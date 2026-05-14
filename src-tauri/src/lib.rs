@@ -859,6 +859,14 @@ pub fn run() {
             commands::agent_nudge::proactive_convert_to_nudge,
             #[cfg(not(mobile))]
             crate::tray::set_tray_labels,
+            // Stock analysis
+            commands::stock_analysis::search_stock,
+            commands::stock_analysis::get_stock_quote,
+            commands::stock_analysis::get_stock_kline,
+            commands::stock_analysis::start_stock_analysis,
+            commands::stock_analysis::cancel_stock_analysis,
+            commands::stock_analysis::list_stock_analyses,
+            commands::stock_analysis::get_stock_analysis,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
         ])

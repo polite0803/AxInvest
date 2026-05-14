@@ -13,3 +13,6 @@ async-trait = "0.1"
 axagent-astock-data = { path = "../astock-data" }
 axagent-agent = { path = "../agent" }
 axagent-runtime-core = { path = "../runtime-core" }
+axagent-providers = { path = "../providers" }
+axagent-core = { path = "../core" }
+futures = "0.3"

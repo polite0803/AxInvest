@@ -87,20 +87,33 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   getStockQuote: async (code: string) => {
-    const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code });
-    set({ quote, stockCode: code, stockName: quote.name });
+    try {
+      const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code });
+      set({ quote, stockCode: code, stockName: quote.name });
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to get stock quote:", e);
+    }
   },
 
   getStockKline: async (code: string, period: string, limit: number) => {
-    const klineData = await invoke<KLine[]>("get_stock_kline", {
-      stockCode: code,
-      period,
-      limit,
-    });
-    set({ klineData });
+    try {
+      const klineData = await invoke<KLine[]>("get_stock_kline", {
+        stockCode: code,
+        period,
+        limit,
+      });
+      set({ klineData });
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to get kline:", e);
+    }
   },
 
   startAnalysis: async (stockCode: string, date: string, providerId: string) => {
+    const { status } = get();
+    if (status === "loading" || status === "running") {
+      console.warn("[StockAnalysis] Analysis already in progress, ignoring duplicate start");
+      return;
+    }
     set({
       status: "loading",
       error: null,
@@ -154,7 +167,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  reset: () => set(initialState),
+  reset: () => {
+    const { _unlisten } = get();
+    if (_unlisten) {
+      _unlisten();
+    }
+    set({ ...initialState, _unlisten: null });
+  },
 
   setupEventListener: async () => {
     const existing = get()._unlisten;
@@ -171,30 +190,30 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         case "AnalystProgress":
           break;
         case "AnalystReport": {
-          const { expert_id, report_text } = payload as Record<string, string>;
+          const { expertId, reportText } = payload as Record<string, string>;
           set((s) => ({
-            analystReports: { ...s.analystReports, [expert_id]: report_text },
+            analystReports: { ...s.analystReports, [expertId]: reportText },
           }));
           break;
         }
         case "DebateRound": {
-          const { round, bull_argument, bear_argument } = payload as Record<string, unknown>;
+          const { round, bullArgument, bearArgument } = payload as Record<string, unknown>;
           set((s) => ({
             debateRounds: [
               ...s.debateRounds,
               {
                 round: round as number,
-                bull: bull_argument as string,
-                bear: bear_argument as string,
+                bull: bullArgument as string,
+                bear: bearArgument as string,
               },
             ],
           }));
           break;
         }
         case "RiskAssessment": {
-          const { risk_type, report } = payload as Record<string, string>;
+          const { riskType, report } = payload as Record<string, string>;
           set((s) => ({
-            riskAssessments: { ...s.riskAssessments, [risk_type]: report },
+            riskAssessments: { ...s.riskAssessments, [riskType]: report },
           }));
           break;
         }

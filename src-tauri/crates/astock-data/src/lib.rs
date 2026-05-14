@@ -2,6 +2,9 @@ mod error;
 mod types;
 mod vendors;
 
+use std::collections::HashMap;
+use tokio::sync::RwLock;
+
 pub use error::DataError;
 pub use types::*;
 use vendors::eastmoney::EastMoneyVendor;
@@ -14,6 +17,8 @@ pub struct AStockClient {
     eastmoney: EastMoneyVendor,
     sina: SinaVendor,
     http: reqwest::Client,
+    /// 进程内简易缓存: key -> (过期时间戳_秒, json值)
+    cache: RwLock<HashMap<String, (i64, String)>>,
 }
 
 impl AStockClient {
@@ -27,6 +32,7 @@ impl AStockClient {
             eastmoney: EastMoneyVendor { http: http.clone() },
             sina: SinaVendor { http: http.clone() },
             http,
+            cache: RwLock::new(HashMap::new()),
         }
     }
 
@@ -34,19 +40,56 @@ impl AStockClient {
         &self.http
     }
 
-    /// 获取实时行情（腾讯财经）
-    pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
-        self.tencent.get_quote(stock_code).await
+    /// 从缓存读取值（未过期时返回 Some）
+    async fn cache_get(&self, key: &str) -> Option<String> {
+        let cache = self.cache.read().await;
+        cache.get(key).and_then(|(expiry, val)| {
+            if *expiry > chrono::Utc::now().timestamp() {
+                Some(val.clone())
+            } else {
+                None
+            }
+        })
     }
 
-    /// 获取K线数据（东方财富）
+    /// 写入缓存（key + 值 + TTL秒数）
+    async fn cache_set(&self, key: String, value: String, ttl_secs: i64) {
+        let mut cache = self.cache.write().await;
+        let expiry = chrono::Utc::now().timestamp() + ttl_secs;
+        cache.insert(key, (expiry, value));
+    }
+
+    /// 获取实时行情（腾讯财经）— 30s 缓存
+    pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
+        let cache_key = format!("quote:{}", stock_code);
+        if let Some(cached) = self.cache_get(&cache_key).await {
+            if let Ok(quote) = serde_json::from_str(&cached) {
+                return Ok(quote);
+            }
+        }
+        let result = self.tencent.get_quote(stock_code).await?;
+        let json = serde_json::to_string(&result).unwrap_or_default();
+        self.cache_set(cache_key, json, 30).await;
+        Ok(result)
+    }
+
+    /// 获取K线数据（东方财富）— 300s 缓存
     pub async fn get_klines(
         &self,
         stock_code: &str,
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        self.eastmoney.get_klines(stock_code, period, limit).await
+        let cache_key = format!("klines:{}:{}:{}", stock_code, period, limit);
+        if let Some(cached) = self.cache_get(&cache_key).await {
+            if let Ok(klines) = serde_json::from_str(&cached) {
+                return Ok(klines);
+            }
+        }
+        let result = self.eastmoney.get_klines(stock_code, period, limit).await?;
+        let json = serde_json::to_string(&result).unwrap_or_default();
+        self.cache_set(cache_key, json, 300).await;
+        Ok(result)
     }
 
     /// 获取财务报表（东方财富）

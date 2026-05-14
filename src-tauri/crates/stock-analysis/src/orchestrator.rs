@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -7,6 +8,7 @@ use axagent_astock_data::{AStockClient, StockRawData};
 
 use crate::decision::{AgentRunner, AnalysisConfig, AnalysisEvent, StockDecision};
 use crate::pipeline;
+use crate::prompts;
 
 /// 7 个分析师专家 ID
 pub const ANALYST_IDS: &[&str] = &[
@@ -30,26 +32,11 @@ const RISK_MANAGER_ID: &str = "research-manager";
 /// 决策角色
 const PORTFOLIO_MANAGER_ID: &str = "portfolio-manager";
 
-// ── 系统提示 ──
+// ── 系统提示（回退）──
+// 当 Markdown 文件未找到时使用的简化回退提示词
 
-fn system_prompt(expert_id: &str) -> &'static str {
-    match expert_id {
-        "market-analyst" => "你是A股市场技术分析师。基于提供的K线数据，进行技术面分析：趋势判断（均线系统、MACD、布林带）、量价关系、支撑压力位、形态识别。输出结构化分析报告。只输出JSON格式结果。",
-        "sentiment-analyst" => "你是A股市场情绪分析师。基于新闻、资金流向、龙虎榜数据，分析市场情绪：散户情绪、机构动向、舆情热度、恐慌/贪婪指数。输出结构化分析报告。只输出JSON格式结果。",
-        "news-analyst" => "你是A股新闻分析师。基于新闻数据，分析近期重大新闻事件及其对股价的潜在影响：利好/利空分类、事件驱动逻辑、时效性评估。输出结构化分析报告。只输出JSON格式结果。",
-        "fundamentals-analyst" => "你是A股基本面分析师。基于财务数据，进行基本面评估：盈利能力（ROE、毛利率、净利率）、成长性（营收/利润增速）、估值水平（PE/PB分位）、财务健康度。输出结构化分析报告。只输出JSON格式结果。",
-        "policy-analyst" => "你是A股政策分析师。基于新闻和行业数据，分析宏观政策和行业政策对股票的影响：货币政策、财政政策、行业监管、产业扶持、地缘政治风险。输出结构化分析报告。只输出JSON格式结果。",
-        "hot-money-tracker" => "你是A股资金面分析师。基于资金流向和龙虎榜数据，分析主力资金动向：北向资金、游资席位、机构席位、大单流向、融资融券。输出结构化分析报告。只输出JSON格式结果。",
-        "lockup-watcher" => "你是A股限售解禁分析师。基于限售解禁数据，分析解禁对股价的压力：解禁规模、解禁比例、解禁股东类型（大股东/机构/战略投资者）、历史解禁影响。输出结构化分析报告。只输出JSON格式结果。",
-        BULL_ID => "你是A股多方研究员。你的任务是从乐观角度论证该股票的投资价值。基于各分析师报告中的数据，构建看多逻辑：成长驱动、估值修复、催化因素、市场情绪。输出结构化辩论报告。只输出JSON格式结果。",
-        BEAR_ID => "你是A股空方研究员。你的任务是从风险角度论证该股票的下行风险。基于各分析师报告中的数据，构建看空逻辑：估值泡沫、业绩风险、竞争压力、政策风险。输出结构化辩论报告。只输出JSON格式结果。",
-        "liquidity-risk" => "你是流动性风险评估师。基于交易数据和技术面报告，评估流动性风险：日均换手率、买卖盘深度、大单占比、量价异常。输出结构化评估报告。只输出JSON格式结果。",
-        "market-risk" => "你是市场风险评估师。基于宏观数据和技术面报告，评估系统性市场风险：大盘走势、行业轮动、外围市场影响、波动率。输出结构化评估报告。只输出JSON格式结果。",
-        "credit-risk" => "你是信用风险评估师。基于财务报告和基本面分析，评估信用风险：偿债能力、现金流健康度、质押比例、商誉减值风险。输出结构化评估报告。只输出JSON格式结果。",
-        RISK_MANAGER_ID => "你是研究主管。你的任务是将多方/空方辩论论点及各风险评估报告进行综合，提炼出关键风险和机会的平衡视图。为投资组合经理提供最终摘要。输出结构化综合报告。只输出JSON格式结果。",
-        PORTFOLIO_MANAGER_ID => "你是A股投资组合经理。基于所有分析报告（7位分析师、多空辩论、风险评估），做出最终投资决策。必须输出严格JSON：{\"action\":\"买入/增持/持有/减持/卖出\",\"position_pct\":0-100,\"target_price\":数字,\"stop_loss\":数字,\"reasoning\":\"理由\",\"risk_level\":\"低/中/高\",\"confidence\":0-1}。只输出JSON格式结果。",
-        _ => "你是股票分析专家。基于提供的数据进行分析。只输出JSON格式结果。",
-    }
+fn fallback_prompt(expert_id: &str) -> String {
+    format!("你是{}。基于提供的数据进行分析。只输出JSON格式结果。", expert_id)
 }
 
 /// 股票分析编排器 — 5 阶段执行
@@ -58,6 +45,7 @@ pub struct StockAnalysisOrchestrator;
 impl StockAnalysisOrchestrator {
     /// 运行完整的 5 阶段分析
     ///
+    /// * `prompts` - 从 Markdown 文件加载的专家提示词映射
     /// * `runner` - LLM Agent 执行器，`None` 时生成占位报告
     /// * `cancel_token` - 取消令牌，检查于各阶段之间
     #[allow(clippy::too_many_arguments)]
@@ -70,8 +58,11 @@ impl StockAnalysisOrchestrator {
         config: AnalysisConfig,
         events: tokio::sync::broadcast::Sender<AnalysisEvent>,
         runner: Option<Arc<dyn AgentRunner>>,
+        prompts: HashMap<String, String>,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<StockDecision, String> {
+        // 将提示词包装为 Arc 以便在 spawn 任务中共享
+        let prompts = Arc::new(prompts);
         // 验证配置
         config.validate().map_err(|e| format!("配置无效: {}", e))?;
 
@@ -106,7 +97,7 @@ impl StockAnalysisOrchestrator {
         }
 
         // ── 阶段 2: 7 位分析师并行 ──
-        Self::phase_2_analysts(&runner, &blackboard, &events, &cancel_token).await?;
+        Self::phase_2_analysts(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         // ── 阶段 3: 多空辩论 ──
         Self::phase_3_debate(
@@ -114,15 +105,17 @@ impl StockAnalysisOrchestrator {
             &blackboard,
             &events,
             config.max_debate_rounds,
+            &prompts,
             &cancel_token,
         )
         .await?;
 
         // ── 阶段 4: 风险评估 ──
-        Self::phase_4_risk(&runner, &blackboard, &events, &cancel_token).await?;
+        Self::phase_4_risk(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         // ── 阶段 5: 投资决策 ──
-        let decision = Self::phase_5_decision(&runner, &blackboard, &events, &cancel_token).await?;
+        let decision =
+            Self::phase_5_decision(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         let _ = events.send(AnalysisEvent::Decision(decision.clone()));
 
@@ -187,6 +180,7 @@ impl StockAnalysisOrchestrator {
         runner: &Option<Arc<dyn AgentRunner>>,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
+        prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<(), String> {
         let mut handles = Vec::new();
@@ -196,10 +190,11 @@ impl StockAnalysisOrchestrator {
             let bb = blackboard.clone();
             let ev = events.clone();
             let r = runner.clone();
+            let p = prompts.clone();
             let ct = cancel_token.clone();
 
             handles.push(tokio::spawn(async move {
-                Self::run_single_analyst(&r, &id, &bb, &ev, &ct).await
+                Self::run_single_analyst(&r, &id, &bb, &ev, &p, &ct).await
             }));
         }
 
@@ -226,6 +221,7 @@ impl StockAnalysisOrchestrator {
         expert_id: &str,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
+        prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<String, String> {
         // 进度通知
@@ -241,7 +237,8 @@ impl StockAnalysisOrchestrator {
 
         // 构建数据上下文
         let user_prompt = pipeline::build_analyst_context(expert_id, blackboard).await;
-        let sys_prompt = system_prompt(expert_id).to_string();
+        let sys_prompt = prompts::get_analyst_context(expert_id, prompts)
+            .unwrap_or_else(|| fallback_prompt(expert_id));
 
         let report = if let Some(ref r) = runner {
             // 通过 AgentRunner 执行 LLM 分析
@@ -281,16 +278,34 @@ impl StockAnalysisOrchestrator {
     }
 
     // ── 阶段 3: 多空辩论 ──
+    //
+    // 设计说明：为何未使用 axagent_runtime::adversarial_debate::DebateManager？
+    //
+    // 共享的 DebateManager 是一个无 LLM 能力的纯数据结构——它接收外部传入的
+    // argument/strength 值并跟踪回合、计算得分、检测收敛。其 evaluate_strength()
+    // 基于关键词（"data"/"because"）的启发式规则，不适用于需要深度推理的金融分析场景。
+    //
+    // 本编排器的辩论阶段需要：
+    // 1. 每轮调用 LLM 生成 bull/bear 论证（DebateManager 不支持）
+    // 2. 将分析师报告和对手上一轮论证作为丰富上下文注入 LLM prompt
+    // 3. 通过 SharedBlackboard 存储和共享辩论状态
+    // 4. 通过 AnalysisEvent broadcast 向 UI 推送辩论进度
+    //
+    // 因此，保留自定义辩论循环是更合理的选择。DebateManager 定位为通用多议题
+    // 辩论跟踪器，适用于不需要 LLM 推理的简单辩论计分场景。
 
     async fn phase_3_debate(
         runner: &Option<Arc<dyn AgentRunner>>,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
         max_rounds: u32,
+        prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<(), String> {
-        let sys_bull = system_prompt(BULL_ID).to_string();
-        let sys_bear = system_prompt(BEAR_ID).to_string();
+        let sys_bull = prompts::get_analyst_context(BULL_ID, prompts)
+            .unwrap_or_else(|| fallback_prompt(BULL_ID));
+        let sys_bear = prompts::get_analyst_context(BEAR_ID, prompts)
+            .unwrap_or_else(|| fallback_prompt(BEAR_ID));
 
         let mut bull_prev = String::new();
         let mut bear_prev = String::new();
@@ -416,6 +431,7 @@ impl StockAnalysisOrchestrator {
         runner: &Option<Arc<dyn AgentRunner>>,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
+        prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<(), String> {
         // 3 个风险评估员并行执行
@@ -425,7 +441,9 @@ impl StockAnalysisOrchestrator {
             let bb = blackboard.clone();
             let ev = events.clone();
             let r = runner.clone();
-            let sys = system_prompt(risk_id).to_string();
+            let p = prompts.clone();
+            let sys = prompts::get_analyst_context(risk_id, &p)
+                .unwrap_or_else(|| fallback_prompt(risk_id));
             let ct = cancel_token.clone();
 
             handles.push(tokio::spawn(async move {
@@ -484,7 +502,8 @@ impl StockAnalysisOrchestrator {
             ctx
         };
 
-        let sys_manager = system_prompt(RISK_MANAGER_ID).to_string();
+        let sys_manager = prompts::get_analyst_context(RISK_MANAGER_ID, prompts)
+            .unwrap_or_else(|| fallback_prompt(RISK_MANAGER_ID));
 
         let manager_report = if let Some(ref r) = runner {
             r.run_agent(RISK_MANAGER_ID, &sys_manager, &manager_ctx)
@@ -511,6 +530,7 @@ impl StockAnalysisOrchestrator {
         runner: &Option<Arc<dyn AgentRunner>>,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
+        prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<StockDecision, String> {
         if Self::is_cancelled(cancel_token) {
@@ -525,7 +545,8 @@ impl StockAnalysisOrchestrator {
 
         // 构建决策上下文（所有报告）
         let user_prompt = pipeline::build_analyst_context(PORTFOLIO_MANAGER_ID, blackboard).await;
-        let sys_prompt = system_prompt(PORTFOLIO_MANAGER_ID).to_string();
+        let sys_prompt = prompts::get_analyst_context(PORTFOLIO_MANAGER_ID, prompts)
+            .unwrap_or_else(|| fallback_prompt(PORTFOLIO_MANAGER_ID));
 
         let decision_text = if let Some(ref r) = runner {
             r.run_agent(PORTFOLIO_MANAGER_ID, &sys_prompt, &user_prompt)

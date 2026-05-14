@@ -148,8 +148,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     if (record.decisionJson) {
       try {
         set({ decision: JSON.parse(record.decisionJson) });
-      } catch {
-        // ignore parse errors
+      } catch (e) {
+        console.error("[StockAnalysis] Failed to parse decision JSON:", e);
       }
     }
   },

@@ -5025,7 +5025,9 @@
     "targetPrice": "Target Price",
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
-    "confidence": "Confidence"
+    "confidence": "Confidence",
+    "emptyHint": "विश्लेषण शुरू करने के लिए स्टॉक कोड खोजें",
+    "emptyHintDetail": "A-शेयर समर्थित। कोड या नाम दर्ज करें (जैसे 600519)"
   },
   "success": "Success"
 }

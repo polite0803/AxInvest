@@ -23,6 +23,9 @@ impl StockAnalysisOrchestrator {
         _conversation_id: String,
         events: tokio::sync::broadcast::Sender<AnalysisEvent>,
     ) -> Result<StockDecision, String> {
+        // 验证配置
+        config.validate().map_err(|e| format!("配置无效: {}", e))?;
+
         // 写入基本元数据
         {
             let mut bb = blackboard.write().await;

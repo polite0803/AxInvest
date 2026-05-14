@@ -83,4 +83,11 @@ export const ANALYST_NAMES: Record<string, string> = {
   "policy-analyst": "政策面分析师",
   "hot-money-tracker": "资金面追踪者",
   "lockup-watcher": "筹码面观察者",
+  "bull-researcher": "多方研究员",
+  "bear-researcher": "空方研究员",
+  "aggressive-debator": "激进风险评估师",
+  "conservative-debator": "保守风险评估师",
+  "neutral-debator": "中性风险评估师",
+  "research-manager": "研究经理",
+  "portfolio-manager": "投资组合经理",
 };

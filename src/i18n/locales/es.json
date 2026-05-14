@@ -5025,7 +5025,9 @@
     "targetPrice": "Target Price",
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
-    "confidence": "Confidence"
+    "confidence": "Confidence",
+    "emptyHint": "Buscar código de acción para iniciar análisis",
+    "emptyHintDetail": "Soporta acciones A. Ingrese código o nombre (ej. 600519)"
   },
   "success": "Success"
 }

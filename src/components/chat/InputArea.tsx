@@ -1374,6 +1374,7 @@ export function InputArea() {
         await startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), "");
         navigate(`/stock-analysis?code=${stockCode}`);
       } catch (e) {
+        // TODO: 后续通过统一日志服务记录
         console.error("[StockAnalysis] Failed to start analysis:", e);
         messageApi.error(t("stockAnalysis.startFailed", "Failed to start stock analysis"));
       }

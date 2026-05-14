@@ -6,7 +6,7 @@ export function DebatePanel() {
   const { t } = useTranslation();
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
 
-  if (debateRounds.length === 0) return null;
+  if (debateRounds.length === 0) { return null; }
 
   return (
     <Card size="small" title={t("stockAnalysis.debate")}>

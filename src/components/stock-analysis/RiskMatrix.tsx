@@ -18,7 +18,7 @@ export function RiskMatrix() {
   const { t } = useTranslation();
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
 
-  if (Object.keys(riskAssessments).length === 0) return null;
+  if (Object.keys(riskAssessments).length === 0) { return null; }
 
   return (
     <Card size="small" title={t("stockAnalysis.riskAssessment")}>

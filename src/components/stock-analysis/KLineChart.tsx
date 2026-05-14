@@ -8,7 +8,7 @@ export function KLineChart() {
   const instanceRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!chartRef.current) { return; }
     if (!instanceRef.current) {
       instanceRef.current = echarts.init(chartRef.current);
     }

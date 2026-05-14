@@ -74,6 +74,7 @@
     "d3-force": "^3.0.0",
     "dayjs": "^1.11.13",
     "dompurify": "^3.4.2",
+    "echarts": "^6.0.0",
     "emoji-picker-element": "^1.29.1",
     "html2canvas": "^1.4.1",
     "i18next": "^26.0.8",

@@ -1073,13 +1073,15 @@ fn start_cron_scheduler(state: &AppState) {
 
 fn start_stock_scheduler(app: &tauri::AppHandle, state: &AppState) {
     use crate::stock_scheduler::StockScheduler;
+    use axagent_astock_data::AStockClient;
     use std::sync::Arc;
 
     let db = Arc::new(state.sea_db.clone());
+    let astock_client = Arc::new(AStockClient::new());
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let scheduler = StockScheduler::new(db);
-        scheduler.start_with_alerts(app_handle).await;
+        let scheduler = StockScheduler::new(db, astock_client, app_handle);
+        scheduler.start_with_alerts().await;
     });
 
     tracing::info!("[StockScheduler] 已启动，每60秒轮询一次（含价格告警检查）");

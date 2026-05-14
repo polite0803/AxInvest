@@ -33,7 +33,7 @@ impl AnalystPluginManager {
         if let Ok(entries) = fs::read_dir(&self.plugin_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "md") {
+                if path.extension().is_some_and(|e| e == "md") {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Some(analyst) = Self::parse_custom_file(&path, &content) {
                             analysts.push(analyst);

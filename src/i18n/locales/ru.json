@@ -18,7 +18,8 @@
     "devTools": "Инструменты разработчика",
     "workflow": "Рабочий процесс",
     "wiki": "Wiki",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "Stock Analysis"
   },
   "sidebar": {
     "sectionWork": "Работа",
@@ -4994,5 +4995,37 @@
     "failed": "Failed"
   },
   "markdown": "Markdown",
+  "stockAnalysis": {
+    "title": "Stock Analysis",
+    "searchPlaceholder": "Enter stock code or name",
+    "startAnalysis": "Start Analysis",
+    "analyzing": "Analyzing...",
+    "starting": "Starting analysis engine...",
+    "price": "Price",
+    "open": "Open",
+    "high": "High",
+    "low": "Low",
+    "volume": "Volume",
+    "volumeUnit": "10K lots",
+    "stage.dataLoading": "Data Loading",
+    "stage.analysis": "Multi-Dimension Analysis",
+    "stage.debate": "Bull-Bear Debate",
+    "stage.risk": "Risk Assessment",
+    "stage.decision": "Investment Decision",
+    "debate": "Bull-Bear Debate",
+    "debateRound": "Round {round}",
+    "bull": "Bull",
+    "bear": "Bear",
+    "riskAssessment": "Risk Assessment",
+    "risk.aggressive": "Aggressive",
+    "risk.conservative": "Conservative",
+    "risk.neutral": "Neutral",
+    "finalDecision": "Final Decision",
+    "position": "Position",
+    "targetPrice": "Target Price",
+    "stopLoss": "Stop Loss",
+    "riskLevel": "Risk Level",
+    "confidence": "Confidence"
+  },
   "success": "Success"
 }

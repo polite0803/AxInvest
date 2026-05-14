@@ -18,7 +18,8 @@
     "devTools": "開發工具",
     "workflow": "工作流",
     "wiki": "知識庫",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "股票分析"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -4994,5 +4995,37 @@
     "failed": "Failed"
   },
   "markdown": "Markdown",
+  "stockAnalysis": {
+    "title": "股票分析",
+    "searchPlaceholder": "輸入股票代碼或名稱",
+    "startAnalysis": "開始分析",
+    "analyzing": "分析中...",
+    "starting": "正在啟動分析引擎...",
+    "price": "最新價",
+    "open": "開",
+    "high": "高",
+    "low": "低",
+    "volume": "量",
+    "volumeUnit": "萬手",
+    "stage.dataLoading": "資料載入",
+    "stage.analysis": "多維度分析",
+    "stage.debate": "多空辯論",
+    "stage.risk": "風險評估",
+    "stage.decision": "投資決策",
+    "debate": "多空辯論",
+    "debateRound": "第{round}輪",
+    "bull": "多方",
+    "bear": "空方",
+    "riskAssessment": "風險評估",
+    "risk.aggressive": "激進",
+    "risk.conservative": "保守",
+    "risk.neutral": "中性",
+    "finalDecision": "最終決策",
+    "position": "倉位",
+    "targetPrice": "目標價",
+    "stopLoss": "止損",
+    "riskLevel": "風險等級",
+    "confidence": "置信度"
+  },
   "success": "Success"
 }

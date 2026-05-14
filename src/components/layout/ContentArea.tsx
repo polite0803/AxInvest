@@ -27,6 +27,9 @@ const LazyFineTune = lazy(() => import("@/pages/FineTunePage").then((m) => ({ de
 const LazyIngestPage = lazy(() => import("@/pages/IngestPage").then((m) => ({ default: m.IngestPage })));
 const LazyWikiGraphPage = lazy(() => import("@/pages/WikiGraphPage").then((m) => ({ default: m.WikiGraphPage })));
 const LazyQuickBarPage = lazy(() => import("@/pages/QuickBarPage").then((m) => ({ default: m.QuickBarPage })));
+const LazyStockAnalysisPage = lazy(() =>
+  import("@/pages/StockAnalysisPage").then((m) => ({ default: m.StockAnalysisPage }))
+);
 
 function PageLoader() {
   return (
@@ -110,6 +113,8 @@ export function ContentArea() {
       <Route path="/devtools/benchmark" element={<SafeLazyPage Page={LazyBenchmarkRunner} />} />
       <Route path="/devtools/tool-recommender" element={<SafeLazyPage Page={LazyToolRecommender} />} />
       <Route path="/devtools/fine-tune" element={<SafeLazyPage Page={LazyFineTune} />} />
+      <Route path="/stock-analysis" element={<SafeLazyPage Page={LazyStockAnalysisPage} />} />
+      <Route path="/stock-analysis/:id" element={<SafeLazyPage Page={LazyStockAnalysisPage} />} />
 
       {/* 技能声明式动态路由 */}
       {pluginRoutes}

@@ -16,6 +16,7 @@ const AGENT_COLORS: Record<string, string> = {
   plan: "#fa8c16",
   research: "#eb2f96",
   review: "#13c2c2",
+  "stock-analysis": "#eb2f96",
 };
 
 function getAgentColor(agentType: string): string {
@@ -45,6 +46,8 @@ function getAgentIcon(agentType: string): string {
       return "🔬";
     case "review":
       return "✅";
+    case "stock-analysis":
+      return "📈";
     default:
       return "🤖";
   }

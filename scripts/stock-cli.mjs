@@ -27,18 +27,31 @@ async function main() {
   switch (cmd) {
     case "search": {
       const keyword = args.join(" ") || args[0];
-      if (!keyword) { console.error("Usage: stock-cli search <keyword>"); process.exit(1); }
-      const results = await api(`/stock/search?keyword=${encodeURIComponent(keyword)}`);
+      if (!keyword) {
+        console.error("Usage: stock-cli search <keyword>");
+        process.exit(1);
+      }
+      const results = await api(
+        `/stock/search?keyword=${encodeURIComponent(keyword)}`,
+      );
       console.log(JSON.stringify(results, null, 2));
       break;
     }
     case "quote": {
       const code = args[0];
-      if (!code) { console.error("Usage: stock-cli quote <code>"); process.exit(1); }
+      if (!code) {
+        console.error("Usage: stock-cli quote <code>");
+        process.exit(1);
+      }
       const quote = await api(`/stock/quote?code=${code}`);
       console.log(`${quote.name} (${quote.code})`);
-      console.log(`  价格: ${quote.price}  (${quote.changePct >= 0 ? "+" : ""}${quote.changePct.toFixed(2)}%)`);
-      console.log(`  开: ${quote.open}  高: ${quote.high}  低: ${quote.low}`);
+      const sign = quote.changePct >= 0 ? "+" : "";
+      console.log(
+        `  价格: ${quote.price}  (${sign}${quote.changePct.toFixed(2)}%)`,
+      );
+      console.log(
+        `  开: ${quote.open}  高: ${quote.high}  低: ${quote.low}`,
+      );
       console.log(`  量: ${(quote.volume / 10000).toFixed(1)}万手`);
       if (quote.pe) console.log(`  PE: ${quote.pe}`);
       if (quote.pb) console.log(`  PB: ${quote.pb}`);
@@ -46,7 +59,10 @@ async function main() {
     }
     case "analyze": {
       const code = args[0];
-      if (!code) { console.error("Usage: stock-cli analyze <code> [date]"); process.exit(1); }
+      if (!code) {
+        console.error("Usage: stock-cli analyze <code> [date]");
+        process.exit(1);
+      }
       const date = args[1] || new Date().toISOString().split("T")[0];
       console.log(`启动分析: ${code} (${date})...`);
       const result = await api("/stock/analysis", {
@@ -60,7 +76,10 @@ async function main() {
     }
     case "analysis": {
       const id = args[0];
-      if (!id) { console.error("Usage: stock-cli analysis <id>"); process.exit(1); }
+      if (!id) {
+        console.error("Usage: stock-cli analysis <id>");
+        process.exit(1);
+      }
       const analysis = await api(`/stock/analysis/${id}`);
       console.log(JSON.stringify(analysis, null, 2));
       break;
@@ -74,34 +93,52 @@ async function main() {
       console.log(`总分析数: ${stats.total_analyses}`);
       console.log(`准确率: ${stats.accuracy_pct.toFixed(1)}%`);
       console.log(`平均收益: ${stats.avg_return_pct.toFixed(2)}%`);
-      console.log(`平均置信度: ${(stats.avg_confidence * 100).toFixed(1)}%`);
+      const conf = (stats.avg_confidence * 100).toFixed(1);
+      console.log(`平均置信度: ${conf}%`);
       break;
     }
     case "watchlist": {
       const sub = args[0];
       if (sub === "add") {
-        const code = args[1], name = args[2];
-        await api("/stock/watchlist", { method: "POST", body: JSON.stringify({ stock_code: code, stock_name: name }) });
+        const code = args[1];
+        const name = args[2];
+        await api("/stock/watchlist", {
+          method: "POST",
+          body: JSON.stringify({ stock_code: code, stock_name: name }),
+        });
         console.log(`已添加: ${name} (${code})`);
       } else if (sub === "rm") {
         await api(`/stock/watchlist/${args[1]}`, { method: "DELETE" });
         console.log("已删除");
       } else {
         const items = await api("/stock/watchlist");
-        items.forEach((i) => console.log(`  ${i.stockCode}  ${i.stockName}`));
+        items.forEach((i) =>
+          console.log(`  ${i.stockCode}  ${i.stockName}`)
+        );
       }
       break;
     }
     case "portfolio": {
       const holdings = await api("/stock/portfolio");
       console.log("持仓汇总:");
-      console.log("代码      名称      持仓     成本    现价     市值      盈亏     盈亏%");
+      console.log(
+        "代码      名称      持仓     成本    现价     市值      盈亏     盈亏%",
+      );
       console.log("-".repeat(80));
       for (const h of holdings) {
-        const pnlStr = h.pnl >= 0 ? `+${h.pnl.toFixed(0)}` : h.pnl.toFixed(0);
-        console.log(
-          `${h.stockCode.padEnd(10)} ${h.stockName.padEnd(8)} ${String(h.shares).padEnd(8)} ${h.avgCost.toFixed(2).padEnd(7)} ${h.currentPrice.toFixed(2).padEnd(7)} ${h.marketValue.toFixed(0).padEnd(8)} ${pnlStr.padEnd(8)} ${h.pnlPct.toFixed(2)}%`
-        );
+        const sign = h.pnl >= 0 ? "+" : "";
+        const pnlStr = `${sign}${h.pnl.toFixed(0)}`;
+        const cols = [
+          h.stockCode.padEnd(10),
+          h.stockName.padEnd(8),
+          String(h.shares).padEnd(8),
+          h.avgCost.toFixed(2).padEnd(7),
+          h.currentPrice.toFixed(2).padEnd(7),
+          h.marketValue.toFixed(0).padEnd(8),
+          pnlStr.padEnd(8),
+          h.pnlPct.toFixed(2) + "%",
+        ];
+        console.log(cols.join(" "));
       }
       break;
     }

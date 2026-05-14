@@ -101,6 +101,95 @@ pub struct LockupSchedule {
     pub shareholder: Option<String>,
 }
 
+/// 融资融券数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarginData {
+    pub stock_code: String,
+    pub date: String,
+    pub margin_buy: f64,        // 融资买入额
+    pub margin_balance: f64,    // 融资余额
+    pub short_sell_volume: f64, // 融券卖出量
+    pub short_balance: f64,     // 融券余量
+}
+
+/// 北向资金持仓
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NorthBoundHolding {
+    pub stock_code: String,
+    pub date: String,
+    pub holding_shares: f64, // 持股数量
+    pub holding_ratio: f64,  // 持股占比
+    pub change_shares: f64,  // 变动数量
+}
+
+/// 行业分类
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectorInfo {
+    pub stock_code: String,
+    pub sector_name: String,       // 申万一级行业
+    pub sub_sector: String,        // 申万二级行业
+    pub concept_tags: Vec<String>, // 概念板块标签
+}
+
+/// 股东增减持
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareholderTrade {
+    pub stock_code: String,
+    pub date: String,
+    pub shareholder_name: String,
+    pub trade_type: String, // 增持/减持
+    pub shares: f64,
+    pub price: f64,
+    pub reason: Option<String>,
+}
+
+/// 除权除息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DividendRecord {
+    pub stock_code: String,
+    pub ex_date: String,
+    pub dividend_per_share: f64, // 每股分红
+    pub bonus_share_ratio: f64,  // 送转比例
+    pub record_date: String,
+}
+
+/// K线周期枚举（兼容券商API代码）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum KLinePeriod {
+    #[serde(rename = "5")]
+    Min5,
+    #[serde(rename = "15")]
+    Min15,
+    #[serde(rename = "30")]
+    Min30,
+    #[serde(rename = "60")]
+    Min60,
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+impl KLinePeriod {
+    /// 转换为东方财富 API 的 period 代码
+    pub fn to_em_code(&self) -> &str {
+        match self {
+            KLinePeriod::Min5 => "5",
+            KLinePeriod::Min15 => "15",
+            KLinePeriod::Min30 => "30",
+            KLinePeriod::Min60 => "60",
+            KLinePeriod::Daily => "101",
+            KLinePeriod::Weekly => "102",
+            KLinePeriod::Monthly => "103",
+        }
+    }
+}
+
 /// 股票搜索结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,4 +210,9 @@ pub struct StockRawData {
     pub money_flow: Option<MoneyFlow>,
     pub dragon_tiger: Vec<DragonTigerEntry>,
     pub lockup: Vec<LockupSchedule>,
+    pub margin_data: Option<MarginData>,
+    pub north_bound: Option<NorthBoundHolding>,
+    pub sector_info: Option<SectorInfo>,
+    pub shareholder_trades: Vec<ShareholderTrade>,
+    pub dividend_records: Vec<DividendRecord>,
 }

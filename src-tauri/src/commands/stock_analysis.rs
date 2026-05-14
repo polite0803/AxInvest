@@ -1,8 +1,13 @@
 use crate::AppState;
 use axagent_agent::shared_blackboard::SharedBlackboard;
-use axagent_core::entity::stock_analyses;
+use axagent_core::entity::{
+    analysis_schedules, portfolio_holdings, stock_analyses, watchlist_items,
+};
 use axagent_core::types::ProviderProxyConfig;
 use axagent_providers::{resolve_base_url_for_type, ProviderAdapter, ProviderRequestContext};
+use axagent_stock_analysis::backtest::{
+    BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
+};
 use axagent_stock_analysis::decision::{AgentRunner, AnalysisConfig, AnalysisEvent};
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
 use axagent_stock_analysis::runner::SessionManagerRunner;
@@ -164,7 +169,7 @@ pub async fn start_stock_analysis(
         });
         let blackboard = Arc::new(RwLock::new(SharedBlackboard::new(
             &analysis_id_clone,
-            &format!("分析 {} ({})", stock_code_for_spawn, stock_name_for_spawn),
+            format!("分析 {} ({})", stock_code_for_spawn, stock_name_for_spawn),
         )));
 
         let config = AnalysisConfig::default();
@@ -277,6 +282,146 @@ pub async fn get_stock_analysis(
         .ok_or_else(|| format!("分析记录不存在: {}", analysis_id))
 }
 
+// ── Watchlist ──
+
+/// 添加自选股
+#[tauri::command]
+pub async fn add_to_watchlist(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+) -> Result<watchlist_items::Model, String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let model = watchlist_items::ActiveModel {
+        id: Set(uuid::Uuid::new_v4().to_string()),
+        stock_code: Set(stock_code),
+        stock_name: Set(stock_name),
+        notes: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+}
+
+/// 移除自选股
+#[tauri::command]
+pub async fn remove_from_watchlist(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    watchlist_items::Entity::delete_by_id(id)
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 自选股列表
+#[tauri::command]
+pub async fn list_watchlist(
+    state: State<'_, AppState>,
+) -> Result<Vec<watchlist_items::Model>, String> {
+    watchlist_items::Entity::find()
+        .order_by_desc(watchlist_items::Column::CreatedAt)
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ── Portfolio ──
+
+/// 添加持仓
+#[tauri::command]
+pub async fn add_portfolio_holding(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+    shares: f64,
+    avg_cost: f64,
+) -> Result<portfolio_holdings::Model, String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let model = portfolio_holdings::ActiveModel {
+        id: Set(uuid::Uuid::new_v4().to_string()),
+        stock_code: Set(stock_code),
+        stock_name: Set(stock_name),
+        shares: Set(shares),
+        avg_cost: Set(avg_cost),
+        notes: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+}
+
+/// 更新持仓
+#[tauri::command]
+pub async fn update_portfolio_holding(
+    state: State<'_, AppState>,
+    id: String,
+    shares: f64,
+    avg_cost: f64,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    portfolio_holdings::Entity::update_many()
+        .col_expr(portfolio_holdings::Column::Shares, Expr::value(shares))
+        .col_expr(portfolio_holdings::Column::AvgCost, Expr::value(avg_cost))
+        .col_expr(portfolio_holdings::Column::UpdatedAt, Expr::value(now))
+        .filter(portfolio_holdings::Column::Id.eq(id))
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 移除持仓
+#[tauri::command]
+pub async fn remove_portfolio_holding(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    portfolio_holdings::Entity::delete_by_id(id)
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 持仓列表（含实时盈亏）
+#[tauri::command]
+pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let holdings = portfolio_holdings::Entity::find()
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 附加实时行情计算盈亏
+    let mut enriched = Vec::new();
+    for h in holdings {
+        let quote = state.astock_client.get_quote(&h.stock_code).await.ok();
+        let current_price = quote.as_ref().map(|q| q.price).unwrap_or(h.avg_cost);
+        let market_value = current_price * h.shares;
+        let cost_basis = h.avg_cost * h.shares;
+        let pnl = market_value - cost_basis;
+        let pnl_pct = if cost_basis != 0.0 {
+            (pnl / cost_basis) * 100.0
+        } else {
+            0.0
+        };
+
+        enriched.push(serde_json::json!({
+            "id": h.id,
+            "stockCode": h.stock_code,
+            "stockName": h.stock_name,
+            "shares": h.shares,
+            "avgCost": h.avg_cost,
+            "currentPrice": current_price,
+            "marketValue": market_value,
+            "pnl": pnl,
+            "pnlPct": pnl_pct,
+            "notes": h.notes,
+            "createdAt": h.created_at,
+        }));
+    }
+    Ok(enriched)
+}
+
 // ── Helper: 构建 SessionManagerRunner ──
 
 /// 从数据库中的 provider 配置构建 SessionManagerRunner。
@@ -372,4 +517,147 @@ async fn build_stock_analysis_runner(
     Ok(SessionManagerRunner::new(adapter, ctx, model_id)
         .with_temperature(Some(0.3))
         .with_max_tokens(Some(4096)))
+}
+
+// ── MCP Stock Data Tools ──
+
+/// 返回 stock data MCP 工具定义列表（供前端 MCP 管理页面注册）
+#[tauri::command]
+pub async fn get_stock_mcp_tools() -> Result<Vec<serde_json::Value>, String> {
+    Ok(axagent_astock_data::mcp_tools::stock_mcp_tools())
+}
+
+/// 执行 stock data MCP 工具调用
+#[tauri::command]
+pub async fn execute_stock_mcp_tool(
+    state: State<'_, AppState>,
+    tool_name: String,
+    arguments: serde_json::Value,
+) -> Result<String, String> {
+    axagent_astock_data::mcp_tools::execute_mcp_tool(&state.astock_client, &tool_name, &arguments)
+        .await
+}
+
+// ── Backtesting ──
+
+/// 回测单个分析决策
+#[tauri::command]
+pub async fn backtest_analysis(
+    state: State<'_, AppState>,
+    stock_code: String,
+    analysis_date: String,
+    decision_action: String,
+    decision_confidence: f64,
+    holding_days: u32,
+) -> Result<BacktestResult, String> {
+    BacktestEngine::backtest_decision(
+        &state.astock_client,
+        &stock_code,
+        &analysis_date,
+        &decision_action,
+        decision_confidence,
+        holding_days,
+    )
+    .await
+}
+
+/// 批量回测历史分析（已完成的分析）
+#[tauri::command]
+pub async fn backtest_all_history(
+    state: State<'_, AppState>,
+    holding_days: u32,
+) -> Result<BacktestStats, String> {
+    let analyses = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let historical: Vec<HistoricalAnalysis> = analyses
+        .iter()
+        .map(|a| HistoricalAnalysis {
+            stock_code: a.stock_code.clone(),
+            analysis_date: a.analysis_date.clone(),
+            decision_action: a
+                .decision_action
+                .clone()
+                .unwrap_or_else(|| "持有".to_string()),
+            decision_confidence: a.decision_position_pct.map(|p| p / 100.0).unwrap_or(0.5),
+        })
+        .collect();
+
+    let results =
+        BacktestEngine::backtest_history(&state.astock_client, historical, holding_days).await?;
+    let stats = BacktestEngine::compute_stats(&results);
+    Ok(stats)
+}
+
+// ── Analysis Schedules ──
+
+/// 创建定时分析计划
+#[tauri::command]
+pub async fn create_analysis_schedule(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+    cron_expression: String,
+    provider_id: String,
+) -> Result<analysis_schedules::Model, String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let model = analysis_schedules::ActiveModel {
+        id: Set(uuid::Uuid::new_v4().to_string()),
+        stock_code: Set(stock_code),
+        stock_name: Set(stock_name),
+        cron_expression: Set(cron_expression),
+        provider_id: Set(provider_id),
+        is_enabled: Set(true),
+        last_run_at: Set(None),
+        next_run_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+}
+
+/// 查询定时分析计划列表
+#[tauri::command]
+pub async fn list_analysis_schedules(
+    state: State<'_, AppState>,
+) -> Result<Vec<analysis_schedules::Model>, String> {
+    analysis_schedules::Entity::find()
+        .order_by_desc(analysis_schedules::Column::CreatedAt)
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 切换定时分析计划启用/禁用
+#[tauri::command]
+pub async fn toggle_analysis_schedule(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    analysis_schedules::Entity::update_many()
+        .col_expr(analysis_schedules::Column::IsEnabled, Expr::value(enabled))
+        .col_expr(analysis_schedules::Column::UpdatedAt, Expr::value(now))
+        .filter(analysis_schedules::Column::Id.eq(id))
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 删除定时分析计划
+#[tauri::command]
+pub async fn delete_analysis_schedule(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    analysis_schedules::Entity::delete_by_id(id)
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

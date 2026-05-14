@@ -13,6 +13,7 @@ mod memory_extract;
 mod paths;
 mod semantic_cache;
 mod smart_router;
+mod stock_scheduler;
 
 #[cfg(not(mobile))]
 mod tray;
@@ -868,6 +869,25 @@ pub fn run() {
             commands::stock_analysis::cancel_stock_analysis,
             commands::stock_analysis::list_stock_analyses,
             commands::stock_analysis::get_stock_analysis,
+            // Watchlist
+            commands::stock_analysis::add_to_watchlist,
+            commands::stock_analysis::remove_from_watchlist,
+            commands::stock_analysis::list_watchlist,
+            // Portfolio
+            commands::stock_analysis::add_portfolio_holding,
+            commands::stock_analysis::update_portfolio_holding,
+            commands::stock_analysis::remove_portfolio_holding,
+            commands::stock_analysis::list_portfolio,
+            // MCP Stock Data Tools
+            commands::stock_analysis::get_stock_mcp_tools,
+            commands::stock_analysis::execute_stock_mcp_tool,
+            // Backtesting
+            commands::stock_analysis::backtest_analysis,
+            commands::stock_analysis::backtest_all_history,
+            commands::stock_analysis::create_analysis_schedule,
+            commands::stock_analysis::list_analysis_schedules,
+            commands::stock_analysis::toggle_analysis_schedule,
+            commands::stock_analysis::delete_analysis_schedule,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
         ])

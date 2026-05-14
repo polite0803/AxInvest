@@ -11,6 +11,8 @@ mod m20240101_000008_enhance_prompt;
 mod m20250512_000001_memory_namespace_link;
 mod m20250513_000001_workflow_snapshots;
 mod m20250514_000001_stock_analysis;
+mod m20250514_000002_watchlist_portfolio;
+mod m20250514_000003_analysis_schedules;
 
 pub struct Migrator;
 
@@ -29,6 +31,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250512_000001_memory_namespace_link::Migration),
             Box::new(m20250513_000001_workflow_snapshots::Migration),
             Box::new(m20250514_000001_stock_analysis::Migration),
+            Box::new(m20250514_000002_watchlist_portfolio::Migration),
+            Box::new(m20250514_000003_analysis_schedules::Migration),
         ]
     }
 }

@@ -11,3 +11,4 @@ pub mod native;
 pub mod realtime;
 pub mod routes;
 pub mod server;
+pub mod stock_handlers;

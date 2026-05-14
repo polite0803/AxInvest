@@ -44,6 +44,8 @@ pub mod memory_namespaces;
 pub mod retrieval_hits;
 pub mod rl_policies;
 
+pub mod stock_analyses;
+
 pub mod stored_files;
 
 pub mod workflow_snapshots;

@@ -231,6 +231,7 @@ pub fn run() {
             commands::mcp::hot_reload_mcp_server,
             commands::mcp::discover_available_mcp_servers,
 
+            commands::local_tool::get_tool_count,
             commands::local_tool::list_local_tools,
             commands::local_tool::toggle_local_tool_group,
             commands::local_tool::toggle_single_tool,
@@ -621,6 +622,8 @@ pub fn run() {
             commands::parallel_execution::get_execution_result,
             commands::parallel_execution::delete_parallel_execution,
             commands::parallel_execution::start_parallel_execution,
+            commands::parallel_execution::verify_parallel_execution,
+            commands::parallel_execution::check_parallel_timeouts,
             // Scheduled task commands (基于 CronJobStore)
             commands::scheduled_task::list_scheduled_tasks,
             commands::scheduled_task::get_scheduled_task,

@@ -1,86 +1,74 @@
 use async_trait::async_trait;
 use crate::error::DataError;
-use crate::vendors::StockVendor;
 use crate::types::*;
+use crate::vendors::StockVendor;
+use reqwest::Client;
 
 pub struct SinaVendor;
 
 #[async_trait]
 impl StockVendor for SinaVendor {
-    fn name(&self) -> &'static str {
-        "sina"
-    }
+    fn name(&self) -> &'static str { "sina" }
 
-    async fn get_quote(&self, _stock_code: &str) -> Result<StockQuote, DataError> {
+    async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
         Err(DataError::VendorError {
             vendor: "sina".into(),
-            message: "not implemented".into(),
+            message: "quote handled by tencent".into(),
         })
     }
 
-    async fn get_klines(
-        &self,
-        _stock_code: &str,
-        _period: &str,
-        _limit: u32,
-    ) -> Result<Vec<KLine>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn get_klines(&self, _: &str, _: &str, _: u32) -> Result<Vec<KLine>, DataError> {
+        Ok(vec![])
     }
 
-    async fn get_financials(
-        &self,
-        _stock_code: &str,
-    ) -> Result<Vec<FinancialReport>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
+        Ok(vec![])
     }
 
-    async fn get_news(&self, _stock_code: &str, _limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        let client = Client::new();
+        let url = format!(
+            "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{}.json?page=1&num={}",
+            stock_code, limit.min(50)
+        );
+
+        let resp = client
+            .get(&url)
+            .header("Referer", "https://finance.sina.com.cn/")
+            .send()
+            .await?;
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+
+        Ok(items
+            .iter()
+            .map(|item| NewsItem {
+                title: item["title"].as_str().unwrap_or("").to_string(),
+                summary: String::new(),
+                source: "新浪财经".to_string(),
+                url: format!(
+                    "https://finance.sina.com.cn{}",
+                    item["url"].as_str().unwrap_or("")
+                ),
+                publish_time: item["ctime"].as_str().unwrap_or("").to_string(),
+                sentiment_score: None,
+            })
+            .collect())
     }
 
-    async fn get_money_flow(&self, _stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
+        Ok(None)
     }
 
-    async fn get_dragon_tiger(
-        &self,
-        _stock_code: &str,
-    ) -> Result<Vec<DragonTigerEntry>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn get_dragon_tiger(&self, _: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
+        Ok(vec![])
     }
 
-    async fn get_lockup_schedule(
-        &self,
-        _stock_code: &str,
-    ) -> Result<Vec<LockupSchedule>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn get_lockup_schedule(&self, _: &str) -> Result<Vec<LockupSchedule>, DataError> {
+        Ok(vec![])
     }
 
-    async fn search_stock(
-        &self,
-        _keyword: &str,
-    ) -> Result<Vec<StockSearchResult>, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "not implemented".into(),
-        })
+    async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {
+        Ok(vec![])
     }
 }

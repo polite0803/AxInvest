@@ -3,7 +3,9 @@ use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 
-pub struct TencentVendor;
+pub struct TencentVendor {
+    pub http: reqwest::Client,
+}
 
 /// 将 AxInvest 股票代码转为腾讯财经格式
 /// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750
@@ -63,14 +65,10 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
 
 #[async_trait]
 impl StockVendor for TencentVendor {
-    fn name(&self) -> &'static str {
-        "tencent"
-    }
-
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let tc_code = to_tencent_code(stock_code);
         let url = format!("http://qt.gtimg.cn/q={}", tc_code);
-        let resp = reqwest::get(&url).await?;
+        let resp = self.http.get(&url).send().await?;
         let text = resp.text().await?;
         parse_quote(&text)
     }

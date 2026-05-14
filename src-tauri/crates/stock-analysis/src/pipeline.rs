@@ -76,10 +76,10 @@ pub async fn write_report(
         let mut bb = blackboard.write().await;
         bb.set_state(&format!("report.{}", expert_id), report);
     }
-    events
-        .send(AnalysisEvent::AnalystReport {
-            expert_id: expert_id.to_string(),
-            report_text: report.to_string(),
-        })
-        .ok();
+    if let Err(e) = events.send(AnalysisEvent::AnalystReport {
+        expert_id: expert_id.to_string(),
+        report_text: report.to_string(),
+    }) {
+        tracing::warn!("发送分析事件(AnalystReport)失败: {}", e);
+    }
 }

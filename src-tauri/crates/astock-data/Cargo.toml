@@ -12,3 +12,4 @@ chrono = { workspace = true }
 thiserror = { workspace = true }
 async-trait = "0.1"
 urlencoding = "2"
+tracing = { workspace = true }

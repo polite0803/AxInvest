@@ -18,11 +18,15 @@ pub struct AStockClient {
 
 impl AStockClient {
     pub fn new() -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .expect("Failed to create HTTP client");
         Self {
-            tencent: TencentVendor,
-            eastmoney: EastMoneyVendor,
-            sina: SinaVendor,
-            http: reqwest::Client::new(),
+            tencent: TencentVendor { http: http.clone() },
+            eastmoney: EastMoneyVendor { http: http.clone() },
+            sina: SinaVendor { http: http.clone() },
+            http,
         }
     }
 
@@ -84,7 +88,9 @@ impl AStockClient {
         self.eastmoney.search_stock(keyword).await
     }
 
-    /// 一次性获取所有原始数据
+    /// 一次性获取所有原始数据。
+    /// 各子请求独立容错：只有 quote 为必需；其余失败时记录 warn 日志并回退为空值。
+    /// TODO: 为高频调用（如 get_quote）补充 retry 逻辑。
     pub async fn fetch_all(
         &self,
         stock_code: &str,
@@ -92,7 +98,7 @@ impl AStockClient {
         kline_limit: u32,
         news_limit: u32,
     ) -> Result<StockRawData, DataError> {
-        let (quote, klines, financials, news, money_flow, dragon_tiger, lockup) = tokio::try_join!(
+        let (quote_r, klines_r, financials_r, news_r, money_flow_r, dragon_tiger_r, lockup_r) = tokio::join!(
             self.get_quote(stock_code),
             self.get_klines(stock_code, kline_period, kline_limit),
             self.get_financials(stock_code),
@@ -100,7 +106,36 @@ impl AStockClient {
             self.get_money_flow(stock_code),
             self.get_dragon_tiger(stock_code),
             self.get_lockup_schedule(stock_code),
-        )?;
+        );
+
+        let quote = quote_r.map_err(|e| {
+            tracing::warn!("quote failed: {}", e);
+            e
+        })?; // quote is required
+        let klines = klines_r.unwrap_or_else(|e| {
+            tracing::warn!("klines failed: {}", e);
+            vec![]
+        });
+        let financials = financials_r.unwrap_or_else(|e| {
+            tracing::warn!("financials failed: {}", e);
+            vec![]
+        });
+        let news = news_r.unwrap_or_else(|e| {
+            tracing::warn!("news failed: {}", e);
+            vec![]
+        });
+        let money_flow = money_flow_r.unwrap_or_else(|e| {
+            tracing::warn!("money_flow failed: {}", e);
+            None
+        });
+        let dragon_tiger = dragon_tiger_r.unwrap_or_else(|e| {
+            tracing::warn!("dragon_tiger failed: {}", e);
+            vec![]
+        });
+        let lockup = lockup_r.unwrap_or_else(|e| {
+            tracing::warn!("lockup failed: {}", e);
+            vec![]
+        });
 
         Ok(StockRawData {
             quote,

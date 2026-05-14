@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// 实时行情
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StockQuote {
     pub code: String,
     pub name: String,
@@ -21,6 +22,7 @@ pub struct StockQuote {
 
 /// K线数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KLine {
     pub date: String,
     pub open: f64,
@@ -34,6 +36,7 @@ pub struct KLine {
 
 /// 财务报告
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FinancialReport {
     pub stock_code: String,
     pub report_date: String,
@@ -51,6 +54,7 @@ pub struct FinancialReport {
 
 /// 新闻/公告条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NewsItem {
     pub title: String,
     pub summary: String,
@@ -62,6 +66,7 @@ pub struct NewsItem {
 
 /// 资金流向
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MoneyFlow {
     pub date: String,
     pub main_net_inflow: f64,
@@ -73,6 +78,7 @@ pub struct MoneyFlow {
 
 /// 龙虎榜条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DragonTigerEntry {
     pub stock_code: String,
     pub date: String,
@@ -85,6 +91,7 @@ pub struct DragonTigerEntry {
 
 /// 限售解禁
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LockupSchedule {
     pub stock_code: String,
     pub stock_name: String,
@@ -96,6 +103,7 @@ pub struct LockupSchedule {
 
 /// 股票搜索结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StockSearchResult {
     pub code: String,
     pub name: String,
@@ -104,6 +112,7 @@ pub struct StockSearchResult {
 
 /// 批量原始数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StockRawData {
     pub quote: StockQuote,
     pub klines: Vec<KLine>,

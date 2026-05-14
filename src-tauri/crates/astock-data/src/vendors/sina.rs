@@ -2,16 +2,13 @@ use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
-use reqwest::Client;
 
-pub struct SinaVendor;
+pub struct SinaVendor {
+    pub http: reqwest::Client,
+}
 
 #[async_trait]
 impl StockVendor for SinaVendor {
-    fn name(&self) -> &'static str {
-        "sina"
-    }
-
     async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
         Err(DataError::VendorError {
             vendor: "sina".into(),
@@ -28,13 +25,13 @@ impl StockVendor for SinaVendor {
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        let client = Client::new();
         let url = format!(
             "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{}.json?page=1&num={}",
             stock_code, limit.min(50)
         );
 
-        let resp = client
+        let resp = self
+            .http
             .get(&url)
             .header("Referer", "https://finance.sina.com.cn/")
             .send()

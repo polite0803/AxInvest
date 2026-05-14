@@ -23,6 +23,7 @@ import {
   useSearchStore,
   useSettingsStore,
   useStreamStore,
+  useStockAnalysisStore,
   useUIStore,
 } from "@/stores";
 import { useExpertStore } from "@/stores/feature/expertStore";
@@ -35,6 +36,7 @@ import { ModelIcon } from "@lobehub/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { App, Badge, Button, Checkbox, Dropdown, Image, Popover, Radio, Select, Tag, theme, Tooltip } from "antd";
 import type { MenuProps } from "antd";
+import dayjs from "dayjs";
 import {
   ArrowUp,
   Atom,
@@ -1361,6 +1363,23 @@ export function InputArea() {
     const trimmed = value.trim();
     if (!trimmed || streaming) { return; }
 
+    // Check for stock analysis trigger: @600519 or /analyze 600519
+    const stockCodeMatch = trimmed.match(/^@(\d{6})/) || trimmed.match(/^\/analyze\s+(\d{6})/);
+    if (stockCodeMatch) {
+      const stockCode = stockCodeMatch[1];
+      const { startAnalysis, setupEventListener } = useStockAnalysisStore.getState();
+      setValue("");
+      try {
+        await setupEventListener();
+        await startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), "");
+        navigate(`/stock-analysis?code=${stockCode}`);
+      } catch (e) {
+        console.error("[StockAnalysis] Failed to start analysis:", e);
+        messageApi.error(t("stockAnalysis.startFailed", "Failed to start stock analysis"));
+      }
+      return;
+    }
+
     const submittedFiles = attachedFiles;
 
     try {
@@ -1451,6 +1470,7 @@ export function InputArea() {
     settings,
     createConversation,
     messageApi,
+    navigate,
     t,
     searchEnabled,
     searchProviderId,

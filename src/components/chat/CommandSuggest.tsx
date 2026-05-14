@@ -21,6 +21,13 @@ const SLASH_COMMANDS: Suggestion[] = [
   },
   {
     type: "command",
+    label: "/analyze",
+    description: "Start stock analysis with code",
+    replacement: "/analyze ",
+    icon: <Terminal size={14} />,
+  },
+  {
+    type: "command",
     label: "/compact",
     description: "Compress conversation context",
     replacement: "/compact",

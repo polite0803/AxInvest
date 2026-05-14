@@ -53,8 +53,8 @@ async function main() {
         `  开: ${quote.open}  高: ${quote.high}  低: ${quote.low}`,
       );
       console.log(`  量: ${(quote.volume / 10000).toFixed(1)}万手`);
-      if (quote.pe) console.log(`  PE: ${quote.pe}`);
-      if (quote.pb) console.log(`  PB: ${quote.pb}`);
+      if (quote.pe) { console.log(`  PE: ${quote.pe}`); }
+      if (quote.pb) { console.log(`  PB: ${quote.pb}`); }
       break;
     }
     case "analyze": {
@@ -112,9 +112,7 @@ async function main() {
         console.log("已删除");
       } else {
         const items = await api("/stock/watchlist");
-        items.forEach((i) =>
-          console.log(`  ${i.stockCode}  ${i.stockName}`)
-        );
+        items.forEach((i) => console.log(`  ${i.stockCode}  ${i.stockName}`));
       }
       break;
     }

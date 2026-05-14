@@ -105,8 +105,38 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
     }));
 
     try {
-      const request: PlanExecuteRequest = { conversationId, planId };
-      await invoke("plan_execute", { request });
+      // Approve all pending steps before execution so plan_execute picks them up
+      const plan = get().activePlans[conversationId];
+      const pendingStepIds = plan?.steps
+        .filter((s) => s.status === "pending")
+        .map((s) => s.id) ?? [];
+
+      for (const stepId of pendingStepIds) {
+        await invoke("plan_modify_step", {
+          request: { planId, stepId, approved: true },
+        });
+      }
+
+      // Update local plan steps to approved so the PlanCard reflects the change
+      if (plan && pendingStepIds.length > 0) {
+        set((s) => ({
+          activePlans: {
+            ...s.activePlans,
+            [conversationId]: {
+              ...plan,
+              steps: plan.steps.map((step) =>
+                pendingStepIds.includes(step.id)
+                  ? { ...step, status: "approved" as const }
+                  : step
+              ),
+            },
+          },
+        }));
+      }
+
+      const allStepIds = plan?.steps.map((s) => s.id);
+      const request: PlanExecuteRequest = { conversationId, planId, stepIds: allStepIds };
+      await invoke("plan_execute", { request }, 0);
       // Plan status will be updated via planStepUpdate / planExecutionComplete events
     } catch (e) {
       const errMsg = String(e);
@@ -181,7 +211,7 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
 
     try {
       const request: PlanExecuteRequest = { conversationId, planId, stepIds };
-      await invoke("plan_execute", { request });
+      await invoke("plan_execute", { request }, 0);
     } catch (e) {
       const errMsg = String(e);
       message.error(errMsg);
@@ -193,15 +223,17 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
   },
 
   resumePlan: async (conversationId, planId) => {
+    set((s) => ({ loading: { ...s.loading, [conversationId]: true } }));
     try {
-      const plan: Plan = await invoke("plan_get", { request: { planId } });
-      if (plan) {
-        set((s) => ({
-          activePlans: { ...s.activePlans, [conversationId]: plan },
-        }));
-      }
+      const plan: Plan = await invoke("plan_activate", { request: { conversationId, planId } });
+      set((s) => ({
+        activePlans: { ...s.activePlans, [conversationId]: plan },
+        loading: { ...s.loading, [conversationId]: false },
+      }));
+      message.success("计划已恢复，可在上方查看和审批");
     } catch (e) {
       console.error("[planStore] resumePlan failed:", e);
+      set((s) => ({ loading: { ...s.loading, [conversationId]: false } }));
       message.error(`恢复计划失败: ${String(e)}`);
     }
   },
@@ -317,7 +349,7 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
     );
 
     if (hasRunning) { planStatus = "executing"; }
-    else if (allDone) { planStatus = hasError ? "completed" : "completed"; }
+    else if (allDone) { planStatus = hasError ? "partial" : "completed"; }
 
     set((s) => ({
       activePlans: {
@@ -334,11 +366,12 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
 
     const updatedPlan = { ...plan, status: status as Plan["status"] };
 
-    // Move to history
+    // Move from active to history only
     set((s) => {
       const history = s.planHistory[conversationId] || [];
+      const { [conversationId]: _removed, ...restActive } = s.activePlans;
       return {
-        activePlans: { ...s.activePlans, [conversationId]: updatedPlan },
+        activePlans: restActive,
         planHistory: {
           ...s.planHistory,
           [conversationId]: [updatedPlan, ...history],

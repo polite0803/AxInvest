@@ -9,7 +9,8 @@
 
 use crate::app_state::AppState;
 use axagent_core::types::{
-    ChatContent, ChatMessage, ChatRequest, ChatTool, ChatToolFunction, ProviderProxyConfig,
+    ChatContent, ChatMessage, ChatRequest, ChatTool, ChatToolFunction, MessageRole,
+    ProviderProxyConfig,
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,14 @@ pub struct PlanCancelRequest {
     pub plan_id: String,
     #[allow(dead_code)]
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlanActivateRequest {
+    #[serde(rename = "conversationId")]
+    pub conversation_id: String,
+    #[serde(rename = "planId")]
+    pub plan_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +134,7 @@ pub enum PlanStatus {
     Approved,
     Executing,
     Completed,
+    Partial,
     Cancelled,
 }
 
@@ -710,7 +720,9 @@ pub async fn plan_generate(
         .map_err(|e| format!("Failed to get messages: {}", e))?;
 
     let user_message_id = messages
-        .first()
+        .iter()
+        .filter(|m| matches!(m.role, MessageRole::User))
+        .max_by_key(|m| m.created_at)
         .map(|m| m.id.clone())
         .unwrap_or_else(|| Uuid::new_v4().to_string());
 
@@ -941,6 +953,60 @@ pub async fn plan_cancel(
     Ok(())
 }
 
+/// Activate a plan for review — sets is_active=1, deactivates others.
+#[tauri::command]
+pub async fn plan_activate(
+    state: tauri::State<'_, AppState>,
+    request: PlanActivateRequest,
+) -> Result<Plan, String> {
+    let db = &state.sea_db;
+
+    // Deactivate all other active plans for this conversation
+    let existing = axagent_core::entity::plans::Entity::find()
+        .filter(axagent_core::entity::plans::Column::ConversationId.eq(&request.conversation_id))
+        .filter(axagent_core::entity::plans::Column::IsActive.eq(1))
+        .all(db)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    for row in &existing {
+        if row.id != request.plan_id {
+            let mut am: axagent_core::entity::plans::ActiveModel = row.clone().into();
+            am.is_active = Set(0);
+            am.updated_at = Set(chrono::Utc::now().timestamp_millis());
+            am.update(db).await.ok();
+        }
+    }
+
+    // Activate target plan
+    let row = axagent_core::entity::plans::Entity::find_by_id(&request.plan_id)
+        .one(db)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| format!("Plan not found: {}", request.plan_id))?;
+
+    let mut am: axagent_core::entity::plans::ActiveModel = row.clone().into();
+    am.is_active = Set(1);
+    am.status = Set("reviewing".to_string());
+    am.updated_at = Set(chrono::Utc::now().timestamp_millis());
+    am.update(db)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let steps: Vec<PlanStep> = serde_json::from_str(&row.steps_json).unwrap_or_default();
+    Ok(Plan {
+        id: row.id.clone(),
+        conversation_id: row.conversation_id.clone(),
+        user_message_id: row.user_message_id.clone(),
+        title: row.title.clone(),
+        steps,
+        status: PlanStatus::Reviewing,
+        is_active: true,
+        created_under_strategy: row.created_under_strategy.clone(),
+        created_at: row.created_at,
+        updated_at: chrono::Utc::now().timestamp_millis(),
+    })
+}
+
 /// Get a plan by ID.
 #[tauri::command]
 pub async fn plan_get(
@@ -963,6 +1029,8 @@ pub async fn plan_get(
                 "approved" => PlanStatus::Approved,
                 "executing" => PlanStatus::Executing,
                 "completed" => PlanStatus::Completed,
+                "partial" => PlanStatus::Partial,
+                "cancelled" => PlanStatus::Cancelled,
                 _ => PlanStatus::Cancelled,
             };
             Ok(Some(Plan {
@@ -1013,6 +1081,8 @@ pub async fn plan_list(
                 "approved" => PlanStatus::Approved,
                 "executing" => PlanStatus::Executing,
                 "completed" => PlanStatus::Completed,
+                "partial" => PlanStatus::Partial,
+                "cancelled" => PlanStatus::Cancelled,
                 _ => PlanStatus::Cancelled,
             };
             Plan {
@@ -1083,6 +1153,8 @@ pub async fn plan_modify_step(
         "approved" => PlanStatus::Approved,
         "executing" => PlanStatus::Executing,
         "completed" => PlanStatus::Completed,
+        "partial" => PlanStatus::Partial,
+        "cancelled" => PlanStatus::Cancelled,
         _ => PlanStatus::Cancelled,
     };
 

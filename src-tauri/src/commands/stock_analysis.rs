@@ -1,6 +1,5 @@
 use crate::AppState;
 use axagent_agent::shared_blackboard::SharedBlackboard;
-use axagent_astock_data::AStockClient;
 use axagent_core::entity::stock_analyses;
 use axagent_core::types::ProviderProxyConfig;
 use axagent_providers::{resolve_base_url_for_type, ProviderAdapter, ProviderRequestContext};
@@ -19,10 +18,11 @@ use tokio::sync::RwLock;
 /// 搜索股票
 #[tauri::command]
 pub async fn search_stock(
+    state: State<'_, AppState>,
     keyword: String,
 ) -> Result<Vec<axagent_astock_data::StockSearchResult>, String> {
-    let client = AStockClient::new();
-    client
+    state
+        .astock_client
         .search_stock(&keyword)
         .await
         .map_err(|e| e.to_string())
@@ -31,10 +31,11 @@ pub async fn search_stock(
 /// 获取实时行情
 #[tauri::command]
 pub async fn get_stock_quote(
+    state: State<'_, AppState>,
     stock_code: String,
 ) -> Result<axagent_astock_data::StockQuote, String> {
-    let client = AStockClient::new();
-    client
+    state
+        .astock_client
         .get_quote(&stock_code)
         .await
         .map_err(|e| e.to_string())
@@ -43,12 +44,13 @@ pub async fn get_stock_quote(
 /// 获取K线数据
 #[tauri::command]
 pub async fn get_stock_kline(
+    state: State<'_, AppState>,
     stock_code: String,
     period: String,
     limit: u32,
 ) -> Result<Vec<axagent_astock_data::KLine>, String> {
-    let client = AStockClient::new();
-    client
+    state
+        .astock_client
         .get_klines(&stock_code, &period, limit)
         .await
         .map_err(|e| e.to_string())
@@ -66,9 +68,9 @@ pub async fn start_stock_analysis(
     let analysis_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
 
-    // 1. 获取股票名称
-    let client = AStockClient::new();
-    let quote = client
+    // 1. 获取股票名称（复用 AppState 单例，享受缓存）
+    let quote = state
+        .astock_client
         .get_quote(&stock_code)
         .await
         .map_err(|e| format!("获取行情失败: {}", e))?;
@@ -124,21 +126,30 @@ pub async fn start_stock_analysis(
                 Some(Arc::new(r))
             },
             Err(e) => {
-                tracing::warn!(
-                    "[stock_analysis] 无法构建 AgentRunner，使用占位报告: {}",
-                    e
-                );
+                tracing::warn!("[stock_analysis] 无法构建 AgentRunner，使用占位报告: {}", e);
                 None
             },
         };
 
-    // 6. spawn 异步分析任务
+    // 6. 在 spawn 之前加载专家提示词（从 Markdown 文件）
+    let prompts_dir = std::env::current_dir()
+        .unwrap_or_default()
+        .join("agency_experts")
+        .join("stock-analysis");
+    let prompts = axagent_stock_analysis::prompts::load_expert_prompts(
+        prompts_dir
+            .to_str()
+            .unwrap_or("agency_experts/stock-analysis"),
+    );
+
+    // 7. spawn 异步分析任务
     let app_handle = app.clone();
     let analysis_id_clone = analysis_id.clone();
     let db = state.sea_db.clone();
     let stock_code_for_spawn = stock_code.clone();
     let stock_name_for_spawn = stock_name.clone();
     let cancel_tokens = state.agent_cancel_tokens.clone();
+    let data_client = state.astock_client.clone(); // Arc 克隆，共享单例缓存
 
     tokio::spawn(async move {
         let (event_tx, _) = tokio::sync::broadcast::channel::<AnalysisEvent>(64);
@@ -151,8 +162,6 @@ pub async fn start_stock_analysis(
                 let _ = app_for_events.emit("stock-analysis-event", &event);
             }
         });
-
-        let data_client = AStockClient::new();
         let blackboard = Arc::new(RwLock::new(SharedBlackboard::new(
             &analysis_id_clone,
             &format!("分析 {} ({})", stock_code_for_spawn, stock_name_for_spawn),
@@ -169,6 +178,7 @@ pub async fn start_stock_analysis(
             config,
             event_tx,
             runner,
+            prompts,
             Some(cancel_token),
         )
         .await;
@@ -315,10 +325,7 @@ async fn build_stock_analysis_runner(
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),
-        base_url: Some(resolve_base_url_for_type(
-            &prov.api_host,
-            &prov.provider_type,
-        )),
+        base_url: Some(resolve_base_url_for_type(&prov.api_host, &prov.provider_type)),
         api_path: prov.api_path.clone(),
         proxy_config: ProviderProxyConfig::resolve(&prov.proxy_config, &settings),
         custom_headers,
@@ -362,9 +369,7 @@ async fn build_stock_analysis_runner(
         .ok_or_else(|| "没有可用的模型".to_string())?;
 
     // 8. 构建 runner（股票分析偏确定性，temperature=0.3）
-    Ok(
-        SessionManagerRunner::new(adapter, ctx, model_id)
-            .with_temperature(Some(0.3))
-            .with_max_tokens(Some(4096)),
-    )
+    Ok(SessionManagerRunner::new(adapter, ctx, model_id)
+        .with_temperature(Some(0.3))
+        .with_max_tokens(Some(4096)))
 }

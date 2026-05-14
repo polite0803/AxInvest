@@ -1,5 +1,6 @@
 use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::SemanticCache;
+use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::SyncEngine;
 use axagent_runtime::dashboard_registry::DashboardRegistry;
 use axagent_runtime::webhook_subscription::WebhookSubscriptionManager;
@@ -82,4 +83,6 @@ pub struct AppState {
     pub dream_data_provider: Arc<axagent_trajectory::TrajectoryDreamDataProvider>,
     pub sandbox_executor: Arc<axagent_trajectory::SkillSandboxExecutor>,
     pub sync_engine: Option<Arc<SyncEngine>>,
+    /// 股票数据客户端（单例，内含请求级缓存）
+    pub astock_client: Arc<AStockClient>,
 }

@@ -358,6 +358,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
         )),
         sandbox_executor: Arc::new(axagent_trajectory::SkillSandboxExecutor::with_default_policy()),
         sync_engine,
+        astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
     }
 }
 

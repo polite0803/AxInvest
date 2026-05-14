@@ -110,10 +110,7 @@ impl AgentRunner for SessionManagerRunner {
             .map_err(|e| format!("LLM 调用失败: {}", e))?;
 
         if response.content.is_empty() {
-            Err(format!(
-                "[{}] LLM 返回空响应",
-                expert_id
-            ))
+            Err(format!("[{}] LLM 返回空响应", expert_id))
         } else {
             Ok(response.content)
         }

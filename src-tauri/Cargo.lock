@@ -1126,6 +1126,7 @@ dependencies = [
 name = "axagent-stock-analysis"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axagent-agent",
  "axagent-astock-data",
  "axagent-runtime-core",

@@ -892,6 +892,8 @@ pub fn run() {
             commands::stock_analysis::create_price_alert,
             commands::stock_analysis::list_price_alerts,
             commands::stock_analysis::delete_price_alert,
+            // Custom analysts
+            commands::stock_analysis::list_custom_analysts,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
         ])

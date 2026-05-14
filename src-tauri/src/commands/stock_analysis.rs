@@ -10,6 +10,7 @@ use axagent_stock_analysis::backtest::{
 };
 use axagent_stock_analysis::decision::{AgentRunner, AnalysisConfig, AnalysisEvent};
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
+use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::runner::SessionManagerRunner;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -141,11 +142,15 @@ pub async fn start_stock_analysis(
         .unwrap_or_default()
         .join("agency_experts")
         .join("stock-analysis");
-    let prompts = axagent_stock_analysis::prompts::load_expert_prompts(
-        prompts_dir
-            .to_str()
-            .unwrap_or("agency_experts/stock-analysis"),
-    );
+    let expert_dir_str = prompts_dir
+        .to_str()
+        .unwrap_or("agency_experts/stock-analysis");
+    let base_prompts = axagent_stock_analysis::prompts::load_expert_prompts(expert_dir_str);
+
+    // 6b. 发现并合并自定义分析师插件
+    let plugin_mgr = AnalystPluginManager::new(expert_dir_str);
+    let custom = plugin_mgr.discover_custom_analysts();
+    let prompts = AnalystPluginManager::merge_prompts(&base_prompts, &custom);
 
     // 7. spawn 异步分析任务
     let app_handle = app.clone();
@@ -708,4 +713,14 @@ pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Resul
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ── 自定义分析师插件 ──
+
+/// 列出所有自定义分析师插件
+#[tauri::command]
+pub async fn list_custom_analysts(
+) -> Result<Vec<axagent_stock_analysis::plugin::CustomAnalyst>, String> {
+    let mgr = AnalystPluginManager::new("agency_experts/stock-analysis");
+    Ok(mgr.discover_custom_analysts())
 }

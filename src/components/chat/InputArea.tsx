@@ -22,8 +22,8 @@ import {
   useProviderStore,
   useSearchStore,
   useSettingsStore,
-  useStreamStore,
   useStockAnalysisStore,
+  useStreamStore,
   useUIStore,
 } from "@/stores";
 import { useExpertStore } from "@/stores/feature/expertStore";

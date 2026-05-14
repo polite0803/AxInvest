@@ -4,7 +4,7 @@ import { AnalystReportCard } from "./AnalystReportCard";
 export function AnalystReportGrid() {
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
 
-  if (Object.keys(analystReports).length === 0) return null;
+  if (Object.keys(analystReports).length === 0) { return null; }
 
   return (
     <div

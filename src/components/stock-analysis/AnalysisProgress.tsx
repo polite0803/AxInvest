@@ -18,16 +18,16 @@ export function AnalysisProgress() {
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const error = useStockAnalysisStore((s) => s.error);
 
-  if (status === "idle") return null;
+  if (status === "idle") { return null; }
 
   let currentStep = 0;
   if (status === "running" || status === "completed") {
     const reportCount = Object.keys(analystReports).length;
-    if (reportCount >= 1) currentStep = 1;
-    if (debateRounds.length > 0) currentStep = 2;
-    if (Object.keys(riskAssessments).length >= 1) currentStep = 3;
+    if (reportCount >= 1) { currentStep = 1; }
+    if (debateRounds.length > 0) { currentStep = 2; }
+    if (Object.keys(riskAssessments).length >= 1) { currentStep = 3; }
   }
-  if (status === "completed") currentStep = 4;
+  if (status === "completed") { currentStep = 4; }
 
   return (
     <div>

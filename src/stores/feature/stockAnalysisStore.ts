@@ -1,4 +1,3 @@
-import { create } from "zustand";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import type {
@@ -10,6 +9,7 @@ import type {
   StockQuote,
   StockSearchResult,
 } from "@/types";
+import { create } from "zustand";
 
 interface StockAnalysisState {
   // Search
@@ -158,7 +158,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   setupEventListener: async () => {
     const existing = get()._unlisten;
-    if (existing) return;
+    if (existing) { return; }
 
     const unlisten = await listen<AnalysisEvent>("stock-analysis-event", (event) => {
       const { type, payload } = event.payload;

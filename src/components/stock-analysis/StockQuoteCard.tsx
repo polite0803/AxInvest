@@ -7,7 +7,7 @@ export function StockQuoteCard() {
   const quote = useStockAnalysisStore((s) => s.quote);
   const stockName = useStockAnalysisStore((s) => s.stockName);
 
-  if (!quote) return null;
+  if (!quote) { return null; }
 
   const isUp = quote.changePct >= 0;
   const color = isUp ? "#cf1322" : "#3f8600";
@@ -22,13 +22,15 @@ export function StockQuoteCard() {
           valueStyle={{ color }}
         />
         <Tag color={isUp ? "red" : "green"}>
-          {isUp ? "+" : ""}{quote.changePct.toFixed(2)}%
+          {isUp ? "+" : ""}
+          {quote.changePct.toFixed(2)}%
         </Tag>
         <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
           {t("stockAnalysis.open")}: {quote.open} &nbsp;
           {t("stockAnalysis.high")}: {quote.high} &nbsp;
           {t("stockAnalysis.low")}: {quote.low} &nbsp;
-          {t("stockAnalysis.volume")}: {(quote.volume / 10000).toFixed(1)}{t("stockAnalysis.volumeUnit")}
+          {t("stockAnalysis.volume")}: {(quote.volume / 10000).toFixed(1)}
+          {t("stockAnalysis.volumeUnit")}
         </div>
       </div>
     </Card>

@@ -28,11 +28,13 @@ export function StockAnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const setupEventListener = useStockAnalysisStore((s) => s.setupEventListener);
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
+  const reset = useStockAnalysisStore((s) => s.reset);
   const status = useStockAnalysisStore((s) => s.status);
 
   useEffect(() => {
     setupEventListener();
-  }, [setupEventListener]);
+    return () => { reset(); };
+  }, [setupEventListener, reset]);
 
   useEffect(() => {
     if (id) {

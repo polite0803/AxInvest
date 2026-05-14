@@ -26,7 +26,11 @@ const BULL_ID: &str = "bull-researcher";
 const BEAR_ID: &str = "bear-researcher";
 
 /// 风控评估员
-const RISK_IDS: &[&str] = &["liquidity-risk", "market-risk", "credit-risk"];
+const RISK_IDS: &[&str] = &[
+    "aggressive-debator",
+    "conservative-debator",
+    "neutral-debator",
+];
 const RISK_MANAGER_ID: &str = "research-manager";
 
 /// 决策角色

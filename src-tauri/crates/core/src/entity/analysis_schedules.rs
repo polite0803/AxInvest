@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 /// 股票定时分析调度计划
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Serialize, Deserialize)]
 #[sea_orm(table_name = "analysis_schedules")]
+#[serde(rename_all = "camelCase")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,

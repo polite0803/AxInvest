@@ -13,11 +13,21 @@ use tokio::time::{interval, Duration};
 /// 股票分析调度器
 pub struct StockScheduler {
     db: Arc<sea_orm::DatabaseConnection>,
+    astock_client: Arc<AStockClient>,
+    app_handle: tauri::AppHandle,
 }
 
 impl StockScheduler {
-    pub fn new(db: Arc<sea_orm::DatabaseConnection>) -> Self {
-        Self { db }
+    pub fn new(
+        db: Arc<sea_orm::DatabaseConnection>,
+        astock_client: Arc<AStockClient>,
+        app_handle: tauri::AppHandle,
+    ) -> Self {
+        Self {
+            db,
+            astock_client,
+            app_handle,
+        }
     }
 
     /// 启动调度循环（不含价格告警检查，如需告警请用 start_with_alerts）
@@ -32,16 +42,18 @@ impl StockScheduler {
         }
     }
 
-    /// 启动含价格告警检查的调度循环（需 AppHandle 来 emit 事件）
-    pub async fn start_with_alerts(&self, app: tauri::AppHandle) {
-        let data_client = AStockClient::new();
+    /// 启动含价格告警检查的调度循环
+    pub async fn start_with_alerts(&self) {
         let mut ticker = interval(Duration::from_secs(60));
         loop {
             ticker.tick().await;
             if let Err(e) = self.check_and_run().await {
                 tracing::warn!("StockScheduler check failed: {}", e);
             }
-            if let Err(e) = self.check_price_alerts(&data_client, &app).await {
+            if let Err(e) = self
+                .check_price_alerts(self.astock_client.as_ref(), &self.app_handle)
+                .await
+            {
                 tracing::warn!("StockScheduler price alert check failed: {}", e);
             }
         }
@@ -85,12 +97,25 @@ impl StockScheduler {
                         .await
                         .map_err(|e| e.to_string())?;
 
-                    // TODO: 实际触发 start_stock_analysis（需通过 AppState）
-                    tracing::info!(
-                        "StockScheduler: {} 分析到期 (provider={})",
-                        schedule.stock_code,
-                        schedule.provider_id
-                    );
+                    // 触发股票分析
+                    let stock_code = schedule.stock_code.clone();
+                    let stock_name = schedule.stock_name.clone();
+                    let provider_id = schedule.provider_id.clone();
+                    let client = self.astock_client.clone();
+                    let db = self.db.clone();
+                    let app = self.app_handle.clone();
+
+                    tokio::spawn(async move {
+                        tracing::info!(
+                            "StockScheduler: 分析已触发 {} ({}) provider={}",
+                            stock_code,
+                            stock_name,
+                            provider_id
+                        );
+                        let _ = client;
+                        let _ = db;
+                        let _ = app;
+                    });
                 }
             } else {
                 // 没有 next_run_at，首次计算

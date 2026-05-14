@@ -5027,7 +5027,27 @@
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
     "emptyHint": "Aktiencode suchen, um Analyse zu starten",
-    "emptyHintDetail": "Unterstützt A-Aktien. Code oder Name eingeben (z.B. 600519)"
+    "emptyHintDetail": "Unterstützt A-Aktien. Code oder Name eingeben (z.B. 600519)",
+    "watchlist": "Watchlist",
+    "tab.market": "Markt",
+    "tab.analysts": "Analysten",
+    "tab.debate": "Debatte",
+    "tab.risk": "Risiko",
+    "tab.decision": "Entscheidung",
+    "compare": "Vergleichen",
+    "stockCode1": "Aktiencode 1",
+    "stockCode2": "Aktiencode 2",
+    "compareBtn": "Vergleichen",
+    "change": "Anderung",
+    "alert.title": "Preisalarm",
+    "alert.code": "Code",
+    "alert.name": "Name",
+    "alert.condition": "Bedingung",
+    "alert.price": "Preis",
+    "alert.above": "Uber",
+    "alert.below": "Unter",
+    "alert.empty": "Keine Alarme",
+    "alert.triggered": "Preisalarm ausgelost!"
   },
   "success": "Success"
 }

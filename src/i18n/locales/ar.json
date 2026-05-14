@@ -5027,7 +5027,27 @@
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
     "emptyHint": "ابحث عن رمز السهم لبدء التحليل",
-    "emptyHintDetail": "يدعم الأسهم A. أدخل الرمز أو الاسم (مثال: 600519)"
+    "emptyHintDetail": "يدعم الأسهم A. أدخل الرمز أو الاسم (مثال: 600519)",
+    "watchlist": "قائمة المراقبة",
+    "tab.market": "السوق",
+    "tab.analysts": "المحللون",
+    "tab.debate": "مناظرة",
+    "tab.risk": "المخاطر",
+    "tab.decision": "القرار",
+    "compare": "مقارنة",
+    "stockCode1": "رمز السهم 1",
+    "stockCode2": "رمز السهم 2",
+    "compareBtn": "مقارنة",
+    "change": "التغير",
+    "alert.title": "تنبيه السعر",
+    "alert.code": "الرمز",
+    "alert.name": "الاسم",
+    "alert.condition": "الشرط",
+    "alert.price": "السعر",
+    "alert.above": "أعلى",
+    "alert.below": "أقل",
+    "alert.empty": "لا توجد تنبيهات",
+    "alert.triggered": "تم تفعيل تنبيه السعر!"
   },
   "success": "Success"
 }

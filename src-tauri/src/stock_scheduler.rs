@@ -1,11 +1,13 @@
 //! 股票定时分析调度器
 //!
 //! 每分钟检查一次 cron 表达式，触发到期的分析任务。
-//! 实际分析逻辑复用 `start_stock_analysis` 的内部调用路径。
+//! 同时检查价格告警条件，触发后通过 Tauri event 通知前端。
 
-use axagent_core::entity::analysis_schedules;
+use axagent_astock_data::AStockClient;
+use axagent_core::entity::{analysis_schedules, price_alerts};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
+use tauri::Emitter;
 use tokio::time::{interval, Duration};
 
 /// 股票分析调度器
@@ -18,13 +20,29 @@ impl StockScheduler {
         Self { db }
     }
 
-    /// 启动调度循环，直接持有 DB Arc，不依赖 AppState
+    /// 启动调度循环（不含价格告警检查，如需告警请用 start_with_alerts）
+    #[allow(dead_code)]
     pub async fn start(&self) {
         let mut ticker = interval(Duration::from_secs(60));
         loop {
             ticker.tick().await;
             if let Err(e) = self.check_and_run().await {
                 tracing::warn!("StockScheduler check failed: {}", e);
+            }
+        }
+    }
+
+    /// 启动含价格告警检查的调度循环（需 AppHandle 来 emit 事件）
+    pub async fn start_with_alerts(&self, app: tauri::AppHandle) {
+        let data_client = AStockClient::new();
+        let mut ticker = interval(Duration::from_secs(60));
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.check_and_run().await {
+                tracing::warn!("StockScheduler check failed: {}", e);
+            }
+            if let Err(e) = self.check_price_alerts(&data_client, &app).await {
+                tracing::warn!("StockScheduler price alert check failed: {}", e);
             }
         }
     }
@@ -68,7 +86,6 @@ impl StockScheduler {
                         .map_err(|e| e.to_string())?;
 
                     // TODO: 实际触发 start_stock_analysis（需通过 AppState）
-                    // 当前仅记录日志，后续可通过 channel 或内部调度集成触发
                     tracing::info!(
                         "StockScheduler: {} 分析到期 (provider={})",
                         schedule.stock_code,
@@ -92,6 +109,78 @@ impl StockScheduler {
                     .exec(self.db.as_ref())
                     .await
                     .map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 检查所有未触发的价格告警
+    async fn check_price_alerts(
+        &self,
+        data_client: &AStockClient,
+        app: &tauri::AppHandle,
+    ) -> Result<(), String> {
+        let alerts = price_alerts::Entity::find()
+            .filter(price_alerts::Column::IsTriggered.eq(false))
+            .all(self.db.as_ref())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let now = chrono::Utc::now().timestamp_millis();
+
+        for alert in alerts {
+            if let Ok(quote) = data_client.get_quote(&alert.stock_code).await {
+                let triggered = match alert.condition.as_str() {
+                    "above" => quote.price >= alert.target_price,
+                    "below" => quote.price <= alert.target_price,
+                    _ => false,
+                };
+
+                if triggered {
+                    // 更新告警为已触发
+                    let _ = price_alerts::Entity::update_many()
+                        .col_expr(
+                            price_alerts::Column::IsTriggered,
+                            sea_orm::sea_query::Expr::value(true),
+                        )
+                        .col_expr(
+                            price_alerts::Column::TriggeredAt,
+                            sea_orm::sea_query::Expr::value(Some(now)),
+                        )
+                        .col_expr(
+                            price_alerts::Column::UpdatedAt,
+                            sea_orm::sea_query::Expr::value(now),
+                        )
+                        .filter(price_alerts::Column::Id.eq(&alert.id))
+                        .exec(self.db.as_ref())
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                    // 向前端发送事件通知
+                    let _ = app.emit(
+                        "price-alert-triggered",
+                        serde_json::json!({
+                            "id": alert.id,
+                            "stockCode": alert.stock_code,
+                            "stockName": alert.stock_name,
+                            "currentPrice": quote.price,
+                            "targetPrice": alert.target_price,
+                            "condition": alert.condition,
+                        }),
+                    );
+
+                    tracing::info!(
+                        "PriceAlert 触发: {} 价格 {} 已{} {}",
+                        alert.stock_code,
+                        quote.price,
+                        if alert.condition == "above" {
+                            "突破"
+                        } else {
+                            "跌破"
+                        },
+                        alert.target_price
+                    );
+                }
             }
         }
         Ok(())

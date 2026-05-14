@@ -5027,7 +5027,27 @@
     "riskLevel": "風險等級",
     "confidence": "置信度",
     "emptyHint": "搜尋股票代碼開始分析",
-    "emptyHintDetail": "支援滬深A股，輸入代碼或名稱搜尋（如：600519、貴州茅台）"
+    "emptyHintDetail": "支援滬深A股，輸入代碼或名稱搜尋（如：600519、貴州茅台）",
+    "watchlist": "自選股",
+    "tab.market": "行情",
+    "tab.analysts": "分析師",
+    "tab.debate": "辯論",
+    "tab.risk": "風險",
+    "tab.decision": "決策",
+    "compare": "多股對比",
+    "stockCode1": "股票代碼1",
+    "stockCode2": "股票代碼2",
+    "compareBtn": "對比",
+    "change": "涨跌幅",
+    "alert.title": "價格告警",
+    "alert.code": "代碼",
+    "alert.name": "名稱",
+    "alert.condition": "條件",
+    "alert.price": "價格",
+    "alert.above": "突破",
+    "alert.below": "跌破",
+    "alert.empty": "暫無告警",
+    "alert.triggered": "價格告警已觸發！"
   },
   "success": "Success"
 }

@@ -5027,7 +5027,27 @@
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
     "emptyHint": "Поиск кода акции для начала анализа",
-    "emptyHintDetail": "Поддержка A-акций. Введите код или название (напр. 600519)"
+    "emptyHintDetail": "Поддержка A-акций. Введите код или название (напр. 600519)",
+    "watchlist": "Список наблюдения",
+    "tab.market": "Рынок",
+    "tab.analysts": "Аналитики",
+    "tab.debate": "Дебаты",
+    "tab.risk": "Риск",
+    "tab.decision": "Решение",
+    "compare": "Сравнить",
+    "stockCode1": "Код 1",
+    "stockCode2": "Код 2",
+    "compareBtn": "Сравнить",
+    "change": "Изменение",
+    "alert.title": "Ценовое оповещение",
+    "alert.code": "Код",
+    "alert.name": "Название",
+    "alert.condition": "Условие",
+    "alert.price": "Цена",
+    "alert.above": "Выше",
+    "alert.below": "Ниже",
+    "alert.empty": "Нет оповещений",
+    "alert.triggered": "Ценовое оповещение сработало!"
   },
   "success": "Success"
 }

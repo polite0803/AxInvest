@@ -1,5 +1,4 @@
 use crate::AppState;
-use axagent_agent::session_manager::SessionManager;
 use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_astock_data::AStockClient;
 use axagent_core::entity::stock_analyses;
@@ -9,6 +8,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
@@ -97,12 +97,20 @@ pub async fn start_stock_analysis(
         .await
         .map_err(|e| format!("写入分析记录失败: {}", e))?;
 
-    // 4. spawn 异步分析任务
+    // 4. 创建取消令牌并存入 AppState
+    let cancel_token = Arc::new(AtomicBool::new(false));
+    {
+        let mut tokens = state.agent_cancel_tokens.lock().await;
+        tokens.insert(analysis_id.clone(), cancel_token.clone());
+    }
+
+    // 5. spawn 异步分析任务
     let app_handle = app.clone();
     let analysis_id_clone = analysis_id.clone();
     let db = state.sea_db.clone();
     let stock_code_for_spawn = stock_code.clone();
     let stock_name_for_spawn = stock_name.clone();
+    let cancel_tokens = state.agent_cancel_tokens.clone();
 
     tokio::spawn(async move {
         let (event_tx, _) = tokio::sync::broadcast::channel::<AnalysisEvent>(64);
@@ -124,21 +132,27 @@ pub async fn start_stock_analysis(
 
         let config = AnalysisConfig::default();
 
-        let session_manager = SessionManager::new(db.clone());
+        // AgentRunner: 暂无 — 后续可在此注入 SessionManagerRunner
+        let runner: Option<Arc<dyn axagent_stock_analysis::decision::AgentRunner>> = None;
 
         let result = StockAnalysisOrchestrator::run(
-            &session_manager,
             &data_client,
             blackboard,
             stock_code_for_spawn,
             stock_name_for_spawn,
             date,
             config,
-            provider_id,
-            conversation_id,
             event_tx,
+            runner,
+            Some(cancel_token),
         )
         .await;
+
+        // 清理取消令牌
+        {
+            let mut tokens = cancel_tokens.lock().await;
+            tokens.remove(&analysis_id_clone);
+        }
 
         // 更新 DB 状态
         match result {
@@ -183,11 +197,20 @@ pub async fn start_stock_analysis(
     }))
 }
 
-/// 取消分析
+/// 取消分析 — 设置取消令牌让后台任务停止
 #[tauri::command]
-pub async fn cancel_stock_analysis(analysis_id: String) -> Result<(), String> {
-    tracing::info!("cancel_stock_analysis: {}", analysis_id);
-    Ok(())
+pub async fn cancel_stock_analysis(
+    state: State<'_, AppState>,
+    analysis_id: String,
+) -> Result<(), String> {
+    let tokens = state.agent_cancel_tokens.lock().await;
+    if let Some(token) = tokens.get(&analysis_id) {
+        token.store(true, Ordering::Relaxed);
+        tracing::info!("cancel_stock_analysis: 已设置取消令牌 {}", analysis_id);
+        Ok(())
+    } else {
+        Err(format!("分析任务不存在或已完成: {}", analysis_id))
+    }
 }
 
 /// 历史分析列表

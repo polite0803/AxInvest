@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// 投资决策
@@ -106,4 +107,22 @@ pub enum AnalysisEvent {
         stage: String,
         message: String,
     },
+}
+
+/// Agent 执行器抽象 — 由命令层注入，编排器通过此 trait 调用 LLM Agent
+#[async_trait]
+pub trait AgentRunner: Send + Sync {
+    /// 运行单个专家 Agent
+    ///
+    /// * `expert_id` - 专家标识，如 "market-analyst"
+    /// * `system_prompt` - 系统提示
+    /// * `user_prompt` - 用户提示（含数据上下文）
+    ///
+    /// 返回专家报告文本
+    async fn run_agent(
+        &self,
+        expert_id: &str,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, String>;
 }

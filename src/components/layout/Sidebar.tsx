@@ -7,7 +7,7 @@ import { useHelpStore, useSettingsStore, useSkillExtensionStore, useUIStore, use
 import type { PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar, theme, Tooltip } from "antd";
-import { Database, HelpCircle, MessageSquare, Router, Sparkles, User } from "lucide-react";
+import { Database, HelpCircle, LineChart, MessageSquare, Router, Sparkles, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -22,6 +22,7 @@ const pageKeyToPath: Record<PageKey, string> = {
   gateway: "/gateway",
   files: "/files",
   settings: "/settings",
+  "stock-analysis": "/stock-analysis",
 };
 
 function pathToPageKey(path: string): PageKey {
@@ -68,6 +69,13 @@ const builtinNavItems: NavItem[] = [
     icon: <Router size={18} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.gateway",
     path: "/gateway",
+    isPlugin: false,
+  },
+  {
+    key: "stock-analysis",
+    icon: <LineChart size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.stockAnalysis",
+    path: "/stock-analysis",
     isPlugin: false,
   },
 ];
@@ -138,7 +146,7 @@ export function Sidebar() {
     sections.push({
       key: "tools",
       labelKey: "sidebar.sectionTools",
-      items: builtinNavItems.filter((n) => n.key === "skills" || n.key === "knowledge"),
+      items: builtinNavItems.filter((n) => n.key === "skills" || n.key === "knowledge" || n.key === "stock-analysis"),
     });
 
     sections.push({

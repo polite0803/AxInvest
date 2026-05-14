@@ -18,7 +18,8 @@
     "devTools": "개발 도구",
     "workflow": "워크플로우",
     "wiki": "Wiki",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "주식 분석"
   },
   "sidebar": {
     "sectionWork": "작업",
@@ -4994,5 +4995,37 @@
     "failed": "Failed"
   },
   "markdown": "Markdown",
+  "stockAnalysis": {
+    "title": "주식 분석",
+    "searchPlaceholder": "주식 코드 또는 이름 입력",
+    "startAnalysis": "분석 시작",
+    "analyzing": "분석 중...",
+    "starting": "분석 엔진 시작 중...",
+    "price": "현재가",
+    "open": "시가",
+    "high": "고가",
+    "low": "저가",
+    "volume": "거래량",
+    "volumeUnit": "만 주",
+    "stage.dataLoading": "데이터 로딩",
+    "stage.analysis": "다차원 분석",
+    "stage.debate": "강세-약세 토론",
+    "stage.risk": "리스크 평가",
+    "stage.decision": "투자 결정",
+    "debate": "강세-약세 토론",
+    "debateRound": "{round}차 라운드",
+    "bull": "강세",
+    "bear": "약세",
+    "riskAssessment": "리스크 평가",
+    "risk.aggressive": "공격적",
+    "risk.conservative": "보수적",
+    "risk.neutral": "중립",
+    "finalDecision": "최종 결정",
+    "position": "포지션",
+    "targetPrice": "목표가",
+    "stopLoss": "손절가",
+    "riskLevel": "리스크 레벨",
+    "confidence": "신뢰도"
+  },
   "success": "Success"
 }

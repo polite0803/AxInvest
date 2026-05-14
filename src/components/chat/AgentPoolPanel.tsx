@@ -21,6 +21,7 @@ const AGENT_COLORS: Record<string, string> = {
   plan: "#fa8c16",
   research: "#eb2f96",
   review: "#13c2c2",
+  "stock-analysis": "#eb2f96",
 };
 
 function hashColor(str: string): string {
@@ -53,6 +54,7 @@ function getTypeIcon(type: string, agentType?: string): string {
       if (agentType === "plan") { return "📋"; }
       if (agentType === "research") { return "🔬"; }
       if (agentType === "review") { return "✅"; }
+      if (agentType === "stock-analysis") { return "📈"; }
       return "🔧";
     case "worker":
       return "⚡";

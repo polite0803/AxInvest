@@ -18,7 +18,8 @@
     "devTools": "開発ツール",
     "workflow": "ワークフロー",
     "wiki": "知识库",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "株式分析"
   },
   "sidebar": {
     "sectionWork": "ワーク",
@@ -4994,5 +4995,37 @@
     "failed": "Failed"
   },
   "markdown": "Markdown",
+  "stockAnalysis": {
+    "title": "株式分析",
+    "searchPlaceholder": "銘柄コードまたは名前を入力",
+    "startAnalysis": "分析開始",
+    "analyzing": "分析中...",
+    "starting": "分析エンジンを起動中...",
+    "price": "価格",
+    "open": "始値",
+    "high": "高値",
+    "low": "安値",
+    "volume": "出来高",
+    "volumeUnit": "万株",
+    "stage.dataLoading": "データ読み込み",
+    "stage.analysis": "多面的分析",
+    "stage.debate": "強気弱気討論",
+    "stage.risk": "リスク評価",
+    "stage.decision": "投資判断",
+    "debate": "強気弱気討論",
+    "debateRound": "第{round}ラウンド",
+    "bull": "強気",
+    "bear": "弱気",
+    "riskAssessment": "リスク評価",
+    "risk.aggressive": "積極的",
+    "risk.conservative": "保守的",
+    "risk.neutral": "中立",
+    "finalDecision": "最終判断",
+    "position": "ポジション",
+    "targetPrice": "目標価格",
+    "stopLoss": "損切り",
+    "riskLevel": "リスクレベル",
+    "confidence": "信頼度"
+  },
   "success": "Success"
 }

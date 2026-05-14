@@ -54,11 +54,7 @@ impl AStockClient {
     }
 
     /// 获取新闻（新浪财经）
-    pub async fn get_news(
-        &self,
-        stock_code: &str,
-        limit: u32,
-    ) -> Result<Vec<NewsItem>, DataError> {
+    pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
         self.sina.get_news(stock_code, limit).await
     }
 
@@ -84,10 +80,7 @@ impl AStockClient {
     }
 
     /// 搜索股票（东方财富）
-    pub async fn search_stock(
-        &self,
-        keyword: &str,
-    ) -> Result<Vec<StockSearchResult>, DataError> {
+    pub async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
         self.eastmoney.search_stock(keyword).await
     }
 
@@ -99,16 +92,15 @@ impl AStockClient {
         kline_limit: u32,
         news_limit: u32,
     ) -> Result<StockRawData, DataError> {
-        let (quote, klines, financials, news, money_flow, dragon_tiger, lockup) =
-            tokio::try_join!(
-                self.get_quote(stock_code),
-                self.get_klines(stock_code, kline_period, kline_limit),
-                self.get_financials(stock_code),
-                self.get_news(stock_code, news_limit),
-                self.get_money_flow(stock_code),
-                self.get_dragon_tiger(stock_code),
-                self.get_lockup_schedule(stock_code),
-            )?;
+        let (quote, klines, financials, news, money_flow, dragon_tiger, lockup) = tokio::try_join!(
+            self.get_quote(stock_code),
+            self.get_klines(stock_code, kline_period, kline_limit),
+            self.get_financials(stock_code),
+            self.get_news(stock_code, news_limit),
+            self.get_money_flow(stock_code),
+            self.get_dragon_tiger(stock_code),
+            self.get_lockup_schedule(stock_code),
+        )?;
 
         Ok(StockRawData {
             quote,

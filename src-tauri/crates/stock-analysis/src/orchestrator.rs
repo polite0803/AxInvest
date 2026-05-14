@@ -43,7 +43,12 @@ impl StockAnalysisOrchestrator {
         let _raw = Self::phase_1_load_data(data_client, &stock_code, &config, &blackboard, &events)
             .await
             .map_err(|e| {
-                events.send(AnalysisEvent::Error { stage: "data_loading".into(), message: e.clone() }).ok();
+                events
+                    .send(AnalysisEvent::Error {
+                        stage: "data_loading".into(),
+                        message: e.clone(),
+                    })
+                    .ok();
                 e
             })?;
 

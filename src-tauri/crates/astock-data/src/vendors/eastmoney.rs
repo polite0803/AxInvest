@@ -1,7 +1,7 @@
-use async_trait::async_trait;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
+use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
 
@@ -16,12 +16,7 @@ fn to_em_code(stock_code: &str) -> String {
         Some('8') | Some('4') => "0",
         _ => "0",
     };
-    format!(
-        "{}.{}{}",
-        market,
-        if market == "1" { "SH" } else { "SZ" },
-        stock_code
-    )
+    format!("{}.{}{}", market, if market == "1" { "SH" } else { "SZ" }, stock_code)
 }
 
 /// 构建东方财富 secid (1.600519, 0.000001)
@@ -38,7 +33,9 @@ fn to_em_secid(stock_code: &str) -> String {
 
 #[async_trait]
 impl StockVendor for EastMoneyVendor {
-    fn name(&self) -> &'static str { "eastmoney" }
+    fn name(&self) -> &'static str {
+        "eastmoney"
+    }
 
     async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
         Err(DataError::VendorError {
@@ -76,7 +73,9 @@ impl StockVendor for EastMoneyVendor {
         klines_raw
             .iter()
             .map(|v| {
-                let s = v.as_str().ok_or_else(|| DataError::ParseError("kline not string".into()))?;
+                let s = v
+                    .as_str()
+                    .ok_or_else(|| DataError::ParseError("kline not string".into()))?;
                 let parts: Vec<&str> = s.split(',').collect();
                 if parts.len() < 11 {
                     return Err(DataError::ParseError(format!(
@@ -99,10 +98,7 @@ impl StockVendor for EastMoneyVendor {
             .collect()
     }
 
-    async fn get_financials(
-        &self,
-        stock_code: &str,
-    ) -> Result<Vec<FinancialReport>, DataError> {
+    async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
         let client = Client::new();
         let url = format!(
             "https://emweb.securities.eastmoney.com/PC_HSF10/FinanceSummary/FinanceSummary?code={}&type=web",
@@ -175,15 +171,12 @@ impl StockVendor for EastMoneyVendor {
                     medium_net: parse(parts[5]) * 10000.0,
                     small_net: parse(parts[6]) * 10000.0,
                 }))
-            }
+            },
             _ => Ok(None),
         }
     }
 
-    async fn get_dragon_tiger(
-        &self,
-        stock_code: &str,
-    ) -> Result<Vec<DragonTigerEntry>, DataError> {
+    async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
         let client = Client::new();
         let secid = to_em_secid(stock_code);
         let url = format!(
@@ -250,10 +243,7 @@ impl StockVendor for EastMoneyVendor {
             .collect()
     }
 
-    async fn search_stock(
-        &self,
-        keyword: &str,
-    ) -> Result<Vec<StockSearchResult>, DataError> {
+    async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
         let client = Client::new();
         let url = format!(
             "https://searchadapter.eastmoney.com/api/suggest/get?input={}&type=14&count=20",

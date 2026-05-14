@@ -1,0 +1,215 @@
+import { create } from "zustand";
+import { invoke, listen } from "@/lib/invoke";
+import type { UnlistenFn } from "@/lib/invoke";
+import type {
+  AnalysisEvent,
+  AnalysisStatus,
+  AnalysisSummary,
+  KLine,
+  StockDecision,
+  StockQuote,
+  StockSearchResult,
+} from "@/types";
+
+interface StockAnalysisState {
+  // Search
+  searchKeyword: string;
+  searchResults: StockSearchResult[];
+
+  // Current analysis
+  analysisId: string | null;
+  stockCode: string;
+  stockName: string;
+  analysisDate: string;
+  status: AnalysisStatus;
+
+  // Data
+  quote: StockQuote | null;
+  klineData: KLine[];
+  analystReports: Record<string, string>;
+  debateRounds: Array<{ round: number; bull: string; bear: string }>;
+  riskAssessments: Record<string, string>;
+  decision: StockDecision | null;
+  error: string | null;
+
+  // History
+  history: AnalysisSummary[];
+
+  // Actions
+  searchStock: (keyword: string) => Promise<void>;
+  getStockQuote: (code: string) => Promise<void>;
+  getStockKline: (code: string, period: string, limit: number) => Promise<void>;
+  startAnalysis: (stockCode: string, date: string, providerId: string) => Promise<void>;
+  cancelAnalysis: () => Promise<void>;
+  fetchHistory: (limit?: number, offset?: number) => Promise<void>;
+  loadAnalysis: (analysisId: string) => Promise<void>;
+  reset: () => void;
+
+  // Event listeners
+  _unlisten: UnlistenFn | null;
+  setupEventListener: () => Promise<void>;
+}
+
+const initialState = {
+  searchKeyword: "",
+  searchResults: [],
+  analysisId: null,
+  stockCode: "",
+  stockName: "",
+  analysisDate: "",
+  status: "idle" as AnalysisStatus,
+  quote: null,
+  klineData: [],
+  analystReports: {},
+  debateRounds: [],
+  riskAssessments: {},
+  decision: null,
+  error: null,
+  history: [],
+};
+
+export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
+  ...initialState,
+  _unlisten: null,
+
+  searchStock: async (keyword: string) => {
+    set({ searchKeyword: keyword });
+    if (keyword.length < 2) {
+      set({ searchResults: [] });
+      return;
+    }
+    try {
+      const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
+      set({ searchResults: results });
+    } catch {
+      set({ searchResults: [] });
+    }
+  },
+
+  getStockQuote: async (code: string) => {
+    const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code });
+    set({ quote, stockCode: code, stockName: quote.name });
+  },
+
+  getStockKline: async (code: string, period: string, limit: number) => {
+    const klineData = await invoke<KLine[]>("get_stock_kline", {
+      stockCode: code,
+      period,
+      limit,
+    });
+    set({ klineData });
+  },
+
+  startAnalysis: async (stockCode: string, date: string, providerId: string) => {
+    set({
+      status: "loading",
+      error: null,
+      analystReports: {},
+      debateRounds: [],
+      riskAssessments: {},
+      decision: null,
+    });
+
+    const result = await invoke<{
+      analysis_id: string;
+      stock_code: string;
+      stock_name: string;
+      status: string;
+    }>("start_stock_analysis", { stockCode, date, providerId });
+
+    set({
+      analysisId: result.analysis_id,
+      stockCode: result.stock_code,
+      stockName: result.stock_name,
+      analysisDate: date,
+      status: "running",
+    });
+  },
+
+  cancelAnalysis: async () => {
+    const { analysisId } = get();
+    if (analysisId) {
+      await invoke("cancel_stock_analysis", { analysisId });
+    }
+    set({ status: "idle" });
+  },
+
+  fetchHistory: async (limit = 20, offset = 0) => {
+    const history = await invoke<AnalysisSummary[]>("list_stock_analyses", { limit, offset });
+    set({ history });
+  },
+
+  loadAnalysis: async (analysisId: string) => {
+    const record = await invoke<AnalysisSummary & { decisionJson: string | null }>(
+      "get_stock_analysis",
+      { analysisId },
+    );
+    set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName });
+    if (record.decisionJson) {
+      try {
+        set({ decision: JSON.parse(record.decisionJson) });
+      } catch {
+        // ignore parse errors
+      }
+    }
+  },
+
+  reset: () => set(initialState),
+
+  setupEventListener: async () => {
+    const existing = get()._unlisten;
+    if (existing) return;
+
+    const unlisten = await listen<AnalysisEvent>("stock-analysis-event", (event) => {
+      const { type, payload } = event.payload;
+      switch (type) {
+        case "Started":
+          set({ status: "running" });
+          break;
+        case "DataLoaded":
+          break;
+        case "AnalystProgress":
+          break;
+        case "AnalystReport": {
+          const { expert_id, report_text } = payload as Record<string, string>;
+          set((s) => ({
+            analystReports: { ...s.analystReports, [expert_id]: report_text },
+          }));
+          break;
+        }
+        case "DebateRound": {
+          const { round, bull_argument, bear_argument } = payload as Record<string, unknown>;
+          set((s) => ({
+            debateRounds: [
+              ...s.debateRounds,
+              {
+                round: round as number,
+                bull: bull_argument as string,
+                bear: bear_argument as string,
+              },
+            ],
+          }));
+          break;
+        }
+        case "RiskAssessment": {
+          const { risk_type, report } = payload as Record<string, string>;
+          set((s) => ({
+            riskAssessments: { ...s.riskAssessments, [risk_type]: report },
+          }));
+          break;
+        }
+        case "Decision":
+          set({ decision: payload as StockDecision, status: "completed" });
+          break;
+        case "Error":
+          set({
+            error: (payload as Record<string, string>).message,
+            status: "error",
+          });
+          break;
+      }
+    });
+
+    set({ _unlisten: unlisten });
+  },
+}));

@@ -43,6 +43,7 @@ export { usePromptTemplateStore } from "./feature/promptTemplateStore";
 export { useProviderStore } from "./feature/providerStore";
 export { useSearchStore } from "./feature/searchStore";
 export { useSettingsStore } from "./feature/settingsStore";
+export { useStockAnalysisStore } from "./feature/stockAnalysisStore";
 export type { GlobalShortcutDiagnostic, GlobalShortcutStatus } from "./feature/settingsStore";
 export { useSkillExtensionStore } from "./feature/skillExtensionStore";
 export { useSkillStore } from "./feature/skillStore";

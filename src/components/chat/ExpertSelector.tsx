@@ -29,6 +29,8 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
   const removeCustomRole = useExpertStore((s) => s.removeCustomRole);
   const updateCustomRole = useExpertStore((s) => s.updateCustomRole);
   const exportCustomRoles = useExpertStore((s) => s.exportCustomRoles);
+  const importBuiltinPresets = useExpertStore((s) => s.importBuiltinPresets);
+  const hasFullBuiltinPresets = useExpertStore((s) => s.hasFullBuiltinPresets);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [importPath, setImportPath] = useState("");
@@ -287,6 +289,7 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
     >
       <div style={{ display: "flex", gap: 6, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
         <Input
+          id="expert-selector-input-13"
           placeholder={t("expertSelector.searchPlaceholder", "搜索专家名称、描述、标签...")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -347,6 +350,33 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
           onClick={handleExportCustom}
           title={t("expertSelector.exportCustom", "导出自定义专家")}
         />
+        {!hasFullBuiltinPresets()
+          ? (
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              icon={<Plus size={14} />}
+              onClick={() => {
+                importBuiltinPresets();
+                app.message.success(t("expertSelector.builtinImported", "已导入 12 个内置专家"));
+              }}
+              title={t("expertSelector.importBuiltin", "导入全部内置专家（代码审查、调试、架构设计等）")}
+            >
+              {t("expertSelector.importBuiltinBtn", "导入内置专家")}
+            </Button>
+          )
+          : (
+            <Button
+              size="small"
+              type="text"
+              disabled
+              icon={<Check size={14} />}
+              title={t("expertSelector.builtinAlreadyImported", "内置专家已导入")}
+            >
+              {t("expertSelector.builtinImportedLabel", "已导入")}
+            </Button>
+          )}
       </div>
 
       {/* Import section */}
@@ -387,6 +417,7 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
             </Text>
             <div style={{ display: "flex", gap: 8 }}>
               <Input
+                id="expert-selector-input-14"
                 size="small"
                 placeholder="~/"
                 value={importPath}
@@ -609,13 +640,23 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
               <label style={{ display: "block", fontSize: 12, color: "#999", marginBottom: 4 }}>
                 {t("expertSelector.name", "名称")}
               </label>
-              <Input value={editName} onChange={(e) => setEditName(e.target.value)} size="small" />
+              <Input
+                id="expert-selector-input-15"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                size="small"
+              />
             </div>
             <div>
               <label style={{ display: "block", fontSize: 12, color: "#999", marginBottom: 4 }}>
                 {t("expertSelector.desc", "描述")}
               </label>
-              <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} size="small" />
+              <Input
+                id="expert-selector-input-16"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                size="small"
+              />
             </div>
             <div>
               <label style={{ display: "block", fontSize: 12, color: "#999", marginBottom: 4 }}>
@@ -634,6 +675,7 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
                 {t("expertSelector.prompt", "系统提示词")}
               </label>
               <Input.TextArea
+                id="expert-selector-input-textarea-17"
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
                 rows={10}
@@ -710,6 +752,7 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
                 {t("expertSelector.icon", "图标")}
               </label>
               <Input
+                id="expert-selector-input-18"
                 value={newRole.icon}
                 onChange={(e) => setNewRole((r) => ({ ...r, icon: e.target.value }))}
                 size="small"
@@ -722,6 +765,7 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
               {t("expertSelector.desc", "描述")}
             </label>
             <Input
+              id="expert-selector-input-19"
               value={newRole.description ?? ""}
               onChange={(e) => setNewRole((r) => ({ ...r, description: e.target.value }))}
               size="small"
@@ -744,6 +788,7 @@ export function ExpertSelector({ open, onClose, onSelect, selectedRoleId }: Expe
               {t("expertSelector.prompt", "系统提示词")}
             </label>
             <Input.TextArea
+              id="expert-selector-input-textarea-20"
               value={newRole.systemPrompt}
               onChange={(e) => setNewRole((r) => ({ ...r, systemPrompt: e.target.value }))}
               rows={8}

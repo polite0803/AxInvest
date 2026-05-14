@@ -1046,6 +1046,7 @@ export * from "./platform";
 export * from "./proactive";
 export * from "./search";
 export * from "./style";
+export * from "./stock-analysis";
 export * from "./tracer";
 export * from "./wiki";
 

@@ -45,6 +45,28 @@ impl Default for AnalysisConfig {
     }
 }
 
+impl AnalysisConfig {
+    /// 验证配置参数合法性
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_debate_rounds == 0 {
+            return Err("max_debate_rounds must be > 0".into());
+        }
+        if self.max_debate_rounds > 10 {
+            return Err("max_debate_rounds must be <= 10".into());
+        }
+        if self.kline_limit == 0 || self.kline_limit > 500 {
+            return Err("kline_limit must be 1-500".into());
+        }
+        if self.news_limit == 0 || self.news_limit > 100 {
+            return Err("news_limit must be 1-100".into());
+        }
+        if !["daily", "weekly", "monthly"].contains(&self.kline_period.as_str()) {
+            return Err("kline_period must be daily/weekly/monthly".into());
+        }
+        Ok(())
+    }
+}
+
 /// 分析阶段性事件（通过 broadcast channel 推送前端）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload", rename_all = "camelCase")]

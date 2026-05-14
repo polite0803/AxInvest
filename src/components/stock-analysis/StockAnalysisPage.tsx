@@ -40,6 +40,17 @@ export function StockAnalysisPage() {
             <Spin size="large" />
           </div>
         )}
+        {status === "idle" && (
+          <div
+            className="flex items-center justify-center text-center"
+            style={{ minHeight: 300, color: "var(--color-text-secondary)" }}
+          >
+            <div>
+              <p className="text-lg mb-2">{t("stockAnalysis.emptyHint")}</p>
+              <p className="text-xs">{t("stockAnalysis.emptyHintDetail")}</p>
+            </div>
+          </div>
+        )}
         {status !== "idle" && (
           <>
             <AnalysisProgress />

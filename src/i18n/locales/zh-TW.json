@@ -5025,7 +5025,9 @@
     "targetPrice": "目標價",
     "stopLoss": "止損",
     "riskLevel": "風險等級",
-    "confidence": "置信度"
+    "confidence": "置信度",
+    "emptyHint": "搜尋股票代碼開始分析",
+    "emptyHintDetail": "支援滬深A股，輸入代碼或名稱搜尋（如：600519、貴州茅台）"
   },
   "success": "Success"
 }

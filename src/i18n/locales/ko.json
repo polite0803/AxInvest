@@ -5025,7 +5025,9 @@
     "targetPrice": "목표가",
     "stopLoss": "손절가",
     "riskLevel": "리스크 레벨",
-    "confidence": "신뢰도"
+    "confidence": "신뢰도",
+    "emptyHint": "주식 코드를 검색하여 분석 시작",
+    "emptyHintDetail": "중국 A주 지원, 코드 또는 이름으로 검색 (예: 600519)"
   },
   "success": "Success"
 }

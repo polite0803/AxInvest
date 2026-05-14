@@ -1,6 +1,7 @@
-import { useStockAnalysisStore } from "@/stores";
+import { useProviderStore, useStockAnalysisStore } from "@/stores";
 import { Button, DatePicker, Input, List } from "antd";
 import dayjs from "dayjs";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export function StockSearchBar() {
@@ -13,6 +14,10 @@ export function StockSearchBar() {
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
 
   const isRunning = status === "loading" || status === "running";
+  const [analysisDate, setAnalysisDate] = useState(dayjs());
+  const defaultProviderId = useProviderStore(
+    (s) => s.providers.find((p) => p.enabled)?.id ?? "",
+  );
 
   return (
     <div className="flex flex-col gap-2">
@@ -26,7 +31,8 @@ export function StockSearchBar() {
           loading={status === "loading"}
         />
         <DatePicker
-          defaultValue={dayjs()}
+          value={analysisDate}
+          onChange={(d) => setAnalysisDate(d || dayjs())}
           disabled={isRunning}
         />
         <Button
@@ -35,7 +41,7 @@ export function StockSearchBar() {
           loading={isRunning}
           onClick={() => {
             if (stockCode) {
-              startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), "");
+              startAnalysis(stockCode, analysisDate.format("YYYY-MM-DD"), defaultProviderId);
             }
           }}
         >

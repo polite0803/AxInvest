@@ -7,15 +7,27 @@ export function KLineChart() {
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
 
+  // Effect 1: 初始化 ECharts 实例（仅在挂载/卸载时执行）
   useEffect(() => {
     if (!chartRef.current) { return; }
-    if (!instanceRef.current) {
-      instanceRef.current = echarts.init(chartRef.current);
-    }
+    instanceRef.current = echarts.init(chartRef.current);
     const chart = instanceRef.current;
 
-    if (klineData.length === 0) {
-      chart.clear();
+    const handleResize = () => chart.resize();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.dispose();
+      instanceRef.current = null;
+    };
+  }, []);
+
+  // Effect 2: 更新 K 线数据（在 klineData 变化时执行）
+  useEffect(() => {
+    const chart = instanceRef.current;
+    if (!chart || klineData.length === 0) {
+      chart?.clear();
       return;
     }
 
@@ -60,10 +72,6 @@ export function KLineChart() {
         },
       ],
     });
-
-    const handleResize = () => chart.resize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
   }, [klineData]);
 
   return <div ref={chartRef} style={{ width: "100%", height: 350 }} />;

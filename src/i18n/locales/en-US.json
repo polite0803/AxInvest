@@ -5025,7 +5025,9 @@
     "targetPrice": "Target Price",
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
-    "confidence": "Confidence"
+    "confidence": "Confidence",
+    "emptyHint": "Search stock code to start analysis",
+    "emptyHintDetail": "Supports A-shares. Enter code or name (e.g. 600519, Kweichow Moutai)"
   },
   "success": "Success"
 }

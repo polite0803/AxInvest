@@ -5025,7 +5025,9 @@
     "targetPrice": "目標価格",
     "stopLoss": "損切り",
     "riskLevel": "リスクレベル",
-    "confidence": "信頼度"
+    "confidence": "信頼度",
+    "emptyHint": "株式コードを検索して分析を開始",
+    "emptyHintDetail": "中国A株に対応、コードまたは銘柄名で検索（例：600519）"
   },
   "success": "Success"
 }

@@ -199,7 +199,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           break;
         }
         case "Decision":
-          set({ decision: payload as StockDecision, status: "completed" });
+          set({ decision: payload as unknown as StockDecision, status: "completed" });
           break;
         case "Error":
           set({

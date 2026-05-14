@@ -83,12 +83,11 @@ impl StockAnalysisOrchestrator {
         // ── 阶段 1: 数据加载 ──
         Self::phase_1_load_data(data_client, &stock_code, &config, &blackboard, &events)
             .await
-            .map_err(|e| {
+            .inspect_err(|e| {
                 let _ = events.send(AnalysisEvent::Error {
                     stage: "data_loading".into(),
                     message: e.clone(),
                 });
-                e
             })?;
 
         // 取消检查
@@ -509,9 +508,7 @@ impl StockAnalysisOrchestrator {
             r.run_agent(RISK_MANAGER_ID, &sys_manager, &manager_ctx)
                 .await?
         } else {
-            format!(
-                r#"{{"expert":"research-manager","summary":"综合风险评估占位报告","risk_balance":"中性偏谨慎","key_risks":["占位风险"],"key_opportunities":["占位机会"]}}"#
-            )
+            r#"{"expert":"research-manager","summary":"综合风险评估占位报告","risk_balance":"中性偏谨慎","key_risks":["占位风险"],"key_opportunities":["占位机会"]}"#.to_string()
         };
 
         pipeline::write_report(RISK_MANAGER_ID, &manager_report, blackboard, events).await;

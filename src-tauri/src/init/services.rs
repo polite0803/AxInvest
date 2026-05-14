@@ -28,6 +28,7 @@ pub fn start_background_services(
     start_skill_watcher(app);
     start_memory_decay_tick(state);
     start_memory_maintenance_tick(state);
+    start_stock_scheduler(state);
 }
 
 fn start_auto_backup(_app: &tauri::AppHandle, state: &AppState, app_dir: std::path::PathBuf) {
@@ -1068,4 +1069,17 @@ fn start_cron_scheduler(state: &AppState) {
     });
 
     tracing::info!("[CronScheduler] 已启动（统一 Cron + ScheduledTask），每30秒轮询一次");
+}
+
+fn start_stock_scheduler(state: &AppState) {
+    use crate::stock_scheduler::StockScheduler;
+    use std::sync::Arc;
+
+    let db = Arc::new(state.sea_db.clone());
+    tauri::async_runtime::spawn(async move {
+        let scheduler = StockScheduler::new(db);
+        scheduler.start().await;
+    });
+
+    tracing::info!("[StockScheduler] 已启动，每60秒轮询一次");
 }

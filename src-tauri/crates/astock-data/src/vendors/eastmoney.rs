@@ -48,9 +48,13 @@ impl StockVendor for EastMoneyVendor {
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
         let period_code = match period {
-            "daily" | "101" => "101",
-            "weekly" | "102" => "102",
-            "monthly" | "103" => "103",
+            "5" | "Min5" => "5",
+            "15" | "Min15" => "15",
+            "30" | "Min30" => "30",
+            "60" | "Min60" => "60",
+            "daily" | "101" | "Daily" => "101",
+            "weekly" | "102" | "Weekly" => "102",
+            "monthly" | "103" | "Monthly" => "103",
             _ => "101",
         };
         let secid = to_em_secid(stock_code);
@@ -194,7 +198,7 @@ impl StockVendor for EastMoneyVendor {
                 let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
                 Ok(DragonTigerEntry {
                     stock_code: stock_code.to_string(),
-                    date: parts.get(0).map(|s| s.to_string()).unwrap_or_default(),
+                    date: parts.first().map(|s| s.to_string()).unwrap_or_default(),
                     dept_name: parts.get(1).map(|s| s.to_string()).unwrap_or_default(),
                     buy_amount: parse(parts.get(3).unwrap_or(&"0")),
                     sell_amount: parse(parts.get(4).unwrap_or(&"0")),
@@ -234,6 +238,35 @@ impl StockVendor for EastMoneyVendor {
                 })
             })
             .collect()
+    }
+
+    /// 获取融资融券数据
+    async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
+        let secid = to_em_secid(stock_code);
+        let url = format!(
+            "https://push2his.eastmoney.com/api/qt/stock/margin/get?secid={}&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55",
+            secid
+        );
+
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let data = &json["data"];
+        let parse_num =
+            |v: &Value| -> f64 { v.as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0) };
+
+        if data.is_null() || data["f51"].is_null() {
+            return Ok(None);
+        }
+
+        Ok(Some(MarginData {
+            stock_code: stock_code.to_string(),
+            date: data["f51"].as_str().unwrap_or("").to_string(),
+            margin_buy: parse_num(&data["f52"]) * 10000.0,
+            margin_balance: parse_num(&data["f53"]) * 10000.0,
+            short_sell_volume: parse_num(&data["f54"]) * 100.0,
+            short_balance: parse_num(&data["f55"]) * 100.0,
+        }))
     }
 
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {

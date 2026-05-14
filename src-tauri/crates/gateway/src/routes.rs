@@ -22,6 +22,10 @@ use crate::native::{
 };
 use crate::realtime::realtime_handler;
 use crate::server::GatewayAppState;
+use crate::stock_handlers::{
+    add_watchlist, delete_watchlist, get_analysis, get_kline, get_quote, get_watchlist,
+    list_analyses, search_stock, start_analysis,
+};
 
 pub fn create_router(state: GatewayAppState) -> Router {
     let cors = CorsLayer::new()
@@ -61,6 +65,16 @@ pub fn create_router(state: GatewayAppState) -> Router {
         .route("/api/jobs/{job_id}/runs/{run_id}/cancel", post(cancel_run))
         .route("/api/jobs/{job_id}/runs/{run_id}/retry", post(retry_run))
         .route("/api/jobs/{job_id}/runs/{run_id}/logs", get(get_run_logs))
+        // Stock analysis
+        .route("/api/stock/search", get(search_stock))
+        .route("/api/stock/quote", get(get_quote))
+        .route("/api/stock/kline", get(get_kline))
+        .route("/api/stock/analysis", post(start_analysis))
+        .route("/api/stock/analysis/{analysis_id}", get(get_analysis))
+        .route("/api/stock/analyses", get(list_analyses))
+        .route("/api/stock/watchlist", get(get_watchlist))
+        .route("/api/stock/watchlist", post(add_watchlist))
+        .route("/api/stock/watchlist/{id}", delete(delete_watchlist))
         // Marketplace reviews
         .route(
             "/api/marketplace/{marketplace_id}/reviews",
@@ -113,6 +127,7 @@ mod tests {
         GatewayAppState {
             db,
             master_key: [7u8; 32],
+            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
         }
     }
 

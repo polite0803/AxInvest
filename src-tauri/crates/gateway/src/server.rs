@@ -21,6 +21,7 @@ use axagent_core::error::{AxAgentError, Result};
 pub struct GatewayAppState {
     pub db: DatabaseConnection,
     pub master_key: [u8; 32],
+    pub astock_client: std::sync::Arc<axagent_astock_data::AStockClient>,
 }
 
 /// TLS certificate material.
@@ -120,6 +121,7 @@ impl GatewayServer {
         let app_state = GatewayAppState {
             db: pool,
             master_key,
+            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
         };
 
         // ── Bind HTTP listener ──────────────────────────────────────────

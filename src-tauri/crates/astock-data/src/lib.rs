@@ -1,4 +1,5 @@
 mod error;
+pub mod mcp_tools;
 mod types;
 mod vendors;
 
@@ -131,6 +132,40 @@ impl AStockClient {
         self.eastmoney.search_stock(keyword).await
     }
 
+    /// 获取融资融券数据（东方财富）
+    pub async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
+        self.eastmoney.get_margin_data(stock_code).await
+    }
+
+    /// 获取北向资金持仓（暂未实现）
+    pub async fn get_north_bound_holding(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<NorthBoundHolding>, DataError> {
+        self.eastmoney.get_north_bound_holding(stock_code).await
+    }
+
+    /// 获取行业分类（暂未实现）
+    pub async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
+        self.eastmoney.get_sector_info(stock_code).await
+    }
+
+    /// 获取股东增减持（暂未实现）
+    pub async fn get_shareholder_trades(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<ShareholderTrade>, DataError> {
+        self.eastmoney.get_shareholder_trades(stock_code).await
+    }
+
+    /// 获取除权除息记录（暂未实现）
+    pub async fn get_dividend_records(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<DividendRecord>, DataError> {
+        self.eastmoney.get_dividend_records(stock_code).await
+    }
+
     /// 一次性获取所有原始数据。
     /// 各子请求独立容错：只有 quote 为必需；其余失败时记录 warn 日志并回退为空值。
     /// TODO: 为高频调用（如 get_quote）补充 retry 逻辑。
@@ -141,7 +176,20 @@ impl AStockClient {
         kline_limit: u32,
         news_limit: u32,
     ) -> Result<StockRawData, DataError> {
-        let (quote_r, klines_r, financials_r, news_r, money_flow_r, dragon_tiger_r, lockup_r) = tokio::join!(
+        let (
+            quote_r,
+            klines_r,
+            financials_r,
+            news_r,
+            money_flow_r,
+            dragon_tiger_r,
+            lockup_r,
+            margin_r,
+            north_bound_r,
+            sector_r,
+            shareholder_r,
+            dividend_r,
+        ) = tokio::join!(
             self.get_quote(stock_code),
             self.get_klines(stock_code, kline_period, kline_limit),
             self.get_financials(stock_code),
@@ -149,6 +197,11 @@ impl AStockClient {
             self.get_money_flow(stock_code),
             self.get_dragon_tiger(stock_code),
             self.get_lockup_schedule(stock_code),
+            self.get_margin_data(stock_code),
+            self.get_north_bound_holding(stock_code),
+            self.get_sector_info(stock_code),
+            self.get_shareholder_trades(stock_code),
+            self.get_dividend_records(stock_code),
         );
 
         let quote = quote_r.map_err(|e| {
@@ -179,6 +232,26 @@ impl AStockClient {
             tracing::warn!("lockup failed: {}", e);
             vec![]
         });
+        let margin_data = margin_r.unwrap_or_else(|e| {
+            tracing::warn!("margin_data failed: {}", e);
+            None
+        });
+        let north_bound = north_bound_r.unwrap_or_else(|e| {
+            tracing::warn!("north_bound failed: {}", e);
+            None
+        });
+        let sector_info = sector_r.unwrap_or_else(|e| {
+            tracing::warn!("sector_info failed: {}", e);
+            None
+        });
+        let shareholder_trades = shareholder_r.unwrap_or_else(|e| {
+            tracing::warn!("shareholder_trades failed: {}", e);
+            vec![]
+        });
+        let dividend_records = dividend_r.unwrap_or_else(|e| {
+            tracing::warn!("dividend_records failed: {}", e);
+            vec![]
+        });
 
         Ok(StockRawData {
             quote,
@@ -188,6 +261,11 @@ impl AStockClient {
             money_flow,
             dragon_tiger,
             lockup,
+            margin_data,
+            north_bound,
+            sector_info,
+            shareholder_trades,
+            dividend_records,
         })
     }
 }

@@ -44,7 +44,10 @@ pub mod memory_namespaces;
 pub mod retrieval_hits;
 pub mod rl_policies;
 
+pub mod analysis_schedules;
+pub mod portfolio_holdings;
 pub mod stock_analyses;
+pub mod watchlist_items;
 
 pub mod stored_files;
 

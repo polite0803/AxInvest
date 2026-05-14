@@ -25,6 +25,45 @@ pub trait StockVendor: Send + Sync {
         -> Result<Vec<LockupSchedule>, DataError>;
 
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError>;
+
+    /// 获取融资融券数据
+    async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
+
+    /// 获取北向资金持仓
+    async fn get_north_bound_holding(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<NorthBoundHolding>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
+
+    /// 获取行业分类
+    async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
+
+    /// 获取股东增减持
+    async fn get_shareholder_trades(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<ShareholderTrade>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
+
+    /// 获取除权除息记录
+    async fn get_dividend_records(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<DividendRecord>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
 }
 
 pub mod eastmoney;

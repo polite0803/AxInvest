@@ -7,12 +7,14 @@ publish = false
 [dependencies]
 axagent-core = { path = "../core" }
 axagent-providers = { path = "../providers" }
+axagent-astock-data = { path = "../astock-data" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 uuid = { workspace = true }
+chrono = { workspace = true }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 tracing = { workspace = true }

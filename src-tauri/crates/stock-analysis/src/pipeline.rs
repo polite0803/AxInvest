@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use axagent_agent::shared_blackboard::SharedBlackboard;
 use crate::decision::AnalysisEvent;
+use axagent_agent::shared_blackboard::SharedBlackboard;
 
 /// 构建分析师的数据上下文（从 Blackboard 中提取相关数据）
 pub async fn build_analyst_context(
@@ -20,17 +20,17 @@ pub async fn build_analyst_context(
             if let Some(klines) = bb.get_state("raw.klines") {
                 ctx.push_str(&format!("## K线数据\n{}\n", klines));
             }
-        }
+        },
         "fundamentals-analyst" => {
             if let Some(fin) = bb.get_state("raw.financials") {
                 ctx.push_str(&format!("## 财务数据\n{}\n", fin));
             }
-        }
+        },
         "news-analyst" | "sentiment-analyst" | "policy-analyst" => {
             if let Some(news) = bb.get_state("raw.news") {
                 ctx.push_str(&format!("## 新闻数据\n{}\n", news));
             }
-        }
+        },
         "hot-money-tracker" => {
             if let Some(mf) = bb.get_state("raw.money_flow") {
                 ctx.push_str(&format!("## 资金流向\n{}\n", mf));
@@ -38,12 +38,12 @@ pub async fn build_analyst_context(
             if let Some(dt) = bb.get_state("raw.dragon_tiger") {
                 ctx.push_str(&format!("## 龙虎榜\n{}\n", dt));
             }
-        }
+        },
         "lockup-watcher" => {
             if let Some(lockup) = bb.get_state("raw.lockup") {
                 ctx.push_str(&format!("## 限售解禁\n{}\n", lockup));
             }
-        }
+        },
         _ => {
             // 辩论/风控/决策角色读取所有报告
             for field in &[
@@ -59,7 +59,7 @@ pub async fn build_analyst_context(
                     ctx.push_str(&format!("\n---\n{}\n", val));
                 }
             }
-        }
+        },
     }
 
     ctx

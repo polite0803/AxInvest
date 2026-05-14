@@ -1,14 +1,16 @@
-use async_trait::async_trait;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
+use async_trait::async_trait;
 use reqwest::Client;
 
 pub struct SinaVendor;
 
 #[async_trait]
 impl StockVendor for SinaVendor {
-    fn name(&self) -> &'static str { "sina" }
+    fn name(&self) -> &'static str {
+        "sina"
+    }
 
     async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
         Err(DataError::VendorError {
@@ -46,10 +48,7 @@ impl StockVendor for SinaVendor {
                 title: item["title"].as_str().unwrap_or("").to_string(),
                 summary: String::new(),
                 source: "新浪财经".to_string(),
-                url: format!(
-                    "https://finance.sina.com.cn{}",
-                    item["url"].as_str().unwrap_or("")
-                ),
+                url: format!("https://finance.sina.com.cn{}", item["url"].as_str().unwrap_or("")),
                 publish_time: item["ctime"].as_str().unwrap_or("").to_string(),
                 sentiment_score: None,
             })

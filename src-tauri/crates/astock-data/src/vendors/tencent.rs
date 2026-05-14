@@ -1,7 +1,7 @@
-use async_trait::async_trait;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
+use async_trait::async_trait;
 
 pub struct TencentVendor;
 
@@ -20,7 +20,9 @@ fn to_tencent_code(stock_code: &str) -> String {
 /// 解析腾讯财经实时行情响应
 fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
     // 格式: v_sh600519="1~贵州茅台~600519~1680.00~1650.00~..."
-    let start = raw.find('"').ok_or_else(|| DataError::ParseError("no opening quote".into()))?;
+    let start = raw
+        .find('"')
+        .ok_or_else(|| DataError::ParseError("no opening quote".into()))?;
     let end = raw[start + 1..]
         .find('"')
         .ok_or_else(|| DataError::ParseError("no closing quote".into()))?;
@@ -34,7 +36,11 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
     let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
     let parse_opt = |s: &str| -> Option<f64> {
         let v: f64 = s.parse().ok()?;
-        if v == 0.0 { None } else { Some(v) }
+        if v == 0.0 {
+            None
+        } else {
+            Some(v)
+        }
     };
 
     Ok(StockQuote {
@@ -57,7 +63,9 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
 
 #[async_trait]
 impl StockVendor for TencentVendor {
-    fn name(&self) -> &'static str { "tencent" }
+    fn name(&self) -> &'static str {
+        "tencent"
+    }
 
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let tc_code = to_tencent_code(stock_code);

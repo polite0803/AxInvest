@@ -11,20 +11,45 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(StockAnalyses::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(StockAnalyses::Id).string().primary_key().not_null())
+                    .col(
+                        ColumnDef::new(StockAnalyses::Id)
+                            .string()
+                            .primary_key()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(StockAnalyses::StockCode).string().not_null())
                     .col(ColumnDef::new(StockAnalyses::StockName).string().not_null())
-                    .col(ColumnDef::new(StockAnalyses::AnalysisDate).string().not_null())
-                    .col(ColumnDef::new(StockAnalyses::ProviderId).string().not_null())
-                    .col(ColumnDef::new(StockAnalyses::ConversationId).string().not_null())
+                    .col(
+                        ColumnDef::new(StockAnalyses::AnalysisDate)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StockAnalyses::ProviderId)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StockAnalyses::ConversationId)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(StockAnalyses::Status).string().not_null())
                     .col(ColumnDef::new(StockAnalyses::DecisionAction).string())
                     .col(ColumnDef::new(StockAnalyses::DecisionPositionPct).double())
                     .col(ColumnDef::new(StockAnalyses::DecisionReasoning).text())
                     .col(ColumnDef::new(StockAnalyses::DecisionJson).text())
                     .col(ColumnDef::new(StockAnalyses::BlackboardSnapshot).text())
-                    .col(ColumnDef::new(StockAnalyses::CreatedAt).big_integer().not_null())
-                    .col(ColumnDef::new(StockAnalyses::UpdatedAt).big_integer().not_null())
+                    .col(
+                        ColumnDef::new(StockAnalyses::CreatedAt)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(StockAnalyses::UpdatedAt)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;

@@ -5,8 +5,10 @@ use axagent_astock_data::AStockClient;
 use axagent_core::entity::stock_analyses;
 use axagent_stock_analysis::decision::{AnalysisConfig, AnalysisEvent};
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set};
 use sea_orm::sea_query::Expr;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
@@ -141,18 +143,11 @@ pub async fn start_stock_analysis(
         // 更新 DB 状态
         match result {
             Ok(decision) => {
-                let decision_json =
-                    serde_json::to_string(&decision).unwrap_or_default();
+                let decision_json = serde_json::to_string(&decision).unwrap_or_default();
                 let now = chrono::Utc::now().timestamp_millis();
                 let _ = stock_analyses::Entity::update_many()
-                    .col_expr(
-                        stock_analyses::Column::Status,
-                        Expr::value("completed"),
-                    )
-                    .col_expr(
-                        stock_analyses::Column::DecisionAction,
-                        Expr::value(&decision.action),
-                    )
+                    .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
+                    .col_expr(stock_analyses::Column::DecisionAction, Expr::value(&decision.action))
                     .col_expr(
                         stock_analyses::Column::DecisionPositionPct,
                         Expr::value(decision.position_pct),
@@ -161,34 +156,22 @@ pub async fn start_stock_analysis(
                         stock_analyses::Column::DecisionReasoning,
                         Expr::value(&decision.reasoning),
                     )
-                    .col_expr(
-                        stock_analyses::Column::DecisionJson,
-                        Expr::value(&decision_json),
-                    )
-                    .col_expr(
-                        stock_analyses::Column::UpdatedAt,
-                        Expr::value(now),
-                    )
+                    .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&decision_json))
+                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
                     .filter(stock_analyses::Column::Id.eq(&analysis_id_clone))
                     .exec(&db)
                     .await;
-            }
+            },
             Err(e) => {
                 let now = chrono::Utc::now().timestamp_millis();
                 let status = format!("failed: {}", e);
                 let _ = stock_analyses::Entity::update_many()
-                    .col_expr(
-                        stock_analyses::Column::Status,
-                        Expr::value(&status),
-                    )
-                    .col_expr(
-                        stock_analyses::Column::UpdatedAt,
-                        Expr::value(now),
-                    )
+                    .col_expr(stock_analyses::Column::Status, Expr::value(&status))
+                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
                     .filter(stock_analyses::Column::Id.eq(&analysis_id_clone))
                     .exec(&db)
                     .await;
-            }
+            },
         }
     });
 

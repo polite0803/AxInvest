@@ -66,6 +66,7 @@ pub mod session;
 pub mod settings;
 pub mod shell;
 pub mod skill_decomposition;
+pub mod stock_analysis;
 pub mod skills;
 pub mod skills_hub;
 pub mod sources;

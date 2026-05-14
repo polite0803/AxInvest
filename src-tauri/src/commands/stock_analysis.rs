@@ -1,7 +1,7 @@
 use crate::AppState;
 use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_core::entity::{
-    analysis_schedules, portfolio_holdings, stock_analyses, watchlist_items,
+    analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, watchlist_items,
 };
 use axagent_core::types::ProviderProxyConfig;
 use axagent_providers::{resolve_base_url_for_type, ProviderAdapter, ProviderRequestContext};
@@ -656,6 +656,54 @@ pub async fn delete_analysis_schedule(
     id: String,
 ) -> Result<(), String> {
     analysis_schedules::Entity::delete_by_id(id)
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Price Alerts ──
+
+/// 创建价格告警
+#[tauri::command]
+pub async fn create_price_alert(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+    condition: String,
+    target_price: f64,
+) -> Result<price_alerts::Model, String> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let model = price_alerts::ActiveModel {
+        id: Set(uuid::Uuid::new_v4().to_string()),
+        stock_code: Set(stock_code),
+        stock_name: Set(stock_name),
+        condition: Set(condition),
+        target_price: Set(target_price),
+        is_triggered: Set(false),
+        triggered_at: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+}
+
+/// 查询价格告警列表
+#[tauri::command]
+pub async fn list_price_alerts(
+    state: State<'_, AppState>,
+) -> Result<Vec<price_alerts::Model>, String> {
+    price_alerts::Entity::find()
+        .order_by_desc(price_alerts::Column::CreatedAt)
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 删除价格告警
+#[tauri::command]
+pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    price_alerts::Entity::delete_by_id(id)
         .exec(&state.sea_db)
         .await
         .map_err(|e| e.to_string())?;

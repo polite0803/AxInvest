@@ -1,0 +1,50 @@
+import { render } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { DecisionBanner } from "../DecisionBanner";
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (_key: string, fallback?: string) => fallback ?? _key,
+  }),
+}));
+
+// Default mock: no decision
+const storeState = {
+  decision: null as {
+    action: string;
+    positionPct: number;
+    reasoning: string;
+    riskLevel: string;
+    confidence: number;
+    targetPrice?: number;
+    stopLoss?: number;
+  } | null,
+};
+
+vi.mock("@/stores", () => ({
+  useStockAnalysisStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+}));
+
+describe("DecisionBanner", () => {
+  it("renders nothing when no decision", () => {
+    storeState.decision = null;
+    const { container } = render(<DecisionBanner />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders decision info when decision exists", () => {
+    storeState.decision = {
+      action: "买入",
+      positionPct: 10.0,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+      targetPrice: 1850.0,
+      stopLoss: 1580.0,
+    };
+    const { container } = render(<DecisionBanner />);
+    expect(container.firstChild).not.toBeNull();
+    expect(container.textContent).toContain("买入");
+    expect(container.textContent).toContain("10%");
+  });
+});

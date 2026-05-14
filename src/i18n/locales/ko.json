@@ -5027,7 +5027,27 @@
     "riskLevel": "리스크 레벨",
     "confidence": "신뢰도",
     "emptyHint": "주식 코드를 검색하여 분석 시작",
-    "emptyHintDetail": "중국 A주 지원, 코드 또는 이름으로 검색 (예: 600519)"
+    "emptyHintDetail": "중국 A주 지원, 코드 또는 이름으로 검색 (예: 600519)",
+    "watchlist": "관심 종목",
+    "tab.market": "시세",
+    "tab.analysts": "애널리스트",
+    "tab.debate": "토론",
+    "tab.risk": "위험",
+    "tab.decision": "결정",
+    "compare": "비교",
+    "stockCode1": "종목코드1",
+    "stockCode2": "종목코드2",
+    "compareBtn": "비교",
+    "change": "변동률",
+    "alert.title": "가격 알림",
+    "alert.code": "코드",
+    "alert.name": "이름",
+    "alert.condition": "조건",
+    "alert.price": "가격",
+    "alert.above": "이상",
+    "alert.below": "이하",
+    "alert.empty": "알림 없음",
+    "alert.triggered": "가격 알림이 발동되었습니다!"
   },
   "success": "Success"
 }

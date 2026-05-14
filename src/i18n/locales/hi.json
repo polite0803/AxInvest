@@ -5027,7 +5027,27 @@
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
     "emptyHint": "विश्लेषण शुरू करने के लिए स्टॉक कोड खोजें",
-    "emptyHintDetail": "A-शेयर समर्थित। कोड या नाम दर्ज करें (जैसे 600519)"
+    "emptyHintDetail": "A-शेयर समर्थित। कोड या नाम दर्ज करें (जैसे 600519)",
+    "watchlist": "वॉचलिस्ट",
+    "tab.market": "बाजार",
+    "tab.analysts": "विश्लेषक",
+    "tab.debate": "बहस",
+    "tab.risk": "जोखिम",
+    "tab.decision": "निर्णय",
+    "compare": "तुलना",
+    "stockCode1": "स्टॉक कोड 1",
+    "stockCode2": "स्टॉक कोड 2",
+    "compareBtn": "तुलना",
+    "change": "परिवर्तन",
+    "alert.title": "मूल्य अलर्ट",
+    "alert.code": "कोड",
+    "alert.name": "नाम",
+    "alert.condition": "शर्त",
+    "alert.price": "मूल्य",
+    "alert.above": "ऊपर",
+    "alert.below": "नीचे",
+    "alert.empty": "कोई अलर्ट नहीं",
+    "alert.triggered": "मूल्य अलर्ट सक्रिय!"
   },
   "success": "Success"
 }

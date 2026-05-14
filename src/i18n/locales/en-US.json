@@ -5027,7 +5027,27 @@
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
     "emptyHint": "Search stock code to start analysis",
-    "emptyHintDetail": "Supports A-shares. Enter code or name (e.g. 600519, Kweichow Moutai)"
+    "emptyHintDetail": "Supports A-shares. Enter code or name (e.g. 600519, Kweichow Moutai)",
+    "watchlist": "Watchlist",
+    "tab.market": "Market",
+    "tab.analysts": "Analysts",
+    "tab.debate": "Debate",
+    "tab.risk": "Risk",
+    "tab.decision": "Decision",
+    "compare": "Compare",
+    "stockCode1": "Stock Code 1",
+    "stockCode2": "Stock Code 2",
+    "compareBtn": "Compare",
+    "change": "Change",
+    "alert.title": "Price Alert",
+    "alert.code": "Code",
+    "alert.name": "Name",
+    "alert.condition": "Condition",
+    "alert.price": "Price",
+    "alert.above": "Above",
+    "alert.below": "Below",
+    "alert.empty": "No alerts",
+    "alert.triggered": "Price alert triggered!"
   },
   "success": "Success"
 }

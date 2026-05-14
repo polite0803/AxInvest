@@ -888,6 +888,10 @@ pub fn run() {
             commands::stock_analysis::list_analysis_schedules,
             commands::stock_analysis::toggle_analysis_schedule,
             commands::stock_analysis::delete_analysis_schedule,
+            // Price alerts
+            commands::stock_analysis::create_price_alert,
+            commands::stock_analysis::list_price_alerts,
+            commands::stock_analysis::delete_price_alert,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
         ])

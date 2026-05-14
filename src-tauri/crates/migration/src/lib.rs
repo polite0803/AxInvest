@@ -13,6 +13,7 @@ mod m20250513_000001_workflow_snapshots;
 mod m20250514_000001_stock_analysis;
 mod m20250514_000002_watchlist_portfolio;
 mod m20250514_000003_analysis_schedules;
+mod m20250514_000004_price_alerts;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250514_000001_stock_analysis::Migration),
             Box::new(m20250514_000002_watchlist_portfolio::Migration),
             Box::new(m20250514_000003_analysis_schedules::Migration),
+            Box::new(m20250514_000004_price_alerts::Migration),
         ]
     }
 }

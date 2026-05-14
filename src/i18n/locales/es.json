@@ -5027,7 +5027,27 @@
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
     "emptyHint": "Buscar código de acción para iniciar análisis",
-    "emptyHintDetail": "Soporta acciones A. Ingrese código o nombre (ej. 600519)"
+    "emptyHintDetail": "Soporta acciones A. Ingrese código o nombre (ej. 600519)",
+    "watchlist": "Lista de seguimiento",
+    "tab.market": "Mercado",
+    "tab.analysts": "Analistas",
+    "tab.debate": "Debate",
+    "tab.risk": "Riesgo",
+    "tab.decision": "Decision",
+    "compare": "Comparar",
+    "stockCode1": "Codigo 1",
+    "stockCode2": "Codigo 2",
+    "compareBtn": "Comparar",
+    "change": "Cambio",
+    "alert.title": "Alerta de Precio",
+    "alert.code": "Codigo",
+    "alert.name": "Nombre",
+    "alert.condition": "Condicion",
+    "alert.price": "Precio",
+    "alert.above": "Por encima",
+    "alert.below": "Por debajo",
+    "alert.empty": "Sin alertas",
+    "alert.triggered": "Alerta de precio activada!"
   },
   "success": "Success"
 }

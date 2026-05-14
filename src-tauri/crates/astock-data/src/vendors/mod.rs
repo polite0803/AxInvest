@@ -3,6 +3,7 @@ use crate::error::DataError;
 use crate::types::*;
 
 #[async_trait]
+#[allow(dead_code)]
 pub trait StockVendor: Send + Sync {
     fn name(&self) -> &'static str;
 

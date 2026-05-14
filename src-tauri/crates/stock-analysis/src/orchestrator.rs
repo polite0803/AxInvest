@@ -31,40 +31,40 @@ impl StockAnalysisOrchestrator {
             bb.set_state("analysis_date", &date);
         }
 
-        events
-            .send(AnalysisEvent::Started {
-                stock_code: stock_code.clone(),
-                stock_name: stock_name.clone(),
-                date: date.clone(),
-            })
-            .ok();
+        if let Err(e) = events.send(AnalysisEvent::Started {
+            stock_code: stock_code.clone(),
+            stock_name: stock_name.clone(),
+            date: date.clone(),
+        }) {
+            tracing::warn!("发送分析事件(Started)失败: {}", e);
+        }
 
         // ── 阶段 1: 数据加载 ──
         let _raw = Self::phase_1_load_data(data_client, &stock_code, &config, &blackboard, &events)
             .await
             .map_err(|e| {
-                events
-                    .send(AnalysisEvent::Error {
-                        stage: "data_loading".into(),
-                        message: e.clone(),
-                    })
-                    .ok();
+                if let Err(send_err) = events.send(AnalysisEvent::Error {
+                    stage: "data_loading".into(),
+                    message: e.clone(),
+                }) {
+                    tracing::warn!("发送分析事件(Error)失败: {}", send_err);
+                }
                 e
             })?;
 
         // ── 阶段 2-5 占位 — 将在后续 tasks 中通过 SessionManager::run_turn_with_tools 集成 Agent 执行 ──
 
-        events
-            .send(AnalysisEvent::Decision(StockDecision {
-                action: "持有".to_string(),
-                position_pct: 0.0,
-                target_price: None,
-                stop_loss: None,
-                reasoning: "全部分析阶段完成，待 Agent LLM 集成后输出真实决策".to_string(),
-                risk_level: "中".to_string(),
-                confidence: 0.0,
-            }))
-            .ok();
+        if let Err(e) = events.send(AnalysisEvent::Decision(StockDecision {
+            action: "持有".to_string(),
+            position_pct: 0.0,
+            target_price: None,
+            stop_loss: None,
+            reasoning: "全部分析阶段完成，待 Agent LLM 集成后输出真实决策".to_string(),
+            risk_level: "中".to_string(),
+            confidence: 0.0,
+        })) {
+            tracing::warn!("发送分析事件(Decision)失败: {}", e);
+        }
 
         Ok(StockDecision {
             action: "持有".to_string(),
@@ -110,12 +110,12 @@ impl StockAnalysisOrchestrator {
             bb.set_state("raw.lockup", &lockup_json);
         }
 
-        events
-            .send(AnalysisEvent::DataLoaded {
-                kline_count: raw.klines.len(),
-                news_count: raw.news.len(),
-            })
-            .ok();
+        if let Err(e) = events.send(AnalysisEvent::DataLoaded {
+            kline_count: raw.klines.len(),
+            news_count: raw.news.len(),
+        }) {
+            tracing::warn!("发送分析事件(DataLoaded)失败: {}", e);
+        }
 
         Ok(raw)
     }

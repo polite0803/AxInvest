@@ -3,10 +3,7 @@ use crate::types::*;
 use async_trait::async_trait;
 
 #[async_trait]
-#[allow(dead_code)]
 pub trait StockVendor: Send + Sync {
-    fn name(&self) -> &'static str;
-
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError>;
 
     async fn get_klines(

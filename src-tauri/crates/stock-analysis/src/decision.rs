@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// 投资决策
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StockDecision {
     /// 买入/增持/持有/减持/卖出
     pub action: String,
@@ -21,6 +22,7 @@ pub struct StockDecision {
 
 /// 分析配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AnalysisConfig {
     /// 最大辩论轮数
     pub max_debate_rounds: u32,
@@ -45,7 +47,7 @@ impl Default for AnalysisConfig {
 
 /// 分析阶段性事件（通过 broadcast channel 推送前端）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "payload")]
+#[serde(tag = "type", content = "payload", rename_all = "camelCase")]
 pub enum AnalysisEvent {
     Started {
         stock_code: String,

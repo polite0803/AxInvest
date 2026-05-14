@@ -2,10 +2,11 @@ use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
-use reqwest::Client;
 use serde_json::Value;
 
-pub struct EastMoneyVendor;
+pub struct EastMoneyVendor {
+    pub http: reqwest::Client,
+}
 
 /// 构建东方财富股票代码 (1.SH600519, 0.SZ000001)
 fn to_em_code(stock_code: &str) -> String {
@@ -33,10 +34,6 @@ fn to_em_secid(stock_code: &str) -> String {
 
 #[async_trait]
 impl StockVendor for EastMoneyVendor {
-    fn name(&self) -> &'static str {
-        "eastmoney"
-    }
-
     async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
         Err(DataError::VendorError {
             vendor: "eastmoney".into(),
@@ -50,7 +47,6 @@ impl StockVendor for EastMoneyVendor {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        let client = Client::new();
         let period_code = match period {
             "daily" | "101" => "101",
             "weekly" | "102" => "102",
@@ -63,7 +59,7 @@ impl StockVendor for EastMoneyVendor {
             secid, period_code, limit
         );
 
-        let resp = client.get(&url).send().await?;
+        let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
 
         let klines_raw = json["data"]["klines"]
@@ -99,13 +95,13 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
-        let client = Client::new();
         let url = format!(
             "https://emweb.securities.eastmoney.com/PC_HSF10/FinanceSummary/FinanceSummary?code={}&type=web",
             to_em_code(stock_code)
         );
 
-        let resp = client
+        let resp = self
+            .http
             .get(&url)
             .header("Referer", "https://emweb.securities.eastmoney.com/")
             .send()
@@ -144,14 +140,13 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
-        let client = Client::new();
         let secid = to_em_secid(stock_code);
         let url = format!(
             "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&lmt=1",
             secid
         );
 
-        let resp = client.get(&url).send().await?;
+        let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
 
         let klines = json["data"]["klines"].as_array();
@@ -177,14 +172,13 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
-        let client = Client::new();
         let secid = to_em_secid(stock_code);
         let url = format!(
             "https://push2his.eastmoney.com/api/qt/stock/mmpa/get?secid={}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58",
             secid
         );
 
-        let resp = client.get(&url).send().await?;
+        let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
 
         let entries = match json["data"]["mmpa"].as_array() {
@@ -215,13 +209,12 @@ impl StockVendor for EastMoneyVendor {
         &self,
         stock_code: &str,
     ) -> Result<Vec<LockupSchedule>, DataError> {
-        let client = Client::new();
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_LOCKUP&columns=SECURITY_CODE,SECURITY_NAME_ABBR,UNLOCK_DATE,UNLOCK_SHARES,PLACING_RATIO,HOLDER_NAME&filter=(SECURITY_CODE=\"{}\")&pageSize=20&sortColumns=UNLOCK_DATE&pageNumber=1",
             stock_code
         );
 
-        let resp = client.get(&url).send().await?;
+        let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -244,13 +237,12 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
-        let client = Client::new();
         let url = format!(
             "https://searchadapter.eastmoney.com/api/suggest/get?input={}&type=14&count=20",
             urlencoding::encode(keyword)
         );
 
-        let resp = client.get(&url).send().await?;
+        let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
 
         let stocks = match json["QuotationCodeTable"]["Data"].as_array() {

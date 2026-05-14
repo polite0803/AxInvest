@@ -33,7 +33,9 @@ export function StockAnalysisPage() {
 
   useEffect(() => {
     setupEventListener();
-    return () => { reset(); };
+    return () => {
+      reset();
+    };
   }, [setupEventListener, reset]);
 
   useEffect(() => {

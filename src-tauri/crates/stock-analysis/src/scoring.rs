@@ -7,13 +7,13 @@ use crate::decision::ScoringWeights;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectiveScore {
-    pub total: u32,           // 综合评分 0-100
-    pub trend_score: u32,     // 趋势 0-30
-    pub deviation_score: u32, // 乖离率 0-20
-    pub macd_score: u32,      // MACD 0-15
-    pub volume_score: u32,    // 量能 0-15
-    pub rsi_score: u32,       // RSI 0-10
-    pub support_score: u32,   // 支撑 0-10
+    pub total: u32,                  // 综合评分 0-100
+    pub trend_score: u32,            // 趋势 0-30
+    pub deviation_score: u32,        // 乖离率 0-20
+    pub macd_score: u32,             // MACD 0-15
+    pub volume_score: u32,           // 量能 0-15
+    pub rsi_score: u32,              // RSI 0-10
+    pub support_score: u32,          // 支撑 0-10
     pub fundamental_adjustment: i32, // 基本面修正值（正加分/负扣分）
     pub signal: String, // "🟢强烈买入" | "🔵买入" | "🟡持有" | "⚪观望" | "🟠卖出" | "🔴强烈卖出"
     pub signal_code: String, // strong_buy | buy | hold | watch | sell | strong_sell

@@ -176,19 +176,13 @@ impl StockAnalysisOrchestrator {
         };
 
         // ── NEW ②: 100分客观评分 ──
-        let mut objective_score =
-            scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
+        let mut objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
 
         // 应用基本面修正
         let pe = raw.quote.pe;
         let pb = raw.quote.pb;
         let roe = raw.financials.first().and_then(|f| f.roe);
-        scoring::ScoringEngine::apply_fundamental_adjustment(
-            &mut objective_score,
-            pe,
-            pb,
-            roe,
-        );
+        scoring::ScoringEngine::apply_fundamental_adjustment(&mut objective_score, pe, pb, roe);
 
         let score_json = serde_json::to_string(&objective_score).unwrap_or_default();
         {

@@ -1,12 +1,16 @@
 pub mod backtest;
 pub mod decision;
+pub mod key_levels;
+pub mod monitor;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod plugin;
 pub mod prompts;
 pub mod quality;
 pub mod report;
+pub mod review;
 pub mod rules;
 pub mod runner;
 pub mod scoring;
+pub mod screener;
 pub mod trading;

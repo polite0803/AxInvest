@@ -141,6 +141,12 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
 
     let sync_engine = create_sync_engine(&sea_db, &app_settings, rt.handle());
 
+    // 共享 AStockClient：astock_client 和 stock_monitor 共用同一实例（共享缓存）
+    let astock_client = Arc::new(axagent_astock_data::AStockClient::new());
+    let stock_monitor = Some(Arc::new(axagent_stock_analysis::monitor::RealtimeMonitor::new(
+        astock_client.clone(),
+    )));
+
     AppState {
         sea_db: sea_db.clone(),
         master_key,
@@ -368,7 +374,8 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
         )),
         sandbox_executor: Arc::new(axagent_trajectory::SkillSandboxExecutor::with_default_policy()),
         sync_engine,
-        astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
+        astock_client,
+        stock_monitor,
     }
 }
 

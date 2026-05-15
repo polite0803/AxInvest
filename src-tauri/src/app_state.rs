@@ -85,4 +85,6 @@ pub struct AppState {
     pub sync_engine: Option<Arc<SyncEngine>>,
     /// 股票数据客户端（单例，内含请求级缓存）
     pub astock_client: Arc<AStockClient>,
+    /// 实时监控引擎（交易时段定时轮询行情并触发告警）
+    pub stock_monitor: Option<Arc<axagent_stock_analysis::monitor::RealtimeMonitor>>,
 }

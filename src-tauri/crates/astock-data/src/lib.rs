@@ -1,3 +1,4 @@
+pub mod calendar;
 mod error;
 pub mod indicators;
 pub mod mcp_tools;

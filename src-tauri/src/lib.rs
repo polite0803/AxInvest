@@ -920,6 +920,7 @@ pub fn run() {
             commands::stock_analysis::discover_stock_candidates,
             // Trading calendar
             commands::stock_analysis::get_market_status,
+            commands::stock_analysis::refresh_trading_calendar,
             // Daily review
             commands::stock_analysis::generate_daily_review,
             // Scoring weights optimization

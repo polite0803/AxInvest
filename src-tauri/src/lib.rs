@@ -916,6 +916,7 @@ pub fn run() {
             commands::stock_analysis::backtest_key_levels,
             // Stock screening
             commands::stock_analysis::screen_stocks,
+            commands::stock_analysis::discover_stock_candidates,
             // Trading calendar
             commands::stock_analysis::get_market_status,
             // Daily review

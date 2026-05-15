@@ -970,6 +970,14 @@ pub async fn screen_stocks(
     StockScreener::screen_watchlist(&state.astock_client, &watchlist, &criteria).await
 }
 
+/// 从全市场发现热门候选标的
+#[tauri::command]
+pub async fn discover_stock_candidates(
+    state: State<'_, AppState>,
+) -> Result<Vec<ScreenResult>, String> {
+    StockScreener::discover_candidates(&state.astock_client).await
+}
+
 // ── Calendar Commands ──
 
 /// 获取市场状态

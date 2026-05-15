@@ -2,6 +2,7 @@ use axagent_astock_data::indicators::TechnicalIndicators;
 use serde::{Deserialize, Serialize};
 
 use crate::decision::ScoringWeights;
+use crate::value_investing::ValueMetrics;
 
 /// 100分制客观评分
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,7 +214,7 @@ impl ScoringEngine {
         score.fundamental_adjustment = adjustment;
 
         // Apply adjustment (cap at 0-100)
-        let new_total = (score.total as i32 + adjustment).max(0).min(100) as u32;
+        let new_total = (score.total as i32 + adjustment).clamp(0, 100) as u32;
         score.total = new_total;
 
         // Re-map signal
@@ -229,6 +230,55 @@ impl ScoringEngine {
                 new_total
             );
         }
+    }
+
+    /// 价值投资修正（基于DCF安全边际、F-Score、护城河）
+    pub fn apply_value_adjustment(score: &mut ObjectiveScore, value_metrics: &ValueMetrics) {
+        let adjustment = if value_metrics.margin_of_safety_pct > 30.0 {
+            20
+        } else if value_metrics.margin_of_safety_pct > 15.0 {
+            12
+        } else if value_metrics.margin_of_safety_pct > 5.0 {
+            6
+        } else if value_metrics.margin_of_safety_pct > 0.0 {
+            2
+        } else if value_metrics.margin_of_safety_pct > -10.0 {
+            -5
+        } else {
+            -10
+        };
+
+        let f_score_bonus = match value_metrics.f_score {
+            7..=9 => 10,
+            5..=6 => 5,
+            3..=4 => 0,
+            _ => -5,
+        };
+        let moat_bonus = match value_metrics.moat_level.as_str() {
+            "宽阔" => 10,
+            "狭窄" => 5,
+            _ => 0,
+        };
+
+        let total_adj = adjustment + f_score_bonus + moat_bonus;
+        score.fundamental_adjustment += total_adj;
+        let new_total = (score.total as i32 + total_adj).clamp(0, 100) as u32;
+        score.total = new_total;
+        let (signal, signal_code) = Self::map_signal(new_total, "");
+        score.signal = signal.to_string();
+        score.signal_code = signal_code.to_string();
+
+        tracing::info!(
+            "价值投资修正: 安全边际{}{:+.0}, F-Score{}{:+}, 护城河{}{:+} → 总调整{:+}, 最终{}/100",
+            value_metrics.mos_level,
+            adjustment,
+            value_metrics.f_score_level,
+            f_score_bonus,
+            value_metrics.moat_level,
+            moat_bonus,
+            total_adj,
+            new_total
+        );
     }
 
     /// 评分到信号映射

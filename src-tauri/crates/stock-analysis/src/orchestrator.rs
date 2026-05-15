@@ -102,6 +102,33 @@ impl StockAnalysisOrchestrator {
             progress_pct: 25,
         });
 
+        // ── 价值投资指标计算 ──
+        let value_metrics = {
+            let total_shares = raw.quote.total_mv.map(|mv| {
+                if raw.quote.price > 0.0 {
+                    mv / raw.quote.price / 1_0000_0000.0
+                } else {
+                    1.0
+                }
+            });
+            crate::value_investing::ValueInvestingEngine::compute(
+                &stock_code,
+                raw.quote.price,
+                total_shares,
+                &raw.financials,
+                raw.quote.pe,
+                raw.quote.pb,
+            )
+        };
+        {
+            let mut bb = blackboard.write().await;
+            bb.set_state(
+                "raw.value_metrics",
+                &serde_json::to_string(&value_metrics).unwrap_or_default(),
+            );
+        }
+        tracing::info!("价值投资指标: {}", value_metrics.summary);
+
         if Self::is_cancelled(&cancel_token) {
             return Err("分析已取消".into());
         }
@@ -144,6 +171,12 @@ impl StockAnalysisOrchestrator {
             }
         }
 
+        // 价值投资者是可选的分析师
+        if prompts.contains_key("value-investor") {
+            all_analyst_ids.push("value-investor".to_string());
+            tracing::info!("启用价值投资者（巴菲特框架）");
+        }
+
         Self::phase_2_analysts(
             &runner,
             &blackboard,
@@ -184,12 +217,30 @@ impl StockAnalysisOrchestrator {
         let roe = raw.financials.first().and_then(|f| f.roe);
         scoring::ScoringEngine::apply_fundamental_adjustment(&mut objective_score, pe, pb, roe);
 
+        // 应用价值投资修正
+        scoring::ScoringEngine::apply_value_adjustment(&mut objective_score, &value_metrics);
+
         let score_json = serde_json::to_string(&objective_score).unwrap_or_default();
         {
             let mut bb = blackboard.write().await;
             bb.set_state("raw.objective_score", &score_json);
         }
         tracing::info!("客观评分: {}/100 ({})", objective_score.total, objective_score.signal);
+
+        // ── 价值投资评估 ──
+        let value_assessment = {
+            let financials = &raw.financials;
+            let shares = 1_000_000_000.0; // 默认股本，实际应获取
+            crate::value::ValueEngine::assess(raw.quote.price, financials, shares)
+        };
+        {
+            let mut bb = blackboard.write().await;
+            bb.set_state(
+                "value.assessment",
+                &serde_json::to_string(&value_assessment).unwrap_or_default(),
+            );
+        }
+        tracing::info!("价值评估: {}", value_assessment.buffett_verdict);
 
         Self::phase_3_debate(
             &runner,

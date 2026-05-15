@@ -925,6 +925,9 @@ pub fn run() {
             commands::stock_analysis::generate_daily_review,
             // Scoring weights optimization
             commands::stock_analysis::optimize_scoring_weights,
+            // Value investing
+            commands::stock_analysis::get_value_assessment,
+            commands::stock_analysis::compute_value_metrics,
             // Portfolio risk + position limits
             commands::stock_analysis::get_portfolio_risk,
             commands::stock_analysis::get_position_limits,

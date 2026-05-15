@@ -106,6 +106,21 @@ impl StockAnalysisOrchestrator {
             return Err("分析已取消".into());
         }
 
+        // 检查 LLM 连接状态，若未连接则发送警告事件并标记占位模式
+        let runner_status = if runner.is_none() {
+            let _ = events.send(AnalysisEvent::Error {
+                stage: "llm_unavailable".into(),
+                message: "⚠️ LLM 未连接，分析将使用占位数据。请检查 Provider 配置。".into(),
+            });
+            "placeholder"
+        } else {
+            "live"
+        };
+        {
+            let mut bb = blackboard.write().await;
+            bb.set_state("meta.runner_status", runner_status);
+        }
+
         Self::phase_2_analysts(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         // 数据质量门控：在辩论/风控/决策前注入质量摘要

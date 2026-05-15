@@ -35,6 +35,9 @@ interface StockAnalysisState {
   // History
   history: AnalysisSummary[];
 
+  // LLM 连接状态
+  llmStatus: "live" | "placeholder" | "unknown";
+
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
@@ -66,6 +69,7 @@ const initialState = {
   decision: null,
   error: null,
   history: [],
+  llmStatus: "unknown" as const,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -172,7 +176,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     if (_unlisten) {
       _unlisten();
     }
-    set({ ...initialState, _unlisten: null });
+    set({ ...initialState, _unlisten: null, llmStatus: "unknown" as const });
   },
 
   setupEventListener: async () => {
@@ -220,12 +224,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         case "Decision":
           set({ decision: payload as unknown as StockDecision, status: "completed" });
           break;
-        case "Error":
+        case "Error": {
+          const msg = (payload as Record<string, string>).message;
           set({
-            error: (payload as Record<string, string>).message,
-            status: "error",
+            error: msg,
+            status: msg.includes("LLM") ? "running" : "error",
+            llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
           });
           break;
+        }
       }
     });
 

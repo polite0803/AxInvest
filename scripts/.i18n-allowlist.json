@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-05-15",
-  "total_entries": 134,
+  "total_entries": 135,
   "total_files": 127,
   "entries": [
     {
@@ -806,6 +806,12 @@
       "file": "src/components/stock-analysis/TradePanel.tsx",
       "lines": "197,251,262",
       "reason": "中文 JSX 注释",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
+      "lines": "61",
+      "reason": "中文字数后缀 (字数单位)",
       "phase": 3
     }
   ]

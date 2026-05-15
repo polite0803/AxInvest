@@ -261,6 +261,134 @@ impl StockVendor for EastMoneyVendor {
         }))
     }
 
+    async fn get_north_bound_holding(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<NorthBoundHolding>, DataError> {
+        let secid = to_em_secid(stock_code);
+        // 东方财富北向资金个股级别API: 通过个股资金流向K线接口获取
+        // klt=3 代表日级别北向资金数据
+        let url = format!(
+            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3&fields2=f51,f52,f53&lmt=1&klt=3"
+        );
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        if let Some(arr) = json["data"]["klines"].as_array() {
+            if let Some(line) = arr.first().and_then(|v| v.as_str()) {
+                let parts: Vec<&str> = line.split(',').collect();
+                if parts.len() >= 3 {
+                    let holding_shares: f64 = parts[1].parse().unwrap_or(0.0);
+                    let holding_ratio: f64 = parts[2].parse().unwrap_or(0.0);
+                    // 变动数量通过与前一日差值计算（此处返回0，由调用方自行计算）
+                    return Ok(Some(NorthBoundHolding {
+                        stock_code: stock_code.to_string(),
+                        date: parts[0].to_string(),
+                        holding_shares,
+                        holding_ratio,
+                        change_shares: 0.0,
+                    }));
+                }
+            }
+        }
+        // 北向资金个股数据可能不可用（部分股票无数据），返回 None 而非错误
+        Ok(None)
+    }
+
+    async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
+        // 通过东方财富行情API获取个股的行业和概念板块信息
+        // f158=申万一级行业, f159=申万二级行业, f160=概念板块, f161/f162=其他分类
+        let url = format!(
+            "https://push2.eastmoney.com/api/qt/stock/get?secid={}&fields=f158,f159,f160",
+            to_em_secid(stock_code)
+        );
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let data = &json["data"];
+        let sector_name = data["f158"].as_str().unwrap_or("").to_string();
+        let sub_sector = data["f159"].as_str().unwrap_or("").to_string();
+        let concept_tags: Vec<String> = data["f160"]
+            .as_str()
+            .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        if sector_name.is_empty() && concept_tags.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(SectorInfo {
+            stock_code: stock_code.to_string(),
+            sector_name,
+            sub_sector,
+            concept_tags,
+        }))
+    }
+
+    async fn get_shareholder_trades(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<ShareholderTrade>, DataError> {
+        // 东方财富数据中心: 大股东增减持数据
+        // SECURITY_CODE=股票代码, CHANGE_DATE=变动日期, SHAREHD_NAME=股东名称
+        // CHANGE_TYPE=变动类型(增持/减持), CHANGE_NUM=变动数量, CHANGE_PRICE=变动均价
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_MAJORHOLDERS_TRADE&columns=SECURITY_CODE,CHANGE_DATE,SHAREHD_NAME,CHANGE_TYPE,CHANGE_NUM,CHANGE_PRICE,CHANGE_REASON&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=20&pageNumber=1"
+        );
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        rows.iter()
+            .map(|r| {
+                Ok(ShareholderTrade {
+                    stock_code: stock_code.to_string(),
+                    date: r["CHANGE_DATE"].as_str().unwrap_or("").to_string(),
+                    shareholder_name: r["SHAREHD_NAME"].as_str().unwrap_or("").to_string(),
+                    trade_type: r["CHANGE_TYPE"].as_str().unwrap_or("").to_string(),
+                    shares: r["CHANGE_NUM"].as_f64().unwrap_or(0.0),
+                    price: r["CHANGE_PRICE"].as_f64().unwrap_or(0.0),
+                    reason: r["CHANGE_REASON"].as_str().map(|s| s.to_string()),
+                })
+            })
+            .collect()
+    }
+
+    async fn get_dividend_records(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<DividendRecord>, DataError> {
+        // 东方财富数据中心: 分红送配数据
+        // SECURITY_CODE=股票代码, EX_DIVIDEND_DATE=除权除息日
+        // DIVIDEND_PER_SHARE=每股分红, BONUS_SHARE_RATIO=送转比例, RECORD_DATE=股权登记日
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_DIVIDEND&columns=SECURITY_CODE,EX_DIVIDEND_DATE,DIVIDEND_PER_SHARE,BONUS_SHARE_RATIO,RECORD_DATE&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=10&pageNumber=1"
+        );
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        rows.iter()
+            .map(|r| {
+                Ok(DividendRecord {
+                    stock_code: stock_code.to_string(),
+                    ex_date: r["EX_DIVIDEND_DATE"].as_str().unwrap_or("").to_string(),
+                    dividend_per_share: r["DIVIDEND_PER_SHARE"].as_f64().unwrap_or(0.0),
+                    bonus_share_ratio: r["BONUS_SHARE_RATIO"].as_f64().unwrap_or(0.0),
+                    record_date: r["RECORD_DATE"].as_str().unwrap_or("").to_string(),
+                })
+            })
+            .collect()
+    }
+
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
         let url = format!(
             "https://searchadapter.eastmoney.com/api/suggest/get?input={}&type=14&count=20",

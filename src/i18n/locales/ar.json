@@ -5487,6 +5487,9 @@
     "alert.empty": "لا توجد تنبيهات",
     "alert.triggered": "تم تفعيل تنبيه السعر!",
     "klineChart": "شمعدان",
-    "volumeChart": "حجم التداول"
+    "volumeChart": "حجم التداول",
+    "loadHistory": "انقر لتحميل تقرير التحليل",
+    "history": "سجل التحليل",
+    "debateHistory": "سجل المناقشة"
   }
 }

@@ -5932,7 +5932,10 @@
     "alert.empty": "暂无告警",
     "alert.triggered": "价格告警已触发！",
     "klineChart": "K线",
-    "volumeChart": "成交量"
+    "volumeChart": "成交量",
+    "loadHistory": "点击加载历史分析报告",
+    "history": "历史分析",
+    "debateHistory": "历史辩论"
   },
   "trade": {
     "title": "交易日志",

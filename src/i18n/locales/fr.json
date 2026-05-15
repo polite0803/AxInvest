@@ -5487,6 +5487,9 @@
     "alert.empty": "Aucune alerte",
     "alert.triggered": "Alerte prix declenchee!",
     "klineChart": "Chandelier",
-    "volumeChart": "Volume"
+    "volumeChart": "Volume",
+    "loadHistory": "Cliquer pour charger le rapport d'analyse",
+    "history": "Historique d'analyse",
+    "debateHistory": "Historique des débats"
   }
 }

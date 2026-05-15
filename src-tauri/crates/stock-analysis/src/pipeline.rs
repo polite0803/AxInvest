@@ -117,3 +117,15 @@ pub async fn write_report(
         tracing::warn!("发送分析事件(AnalystReport)失败: {e}");
     }
 }
+
+/// 导出黑板的完整快照为 JSON（供持久化和历史回看）
+pub async fn export_blackboard_snapshot(
+    blackboard: &Arc<RwLock<SharedBlackboard>>,
+) -> String {
+    let bb = blackboard.read().await;
+    let mut snapshot = serde_json::Map::new();
+    for (key, value) in &bb.shared_state {
+        snapshot.insert(key.clone(), serde_json::Value::String(value.clone()));
+    }
+    serde_json::to_string(&snapshot).unwrap_or_default()
+}

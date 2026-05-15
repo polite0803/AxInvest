@@ -5487,6 +5487,9 @@
     "alert.empty": "Нет оповещений",
     "alert.triggered": "Ценовое оповещение сработало!",
     "klineChart": "Японские свечи",
-    "volumeChart": "Объём"
+    "volumeChart": "Объём",
+    "loadHistory": "Нажмите, чтобы загрузить отчёт анализа",
+    "history": "История анализа",
+    "debateHistory": "История дебатов"
   }
 }

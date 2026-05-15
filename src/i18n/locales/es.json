@@ -5487,6 +5487,9 @@
     "alert.empty": "Sin alertas",
     "alert.triggered": "Alerta de precio activada!",
     "klineChart": "Velas",
-    "volumeChart": "Volumen"
+    "volumeChart": "Volumen",
+    "loadHistory": "Clic para cargar informe de análisis",
+    "history": "Historial de análisis",
+    "debateHistory": "Historial de debate"
   }
 }

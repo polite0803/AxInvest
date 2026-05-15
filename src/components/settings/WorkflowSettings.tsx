@@ -41,7 +41,12 @@ export function WorkflowSettings({ onOpenEditor, onCreateNew }: WorkflowSettings
     <div style={{ padding: "0" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <Button type="primary" icon={<Plus size={16} />} onClick={handleCreateNew}>
+          <Button
+            type="primary"
+            data-testid="workflow-create-new-btn"
+            icon={<Plus size={16} />}
+            onClick={handleCreateNew}
+          >
             {t("settings.workflow.createNew")}
           </Button>
         </div>
@@ -84,7 +89,7 @@ export function WorkflowSettings({ onOpenEditor, onCreateNew }: WorkflowSettings
             label: (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <GitBranch size={14} />
-                {t("settings.workflow.myWorkflows", "我的工作流")}
+                {t("settings.workflow.myWorkflows")}
               </span>
             ),
             children: renderMyWorkflows(),
@@ -94,7 +99,7 @@ export function WorkflowSettings({ onOpenEditor, onCreateNew }: WorkflowSettings
             label: (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <Store size={14} />
-                {t("settings.workflow.marketplace", "工作流市场")}
+                {t("settings.workflow.marketplace")}
               </span>
             ),
             children: <WorkflowMarketplace />,

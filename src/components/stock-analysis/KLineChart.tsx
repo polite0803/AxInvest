@@ -1,8 +1,10 @@
 import { useStockAnalysisStore } from "@/stores";
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 export function KLineChart() {
+  const { t } = useTranslation();
   const klineData = useStockAnalysisStore((s) => s.klineData);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
@@ -51,7 +53,7 @@ export function KLineChart() {
       ],
       series: [
         {
-          name: "K线",
+          name: t("stockAnalysis.klineChart"),
           type: "candlestick",
           data: ohlc,
           xAxisIndex: 0,
@@ -64,7 +66,7 @@ export function KLineChart() {
           },
         },
         {
-          name: "成交量",
+          name: t("stockAnalysis.volumeChart"),
           type: "bar",
           data: volumes,
           xAxisIndex: 1,

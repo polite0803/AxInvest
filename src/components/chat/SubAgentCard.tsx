@@ -99,7 +99,7 @@ export function SubAgentCard({ card }: SubAgentCardProps) {
       <div className="sub-agent-card__desc">{card.description}</div>
       {isCompleted && card.childConversationId && (
         <div className="sub-agent-card__action">
-          查看子会话 <RightOutlined />
+          {t("agentPool.viewSubSession")} <RightOutlined />
         </div>
       )}
     </div>

@@ -1374,7 +1374,7 @@ export function InputArea() {
       } catch (e) {
         // TODO: 后续通过统一日志服务记录
         console.error("[StockAnalysis] Failed to start analysis:", e);
-        messageApi.error(t("stockAnalysis.startFailed", "Failed to start stock analysis"));
+        messageApi.error(t("stockAnalysis.startFailed"));
       }
       return;
     }

@@ -5481,6 +5481,8 @@
     "alert.above": "Uber",
     "alert.below": "Unter",
     "alert.empty": "Keine Alarme",
-    "alert.triggered": "Preisalarm ausgelost!"
+    "alert.triggered": "Preisalarm ausgelost!",
+    "klineChart": "Kerzenchart",
+    "volumeChart": "Volumen"
   }
 }

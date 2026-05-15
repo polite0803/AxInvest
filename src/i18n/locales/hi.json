@@ -5481,6 +5481,8 @@
     "alert.above": "ऊपर",
     "alert.below": "नीचे",
     "alert.empty": "कोई अलर्ट नहीं",
-    "alert.triggered": "मूल्य अलर्ट सक्रिय!"
+    "alert.triggered": "मूल्य अलर्ट सक्रिय!",
+    "klineChart": "कैंडलस्टिक",
+    "volumeChart": "वॉल्यूम"
   }
 }

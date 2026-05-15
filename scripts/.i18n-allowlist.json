@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-05-15",
-  "total_entries": 128,
+  "total_entries": 132,
   "total_files": 127,
   "entries": [
     {
@@ -36,8 +36,8 @@
     },
     {
       "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "196,208,215,222,232,250,253,311",
-      "reason": "硬编码中文字符串",
+      "lines": "198,210,217,224,234,252,255,313",
+      "reason": "中文注释 (JSX comments)",
       "phase": 3
     },
     {
@@ -210,7 +210,7 @@
     },
     {
       "file": "src/components/layout/ContentArea.tsx",
-      "lines": "49,112,115",
+      "lines": "52,117,120",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -770,6 +770,30 @@
       "file": "src/types/permission.ts",
       "lines": "1",
       "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "6,7,8,9,10",
+      "reason": "标签映射常量 (label-to-color map, not user-facing)",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/KLineChart.tsx",
+      "lines": "10",
+      "reason": "中文注释 (mounted/unmount comment)",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/DecisionBanner.test.tsx",
+      "lines": "37,39,40,47",
+      "reason": "测试数据 (test fixtures)",
+      "phase": 3
+    },
+    {
+      "file": "src/types/stock-analysis.ts",
+      "lines": "79,80,81,82,83,84,85,86,87,88,89,90,91,92",
+      "reason": "分析师角色名常量映射 (analyst role label map, constants)",
       "phase": 3
     }
   ]

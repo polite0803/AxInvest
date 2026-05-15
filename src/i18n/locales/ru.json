@@ -5481,6 +5481,8 @@
     "alert.above": "Выше",
     "alert.below": "Ниже",
     "alert.empty": "Нет оповещений",
-    "alert.triggered": "Ценовое оповещение сработало!"
+    "alert.triggered": "Ценовое оповещение сработало!",
+    "klineChart": "Японские свечи",
+    "volumeChart": "Объём"
   }
 }

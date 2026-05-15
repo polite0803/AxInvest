@@ -5926,6 +5926,8 @@
     "alert.above": "突破",
     "alert.below": "跌破",
     "alert.empty": "暂无告警",
-    "alert.triggered": "价格告警已触发！"
+    "alert.triggered": "价格告警已触发！",
+    "klineChart": "K线",
+    "volumeChart": "成交量"
   }
 }

@@ -5481,6 +5481,8 @@
     "alert.above": "이상",
     "alert.below": "이하",
     "alert.empty": "알림 없음",
-    "alert.triggered": "가격 알림이 발동되었습니다!"
+    "alert.triggered": "가격 알림이 발동되었습니다!",
+    "klineChart": "캔들차트",
+    "volumeChart": "거래량"
   }
 }

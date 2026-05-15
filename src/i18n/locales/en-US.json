@@ -5938,6 +5938,8 @@
     "alert.above": "Above",
     "alert.below": "Below",
     "alert.empty": "No alerts",
-    "alert.triggered": "Price alert triggered!"
+    "alert.triggered": "Price alert triggered!",
+    "klineChart": "Candlestick",
+    "volumeChart": "Volume"
   }
 }

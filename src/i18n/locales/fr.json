@@ -5481,6 +5481,8 @@
     "alert.above": "Au-dessus",
     "alert.below": "En-dessous",
     "alert.empty": "Aucune alerte",
-    "alert.triggered": "Alerte prix declenchee!"
+    "alert.triggered": "Alerte prix declenchee!",
+    "klineChart": "Chandelier",
+    "volumeChart": "Volume"
   }
 }

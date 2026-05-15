@@ -102,8 +102,8 @@ export function CompareView() {
             </tr>
             <tr>
               <td>{t("stockAnalysis.volume")}</td>
-              <td className="text-right">{(quote1.volume / 10000).toFixed(1)}万</td>
-              <td className="text-right">{(quote2.volume / 10000).toFixed(1)}万</td>
+              <td className="text-right">{(quote1.volume / 10000).toFixed(1)}{t("stockAnalysis.volumeUnit")}</td>
+              <td className="text-right">{(quote2.volume / 10000).toFixed(1)}{t("stockAnalysis.volumeUnit")}</td>
             </tr>
           </tbody>
         </table>

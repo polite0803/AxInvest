@@ -126,3 +126,28 @@ pub trait AgentRunner: Send + Sync {
         user_prompt: &str,
     ) -> Result<String, String>;
 }
+
+/// 可配置的评分权重
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScoringWeights {
+    pub trend: f64,
+    pub deviation: f64,
+    pub macd: f64,
+    pub volume: f64,
+    pub rsi: f64,
+    pub support: f64,
+}
+
+impl Default for ScoringWeights {
+    fn default() -> Self {
+        Self {
+            trend: 30.0,
+            deviation: 20.0,
+            macd: 15.0,
+            volume: 15.0,
+            rsi: 10.0,
+            support: 10.0,
+        }
+    }
+}

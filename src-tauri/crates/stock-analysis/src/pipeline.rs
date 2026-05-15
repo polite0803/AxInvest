@@ -119,9 +119,7 @@ pub async fn write_report(
 }
 
 /// 导出黑板的完整快照为 JSON（供持久化和历史回看）
-pub async fn export_blackboard_snapshot(
-    blackboard: &Arc<RwLock<SharedBlackboard>>,
-) -> String {
+pub async fn export_blackboard_snapshot(blackboard: &Arc<RwLock<SharedBlackboard>>) -> String {
     let bb = blackboard.read().await;
     let mut snapshot = serde_json::Map::new();
     for (key, value) in &bb.shared_state {

@@ -225,10 +225,7 @@ pub async fn start_stock_analysis(
                         Expr::value(&decision.reasoning),
                     )
                     .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&decision_json))
-                    .col_expr(
-                        stock_analyses::Column::BlackboardSnapshot,
-                        Expr::value(&snapshot),
-                    )
+                    .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(&snapshot))
                     .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
                     .filter(stock_analyses::Column::Id.eq(&analysis_id_clone))
                     .exec(&db)

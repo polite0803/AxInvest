@@ -16,7 +16,7 @@ use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::runner::SessionManagerRunner;
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
-use axagent_stock_analysis::trading::{PositionSummary, TradingEngine};
+use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison, TradingEngine};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -888,6 +888,22 @@ pub async fn validate_trade(
         "errors": result.errors,
         "warnings": result.warnings,
     }))
+}
+
+/// 对比实际交易出场价与最近分析预测价位
+#[tauri::command]
+pub async fn compare_trade_with_analysis(
+    state: State<'_, AppState>,
+    trade_id: String,
+) -> Result<TradePredictionComparison, String> {
+    let trade = trades::Entity::find_by_id(&trade_id)
+        .one(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "交易记录不存在".to_string())?;
+
+    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    engine.compare_trade_vs_prediction(&trade).await
 }
 
 // ── Monitor Commands ──

@@ -905,6 +905,7 @@ pub fn run() {
             commands::stock_analysis::get_trade_positions,
             commands::stock_analysis::toggle_trading_enabled,
             commands::stock_analysis::validate_trade,
+            commands::stock_analysis::compare_trade_with_analysis,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
             // Monitor commands

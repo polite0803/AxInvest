@@ -108,20 +108,15 @@ pub fn run_quality_gate(reports: &HashMap<String, String>) -> QualityCheck {
     let mut grades: Vec<(String, QualityGrade)> = Vec::new();
     let mut warnings = Vec::new();
 
-    let analyst_ids = [
-        "market-analyst",
-        "sentiment-analyst",
-        "news-analyst",
-        "fundamentals-analyst",
-        "policy-analyst",
-        "hot-money-tracker",
-        "lockup-watcher",
-    ];
+    // 排除非分析师角色的 ID（辩论员、经理、交易员等）
+    let non_analyst_keywords = ["debator", "researcher", "manager", "trader"];
 
-    for id in &analyst_ids {
-        let report = reports.get(*id).cloned().unwrap_or_default();
+    for (id, report) in reports.iter() {
+        if non_analyst_keywords.iter().any(|kw| id.contains(kw)) {
+            continue;
+        }
         let required = get_required_items(id);
-        let grade = check_report_quality(id, &report, &required);
+        let grade = check_report_quality(id, report, &required);
 
         if grade == QualityGrade::F || grade == QualityGrade::D {
             warnings.push(format!(
@@ -133,21 +128,24 @@ pub fn run_quality_gate(reports: &HashMap<String, String>) -> QualityCheck {
                 }
             ));
         }
-        grades.push((id.to_string(), grade));
+        grades.push((id.clone(), grade));
     }
 
+    let total_count = grades.len();
     let fail_count = grades
         .iter()
         .filter(|(_, g)| *g == QualityGrade::F || *g == QualityGrade::D)
         .count();
 
-    let overall = if fail_count == 0 {
-        QualityGrade::A
-    } else if fail_count <= 1 {
-        QualityGrade::B
-    } else if fail_count <= 3 {
+    let overall = if total_count == 0 {
         QualityGrade::C
-    } else if fail_count <= 5 {
+    } else if fail_count == 0 {
+        QualityGrade::A
+    } else if fail_count <= (total_count as f64 * 0.2).ceil() as usize && fail_count <= 1 {
+        QualityGrade::B
+    } else if fail_count <= (total_count as f64 * 0.5).ceil() as usize {
+        QualityGrade::C
+    } else if fail_count <= (total_count as f64 * 0.8).ceil() as usize {
         QualityGrade::D
     } else {
         QualityGrade::F
@@ -162,8 +160,9 @@ pub fn run_quality_gate(reports: &HashMap<String, String>) -> QualityCheck {
     };
 
     let summary = format!(
-        "数据质量: {}级 | 7位分析师中{}位报告存在质量问题 | {}",
+        "数据质量: {}级 | {}位分析师中{}位报告存在质量问题 | {}",
         grade_str,
+        total_count,
         fail_count,
         if warnings.is_empty() {
             "所有报告通过质量检查".to_string()

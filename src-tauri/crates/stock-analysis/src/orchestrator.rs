@@ -121,16 +121,47 @@ impl StockAnalysisOrchestrator {
             bb.set_state("meta.runner_status", runner_status);
         }
 
-        Self::phase_2_analysts(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
+        // 检测定制分析师的 ID（不在标准列表中的 analyst 类型）
+        let mut all_analyst_ids: Vec<String> = ANALYST_IDS.iter().map(|s| s.to_string()).collect();
+        let non_analyst_ids: std::collections::HashSet<&str> = [
+            "bull-researcher",
+            "bear-researcher",
+            "aggressive-debator",
+            "conservative-debator",
+            "neutral-debator",
+            "research-manager",
+            "trader",
+            "portfolio-manager",
+        ]
+        .iter()
+        .copied()
+        .collect();
+
+        for key in prompts.keys() {
+            if !ANALYST_IDS.contains(&key.as_str()) && !non_analyst_ids.contains(key.as_str()) {
+                all_analyst_ids.push(key.clone());
+                tracing::info!("发现自定义分析师: {}", key);
+            }
+        }
+
+        Self::phase_2_analysts(
+            &runner,
+            &blackboard,
+            &events,
+            &prompts,
+            &cancel_token,
+            &all_analyst_ids,
+        )
+        .await?;
 
         // 数据质量门控：在辩论/风控/决策前注入质量摘要
         let _quality_summary = {
             let reports = {
                 let bb = blackboard.read().await;
                 let mut map = HashMap::new();
-                for id in ANALYST_IDS {
+                for id in &all_analyst_ids {
                     if let Some(report) = bb.get_state(&format!("report.{id}")) {
-                        map.insert(id.to_string(), report.clone());
+                        map.insert(id.clone(), report.clone());
                     }
                 }
                 map
@@ -277,11 +308,12 @@ impl StockAnalysisOrchestrator {
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
         prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
+        analyst_ids: &[String],
     ) -> Result<(), String> {
         let mut handles = Vec::new();
 
-        for &analyst_id in ANALYST_IDS {
-            let id = analyst_id.to_string();
+        for id in analyst_ids {
+            let id = id.clone();
             let bb = blackboard.clone();
             let ev = events.clone();
             let r = runner.clone();

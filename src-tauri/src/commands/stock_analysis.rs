@@ -1011,6 +1011,12 @@ pub async fn get_market_status() -> Result<serde_json::Value, String> {
     }))
 }
 
+/// 从东方财富 API 刷新交易日历
+#[tauri::command]
+pub async fn refresh_trading_calendar() -> Result<Vec<String>, String> {
+    axagent_astock_data::calendar::fetch_holiday_calendar().await
+}
+
 // ── Review Commands ──
 
 /// 生成每日收盘复盘报告

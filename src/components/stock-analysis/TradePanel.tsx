@@ -37,6 +37,7 @@ export function TradePanel() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<PositionSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lastAnalysis, setLastAnalysis] = useState<{action: string; targetPrice: number | null} | null>(null);
   const [form, setForm] = useState({
     stockCode: "",
     stockName: "",
@@ -67,6 +68,22 @@ export function TradePanel() {
       loadData();
     }
   }, [enabled]);
+
+  // 当股票代码变化时，获取最近分析决策
+  useEffect(() => {
+    if (form.stockCode && enabled) {
+      invoke<{stockCode: string; decisionJson: string | null}[]>("list_stock_analyses", { limit: 1 })
+        .then((list) => {
+          if (list.length > 0 && list[0].decisionJson) {
+            try {
+              const d = JSON.parse(list[0].decisionJson);
+              setLastAnalysis({action: d.action, targetPrice: d.targetPrice ?? null});
+            } catch { setLastAnalysis(null); }
+          }
+        })
+        .catch(() => setLastAnalysis(null));
+    }
+  }, [form.stockCode, enabled]);
 
   const handleRecord = async () => {
     if (!form.stockCode || !form.stockName || form.price <= 0) {
@@ -247,6 +264,17 @@ export function TradePanel() {
           />
         </div>
       </div>
+
+      {/* 分析一致性提示 */}
+      {lastAnalysis && (
+        <div className="text-xs p-1 rounded" style={{ background: "var(--color-bg-elevated)", marginTop: 4 }}>
+          <span style={{ color: "var(--color-text-secondary)" }}>最近分析: </span>
+          <Tag color={lastAnalysis.action === "买入" ? "green" : lastAnalysis.action === "卖出" ? "red" : "blue"}>
+            {lastAnalysis.action}
+          </Tag>
+          {lastAnalysis.targetPrice && <span> 目标¥{lastAnalysis.targetPrice}</span>}
+        </div>
+      )}
 
       {/* 持仓汇总 */}
       {positions.length > 0 && (

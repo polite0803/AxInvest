@@ -48,6 +48,7 @@ pub mod analysis_schedules;
 pub mod portfolio_holdings;
 pub mod price_alerts;
 pub mod stock_analyses;
+pub mod trades;
 pub mod watchlist_items;
 
 pub mod stored_files;

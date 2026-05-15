@@ -899,6 +899,12 @@ pub fn run() {
             commands::stock_analysis::list_custom_analysts,
             // HTML report generation
             commands::stock_analysis::generate_stock_report,
+            // Manual trading log
+            commands::stock_analysis::record_trade,
+            commands::stock_analysis::list_trades,
+            commands::stock_analysis::get_trade_positions,
+            commands::stock_analysis::toggle_trading_enabled,
+            commands::stock_analysis::validate_trade,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
         ])

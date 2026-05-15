@@ -5933,5 +5933,21 @@
     "alert.triggered": "价格告警已触发！",
     "klineChart": "K线",
     "volumeChart": "成交量"
+  },
+  "trade": {
+    "title": "交易日志",
+    "disabledHint": "开启后可手动记录买卖交易，自动跟踪持仓成本与盈亏",
+    "stockCode": "代码",
+    "stockName": "名称",
+    "buy": "买",
+    "sell": "卖",
+    "price": "价格",
+    "quantity": "数量",
+    "cost": "成本",
+    "shares": "持仓",
+    "pnl": "盈亏",
+    "recorded": "已记录",
+    "fillRequired": "请填写必要信息",
+    "toggleFailed": "切换失败"
   }
 }

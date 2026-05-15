@@ -1135,10 +1135,12 @@ dependencies = [
  "axagent-runtime-core",
  "chrono",
  "futures",
+ "sea-orm",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

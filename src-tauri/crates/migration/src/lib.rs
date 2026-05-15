@@ -662,6 +662,12 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             condition TEXT NOT NULL, target_price REAL NOT NULL, \
             is_triggered INTEGER NOT NULL DEFAULT 0, triggered_at INTEGER, \
             created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS trades (\
+            id TEXT NOT NULL PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
+            direction TEXT NOT NULL, price REAL NOT NULL, quantity INTEGER NOT NULL, \
+            trade_date TEXT NOT NULL, trade_time TEXT NOT NULL, \
+            fee REAL, realized_pnl REAL, notes TEXT, \
+            created_at INTEGER NOT NULL)",
     ] {
         db.execute_unprepared(sql).await?;
     }
@@ -739,6 +745,9 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "CREATE INDEX IF NOT EXISTS idx_analysis_schedules_next ON analysis_schedules(next_run_at)",
         "CREATE INDEX IF NOT EXISTS idx_price_alerts_code ON price_alerts(stock_code)",
         "CREATE INDEX IF NOT EXISTS idx_price_alerts_triggered ON price_alerts(is_triggered)",
+        "CREATE INDEX IF NOT EXISTS idx_trades_code ON trades(stock_code)",
+        "CREATE INDEX IF NOT EXISTS idx_trades_direction ON trades(direction)",
+        "CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(created_at)",
     ] {
         db.execute_unprepared(sql).await?;
     }

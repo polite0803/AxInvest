@@ -1,7 +1,7 @@
 use crate::AppState;
 use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_core::entity::{
-    analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, watchlist_items,
+    analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
 use axagent_core::types::ProviderProxyConfig;
 use axagent_providers::{resolve_base_url_for_type, ProviderAdapter, ProviderRequestContext};
@@ -12,6 +12,7 @@ use axagent_stock_analysis::decision::{AgentRunner, AnalysisConfig, AnalysisEven
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::runner::SessionManagerRunner;
+use axagent_stock_analysis::trading::{PositionSummary, TradingEngine};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -789,4 +790,92 @@ pub async fn generate_stock_report(
     std::fs::write(&filepath, &html).map_err(|e| e.to_string())?;
 
     Ok(filepath.to_string_lossy().to_string())
+}
+
+// ── 手动交易日志 ──
+
+/// 记录一笔交易
+#[tauri::command]
+pub async fn record_trade(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+    direction: String,
+    price: f64,
+    quantity: i32,
+    trade_date: String,
+    trade_time: String,
+    notes: Option<String>,
+) -> Result<trades::Model, String> {
+    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    engine
+        .execute_trade(
+            &stock_code,
+            &stock_name,
+            &direction,
+            price,
+            quantity,
+            &trade_date,
+            &trade_time,
+            notes.as_deref(),
+        )
+        .await
+}
+
+/// 获取交易历史
+#[tauri::command]
+pub async fn list_trades(
+    state: State<'_, AppState>,
+    stock_code: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<trades::Model>, String> {
+    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    engine
+        .get_trades(stock_code.as_deref(), limit.unwrap_or(50))
+        .await
+}
+
+/// 获取持仓汇总（交易日志驱动的成本跟踪）
+#[tauri::command]
+pub async fn get_trade_positions(
+    state: State<'_, AppState>,
+) -> Result<Vec<PositionSummary>, String> {
+    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    engine.get_positions().await
+}
+
+/// 开启 / 关闭交易功能
+#[tauri::command]
+pub async fn toggle_trading_enabled(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    tracing::info!("Trading system {}abled", if enabled { "en" } else { "dis" });
+    axagent_core::repo::settings::set_setting(
+        &state.sea_db,
+        "trading_enabled",
+        &enabled.to_string(),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// 校验交易（提交前预览）
+#[tauri::command]
+pub async fn validate_trade(
+    state: State<'_, AppState>,
+    stock_code: String,
+    direction: String,
+    quantity: i32,
+    price: f64,
+) -> Result<serde_json::Value, String> {
+    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let result = engine
+        .validate_trade(&stock_code, &direction, quantity, price)
+        .await;
+    Ok(serde_json::json!({
+        "valid": result.valid,
+        "errors": result.errors,
+        "warnings": result.warnings,
+    }))
 }

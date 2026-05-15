@@ -1006,7 +1006,36 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
         .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
         .collect();
 
-    PostCloseReview::generate(&state.astock_client, &watchlist).await
+    // 查询当日已触发的价格告警
+    let triggered_alerts_result = price_alerts::Entity::find()
+        .filter(price_alerts::Column::IsTriggered.eq(true))
+        .all(&state.sea_db)
+        .await;
+
+    let mut triggered_alerts: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if let Ok(alerts) = triggered_alerts_result {
+        for alert in alerts {
+            let desc = format!(
+                "{}触发: 价格{}{:.2}(目标{:.2})",
+                alert.condition,
+                if alert.condition == "above" { "≥" } else { "≤" },
+                state
+                    .astock_client
+                    .get_quote(&alert.stock_code)
+                    .await
+                    .map(|q| q.price)
+                    .unwrap_or(0.0),
+                alert.target_price
+            );
+            triggered_alerts
+                .entry(alert.stock_code)
+                .or_default()
+                .push(desc);
+        }
+    }
+
+    PostCloseReview::generate(&state.astock_client, &watchlist, &triggered_alerts).await
 }
 
 // ── Scoring Weights Optimization ──

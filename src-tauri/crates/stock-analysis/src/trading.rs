@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::{detect_market_type, get_st_price_limit_pct};
-use axagent_core::entity::{portfolio_holdings, trades};
+use axagent_core::entity::{portfolio_holdings, stock_analyses, trades};
 
 /// 手动交易引擎
 pub struct TradingEngine {
@@ -125,6 +125,46 @@ impl TradingEngine {
                 None => {
                     errors.push("没有该股票持仓，无法卖出".to_string());
                 },
+            }
+        }
+
+        // 分析一致性检查（仅买入时）
+        if direction == "buy" {
+            let last_analysis = stock_analyses::Entity::find()
+                .filter(stock_analyses::Column::StockCode.eq(stock_code))
+                .filter(stock_analyses::Column::Status.eq("completed"))
+                .order_by_desc(stock_analyses::Column::CreatedAt)
+                .one(self.db.as_ref())
+                .await
+                .ok()
+                .flatten();
+
+            if let Some(analysis) = last_analysis {
+                if let Some(ref decision_json) = analysis.decision_json {
+                    if let Ok(decision) =
+                        serde_json::from_str::<serde_json::Value>(decision_json)
+                    {
+                        let suggested_action = decision["action"].as_str().unwrap_or("");
+                        let suggested_target = decision["targetPrice"].as_f64();
+
+                        if suggested_action == "卖出" || suggested_action == "减持" {
+                            warnings.push(format!(
+                                "分析建议「{}」而非买入，请二次确认",
+                                suggested_action
+                            ));
+                        }
+
+                        if let Some(target) = suggested_target {
+                            let deviation = ((price - target) / target).abs() * 100.0;
+                            if deviation > 5.0 {
+                                warnings.push(format!(
+                                    "入场价 {:.2} 偏离分析目标价 {:.2} ({:.1}%)",
+                                    price, target, deviation
+                                ));
+                            }
+                        }
+                    }
+                }
             }
         }
 

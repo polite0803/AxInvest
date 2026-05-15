@@ -4229,6 +4229,7 @@ mod tests {
                 axagent_trajectory::SkillSandboxExecutor::with_default_policy(),
             ),
             sync_engine: None,
+            astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
         };
 
         let attachments = vec![AttachmentInput {

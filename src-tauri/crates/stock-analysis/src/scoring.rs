@@ -14,6 +14,7 @@ pub struct ObjectiveScore {
     pub volume_score: u32,    // 量能 0-15
     pub rsi_score: u32,       // RSI 0-10
     pub support_score: u32,   // 支撑 0-10
+    pub fundamental_adjustment: i32, // 基本面修正值（正加分/负扣分）
     pub signal: String, // "🟢强烈买入" | "🔵买入" | "🟡持有" | "⚪观望" | "🟠卖出" | "🔴强烈卖出"
     pub signal_code: String, // strong_buy | buy | hold | watch | sell | strong_sell
 }
@@ -53,6 +54,7 @@ impl ScoringEngine {
             volume_score: volume,
             rsi_score: rsi,
             support_score: support,
+            fundamental_adjustment: 0,
             signal: signal.to_string(),
             signal_code: signal_code.to_string(),
         }
@@ -147,6 +149,85 @@ impl ScoringEngine {
             2.. => 10,
             1 => 6,
             _ => 2,
+        }
+    }
+
+    /// 基本面修正（基于PE/PB/ROE等估值指标，可选）
+    pub fn apply_fundamental_adjustment(
+        score: &mut ObjectiveScore,
+        pe: Option<f64>,
+        pb: Option<f64>,
+        roe: Option<f64>,
+    ) {
+        let mut adjustment: i32 = 0;
+        let mut reasons = Vec::new();
+
+        // PE 修正
+        if let Some(pe) = pe {
+            if pe <= 0.0 {
+                adjustment -= 15;
+                reasons.push("PE为负(亏损)");
+            } else if pe > 200.0 {
+                adjustment -= 10;
+                reasons.push("PE>200(极高估值)");
+            } else if pe > 100.0 {
+                adjustment -= 5;
+                reasons.push("PE>100(高估值)");
+            } else if pe < 10.0 {
+                adjustment += 10;
+                reasons.push("PE<10(低估值)");
+            } else if pe < 15.0 {
+                adjustment += 5;
+                reasons.push("PE<15(合理偏低)");
+            }
+        }
+
+        // PB 修正
+        if let Some(pb) = pb {
+            if pb > 10.0 {
+                adjustment -= 5;
+                reasons.push("PB>10(高市净率)");
+            } else if pb < 1.0 && pb > 0.0 {
+                adjustment += 5;
+                reasons.push("PB<1(破净)");
+            }
+        }
+
+        // ROE 修正
+        if let Some(roe) = roe {
+            if roe >= 20.0 {
+                adjustment += 10;
+                reasons.push("ROE≥20%(优秀)");
+            } else if roe >= 15.0 {
+                adjustment += 5;
+                reasons.push("ROE≥15%(良好)");
+            } else if roe < 5.0 && roe > 0.0 {
+                adjustment -= 5;
+                reasons.push("ROE<5%(偏低)");
+            } else if roe <= 0.0 {
+                adjustment -= 10;
+                reasons.push("ROE≤0(亏损)");
+            }
+        }
+
+        score.fundamental_adjustment = adjustment;
+
+        // Apply adjustment (cap at 0-100)
+        let new_total = (score.total as i32 + adjustment).max(0).min(100) as u32;
+        score.total = new_total;
+
+        // Re-map signal
+        let (signal, signal_code) = Self::map_signal(new_total, "");
+        score.signal = signal.to_string();
+        score.signal_code = signal_code.to_string();
+
+        if !reasons.is_empty() {
+            tracing::info!(
+                "基本面修正: {:?} → 调整 {}, 最终 {}/100",
+                reasons,
+                adjustment,
+                new_total
+            );
         }
     }
 

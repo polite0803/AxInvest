@@ -153,7 +153,8 @@ impl StockVendor for EastMoneyVendor {
             Some(arr) if !arr.is_empty() => {
                 let s = arr[0].as_str().unwrap_or("");
                 let parts: Vec<&str> = s.split(',').collect();
-                if parts.len() < 6 {
+                // parts[2] = f53 (主力净流入占比%), 当前 MoneyFlow 结构体不需要此字段
+                if parts.len() < 7 {
                     return Ok(None);
                 }
                 let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };

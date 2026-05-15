@@ -12,6 +12,9 @@ export interface StockQuote {
   pe: number | null;
   pb: number | null;
   totalMv: number | null;
+  limitUp: number | null;
+  limitDown: number | null;
+  isSt: boolean;
   timestamp: string;
 }
 

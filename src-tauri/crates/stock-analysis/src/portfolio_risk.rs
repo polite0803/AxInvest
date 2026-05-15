@@ -21,6 +21,17 @@ impl PortfolioRiskManager {
         positions: &[super::trading::PositionSummary],
     ) -> PortfolioRiskMetrics {
         let total_positions = positions.len();
+        if total_positions == 0 {
+            return PortfolioRiskMetrics {
+                total_positions: 0,
+                total_market_value: 0.0,
+                top_concentration_pct: 0.0,
+                sector_exposure: HashMap::new(),
+                diversification_score: 0,
+                risk_level: "无持仓".to_string(),
+                warning: Some("暂无持仓记录，请先添加交易记录或手动录入持仓。".to_string()),
+            };
+        }
         let total_mv: f64 = positions.iter().filter_map(|p| p.market_value).sum();
 
         // 最大单股集中度

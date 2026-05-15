@@ -10,6 +10,8 @@ use axagent_astock_data::{AStockClient, StockRawData};
 use crate::decision::{AgentRunner, AnalysisConfig, AnalysisEvent, StockDecision};
 use crate::pipeline;
 use crate::prompts;
+use crate::rules;
+use crate::scoring;
 
 pub const ANALYST_IDS: &[&str] = &[
     "market-analyst",
@@ -70,7 +72,7 @@ impl StockAnalysisOrchestrator {
             date: date.clone(),
         });
 
-        Self::phase_1_load_data(data_client, &stock_code, &config, &blackboard, &events)
+        let raw = Self::phase_1_load_data(data_client, &stock_code, &config, &blackboard, &events)
             .await
             .inspect_err(|e| {
                 let _ = events.send(AnalysisEvent::Error {
@@ -79,6 +81,27 @@ impl StockAnalysisOrchestrator {
                 });
             })?;
 
+        // ── NEW ①: 计算技术指标 ──
+        let indicators = {
+            let raw_klines = raw.klines.clone();
+            axagent_astock_data::indicators::compute_indicators(&stock_code, &raw_klines)
+        };
+        {
+            let mut bb = blackboard.write().await;
+            bb.set_state("raw.indicators", &serde_json::to_string(&indicators).unwrap_or_default());
+            // 同时写入行情到 blackboard（供后续评分等阶段使用）
+            bb.set_state("raw.quote", &serde_json::to_string(&raw.quote).unwrap_or_default());
+        }
+
+        let _ = events.send(AnalysisEvent::AnalystProgress {
+            expert_id: "indicators".into(),
+            status: format!(
+                "技术指标计算完成: MA20={:.2}, MACD信号={}, RSI6={:.0}",
+                indicators.ma20, indicators.macd_signal, indicators.rsi6
+            ),
+            progress_pct: 25,
+        });
+
         if Self::is_cancelled(&cancel_token) {
             return Err("分析已取消".into());
         }
@@ -86,7 +109,7 @@ impl StockAnalysisOrchestrator {
         Self::phase_2_analysts(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         // 数据质量门控：在辩论/风控/决策前注入质量摘要
-        {
+        let _quality_summary = {
             let reports = {
                 let bb = blackboard.read().await;
                 let mut map = HashMap::new();
@@ -103,7 +126,17 @@ impl StockAnalysisOrchestrator {
                 let mut bb = blackboard.write().await;
                 bb.set_state("data_quality_summary", &quality.summary);
             }
+            quality.summary
+        };
+
+        // ── NEW ②: 100分客观评分 ──
+        let objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price);
+        let score_json = serde_json::to_string(&objective_score).unwrap_or_default();
+        {
+            let mut bb = blackboard.write().await;
+            bb.set_state("raw.objective_score", &score_json);
         }
+        tracing::info!("客观评分: {}/100 ({})", objective_score.total, objective_score.signal);
 
         Self::phase_3_debate(
             &runner,
@@ -118,6 +151,54 @@ impl StockAnalysisOrchestrator {
         Self::phase_4_risk(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         Self::phase_4b_trader(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
+
+        // ── NEW ③: 严进规则引擎 —— 拦截交易员方案，强制执行硬规则 ──
+        let _rule_check_result = {
+            let trader_report = {
+                let bb = blackboard.read().await;
+                bb.get_state("report.trader").cloned().unwrap_or_default()
+            };
+            let trader_action = if trader_report.contains("买入") {
+                "买入"
+            } else if trader_report.contains("卖出") {
+                "卖出"
+            } else {
+                "持有"
+            };
+            let trader_stop_loss: Option<f64> = extract_number_after(&trader_report, "止损");
+            let trader_entry_price: Option<f64> = extract_number_after(&trader_report, "入场");
+
+            let check = rules::RuleEngine::check(
+                &indicators,
+                &objective_score,
+                trader_action,
+                trader_stop_loss,
+                trader_entry_price,
+            );
+
+            let mut bb = blackboard.write().await;
+            bb.set_state("rule_check.violations", &check.violations.join("; "));
+            bb.set_state("rule_check.corrections", &check.corrections.join("; "));
+            if let Some(ref force) = check.force_signal {
+                bb.set_state("rule_check.force_signal", force);
+            }
+            let result_text = if check.passed {
+                "✅ 通过: 交易方案符合严进规则".to_string()
+            } else {
+                format!(
+                    "❌ 违规: {} | 修正: {}",
+                    check.violations.join("; "),
+                    check.corrections.join("; ")
+                )
+            };
+            bb.set_state("rule_check.result", &result_text);
+
+            if !check.passed {
+                tracing::warn!("[严进规则] 违规: {}", check.violations.join("; "));
+            }
+
+            result_text
+        };
 
         let decision =
             Self::phase_5_decision(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
@@ -645,4 +726,15 @@ impl StockAnalysisOrchestrator {
 
         Err("无法从输出中提取有效 JSON 决策".into())
     }
+}
+
+/// 从文本中提取关键字后面的数字
+fn extract_number_after(text: &str, keyword: &str) -> Option<f64> {
+    text.find(keyword)
+        .and_then(|i| text[i + keyword.len()..].split_whitespace().next())
+        .and_then(|s| {
+            s.trim_matches(|c: char| !c.is_ascii_digit() && c != '.')
+                .parse()
+                .ok()
+        })
 }

@@ -724,3 +724,69 @@ pub async fn list_custom_analysts(
     let mgr = AnalystPluginManager::new("agency_experts/stock-analysis");
     Ok(mgr.discover_custom_analysts())
 }
+
+/// 生成股票分析 HTML 报告
+#[tauri::command]
+pub async fn generate_stock_report(
+    state: State<'_, AppState>,
+    analysis_id: String,
+) -> Result<String, String> {
+    let record = stock_analyses::Entity::find_by_id(&analysis_id)
+        .one(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "分析记录不存在".to_string())?;
+
+    // 生成报告路径
+    let reports_dir = std::path::Path::new("reports");
+    std::fs::create_dir_all(reports_dir).map_err(|e| e.to_string())?;
+
+    let filename = format!("{}_{}.html", record.stock_code, record.analysis_date.replace('-', ""));
+    let filepath = reports_dir.join(&filename);
+
+    // 获取行情和K线数据
+    let quote = state
+        .astock_client
+        .get_quote(&record.stock_code)
+        .await
+        .map_err(|e| format!("获取行情失败: {}", e))?;
+
+    let klines = state
+        .astock_client
+        .get_klines(&record.stock_code, "daily", 120)
+        .await
+        .map_err(|e| format!("获取K线失败: {}", e))?;
+
+    // 计算技术指标和客观评分
+    let indicators =
+        axagent_astock_data::indicators::compute_indicators(&record.stock_code, &klines);
+    let score = axagent_stock_analysis::scoring::ScoringEngine::score(&indicators, quote.price);
+
+    let quote_json = serde_json::to_string(&quote).unwrap_or_default();
+    let score_json = serde_json::to_string(&score).unwrap_or_default();
+    let decision_json = record.decision_json.clone().unwrap_or_default();
+
+    // 从 blackboard_snapshot 尝试恢复分析师报告
+    let analyst_reports: std::collections::HashMap<String, String> = record
+        .blackboard_snapshot
+        .as_ref()
+        .and_then(|snap| serde_json::from_str(snap).ok())
+        .unwrap_or_default();
+
+    let html = axagent_stock_analysis::report::generate_html_report(
+        &record.stock_code,
+        &record.stock_name,
+        &record.analysis_date,
+        &quote_json,
+        &indicators,
+        &score_json,
+        &analyst_reports,
+        &decision_json,
+        "",
+        "",
+    );
+
+    std::fs::write(&filepath, &html).map_err(|e| e.to_string())?;
+
+    Ok(filepath.to_string_lossy().to_string())
+}

@@ -1,4 +1,5 @@
 mod error;
+pub mod indicators;
 pub mod mcp_tools;
 mod types;
 mod vendors;

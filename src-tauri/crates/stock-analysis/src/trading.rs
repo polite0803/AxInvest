@@ -6,7 +6,6 @@
 //! 3. 持仓汇总（加权平均成本 + 实时盈亏）
 //! 4. 交易历史查询
 
-use chrono::NaiveDate;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Set,
@@ -460,13 +459,9 @@ async fn upsert_position(
     Ok(())
 }
 
-/// 判断是否为 A 股交易日（简化版：排除周六、周日）
+/// 判断是否为 A 股交易日（委托给 astock-data 的交易日历，含节假日和调休）
 fn is_trading_day(date_str: &str) -> bool {
-    if let Ok(d) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-        use chrono::Datelike;
-        let weekday = d.weekday();
-        weekday != chrono::Weekday::Sat && weekday != chrono::Weekday::Sun
-    } else {
-        true // 无法解析时默认是交易日
-    }
+    chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+        .map(|d| axagent_astock_data::calendar::is_trading_day(&d))
+        .unwrap_or(true)
 }

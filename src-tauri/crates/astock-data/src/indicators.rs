@@ -97,6 +97,35 @@ fn stddev(data: &[f64], mean: f64) -> f64 {
 
 /// Compute all technical indicators from K-line data
 pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndicators {
+    if klines.is_empty() {
+        return TechnicalIndicators {
+            stock_code: stock_code.to_string(),
+            latest_date: String::new(),
+            ma5: 0.0,
+            ma10: 0.0,
+            ma20: 0.0,
+            ma60: 0.0,
+            ma_alignment: "无数据".to_string(),
+            macd_dif: 0.0,
+            macd_dea: 0.0,
+            macd_bar: 0.0,
+            macd_signal: "无数据".to_string(),
+            rsi6: 50.0,
+            rsi12: 50.0,
+            rsi24: 50.0,
+            rsi_signal: "无数据".to_string(),
+            boll_upper: 0.0,
+            boll_mid: 0.0,
+            boll_lower: 0.0,
+            boll_position: "无数据".to_string(),
+            bias_ma5: 0.0,
+            bias_ma20: 0.0,
+            volume_ratio: 1.0,
+            volume_signal: "无数据".to_string(),
+            support_levels: vec![],
+            resistance_levels: vec![],
+        };
+    }
     let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
     let volumes: Vec<f64> = klines.iter().map(|k| k.volume).collect();
     let latest = klines.last();

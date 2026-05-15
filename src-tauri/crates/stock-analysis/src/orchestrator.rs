@@ -176,7 +176,20 @@ impl StockAnalysisOrchestrator {
         };
 
         // ── NEW ②: 100分客观评分 ──
-        let objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
+        let mut objective_score =
+            scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
+
+        // 应用基本面修正
+        let pe = raw.quote.pe;
+        let pb = raw.quote.pb;
+        let roe = raw.financials.first().and_then(|f| f.roe);
+        scoring::ScoringEngine::apply_fundamental_adjustment(
+            &mut objective_score,
+            pe,
+            pb,
+            roe,
+        );
+
         let score_json = serde_json::to_string(&objective_score).unwrap_or_default();
         {
             let mut bb = blackboard.write().await;
@@ -284,6 +297,25 @@ impl StockAnalysisOrchestrator {
         let dragon_tiger_json = serde_json::to_string(&raw.dragon_tiger).unwrap_or_default();
         let lockup_json = serde_json::to_string(&raw.lockup).unwrap_or_default();
 
+        // 补充数据源序列化
+        let margin_json = raw
+            .margin_data
+            .as_ref()
+            .map(|m| serde_json::to_string(m).unwrap_or_default())
+            .unwrap_or_default();
+        let northbound_json = raw
+            .north_bound
+            .as_ref()
+            .map(|n| serde_json::to_string(n).unwrap_or_default())
+            .unwrap_or_default();
+        let sector_json = raw
+            .sector_info
+            .as_ref()
+            .map(|s| serde_json::to_string(s).unwrap_or_default())
+            .unwrap_or_default();
+        let trades_json = serde_json::to_string(&raw.shareholder_trades).unwrap_or_default();
+        let dividends_json = serde_json::to_string(&raw.dividend_records).unwrap_or_default();
+
         {
             let mut bb = blackboard.write().await;
             bb.set_state("raw.klines", &klines_json);
@@ -292,6 +324,11 @@ impl StockAnalysisOrchestrator {
             bb.set_state("raw.money_flow", &money_flow_json);
             bb.set_state("raw.dragon_tiger", &dragon_tiger_json);
             bb.set_state("raw.lockup", &lockup_json);
+            bb.set_state("raw.margin_data", &margin_json);
+            bb.set_state("raw.north_bound", &northbound_json);
+            bb.set_state("raw.sector_info", &sector_json);
+            bb.set_state("raw.shareholder_trades", &trades_json);
+            bb.set_state("raw.dividend_records", &dividends_json);
         }
 
         let _ = events.send(AnalysisEvent::DataLoaded {

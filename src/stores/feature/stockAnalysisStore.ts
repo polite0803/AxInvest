@@ -221,6 +221,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }));
           break;
         }
+        case "InvestmentPlan": {
+          const { plan } = payload as Record<string, string>;
+          set((s) => ({
+            analystReports: { ...s.analystReports, "investment-plan": plan },
+          }));
+          break;
+        }
+        // NOTE: payload 与 StockDecision 的结构由 serde(rename_all="camelCase") 保证一致
+        // 若后端修改 Decision 变体字段，此处需同步更新
         case "Decision":
           set({ decision: payload as unknown as StockDecision, status: "completed" });
           break;

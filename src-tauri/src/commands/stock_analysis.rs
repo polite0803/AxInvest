@@ -1003,7 +1003,8 @@ pub async fn discover_stock_candidates(
 #[tauri::command]
 pub async fn get_market_status() -> Result<serde_json::Value, String> {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d").unwrap_or_default();
+    let date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
+        .unwrap_or_else(|_| chrono::Utc::now().date_naive());
     Ok(serde_json::json!({
         "isTradingDay": axagent_astock_data::calendar::is_trading_day(&date),
         "isTradingTime": axagent_astock_data::calendar::is_trading_time(),

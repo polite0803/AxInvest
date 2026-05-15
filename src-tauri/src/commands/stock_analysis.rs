@@ -11,6 +11,8 @@ use axagent_stock_analysis::backtest::{
 use axagent_stock_analysis::decision::{AgentRunner, AnalysisConfig, AnalysisEvent};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::monitor::MonitorConfig;
+use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
+use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
@@ -1066,4 +1068,27 @@ pub async fn optimize_scoring_weights(
     state: State<'_, AppState>,
 ) -> Result<axagent_stock_analysis::decision::ScoringWeights, String> {
     axagent_stock_analysis::backtest::optimize_weights(&state.astock_client, &state.sea_db).await
+}
+
+// ── Portfolio Risk ──
+
+/// 获取组合风险指标
+#[tauri::command]
+pub async fn get_portfolio_risk(
+    state: State<'_, AppState>,
+) -> Result<PortfolioRiskMetrics, String> {
+    let engine = TradingEngine::new(
+        Arc::new(state.sea_db.clone()),
+        state.astock_client.clone(),
+    );
+    let positions = engine.get_positions().await?;
+    Ok(PortfolioRiskManager::compute_from_positions(&positions))
+}
+
+// ── Position Limits ──
+
+/// 获取全局仓位限制配置
+#[tauri::command]
+pub async fn get_position_limits() -> Result<PositionLimits, String> {
+    Ok(PositionLimits::default())
 }

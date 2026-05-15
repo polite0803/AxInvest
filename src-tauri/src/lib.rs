@@ -920,6 +920,8 @@ pub fn run() {
             commands::stock_analysis::get_market_status,
             // Daily review
             commands::stock_analysis::generate_daily_review,
+            // Scoring weights optimization
+            commands::stock_analysis::optimize_scoring_weights,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");

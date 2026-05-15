@@ -176,7 +176,7 @@ impl StockAnalysisOrchestrator {
         };
 
         // ── NEW ②: 100分客观评分 ──
-        let objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price);
+        let objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
         let score_json = serde_json::to_string(&objective_score).unwrap_or_default();
         {
             let mut bb = blackboard.write().await;

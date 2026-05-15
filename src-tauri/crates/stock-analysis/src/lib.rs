@@ -5,6 +5,8 @@ pub mod monitor;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod plugin;
+pub mod portfolio_risk;
+pub mod position_limits;
 pub mod prompts;
 pub mod quality;
 pub mod report;

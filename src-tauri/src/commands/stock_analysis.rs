@@ -1035,7 +1035,11 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
             let desc = format!(
                 "{}触发: 价格{}{:.2}(目标{:.2})",
                 alert.condition,
-                if alert.condition == "above" { "≥" } else { "≤" },
+                if alert.condition == "above" {
+                    "≥"
+                } else {
+                    "≤"
+                },
                 state
                     .astock_client
                     .get_quote(&alert.stock_code)

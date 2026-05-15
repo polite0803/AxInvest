@@ -152,9 +152,7 @@ impl TradingEngine {
 
             if let Some(analysis) = last_analysis {
                 if let Some(ref decision_json) = analysis.decision_json {
-                    if let Ok(decision) =
-                        serde_json::from_str::<serde_json::Value>(decision_json)
-                    {
+                    if let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json) {
                         let suggested_action = decision["action"].as_str().unwrap_or("");
                         let suggested_target = decision["targetPrice"].as_f64();
 
@@ -383,15 +381,13 @@ impl TradingEngine {
 
         if let Some(ref decision_json) = last_analysis.decision_json {
             if let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json) {
-                comparison.analysis_action =
-                    decision["action"].as_str().unwrap_or("").to_string();
+                comparison.analysis_action = decision["action"].as_str().unwrap_or("").to_string();
                 comparison.analysis_target = decision["targetPrice"].as_f64();
                 comparison.analysis_stop = decision["stopLoss"].as_f64();
 
                 if let Some(target) = comparison.analysis_target {
                     if target != 0.0 {
-                        comparison.target_deviation_pct =
-                            ((trade.price - target) / target) * 100.0;
+                        comparison.target_deviation_pct = ((trade.price - target) / target) * 100.0;
                     }
                 }
             }

@@ -38,6 +38,8 @@ pub struct MonitorAlert {
     pub current_price: f64,
     pub change_pct: f64,
     pub timestamp: String,
+    /// 操作建议（如 "考虑减仓50%，现价低于止损"）
+    pub suggested_action: Option<String>,
 }
 
 /// 实时监控引擎
@@ -134,6 +136,10 @@ impl RealtimeMonitor {
         // 止损检查
         if let Some(stop) = config.stop_loss {
             if quote.price <= stop {
+                let suggested = Some(format!(
+                    "建议: 考虑减仓50%，现价{:.2}低于止损{:.2}",
+                    quote.price, stop
+                ));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -145,6 +151,7 @@ impl RealtimeMonitor {
                     current_price: quote.price,
                     change_pct: quote.change_pct,
                     timestamp: now.clone(),
+                    suggested_action: suggested,
                 });
             }
         }
@@ -152,6 +159,10 @@ impl RealtimeMonitor {
         // 止盈检查
         if let Some(tp) = config.take_profit {
             if quote.price >= tp {
+                let suggested = Some(format!(
+                    "建议: 考虑卖出50%锁利，现价{:.2}≥止盈{:.2}",
+                    quote.price, tp
+                ));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -163,6 +174,7 @@ impl RealtimeMonitor {
                     current_price: quote.price,
                     change_pct: quote.change_pct,
                     timestamp: now.clone(),
+                    suggested_action: suggested,
                 });
             }
         }
@@ -170,6 +182,10 @@ impl RealtimeMonitor {
         // 压力位突破
         if let Some(res) = config.resistance_break {
             if quote.price >= res {
+                let suggested = Some(format!(
+                    "建议: 压力位突破{:.2}，关注持续性和量能配合",
+                    res
+                ));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -181,6 +197,7 @@ impl RealtimeMonitor {
                     current_price: quote.price,
                     change_pct: quote.change_pct,
                     timestamp: now.clone(),
+                    suggested_action: suggested,
                 });
             }
         }
@@ -188,6 +205,10 @@ impl RealtimeMonitor {
         // 支撑位跌破
         if let Some(sup) = config.support_break {
             if quote.price <= sup {
+                let suggested = Some(format!(
+                    "建议: 支撑位{:.2}跌破，考虑减仓或设立更严格止损",
+                    sup
+                ));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -199,6 +220,7 @@ impl RealtimeMonitor {
                     current_price: quote.price,
                     change_pct: quote.change_pct,
                     timestamp: now.clone(),
+                    suggested_action: suggested,
                 });
             }
         }
@@ -207,6 +229,10 @@ impl RealtimeMonitor {
         if let Some(pct) = config.change_pct_alert {
             if quote.change_pct.abs() >= pct {
                 let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
+                let suggested = Some(format!(
+                    "建议: 异常{}幅{:.2}%，关注消息面和资金流向",
+                    dir, quote.change_pct
+                ));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -218,6 +244,7 @@ impl RealtimeMonitor {
                     current_price: quote.price,
                     change_pct: quote.change_pct,
                     timestamp: now.clone(),
+                    suggested_action: suggested,
                 });
             }
         }
@@ -225,6 +252,10 @@ impl RealtimeMonitor {
         // 换手率异常
         if let Some(ratio) = config.turnover_rate_alert {
             if quote.turnover_rate >= ratio {
+                let suggested = Some(format!(
+                    "建议: 换手率异常{:.2}%，关注主力进出痕迹",
+                    quote.turnover_rate
+                ));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -236,6 +267,7 @@ impl RealtimeMonitor {
                     current_price: quote.price,
                     change_pct: quote.change_pct,
                     timestamp: now.clone(),
+                    suggested_action: suggested,
                 });
             }
         }

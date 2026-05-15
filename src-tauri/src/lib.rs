@@ -924,6 +924,9 @@ pub fn run() {
             commands::stock_analysis::generate_daily_review,
             // Scoring weights optimization
             commands::stock_analysis::optimize_scoring_weights,
+            // Portfolio risk + position limits
+            commands::stock_analysis::get_portfolio_risk,
+            commands::stock_analysis::get_position_limits,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");

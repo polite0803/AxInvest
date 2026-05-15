@@ -62,18 +62,59 @@ impl AStockClient {
         cache.insert(key, (expiry, value));
     }
 
-    /// 获取实时行情（腾讯财经）— 30s 缓存
+    /// 获取实时行情（腾讯财经为主，东方财富为降级备选）— 30s 缓存
     pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let cache_key = format!("quote:{stock_code}");
         if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(quote) = serde_json::from_str(&cached) {
+            if let Ok(quote) = serde_json::from_str::<StockQuote>(&cached) {
                 return Ok(quote);
             }
         }
-        let result = self.tencent.get_quote(stock_code).await?;
-        let json = serde_json::to_string(&result).unwrap_or_default();
-        self.cache_set(cache_key, json, 30).await;
-        Ok(result)
+
+        // P0: 腾讯财经
+        match self.tencent.get_quote(stock_code).await {
+            Ok(quote) => {
+                let json = serde_json::to_string(&quote).unwrap_or_default();
+                self.cache_set(cache_key, json, 30).await;
+                return Ok(quote);
+            }
+            Err(e) => tracing::warn!("[降级] 腾讯财经行情失败: {e}, 尝试东方财富..."),
+        }
+
+        // P1: 东方财富 fallback（通过 eastmoney vendor）
+        match self.eastmoney.get_klines(stock_code, "daily", 1).await {
+            Ok(klines) if !klines.is_empty() => {
+                let k = &klines[0];
+                let quote = StockQuote {
+                    code: stock_code.to_string(),
+                    name: stock_code.to_string(), // name unknown from kline alone
+                    price: k.close,
+                    open: k.open,
+                    high: k.high,
+                    low: k.low,
+                    volume: k.volume,
+                    amount: k.amount,
+                    change_pct: (k.close - k.open) / k.open * 100.0,
+                    turnover_rate: k.turnover_rate.unwrap_or(0.0),
+                    pe: None,
+                    pb: None,
+                    total_mv: None,
+                    limit_up: None,
+                    limit_down: None,
+                    is_st: false,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                };
+                let json = serde_json::to_string(&quote).unwrap_or_default();
+                self.cache_set(cache_key, json, 30).await;
+                return Ok(quote);
+            }
+            _ => tracing::warn!("[降级] 东方财富也失败，所有行情数据源不可用"),
+        }
+
+        Err(DataError::VendorError {
+            vendor: "all".into(),
+            message: "所有行情数据源均不可用，请稍后重试".into(),
+        })
     }
 
     /// 获取K线数据（东方财富）— 300s 缓存

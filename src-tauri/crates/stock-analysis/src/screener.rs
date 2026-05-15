@@ -1,3 +1,5 @@
+#![allow(clippy::unnecessary_sort_by)]
+
 use axagent_astock_data::AStockClient;
 
 /// 筛选条件

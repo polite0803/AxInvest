@@ -147,6 +147,7 @@ impl TradingEngine {
     ///
     /// - 买入：更新持仓（加权平均成本），若已持有则合并且权重平均成本
     /// - 卖出：计算已实现盈亏，减仓或清仓
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_trade(
         &self,
         stock_code: &str,

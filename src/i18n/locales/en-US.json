@@ -2874,6 +2874,9 @@
       "agents": "Agents",
       "builtin": "Built-in",
       "bundled": "Bundled",
+      "codebuddy": "CodeBuddy",
+      "trae": "Trae",
+      "workbuddy": "WorkBuddy",
       "project": "Project"
     },
     "enabled": "Enabled",
@@ -5402,7 +5405,8 @@
     "continue": "Continue",
     "error": "Error",
     "citations": "Citations",
-    "copyReport": "Copy Report"
+    "copyReport": "Copy Report",
+    "mockFinding": "Mock Research Finding"
   },
   "reportViewer": {
     "noReport": "No report generated yet",

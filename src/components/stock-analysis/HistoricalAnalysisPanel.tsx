@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { invoke } from "@/lib/invoke";
-import { Card, Collapse, Tag, Spin, Typography } from "antd";
+import { Card, Collapse, Spin, Tag, Typography } from "antd";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface Props {
@@ -28,7 +28,7 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
     setLoading(false);
   };
 
-  if (loading) return <Spin />;
+  if (loading) { return <Spin />; }
 
   if (!snapshot) {
     return (
@@ -77,25 +77,25 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
           })),
           ...(debateEntries.length > 0
             ? [
-                {
-                  key: "debates",
-                  label: t("stockAnalysis.debateHistory"),
-                  children: (
-                    <pre
-                      className="text-xs"
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        maxHeight: 300,
-                        overflow: "auto",
-                      }}
-                    >
+              {
+                key: "debates",
+                label: t("stockAnalysis.debateHistory"),
+                children: (
+                  <pre
+                    className="text-xs"
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      maxHeight: 300,
+                      overflow: "auto",
+                    }}
+                  >
                       {debateEntries
                         .map(([k, v]) => `### ${k}\n${v}`)
                         .join("\n\n")}
-                    </pre>
-                  ),
-                },
-              ]
+                  </pre>
+                ),
+              },
+            ]
             : []),
         ]}
       />

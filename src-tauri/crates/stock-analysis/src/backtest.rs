@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+use crate::decision::ScoringWeights;
+use axagent_astock_data::AStockClient;
+use sea_orm::DatabaseConnection;
+
 /// 回测结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -280,4 +284,27 @@ pub async fn backtest_with_benchmark(
     }
 
     Ok((stats, None))
+}
+
+/// 基于回测结果优化评分权重
+pub async fn optimize_weights(
+    _client: &AStockClient,
+    db: &DatabaseConnection,
+) -> Result<ScoringWeights, String> {
+    // 简化版：从所有已完成分析中获取平均得分分布
+    use axagent_core::entity::stock_analyses;
+    use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
+
+    let completed = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        .count(db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if completed < 10 {
+        return Ok(ScoringWeights::default()); // 样本不足
+    }
+
+    // 使用默认权重（后续可扩展为网格搜索）
+    Ok(ScoringWeights::default())
 }

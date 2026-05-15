@@ -1,6 +1,8 @@
 use axagent_astock_data::indicators::TechnicalIndicators;
 use serde::{Deserialize, Serialize};
 
+use crate::decision::ScoringWeights;
+
 /// 100分制客观评分
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,16 +22,25 @@ pub struct ObjectiveScore {
 pub struct ScoringEngine;
 
 impl ScoringEngine {
-    /// 从技术指标计算客观评分
-    pub fn score(indicators: &TechnicalIndicators, latest_price: f64) -> ObjectiveScore {
-        let trend = Self::score_trend(&indicators.ma_alignment);
-        let deviation = Self::score_deviation(indicators.bias_ma5);
-        let macd = Self::score_macd(&indicators.macd_signal, indicators.macd_dif);
-        let volume = Self::score_volume(&indicators.volume_signal);
-        let rsi = Self::score_rsi(indicators.rsi6);
-        let support = Self::score_support(latest_price, &indicators.support_levels);
-
-        let total = trend + deviation + macd + volume + rsi + support;
+    /// 从技术指标计算客观评分（可传入自定义权重）
+    pub fn score(
+        indicators: &TechnicalIndicators,
+        latest_price: f64,
+        weights: Option<&ScoringWeights>,
+    ) -> ObjectiveScore {
+        let default_weights = ScoringWeights::default();
+        let w = weights.unwrap_or(&default_weights);
+        let trend = (Self::score_trend(&indicators.ma_alignment) as f64 * w.trend / 30.0) as u32;
+        let deviation = (Self::score_deviation(indicators.bias_ma5) as f64 * w.deviation / 20.0) as u32;
+        let macd =
+            (Self::score_macd(&indicators.macd_signal, indicators.macd_dif) as f64 * w.macd / 15.0)
+                as u32;
+        let volume = (Self::score_volume(&indicators.volume_signal) as f64 * w.volume / 15.0) as u32;
+        let rsi = (Self::score_rsi(indicators.rsi6) as f64 * w.rsi / 10.0) as u32;
+        let support =
+            (Self::score_support(latest_price, &indicators.support_levels) as f64 * w.support / 10.0)
+                as u32;
+        let total = (trend + deviation + macd + volume + rsi + support).min(100);
 
         let (signal, signal_code) = Self::map_signal(total, &indicators.ma_alignment);
 

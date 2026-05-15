@@ -62,7 +62,7 @@ impl AStockClient {
 
     /// 获取实时行情（腾讯财经）— 30s 缓存
     pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
-        let cache_key = format!("quote:{}", stock_code);
+        let cache_key = format!("quote:{stock_code}");
         if let Some(cached) = self.cache_get(&cache_key).await {
             if let Ok(quote) = serde_json::from_str(&cached) {
                 return Ok(quote);
@@ -81,7 +81,7 @@ impl AStockClient {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        let cache_key = format!("klines:{}:{}:{}", stock_code, period, limit);
+        let cache_key = format!("klines:{stock_code}:{period}:{limit}");
         if let Some(cached) = self.cache_get(&cache_key).await {
             if let Ok(klines) = serde_json::from_str(&cached) {
                 return Ok(klines);
@@ -205,51 +205,51 @@ impl AStockClient {
         );
 
         let quote = quote_r.map_err(|e| {
-            tracing::warn!("quote failed: {}", e);
+            tracing::warn!("quote failed: {e}");
             e
-        })?; // quote is required
+        })?;
         let klines = klines_r.unwrap_or_else(|e| {
-            tracing::warn!("klines failed: {}", e);
+            tracing::warn!("klines failed: {e}");
             vec![]
         });
         let financials = financials_r.unwrap_or_else(|e| {
-            tracing::warn!("financials failed: {}", e);
+            tracing::warn!("financials failed: {e}");
             vec![]
         });
         let news = news_r.unwrap_or_else(|e| {
-            tracing::warn!("news failed: {}", e);
+            tracing::warn!("news failed: {e}");
             vec![]
         });
         let money_flow = money_flow_r.unwrap_or_else(|e| {
-            tracing::warn!("money_flow failed: {}", e);
+            tracing::warn!("money_flow failed: {e}");
             None
         });
         let dragon_tiger = dragon_tiger_r.unwrap_or_else(|e| {
-            tracing::warn!("dragon_tiger failed: {}", e);
+            tracing::warn!("dragon_tiger failed: {e}");
             vec![]
         });
         let lockup = lockup_r.unwrap_or_else(|e| {
-            tracing::warn!("lockup failed: {}", e);
+            tracing::warn!("lockup failed: {e}");
             vec![]
         });
         let margin_data = margin_r.unwrap_or_else(|e| {
-            tracing::warn!("margin_data failed: {}", e);
+            tracing::warn!("margin_data failed: {e}");
             None
         });
         let north_bound = north_bound_r.unwrap_or_else(|e| {
-            tracing::warn!("north_bound failed: {}", e);
+            tracing::warn!("north_bound failed: {e}");
             None
         });
         let sector_info = sector_r.unwrap_or_else(|e| {
-            tracing::warn!("sector_info failed: {}", e);
+            tracing::warn!("sector_info failed: {e}");
             None
         });
         let shareholder_trades = shareholder_r.unwrap_or_else(|e| {
-            tracing::warn!("shareholder_trades failed: {}", e);
+            tracing::warn!("shareholder_trades failed: {e}");
             vec![]
         });
         let dividend_records = dividend_r.unwrap_or_else(|e| {
-            tracing::warn!("dividend_records failed: {}", e);
+            tracing::warn!("dividend_records failed: {e}");
             vec![]
         });
 

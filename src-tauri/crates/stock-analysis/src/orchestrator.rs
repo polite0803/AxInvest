@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -10,7 +11,6 @@ use crate::decision::{AgentRunner, AnalysisConfig, AnalysisEvent, StockDecision}
 use crate::pipeline;
 use crate::prompts;
 
-/// 7 个分析师专家 ID
 pub const ANALYST_IDS: &[&str] = &[
     "market-analyst",
     "sentiment-analyst",
@@ -21,11 +21,9 @@ pub const ANALYST_IDS: &[&str] = &[
     "lockup-watcher",
 ];
 
-/// 辩论角色
 const BULL_ID: &str = "bull-researcher";
 const BEAR_ID: &str = "bear-researcher";
 
-/// 风控评估员
 const RISK_IDS: &[&str] = &[
     "aggressive-debator",
     "conservative-debator",
@@ -33,25 +31,15 @@ const RISK_IDS: &[&str] = &[
 ];
 const RISK_MANAGER_ID: &str = "research-manager";
 
-/// 决策角色
 const PORTFOLIO_MANAGER_ID: &str = "portfolio-manager";
 
-// ── 系统提示（回退）──
-// 当 Markdown 文件未找到时使用的简化回退提示词
-
 fn fallback_prompt(expert_id: &str) -> String {
-    format!("你是{}。基于提供的数据进行分析。只输出JSON格式结果。", expert_id)
+    format!("你是{expert_id}。基于提供的数据进行分析。只输出JSON格式结果。")
 }
 
-/// 股票分析编排器 — 5 阶段执行
 pub struct StockAnalysisOrchestrator;
 
 impl StockAnalysisOrchestrator {
-    /// 运行完整的 5 阶段分析
-    ///
-    /// * `prompts` - 从 Markdown 文件加载的专家提示词映射
-    /// * `runner` - LLM Agent 执行器，`None` 时生成占位报告
-    /// * `cancel_token` - 取消令牌，检查于各阶段之间
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         data_client: &AStockClient,
@@ -65,12 +53,9 @@ impl StockAnalysisOrchestrator {
         prompts: HashMap<String, String>,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Result<StockDecision, String> {
-        // 将提示词包装为 Arc 以便在 spawn 任务中共享
         let prompts = Arc::new(prompts);
-        // 验证配置
-        config.validate().map_err(|e| format!("配置无效: {}", e))?;
+        config.validate().map_err(|e| format!("配置无效: {e}"))?;
 
-        // 写入基本元数据
         {
             let mut bb = blackboard.write().await;
             bb.set_state("stock_code", &stock_code);
@@ -84,7 +69,6 @@ impl StockAnalysisOrchestrator {
             date: date.clone(),
         });
 
-        // ── 阶段 1: 数据加载 ──
         Self::phase_1_load_data(data_client, &stock_code, &config, &blackboard, &events)
             .await
             .inspect_err(|e| {
@@ -94,15 +78,12 @@ impl StockAnalysisOrchestrator {
                 });
             })?;
 
-        // 取消检查
         if Self::is_cancelled(&cancel_token) {
             return Err("分析已取消".into());
         }
 
-        // ── 阶段 2: 7 位分析师并行 ──
         Self::phase_2_analysts(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
-        // ── 阶段 3: 多空辩论 ──
         Self::phase_3_debate(
             &runner,
             &blackboard,
@@ -113,10 +94,8 @@ impl StockAnalysisOrchestrator {
         )
         .await?;
 
-        // ── 阶段 4: 风险评估 ──
         Self::phase_4_risk(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
-        // ── 阶段 5: 投资决策 ──
         let decision =
             Self::phase_5_decision(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
@@ -125,16 +104,12 @@ impl StockAnalysisOrchestrator {
         Ok(decision)
     }
 
-    // ── 取消检查 ──
-
     fn is_cancelled(token: &Option<Arc<AtomicBool>>) -> bool {
         token
             .as_ref()
             .map(|t| t.load(Ordering::Relaxed))
             .unwrap_or(false)
     }
-
-    // ── 阶段 1 ──
 
     async fn phase_1_load_data(
         data_client: &AStockClient,
@@ -146,7 +121,7 @@ impl StockAnalysisOrchestrator {
         let raw = data_client
             .fetch_all(stock_code, &config.kline_period, config.kline_limit, config.news_limit)
             .await
-            .map_err(|e| format!("数据获取失败: {}", e))?;
+            .map_err(|e| format!("数据获取失败: {e}"))?;
 
         let klines_json = serde_json::to_string(&raw.klines).unwrap_or_default();
         let financials_json = serde_json::to_string(&raw.financials).unwrap_or_default();
@@ -177,8 +152,6 @@ impl StockAnalysisOrchestrator {
         Ok(raw)
     }
 
-    // ── 阶段 2: 7 位分析师并行执行 ──
-
     async fn phase_2_analysts(
         runner: &Option<Arc<dyn AgentRunner>>,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
@@ -205,13 +178,13 @@ impl StockAnalysisOrchestrator {
             match handle.await {
                 Ok(Ok(report)) => {
                     tracing::info!("分析师报告生成成功");
-                    drop(report); // 已在 run_single_analyst 中发送事件
+                    drop(report);
                 },
                 Ok(Err(e)) => {
-                    tracing::warn!("分析师执行失败: {}", e);
+                    tracing::warn!("分析师执行失败: {e}");
                 },
                 Err(e) => {
-                    tracing::warn!("分析师 task panic: {}", e);
+                    tracing::warn!("分析师 task panic: {e}");
                 },
             }
         }
@@ -227,7 +200,6 @@ impl StockAnalysisOrchestrator {
         prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<String, String> {
-        // 进度通知
         let _ = events.send(AnalysisEvent::AnalystProgress {
             expert_id: expert_id.to_string(),
             status: "正在分析...".into(),
@@ -238,13 +210,11 @@ impl StockAnalysisOrchestrator {
             return Err("已取消".into());
         }
 
-        // 构建数据上下文
         let user_prompt = pipeline::build_analyst_context(expert_id, blackboard).await;
         let sys_prompt = prompts::get_analyst_context(expert_id, prompts)
             .unwrap_or_else(|| fallback_prompt(expert_id));
 
         let report = if let Some(ref r) = runner {
-            // 通过 AgentRunner 执行 LLM 分析
             let _ = events.send(AnalysisEvent::AnalystProgress {
                 expert_id: expert_id.to_string(),
                 status: "调用LLM...".into(),
@@ -252,17 +222,14 @@ impl StockAnalysisOrchestrator {
             });
             r.run_agent(expert_id, &sys_prompt, &user_prompt).await?
         } else {
-            // 无 runner 时生成结构化占位报告
             Self::placeholder_analyst_report(expert_id)
         };
 
-        // 写入 Blackboard 并发送事件
         pipeline::write_report(expert_id, &report, blackboard, events).await;
 
         Ok(report)
     }
 
-    /// 当 AgentRunner 未注入时，生成包含数据摘要的占位报告
     fn placeholder_analyst_report(expert_id: &str) -> String {
         let label = match expert_id {
             "market-analyst" => "技术面分析",
@@ -275,27 +242,9 @@ impl StockAnalysisOrchestrator {
             _ => "分析",
         };
         format!(
-            r#"{{"expert":"{}","type":"{}","summary":"占位报告 — AgentRunner 未注入。数据已加载至 Blackboard，待 LLM 集成后生成真实分析。","signals":[],"risk_flags":[]}}"#,
-            expert_id, label
+            r#"{{"expert":"{expert_id}","type":"{label}","summary":"占位报告 — AgentRunner 未注入。数据已加载至 Blackboard，待 LLM 集成后生成真实分析。","signals":[],"risk_flags":[]}}"#
         )
     }
-
-    // ── 阶段 3: 多空辩论 ──
-    //
-    // 设计说明：为何未使用 axagent_runtime::adversarial_debate::DebateManager？
-    //
-    // 共享的 DebateManager 是一个无 LLM 能力的纯数据结构——它接收外部传入的
-    // argument/strength 值并跟踪回合、计算得分、检测收敛。其 evaluate_strength()
-    // 基于关键词（"data"/"because"）的启发式规则，不适用于需要深度推理的金融分析场景。
-    //
-    // 本编排器的辩论阶段需要：
-    // 1. 每轮调用 LLM 生成 bull/bear 论证（DebateManager 不支持）
-    // 2. 将分析师报告和对手上一轮论证作为丰富上下文注入 LLM prompt
-    // 3. 通过 SharedBlackboard 存储和共享辩论状态
-    // 4. 通过 AnalysisEvent broadcast 向 UI 推送辩论进度
-    //
-    // 因此，保留自定义辩论循环是更合理的选择。DebateManager 定位为通用多议题
-    // 辩论跟踪器，适用于不需要 LLM 推理的简单辩论计分场景。
 
     async fn phase_3_debate(
         runner: &Option<Arc<dyn AgentRunner>>,
@@ -320,11 +269,10 @@ impl StockAnalysisOrchestrator {
 
             let _ = events.send(AnalysisEvent::AnalystProgress {
                 expert_id: "debate".into(),
-                status: format!("辩论第 {}/{} 轮", round, max_rounds),
-                progress_pct: ((round as u8 * 100) / max_rounds as u8),
+                status: format!("辩论第 {round}/{max_rounds} 轮"),
+                progress_pct: (round * 100 / max_rounds).min(100) as u8,
             });
 
-            // 多方论证：读取空方上一轮论点作为反驳依据
             let bull_context = Self::build_debate_context(
                 BULL_ID,
                 blackboard,
@@ -336,21 +284,19 @@ impl StockAnalysisOrchestrator {
                 r.run_agent(BULL_ID, &sys_bull, &bull_context).await?
             } else {
                 format!(
-                    r#"{{"round":{},"role":"bull","argument":"多方辩论占位 — 第{}轮","key_points":["技术面支持","基本面良好"],"confidence":0.6}}"#,
-                    round, round
+                    r#"{{"round":{round},"role":"bull","argument":"多方辩论占位 — 第{round}轮","key_points":["技术面支持","基本面良好"],"confidence":0.6}}"#
                 )
             };
             bull_prev = bull_arg.clone();
             {
                 let mut bb = blackboard.write().await;
-                bb.set_state(&format!("debate.bull.round_{}", round), &bull_arg);
+                bb.set_state(&format!("debate.bull.round_{round}"), &bull_arg);
             }
 
             if Self::is_cancelled(cancel_token) {
                 return Err("已取消".into());
             }
 
-            // 空方论证：读取多方本轮论点
             let bear_context =
                 Self::build_debate_context(BEAR_ID, blackboard, Some(&bull_arg)).await;
 
@@ -358,14 +304,13 @@ impl StockAnalysisOrchestrator {
                 r.run_agent(BEAR_ID, &sys_bear, &bear_context).await?
             } else {
                 format!(
-                    r#"{{"round":{},"role":"bear","argument":"空方辩论占位 — 第{}轮","key_points":["估值偏高","政策不确定性"],"confidence":0.5}}"#,
-                    round, round
+                    r#"{{"round":{round},"role":"bear","argument":"空方辩论占位 — 第{round}轮","key_points":["估值偏高","政策不确定性"],"confidence":0.5}}"#
                 )
             };
             bear_prev = bear_arg.clone();
             {
                 let mut bb = blackboard.write().await;
-                bb.set_state(&format!("debate.bear.round_{}", round), &bear_arg);
+                bb.set_state(&format!("debate.bear.round_{round}"), &bear_arg);
             }
 
             let _ = events.send(AnalysisEvent::DebateRound {
@@ -375,10 +320,8 @@ impl StockAnalysisOrchestrator {
             });
         }
 
-        // 写入最终辩论摘要
         let summary = format!(
-            r#"{{"rounds":{},"bull_final":"{}","bear_final":"{}"}}"#,
-            max_rounds,
+            r#"{{"rounds":{max_rounds},"bull_final":"{}","bear_final":"{}"}}"#,
             &bull_prev[..bull_prev.len().min(200)],
             &bear_prev[..bear_prev.len().min(200)]
         );
@@ -398,14 +341,14 @@ impl StockAnalysisOrchestrator {
         opponent_arg: Option<&str>,
     ) -> String {
         let mut ctx = String::new();
-        ctx.push_str(&format!("角色: {}\n\n", role));
+        let _ = write!(ctx, "角色: {role}\n\n");
 
-        // 读取所有分析师报告
         let bb = blackboard.read().await;
         for analyst_id in ANALYST_IDS {
-            let field = format!("report.{}", analyst_id);
+            let field = format!("report.{analyst_id}");
             if let Some(report) = bb.get_state(&field) {
-                ctx.push_str(&format!(
+                let _ = write!(
+                    ctx,
                     "--- {} 报告 ---\n{}\n",
                     analyst_id,
                     if report.len() > 500 {
@@ -413,22 +356,20 @@ impl StockAnalysisOrchestrator {
                     } else {
                         report
                     }
-                ));
+                );
             }
         }
 
-        // 读取对方上一轮论点
         if let Some(arg) = opponent_arg {
-            ctx.push_str(&format!(
+            let _ = write!(
+                ctx,
                 "\n--- 对手上一轮论点 ---\n{}\n",
                 if arg.len() > 500 { &arg[..500] } else { arg }
-            ));
+            );
         }
 
         ctx
     }
-
-    // ── 阶段 4: 风险评估 ──
 
     async fn phase_4_risk(
         runner: &Option<Arc<dyn AgentRunner>>,
@@ -437,7 +378,6 @@ impl StockAnalysisOrchestrator {
         prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<(), String> {
-        // 3 个风险评估员并行执行
         let mut handles = Vec::new();
         for &risk_id in RISK_IDS {
             let id = risk_id.to_string();
@@ -477,8 +417,8 @@ impl StockAnalysisOrchestrator {
         for handle in handles {
             match handle.await {
                 Ok(Ok(report)) => risk_reports.push(report),
-                Ok(Err(e)) => tracing::warn!("风险评估员执行失败: {}", e),
-                Err(e) => tracing::warn!("风险评估员 task panic: {}", e),
+                Ok(Err(e)) => tracing::warn!("风险评估员执行失败: {e}"),
+                Err(e) => tracing::warn!("风险评估员 task panic: {e}"),
             }
         }
 
@@ -486,21 +426,19 @@ impl StockAnalysisOrchestrator {
             return Err("已取消".into());
         }
 
-        // 研究主管综合所有风险报告
         let manager_ctx = {
             let bb = blackboard.read().await;
             let mut ctx = String::new();
-            ctx.push_str(&format!("角色: {}\n\n", RISK_MANAGER_ID));
+            let _ = write!(ctx, "角色: {RISK_MANAGER_ID}\n\n");
             for (i, report) in risk_reports.iter().enumerate() {
-                ctx.push_str(&format!(
-                    "--- {} 评估报告 ---\n{}\n\n",
+                let _ = write!(
+                    ctx,
+                    "--- {} 评估报告 ---\n{report}\n\n",
                     RISK_IDS.get(i).unwrap_or(&"unknown"),
-                    report
-                ));
+                );
             }
-            // 也包含辩论摘要
             if let Some(debate) = bb.get_state("debate.summary") {
-                ctx.push_str(&format!("\n--- 多空辩论摘要 ---\n{}\n", debate));
+                let _ = write!(ctx, "\n--- 多空辩论摘要 ---\n{debate}\n");
             }
             ctx
         };
@@ -525,8 +463,6 @@ impl StockAnalysisOrchestrator {
         Ok(())
     }
 
-    // ── 阶段 5: 投资决策 ──
-
     async fn phase_5_decision(
         runner: &Option<Arc<dyn AgentRunner>>,
         blackboard: &Arc<RwLock<SharedBlackboard>>,
@@ -544,7 +480,6 @@ impl StockAnalysisOrchestrator {
             progress_pct: 90,
         });
 
-        // 构建决策上下文（所有报告）
         let user_prompt = pipeline::build_analyst_context(PORTFOLIO_MANAGER_ID, blackboard).await;
         let sys_prompt = prompts::get_analyst_context(PORTFOLIO_MANAGER_ID, prompts)
             .unwrap_or_else(|| fallback_prompt(PORTFOLIO_MANAGER_ID));
@@ -553,21 +488,18 @@ impl StockAnalysisOrchestrator {
             r.run_agent(PORTFOLIO_MANAGER_ID, &sys_prompt, &user_prompt)
                 .await?
         } else {
-            // 占位决策
             r#"{"action":"持有","position_pct":0,"target_price":null,"stop_loss":null,"reasoning":"分析框架已完成，待 AgentRunner 注入后生成真实 LLM 决策。","risk_level":"中","confidence":0.0}"#.to_string()
         };
 
-        // 尝试解析 LLM 输出的 JSON 决策
         let decision = Self::parse_decision(&decision_text).unwrap_or_else(|e| {
-            tracing::warn!("决策解析失败，使用默认值: {}", e);
+            tracing::warn!("决策解析失败，使用默认值: {e}");
             StockDecision {
                 action: "持有".into(),
                 position_pct: 0.0,
                 target_price: None,
                 stop_loss: None,
                 reasoning: format!(
-                    "解析失败: {}。原始输出: {}",
-                    e,
+                    "解析失败: {e}。原始输出: {}",
                     &decision_text[..200.min(decision_text.len())]
                 ),
                 risk_level: "中".into(),
@@ -575,7 +507,6 @@ impl StockAnalysisOrchestrator {
             }
         });
 
-        // 写入 Blackboard
         {
             let mut bb = blackboard.write().await;
             bb.set_state("report.portfolio-manager", &decision_text);
@@ -591,14 +522,11 @@ impl StockAnalysisOrchestrator {
         Ok(decision)
     }
 
-    /// 从 LLM 输出文本中提取 JSON 并解析为 StockDecision
     fn parse_decision(text: &str) -> Result<StockDecision, String> {
-        // 尝试直接解析
         if let Ok(d) = serde_json::from_str::<StockDecision>(text) {
             return Ok(d);
         }
 
-        // 尝试提取 ```json ... ``` 代码块
         if let Some(start) = text.find("```json") {
             let inner = &text[start + 7..];
             if let Some(end) = inner.find("```") {
@@ -609,7 +537,6 @@ impl StockAnalysisOrchestrator {
             }
         }
 
-        // 尝试提取 { ... } JSON 对象
         if let Some(start) = text.find('{') {
             if let Some(end) = text.rfind('}') {
                 let json_str = &text[start..=end];

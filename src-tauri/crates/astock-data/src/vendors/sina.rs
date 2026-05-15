@@ -26,8 +26,8 @@ impl StockVendor for SinaVendor {
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
         let url = format!(
-            "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{}.json?page=1&num={}",
-            stock_code, limit.min(50)
+            "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{stock_code}.json?page=1&num={}",
+            limit.min(50)
         );
 
         let resp = self

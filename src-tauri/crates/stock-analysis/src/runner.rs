@@ -107,10 +107,10 @@ impl AgentRunner for SessionManagerRunner {
             .adapter
             .chat(&self.ctx, request)
             .await
-            .map_err(|e| format!("LLM 调用失败: {}", e))?;
+            .map_err(|e| format!("LLM 调用失败: {e}"))?;
 
         if response.content.is_empty() {
-            Err(format!("[{}] LLM 返回空响应", expert_id))
+            Err(format!("[{expert_id}] LLM 返回空响应"))
         } else {
             Ok(response.content)
         }

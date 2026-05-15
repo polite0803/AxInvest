@@ -2,6 +2,8 @@
 name = "axagent-stock-analysis"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
+publish = false
 
 [dependencies]
 serde = { workspace = true }

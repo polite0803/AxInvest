@@ -130,6 +130,6 @@ pub async fn execute_mcp_tool(
                 .map_err(|e| e.to_string())?;
             serde_json::to_string(&flow).map_err(|e| e.to_string())
         },
-        _ => Err(format!("Unknown MCP tool: {}", tool_name)),
+        _ => Err(format!("Unknown MCP tool: {tool_name}")),
     }
 }

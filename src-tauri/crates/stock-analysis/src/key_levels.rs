@@ -49,6 +49,7 @@ impl KeyLevelTracker {
     }
 
     /// 从分析结果中提取关键价位并保存快照
+    #[allow(clippy::too_many_arguments)]
     pub async fn capture_snapshot(
         &self,
         analysis_id: &str,
@@ -103,8 +104,10 @@ impl KeyLevelTracker {
             .await
             .map_err(|e| e.to_string())?;
 
-        let mut stats = KeyLevelBacktestStats::default();
-        stats.total_snapshots = analyses.len() as u32;
+        let mut stats = KeyLevelBacktestStats {
+            total_snapshots: analyses.len() as u32,
+            ..Default::default()
+        };
 
         for analysis in analyses {
             if let Some(snapshot_str) = analysis.blackboard_snapshot.as_deref() {

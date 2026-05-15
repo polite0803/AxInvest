@@ -4230,6 +4230,7 @@ mod tests {
             ),
             sync_engine: None,
             astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
+            stock_monitor: None,
         };
 
         let attachments = vec![AttachmentInput {

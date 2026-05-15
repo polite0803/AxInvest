@@ -5945,5 +5945,21 @@
     "alert.triggered": "Price alert triggered!",
     "klineChart": "Candlestick",
     "volumeChart": "Volume"
+  },
+  "trade": {
+    "title": "Trading Log",
+    "disabledHint": "Enable to manually record buy/sell trades. Automatically tracks position cost and P&L.",
+    "stockCode": "Code",
+    "stockName": "Name",
+    "buy": "Buy",
+    "sell": "Sell",
+    "price": "Price",
+    "quantity": "Qty",
+    "cost": "Cost",
+    "shares": "Position",
+    "pnl": "P&L",
+    "recorded": "Recorded",
+    "fillRequired": "Please fill in required fields",
+    "toggleFailed": "Toggle failed"
   }
 }

@@ -9,3 +9,4 @@ pub mod report;
 pub mod rules;
 pub mod runner;
 pub mod scoring;
+pub mod trading;

@@ -17,4 +17,6 @@ axagent-agent = { path = "../agent" }
 axagent-runtime-core = { path = "../runtime-core" }
 axagent-providers = { path = "../providers" }
 axagent-core = { path = "../core" }
+sea-orm = { workspace = true }
+uuid = { workspace = true }
 futures = "0.3"

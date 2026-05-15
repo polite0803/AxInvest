@@ -907,6 +907,19 @@ pub fn run() {
             commands::stock_analysis::validate_trade,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
+            // Monitor commands
+            commands::stock_analysis::start_monitor,
+            commands::stock_analysis::stop_monitor,
+            commands::stock_analysis::add_monitor_config,
+            commands::stock_analysis::list_monitor_configs,
+            // Key levels backtest
+            commands::stock_analysis::backtest_key_levels,
+            // Stock screening
+            commands::stock_analysis::screen_stocks,
+            // Trading calendar
+            commands::stock_analysis::get_market_status,
+            // Daily review
+            commands::stock_analysis::generate_daily_review,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");

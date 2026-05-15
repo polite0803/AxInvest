@@ -9,9 +9,13 @@ use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
 use axagent_stock_analysis::decision::{AgentRunner, AnalysisConfig, AnalysisEvent};
+use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
+use axagent_stock_analysis::monitor::MonitorConfig;
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
 use axagent_stock_analysis::plugin::AnalystPluginManager;
+use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::runner::SessionManagerRunner;
+use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_stock_analysis::trading::{PositionSummary, TradingEngine};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -878,4 +882,115 @@ pub async fn validate_trade(
         "errors": result.errors,
         "warnings": result.warnings,
     }))
+}
+
+// ── Monitor Commands ──
+
+/// 启动实时监控引擎
+#[tauri::command]
+pub async fn start_monitor(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(ref monitor) = state.stock_monitor {
+        monitor.start().await;
+        Ok(())
+    } else {
+        Err("监控引擎未初始化".to_string())
+    }
+}
+
+/// 停止实时监控引擎
+#[tauri::command]
+pub async fn stop_monitor(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(ref monitor) = state.stock_monitor {
+        monitor.stop().await;
+        Ok(())
+    } else {
+        Err("监控引擎未初始化".to_string())
+    }
+}
+
+/// 添加监控配置
+#[tauri::command]
+pub async fn add_monitor_config(
+    state: State<'_, AppState>,
+    config: MonitorConfig,
+) -> Result<(), String> {
+    if let Some(ref monitor) = state.stock_monitor {
+        monitor.add_config(config).await;
+        Ok(())
+    } else {
+        Err("监控引擎未初始化".to_string())
+    }
+}
+
+/// 获取所有监控配置
+#[tauri::command]
+pub async fn list_monitor_configs(
+    state: State<'_, AppState>,
+) -> Result<Vec<MonitorConfig>, String> {
+    if let Some(ref monitor) = state.stock_monitor {
+        Ok(monitor.list_configs().await)
+    } else {
+        Err("监控引擎未初始化".to_string())
+    }
+}
+
+// ── Key Levels Commands ──
+
+/// 回测关键价位命中率
+#[tauri::command]
+pub async fn backtest_key_levels(
+    state: State<'_, AppState>,
+    lookback_days: u32,
+) -> Result<KeyLevelBacktestStats, String> {
+    let tracker = KeyLevelTracker::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    tracker.backtest_key_levels(lookback_days).await
+}
+
+// ── Screen Commands ──
+
+/// 从自选股中筛选
+#[tauri::command]
+pub async fn screen_stocks(
+    state: State<'_, AppState>,
+    criteria: ScreenCriteria,
+) -> Result<Vec<ScreenResult>, String> {
+    let watchlist: Vec<(String, String)> = axagent_core::entity::watchlist_items::Entity::find()
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
+        .collect();
+
+    StockScreener::screen_watchlist(&state.astock_client, &watchlist, &criteria).await
+}
+
+// ── Calendar Commands ──
+
+/// 获取市场状态
+#[tauri::command]
+pub async fn get_market_status() -> Result<serde_json::Value, String> {
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let date = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d").unwrap_or_default();
+    Ok(serde_json::json!({
+        "isTradingDay": axagent_astock_data::calendar::is_trading_day(&date),
+        "isTradingTime": axagent_astock_data::calendar::is_trading_time(),
+        "status": axagent_astock_data::calendar::next_trading_time_desc(),
+    }))
+}
+
+// ── Review Commands ──
+
+/// 生成每日收盘复盘报告
+#[tauri::command]
+pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyReview, String> {
+    let watchlist: Vec<(String, String)> = axagent_core::entity::watchlist_items::Entity::find()
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
+        .collect();
+
+    PostCloseReview::generate(&state.astock_client, &watchlist).await
 }

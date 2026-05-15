@@ -1,0 +1,248 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::{interval, Duration};
+
+use axagent_astock_data::{AStockClient, StockQuote};
+
+/// 监控条件
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MonitorConfig {
+    pub stock_code: String,
+    pub stock_name: String,
+    /// 止损价（跌破告警）
+    pub stop_loss: Option<f64>,
+    /// 止盈价（突破告警）
+    pub take_profit: Option<f64>,
+    /// 突破压力位告警
+    pub resistance_break: Option<f64>,
+    /// 跌破支撑位告警
+    pub support_break: Option<f64>,
+    /// 涨跌幅超过N%告警
+    pub change_pct_alert: Option<f64>,
+    /// 成交量异常（换手率>N告警）
+    pub turnover_rate_alert: Option<f64>,
+    /// 是否启用
+    pub enabled: bool,
+}
+
+/// 告警事件
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorAlert {
+    pub stock_code: String,
+    pub stock_name: String,
+    /// "stop_loss" | "take_profit" | "resistance" | "support" | "change" | "volume"
+    pub alert_type: String,
+    pub alert_message: String,
+    pub current_price: f64,
+    pub change_pct: f64,
+    pub timestamp: String,
+}
+
+/// 实时监控引擎
+pub struct RealtimeMonitor {
+    client: Arc<AStockClient>,
+    configs: RwLock<HashMap<String, MonitorConfig>>,
+    alert_tx: tokio::sync::broadcast::Sender<MonitorAlert>,
+    running: RwLock<bool>,
+}
+
+impl RealtimeMonitor {
+    pub fn new(client: Arc<AStockClient>) -> Self {
+        let (alert_tx, _) = tokio::sync::broadcast::channel(128);
+        Self {
+            client,
+            configs: RwLock::new(HashMap::new()),
+            alert_tx,
+            running: RwLock::new(false),
+        }
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<MonitorAlert> {
+        self.alert_tx.subscribe()
+    }
+
+    /// 添加监控标的
+    pub async fn add_config(&self, config: MonitorConfig) {
+        let mut configs = self.configs.write().await;
+        configs.insert(config.stock_code.clone(), config);
+    }
+
+    /// 移除监控标的
+    pub async fn remove_config(&self, stock_code: &str) {
+        let mut configs = self.configs.write().await;
+        configs.remove(stock_code);
+    }
+
+    /// 获取所有监控配置
+    pub async fn list_configs(&self) -> Vec<MonitorConfig> {
+        let configs = self.configs.read().await;
+        configs.values().cloned().collect()
+    }
+
+    /// 启动监控循环（每30秒轮询一次）
+    pub async fn start(&self) {
+        {
+            let mut running = self.running.write().await;
+            if *running {
+                return;
+            }
+            *running = true;
+        }
+
+        let mut ticker = interval(Duration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            {
+                let running = self.running.read().await;
+                if !*running {
+                    break;
+                }
+            }
+
+            let configs = {
+                let c = self.configs.read().await;
+                c.values().cloned().collect::<Vec<_>>()
+            };
+
+            for config in configs {
+                if !config.enabled {
+                    continue;
+                }
+                // 非交易时段跳过
+                if !axagent_astock_data::calendar::is_trading_time() {
+                    continue;
+                }
+
+                if let Ok(quote) = self.client.get_quote(&config.stock_code).await {
+                    self.check_alerts(&config, &quote).await;
+                }
+            }
+        }
+    }
+
+    pub async fn stop(&self) {
+        let mut running = self.running.write().await;
+        *running = false;
+    }
+
+    async fn check_alerts(&self, config: &MonitorConfig, quote: &StockQuote) {
+        let mut alerts = Vec::new();
+        let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+        // 止损检查
+        if let Some(stop) = config.stop_loss {
+            if quote.price <= stop {
+                alerts.push(MonitorAlert {
+                    stock_code: config.stock_code.clone(),
+                    stock_name: config.stock_name.clone(),
+                    alert_type: "stop_loss".into(),
+                    alert_message: format!(
+                        "跌破止损价 {}: 现价 {:.2} <= 止损 {:.2}",
+                        config.stock_name, quote.price, stop
+                    ),
+                    current_price: quote.price,
+                    change_pct: quote.change_pct,
+                    timestamp: now.clone(),
+                });
+            }
+        }
+
+        // 止盈检查
+        if let Some(tp) = config.take_profit {
+            if quote.price >= tp {
+                alerts.push(MonitorAlert {
+                    stock_code: config.stock_code.clone(),
+                    stock_name: config.stock_name.clone(),
+                    alert_type: "take_profit".into(),
+                    alert_message: format!(
+                        "突破止盈价 {}: 现价 {:.2} >= 止盈 {:.2}",
+                        config.stock_name, quote.price, tp
+                    ),
+                    current_price: quote.price,
+                    change_pct: quote.change_pct,
+                    timestamp: now.clone(),
+                });
+            }
+        }
+
+        // 压力位突破
+        if let Some(res) = config.resistance_break {
+            if quote.price >= res {
+                alerts.push(MonitorAlert {
+                    stock_code: config.stock_code.clone(),
+                    stock_name: config.stock_name.clone(),
+                    alert_type: "resistance".into(),
+                    alert_message: format!(
+                        "突破压力位 {}: 现价 {:.2} >= 压力 {:.2}",
+                        config.stock_name, quote.price, res
+                    ),
+                    current_price: quote.price,
+                    change_pct: quote.change_pct,
+                    timestamp: now.clone(),
+                });
+            }
+        }
+
+        // 支撑位跌破
+        if let Some(sup) = config.support_break {
+            if quote.price <= sup {
+                alerts.push(MonitorAlert {
+                    stock_code: config.stock_code.clone(),
+                    stock_name: config.stock_name.clone(),
+                    alert_type: "support".into(),
+                    alert_message: format!(
+                        "跌破支撑位 {}: 现价 {:.2} <= 支撑 {:.2}",
+                        config.stock_name, quote.price, sup
+                    ),
+                    current_price: quote.price,
+                    change_pct: quote.change_pct,
+                    timestamp: now.clone(),
+                });
+            }
+        }
+
+        // 涨跌幅异常
+        if let Some(pct) = config.change_pct_alert {
+            if quote.change_pct.abs() >= pct {
+                let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
+                alerts.push(MonitorAlert {
+                    stock_code: config.stock_code.clone(),
+                    stock_name: config.stock_name.clone(),
+                    alert_type: "change".into(),
+                    alert_message: format!(
+                        "异常{}幅 {}: {:.2}%",
+                        dir, config.stock_name, quote.change_pct
+                    ),
+                    current_price: quote.price,
+                    change_pct: quote.change_pct,
+                    timestamp: now.clone(),
+                });
+            }
+        }
+
+        // 换手率异常
+        if let Some(ratio) = config.turnover_rate_alert {
+            if quote.turnover_rate >= ratio {
+                alerts.push(MonitorAlert {
+                    stock_code: config.stock_code.clone(),
+                    stock_name: config.stock_name.clone(),
+                    alert_type: "volume".into(),
+                    alert_message: format!(
+                        "换手率异常 {}: {:.2}% > {:.2}%",
+                        config.stock_name, quote.turnover_rate, ratio
+                    ),
+                    current_price: quote.price,
+                    change_pct: quote.change_pct,
+                    timestamp: now.clone(),
+                });
+            }
+        }
+
+        // 发送告警
+        for alert in alerts {
+            let _ = self.alert_tx.send(alert);
+        }
+    }
+}

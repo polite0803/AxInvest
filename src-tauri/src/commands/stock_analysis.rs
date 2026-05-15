@@ -770,7 +770,8 @@ pub async fn generate_stock_report(
     // 计算技术指标和客观评分
     let indicators =
         axagent_astock_data::indicators::compute_indicators(&record.stock_code, &klines);
-    let score = axagent_stock_analysis::scoring::ScoringEngine::score(&indicators, quote.price, None);
+    let score =
+        axagent_stock_analysis::scoring::ScoringEngine::score(&indicators, quote.price, None);
 
     let quote_json = serde_json::to_string(&quote).unwrap_or_default();
     let score_json = serde_json::to_string(&score).unwrap_or_default();

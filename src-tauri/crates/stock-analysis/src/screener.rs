@@ -129,9 +129,7 @@ impl StockScreener {
     }
 
     /// 从全市场发现热门候选标的（基于沪深300核心成分股 + 当日数据）
-    pub async fn discover_candidates(
-        client: &AStockClient,
-    ) -> Result<Vec<ScreenResult>, String> {
+    pub async fn discover_candidates(client: &AStockClient) -> Result<Vec<ScreenResult>, String> {
         // 沪深300 核心成分股（简化列表，20只覆盖主要行业）
         let index_stocks: &[(&str, &str)] = &[
             ("600519", "贵州茅台"),

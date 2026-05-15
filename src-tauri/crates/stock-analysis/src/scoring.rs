@@ -31,15 +31,16 @@ impl ScoringEngine {
         let default_weights = ScoringWeights::default();
         let w = weights.unwrap_or(&default_weights);
         let trend = (Self::score_trend(&indicators.ma_alignment) as f64 * w.trend / 30.0) as u32;
-        let deviation = (Self::score_deviation(indicators.bias_ma5) as f64 * w.deviation / 20.0) as u32;
-        let macd =
-            (Self::score_macd(&indicators.macd_signal, indicators.macd_dif) as f64 * w.macd / 15.0)
-                as u32;
-        let volume = (Self::score_volume(&indicators.volume_signal) as f64 * w.volume / 15.0) as u32;
+        let deviation =
+            (Self::score_deviation(indicators.bias_ma5) as f64 * w.deviation / 20.0) as u32;
+        let macd = (Self::score_macd(&indicators.macd_signal, indicators.macd_dif) as f64 * w.macd
+            / 15.0) as u32;
+        let volume =
+            (Self::score_volume(&indicators.volume_signal) as f64 * w.volume / 15.0) as u32;
         let rsi = (Self::score_rsi(indicators.rsi6) as f64 * w.rsi / 10.0) as u32;
-        let support =
-            (Self::score_support(latest_price, &indicators.support_levels) as f64 * w.support / 10.0)
-                as u32;
+        let support = (Self::score_support(latest_price, &indicators.support_levels) as f64
+            * w.support
+            / 10.0) as u32;
         let total = (trend + deviation + macd + volume + rsi + support).min(100);
 
         let (signal, signal_code) = Self::map_signal(total, &indicators.ma_alignment);

@@ -1089,6 +1089,63 @@ pub async fn get_portfolio_risk(
     Ok(PortfolioRiskManager::compute_from_positions(&positions))
 }
 
+// ── Value Investing ──
+
+/// 获取巴菲特式价值投资评估
+#[tauri::command]
+pub async fn get_value_assessment(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<axagent_stock_analysis::value::ValueAssessment, String> {
+    let client = &state.astock_client;
+    let quote = client
+        .get_quote(&stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    let financials = client
+        .get_financials(&stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(axagent_stock_analysis::value::ValueEngine::assess(
+        quote.price,
+        &financials,
+        1_000_000_000.0,
+    ))
+}
+
+/// 计算巴菲特式价值投资综合指标（DCF + F-Score + 护城河量化 + 安全边际 + 所有者收益）
+#[tauri::command]
+pub async fn compute_value_metrics(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<axagent_stock_analysis::value_investing::ValueMetrics, String> {
+    let quote = state
+        .astock_client
+        .get_quote(&stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    let financials = state
+        .astock_client
+        .get_financials(&stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    let total_shares = quote.total_mv.map(|mv| {
+        if quote.price > 0.0 {
+            mv / quote.price / 1_0000_0000.0
+        } else {
+            1.0
+        }
+    });
+    Ok(axagent_stock_analysis::value_investing::ValueInvestingEngine::compute(
+        &stock_code,
+        quote.price,
+        total_shares,
+        &financials,
+        quote.pe,
+        quote.pb,
+    ))
+}
+
 // ── Position Limits ──
 
 /// 获取全局仓位限制配置

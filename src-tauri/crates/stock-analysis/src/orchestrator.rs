@@ -84,6 +84,26 @@ impl StockAnalysisOrchestrator {
 
         Self::phase_2_analysts(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
+        // 数据质量门控：在辩论/风控/决策前注入质量摘要
+        {
+            let reports = {
+                let bb = blackboard.read().await;
+                let mut map = HashMap::new();
+                for id in ANALYST_IDS {
+                    if let Some(report) = bb.get_state(&format!("report.{id}")) {
+                        map.insert(id.to_string(), report.clone());
+                    }
+                }
+                map
+            };
+            let quality = crate::quality::run_quality_gate(&reports);
+            tracing::info!("{}", quality.summary);
+            {
+                let mut bb = blackboard.write().await;
+                bb.set_state("data_quality_summary", &quality.summary);
+            }
+        }
+
         Self::phase_3_debate(
             &runner,
             &blackboard,

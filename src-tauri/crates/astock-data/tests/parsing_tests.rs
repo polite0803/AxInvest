@@ -16,6 +16,9 @@ fn test_stock_quote_serialization() {
         pe: Some(35.5),
         pb: Some(12.3),
         total_mv: Some(2100000000000.0),
+        limit_up: Some(1848.0),
+        limit_down: Some(1512.0),
+        is_st: false,
         timestamp: "2026-05-14T12:00:00Z".into(),
     };
     let json = serde_json::to_string(&quote).unwrap();
@@ -75,6 +78,9 @@ fn test_stock_quote_default_values() {
         pe: None,
         pb: None,
         total_mv: None,
+        limit_up: None,
+        limit_down: None,
+        is_st: false,
         timestamp: "2026-05-14T12:00:00Z".into(),
     };
     let json = serde_json::to_string(&quote).unwrap();

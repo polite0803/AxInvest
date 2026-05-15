@@ -136,10 +136,8 @@ impl RealtimeMonitor {
         // 止损检查
         if let Some(stop) = config.stop_loss {
             if quote.price <= stop {
-                let suggested = Some(format!(
-                    "建议: 考虑减仓50%，现价{:.2}低于止损{:.2}",
-                    quote.price, stop
-                ));
+                let suggested =
+                    Some(format!("建议: 考虑减仓50%，现价{:.2}低于止损{:.2}", quote.price, stop));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -159,10 +157,8 @@ impl RealtimeMonitor {
         // 止盈检查
         if let Some(tp) = config.take_profit {
             if quote.price >= tp {
-                let suggested = Some(format!(
-                    "建议: 考虑卖出50%锁利，现价{:.2}≥止盈{:.2}",
-                    quote.price, tp
-                ));
+                let suggested =
+                    Some(format!("建议: 考虑卖出50%锁利，现价{:.2}≥止盈{:.2}", quote.price, tp));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -182,10 +178,7 @@ impl RealtimeMonitor {
         // 压力位突破
         if let Some(res) = config.resistance_break {
             if quote.price >= res {
-                let suggested = Some(format!(
-                    "建议: 压力位突破{:.2}，关注持续性和量能配合",
-                    res
-                ));
+                let suggested = Some(format!("建议: 压力位突破{:.2}，关注持续性和量能配合", res));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -205,10 +198,8 @@ impl RealtimeMonitor {
         // 支撑位跌破
         if let Some(sup) = config.support_break {
             if quote.price <= sup {
-                let suggested = Some(format!(
-                    "建议: 支撑位{:.2}跌破，考虑减仓或设立更严格止损",
-                    sup
-                ));
+                let suggested =
+                    Some(format!("建议: 支撑位{:.2}跌破，考虑减仓或设立更严格止损", sup));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),
@@ -252,10 +243,8 @@ impl RealtimeMonitor {
         // 换手率异常
         if let Some(ratio) = config.turnover_rate_alert {
             if quote.turnover_rate >= ratio {
-                let suggested = Some(format!(
-                    "建议: 换手率异常{:.2}%，关注主力进出痕迹",
-                    quote.turnover_rate
-                ));
+                let suggested =
+                    Some(format!("建议: 换手率异常{:.2}%，关注主力进出痕迹", quote.turnover_rate));
                 alerts.push(MonitorAlert {
                     stock_code: config.stock_code.clone(),
                     stock_name: config.stock_name.clone(),

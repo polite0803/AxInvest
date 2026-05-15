@@ -67,10 +67,7 @@ impl PortfolioRiskManager {
                 concentration
             ));
         } else if concentration > 30.0 {
-            warning = Some(format!(
-                "单股集中度 {:.0}% 偏高，关注分散风险。",
-                concentration
-            ));
+            warning = Some(format!("单股集中度 {:.0}% 偏高，关注分散风险。", concentration));
         }
         if total_positions < 3 && total_positions > 0 {
             let msg = format!("仅{}只持仓，分散度不足，建议 ≥3 只。", total_positions);

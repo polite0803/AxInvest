@@ -17,13 +17,27 @@ pub async fn build_analyst_context(
 
     match expert_id {
         "market-analyst" => {
+            // 优先提供已计算的技术指标（预计算），K线数据作为补充
+            if let Some(indicators) = bb.get_state("raw.indicators") {
+                let _ = write!(ctx, "## 预计算技术指标\n{indicators}\n\n");
+            }
             if let Some(klines) = bb.get_state("raw.klines") {
-                let _ = write!(ctx, "## K线数据\n{klines}\n");
+                let _ = write!(ctx, "## 原始K线数据（最近120日）\n{klines}\n");
+            }
+            if let Some(score) = bb.get_state("raw.objective_score") {
+                let _ = write!(ctx, "## 客观评分参考\n{score}\n");
             }
         },
         "fundamentals-analyst" => {
             if let Some(fin) = bb.get_state("raw.financials") {
                 let _ = write!(ctx, "## 财务数据\n{fin}\n");
+            }
+            // 提供客观评分和估值参考
+            if let Some(score) = bb.get_state("raw.objective_score") {
+                let _ = write!(ctx, "## 技术面客观评分（参考）\n{score}\n");
+            }
+            if let Some(quote) = bb.get_state("raw.quote") {
+                let _ = write!(ctx, "## 实时行情（PE/PB等估值参考）\n{quote}\n");
             }
         },
         "news-analyst" | "sentiment-analyst" | "policy-analyst" => {
@@ -45,6 +59,24 @@ pub async fn build_analyst_context(
             }
         },
         _ => {
+            // 预计算技术指标和评分（供下游阶段使用）
+            if let Some(indicators) = bb.get_state("raw.indicators") {
+                let _ = write!(ctx, "## 技术指标\n{indicators}\n\n");
+            }
+            if let Some(score) = bb.get_state("raw.objective_score") {
+                let _ = write!(ctx, "## 客观评分\n{score}\n\n");
+            }
+            // 规则检查结果
+            if let Some(violations) = bb.get_state("rule_check.violations") {
+                let _ = write!(ctx, "## 严进规则违规\n{violations}\n\n");
+            }
+            if let Some(corrections) = bb.get_state("rule_check.corrections") {
+                let _ = write!(ctx, "## 规则修正建议\n{corrections}\n\n");
+            }
+            if let Some(force) = bb.get_state("rule_check.force_signal") {
+                let _ = write!(ctx, "## 强制信号\n{force}\n\n");
+            }
+            // 所有分析师报告
             for field in &[
                 "report.market-analyst",
                 "report.sentiment-analyst",
@@ -53,6 +85,10 @@ pub async fn build_analyst_context(
                 "report.policy-analyst",
                 "report.hot-money-tracker",
                 "report.lockup-watcher",
+                "report.bull-researcher",
+                "report.bear-researcher",
+                "report.research-manager",
+                "report.trader",
             ] {
                 if let Some(val) = bb.get_state(field) {
                     let _ = write!(ctx, "\n---\n{val}\n");

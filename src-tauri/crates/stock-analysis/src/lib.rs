@@ -5,4 +5,7 @@ pub mod pipeline;
 pub mod plugin;
 pub mod prompts;
 pub mod quality;
+pub mod report;
+pub mod rules;
 pub mod runner;
+pub mod scoring;

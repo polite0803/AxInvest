@@ -34,6 +34,19 @@ pub struct BacktestStats {
     pub avg_max_drawdown_pct: f64,
     /// 平均置信度
     pub avg_confidence: f64,
+    /// 超额收益 alpha（%），相对沪深300
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_pct: Option<f64>,
+}
+
+/// 基准对比结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkResult {
+    pub stock_return_pct: f64,
+    pub csi300_return_pct: f64,
+    pub alpha_pct: f64,
+    pub outperformed: bool,
+    pub benchmark_name: String,
 }
 
 /// 历史分析记录（用于回测输入）
@@ -194,6 +207,77 @@ impl BacktestEngine {
             avg_return_pct: avg_return,
             avg_max_drawdown_pct: avg_max_dd,
             avg_confidence,
+            alpha_pct: None,
         }
     }
+
+    /// 对比沪深300基准计算超额收益
+    pub async fn benchmark_against_csi300(
+        client: &axagent_astock_data::AStockClient,
+        start_date: &str,
+        end_date: &str,
+        stock_return_pct: f64,
+    ) -> Result<BenchmarkResult, String> {
+        // 获取沪深300 (000300) 同期表现
+        let klines = client
+            .get_klines("000300", "daily", 365)
+            .await
+            .map_err(|e| format!("获取沪深300K线失败: {e}"))?;
+
+        let start_kline = klines.iter().find(|k| k.date.as_str() >= start_date);
+        let end_kline = klines.iter().rev().find(|k| k.date.as_str() <= end_date);
+
+        match (start_kline, end_kline) {
+            (Some(start), Some(end)) => {
+                let csi300_return = if start.close > 0.0 {
+                    ((end.close - start.close) / start.close) * 100.0
+                } else {
+                    0.0
+                };
+                let alpha = stock_return_pct - csi300_return;
+                let outperformed = alpha > 0.0;
+
+                Ok(BenchmarkResult {
+                    stock_return_pct,
+                    csi300_return_pct: csi300_return,
+                    alpha_pct: alpha,
+                    outperformed,
+                    benchmark_name: "沪深300".to_string(),
+                })
+            },
+            _ => Err("无法计算CSI 300基准收益".into()),
+        }
+    }
+}
+
+/// 同时运行回测和CSI 300基准对比的便捷函数
+pub async fn backtest_with_benchmark(
+    client: &axagent_astock_data::AStockClient,
+    analyses: Vec<HistoricalAnalysis>,
+    holding_days: u32,
+) -> Result<(BacktestStats, Option<BenchmarkResult>), String> {
+    let results = BacktestEngine::backtest_history(client, analyses, holding_days).await?;
+    let mut stats = BacktestEngine::compute_stats(&results);
+
+    // 取第一条分析的日期范围计算CSI300基准
+    if let (Some(first), Some(last)) = (results.first(), results.last()) {
+        match BacktestEngine::benchmark_against_csi300(
+            client,
+            &first.analysis_date,
+            &last.analysis_date,
+            stats.avg_return_pct,
+        )
+        .await
+        {
+            Ok(bench) => {
+                stats.alpha_pct = Some(bench.alpha_pct);
+                return Ok((stats, Some(bench)));
+            },
+            Err(e) => {
+                tracing::warn!("CSI300基准计算失败: {e}");
+            },
+        }
+    }
+
+    Ok((stats, None))
 }

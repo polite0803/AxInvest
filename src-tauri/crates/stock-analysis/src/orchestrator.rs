@@ -31,6 +31,7 @@ const RISK_IDS: &[&str] = &[
 ];
 const RISK_MANAGER_ID: &str = "research-manager";
 
+const TRADER_ID: &str = "trader";
 const PORTFOLIO_MANAGER_ID: &str = "portfolio-manager";
 
 fn fallback_prompt(expert_id: &str) -> String {
@@ -115,6 +116,8 @@ impl StockAnalysisOrchestrator {
         .await?;
 
         Self::phase_4_risk(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
+
+        Self::phase_4b_trader(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
         let decision =
             Self::phase_5_decision(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
@@ -259,6 +262,7 @@ impl StockAnalysisOrchestrator {
             "policy-analyst" => "政策分析",
             "hot-money-tracker" => "资金面分析",
             "lockup-watcher" => "限售解禁分析",
+            "trader" => "交易执行方案",
             _ => "分析",
         };
         format!(
@@ -478,6 +482,79 @@ impl StockAnalysisOrchestrator {
         let _ = events.send(AnalysisEvent::RiskAssessment {
             risk_type: "comprehensive".into(),
             report: manager_report,
+        });
+
+        Ok(())
+    }
+
+    async fn phase_4b_trader(
+        runner: &Option<Arc<dyn AgentRunner>>,
+        blackboard: &Arc<RwLock<SharedBlackboard>>,
+        events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
+        prompts: &Arc<HashMap<String, String>>,
+        cancel_token: &Option<Arc<AtomicBool>>,
+    ) -> Result<(), String> {
+        if Self::is_cancelled(cancel_token) {
+            return Err("已取消".into());
+        }
+
+        let _ = events.send(AnalysisEvent::AnalystProgress {
+            expert_id: TRADER_ID.into(),
+            status: "交易员制定执行方案...".into(),
+            progress_pct: 85,
+        });
+
+        let trader_context = {
+            let bb = blackboard.read().await;
+            let mut ctx = String::new();
+            let _ =
+                write!(ctx, "角色: 交易员\n\n请基于以下分析结果制定具体的A股交易执行方案。\n\n");
+
+            for analyst_id in ANALYST_IDS {
+                let field = format!("report.{analyst_id}");
+                if let Some(report) = bb.get_state(&field) {
+                    let _ = write!(
+                        ctx,
+                        "--- {} 报告 ---\n{}\n\n",
+                        analyst_id,
+                        if report.len() > 500 {
+                            &report[..500]
+                        } else {
+                            report
+                        }
+                    );
+                }
+            }
+
+            if let Some(debate) = bb.get_state("debate.summary") {
+                let _ = write!(ctx, "--- 多空辩论摘要 ---\n{debate}\n\n");
+            }
+            if let Some(risk) = bb.get_state("report.research-manager") {
+                let _ = write!(
+                    ctx,
+                    "--- 研究经理综合评估 ---\n{}\n\n",
+                    if risk.len() > 500 { &risk[..500] } else { risk }
+                );
+            }
+
+            ctx
+        };
+
+        let sys_prompt = prompts
+            .get(TRADER_ID)
+            .cloned()
+            .unwrap_or_else(|| fallback_prompt(TRADER_ID));
+
+        let report = if let Some(ref r) = runner {
+            r.run_agent(TRADER_ID, &sys_prompt, &trader_context).await?
+        } else {
+            Self::placeholder_analyst_report(TRADER_ID)
+        };
+
+        pipeline::write_report(TRADER_ID, &report, blackboard, events).await;
+
+        let _ = events.send(AnalysisEvent::InvestmentPlan {
+            plan: report.clone(),
         });
 
         Ok(())

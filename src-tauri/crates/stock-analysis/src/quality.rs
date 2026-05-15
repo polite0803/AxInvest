@@ -170,3 +170,85 @@ pub fn run_quality_gate(reports: &HashMap<String, String>) -> QualityCheck {
         warnings,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_empty_report_gets_f() {
+        let grade = check_report_quality("market-analyst", "", &["趋势"]);
+        assert_eq!(grade, QualityGrade::F);
+    }
+
+    #[test]
+    fn test_short_report_gets_d() {
+        let grade = check_report_quality("market-analyst", "短", &["趋势"]);
+        assert_eq!(grade, QualityGrade::D);
+    }
+
+    #[test]
+    fn test_failure_marker_gets_d() {
+        let report = "无法获取数据，分析失败。".repeat(10);
+        let grade = check_report_quality("market-analyst", &report, &["趋势"]);
+        assert_eq!(grade, QualityGrade::D);
+    }
+
+    #[test]
+    fn test_full_coverage_gets_a() {
+        let report = "趋势向上，形态良好，指标多头，支撑强劲，压力位突破。".repeat(10);
+        let grade = check_report_quality(
+            "market-analyst",
+            &report,
+            &["趋势", "形态", "指标", "支撑", "压力"],
+        );
+        assert_eq!(grade, QualityGrade::A);
+    }
+
+    #[test]
+    fn test_partial_coverage_gets_b_or_c() {
+        let report = "趋势向上，形态良好。".repeat(20);
+        let grade = check_report_quality(
+            "market-analyst",
+            &report,
+            &["趋势", "形态", "指标", "支撑", "压力"],
+        );
+        assert!(grade == QualityGrade::C || grade == QualityGrade::B);
+    }
+
+    #[test]
+    fn test_run_quality_gate_with_mixed_reports() {
+        let mut reports = HashMap::new();
+        reports.insert(
+            "market-analyst".to_string(),
+            "趋势向上，形态良好，MACD金叉，支撑位有效，压力位需观察。".repeat(10),
+        );
+        reports.insert(
+            "sentiment-analyst".to_string(),
+            "".to_string(), // Empty = F
+        );
+        reports.insert(
+            "news-analyst".to_string(),
+            "短".to_string(), // Short = D
+        );
+        reports.insert(
+            "fundamentals-analyst".to_string(),
+            "营收增长，ROE稳健，PE合理，估值偏低。".repeat(10),
+        );
+        reports.insert("policy-analyst".to_string(), "政策利好，产业扶持，监管放松。".repeat(10));
+        reports.insert(
+            "hot-money-tracker".to_string(),
+            "主力流入，龙虎榜机构买入，北向加仓。".repeat(10),
+        );
+        reports.insert(
+            "lockup-watcher".to_string(),
+            "近期无解禁，大股东增持，质押比例低。".repeat(10),
+        );
+
+        let result = run_quality_gate(&reports);
+        // 2 failures out of 7 = grade C
+        assert_eq!(result.grade, QualityGrade::C);
+        assert_eq!(result.warnings.len(), 2);
+    }
+}

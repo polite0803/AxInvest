@@ -17,7 +17,59 @@ pub struct StockQuote {
     pub pe: Option<f64>,
     pub pb: Option<f64>,
     pub total_mv: Option<f64>,
+    /// 涨停价
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_up: Option<f64>,
+    /// 跌停价
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_down: Option<f64>,
+    /// 是否ST股票（含*ST）
+    #[serde(default)]
+    pub is_st: bool,
     pub timestamp: String,
+}
+
+/// 判断A股市场类型
+///
+/// 根据股票代码前缀识别市场板块：
+/// - `6` 开头且 "688" → 科创板 (star)
+/// - `6` 开头（非688） → 上海主板 (main_sh)
+/// - `0` 开头 → 深圳主板 (main_sz)
+/// - `3` 开头 → 创业板 (chinext)
+/// - `8` 开头 → 北交所 (bj)
+pub fn detect_market_type(code: &str) -> &str {
+    match code.chars().next() {
+        Some('6') if code.starts_with("688") => "star",
+        Some('6') => "main_sh",
+        Some('0') => "main_sz",
+        Some('3') => "chinext",
+        Some('8') => "bj",
+        _ => "unknown",
+    }
+}
+
+/// 获取A股各板块涨跌停幅度（百分比）
+///
+/// - 科创板/创业板: ±20%
+/// - 北交所: ±30%
+/// - 主板: ±10%
+pub fn get_price_limit_pct(market_type: &str) -> f64 {
+    match market_type {
+        "star" | "chinext" => 20.0,
+        "bj" => 30.0,
+        _ => 10.0,
+    }
+}
+
+/// 获取ST股票的涨跌停幅度
+///
+/// ST股票统一±5%，非ST按板块规则
+pub fn get_st_price_limit_pct(is_st: bool, market_type: &str) -> f64 {
+    if is_st {
+        5.0
+    } else {
+        get_price_limit_pct(market_type)
+    }
 }
 
 /// K线数据

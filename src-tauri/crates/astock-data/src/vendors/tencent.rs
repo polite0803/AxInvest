@@ -31,8 +31,8 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
     let data = &raw[start + 1..start + 1 + end];
     let fields: Vec<&str> = data.split('~').collect();
 
-    if fields.len() < 40 {
-        return Err(DataError::ParseError(format!("expected >=40 fields, got {}", fields.len())));
+    if fields.len() < 49 {
+        return Err(DataError::ParseError(format!("expected >=49 fields, got {}", fields.len())));
     }
 
     let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
@@ -45,9 +45,13 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
         }
     };
 
+    // 从股票名称检测 ST 状态
+    let name = fields[1].to_string();
+    let is_st = name.contains("ST") || name.contains("*ST");
+
     Ok(StockQuote {
         code: fields[2].to_string(),
-        name: fields[1].to_string(),
+        name,
         price: parse(fields[3]),
         open: parse(fields[5]),
         high: parse(fields[33]),
@@ -59,6 +63,23 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
         pe: parse_opt(fields[39]),
         pb: parse_opt(fields[46]),
         total_mv: parse_opt(fields[45]).map(|v| v * 10000.0),
+        limit_up: {
+            let v = parse(fields[47]);
+            if v > 0.0 {
+                Some(v)
+            } else {
+                None
+            }
+        },
+        limit_down: {
+            let v = parse(fields[48]);
+            if v > 0.0 {
+                Some(v)
+            } else {
+                None
+            }
+        },
+        is_st,
         timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }

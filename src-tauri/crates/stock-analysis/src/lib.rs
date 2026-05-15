@@ -4,4 +4,5 @@ pub mod orchestrator;
 pub mod pipeline;
 pub mod plugin;
 pub mod prompts;
+pub mod quality;
 pub mod runner;

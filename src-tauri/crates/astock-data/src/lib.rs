@@ -77,7 +77,7 @@ impl AStockClient {
                 let json = serde_json::to_string(&quote).unwrap_or_default();
                 self.cache_set(cache_key, json, 30).await;
                 return Ok(quote);
-            }
+            },
             Err(e) => tracing::warn!("[降级] 腾讯财经行情失败: {e}, 尝试东方财富..."),
         }
 
@@ -107,7 +107,7 @@ impl AStockClient {
                 let json = serde_json::to_string(&quote).unwrap_or_default();
                 self.cache_set(cache_key, json, 30).await;
                 return Ok(quote);
-            }
+            },
             _ => tracing::warn!("[降级] 东方财富也失败，所有行情数据源不可用"),
         }
 

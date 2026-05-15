@@ -5481,6 +5481,8 @@
     "alert.above": "以上",
     "alert.below": "以下",
     "alert.empty": "アラートなし",
-    "alert.triggered": "価格アラートが発動しました！"
+    "alert.triggered": "価格アラートが発動しました！",
+    "klineChart": "ローソク足",
+    "volumeChart": "出来高"
   }
 }

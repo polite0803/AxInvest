@@ -5481,6 +5481,8 @@
     "alert.above": "Por encima",
     "alert.below": "Por debajo",
     "alert.empty": "Sin alertas",
-    "alert.triggered": "Alerta de precio activada!"
+    "alert.triggered": "Alerta de precio activada!",
+    "klineChart": "Velas",
+    "volumeChart": "Volumen"
   }
 }

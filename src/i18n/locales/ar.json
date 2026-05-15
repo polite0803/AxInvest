@@ -5481,6 +5481,8 @@
     "alert.above": "أعلى",
     "alert.below": "أقل",
     "alert.empty": "لا توجد تنبيهات",
-    "alert.triggered": "تم تفعيل تنبيه السعر!"
+    "alert.triggered": "تم تفعيل تنبيه السعر!",
+    "klineChart": "شمعدان",
+    "volumeChart": "حجم التداول"
   }
 }

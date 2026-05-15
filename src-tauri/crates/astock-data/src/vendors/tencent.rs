@@ -16,7 +16,7 @@ fn to_tencent_code(stock_code: &str) -> String {
         Some('8') | Some('4') => "bj",
         _ => "sz",
     };
-    format!("{}{}", prefix, stock_code)
+    format!("{prefix}{stock_code}")
 }
 
 /// 解析腾讯财经实时行情响应
@@ -67,7 +67,7 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
 impl StockVendor for TencentVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let tc_code = to_tencent_code(stock_code);
-        let url = format!("http://qt.gtimg.cn/q={}", tc_code);
+        let url = format!("http://qt.gtimg.cn/q={tc_code}");
         let resp = self.http.get(&url).send().await?;
         let text = resp.text().await?;
         parse_quote(&text)

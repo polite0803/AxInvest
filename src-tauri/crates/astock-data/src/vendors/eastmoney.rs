@@ -10,26 +10,23 @@ pub struct EastMoneyVendor {
 
 /// 构建东方财富股票代码 (1.SH600519, 0.SZ000001)
 fn to_em_code(stock_code: &str) -> String {
-    let market = match stock_code.chars().next() {
-        Some('6') => "1",
-        Some('0') | Some('2') => "0",
-        Some('3') => "0",
-        Some('8') | Some('4') => "0",
-        _ => "0",
+    let market = if stock_code.starts_with('6') {
+        "1"
+    } else {
+        "0"
     };
-    format!("{}.{}{}", market, if market == "1" { "SH" } else { "SZ" }, stock_code)
+    let prefix = if market == "1" { "SH" } else { "SZ" };
+    format!("{market}.{prefix}{stock_code}")
 }
 
 /// 构建东方财富 secid (1.600519, 0.000001)
 fn to_em_secid(stock_code: &str) -> String {
-    let market = match stock_code.chars().next() {
-        Some('6') => "1",
-        Some('0') | Some('2') => "0",
-        Some('3') => "0",
-        Some('8') | Some('4') => "0",
-        _ => "0",
+    let market = if stock_code.starts_with('6') {
+        "1"
+    } else {
+        "0"
     };
-    format!("{}.{}", market, stock_code)
+    format!("{market}.{stock_code}")
 }
 
 #[async_trait]
@@ -59,8 +56,7 @@ impl StockVendor for EastMoneyVendor {
         };
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt={}&fqt=1&end=20500101&lmt={}",
-            secid, period_code, limit
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt={period_code}&fqt=1&end=20500101&lmt={limit}"
         );
 
         let resp = self.http.get(&url).send().await?;
@@ -146,8 +142,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&lmt=1",
-            secid
+            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&lmt=1"
         );
 
         let resp = self.http.get(&url).send().await?;
@@ -178,8 +173,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/mmpa/get?secid={}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58",
-            secid
+            "https://push2his.eastmoney.com/api/qt/stock/mmpa/get?secid={secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
         );
 
         let resp = self.http.get(&url).send().await?;
@@ -214,8 +208,7 @@ impl StockVendor for EastMoneyVendor {
         stock_code: &str,
     ) -> Result<Vec<LockupSchedule>, DataError> {
         let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_LOCKUP&columns=SECURITY_CODE,SECURITY_NAME_ABBR,UNLOCK_DATE,UNLOCK_SHARES,PLACING_RATIO,HOLDER_NAME&filter=(SECURITY_CODE=\"{}\")&pageSize=20&sortColumns=UNLOCK_DATE&pageNumber=1",
-            stock_code
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_LOCKUP&columns=SECURITY_CODE,SECURITY_NAME_ABBR,UNLOCK_DATE,UNLOCK_SHARES,PLACING_RATIO,HOLDER_NAME&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=20&sortColumns=UNLOCK_DATE&pageNumber=1"
         );
 
         let resp = self.http.get(&url).send().await?;
@@ -244,8 +237,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/margin/get?secid={}&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55",
-            secid
+            "https://push2his.eastmoney.com/api/qt/stock/margin/get?secid={secid}&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55"
         );
 
         let resp = self.http.get(&url).send().await?;

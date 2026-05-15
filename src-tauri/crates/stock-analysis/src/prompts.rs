@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tracing;
 
 /// 14 个专家 ID（对应 14 个 .md 文件）
 pub const EXPERT_IDS: &[&str] = &[
@@ -33,7 +32,7 @@ pub fn load_expert_prompts(base_dir: &str) -> HashMap<String, String> {
     let mut prompts = HashMap::new();
 
     for id in EXPERT_IDS {
-        let path = PathBuf::from(base_dir).join(format!("{}.md", id));
+        let path = PathBuf::from(base_dir).join(format!("{id}.md"));
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 let body = extract_body(&content);

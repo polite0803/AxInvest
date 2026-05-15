@@ -65,21 +65,14 @@ impl BacktestEngine {
         let klines = client
             .get_klines(stock_code, "daily", holding_days + 10)
             .await
-            .map_err(|e| format!("获取K线失败: {}", e))?;
+            .map_err(|e| format!("获取K线失败: {e}"))?;
 
         if klines.is_empty() {
-            return Err(format!("{} 无K线数据", stock_code));
+            return Err(format!("{stock_code} 无K线数据"));
         }
 
-        // 找到分析日对应的 K 线（或最近的一根）
-        let entry_kline = klines.iter().find(|k| k.date.as_str() >= analysis_date);
-        let entry_idx = entry_kline.map(|_| {
-            klines
-                .iter()
-                .position(|k| k.date.as_str() >= analysis_date)
-                .unwrap_or(0)
-        });
-        let entry_price = entry_kline.map(|k| k.close);
+        let entry_idx = klines.iter().position(|k| k.date.as_str() >= analysis_date);
+        let entry_price = entry_idx.map(|i| klines[i].close);
 
         // 取第 holding_days 根K线（或最后可用的）
         let exit_idx = entry_idx

@@ -5487,6 +5487,9 @@
     "alert.empty": "कोई अलर्ट नहीं",
     "alert.triggered": "मूल्य अलर्ट सक्रिय!",
     "klineChart": "कैंडलस्टिक",
-    "volumeChart": "वॉल्यूम"
+    "volumeChart": "वॉल्यूम",
+    "loadHistory": "विश्लेषण रिपोर्ट लोड करने के लिए क्लिक करें",
+    "history": "विश्लेषण इतिहास",
+    "debateHistory": "बहस का इतिहास"
   }
 }

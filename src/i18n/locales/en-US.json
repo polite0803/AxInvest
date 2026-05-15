@@ -5944,7 +5944,10 @@
     "alert.empty": "No alerts",
     "alert.triggered": "Price alert triggered!",
     "klineChart": "Candlestick",
-    "volumeChart": "Volume"
+    "volumeChart": "Volume",
+    "loadHistory": "Click to load history report",
+    "history": "Analysis History",
+    "debateHistory": "Debate History"
   },
   "trade": {
     "title": "Trading Log",

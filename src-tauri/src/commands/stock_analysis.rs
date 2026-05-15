@@ -184,9 +184,10 @@ pub async fn start_stock_analysis(
 
         let config = AnalysisConfig::default();
 
+        let blackboard_for_run = blackboard.clone();
         let result = StockAnalysisOrchestrator::run(
             &data_client,
-            blackboard,
+            blackboard_for_run,
             stock_code_for_spawn,
             stock_name_for_spawn,
             date,
@@ -208,6 +209,9 @@ pub async fn start_stock_analysis(
         match result {
             Ok(decision) => {
                 let decision_json = serde_json::to_string(&decision).unwrap_or_default();
+                // 导出完整黑板快照供历史回看
+                let snapshot =
+                    axagent_stock_analysis::pipeline::export_blackboard_snapshot(&blackboard).await;
                 let now = chrono::Utc::now().timestamp_millis();
                 let _ = stock_analyses::Entity::update_many()
                     .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
@@ -221,6 +225,10 @@ pub async fn start_stock_analysis(
                         Expr::value(&decision.reasoning),
                     )
                     .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&decision_json))
+                    .col_expr(
+                        stock_analyses::Column::BlackboardSnapshot,
+                        Expr::value(&snapshot),
+                    )
                     .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
                     .filter(stock_analyses::Column::Id.eq(&analysis_id_clone))
                     .exec(&db)

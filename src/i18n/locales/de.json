@@ -5487,6 +5487,9 @@
     "alert.empty": "Keine Alarme",
     "alert.triggered": "Preisalarm ausgelost!",
     "klineChart": "Kerzenchart",
-    "volumeChart": "Volumen"
+    "volumeChart": "Volumen",
+    "loadHistory": "Klicken, um Analysebericht zu laden",
+    "history": "Analyseverlauf",
+    "debateHistory": "Debattenverlauf"
   }
 }

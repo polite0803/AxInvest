@@ -5487,6 +5487,9 @@
     "alert.empty": "暫無告警",
     "alert.triggered": "價格告警已觸發！",
     "klineChart": "K線",
-    "volumeChart": "成交量"
+    "volumeChart": "成交量",
+    "loadHistory": "點擊載入歷史分析報告",
+    "history": "歷史分析",
+    "debateHistory": "歷史辯論"
   }
 }

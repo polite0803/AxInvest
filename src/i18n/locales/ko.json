@@ -5487,6 +5487,9 @@
     "alert.empty": "알림 없음",
     "alert.triggered": "가격 알림이 발동되었습니다!",
     "klineChart": "캔들차트",
-    "volumeChart": "거래량"
+    "volumeChart": "거래량",
+    "loadHistory": "분석 보고서를 로드하려면 클릭",
+    "history": "분석 기록",
+    "debateHistory": "토론 기록"
   }
 }

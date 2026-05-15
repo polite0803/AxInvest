@@ -127,7 +127,9 @@ pub fn is_lunch_break() -> bool {
 /// 从东方财富 API 获取最新交易日历
 pub async fn fetch_holiday_calendar() -> Result<Vec<String>, String> {
     let url = "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_TRADE_CALENDAR&columns=TRADE_DATE,IS_TRADING_DAY&pageSize=365&pageNumber=1";
-    let resp = reqwest::get(url).await.map_err(|e| format!("获取交易日历失败: {}", e))?;
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| format!("获取交易日历失败: {}", e))?;
     let json: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {}", e))?;
 
     let holidays: Vec<String> = json["result"]["data"]
@@ -137,7 +139,11 @@ pub async fn fetch_holiday_calendar() -> Result<Vec<String>, String> {
         .filter_map(|d| {
             let is_trading = d["IS_TRADING_DAY"].as_str().unwrap_or("1") == "0";
             let date = d["TRADE_DATE"].as_str().unwrap_or("").to_string();
-            if !date.is_empty() && is_trading { Some(date) } else { None }
+            if !date.is_empty() && is_trading {
+                Some(date)
+            } else {
+                None
+            }
         })
         .collect();
 

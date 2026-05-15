@@ -62,21 +62,13 @@ fn test_compute_indicators_basic() {
 #[test]
 fn test_is_trading_day() {
     // 周一（非节假日）
-    assert!(is_trading_day(
-        &NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()
-    ));
+    assert!(is_trading_day(&NaiveDate::from_ymd_opt(2026, 5, 11).unwrap()));
     // 周六
-    assert!(!is_trading_day(
-        &NaiveDate::from_ymd_opt(2026, 5, 16).unwrap()
-    ));
+    assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 5, 16).unwrap()));
     // 国庆
-    assert!(!is_trading_day(
-        &NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()
-    ));
+    assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()));
     // 中秋
-    assert!(!is_trading_day(
-        &NaiveDate::from_ymd_opt(2026, 9, 21).unwrap()
-    ));
+    assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 9, 21).unwrap()));
 }
 
 #[test]

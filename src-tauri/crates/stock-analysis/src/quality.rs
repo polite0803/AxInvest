@@ -36,6 +36,14 @@ pub fn check_report_quality(
 ) -> QualityGrade {
     let text = report_text.to_lowercase();
 
+    // 占位报告检测 (LLM 未连接时生成的假报告)
+    let is_placeholder = text.contains("\"summary\":\"占位报告")
+        || text.contains("agentrunner 未注入")
+        || text.contains("placeholder");
+    if is_placeholder {
+        return QualityGrade::F;
+    }
+
     // 硬检查 1: 报告是否为空或过短
     if report_text.trim().is_empty() {
         return QualityGrade::F;

@@ -17,6 +17,17 @@ use axagent_astock_data::AStockClient;
 use axagent_astock_data::{detect_market_type, get_st_price_limit_pct};
 use axagent_core::entity::{portfolio_holdings, stock_analyses, trades};
 
+/// 实际交易 vs 分析预测对比
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradePredictionComparison {
+    pub analysis_action: String,
+    pub analysis_target: Option<f64>,
+    pub analysis_stop: Option<f64>,
+    pub actual_price: f64,
+    pub target_deviation_pct: f64,
+}
+
 /// 手动交易引擎
 pub struct TradingEngine {
     db: Arc<DatabaseConnection>,
@@ -341,6 +352,52 @@ impl TradingEngine {
         }
 
         query.all(self.db.as_ref()).await.map_err(|e| e.to_string())
+    }
+
+    // ── 出场价 vs 分析预测对比 ──
+
+    /// 对比实际交易出场价与最近分析预测价位
+    pub async fn compare_trade_vs_prediction(
+        &self,
+        trade: &trades::Model,
+    ) -> Result<TradePredictionComparison, String> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+        let mut comparison = TradePredictionComparison {
+            analysis_action: String::new(),
+            analysis_target: None,
+            analysis_stop: None,
+            actual_price: trade.price,
+            target_deviation_pct: 0.0,
+        };
+
+        let last_analysis = stock_analyses::Entity::find()
+            .filter(stock_analyses::Column::StockCode.eq(&trade.stock_code))
+            .filter(stock_analyses::Column::Status.eq("completed"))
+            .filter(stock_analyses::Column::CreatedAt.lt(trade.created_at))
+            .order_by_desc(stock_analyses::Column::CreatedAt)
+            .one(self.db.as_ref())
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("没有找到在交易前的分析记录".to_string())?;
+
+        if let Some(ref decision_json) = last_analysis.decision_json {
+            if let Ok(decision) = serde_json::from_str::<serde_json::Value>(decision_json) {
+                comparison.analysis_action =
+                    decision["action"].as_str().unwrap_or("").to_string();
+                comparison.analysis_target = decision["targetPrice"].as_f64();
+                comparison.analysis_stop = decision["stopLoss"].as_f64();
+
+                if let Some(target) = comparison.analysis_target {
+                    if target != 0.0 {
+                        comparison.target_deviation_pct =
+                            ((trade.price - target) / target) * 100.0;
+                    }
+                }
+            }
+        }
+
+        Ok(comparison)
     }
 }
 

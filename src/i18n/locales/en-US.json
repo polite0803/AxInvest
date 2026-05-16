@@ -708,9 +708,23 @@
         "disable": "Disable",
         "enable": "Enable",
         "install": "Install",
+        "installPlaceholder": "Install: @scope/name or Git URL or local path",
         "loading": "Loading...",
         "refresh": "Refresh",
-        "title": "Plugin Marketplace"
+        "title": "Plugin Marketplace",
+        "validateFailed": "Validation failed: {{error}}",
+        "installSuccess": "Installed {{id}} v{{version}}",
+        "installFailed": "Installation failed: {{error}}",
+        "installTitle": "Install {{name}}",
+        "confirmInstall": "Confirm Install",
+        "cancel": "Cancel",
+        "version": "Version",
+        "description": "Description",
+        "permissions": "Permissions",
+        "none": "None",
+        "mcpServers": "MCP Servers",
+        "skills": "Skills",
+        "tools": "Tools"
       }
     },
     "steer": "Steer",
@@ -3509,7 +3523,16 @@
       "defaultCodeJsComment": "// Input: input\n// Return value will be stored in output_var",
       "defaultCodePythonComment": "# Input: input\n# Return value will be stored in output_var",
       "codeInputParams": "Input params: input",
-      "codeReturnHint": "Return value will be stored in output_var"
+      "codeReturnHint": "Return value will be stored in output_var",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser",
+      "selectRole": "Select Role",
+      "roleTag": "Role: {{role}}",
+      "bindRole": "Bind Role",
+      "expertNotFound": "Expert not found",
+      "profileMatched": "Matched existing profile",
+      "profileCreated": "Profile created",
+      "profileCreateFailed": "Failed to create profile: {{error}}"
     },
     "debug": {
       "totalDuration": "Total Duration",
@@ -3581,7 +3604,10 @@
       "roleDeveloper": "Developer",
       "roleReviewer": "Reviewer",
       "roleSynthesizer": "Synthesizer",
-      "roleExecutor": "Executor"
+      "roleExecutor": "Executor",
+      "agent": "Agent",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser"
     },
     "conditionNode": {
       "title": "Condition",
@@ -5963,6 +5989,16 @@
     "pnl": "P&L",
     "recorded": "Recorded",
     "fillRequired": "Please fill in required fields",
-    "toggleFailed": "Toggle failed"
+    "toggleFailed": "Toggle failed",
+    "agentRole": {
+      "coordinator": "Coordinator",
+      "researcher": "Researcher",
+      "planner": "Planner",
+      "developer": "Developer",
+      "reviewer": "Reviewer",
+      "browser": "Browser",
+      "synthesizer": "Synthesizer",
+      "executor": "Executor"
+    }
   }
 }

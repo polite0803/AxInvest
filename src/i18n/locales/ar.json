@@ -631,9 +631,23 @@
         "disable": "Disable",
         "enable": "Enable",
         "install": "Install",
+        "installPlaceholder": "تثبيت: @scope/name أو Git URL أو مسار محلي",
         "loading": "Loading...",
         "refresh": "Refresh",
-        "title": "Plugin Marketplace"
+        "title": "Plugin Marketplace",
+        "validateFailed": "فشل التحقق: {{error}}",
+        "installSuccess": "تم تثبيت {{id}} v{{version}}",
+        "installFailed": "فشل التثبيت: {{error}}",
+        "installTitle": "تثبيت {{name}}",
+        "confirmInstall": "تأكيد التثبيت",
+        "cancel": "إلغاء",
+        "version": "الإصدار",
+        "description": "الوصف",
+        "permissions": "الصلاحيات",
+        "none": "لا يوجد",
+        "mcpServers": "خوادم MCP",
+        "skills": "المهارات",
+        "tools": "الأدوات"
       }
     },
     "steer": "Steer",
@@ -3709,7 +3723,16 @@
       "defaultCodeJsComment": "// Input: input\n// Return value will be stored in output_var",
       "defaultCodePythonComment": "# Input: input\n# Return value will be stored in output_var",
       "codeInputParams": "Input params: input",
-      "codeReturnHint": "Return value will be stored in output_var"
+      "codeReturnHint": "Return value will be stored in output_var",
+      "roleCoordinator": "",
+      "roleBrowser": "",
+      "selectRole": "",
+      "roleTag": "",
+      "bindRole": "",
+      "expertNotFound": "",
+      "profileMatched": "",
+      "profileCreated": "",
+      "profileCreateFailed": ""
     },
     "debug": {
       "totalDuration": "Total Duration",
@@ -3872,7 +3895,10 @@
       "roleDeveloper": "Developer",
       "roleReviewer": "Reviewer",
       "roleSynthesizer": "Synthesizer",
-      "roleExecutor": "Executor"
+      "roleExecutor": "Executor",
+      "agent": "",
+      "roleCoordinator": "",
+      "roleBrowser": ""
     },
     "conditionNode": {
       "title": "شرط",

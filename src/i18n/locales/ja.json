@@ -631,9 +631,23 @@
         "disable": "無効化",
         "enable": "有効化",
         "install": "インストール",
+        "installPlaceholder": "インストール: @scope/name または GitURL またはローカルパス",
         "loading": "加载中...",
         "refresh": "更新",
-        "title": "插件市场"
+        "title": "插件市场",
+        "validateFailed": "検証に失敗しました: {{error}}",
+        "installSuccess": "{{id}} v{{version}} をインストールしました",
+        "installFailed": "インストールに失敗しました: {{error}}",
+        "installTitle": "{{name}} をインストール",
+        "confirmInstall": "インストール確認",
+        "cancel": "キャンセル",
+        "version": "バージョン",
+        "description": "説明",
+        "permissions": "権限",
+        "none": "なし",
+        "mcpServers": "MCPサーバー",
+        "skills": "スキル",
+        "tools": "ツール"
       }
     },
     "steer": "引导",
@@ -3317,7 +3331,16 @@
       "defaultCodeJsComment": "// 输入数据: input.yourVar",
       "defaultCodePythonComment": "# 输入数据: input.yourVar",
       "codeInputParams": "输入参数",
-      "codeReturnHint": "返回数据将作为节点输出传递"
+      "codeReturnHint": "返回数据将作为节点输出传递",
+      "roleCoordinator": "",
+      "roleBrowser": "",
+      "selectRole": "",
+      "roleTag": "",
+      "bindRole": "",
+      "expertNotFound": "",
+      "profileMatched": "",
+      "profileCreated": "",
+      "profileCreateFailed": ""
     },
     "debug": {
       "totalDuration": "总耗时",
@@ -3480,7 +3503,10 @@
       "roleDeveloper": "开发者",
       "roleReviewer": "审查者",
       "roleSynthesizer": "综合者",
-      "roleExecutor": "执行者"
+      "roleExecutor": "执行者",
+      "agent": "",
+      "roleCoordinator": "",
+      "roleBrowser": ""
     },
     "conditionNode": {
       "title": "条件分岐",

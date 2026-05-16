@@ -631,9 +631,23 @@
         "disable": "Disable",
         "enable": "Enable",
         "install": "Install",
+        "installPlaceholder": "Установка: @scope/name или Git URL или локальный путь",
         "loading": "Loading...",
         "refresh": "Refresh",
-        "title": "Plugin Marketplace"
+        "title": "Plugin Marketplace",
+        "validateFailed": "Ошибка проверки: {{error}}",
+        "installSuccess": "{{id}} v{{version}} установлен",
+        "installFailed": "Ошибка установки: {{error}}",
+        "installTitle": "Установить {{name}}",
+        "confirmInstall": "Подтвердить установку",
+        "cancel": "Отмена",
+        "version": "Версия",
+        "description": "Описание",
+        "permissions": "Разрешения",
+        "none": "Нет",
+        "mcpServers": "MCP-серверы",
+        "skills": "Навыки",
+        "tools": "Инструменты"
       }
     },
     "steer": "Steer",
@@ -3317,7 +3331,16 @@
       "defaultCodeJsComment": "// Input: input\n// Return value will be stored in output_var",
       "defaultCodePythonComment": "# Input: input\n# Return value will be stored in output_var",
       "codeInputParams": "Input params: input",
-      "codeReturnHint": "Return value will be stored in output_var"
+      "codeReturnHint": "Return value will be stored in output_var",
+      "roleCoordinator": "",
+      "roleBrowser": "",
+      "selectRole": "",
+      "roleTag": "",
+      "bindRole": "",
+      "expertNotFound": "",
+      "profileMatched": "",
+      "profileCreated": "",
+      "profileCreateFailed": ""
     },
     "debug": {
       "totalDuration": "Total Duration",
@@ -3480,7 +3503,10 @@
       "roleDeveloper": "Developer",
       "roleReviewer": "Reviewer",
       "roleSynthesizer": "Synthesizer",
-      "roleExecutor": "Executor"
+      "roleExecutor": "Executor",
+      "agent": "",
+      "roleCoordinator": "",
+      "roleBrowser": ""
     },
     "conditionNode": {
       "title": "Условие",

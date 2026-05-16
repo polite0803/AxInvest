@@ -732,7 +732,7 @@
     },
     {
       "file": "src/types/agentProfile.ts",
-      "lines": "10,13,18,73",
+      "lines": "10,13,18,73,85,91",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

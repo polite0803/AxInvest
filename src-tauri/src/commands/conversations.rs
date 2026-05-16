@@ -4231,6 +4231,9 @@ mod tests {
             sync_engine: None,
             astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
             stock_monitor: None,
+            plugin_manager: std::sync::Mutex::new(axagent_plugins::PluginManager::new(
+                axagent_plugins::PluginManagerConfig::new(temp_dir.clone()),
+            )),
         };
 
         let attachments = vec![AttachmentInput {

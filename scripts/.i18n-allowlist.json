@@ -831,6 +831,12 @@
       "lines": "77,79,81",
       "reason": "JSDoc 中文注释 + deprecated 标记",
       "phase": 3
+    },
+    {
+      "file": "src/stores/feature/stockAnalysisStore.ts",
+      "lines": "260",
+      "reason": "JSDoc 中文注释",
+      "phase": 3
     }
   ]
 }

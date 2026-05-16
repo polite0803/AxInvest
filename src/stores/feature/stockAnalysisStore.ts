@@ -162,12 +162,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   loadAnalysis: async (analysisId: string) => {
-    const record = await invoke<AnalysisSummary & {
-      decisionJson: string | null;
-      blackboardSnapshot: string | null;
-    }>("get_stock_analysis", { analysisId });
-    set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName,
-      status: "completed" });
+    const record = await invoke<
+      AnalysisSummary & {
+        decisionJson: string | null;
+        blackboardSnapshot: string | null;
+      }
+    >("get_stock_analysis", { analysisId });
+    set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName, status: "completed" });
     if (record.decisionJson) {
       try {
         set({ decision: JSON.parse(record.decisionJson) });

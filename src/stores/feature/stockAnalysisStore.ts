@@ -54,6 +54,8 @@ interface StockAnalysisState {
   // Event listeners
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
+  // 搜索防抖定时器
+  _searchTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const initialState = {
@@ -79,6 +81,7 @@ const initialState = {
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   ...initialState,
   _unlisten: null,
+  _searchTimer: null,
 
   searchStock: async (keyword: string) => {
     set({ searchKeyword: keyword });
@@ -86,12 +89,18 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       set({ searchResults: [] });
       return;
     }
-    try {
-      const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
-      set({ searchResults: results });
-    } catch {
-      set({ searchResults: [] });
-    }
+    // 防抖 300ms
+    const { _searchTimer } = get();
+    if (_searchTimer) clearTimeout(_searchTimer);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
+        set({ searchResults: results });
+      } catch {
+        set({ searchResults: [] });
+      }
+    }, 300);
+    set({ _searchTimer: timer });
   },
 
   getStockQuote: async (code: string) => {

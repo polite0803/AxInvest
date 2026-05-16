@@ -774,7 +774,7 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "6,7,8,9,10",
+      "lines": "6,7,8,9,10,11,12",
       "reason": "标签映射常量 (label-to-color map, not user-facing)",
       "phase": 3
     },
@@ -798,14 +798,14 @@
     },
     {
       "file": "src/components/stock-analysis/AnalysisProgress.tsx",
-      "lines": "42",
-      "reason": "中文状态提示 (离线模式指示符)",
+      "lines": "33,40,42,45,73",
+      "reason": "中文状态提示 + 模板字面量内嵌中文",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/TradePanel.tsx",
-      "lines": "197,216,251,262,270,273,274,277,281,304,307,310,313,321",
-      "reason": "中文 JSX 注释",
+      "lines": "79,197,216,228,251,262,270,273,274,277,281,282,285,286,289,293,304,307,310,313,316,319,321,322,325,333",
+      "reason": "中文 JSX 注释 + 内嵌判断文本",
       "phase": 3
     },
     {
@@ -836,12 +836,6 @@
       "file": "src/stores/feature/stockAnalysisStore.ts",
       "lines": "295",
       "reason": "JSDoc 中文注释",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
-      "lines": "33,40,45,73",
-      "reason": "中文状态提示 + 模板字面量内嵌中文",
       "phase": 3
     },
     {

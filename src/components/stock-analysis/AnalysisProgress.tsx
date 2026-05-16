@@ -13,22 +13,13 @@ const STAGES = [
 export function AnalysisProgress() {
   const { t } = useTranslation();
   const status = useStockAnalysisStore((s) => s.status);
-  const analystReports = useStockAnalysisStore((s) => s.analystReports);
-  const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
-  const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
+  const currentStage = useStockAnalysisStore((s) => s.currentStage);
   const error = useStockAnalysisStore((s) => s.error);
   const llmStatus = useStockAnalysisStore((s) => s.llmStatus);
 
   if (status === "idle") { return null; }
 
-  let currentStep = 0;
-  if (status === "running" || status === "completed") {
-    const reportCount = Object.keys(analystReports).length;
-    if (reportCount >= 1) { currentStep = 1; }
-    if (debateRounds.length > 0) { currentStep = 2; }
-    if (Object.keys(riskAssessments).length >= 1) { currentStep = 3; }
-  }
-  if (status === "completed") { currentStep = 4; }
+  const currentStep = status === "completed" ? 4 : currentStage;
 
   return (
     <div>

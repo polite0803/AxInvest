@@ -39,10 +39,24 @@ pub async fn build_analyst_context(
             if let Some(quote) = bb.get_state("raw.quote") {
                 let _ = write!(ctx, "## 实时行情（PE/PB等估值参考）\n{quote}\n");
             }
+            if let Some(dividends) = bb.get_state("raw.dividend_records") {
+                let _ = write!(ctx, "## 分红记录\n{dividends}\n");
+            }
+            if let Some(vm) = bb.get_state("raw.value_metrics") {
+                let _ = write!(ctx, "## 价值投资指标（系统预计算）\n{vm}\n");
+            }
         },
-        "news-analyst" | "sentiment-analyst" | "policy-analyst" => {
+        "news-analyst" | "sentiment-analyst" => {
             if let Some(news) = bb.get_state("raw.news") {
                 let _ = write!(ctx, "## 新闻数据\n{news}\n");
+            }
+        },
+        "policy-analyst" => {
+            if let Some(news) = bb.get_state("raw.news") {
+                let _ = write!(ctx, "## 新闻数据\n{news}\n");
+            }
+            if let Some(sector) = bb.get_state("raw.sector_info") {
+                let _ = write!(ctx, "## 行业分类\n{sector}\n");
             }
         },
         "hot-money-tracker" => {
@@ -52,10 +66,30 @@ pub async fn build_analyst_context(
             if let Some(dt) = bb.get_state("raw.dragon_tiger") {
                 let _ = write!(ctx, "## 龙虎榜\n{dt}\n");
             }
+            if let Some(margin) = bb.get_state("raw.margin_data") {
+                let _ = write!(ctx, "## 融资融券数据\n{margin}\n");
+            }
+            if let Some(nb) = bb.get_state("raw.north_bound") {
+                let _ = write!(ctx, "## 北向资金持仓\n{nb}\n");
+            }
         },
         "lockup-watcher" => {
             if let Some(lockup) = bb.get_state("raw.lockup") {
                 let _ = write!(ctx, "## 限售解禁\n{lockup}\n");
+            }
+            if let Some(trades) = bb.get_state("raw.shareholder_trades") {
+                let _ = write!(ctx, "## 股东增减持记录\n{trades}\n");
+            }
+        },
+        "value-investor" => {
+            if let Some(fin) = bb.get_state("raw.financials") {
+                let _ = write!(ctx, "## 财务数据\n{fin}\n");
+            }
+            if let Some(quote) = bb.get_state("raw.quote") {
+                let _ = write!(ctx, "## 行情\n{quote}\n");
+            }
+            if let Some(va) = bb.get_state("value.assessment") {
+                let _ = write!(ctx, "## 量化价值评估\n{va}\n");
             }
         },
         _ => {

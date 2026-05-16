@@ -179,7 +179,7 @@ jobs:
         if: contains(matrix.target, 'windows')
         shell: pwsh
         run: |
-          $exe = "src-tauri/target/${{ matrix.target }}/release/AxInvest.exe"
+          $exe = "src-tauri/target/${{ matrix.target }}/release/AxAgent.exe"
           $arch = if ("${{ matrix.target }}" -match "aarch64") { "arm64" } else { "x64" }
           $zipName = "AxInvest_${{ github.ref_name }}_windows-${arch}-portable.zip"
           Compress-Archive -Path $exe -DestinationPath $zipName
@@ -414,10 +414,10 @@ jobs:
         with:
           ndk-version: ${{ env.NDK_VERSION }}
 
-      - name: Setup JDK 17
+      - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Android SDK

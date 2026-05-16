@@ -990,6 +990,9 @@
       "exportSkill": "Экспорт",
       "importSkill": "Импорт"
     },
+    "plugins": {
+      "title": "Плагины"
+    },
     "dashboardPlugins": {
       "title": "Плагины панели управления",
       "description": "Описание",
@@ -2492,7 +2495,8 @@
     "toggleSidebar": "Переключить боковую панель",
     "toggleInspector": "Переключить инспектор",
     "searchConversations": "Поиск чатов",
-    "goToSkills": "Перейти к навыкам"
+    "goToSkills": "Перейти к навыкам",
+    "goToPlugins": "Перейти к плагинам"
   },
   "appLaunch": {
     "title": "Конфигурация запуска",

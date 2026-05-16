@@ -19,9 +19,9 @@ interface ParsedReport {
 function tryParse(report: string): ParsedReport | null {
   try {
     const trimmed = report.trim();
-    if (trimmed.startsWith("{")) return JSON.parse(trimmed);
+    if (trimmed.startsWith("{")) { return JSON.parse(trimmed); }
     const m = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
-    if (m) return JSON.parse(m[1]);
+    if (m) { return JSON.parse(m[1]); }
   } catch { /* not JSON, show raw */ }
   return null;
 }
@@ -70,7 +70,16 @@ export function AnalystReportCard({ expertId, report }: Props) {
       {signals && signals.length > 0 && (
         <div className="flex gap-1 flex-wrap mt-1">
           {signals.map((s, i) => (
-            <Tag key={i} color={s.includes("买") || s.includes("多") ? "green" : s.includes("卖") || s.includes("空") ? "red" : "blue"}>{s}</Tag>
+            <Tag
+              key={i}
+              color={s.includes("买") || s.includes("多")
+                ? "green"
+                : s.includes("卖") || s.includes("空")
+                ? "red"
+                : "blue"}
+            >
+              {s}
+            </Tag>
           ))}
         </div>
       )}

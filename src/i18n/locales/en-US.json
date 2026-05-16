@@ -2244,6 +2244,9 @@
       "exportSkill": "Export",
       "importSkill": "Import"
     },
+    "plugins": {
+      "title": "Plugins"
+    },
     "dashboardPlugins": {
       "title": "Dashboard Plugins",
       "description": "Extend your dashboard with plugins",
@@ -2698,7 +2701,8 @@
     "toggleSidebar": "Toggle Sidebar",
     "toggleInspector": "Toggle Inspector",
     "searchConversations": "Search Conversations",
-    "goToSkills": "Go to Skills"
+    "goToSkills": "Go to Skills",
+    "goToPlugins": "Go to Plugins"
   },
   "quickbar": {
     "title": "QuickBar",

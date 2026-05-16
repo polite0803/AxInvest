@@ -35,6 +35,9 @@ interface StockAnalysisState {
   // History
   history: AnalysisSummary[];
 
+  // 当前管线阶段 (0=数据加载 1=分析 2=辩论 3=风控 4=决策)
+  currentStage: number;
+
   // LLM 连接状态
   llmStatus: "live" | "placeholder" | "unknown";
 
@@ -69,6 +72,7 @@ const initialState = {
   decision: null,
   error: null,
   history: [],
+  currentStage: 0,
   llmStatus: "unknown" as const,
 };
 
@@ -191,8 +195,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           break;
         case "dataLoaded":
           break;
-        case "analystProgress":
+        case "analystProgress": {
+          const { expertId } = payload as Record<string, string>;
+          const stage = inferStage(expertId);
+          if (stage >= 0) { set({ currentStage: stage }); }
           break;
+        }
         case "analystReport": {
           const { expertId, reportText } = payload as Record<string, string>;
           set((s) => ({
@@ -248,3 +256,31 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({ _unlisten: unlisten });
   },
 }));
+
+/** 从 expert_id 推断当前管线阶段 */
+function inferStage(expertId: string): number {
+  if (expertId === "indicators") { return 0; }
+  if (ANALYST_STAGE_IDS.has(expertId)) { return 1; }
+  if (expertId === "debate") { return 2; }
+  if (RISK_STAGE_IDS.has(expertId)) { return 3; }
+  if (expertId === "trader" || expertId === "portfolio-manager") { return 4; }
+  return -1;
+}
+
+const ANALYST_STAGE_IDS = new Set([
+  "market-analyst",
+  "sentiment-analyst",
+  "news-analyst",
+  "fundamentals-analyst",
+  "policy-analyst",
+  "hot-money-tracker",
+  "lockup-watcher",
+  "value-investor",
+]);
+
+const RISK_STAGE_IDS = new Set([
+  "aggressive-debator",
+  "conservative-debator",
+  "neutral-debator",
+  "research-manager",
+]);

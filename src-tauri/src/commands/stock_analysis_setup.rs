@@ -245,32 +245,32 @@ fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String) {
 
 fn expert_id_to_display(id: &str) -> String {
     match id {
-        "market-analyst" => "市场技术分析师",
-        "sentiment-analyst" => "情绪面分析师",
-        "news-analyst" => "消息面分析师",
-        "fundamentals-analyst" => "基本面分析师",
-        "policy-analyst" => "政策面分析师",
-        "hot-money-tracker" => "资金面追踪",
-        "lockup-watcher" => "筹码限售观察",
-        "bull-researcher" => "多方研究员",
-        "bear-researcher" => "空方研究员",
-        "aggressive-debator" => "激进风险评估",
-        "conservative-debator" => "保守风险评估",
-        "neutral-debator" => "中性风险评估",
-        "research-manager" => "研究经理",
-        "trader" => "交易员",
-        "portfolio-manager" => "投资组合经理",
-        o => o.into(),
+        "market-analyst" => "市场技术分析师".to_string(),
+        "sentiment-analyst" => "情绪面分析师".to_string(),
+        "news-analyst" => "消息面分析师".to_string(),
+        "fundamentals-analyst" => "基本面分析师".to_string(),
+        "policy-analyst" => "政策面分析师".to_string(),
+        "hot-money-tracker" => "资金面追踪".to_string(),
+        "lockup-watcher" => "筹码限售观察".to_string(),
+        "bull-researcher" => "多方研究员".to_string(),
+        "bear-researcher" => "空方研究员".to_string(),
+        "aggressive-debator" => "激进风险评估".to_string(),
+        "conservative-debator" => "保守风险评估".to_string(),
+        "neutral-debator" => "中性风险评估".to_string(),
+        "research-manager" => "研究经理".to_string(),
+        "trader" => "交易员".to_string(),
+        "portfolio-manager" => "投资组合经理".to_string(),
+        o => o.to_string(),
     }
 }
 
 fn role_id_to_display(id: &str) -> String {
     match id {
-        "stock-analyst" => "股票分析师",
-        "debater" => "辩论研究员",
-        "risk-evaluator" => "风险评估师",
-        "trader" => "交易员",
-        "decision-maker" => "决策者",
-        o => o.into(),
+        "stock-analyst" => "股票分析师".to_string(),
+        "debater" => "辩论研究员".to_string(),
+        "risk-evaluator" => "风险评估师".to_string(),
+        "trader" => "交易员".to_string(),
+        "decision-maker" => "决策者".to_string(),
+        o => o.to_string(),
     }
 }

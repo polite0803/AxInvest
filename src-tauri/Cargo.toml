@@ -28,6 +28,7 @@ sha2 = "0.10"
 image = { version = "0.25", features = ["png"] }
 xcap = "0.9.4"
 enigo = "0.6"
+tauri = "2.11.1"
 
 [package]
 name = "axagent"

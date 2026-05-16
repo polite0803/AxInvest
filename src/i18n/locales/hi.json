@@ -5525,6 +5525,19 @@
     "addToWatchlist": "जोड़ें",
     "addedToWatchlist": "जोड़ा गया",
     "inWatchlist": "सूची में",
-    "addFailed": "विफल"
+    "addFailed": "विफल",
+    "actionBuy": "खरीदें",
+    "actionSell": "बेचें",
+    "actionIncrease": "बढ़ाएं",
+    "actionHold": "रखें",
+    "actionReduce": "घटाएं",
+    "recentAnalysis": "हालिया विश्लेषण",
+    "targetPriceNote": "लक्ष्य ¥{{price}}",
+    "totalMarketValue": "कुल बाजार मूल्य",
+    "unrealizedPnl": "अवास्तविक लाभ/हानि",
+    "concentration": "केंद्रीकरण",
+    "holdings": "होल्डिंग्स",
+    "sharesUnit": "",
+    "wanUnit": "0k"
   }
 }

@@ -5525,6 +5525,19 @@
     "addToWatchlist": "Añadir",
     "addedToWatchlist": "Añadido",
     "inWatchlist": "En lista",
-    "addFailed": "Error"
+    "addFailed": "Error",
+    "actionBuy": "Comprar",
+    "actionSell": "Vender",
+    "actionIncrease": "Aumentar",
+    "actionHold": "Mantener",
+    "actionReduce": "Reducir",
+    "recentAnalysis": "Análisis Reciente",
+    "targetPriceNote": "Objetivo ¥{{price}}",
+    "totalMarketValue": "Valor de Mercado",
+    "unrealizedPnl": "P&G No Realizado",
+    "concentration": "Concentración",
+    "holdings": "Posiciones",
+    "sharesUnit": "",
+    "wanUnit": "0k"
   }
 }

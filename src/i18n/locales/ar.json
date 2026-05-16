@@ -5525,6 +5525,19 @@
     "addToWatchlist": "إضافة",
     "addedToWatchlist": "تمت الإضافة",
     "inWatchlist": "في القائمة",
-    "addFailed": "فشل"
+    "addFailed": "فشل",
+    "actionBuy": "شراء",
+    "actionSell": "بيع",
+    "actionIncrease": "زيادة",
+    "actionHold": "احتفاظ",
+    "actionReduce": "تخفيض",
+    "recentAnalysis": "التحليل الأخير",
+    "targetPriceNote": "الهدف ¥{{price}}",
+    "totalMarketValue": "القيمة السوقية",
+    "unrealizedPnl": "الأرباح غير المحققة",
+    "concentration": "تركيز",
+    "holdings": "الحيازات",
+    "sharesUnit": "",
+    "wanUnit": "0ألف"
   }
 }

@@ -31,6 +31,8 @@ export function StockAnalysisPage() {
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const reset = useStockAnalysisStore((s) => s.reset);
   const status = useStockAnalysisStore((s) => s.status);
+  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
+  const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
 
   useEffect(() => {
     setupEventListener();
@@ -41,9 +43,15 @@ export function StockAnalysisPage() {
 
   useEffect(() => {
     if (id) {
-      loadAnalysis(id);
+      loadAnalysis(id).then(() => {
+        const code = useStockAnalysisStore.getState().stockCode;
+        if (code) {
+          getStockQuote(code);
+          getStockKline(code, "daily", 120);
+        }
+      });
     }
-  }, [id, loadAnalysis]);
+  }, [id, loadAnalysis, getStockQuote, getStockKline]);
 
   const tabItems = [
     {

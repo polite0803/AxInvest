@@ -296,15 +296,22 @@ export function TradePanel() {
               : 0;
             const riskColor = maxPct > 50 ? "#f85149" : maxPct > 30 ? "#d29922" : "#3fb950";
             return (
-              <div className="text-xs flex justify-between p-1 mt-1 rounded" style={{ background: "var(--color-bg-elevated)" }}>
-                <span>总市值: <b>{(totalMv / 10000).toFixed(1)}万</b></span>
+              <div
+                className="text-xs flex justify-between p-1 mt-1 rounded"
+                style={{ background: "var(--color-bg-elevated)" }}
+              >
+                <span>
+                  总市值: <b>{(totalMv / 10000).toFixed(1)}万</b>
+                </span>
                 <span style={{ color: totalPnl >= 0 ? "#3fb950" : "#f85149" }}>
                   浮动盈亏: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
                 </span>
                 <span style={{ color: riskColor }}>
                   集中度: <b>{maxPct.toFixed(0)}%</b>
                 </span>
-                <span>持仓: <b>{positions.length}只</b></span>
+                <span>
+                  持仓: <b>{positions.length}只</b>
+                </span>
               </div>
             );
           })()}

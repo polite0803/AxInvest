@@ -5521,6 +5521,10 @@
     "volumeChart": "거래량",
     "loadHistory": "분석 보고서를 로드하려면 클릭",
     "history": "분석 기록",
-    "debateHistory": "토론 기록"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "관심종목 추가",
+    "addedToWatchlist": "추가됨",
+    "inWatchlist": "추가됨",
+    "addFailed": "작업 실패"
   }
 }

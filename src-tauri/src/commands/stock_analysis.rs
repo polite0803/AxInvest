@@ -117,31 +117,28 @@ pub async fn start_stock_analysis(
     // 4. 创建取消令牌
     let cancel_token = Arc::new(AtomicBool::new(false));
 
-    // 5. 构建 StockAgentSession（通过 SessionManager 调用 LLM，走上游标准路径）
+    // 5. 构建带取消令牌的 AgentRunner
     let master_key = state.master_key;
     let db_for_runner = state.sea_db.clone();
     let provider_id_for_runner = provider_id.clone();
-    let session_manager = state.agent_session_manager.clone();
 
-    let runner: Option<Arc<dyn AgentRunner>> = match build_stock_agent_session(
+    let runner: Option<Arc<dyn AgentRunner>> = match build_cancel_aware_runner(
         &db_for_runner,
         &master_key,
         &provider_id_for_runner,
-        session_manager,
-        conversation_id.clone(),
         cancel_token.clone(),
     )
     .await
     {
-        Ok(session) => {
+        Ok(r) => {
             tracing::info!(
-                "[stock_analysis] StockAgentSession 已构建 (provider={})",
+                "[stock_analysis] CancelAwareRunner 已构建 (provider={})",
                 provider_id_for_runner
             );
-            Some(Arc::new(session))
+            Some(Arc::new(r))
         },
         Err(e) => {
-            tracing::warn!("[stock_analysis] 无法构建 StockAgentSession，使用占位报告: {}", e);
+            tracing::warn!("[stock_analysis] 无法构建 runner，使用占位报告: {}", e);
             None
         },
     };
@@ -437,18 +434,14 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
 
 // ── Helper: 构建 SessionManagerRunner ──
 
-/// 从数据库中的 provider 配置构建 SessionManagerRunner。
-///
-/// 构建 StockAgentSession — 通过 SessionManager 调用 LLM，走上游标准路径。
+/// 构建带取消令牌的 AgentRunner（封装 SessionManagerRunner）。
 /// 任何步骤失败都会返回 `Err`，调用方可回退到占位报告模式。
-async fn build_stock_agent_session(
+async fn build_cancel_aware_runner(
     db: &sea_orm::DatabaseConnection,
     master_key: &[u8; 32],
     provider_id: &str,
-    session_manager: Arc<axagent_agent::session_manager::SessionManager>,
-    conversation_id: String,
     cancel_token: Arc<AtomicBool>,
-) -> Result<axagent_stock_analysis::agent_session::StockAgentSession, String> {
+) -> Result<impl AgentRunner, String> {
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await
         .map_err(|e| format!("Provider 查询失败: {}", e))?;
@@ -511,14 +504,36 @@ async fn build_stock_agent_session(
         .find(|m| m.enabled)
         .map(|m| m.model_id.clone())
         .ok_or_else(|| "没有可用的模型".to_string())?;
-    Ok(axagent_stock_analysis::agent_session::StockAgentSession::new(
-        session_manager,
-        adapter,
-        ctx,
-        model_id,
-        conversation_id,
-        Some(cancel_token),
-    ))
+    let inner = axagent_stock_analysis::runner::SessionManagerRunner::new(adapter, ctx, model_id)
+        .with_temperature(Some(0.3))
+        .with_max_tokens(Some(4096));
+    Ok(CancelAwareRunner {
+        inner,
+        token: cancel_token,
+    })
+}
+
+/// 带取消令牌检查的 AgentRunner 包装
+struct CancelAwareRunner {
+    inner: axagent_stock_analysis::runner::SessionManagerRunner,
+    token: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl AgentRunner for CancelAwareRunner {
+    async fn run_agent(
+        &self,
+        expert_id: &str,
+        sys_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, String> {
+        if self.token.load(Ordering::Relaxed) {
+            return Err("已取消".into());
+        }
+        self.inner
+            .run_agent(expert_id, sys_prompt, user_prompt)
+            .await
+    }
 }
 
 /// 从 DB 的 agency_experts 表加载股票分析专家系统提示词

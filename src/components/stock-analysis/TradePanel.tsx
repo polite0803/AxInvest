@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined } from "@ant-design/icons";
 import { Button, Card, Input, InputNumber, message, Select, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";
@@ -33,6 +34,9 @@ interface PositionSummary {
 
 export function TradePanel() {
   const { t } = useTranslation();
+  const storeStockCode = useStockAnalysisStore((s) => s.stockCode);
+  const storeStockName = useStockAnalysisStore((s) => s.stockName);
+  const storeDecision = useStockAnalysisStore((s) => s.decision);
   const [enabled, setEnabled] = useState(false);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<PositionSummary[]>([]);
@@ -41,7 +45,7 @@ export function TradePanel() {
   const [form, setForm] = useState({
     stockCode: "",
     stockName: "",
-    direction: "buy",
+    direction: "buy" as string,
     price: 0,
     quantity: 100,
     notes: "",
@@ -68,6 +72,14 @@ export function TradePanel() {
       loadData();
     }
   }, [enabled]);
+
+  // 自动从分析页同步股票代码/名称
+  useEffect(() => {
+    if (storeStockCode && !form.stockCode) {
+      const dir = storeDecision?.action === "卖出" ? "sell" : "buy";
+      setForm((f) => ({ ...f, stockCode: storeStockCode, stockName: storeStockName, direction: dir }));
+    }
+  }, [storeStockCode, storeStockName, storeDecision]);
 
   // 当股票代码变化时，获取最近分析决策
   useEffect(() => {

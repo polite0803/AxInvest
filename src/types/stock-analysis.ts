@@ -64,15 +64,15 @@ export interface AnalysisSummary {
 
 export interface AnalysisEvent {
   type:
-    | "Started"
-    | "DataLoaded"
-    | "AnalystProgress"
-    | "AnalystReport"
-    | "DebateRound"
-    | "RiskAssessment"
-    | "InvestmentPlan"
-    | "Decision"
-    | "Error";
+    | "started"
+    | "dataLoaded"
+    | "analystProgress"
+    | "analystReport"
+    | "debateRound"
+    | "riskAssessment"
+    | "investmentPlan"
+    | "decision"
+    | "error";
   payload: Record<string, unknown>;
 }
 

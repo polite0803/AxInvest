@@ -186,21 +186,21 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const unlisten = await listen<AnalysisEvent>("stock-analysis-event", (event) => {
       const { type, payload } = event.payload;
       switch (type) {
-        case "Started":
+        case "started":
           set({ status: "running" });
           break;
-        case "DataLoaded":
+        case "dataLoaded":
           break;
-        case "AnalystProgress":
+        case "analystProgress":
           break;
-        case "AnalystReport": {
+        case "analystReport": {
           const { expertId, reportText } = payload as Record<string, string>;
           set((s) => ({
             analystReports: { ...s.analystReports, [expertId]: reportText },
           }));
           break;
         }
-        case "DebateRound": {
+        case "debateRound": {
           const { round, bullArgument, bearArgument } = payload as Record<string, unknown>;
           set((s) => ({
             debateRounds: [
@@ -214,14 +214,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }));
           break;
         }
-        case "RiskAssessment": {
+        case "riskAssessment": {
           const { riskType, report } = payload as Record<string, string>;
           set((s) => ({
             riskAssessments: { ...s.riskAssessments, [riskType]: report },
           }));
           break;
         }
-        case "InvestmentPlan": {
+        case "investmentPlan": {
           const { plan } = payload as Record<string, string>;
           set((s) => ({
             analystReports: { ...s.analystReports, "investment-plan": plan },
@@ -230,10 +230,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         }
         // NOTE: payload 与 StockDecision 的结构由 serde(rename_all="camelCase") 保证一致
         // 若后端修改 Decision 变体字段，此处需同步更新
-        case "Decision":
+        case "decision":
           set({ decision: payload as unknown as StockDecision, status: "completed" });
           break;
-        case "Error": {
+        case "error": {
           const msg = (payload as Record<string, string>).message;
           set({
             error: msg,

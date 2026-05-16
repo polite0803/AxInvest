@@ -5525,6 +5525,19 @@
     "addToWatchlist": "ウォッチリストに追加",
     "addedToWatchlist": "追加済み",
     "inWatchlist": "追加済み",
-    "addFailed": "操作失敗"
+    "addFailed": "操作失敗",
+    "actionBuy": "買い",
+    "actionSell": "売り",
+    "actionIncrease": "増加",
+    "actionHold": "保持",
+    "actionReduce": "削減",
+    "recentAnalysis": "最近の分析",
+    "targetPriceNote": "目標 ¥{{price}}",
+    "totalMarketValue": "時価総額",
+    "unrealizedPnl": "未実現損益",
+    "concentration": "集中度",
+    "holdings": "保有",
+    "sharesUnit": "株",
+    "wanUnit": "万"
   }
 }

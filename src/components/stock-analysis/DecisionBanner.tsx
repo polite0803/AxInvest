@@ -23,6 +23,13 @@ export function DecisionBanner() {
   if (!decision) { return null; }
 
   const color = ACTION_COLORS[decision.action] || "info";
+  const actionLabel: Record<string, string> = {
+    "买入": t("stockAnalysis.actionBuy"),
+    "增持": t("stockAnalysis.actionIncrease"),
+    "持有": t("stockAnalysis.actionHold"),
+    "减持": t("stockAnalysis.actionReduce"),
+    "卖出": t("stockAnalysis.actionSell"),
+  };
 
   const addToWatchlist = async () => {
     if (!stockCode || !stockName) { return; }
@@ -45,7 +52,7 @@ export function DecisionBanner() {
         <div>
           <span className="font-semibold">{t("stockAnalysis.finalDecision")}:</span>
           <Tag color={color === "success" ? "green" : color === "error" ? "red" : "blue"}>
-            {decision.action}
+            {actionLabel[decision.action] || decision.action}
           </Tag>
           <span>{t("stockAnalysis.position")}: {decision.positionPct}%</span>
         </div>

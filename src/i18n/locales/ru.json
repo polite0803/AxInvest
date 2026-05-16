@@ -5525,6 +5525,19 @@
     "addToWatchlist": "Добавить",
     "addedToWatchlist": "Добавлено",
     "inWatchlist": "В списке",
-    "addFailed": "Ошибка"
+    "addFailed": "Ошибка",
+    "actionBuy": "Купить",
+    "actionSell": "Продать",
+    "actionIncrease": "Увеличить",
+    "actionHold": "Держать",
+    "actionReduce": "Сократить",
+    "recentAnalysis": "Недавний анализ",
+    "targetPriceNote": "Цель ¥{{price}}",
+    "totalMarketValue": "Рыночная стоимость",
+    "unrealizedPnl": "Нереализованная прибыль",
+    "concentration": "Концентрация",
+    "holdings": "Позиции",
+    "sharesUnit": "",
+    "wanUnit": "0k"
   }
 }

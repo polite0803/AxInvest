@@ -5525,6 +5525,19 @@
     "addToWatchlist": "관심종목 추가",
     "addedToWatchlist": "추가됨",
     "inWatchlist": "추가됨",
-    "addFailed": "작업 실패"
+    "addFailed": "작업 실패",
+    "actionBuy": "매수",
+    "actionSell": "매도",
+    "actionIncrease": "증가",
+    "actionHold": "보유",
+    "actionReduce": "감소",
+    "recentAnalysis": "최근 분석",
+    "targetPriceNote": "목표 ¥{{price}}",
+    "totalMarketValue": "총 시가",
+    "unrealizedPnl": "미실현 손익",
+    "concentration": "집중도",
+    "holdings": "보유",
+    "sharesUnit": "주",
+    "wanUnit": "만"
   }
 }

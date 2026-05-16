@@ -5970,7 +5970,20 @@
     "addToWatchlist": "加入自选",
     "addedToWatchlist": "已加入自选",
     "inWatchlist": "已在自选",
-    "addFailed": "操作失败"
+    "addFailed": "操作失败",
+    "actionBuy": "买入",
+    "actionSell": "卖出",
+    "actionIncrease": "增持",
+    "actionHold": "持有",
+    "actionReduce": "减持",
+    "recentAnalysis": "最近分析",
+    "targetPriceNote": "目标¥{{price}}",
+    "totalMarketValue": "总市值",
+    "unrealizedPnl": "浮动盈亏",
+    "concentration": "集中度",
+    "holdings": "持仓",
+    "sharesUnit": "只",
+    "wanUnit": "万"
   },
   "trade": {
     "title": "交易日志",

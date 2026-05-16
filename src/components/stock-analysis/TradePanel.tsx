@@ -6,6 +6,9 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+/** 后端返回的分析动作常量（用于比较，不做 UI 展示） */
+const A = { BUY: "买入", SELL: "卖出" } as const;
+
 interface TradeRecord {
   id: string;
   stockCode: string;
@@ -76,7 +79,7 @@ export function TradePanel() {
   // 自动从分析页同步股票代码/名称
   useEffect(() => {
     if (storeStockCode && !form.stockCode) {
-      const dir = storeDecision?.action === "卖出" ? "sell" : "buy";
+      const dir = storeDecision?.action === A.SELL ? "sell" : "buy";
       setForm((f) => ({ ...f, stockCode: storeStockCode, stockName: storeStockName, direction: dir }));
     }
   }, [storeStockCode, storeStockName, storeDecision]);
@@ -225,7 +228,7 @@ export function TradePanel() {
         </div>
       }
     >
-      {/* 录入表单 */}
+      {/* Entry form */}
       <div className="flex flex-col gap-1 mb-2">
         <div className="flex gap-1">
           <Input
@@ -279,18 +282,20 @@ export function TradePanel() {
         </div>
       </div>
 
-      {/* 分析一致性提示 */}
+      {/* Analysis consistency hint */}
       {lastAnalysis && (
         <div className="text-xs p-1 rounded" style={{ background: "var(--color-bg-elevated)", marginTop: 4 }}>
-          <span style={{ color: "var(--color-text-secondary)" }}>最近分析:</span>
-          <Tag color={lastAnalysis.action === "买入" ? "green" : lastAnalysis.action === "卖出" ? "red" : "blue"}>
+          <span style={{ color: "var(--color-text-secondary)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
+          <Tag color={lastAnalysis.action === A.BUY ? "green" : lastAnalysis.action === A.SELL ? "red" : "blue"}>
             {lastAnalysis.action}
           </Tag>
-          {lastAnalysis.targetPrice && <span>目标¥{lastAnalysis.targetPrice}</span>}
+          {lastAnalysis.targetPrice && (
+            <span>{t("stockAnalysis.targetPriceNote", { price: lastAnalysis.targetPrice })}</span>
+          )}
         </div>
       )}
 
-      {/* 持仓汇总 */}
+      {/* Position summary */}
       {positions.length > 0 && (
         <>
           <Table
@@ -313,16 +318,17 @@ export function TradePanel() {
                 style={{ background: "var(--color-bg-elevated)" }}
               >
                 <span>
-                  总市值: <b>{(totalMv / 10000).toFixed(1)}万</b>
+                  {t("stockAnalysis.totalMarketValue")}:{" "}
+                  <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
                 </span>
                 <span style={{ color: totalPnl >= 0 ? "#3fb950" : "#f85149" }}>
-                  浮动盈亏: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
+                  {t("stockAnalysis.unrealizedPnl")}: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
                 </span>
                 <span style={{ color: riskColor }}>
-                  集中度: <b>{maxPct.toFixed(0)}%</b>
+                  {t("stockAnalysis.concentration")}: <b>{maxPct.toFixed(0)}%</b>
                 </span>
                 <span>
-                  持仓: <b>{positions.length}只</b>
+                  {t("stockAnalysis.holdings")}: <b>{positions.length}{t("stockAnalysis.sharesUnit")}</b>
                 </span>
               </div>
             );
@@ -330,7 +336,7 @@ export function TradePanel() {
         </>
       )}
 
-      {/* 最近交易 */}
+      {/* Recent trades */}
       {trades.length > 0 && (
         <Table
           size="small"

@@ -774,8 +774,8 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "6,7,8,9,10,11,12",
-      "reason": "标签映射常量 (label-to-color map, not user-facing)",
+      "lines": "6,7,8,9,10,11,12,27,28,29,30,31",
+      "reason": "后端动作常量键名映射 (internal backend-key→color/label maps)",
       "phase": 3
     },
     {
@@ -804,8 +804,8 @@
     },
     {
       "file": "src/components/stock-analysis/TradePanel.tsx",
-      "lines": "79,197,216,228,251,262,270,273,274,277,281,282,285,286,289,293,304,307,310,313,316,319,321,322,325,333",
-      "reason": "中文 JSX 注释 + 内嵌判断文本",
+      "lines": "9,10",
+      "reason": "后端动作常量 (internal backend-key constants)",
       "phase": 3
     },
     {

@@ -5525,6 +5525,19 @@
     "addToWatchlist": "Ajouter",
     "addedToWatchlist": "Ajouté",
     "inWatchlist": "Dans la liste",
-    "addFailed": "Échec"
+    "addFailed": "Échec",
+    "actionBuy": "Acheter",
+    "actionSell": "Vendre",
+    "actionIncrease": "Augmenter",
+    "actionHold": "Conserver",
+    "actionReduce": "Réduire",
+    "recentAnalysis": "Analyse Récente",
+    "targetPriceNote": "Objectif ¥{{price}}",
+    "totalMarketValue": "Valeur Marché",
+    "unrealizedPnl": "P&L Latent",
+    "concentration": "Concentration",
+    "holdings": "Positions",
+    "sharesUnit": "",
+    "wanUnit": "0k"
   }
 }

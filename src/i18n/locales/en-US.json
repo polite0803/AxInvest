@@ -5982,7 +5982,20 @@
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
     "inWatchlist": "In Watchlist",
-    "addFailed": "Operation Failed"
+    "addFailed": "Operation Failed",
+    "actionBuy": "Buy",
+    "actionSell": "Sell",
+    "actionIncrease": "Increase",
+    "actionHold": "Hold",
+    "actionReduce": "Reduce",
+    "recentAnalysis": "Recent Analysis",
+    "targetPriceNote": "Target ¥{{price}}",
+    "totalMarketValue": "Total Mkt Value",
+    "unrealizedPnl": "Unrealized P&L",
+    "concentration": "Concentration",
+    "holdings": "Holdings",
+    "sharesUnit": "",
+    "wanUnit": "0k"
   },
   "trade": {
     "title": "Trading Log",

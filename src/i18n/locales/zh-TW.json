@@ -5525,6 +5525,19 @@
     "addToWatchlist": "加入自选",
     "addedToWatchlist": "已加入自选",
     "inWatchlist": "已在自选",
-    "addFailed": "操作失败"
+    "addFailed": "操作失败",
+    "actionBuy": "買入",
+    "actionSell": "賣出",
+    "actionIncrease": "增持",
+    "actionHold": "持有",
+    "actionReduce": "減持",
+    "recentAnalysis": "最近分析",
+    "targetPriceNote": "目標¥{{price}}",
+    "totalMarketValue": "總市值",
+    "unrealizedPnl": "浮動盈虧",
+    "concentration": "集中度",
+    "holdings": "持倉",
+    "sharesUnit": "檔",
+    "wanUnit": "萬"
   }
 }

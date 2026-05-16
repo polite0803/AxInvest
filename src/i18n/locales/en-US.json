@@ -5978,7 +5978,11 @@
     "volumeChart": "Volume",
     "loadHistory": "Click to load history report",
     "history": "Analysis History",
-    "debateHistory": "Debate History"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "Add to Watchlist",
+    "addedToWatchlist": "Added",
+    "inWatchlist": "In Watchlist",
+    "addFailed": "Operation Failed"
   },
   "trade": {
     "title": "Trading Log",

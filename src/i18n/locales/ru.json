@@ -5521,6 +5521,10 @@
     "volumeChart": "Объём",
     "loadHistory": "Нажмите, чтобы загрузить отчёт анализа",
     "history": "История анализа",
-    "debateHistory": "История дебатов"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "Добавить",
+    "addedToWatchlist": "Добавлено",
+    "inWatchlist": "В списке",
+    "addFailed": "Ошибка"
   }
 }

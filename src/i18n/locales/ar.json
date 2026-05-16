@@ -5521,6 +5521,10 @@
     "volumeChart": "حجم التداول",
     "loadHistory": "انقر لتحميل تقرير التحليل",
     "history": "سجل التحليل",
-    "debateHistory": "سجل المناقشة"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "إضافة",
+    "addedToWatchlist": "تمت الإضافة",
+    "inWatchlist": "في القائمة",
+    "addFailed": "فشل"
   }
 }

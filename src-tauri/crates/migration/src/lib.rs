@@ -738,6 +738,7 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         // AxInvest: Stock analysis indexes
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_code ON stock_analyses(stock_code)",
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_date ON stock_analyses(analysis_date)",
+        "CREATE INDEX IF NOT EXISTS idx_stock_analyses_code_created ON stock_analyses(stock_code, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_conv ON stock_analyses(conversation_id)",
         "CREATE INDEX IF NOT EXISTS idx_watchlist_items_code ON watchlist_items(stock_code)",
         "CREATE INDEX IF NOT EXISTS idx_portfolio_holdings_code ON portfolio_holdings(stock_code)",

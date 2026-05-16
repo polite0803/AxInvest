@@ -5966,7 +5966,11 @@
     "volumeChart": "成交量",
     "loadHistory": "点击加载历史分析报告",
     "history": "历史分析",
-    "debateHistory": "历史辩论"
+    "debateHistory": "历史辩论",
+    "addToWatchlist": "加入自选",
+    "addedToWatchlist": "已加入自选",
+    "inWatchlist": "已在自选",
+    "addFailed": "操作失败"
   },
   "trade": {
     "title": "交易日志",

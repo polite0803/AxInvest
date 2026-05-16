@@ -5521,6 +5521,10 @@
     "volumeChart": "出来高",
     "loadHistory": "クリックして分析レポートを読み込む",
     "history": "分析履歴",
-    "debateHistory": "討論履歴"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "ウォッチリストに追加",
+    "addedToWatchlist": "追加済み",
+    "inWatchlist": "追加済み",
+    "addFailed": "操作失敗"
   }
 }

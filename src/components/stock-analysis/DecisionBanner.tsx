@@ -1,5 +1,7 @@
+import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Alert, Tag } from "antd";
+import { Alert, Button, message, Tag } from "antd";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const ACTION_COLORS: Record<string, "success" | "warning" | "error" | "info"> = {
@@ -13,10 +15,27 @@ const ACTION_COLORS: Record<string, "success" | "warning" | "error" | "info"> = 
 export function DecisionBanner() {
   const { t } = useTranslation();
   const decision = useStockAnalysisStore((s) => s.decision);
+  const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const stockName = useStockAnalysisStore((s) => s.stockName);
+  const [watchlisted, setWatchlisted] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   if (!decision) { return null; }
 
   const color = ACTION_COLORS[decision.action] || "info";
+
+  const addToWatchlist = async () => {
+    if (!stockCode || !stockName) { return; }
+    setAdding(true);
+    try {
+      await invoke("add_to_watchlist", { stockCode, stockName });
+      setWatchlisted(true);
+      message.success(t("stockAnalysis.addedToWatchlist"));
+    } catch {
+      message.error(t("stockAnalysis.addFailed"));
+    }
+    setAdding(false);
+  };
 
   return (
     <Alert
@@ -32,13 +51,19 @@ export function DecisionBanner() {
         </div>
       }
       description={
-        <div className="text-xs" style={{ whiteSpace: "pre-wrap" }}>
-          {decision.reasoning}
-          <div className="mt-1">
-            {decision.targetPrice && <span>{t("stockAnalysis.targetPrice")}: {decision.targetPrice} &nbsp;</span>}
-            {decision.stopLoss && <span>{t("stockAnalysis.stopLoss")}: {decision.stopLoss} &nbsp;</span>}
+        <div className="text-xs">
+          <div style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>{decision.reasoning}</div>
+          <div className="flex gap-2 flex-wrap items-center">
+            {decision.targetPrice && <Tag>{t("stockAnalysis.targetPrice")}: ¥{decision.targetPrice}</Tag>}
+            {decision.stopLoss && <Tag>{t("stockAnalysis.stopLoss")}: ¥{decision.stopLoss}</Tag>}
             <Tag>{t("stockAnalysis.riskLevel")}: {decision.riskLevel}</Tag>
             <Tag>{t("stockAnalysis.confidence")}: {(decision.confidence * 100).toFixed(0)}%</Tag>
+            {stockCode && !watchlisted && (
+              <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>
+                ⭐ {t("stockAnalysis.addToWatchlist")}
+              </Button>
+            )}
+            {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
           </div>
         </div>
       }

@@ -5521,6 +5521,10 @@
     "volumeChart": "Volume",
     "loadHistory": "Cliquer pour charger le rapport d'analyse",
     "history": "Historique d'analyse",
-    "debateHistory": "Historique des débats"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "Ajouter",
+    "addedToWatchlist": "Ajouté",
+    "inWatchlist": "Dans la liste",
+    "addFailed": "Échec"
   }
 }

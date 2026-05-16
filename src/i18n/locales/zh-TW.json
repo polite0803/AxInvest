@@ -5521,6 +5521,10 @@
     "volumeChart": "成交量",
     "loadHistory": "點擊載入歷史分析報告",
     "history": "歷史分析",
-    "debateHistory": "歷史辯論"
+    "debateHistory": "Debate History",
+    "addToWatchlist": "加入自选",
+    "addedToWatchlist": "已加入自选",
+    "inWatchlist": "已在自选",
+    "addFailed": "操作失败"
   }
 }

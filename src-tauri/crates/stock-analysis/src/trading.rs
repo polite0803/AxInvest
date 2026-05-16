@@ -56,6 +56,7 @@ pub struct PositionSummary {
     pub unrealized_pnl: Option<f64>,
     pub unrealized_pnl_pct: Option<f64>,
     pub total_realized_pnl: f64,
+    pub sector_name: Option<String>,
 }
 
 impl TradingEngine {
@@ -329,6 +330,16 @@ impl TradingEngine {
                 .map(|rows| rows.iter().filter_map(|t| t.realized_pnl).sum())
                 .unwrap_or(0.0);
 
+            // 查询行业分类
+            let sector_name = self
+                .astock_client
+                .get_sector_info(&h.stock_code)
+                .await
+                .ok()
+                .flatten()
+                .map(|s| s.sector_name)
+                .filter(|n| !n.is_empty());
+
             positions.push(PositionSummary {
                 stock_code: h.stock_code.clone(),
                 stock_name: h.stock_name.clone(),
@@ -339,6 +350,7 @@ impl TradingEngine {
                 unrealized_pnl,
                 unrealized_pnl_pct,
                 total_realized_pnl: realized,
+                sector_name,
             });
         }
         Ok(positions)

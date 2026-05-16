@@ -85,11 +85,21 @@ impl PortfolioRiskManager {
             warning = Some(warning.map_or(msg.clone(), |w| format!("{} {}", w, msg)));
         }
 
+        // 行业暴露计算
+        let mut sector_exposure: HashMap<String, f64> = HashMap::new();
+        for p in positions {
+            if let (Some(mv), Some(sector)) = (p.market_value, &p.sector_name) {
+                if !sector.is_empty() && total_mv > 0.0 {
+                    *sector_exposure.entry(sector.clone()).or_default() += (mv / total_mv) * 100.0;
+                }
+            }
+        }
+
         PortfolioRiskMetrics {
             total_positions,
             total_market_value: total_mv,
             top_concentration_pct: concentration,
-            sector_exposure: HashMap::new(),
+            sector_exposure,
             diversification_score: diversification,
             risk_level,
             warning,

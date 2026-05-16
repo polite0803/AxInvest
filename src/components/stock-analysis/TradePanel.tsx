@@ -280,13 +280,35 @@ export function TradePanel() {
 
       {/* 持仓汇总 */}
       {positions.length > 0 && (
-        <Table
-          size="small"
-          dataSource={positions}
-          rowKey="stockCode"
-          pagination={false}
-          columns={positionColumns}
-        />
+        <>
+          <Table
+            size="small"
+            dataSource={positions}
+            rowKey="stockCode"
+            pagination={false}
+            columns={positionColumns}
+          />
+          {(() => {
+            const totalMv = positions.reduce((s, p) => s + (p.marketValue ?? 0), 0);
+            const totalPnl = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0);
+            const maxPct = positions.length > 0 && totalMv > 0
+              ? Math.max(...positions.map(p => ((p.marketValue ?? 0) / totalMv) * 100))
+              : 0;
+            const riskColor = maxPct > 50 ? "#f85149" : maxPct > 30 ? "#d29922" : "#3fb950";
+            return (
+              <div className="text-xs flex justify-between p-1 mt-1 rounded" style={{ background: "var(--color-bg-elevated)" }}>
+                <span>总市值: <b>{(totalMv / 10000).toFixed(1)}万</b></span>
+                <span style={{ color: totalPnl >= 0 ? "#3fb950" : "#f85149" }}>
+                  浮动盈亏: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
+                </span>
+                <span style={{ color: riskColor }}>
+                  集中度: <b>{maxPct.toFixed(0)}%</b>
+                </span>
+                <span>持仓: <b>{positions.length}只</b></span>
+              </div>
+            );
+          })()}
+        </>
       )}
 
       {/* 最近交易 */}

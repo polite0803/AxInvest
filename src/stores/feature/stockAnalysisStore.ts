@@ -161,16 +161,39 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   loadAnalysis: async (analysisId: string) => {
-    const record = await invoke<AnalysisSummary & { decisionJson: string | null }>(
-      "get_stock_analysis",
-      { analysisId },
-    );
+    const record = await invoke<AnalysisSummary & {
+      decisionJson: string | null;
+      blackboardSnapshot: string | null;
+    }>("get_stock_analysis", { analysisId });
     set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName });
     if (record.decisionJson) {
       try {
         set({ decision: JSON.parse(record.decisionJson) });
       } catch (e) {
         console.error("[StockAnalysis] Failed to parse decision JSON:", e);
+      }
+    }
+    // 从 blackboardSnapshot 恢复历史分析报告
+    if (record.blackboardSnapshot) {
+      try {
+        const snap: Record<string, string> = JSON.parse(record.blackboardSnapshot);
+        const reports: Record<string, string> = {};
+        const debates: Array<{ round: number; bull: string; bear: string }> = [];
+        const risks: Record<string, string> = {};
+        for (const [key, value] of Object.entries(snap)) {
+          if (key.startsWith("report.")) {
+            reports[key.slice(7)] = value;
+          } else if (key.startsWith("debate.bull.round_")) {
+            const round = parseInt(key.slice("debate.bull.round_".length));
+            const bearKey = `debate.bear.round_${round}`;
+            debates.push({ round: round - 1, bull: value, bear: snap[bearKey] ?? "" });
+          } else if (key.startsWith("risk.")) {
+            risks[key.slice(5)] = value;
+          }
+        }
+        set({ analystReports: reports, debateRounds: debates, riskAssessments: risks });
+      } catch (e) {
+        console.error("[StockAnalysis] Failed to restore blackboard snapshot:", e);
       }
     }
   },

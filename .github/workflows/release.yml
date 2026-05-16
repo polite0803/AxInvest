@@ -371,7 +371,6 @@ jobs:
   build-android:
     name: Build Android (${{ matrix.abi }})
     needs: [draft-release-notes]
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -442,8 +441,8 @@ jobs:
       - name: Setup keystore and signing config
         run: |
           mkdir -p src-tauri/gen/android/app
-          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > src-tauri/gen/android/app/release.jks
-          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > src-tauri/gen/android/app/release.p12
+          printf 'storeFile=release.p12\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
             "${{ secrets.KEYSTORE_PASSWORD }}" "${{ secrets.KEY_ALIAS }}" "${{ secrets.KEY_PASSWORD }}" \
             > src-tauri/gen/android/keystore.properties
           python3 scripts/patch-android-signing.py src-tauri/gen/android/app/build.gradle.kts
@@ -455,22 +454,6 @@ jobs:
           -dontwarn com.tauri.**
           -dontwarn org.tauri.**
           PROGUARD
-
-      - name: Convert keystore JKS → PKCS12
-        run: |
-          keytool -importkeystore \
-            -srckeystore src-tauri/gen/android/app/release.jks \
-            -destkeystore src-tauri/gen/android/app/release.p12 \
-            -deststoretype PKCS12 \
-            -srcstorepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -deststorepass "${{ secrets.KEYSTORE_PASSWORD }}" \
-            -srckeypass "${{ secrets.KEY_PASSWORD }}" \
-            -destkeypass "${{ secrets.KEY_PASSWORD }}" \
-            -srcalias "${{ secrets.KEY_ALIAS }}" \
-            -destalias "${{ secrets.KEY_ALIAS }}" \
-            -noprompt
-          # 更新 keystore.properties 指向 PKCS12 文件
-          sed -i 's/storeFile=release\.jks/storeFile=release.p12/' src-tauri/gen/android/keystore.properties
 
       - name: Build Android APK
         run: |

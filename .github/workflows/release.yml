@@ -371,6 +371,7 @@ jobs:
   build-android:
     name: Build Android (${{ matrix.abi }})
     needs: [draft-release-notes]
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

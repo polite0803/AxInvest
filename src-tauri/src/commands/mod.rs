@@ -70,6 +70,7 @@ pub mod skills;
 pub mod skills_hub;
 pub mod sources;
 pub mod stock_analysis;
+pub mod stock_analysis_setup;
 pub mod storage;
 #[cfg(not(mobile))]
 pub mod terminal;

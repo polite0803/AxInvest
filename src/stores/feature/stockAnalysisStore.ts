@@ -125,6 +125,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({
       status: "loading",
       error: null,
+      currentStage: 0,
       analystReports: {},
       debateRounds: [],
       riskAssessments: {},
@@ -165,7 +166,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       decisionJson: string | null;
       blackboardSnapshot: string | null;
     }>("get_stock_analysis", { analysisId });
-    set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName });
+    set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName,
+      status: "completed" });
     if (record.decisionJson) {
       try {
         set({ decision: JSON.parse(record.decisionJson) });

@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-15",
-  "total_entries": 135,
-  "total_files": 127,
+  "total_entries": 138,
+  "total_files": 130,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -792,7 +792,7 @@
     },
     {
       "file": "src/types/stock-analysis.ts",
-      "lines": "79,80,81,82,83,84,85,86,87,88,89,90,91,92",
+      "lines": "79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95",
       "reason": "分析师角色名常量映射 (analyst role label map, constants)",
       "phase": 3
     },
@@ -804,7 +804,7 @@
     },
     {
       "file": "src/components/stock-analysis/TradePanel.tsx",
-      "lines": "197,251,262",
+      "lines": "197,216,251,262,270,273,274,277,281,304,307,310,313,321",
       "reason": "中文 JSX 注释",
       "phase": 3
     },
@@ -812,6 +812,24 @@
       "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
       "lines": "61",
       "reason": "中文字数后缀 (字数单位)",
+      "phase": 3
+    },
+    {
+      "file": "src/components/workflow/Nodes/AgentNode.tsx",
+      "lines": "15,17,19,21",
+      "reason": "JSDoc 中文注释",
+      "phase": 3
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
+      "lines": "154,176",
+      "reason": "JSX 中文注释",
+      "phase": 3
+    },
+    {
+      "file": "src/components/workflow/types/workflow.types.ts",
+      "lines": "77,79,81",
+      "reason": "JSDoc 中文注释 + deprecated 标记",
       "phase": 3
     }
   ]

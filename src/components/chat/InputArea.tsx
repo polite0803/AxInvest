@@ -1369,7 +1369,8 @@ export function InputArea() {
       setValue("");
       try {
         await setupEventListener();
-        await startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), "");
+        const defaultProviderId = useProviderStore.getState().providers.find((p) => p.enabled)?.id ?? "";
+        await startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), defaultProviderId);
         navigate(`/stock-analysis?code=${stockCode}`);
       } catch (e) {
         // TODO: 后续通过统一日志服务记录

@@ -631,9 +631,23 @@
         "disable": "禁用",
         "enable": "啟用",
         "install": "安裝",
+        "installPlaceholder": "安裝: @scope/name 或 Git URL 或本機路徑",
         "loading": "加載中...",
         "refresh": "刷新",
-        "title": "插件市場"
+        "title": "插件市場",
+        "validateFailed": "驗證失敗: {{error}}",
+        "installSuccess": "已安裝 {{id}} v{{version}}",
+        "installFailed": "安裝失敗: {{error}}",
+        "installTitle": "安裝 {{name}}",
+        "confirmInstall": "確認安裝",
+        "cancel": "取消",
+        "version": "版本",
+        "description": "描述",
+        "permissions": "權限",
+        "none": "無",
+        "mcpServers": "MCP 服務",
+        "skills": "技能",
+        "tools": "工具"
       }
     },
     "steer": "引導",
@@ -3317,7 +3331,16 @@
       "defaultCodeJsComment": "// 輸入數據: input.yourVar",
       "defaultCodePythonComment": "# 輸入數據: input.yourVar",
       "codeInputParams": "輸入參數",
-      "codeReturnHint": "返回數據將作為節點輸出傳遞"
+      "codeReturnHint": "返回數據將作為節點輸出傳遞",
+      "roleCoordinator": "",
+      "roleBrowser": "",
+      "selectRole": "",
+      "roleTag": "",
+      "bindRole": "",
+      "expertNotFound": "",
+      "profileMatched": "",
+      "profileCreated": "",
+      "profileCreateFailed": ""
     },
     "debug": {
       "totalDuration": "總耗時",
@@ -3480,7 +3503,10 @@
       "roleDeveloper": "開發者",
       "roleReviewer": "審查者",
       "roleSynthesizer": "綜合者",
-      "roleExecutor": "執行者"
+      "roleExecutor": "執行者",
+      "agent": "",
+      "roleCoordinator": "",
+      "roleBrowser": ""
     },
     "conditionNode": {
       "title": "條件判斷",

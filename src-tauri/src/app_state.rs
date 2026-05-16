@@ -2,6 +2,7 @@ use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::SemanticCache;
 use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::SyncEngine;
+use axagent_plugins::PluginManager;
 use axagent_runtime::dashboard_registry::DashboardRegistry;
 use axagent_runtime::webhook_subscription::WebhookSubscriptionManager;
 use sea_orm::DatabaseConnection;
@@ -87,4 +88,5 @@ pub struct AppState {
     pub astock_client: Arc<AStockClient>,
     /// 实时监控引擎（交易时段定时轮询行情并触发告警）
     pub stock_monitor: Option<Arc<axagent_stock_analysis::monitor::RealtimeMonitor>>,
+    pub plugin_manager: std::sync::Mutex<PluginManager>,
 }

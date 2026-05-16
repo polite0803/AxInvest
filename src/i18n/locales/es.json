@@ -631,9 +631,23 @@
         "disable": "Disable",
         "enable": "Enable",
         "install": "Install",
+        "installPlaceholder": "Instalar: @scope/name o URL Git o ruta local",
         "loading": "Loading...",
         "refresh": "Refresh",
-        "title": "Plugin Marketplace"
+        "title": "Plugin Marketplace",
+        "validateFailed": "Validación fallida: {{error}}",
+        "installSuccess": "{{id}} v{{version}} instalado",
+        "installFailed": "Instalación fallida: {{error}}",
+        "installTitle": "Instalar {{name}}",
+        "confirmInstall": "Confirmar instalación",
+        "cancel": "Cancelar",
+        "version": "Versión",
+        "description": "Descripción",
+        "permissions": "Permisos",
+        "none": "Ninguno",
+        "mcpServers": "Servidores MCP",
+        "skills": "Habilidades",
+        "tools": "Herramientas"
       }
     },
     "steer": "Steer",
@@ -3709,7 +3723,16 @@
       "defaultCodeJsComment": "// Input: input\n// Return value will be stored in output_var",
       "defaultCodePythonComment": "# Input: input\n# Return value will be stored in output_var",
       "codeInputParams": "Input params: input",
-      "codeReturnHint": "Return value will be stored in output_var"
+      "codeReturnHint": "Return value will be stored in output_var",
+      "roleCoordinator": "",
+      "roleBrowser": "",
+      "selectRole": "",
+      "roleTag": "",
+      "bindRole": "",
+      "expertNotFound": "",
+      "profileMatched": "",
+      "profileCreated": "",
+      "profileCreateFailed": ""
     },
     "debug": {
       "totalDuration": "Total Duration",
@@ -3872,7 +3895,10 @@
       "roleDeveloper": "Developer",
       "roleReviewer": "Reviewer",
       "roleSynthesizer": "Synthesizer",
-      "roleExecutor": "Executor"
+      "roleExecutor": "Executor",
+      "agent": "",
+      "roleCoordinator": "",
+      "roleBrowser": ""
     },
     "conditionNode": {
       "title": "Condición",

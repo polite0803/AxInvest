@@ -1194,6 +1194,18 @@ pub fn run() {
             let tray_language = "en".to_string();
             init::services::start_background_services(app.handle(), &state, app_dir.clone(), tray_language);
 
+            // 种子化股票分析专家/角色/Profile
+            let seed_db = sea_db.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap_or_else(|_|
+                    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap());
+                rt.block_on(async {
+                    if let Err(e) = commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(&seed_db).await {
+                        tracing::warn!("[stock_analysis_setup] 种子化失败: {e}");
+                    }
+                });
+            });
+
             android_utils::mark_startup_phase("setup_complete");
             Ok(())
         })

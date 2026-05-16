@@ -11,10 +11,12 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
 tracing = { workspace = true }
+tauri = { workspace = true }
 async-trait = "0.1"
 axagent-astock-data = { path = "../astock-data" }
 axagent-agent = { path = "../agent" }
 axagent-runtime-core = { path = "../runtime-core" }
+axagent-tools = { path = "../tools" }
 axagent-providers = { path = "../providers" }
 axagent-core = { path = "../core" }
 sea-orm = { workspace = true }

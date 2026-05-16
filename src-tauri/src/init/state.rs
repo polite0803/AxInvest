@@ -383,6 +383,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
         sync_engine,
         astock_client,
         stock_monitor,
+        plugin_manager,
     }
 }
 

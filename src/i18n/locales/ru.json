@@ -18,7 +18,8 @@
     "devTools": "Инструменты разработчика",
     "workflow": "Рабочий процесс",
     "wiki": "Wiki",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "Анализ акций"
   },
   "sidebar": {
     "sectionWork": "Работа",

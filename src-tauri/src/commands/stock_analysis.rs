@@ -16,7 +16,6 @@ use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
 use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
-use axagent_stock_analysis::runner::SessionManagerRunner;
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison, TradingEngine};
 use sea_orm::sea_query::Expr;
@@ -115,49 +114,46 @@ pub async fn start_stock_analysis(
         .await
         .map_err(|e| format!("写入分析记录失败: {}", e))?;
 
-    // 4. 创建取消令牌并存入 AppState
+    // 4. 创建取消令牌
     let cancel_token = Arc::new(AtomicBool::new(false));
+
+    // 5. 构建 StockAgentSession（通过 SessionManager 调用 LLM，走上游标准路径）
+    let master_key = state.master_key;
+    let db_for_runner = state.sea_db.clone();
+    let provider_id_for_runner = provider_id.clone();
+    let session_manager = state.agent_session_manager.clone();
+
+    let runner: Option<Arc<dyn AgentRunner>> = match build_stock_agent_session(
+        &db_for_runner,
+        &master_key,
+        &provider_id_for_runner,
+        session_manager,
+        conversation_id.clone(),
+        cancel_token.clone(),
+    )
+    .await
+    {
+        Ok(session) => {
+            tracing::info!(
+                "[stock_analysis] StockAgentSession 已构建 (provider={})",
+                provider_id_for_runner
+            );
+            Some(Arc::new(session))
+        },
+        Err(e) => {
+            tracing::warn!("[stock_analysis] 无法构建 StockAgentSession，使用占位报告: {}", e);
+            None
+        },
+    };
+
+    // 6. 从 DB 加载专家提示词（种子化后已有）
+    let prompts = load_stock_analysis_prompts(&state.sea_db).await;
+
+    // 6b. 注册取消令牌
     {
         let mut tokens = state.agent_cancel_tokens.lock().await;
         tokens.insert(analysis_id.clone(), cancel_token.clone());
     }
-
-    // 5. 尝试构建 AgentRunner（在 spawn 之前，因为需要访问 state）
-    let master_key = state.master_key;
-    let db_for_runner = state.sea_db.clone();
-    let provider_id_for_runner = provider_id.clone();
-
-    let runner: Option<Arc<dyn AgentRunner>> =
-        match build_stock_analysis_runner(&db_for_runner, &master_key, &provider_id_for_runner)
-            .await
-        {
-            Ok(r) => {
-                tracing::info!(
-                    "[stock_analysis] AgentRunner 已注入 (provider={})",
-                    provider_id_for_runner
-                );
-                Some(Arc::new(r))
-            },
-            Err(e) => {
-                tracing::warn!("[stock_analysis] 无法构建 AgentRunner，使用占位报告: {}", e);
-                None
-            },
-        };
-
-    // 6. 在 spawn 之前加载专家提示词（从 Markdown 文件）
-    let prompts_dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join("agency_experts")
-        .join("stock-analysis");
-    let expert_dir_str = prompts_dir
-        .to_str()
-        .unwrap_or("agency_experts/stock-analysis");
-    let base_prompts = axagent_stock_analysis::prompts::load_expert_prompts(expert_dir_str);
-
-    // 6b. 发现并合并自定义分析师插件
-    let plugin_mgr = AnalystPluginManager::new(expert_dir_str);
-    let custom = plugin_mgr.discover_custom_analysts();
-    let prompts = AnalystPluginManager::merge_prompts(&base_prompts, &custom);
 
     // 7. spawn 异步分析任务
     let app_handle = app.clone();
@@ -443,46 +439,36 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
 
 /// 从数据库中的 provider 配置构建 SessionManagerRunner。
 ///
-/// 流程: DB 查 provider → 取激活 key → 解密 → 构建 ProviderRequestContext →
-/// 构建 ProviderAdapter → 选第一个启用模型 → 构建 SessionManagerRunner。
-///
+/// 构建 StockAgentSession — 通过 SessionManager 调用 LLM，走上游标准路径。
 /// 任何步骤失败都会返回 `Err`，调用方可回退到占位报告模式。
-async fn build_stock_analysis_runner(
+async fn build_stock_agent_session(
     db: &sea_orm::DatabaseConnection,
     master_key: &[u8; 32],
     provider_id: &str,
-) -> Result<SessionManagerRunner, String> {
-    // 1. 查询 provider 配置
+    session_manager: Arc<axagent_agent::session_manager::SessionManager>,
+    conversation_id: String,
+    cancel_token: Arc<AtomicBool>,
+) -> Result<axagent_stock_analysis::agent_session::StockAgentSession, String> {
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await
         .map_err(|e| format!("Provider 查询失败: {}", e))?;
-
     if !prov.enabled {
         return Err("Provider 已禁用".into());
     }
-
-    // 2. 取激活的 API key
     let key = prov
         .keys
         .iter()
         .find(|k| k.enabled)
         .ok_or_else(|| "没有启用的 API key".to_string())?;
-
-    // 3. 解密 key
     let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, master_key)
         .map_err(|e| format!("密钥解密失败: {}", e))?;
-
-    // 4. 获取全局设置（用于 proxy 回退）
     let settings = axagent_core::repo::settings::get_settings(db)
         .await
         .unwrap_or_default();
-
-    // 5. 构建 ProviderRequestContext
     let custom_headers: Option<std::collections::HashMap<String, String>> = prov
         .custom_headers
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
-
     let ctx = ProviderRequestContext {
         api_key,
         key_id: key.id.clone(),
@@ -496,8 +482,6 @@ async fn build_stock_analysis_runner(
         previous_response_id: None,
         store_response: None,
     };
-
-    // 6. 根据 provider 类型构建对应的 adapter
     let adapter: Arc<dyn ProviderAdapter> = match prov.provider_type {
         axagent_core::types::ProviderType::OpenAI => {
             Arc::new(axagent_providers::openai::OpenAIAdapter::new())
@@ -521,19 +505,49 @@ async fn build_stock_analysis_runner(
             Arc::new(axagent_providers::ollama::OllamaAdapter::new())
         },
     };
-
-    // 7. 选第一个启用的模型
     let model_id = prov
         .models
         .iter()
         .find(|m| m.enabled)
         .map(|m| m.model_id.clone())
         .ok_or_else(|| "没有可用的模型".to_string())?;
+    Ok(axagent_stock_analysis::agent_session::StockAgentSession::new(
+        session_manager,
+        adapter,
+        ctx,
+        model_id,
+        conversation_id,
+        Some(cancel_token),
+    ))
+}
 
-    // 8. 构建 runner（股票分析偏确定性，temperature=0.3）
-    Ok(SessionManagerRunner::new(adapter, ctx, model_id)
-        .with_temperature(Some(0.3))
-        .with_max_tokens(Some(4096)))
+/// 从 DB 的 agency_experts 表加载股票分析专家系统提示词
+async fn load_stock_analysis_prompts(
+    db: &sea_orm::DatabaseConnection,
+) -> std::collections::HashMap<String, String> {
+    use axagent_core::entity::agency_experts;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let mut prompts = std::collections::HashMap::new();
+    let rows = match agency_experts::Entity::find()
+        .filter(agency_experts::Column::SourceDir.eq("stock-analysis"))
+        .all(db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("[stock_analysis] DB 加载专家提示词失败: {e}");
+            return prompts;
+        },
+    };
+    for row in rows {
+        let expert_id = row
+            .id
+            .strip_prefix("agency-stock-analysis-")
+            .unwrap_or(&row.id);
+        prompts.insert(expert_id.to_string(), row.system_prompt);
+    }
+    tracing::info!("[stock_analysis] 从 DB 加载了 {} 个专家提示词", prompts.len());
+    prompts
 }
 
 // ── MCP Stock Data Tools ──

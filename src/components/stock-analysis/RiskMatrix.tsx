@@ -13,7 +13,7 @@ const RISK_INFO: Record<string, { label: string; color: string }> = {
 
 function riskDisplay(type: string) {
   const info = RISK_INFO[type];
-  if (info) return info;
+  if (info) { return info; }
   // 回退：截取短名用于颜色 hash
   const hash = type.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   const hue = hash % 360;
@@ -24,7 +24,7 @@ export function RiskMatrix() {
   const { t } = useTranslation();
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
 
-  if (Object.keys(riskAssessments).length === 0) return null;
+  if (Object.keys(riskAssessments).length === 0) { return null; }
 
   return (
     <Card size="small" title={t("stockAnalysis.riskAssessment")}>

@@ -990,6 +990,9 @@
       "exportSkill": "تصدير",
       "importSkill": "استيراد"
     },
+    "plugins": {
+      "title": "الإضافات"
+    },
     "dashboardPlugins": {
       "title": "إضافات لوحة المعلومات",
       "description": "الوصف",
@@ -2492,7 +2495,8 @@
     "toggleSidebar": "تبديل الشريط الجانبي",
     "toggleInspector": "تبديل المفتش",
     "searchConversations": "البحث في المحادثات",
-    "goToSkills": "الانتقال إلى المهارات"
+    "goToSkills": "الانتقال إلى المهارات",
+    "goToPlugins": "الانتقال إلى الإضافات"
   },
   "appLaunch": {
     "title": "إعداد التشغيل",

@@ -91,7 +91,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
     // 防抖 300ms
     const { _searchTimer } = get();
-    if (_searchTimer) clearTimeout(_searchTimer);
+    if (_searchTimer) { clearTimeout(_searchTimer); }
     const timer = setTimeout(async () => {
       try {
         const results = await invoke<StockSearchResult[]>("search_stock", { keyword });

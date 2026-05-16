@@ -60,6 +60,7 @@ impl AnalystPluginManager {
         let mut name = String::new();
         let mut description = String::new();
         let mut category = String::from("analyst");
+        let mut disabled = false;
 
         for line in frontmatter.lines() {
             let trimmed = line.trim();
@@ -69,10 +70,12 @@ impl AnalystPluginManager {
                 description = v.trim().to_string();
             } else if let Some(v) = trimmed.strip_prefix("category:") {
                 category = v.trim().to_string();
+            } else if let Some(v) = trimmed.strip_prefix("disabled:") {
+                disabled = v.trim().parse().unwrap_or(false);
             }
         }
 
-        if name.is_empty() {
+        if name.is_empty() || disabled {
             return None;
         }
 

@@ -176,7 +176,19 @@ impl TradingEngine {
             }
         }
 
-        // 交易日历检查（简化版：排除周末）
+        // 仓位上限检查（买入时）
+        if direction == "buy" {
+            let limits = crate::position_limits::PositionLimits::default();
+            let positions = self.get_positions().await.unwrap_or_default();
+            let current_count = positions.len();
+            let total_mv: f64 = positions.iter().filter_map(|p| p.market_value).sum();
+            let new_position_value = price * quantity as f64;
+            if let Err(e) = limits.check_new_position(new_position_value, total_mv, current_count) {
+                warnings.push(format!("仓位限制: {}", e));
+            }
+        }
+
+        // 交易日历检查
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
         if !is_trading_day(&today) {
             warnings.push("当前非交易日，已记录但仅供参考".to_string());

@@ -2,6 +2,7 @@
 name: 趋势跟踪分析师
 description: 自定义趋势跟踪分析示例，关注均线排列和趋势强度
 category: analyst
+disabled: true
 ---
 
 # 角色定位

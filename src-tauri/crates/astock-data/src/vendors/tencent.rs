@@ -53,6 +53,7 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
         code: fields[2].to_string(),
         name,
         price: parse(fields[3]),
+        pre_close: parse(fields[4]),
         open: parse(fields[5]),
         high: parse(fields[33]),
         low: parse(fields[34]),

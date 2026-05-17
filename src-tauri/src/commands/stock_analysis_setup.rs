@@ -10,6 +10,8 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("policy-analyst", "stock-analyst"),
     ("hot-money-tracker", "stock-analyst"),
     ("lockup-watcher", "stock-analyst"),
+    ("research-analyst", "stock-analyst"),
+    ("sector-analyst", "stock-analyst"),
     ("bull-researcher", "debater"),
     ("bear-researcher", "debater"),
     ("aggressive-debator", "risk-evaluator"),
@@ -94,7 +96,7 @@ async fn seed_agency_experts(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             continue;
         }
         let content = std::fs::read_to_string(&md_path).map_err(|e| e.to_string())?;
-        let (name, desc, body) = parse_expert_md(&content, expert_id);
+        let (name, desc, body, color) = parse_expert_md(&content, expert_id);
         let agency_id = format!("agency-stock-analysis-{expert_id}");
         if agency_experts::Entity::find_by_id(&agency_id)
             .one(db)
@@ -111,7 +113,7 @@ async fn seed_agency_experts(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             description: Set(if desc.is_empty() { None } else { Some(desc) }),
             category: Set("finance".into()),
             system_prompt: Set(body),
-            color: Set(None),
+            color: Set(color),
             source_dir: Set("stock-analysis".into()),
             is_enabled: Set(1),
             imported_at: Set(now),
@@ -217,9 +219,10 @@ fn resolve_expert_dir() -> Result<std::path::PathBuf, String> {
     Err("找不到 agency_experts/stock-analysis/ 目录".into())
 }
 
-fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String) {
+fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String, Option<String>) {
     let mut name = String::new();
     let mut desc = String::new();
+    let mut color: Option<String> = None;
     let body = if let Some(rest) = content.strip_prefix("---") {
         if let Some(end) = rest.find("\n---") {
             let fm = &rest[..end];
@@ -228,6 +231,11 @@ fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String) {
                     name = v.trim().into();
                 } else if let Some(v) = line.trim().strip_prefix("description:") {
                     desc = v.trim().into();
+                } else if let Some(v) = line.trim().strip_prefix("color:") {
+                    let c = v.trim();
+                    if !c.is_empty() {
+                        color = Some(c.into());
+                    }
                 }
             }
             rest[end + 4..].trim().to_string()
@@ -240,7 +248,7 @@ fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String) {
     if name.is_empty() {
         name = expert_id_to_display(fallback);
     }
-    (name, desc, body)
+    (name, desc, body, color)
 }
 
 fn expert_id_to_display(id: &str) -> String {
@@ -252,6 +260,8 @@ fn expert_id_to_display(id: &str) -> String {
         "policy-analyst" => "政策面分析师".to_string(),
         "hot-money-tracker" => "资金面追踪".to_string(),
         "lockup-watcher" => "筹码限售观察".to_string(),
+        "research-analyst" => "研报分析师".to_string(),
+        "sector-analyst" => "板块题材分析师".to_string(),
         "bull-researcher" => "多方研究员".to_string(),
         "bear-researcher" => "空方研究员".to_string(),
         "aggressive-debator" => "激进风险评估".to_string(),

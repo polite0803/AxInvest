@@ -2,6 +2,19 @@ use chrono::{Datelike, NaiveDate, Timelike, Weekday};
 
 /// 判断是否为A股交易日
 pub fn is_trading_day(date: &NaiveDate) -> bool {
+    let date_str = date.format("%Y-%m-%d").to_string();
+
+    // 调休工作日（周末但上班）——优先于周末判断
+    let workdays = [
+        "2025-02-08", // 春节调休
+        "2025-04-27", // 清明调休
+        "2025-09-28", // 中秋调休
+        "2025-10-11", // 国庆调休
+    ];
+    if workdays.contains(&date_str.as_str()) {
+        return true;
+    }
+
     let w = date.weekday();
     // 周末不交易
     if w == Weekday::Sat || w == Weekday::Sun {
@@ -59,21 +72,9 @@ pub fn is_trading_day(date: &NaiveDate) -> bool {
         "2026-10-02",
     ];
 
-    let date_str = date.format("%Y-%m-%d").to_string();
-    if holidays.contains(&date_str.as_str()) {
+    let date_str2 = date.format("%Y-%m-%d").to_string();
+    if holidays.contains(&date_str2.as_str()) {
         return false;
-    }
-
-    // 调休工作日（周末但上班）
-    let workdays = [
-        "2025-02-08", // 春节调休
-        "2025-04-27", // 清明调休
-        "2025-09-28", // 中秋调休
-        "2025-10-11", // 国庆调休
-    ];
-
-    if workdays.contains(&date_str.as_str()) {
-        return true;
     }
 
     true
@@ -168,4 +169,41 @@ pub fn next_trading_time_desc() -> String {
         return "已收盘".to_string();
     }
     "非交易时段".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_weekend_not_trading() {
+        let sat = NaiveDate::from_ymd_opt(2025, 6, 7).unwrap(); // 周六
+        let sun = NaiveDate::from_ymd_opt(2025, 6, 8).unwrap(); // 周日
+        assert!(!is_trading_day(&sat));
+        assert!(!is_trading_day(&sun));
+    }
+
+    #[test]
+    fn test_weekday_is_trading() {
+        let mon = NaiveDate::from_ymd_opt(2025, 6, 9).unwrap(); // 周一，非节假日
+        assert!(is_trading_day(&mon));
+    }
+
+    #[test]
+    fn test_holiday_not_trading() {
+        let new_year = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap(); // 元旦
+        assert!(!is_trading_day(&new_year));
+    }
+
+    #[test]
+    fn test_national_day_holiday() {
+        let nd = NaiveDate::from_ymd_opt(2025, 10, 1).unwrap(); // 国庆
+        assert!(!is_trading_day(&nd));
+    }
+
+    #[test]
+    fn test_workday_override() {
+        let workday = NaiveDate::from_ymd_opt(2025, 2, 8).unwrap(); // 春节调休上班
+        assert!(is_trading_day(&workday));
+    }
 }

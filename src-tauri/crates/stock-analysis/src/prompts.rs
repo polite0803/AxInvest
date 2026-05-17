@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// 15 个专家 ID（对应 15 个 .md 文件）
+/// 17 个专家 ID（对应 17 个 .md 文件）
 pub const EXPERT_IDS: &[&str] = &[
     "market-analyst",
     "sentiment-analyst",
@@ -15,6 +15,8 @@ pub const EXPERT_IDS: &[&str] = &[
     "policy-analyst",
     "hot-money-tracker",
     "lockup-watcher",
+    "research-analyst",
+    "sector-analyst",
     "bull-researcher",
     "bear-researcher",
     "aggressive-debator",

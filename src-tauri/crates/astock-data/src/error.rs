@@ -16,4 +16,7 @@ pub enum DataError {
 
     #[error("Stock code not found: {0}")]
     NotFound(String),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
 }

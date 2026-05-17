@@ -78,11 +78,15 @@ impl BacktestEngine {
         decision_confidence: f64,
         holding_days: u32,
     ) -> Result<BacktestResult, String> {
-        // 获取分析日后 holding_days+10 天的K线数据
+        // 取最近 250 日K线（约一个交易年），最大化覆盖 analysis_date 的概率
+        // 注：get_klines 返回最近 N 根K线（按时间升序），若 analysis_date 超出范围则回测失败
         let klines = client
-            .get_klines(stock_code, "daily", holding_days + 10)
+            .get_klines(stock_code, "daily", 250)
             .await
             .map_err(|e| format!("获取K线失败: {e}"))?;
+        if klines.iter().all(|k| k.date.as_str() < analysis_date) {
+            return Err(format!("{stock_code} 无 {analysis_date} 之后的K线数据"));
+        }
 
         if klines.is_empty() {
             return Err(format!("{stock_code} 无K线数据"));

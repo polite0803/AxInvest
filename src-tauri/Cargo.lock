@@ -786,6 +786,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "windows-sys 0.59.0",
+ "zeroize",
  "zip 2.4.2",
 ]
 
@@ -834,6 +835,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "flate2",
  "reqwest 0.13.2",
  "serde",
  "serde_json",

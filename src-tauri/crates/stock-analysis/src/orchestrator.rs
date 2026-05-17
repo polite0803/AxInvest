@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use axagent_agent::shared_blackboard::SharedBlackboard;
-use axagent_astock_data::{AStockClient, StockRawData};
+use axagent_astock_data::{AStockClient, MarketRawData, StockRawData};
 
 use crate::decision::{AgentRunner, AnalysisConfig, AnalysisEvent, StockDecision};
 use crate::pipeline;
@@ -21,6 +21,8 @@ pub const ANALYST_IDS: &[&str] = &[
     "policy-analyst",
     "hot-money-tracker",
     "lockup-watcher",
+    "research-analyst",
+    "sector-analyst",
 ];
 
 const BULL_ID: &str = "bull-researcher";
@@ -80,6 +82,34 @@ impl StockAnalysisOrchestrator {
                     message: e.clone(),
                 });
             })?;
+
+        let market_data = data_client.fetch_market_data().await.unwrap_or_else(|e| {
+            tracing::warn!("市场级数据获取失败: {e}");
+            MarketRawData {
+                hot_stocks: vec![],
+                industry_ranking: vec![],
+                cls_flash: vec![],
+                market_dragon_tiger: vec![],
+                north_bound_flow: None,
+            }
+        });
+        {
+            let mut bb = blackboard.write().await;
+            let hot_json = serde_json::to_string(&market_data.hot_stocks).unwrap_or_default();
+            let industry_json = serde_json::to_string(&market_data.industry_ranking).unwrap_or_default();
+            let cls_json = serde_json::to_string(&market_data.cls_flash).unwrap_or_default();
+            let mdt_json = serde_json::to_string(&market_data.market_dragon_tiger).unwrap_or_default();
+            let nbf_json = market_data
+                .north_bound_flow
+                .as_ref()
+                .map(|n| serde_json::to_string(n).unwrap_or_default())
+                .unwrap_or_default();
+            bb.set_state("market.hot_stocks", &hot_json);
+            bb.set_state("market.industry_ranking", &industry_json);
+            bb.set_state("market.cls_flash", &cls_json);
+            bb.set_state("market.market_dragon_tiger", &mdt_json);
+            bb.set_state("market.north_bound_flow", &nbf_json);
+        }
 
         // ── NEW ①: 计算技术指标 ──
         let indicators = {
@@ -230,7 +260,9 @@ impl StockAnalysisOrchestrator {
         // ── 价值投资评估 ──
         let value_assessment = {
             let financials = &raw.financials;
-            let shares = 1_000_000_000.0; // 默认股本，实际应获取
+            let shares = raw.quote.total_mv
+                .map(|mv| if raw.quote.price > 0.0 { mv / raw.quote.price } else { 1_000_000_000.0 })
+                .unwrap_or(1_000_000_000.0);
             crate::value::ValueEngine::assess(raw.quote.price, financials, shares)
         };
         {
@@ -262,20 +294,14 @@ impl StockAnalysisOrchestrator {
                 let bb = blackboard.read().await;
                 bb.get_state("report.trader").cloned().unwrap_or_default()
             };
-            let trader_action = if trader_report.contains("买入") {
-                "买入"
-            } else if trader_report.contains("卖出") {
-                "卖出"
-            } else {
-                "持有"
-            };
-            let trader_stop_loss: Option<f64> = extract_number_after(&trader_report, "止损");
-            let trader_entry_price: Option<f64> = extract_number_after(&trader_report, "入场");
+            // 尝试解析 LLM JSON 输出，失败则回退到字符串匹配
+            let (trader_action, trader_stop_loss, trader_entry_price) =
+                parse_trader_decision(&trader_report);
 
             let check = rules::RuleEngine::check(
                 &indicators,
                 &objective_score,
-                trader_action,
+                &trader_action,
                 trader_stop_loss,
                 trader_entry_price,
             );
@@ -360,6 +386,18 @@ impl StockAnalysisOrchestrator {
             .unwrap_or_default();
         let trades_json = serde_json::to_string(&raw.shareholder_trades).unwrap_or_default();
         let dividends_json = serde_json::to_string(&raw.dividend_records).unwrap_or_default();
+        let reports_json = serde_json::to_string(&raw.research_reports).unwrap_or_default();
+        let eps_json = raw
+            .consensus_eps
+            .as_ref()
+            .map(|e| serde_json::to_string(e).unwrap_or_default())
+            .unwrap_or_default();
+        let concept_json = raw
+            .concept_blocks
+            .as_ref()
+            .map(|c| serde_json::to_string(c).unwrap_or_default())
+            .unwrap_or_default();
+        let announcements_json = serde_json::to_string(&raw.announcements).unwrap_or_default();
 
         {
             let mut bb = blackboard.write().await;
@@ -374,6 +412,10 @@ impl StockAnalysisOrchestrator {
             bb.set_state("raw.sector_info", &sector_json);
             bb.set_state("raw.shareholder_trades", &trades_json);
             bb.set_state("raw.dividend_records", &dividends_json);
+            bb.set_state("raw.research_reports", &reports_json);
+            bb.set_state("raw.consensus_eps", &eps_json);
+            bb.set_state("raw.concept_blocks", &concept_json);
+            bb.set_state("raw.announcements", &announcements_json);
         }
 
         let _ = events.send(AnalysisEvent::DataLoaded {
@@ -855,6 +897,39 @@ impl StockAnalysisOrchestrator {
 
         Err("无法从输出中提取有效 JSON 决策".into())
     }
+}
+
+/// 解析交易员决策：优先 JSON，回退字符串匹配
+fn parse_trader_decision(report: &str) -> (String, Option<f64>, Option<f64>) {
+    // 尝试 JSON 解析
+    if let Some(parsed) = try_parse_json(report) {
+        let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("持有").to_string();
+        let stop = parsed.get("stopLoss").or_else(|| parsed.get("stop_loss")).and_then(|v| v.as_f64());
+        let entry = parsed.get("entryPrice").or_else(|| parsed.get("entry_price")).and_then(|v| v.as_f64());
+        return (action, stop, entry);
+    }
+    // 回退：字符串匹配
+    let action = if report.contains("买入") { "买入".to_string() }
+        else if report.contains("卖出") { "卖出".to_string() }
+        else { "持有".to_string() };
+    let stop = extract_number_after(report, "止损");
+    let entry = extract_number_after(report, "入场");
+    (action, stop, entry)
+}
+
+/// 从 LLM 输出中尝试提取 JSON（直接 "{" 或 ```json 代码块）
+fn try_parse_json(text: &str) -> Option<serde_json::Value> {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') {
+        return serde_json::from_str(trimmed).ok();
+    }
+    if let Some(start) = trimmed.find("```json") {
+        let inner = &trimmed[start + 7..];
+        if let Some(end) = inner.find("```") {
+            return serde_json::from_str(&inner[..end]).ok();
+        }
+    }
+    None
 }
 
 /// 从文本中提取关键字后面的数字

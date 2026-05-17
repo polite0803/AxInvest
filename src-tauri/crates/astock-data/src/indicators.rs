@@ -276,3 +276,117 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         resistance_levels,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_kline(date: &str, open: f64, high: f64, low: f64, close: f64, volume: f64) -> KLine {
+        KLine {
+            date: date.to_string(),
+            open,
+            high,
+            low,
+            close,
+            volume,
+            amount: volume * close,
+            turnover_rate: None,
+        }
+    }
+
+    #[test]
+    fn test_sma_basic() {
+        let data = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        assert!((sma(&data, 5).unwrap() - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_sma_insufficient_data() {
+        let data = vec![10.0, 20.0];
+        assert!(sma(&data, 5).is_none());
+    }
+
+    #[test]
+    fn test_ema_non_empty() {
+        let data = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        let result = ema(&data, 5);
+        assert!(result > 0.0);
+    }
+
+    #[test]
+    fn test_rsi_uniform() {
+        let closes = vec![10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0];
+        let result = rsi(&closes, 6);
+        // 零波动时 avg_loss=0，RSI 为 100
+        assert!((result - 100.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_rsi_all_gains() {
+        let closes: Vec<f64> = (0..8).map(|i| i as f64 * 10.0).collect();
+        let result = rsi(&closes, 6);
+        assert!(result > 80.0);
+    }
+
+    #[test]
+    fn test_stddev_calculation() {
+        let data = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+        let mean = data.iter().sum::<f64>() / data.len() as f64;
+        let sd = stddev(&data, mean);
+        assert!(sd > 0.0);
+    }
+
+    #[test]
+    fn test_compute_indicators_empty() {
+        let result = compute_indicators("000001", &[]);
+        assert_eq!(result.stock_code, "000001");
+        assert_eq!(result.ma_alignment, "无数据");
+        assert_eq!(result.macd_signal, "无数据");
+    }
+
+    #[test]
+    fn test_compute_indicators_basic() {
+        let klines: Vec<KLine> = (0..65)
+            .map(|i| {
+                make_kline(
+                    &format!("2025-01-{:02}", i + 1),
+                    10.0,
+                    10.5,
+                    9.5,
+                    10.0 + i as f64 * 0.1,
+                    10000.0,
+                )
+            })
+            .collect();
+        let result = compute_indicators("000001", &klines);
+        assert!(result.ma5 > 0.0);
+        assert!(result.ma10 > 0.0);
+        assert!(result.ma20 > 0.0);
+        assert!(!result.macd_signal.is_empty());
+        assert!(result.rsi6 >= 0.0 && result.rsi6 <= 100.0);
+    }
+
+    #[test]
+    fn test_compute_indicators_ma_alignment() {
+        // SMA 取前 N 个元素，递减价格 → 前高后低 → MA5 > MA10 > MA20 > MA60 为多头排列
+        let klines: Vec<KLine> = (0..65)
+            .map(|i| {
+                let price = 50.0 - i as f64 * 0.5;
+                make_kline(
+                    &format!("2025-01-{:02}", i + 1),
+                    price,
+                    price + 1.0,
+                    price - 1.0,
+                    price,
+                    10000.0,
+                )
+            })
+            .collect();
+        let result = compute_indicators("000001", &klines);
+        assert!(
+            result.ma_alignment == "多头排列" || result.ma_alignment == "弱多头",
+            "Expected bull alignment, got: {}",
+            result.ma_alignment
+        );
+    }
+}

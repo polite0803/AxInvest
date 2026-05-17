@@ -100,12 +100,18 @@ impl TradingEngine {
             errors.push(format!("数量必须是 {} 股的整数倍（{}手）", min_lot, min_lot));
         }
 
-        // 涨跌停校验
+        // 涨跌停校验（优先使用 vendor 预计算的 limit_up/limit_down，回退到 pre_close 计算）
         if let Ok(quote) = self.astock_client.get_quote(stock_code).await {
-            let limit_pct = get_st_price_limit_pct(quote.is_st, market);
-            let reference_price = quote.open;
-            let limit_up = reference_price * (1.0 + limit_pct / 100.0);
-            let limit_down = reference_price * (1.0 - limit_pct / 100.0);
+            let limit_up = quote.limit_up.unwrap_or_else(|| {
+                let limit_pct = get_st_price_limit_pct(quote.is_st, market);
+                let ref_price = if quote.pre_close > 0.0 { quote.pre_close } else { quote.open };
+                ref_price * (1.0 + limit_pct / 100.0)
+            });
+            let limit_down = quote.limit_down.unwrap_or_else(|| {
+                let limit_pct = get_st_price_limit_pct(quote.is_st, market);
+                let ref_price = if quote.pre_close > 0.0 { quote.pre_close } else { quote.open };
+                ref_price * (1.0 - limit_pct / 100.0)
+            });
 
             if price > limit_up {
                 errors.push(format!("买入价 {:.2} 超过涨停价 {:.2}", price, limit_up));
@@ -208,6 +214,7 @@ impl TradingEngine {
     ///
     /// - 买入：更新持仓（加权平均成本），若已持有则合并且权重平均成本
     /// - 卖出：计算已实现盈亏，减仓或清仓
+    /// - 需要 `enabled = true` 且通过校验才执行
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_trade(
         &self,
@@ -220,6 +227,15 @@ impl TradingEngine {
         trade_time: &str,
         notes: Option<&str>,
     ) -> Result<trades::Model, String> {
+        // 从 settings 表读取交易开关状态
+        let enabled: bool = axagent_core::repo::settings::get_setting(self.db.as_ref(), "trading_enabled")
+            .await
+            .unwrap_or_default()
+            .map(|s| s == "true")
+            .unwrap_or(false);
+        if !self.enabled && !enabled {
+            return Err("交易功能未启用，请先在设置中开启".into());
+        }
         // 校验
         let validation = self
             .validate_trade(stock_code, direction, quantity, price)

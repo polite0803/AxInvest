@@ -64,8 +64,66 @@ pub trait StockVendor: Send + Sync {
         let _ = stock_code;
         Ok(vec![])
     }
+
+    async fn get_research_reports(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<ResearchReport>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
+
+    async fn get_consensus_eps(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<ConsensusEPS>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
+
+    async fn get_concept_blocks(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<ConceptBlocks>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
+
+    async fn get_announcements(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<Announcement>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
+
+    async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
+        Ok(vec![])
+    }
+
+    async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
+        Ok(vec![])
+    }
+
+    async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
+        Ok(vec![])
+    }
+
+    async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
+        Ok(vec![])
+    }
+
+    async fn get_north_bound_flow(&self) -> Result<Option<NorthBoundFlow>, DataError> {
+        Ok(None)
+    }
 }
 
+pub mod akshare;
+pub mod baidu_stock;
+pub mod cninfo;
 pub mod eastmoney;
+pub mod iwencai;
+pub mod mootdx;
 pub mod sina;
+pub mod ths;
 pub mod tencent;

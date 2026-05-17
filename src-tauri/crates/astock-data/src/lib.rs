@@ -10,17 +10,77 @@ use tokio::sync::RwLock;
 
 pub use error::DataError;
 pub use types::*;
+use vendors::akshare::AkshareVendor;
+use vendors::baidu_stock::BaiduStockVendor;
+use vendors::cninfo::CninfoVendor;
 use vendors::eastmoney::EastMoneyVendor;
+use vendors::iwencai::IwencaiVendor;
+use vendors::mootdx::MootdxVendor;
 use vendors::sina::SinaVendor;
+use vendors::ths::ThsVendor;
 use vendors::tencent::TencentVendor;
 use vendors::StockVendor;
 
+type VendorRef = (String, Box<dyn StockVendor>);
+
+struct VendorRouting {
+    quote: Vec<String>,
+    klines: Vec<String>,
+    financials: Vec<String>,
+    news: Vec<String>,
+    money_flow: Vec<String>,
+    dragon_tiger: Vec<String>,
+    lockup: Vec<String>,
+    search: Vec<String>,
+    margin: Vec<String>,
+    north_bound: Vec<String>,
+    sector: Vec<String>,
+    shareholder_trades: Vec<String>,
+    dividend: Vec<String>,
+    research_reports: Vec<String>,
+    consensus_eps: Vec<String>,
+    concept_blocks: Vec<String>,
+    announcements: Vec<String>,
+    market_dragon_tiger: Vec<String>,
+    hot_stocks: Vec<String>,
+    industry_ranking: Vec<String>,
+    cls_flash: Vec<String>,
+    north_bound_flow: Vec<String>,
+}
+
+impl VendorRouting {
+    fn default_routing() -> Self {
+        Self {
+            quote: vec!["tencent".into(), "mootdx".into(), "eastmoney".into()],
+            klines: vec!["eastmoney".into(), "mootdx".into()],
+            financials: vec!["eastmoney".into(), "akshare".into()],
+            news: vec!["sina".into(), "akshare".into()],
+            money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
+            dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
+            lockup: vec!["eastmoney".into(), "baidu_stock".into()],
+            search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],
+            margin: vec!["eastmoney".into(), "baidu_stock".into()],
+            north_bound: vec!["eastmoney".into(), "baidu_stock".into()],
+            sector: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into(), "iwencai".into()],
+            shareholder_trades: vec!["eastmoney".into(), "baidu_stock".into()],
+            dividend: vec!["eastmoney".into(), "baidu_stock".into()],
+            research_reports: vec!["eastmoney".into(), "baidu_stock".into()],
+            consensus_eps: vec!["ths".into(), "akshare".into(), "iwencai".into()],
+            concept_blocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
+            announcements: vec!["cninfo".into()],
+            market_dragon_tiger: vec!["eastmoney".into()],
+            hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
+            industry_ranking: vec!["ths".into(), "baidu_stock".into()],
+            cls_flash: vec!["eastmoney".into(), "akshare".into()],
+            north_bound_flow: vec!["ths".into(), "baidu_stock".into()],
+        }
+    }
+}
+
 pub struct AStockClient {
-    tencent: TencentVendor,
-    eastmoney: EastMoneyVendor,
-    sina: SinaVendor,
+    vendors: Vec<VendorRef>,
+    routing: VendorRouting,
     http: reqwest::Client,
-    /// 进程内简易缓存: key -> (过期时间戳_秒, json值)
     cache: RwLock<HashMap<String, (i64, String)>>,
 }
 
@@ -30,20 +90,35 @@ impl AStockClient {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("Failed to create HTTP client");
-        Self {
-            tencent: TencentVendor { http: http.clone() },
-            eastmoney: EastMoneyVendor { http: http.clone() },
-            sina: SinaVendor { http: http.clone() },
-            http,
+
+        let mut client = Self {
+            vendors: Vec::new(),
+            routing: VendorRouting::default_routing(),
+            http: http.clone(),
             cache: RwLock::new(HashMap::new()),
-        }
+        };
+
+        client.register_vendor("tencent", Box::new(TencentVendor { http: http.clone() }));
+        client.register_vendor("eastmoney", Box::new(EastMoneyVendor { http: http.clone() }));
+        client.register_vendor("sina", Box::new(SinaVendor { http: http.clone() }));
+        client.register_vendor("ths", Box::new(ThsVendor { http: http.clone() }));
+        client.register_vendor("cninfo", Box::new(CninfoVendor { http: http.clone() }));
+        client.register_vendor("baidu_stock", Box::new(BaiduStockVendor { http: http.clone() }));
+        client.register_vendor("iwencai", Box::new(IwencaiVendor { http: http.clone(), api_key: String::new() }));
+        client.register_vendor("akshare", Box::new(AkshareVendor { http: http.clone() }));
+        client.register_vendor("mootdx", Box::new(MootdxVendor::new()));
+
+        client
+    }
+
+    pub fn register_vendor(&mut self, name: &str, vendor: Box<dyn StockVendor>) {
+        self.vendors.push((name.to_string(), vendor));
     }
 
     pub fn http(&self) -> &reqwest::Client {
         &self.http
     }
 
-    /// 从缓存读取值（未过期时返回 Some）
     async fn cache_get(&self, key: &str) -> Option<String> {
         let cache = self.cache.read().await;
         cache.get(key).and_then(|(expiry, val)| {
@@ -55,14 +130,26 @@ impl AStockClient {
         })
     }
 
-    /// 写入缓存（key + 值 + TTL秒数）
+    const MAX_CACHE_SIZE: usize = 1000;
+
     async fn cache_set(&self, key: String, value: String, ttl_secs: i64) {
         let mut cache = self.cache.write().await;
+        // 容量检查：超出上限时清理过期条目
+        if cache.len() >= Self::MAX_CACHE_SIZE {
+            let now = chrono::Utc::now().timestamp();
+            cache.retain(|_, (expiry, _)| *expiry > now);
+        }
         let expiry = chrono::Utc::now().timestamp() + ttl_secs;
         cache.insert(key, (expiry, value));
     }
 
-    /// 获取实时行情（腾讯财经为主，东方财富为降级备选）— 30s 缓存
+    fn find_vendor(&self, name: &str) -> Option<&dyn StockVendor> {
+        self.vendors
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_ref())
+    }
+
     pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let cache_key = format!("quote:{stock_code}");
         if let Some(cached) = self.cache_get(&cache_key).await {
@@ -71,53 +158,28 @@ impl AStockClient {
             }
         }
 
-        // P0: 腾讯财经
-        match self.tencent.get_quote(stock_code).await {
-            Ok(quote) => {
-                let json = serde_json::to_string(&quote).unwrap_or_default();
-                self.cache_set(cache_key, json, 30).await;
-                return Ok(quote);
-            },
-            Err(e) => tracing::warn!("[降级] 腾讯财经行情失败: {e}, 尝试东方财富..."),
+        let mut last_err = None;
+        for name in &self.routing.quote {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_quote(stock_code).await {
+                    Ok(result) => {
+                        let json = serde_json::to_string(&result).unwrap_or_default();
+                        self.cache_set(cache_key, json, 30).await;
+                        return Ok(result);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 行情失败: {}", name, e);
+                        last_err = Some(e);
+                    },
+                }
+            }
         }
-
-        // P1: 东方财富 fallback（通过 eastmoney vendor）
-        match self.eastmoney.get_klines(stock_code, "daily", 1).await {
-            Ok(klines) if !klines.is_empty() => {
-                let k = &klines[0];
-                let quote = StockQuote {
-                    code: stock_code.to_string(),
-                    name: stock_code.to_string(), // name unknown from kline alone
-                    price: k.close,
-                    open: k.open,
-                    high: k.high,
-                    low: k.low,
-                    volume: k.volume,
-                    amount: k.amount,
-                    change_pct: (k.close - k.open) / k.open * 100.0,
-                    turnover_rate: k.turnover_rate.unwrap_or(0.0),
-                    pe: None,
-                    pb: None,
-                    total_mv: None,
-                    limit_up: None,
-                    limit_down: None,
-                    is_st: false,
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                };
-                let json = serde_json::to_string(&quote).unwrap_or_default();
-                self.cache_set(cache_key, json, 30).await;
-                return Ok(quote);
-            },
-            _ => tracing::warn!("[降级] 东方财富也失败，所有行情数据源不可用"),
-        }
-
-        Err(DataError::VendorError {
+        Err(last_err.unwrap_or_else(|| DataError::VendorError {
             vendor: "all".into(),
-            message: "所有行情数据源均不可用，请稍后重试".into(),
-        })
+            message: "所有行情数据源均不可用".into(),
+        }))
     }
 
-    /// 获取K线数据（东方财富）— 300s 缓存
     pub async fn get_klines(
         &self,
         stock_code: &str,
@@ -130,88 +192,311 @@ impl AStockClient {
                 return Ok(klines);
             }
         }
-        let result = self.eastmoney.get_klines(stock_code, period, limit).await?;
-        let json = serde_json::to_string(&result).unwrap_or_default();
-        self.cache_set(cache_key, json, 300).await;
-        Ok(result)
+        let mut last_err = None;
+        for name in &self.routing.klines {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_klines(stock_code, period, limit).await {
+                    Ok(result) => {
+                        let json = serde_json::to_string(&result).unwrap_or_default();
+                        self.cache_set(cache_key, json, 300).await;
+                        return Ok(result);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} K线失败: {}", name, e);
+                        last_err = Some(e);
+                    },
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| DataError::VendorError {
+            vendor: "all".into(),
+            message: "所有K线数据源均不可用".into(),
+        }))
     }
 
-    /// 获取财务报表（东方财富）
     pub async fn get_financials(
         &self,
         stock_code: &str,
     ) -> Result<Vec<FinancialReport>, DataError> {
-        self.eastmoney.get_financials(stock_code).await
+        for name in &self.routing.financials {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_financials(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 获取新闻（新浪财经）
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        self.sina.get_news(stock_code, limit).await
+        for name in &self.routing.news {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_news(stock_code, limit).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 获取资金流向（东方财富）
     pub async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
-        self.eastmoney.get_money_flow(stock_code).await
+        for name in &self.routing.money_flow {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_money_flow(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
     }
 
-    /// 获取龙虎榜（东方财富）
     pub async fn get_dragon_tiger(
         &self,
         stock_code: &str,
     ) -> Result<Vec<DragonTigerEntry>, DataError> {
-        self.eastmoney.get_dragon_tiger(stock_code).await
+        for name in &self.routing.dragon_tiger {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_dragon_tiger(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 获取限售解禁（东方财富）
     pub async fn get_lockup_schedule(
         &self,
         stock_code: &str,
     ) -> Result<Vec<LockupSchedule>, DataError> {
-        self.eastmoney.get_lockup_schedule(stock_code).await
+        for name in &self.routing.lockup {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_lockup_schedule(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 搜索股票（东方财富）
     pub async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
-        self.eastmoney.search_stock(keyword).await
+        for name in &self.routing.search {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.search_stock(keyword).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 获取融资融券数据（东方财富）
     pub async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
-        self.eastmoney.get_margin_data(stock_code).await
+        for name in &self.routing.margin {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_margin_data(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
     }
 
-    /// 获取北向资金持仓（暂未实现）
     pub async fn get_north_bound_holding(
         &self,
         stock_code: &str,
     ) -> Result<Option<NorthBoundHolding>, DataError> {
-        self.eastmoney.get_north_bound_holding(stock_code).await
+        for name in &self.routing.north_bound {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_north_bound_holding(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
     }
 
-    /// 获取行业分类（暂未实现）
     pub async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
-        self.eastmoney.get_sector_info(stock_code).await
+        for name in &self.routing.sector {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_sector_info(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
     }
 
-    /// 获取股东增减持（暂未实现）
     pub async fn get_shareholder_trades(
         &self,
         stock_code: &str,
     ) -> Result<Vec<ShareholderTrade>, DataError> {
-        self.eastmoney.get_shareholder_trades(stock_code).await
+        for name in &self.routing.shareholder_trades {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_shareholder_trades(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 获取除权除息记录（暂未实现）
     pub async fn get_dividend_records(
         &self,
         stock_code: &str,
     ) -> Result<Vec<DividendRecord>, DataError> {
-        self.eastmoney.get_dividend_records(stock_code).await
+        for name in &self.routing.dividend {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_dividend_records(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
     }
 
-    /// 一次性获取所有原始数据。
-    /// 各子请求独立容错：只有 quote 为必需；其余失败时记录 warn 日志并回退为空值。
-    /// TODO: 为高频调用（如 get_quote）补充 retry 逻辑。
+    pub async fn get_research_reports(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<ResearchReport>, DataError> {
+        for name in &self.routing.research_reports {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_research_reports(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_consensus_eps(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<ConsensusEPS>, DataError> {
+        for name in &self.routing.consensus_eps {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_consensus_eps(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn get_concept_blocks(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<ConceptBlocks>, DataError> {
+        for name in &self.routing.concept_blocks {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_concept_blocks(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn get_announcements(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<Announcement>, DataError> {
+        for name in &self.routing.announcements {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_announcements(stock_code).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
+        for name in &self.routing.market_dragon_tiger {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_market_dragon_tiger().await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
+        for name in &self.routing.hot_stocks {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_hot_stocks().await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
+        for name in &self.routing.industry_ranking {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_industry_ranking().await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
+        for name in &self.routing.cls_flash {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_cls_flash().await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_north_bound_flow(&self) -> Result<Option<NorthBoundFlow>, DataError> {
+        for name in &self.routing.north_bound_flow {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.get_north_bound_flow().await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn fetch_market_data(&self) -> Result<MarketRawData, DataError> {
+        let (hot_r, industry_r, cls_r, mdt_r, nbf_r) = tokio::join!(
+            self.get_hot_stocks(),
+            self.get_industry_ranking(),
+            self.get_cls_flash(),
+            self.get_market_dragon_tiger(),
+            self.get_north_bound_flow(),
+        );
+
+        Ok(MarketRawData {
+            hot_stocks: hot_r.unwrap_or_else(|e| {
+                tracing::warn!("hot_stocks failed: {e}");
+                vec![]
+            }),
+            industry_ranking: industry_r.unwrap_or_else(|e| {
+                tracing::warn!("industry_ranking failed: {e}");
+                vec![]
+            }),
+            cls_flash: cls_r.unwrap_or_else(|e| {
+                tracing::warn!("cls_flash failed: {e}");
+                vec![]
+            }),
+            market_dragon_tiger: mdt_r.unwrap_or_else(|e| {
+                tracing::warn!("market_dragon_tiger failed: {e}");
+                vec![]
+            }),
+            north_bound_flow: nbf_r.unwrap_or_else(|e| {
+                tracing::warn!("north_bound_flow failed: {e}");
+                None
+            }),
+        })
+    }
+
     pub async fn fetch_all(
         &self,
         stock_code: &str,
@@ -232,6 +517,10 @@ impl AStockClient {
             sector_r,
             shareholder_r,
             dividend_r,
+            research_r,
+            consensus_r,
+            concept_r,
+            announcements_r,
         ) = tokio::join!(
             self.get_quote(stock_code),
             self.get_klines(stock_code, kline_period, kline_limit),
@@ -245,6 +534,10 @@ impl AStockClient {
             self.get_sector_info(stock_code),
             self.get_shareholder_trades(stock_code),
             self.get_dividend_records(stock_code),
+            self.get_research_reports(stock_code),
+            self.get_consensus_eps(stock_code),
+            self.get_concept_blocks(stock_code),
+            self.get_announcements(stock_code),
         );
 
         let quote = quote_r.map_err(|e| {
@@ -295,6 +588,22 @@ impl AStockClient {
             tracing::warn!("dividend_records failed: {e}");
             vec![]
         });
+        let research_reports = research_r.unwrap_or_else(|e| {
+            tracing::warn!("research_reports failed: {e}");
+            vec![]
+        });
+        let consensus_eps = consensus_r.unwrap_or_else(|e| {
+            tracing::warn!("consensus_eps failed: {e}");
+            None
+        });
+        let concept_blocks = concept_r.unwrap_or_else(|e| {
+            tracing::warn!("concept_blocks failed: {e}");
+            None
+        });
+        let announcements = announcements_r.unwrap_or_else(|e| {
+            tracing::warn!("announcements failed: {e}");
+            vec![]
+        });
 
         Ok(StockRawData {
             quote,
@@ -309,6 +618,10 @@ impl AStockClient {
             sector_info,
             shareholder_trades,
             dividend_records,
+            research_reports,
+            consensus_eps,
+            concept_blocks,
+            announcements,
         })
     }
 }

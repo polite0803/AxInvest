@@ -188,8 +188,8 @@ impl ValueInvestingEngine {
         if curr.roe.unwrap_or(0.0) > prev.roe.unwrap_or(0.0) {
             score += 1;
         } // ROE增长
-          // CFO > NI（简化：用 net_profit 近似）
-        if curr.net_profit.unwrap_or(0.0) > 0.0 {
+          // CFO > NI: 营收显著大于净利润表明经营现金流质量好
+        if curr.revenue.unwrap_or(0.0) > curr.net_profit.unwrap_or(0.0) * 1_0000_0000.0 {
             score += 1;
         }
 
@@ -310,12 +310,13 @@ impl ValueInvestingEngine {
 
     /// 巴菲特所有者收益 = 净利润 + 折旧摊销 - 资本支出
     /// 简化：用净利润的110%近似（假设折旧略大于资本支出）
+    /// 巴菲特所有者收益 = 净利润 + 折旧摊销 - 资本支出（简化：净利润 × 1.05）
     fn buffett_owner_earnings(financials: &[FinancialReport]) -> f64 {
         if financials.is_empty() {
             return 0.0;
         }
         let f = &financials[0];
         let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0; // 亿→元
-        net * 1.10
+        net * 1.05
     }
 }

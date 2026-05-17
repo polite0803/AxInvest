@@ -212,7 +212,7 @@ impl StockVendor for EastMoneyVendor {
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_LOCKUP&columns=SECURITY_CODE,SECURITY_NAME_ABBR,UNLOCK_DATE,UNLOCK_SHARES,PLACING_RATIO,HOLDER_NAME&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=20&sortColumns=UNLOCK_DATE&pageNumber=1"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.http.get(url).send().await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -220,18 +220,18 @@ impl StockVendor for EastMoneyVendor {
             None => return Ok(vec![]),
         };
 
-        rows.iter()
+        Ok(rows.iter()
             .map(|r| {
-                Ok(LockupSchedule {
+                LockupSchedule {
                     stock_code: stock_code.to_string(),
                     stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
                     unlock_date: r["UNLOCK_DATE"].as_str().unwrap_or("").to_string(),
                     unlock_shares: r["UNLOCK_SHARES"].as_f64().unwrap_or(0.0),
                     unlock_ratio: r["PLACING_RATIO"].as_f64().unwrap_or(0.0),
                     shareholder: r["HOLDER_NAME"].as_str().map(|s| s.to_string()),
-                })
+                }
             })
-            .collect()
+            .collect())
     }
 
     /// 获取融资融券数据
@@ -410,6 +410,161 @@ impl StockVendor for EastMoneyVendor {
                 code: s["Code"].as_str().unwrap_or("").to_string(),
                 name: s["Name"].as_str().unwrap_or("").to_string(),
                 market: s["Market"].as_str().unwrap_or("").to_string(),
+            })
+            .collect())
+    }
+
+    async fn get_research_reports(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<ResearchReport>, DataError> {
+        let url = format!(
+            "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=20&industry=%2A&rating=&ratingChange=&beginTime=2000-01-01&endTime=2030-01-01&pageNo=1&fields=&qType=0&orgCode=&code={}&rcode=&p=1&pageNum=1&pageNumber=1",
+            stock_code
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://data.eastmoney.com/")
+            .send()
+            .await?;
+
+        let json: Value = resp.json().await?;
+
+        let reports = match json["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(reports
+            .iter()
+            .map(|r| {
+                let mut eps_forecast = Vec::new();
+                if let Some(eps) = r["predictThisYearEps"].as_str() {
+                    if let Ok(val) = eps.parse::<f64>() {
+                        eps_forecast.push(EpsForecast {
+                            year: "今年".into(),
+                            eps: Some(val),
+                        });
+                    }
+                }
+                if let Some(eps) = r["predictNextYearEps"].as_str() {
+                    if let Ok(val) = eps.parse::<f64>() {
+                        eps_forecast.push(EpsForecast {
+                            year: "明年".into(),
+                            eps: Some(val),
+                        });
+                    }
+                }
+                if let Some(eps) = r["predictNextTwoYearEps"].as_str() {
+                    if let Ok(val) = eps.parse::<f64>() {
+                        eps_forecast.push(EpsForecast {
+                            year: "后年".into(),
+                            eps: Some(val),
+                        });
+                    }
+                }
+
+                let info_code = r["infoCode"].as_str().unwrap_or("");
+                let pdf_url = if info_code.is_empty() {
+                    None
+                } else {
+                    Some(format!("https://pdf.dfcfw.com/pdf/H3_{}_1.pdf", info_code))
+                };
+
+                ResearchReport {
+                    title: r["title"].as_str().unwrap_or("").to_string(),
+                    institution: r["orgSName"].as_str().unwrap_or("").to_string(),
+                    analyst: r["researcher"].as_str().map(|s| s.to_string()),
+                    rating: r["emRatingName"].as_str().map(|s| s.to_string()),
+                    target_price: None,
+                    eps_forecast,
+                    publish_date: r["publishDate"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string(),
+                    pdf_url,
+                }
+            })
+            .collect())
+    }
+
+    async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
+        let url = "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_DAILYBOARD_DETAILS_NEW&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,BUY_AMOUNT,SELL_AMOUNT,NET_BUY,CHANGE_REASON&sortColumns=NET_BUY&sortTypes=-1&pageSize=30&pageNumber=1";
+
+        let resp = self.http.get(url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(rows
+            .iter()
+            .map(|r| MarketDragonTiger {
+                stock_code: r["SECURITY_CODE"].as_str().unwrap_or("").to_string(),
+                stock_name: r["SECURITY_NAME_ABBR"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                date: r["TRADE_DATE"].as_str().unwrap_or("").to_string(),
+                net_buy: r["NET_BUY"].as_f64().unwrap_or(0.0),
+                buy_amount: r["BUY_AMOUNT"].as_f64().unwrap_or(0.0),
+                sell_amount: r["SELL_AMOUNT"].as_f64().unwrap_or(0.0),
+                reason: r["CHANGE_REASON"].as_str().map(|s| s.to_string()),
+            })
+            .collect())
+    }
+
+    async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
+        let url = "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns?client=web&biz=web_news_col&column=250&order=1&needInteractData=0&page_index=1&page_size=20";
+
+        let resp = self
+            .http
+            .get(url)
+            .header("Referer", "https://finance.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
+
+        let json: Value = resp.json().await?;
+
+        let items = match json["data"]["list"].as_array() {
+            Some(arr) => arr,
+            None => match json["data"].as_array() {
+                Some(arr) => arr,
+                None => return Ok(vec![]),
+            },
+        };
+
+        Ok(items
+            .iter()
+            .filter_map(|item| {
+                let title = item.get("title")?.as_str()?.to_string();
+                let content = item.get("digest")
+                    .or_else(|| item.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let publish_time = item.get("showTime")
+                    .or_else(|| item.get("publish_time"))
+                    .or_else(|| item.get("ctime"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let source = item.get("source")
+                    .or_else(|| item.get("mediaName"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                Some(ClsFlashItem {
+                    title,
+                    content,
+                    publish_time,
+                    source,
+                })
             })
             .collect())
     }

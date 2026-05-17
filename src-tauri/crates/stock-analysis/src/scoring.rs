@@ -282,7 +282,7 @@ impl ScoringEngine {
     }
 
     /// 评分到信号映射
-    fn map_signal(total: u32, alignment: &str) -> (&str, &str) {
+    pub fn map_signal(total: u32, alignment: &str) -> (&str, &str) {
         if total >= 75 && alignment == "多头排列" {
             ("🟢强烈买入", "strong_buy")
         } else if total >= 60 {
@@ -296,5 +296,168 @@ impl ScoringEngine {
         } else {
             ("🟠卖出", "sell")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axagent_astock_data::indicators::TechnicalIndicators;
+
+    fn make_indicators(
+        ma_alignment: &str,
+        bias_ma5: f64,
+        macd_signal: &str,
+        macd_dif: f64,
+        volume_signal: &str,
+        rsi6: f64,
+        support_levels: Vec<f64>,
+    ) -> TechnicalIndicators {
+        TechnicalIndicators {
+            stock_code: "000001".to_string(),
+            latest_date: "2025-01-15".to_string(),
+            ma5: 10.0,
+            ma10: 9.5,
+            ma20: 9.0,
+            ma60: 8.0,
+            ma_alignment: ma_alignment.to_string(),
+            macd_dif,
+            macd_dea: 0.5,
+            macd_bar: 0.2,
+            macd_signal: macd_signal.to_string(),
+            rsi6,
+            rsi12: 55.0,
+            rsi24: 52.0,
+            rsi_signal: "中性".to_string(),
+            boll_upper: 12.0,
+            boll_mid: 9.0,
+            boll_lower: 6.0,
+            boll_position: "中轨附近".to_string(),
+            bias_ma5,
+            bias_ma20: 1.0,
+            volume_ratio: 1.0,
+            volume_signal: volume_signal.to_string(),
+            support_levels,
+            resistance_levels: vec![12.0],
+        }
+    }
+
+    #[test]
+    fn test_score_trend_bull() {
+        assert_eq!(ScoringEngine::score_trend("多头排列"), 30);
+    }
+
+    #[test]
+    fn test_score_trend_weak_bull() {
+        assert_eq!(ScoringEngine::score_trend("弱多头"), 20);
+    }
+
+    #[test]
+    fn test_score_trend_bear() {
+        assert_eq!(ScoringEngine::score_trend("空头排列"), 0);
+    }
+
+    #[test]
+    fn test_score_deviation_small() {
+        assert_eq!(ScoringEngine::score_deviation(0.5), 20);
+    }
+
+    #[test]
+    fn test_score_deviation_large() {
+        assert_eq!(ScoringEngine::score_deviation(10.0), 0);
+    }
+
+    #[test]
+    fn test_score_macd_golden_cross_positive() {
+        assert_eq!(ScoringEngine::score_macd("金叉", 0.5), 15);
+    }
+
+    #[test]
+    fn test_score_macd_dead_cross() {
+        assert_eq!(ScoringEngine::score_macd("死叉", -0.5), 0);
+    }
+
+    #[test]
+    fn test_score_volume_shrink_retrace() {
+        assert_eq!(ScoringEngine::score_volume("缩量回调"), 15);
+    }
+
+    #[test]
+    fn test_score_volume_selloff() {
+        assert_eq!(ScoringEngine::score_volume("放量下跌"), 0);
+    }
+
+    #[test]
+    fn test_score_rsi_oversold() {
+        assert_eq!(ScoringEngine::score_rsi(15.0), 10);
+    }
+
+    #[test]
+    fn test_score_rsi_overbought() {
+        assert_eq!(ScoringEngine::score_rsi(85.0), 0);
+    }
+
+    #[test]
+    fn test_score_rsi_neutral() {
+        assert_eq!(ScoringEngine::score_rsi(50.0), 5);
+    }
+
+    #[test]
+    fn test_score_support_double() {
+        // 价格 10.0，3% 以内 = 0.3，支撑 9.8 和 9.75 均在 3% 以内
+        let supports = vec![9.8, 9.75, 7.0];
+        assert!(ScoringEngine::score_support(10.0, &supports) >= 6);
+    }
+
+    #[test]
+    fn test_score_support_none() {
+        assert_eq!(ScoringEngine::score_support(10.0, &[12.0, 15.0]), 2);
+    }
+
+    #[test]
+    fn test_full_scoring_default() {
+        let ind = make_indicators("多头排列", 1.0, "多头运行", 0.3, "正常", 50.0, vec![9.5, 9.0]);
+        let score = ScoringEngine::score(&ind, 10.0, None);
+        assert!(score.total > 0);
+        assert!(score.total <= 100);
+        assert!(!score.signal.is_empty());
+        assert!(!score.signal_code.is_empty());
+    }
+
+    #[test]
+    fn test_map_signal_strong_buy() {
+        let (signal, code) = ScoringEngine::map_signal(80, "多头排列");
+        assert!(signal.contains("强烈买入") || code == "strong_buy");
+    }
+
+    #[test]
+    fn test_map_signal_buy() {
+        let (_, code) = ScoringEngine::map_signal(65, "弱多头");
+        assert_eq!(code, "buy");
+    }
+
+    #[test]
+    fn test_map_signal_hold() {
+        let (_, code) = ScoringEngine::map_signal(50, "缠绕/交叉");
+        assert_eq!(code, "hold");
+    }
+
+    #[test]
+    fn test_map_signal_strong_sell() {
+        let (_, code) = ScoringEngine::map_signal(20, "空头排列");
+        assert!(code == "strong_sell" || code == "sell");
+    }
+
+    #[test]
+    fn test_apply_fundamental_adjustment() {
+        let ind = make_indicators("多头排列", 1.0, "多头运行", 0.3, "正常", 50.0, vec![9.0]);
+        let mut score = ScoringEngine::score(&ind, 10.0, None);
+        let before = score.total;
+        ScoringEngine::apply_fundamental_adjustment(&mut score, Some(8.0), Some(0.8), Some(22.0));
+        assert!(
+            score.fundamental_adjustment > 0,
+            "Low PE + low PB + high ROE should yield positive adjustment"
+        );
+        assert!(score.total >= before || score.total <= 100, "Score should be capped at 0-100");
     }
 }

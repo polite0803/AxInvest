@@ -953,6 +953,16 @@ pub fn run() {
             // Portfolio risk + position limits
             commands::stock_analysis::get_portfolio_risk,
             commands::stock_analysis::get_position_limits,
+            // New data source commands
+            commands::stock_analysis::get_stock_research_reports,
+            commands::stock_analysis::get_stock_consensus_eps,
+            commands::stock_analysis::get_stock_concept_blocks,
+            commands::stock_analysis::get_stock_announcements,
+            commands::stock_analysis::get_hot_stocks,
+            commands::stock_analysis::get_industry_ranking,
+            commands::stock_analysis::get_cls_flash,
+            commands::stock_analysis::get_market_dragon_tiger,
+            commands::stock_analysis::get_north_bound_flow,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");

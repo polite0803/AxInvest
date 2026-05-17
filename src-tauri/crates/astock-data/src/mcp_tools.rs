@@ -1,6 +1,5 @@
 use serde_json::json;
 
-/// 获取 stock data MCP 工具定义列表
 pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
     vec![
         json!({
@@ -72,10 +71,170 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "required": ["stock_code"]
             }
         }),
+        json!({
+            "name": "get_stock_dragon_tiger",
+            "description": "获取个股龙虎榜数据（营业部买卖、上榜原因）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_margin_data",
+            "description": "获取融资融券数据（融资买入额、余额、融券卖出量、余量）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_sector_info",
+            "description": "获取行业分类（申万一级/二级、概念板块标签）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_north_bound",
+            "description": "获取北向资金个股持仓（持股数量、占比）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_lockup",
+            "description": "获取限售解禁日程（解禁日期、股数、比例、股东名称）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_shareholder_trades",
+            "description": "获取大股东增减持记录（变动类型、数量、均价、原因）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_dividend_records",
+            "description": "获取除权除息/分红送配记录",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_research_reports",
+            "description": "获取研报列表（机构、评级、目标价、EPS预测）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_consensus_eps",
+            "description": "获取机构一致预期EPS（一致预期EPS、目标价、评级）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_concept_blocks",
+            "description": "获取概念板块三维归属（行业/概念/地域）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_announcements",
+            "description": "获取巨潮全量公告（沪深北交所）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_market_dragon_tiger",
+            "description": "获取全市场龙虎榜（每日上榜股票+净买额排名）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_hot_stocks",
+            "description": "获取同花顺强势股（当日强势股+题材归因标签）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_industry_ranking",
+            "description": "获取行业横向排名（~90行业涨跌排名+领涨股）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_cls_flash",
+            "description": "获取财联社快讯（分钟级电报）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_north_bound_flow",
+            "description": "获取北向资金分钟级流向（沪深股通）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
     ]
 }
 
-/// 执行 MCP 工具调用并返回 JSON 结果
 pub async fn execute_mcp_tool(
     client: &crate::AStockClient,
     tool_name: &str,
@@ -126,6 +285,126 @@ pub async fn execute_mcp_tool(
             let code = arguments["stock_code"].as_str().unwrap_or("");
             let flow = client
                 .get_money_flow(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&flow).map_err(|e| e.to_string())
+        },
+        "get_stock_dragon_tiger" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let dt = client
+                .get_dragon_tiger(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&dt).map_err(|e| e.to_string())
+        },
+        "get_stock_margin_data" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let margin = client
+                .get_margin_data(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&margin).map_err(|e| e.to_string())
+        },
+        "get_stock_sector_info" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let sector = client
+                .get_sector_info(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&sector).map_err(|e| e.to_string())
+        },
+        "get_stock_north_bound" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let nb = client
+                .get_north_bound_holding(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&nb).map_err(|e| e.to_string())
+        },
+        "get_stock_lockup" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let lockup = client
+                .get_lockup_schedule(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&lockup).map_err(|e| e.to_string())
+        },
+        "get_stock_shareholder_trades" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let trades = client
+                .get_shareholder_trades(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&trades).map_err(|e| e.to_string())
+        },
+        "get_stock_dividend_records" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let dividends = client
+                .get_dividend_records(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&dividends).map_err(|e| e.to_string())
+        },
+        "get_stock_research_reports" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let reports = client
+                .get_research_reports(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&reports).map_err(|e| e.to_string())
+        },
+        "get_stock_consensus_eps" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let eps = client
+                .get_consensus_eps(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&eps).map_err(|e| e.to_string())
+        },
+        "get_stock_concept_blocks" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let blocks = client
+                .get_concept_blocks(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&blocks).map_err(|e| e.to_string())
+        },
+        "get_stock_announcements" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let anns = client
+                .get_announcements(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&anns).map_err(|e| e.to_string())
+        },
+        "get_market_dragon_tiger" => {
+            let dt = client
+                .get_market_dragon_tiger()
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&dt).map_err(|e| e.to_string())
+        },
+        "get_hot_stocks" => {
+            let hot = client
+                .get_hot_stocks()
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&hot).map_err(|e| e.to_string())
+        },
+        "get_industry_ranking" => {
+            let ranking = client
+                .get_industry_ranking()
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&ranking).map_err(|e| e.to_string())
+        },
+        "get_cls_flash" => {
+            let flash = client.get_cls_flash().await.map_err(|e| e.to_string())?;
+            serde_json::to_string(&flash).map_err(|e| e.to_string())
+        },
+        "get_north_bound_flow" => {
+            let flow = client
+                .get_north_bound_flow()
                 .await
                 .map_err(|e| e.to_string())?;
             serde_json::to_string(&flow).map_err(|e| e.to_string())

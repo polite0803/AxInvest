@@ -32,7 +32,6 @@ pub async fn build_analyst_context(
             if let Some(fin) = bb.get_state("raw.financials") {
                 let _ = write!(ctx, "## 财务数据\n{fin}\n");
             }
-            // 提供客观评分和估值参考
             if let Some(score) = bb.get_state("raw.objective_score") {
                 let _ = write!(ctx, "## 技术面客观评分（参考）\n{score}\n");
             }
@@ -45,10 +44,19 @@ pub async fn build_analyst_context(
             if let Some(vm) = bb.get_state("raw.value_metrics") {
                 let _ = write!(ctx, "## 价值投资指标（系统预计算）\n{vm}\n");
             }
+            if let Some(reports) = bb.get_state("raw.research_reports") {
+                let _ = write!(ctx, "## 研报列表\n{reports}\n");
+            }
+            if let Some(eps) = bb.get_state("raw.consensus_eps") {
+                let _ = write!(ctx, "## 机构一致预期EPS\n{eps}\n");
+            }
         },
         "news-analyst" | "sentiment-analyst" => {
             if let Some(news) = bb.get_state("raw.news") {
                 let _ = write!(ctx, "## 新闻数据\n{news}\n");
+            }
+            if let Some(cls) = bb.get_state("market.cls_flash") {
+                let _ = write!(ctx, "## 财联社快讯\n{cls}\n");
             }
         },
         "policy-analyst" => {
@@ -57,6 +65,12 @@ pub async fn build_analyst_context(
             }
             if let Some(sector) = bb.get_state("raw.sector_info") {
                 let _ = write!(ctx, "## 行业分类\n{sector}\n");
+            }
+            if let Some(hot) = bb.get_state("market.hot_stocks") {
+                let _ = write!(ctx, "## 同花顺强势股\n{hot}\n");
+            }
+            if let Some(industry) = bb.get_state("market.industry_ranking") {
+                let _ = write!(ctx, "## 行业横向排名\n{industry}\n");
             }
         },
         "hot-money-tracker" => {
@@ -71,6 +85,12 @@ pub async fn build_analyst_context(
             }
             if let Some(nb) = bb.get_state("raw.north_bound") {
                 let _ = write!(ctx, "## 北向资金持仓\n{nb}\n");
+            }
+            if let Some(nbf) = bb.get_state("market.north_bound_flow") {
+                let _ = write!(ctx, "## 北向资金分钟级流向\n{nbf}\n");
+            }
+            if let Some(mdt) = bb.get_state("market.market_dragon_tiger") {
+                let _ = write!(ctx, "## 全市场龙虎榜\n{mdt}\n");
             }
         },
         "lockup-watcher" => {
@@ -90,6 +110,37 @@ pub async fn build_analyst_context(
             }
             if let Some(va) = bb.get_state("value.assessment") {
                 let _ = write!(ctx, "## 量化价值评估\n{va}\n");
+            }
+            if let Some(eps) = bb.get_state("raw.consensus_eps") {
+                let _ = write!(ctx, "## 机构一致预期EPS\n{eps}\n");
+            }
+            if let Some(reports) = bb.get_state("raw.research_reports") {
+                let _ = write!(ctx, "## 研报列表\n{reports}\n");
+            }
+        },
+        "research-analyst" => {
+            if let Some(reports) = bb.get_state("raw.research_reports") {
+                let _ = write!(ctx, "## 研报列表\n{reports}\n");
+            }
+            if let Some(eps) = bb.get_state("raw.consensus_eps") {
+                let _ = write!(ctx, "## 机构一致预期EPS\n{eps}\n");
+            }
+            if let Some(quote) = bb.get_state("raw.quote") {
+                let _ = write!(ctx, "## 实时行情\n{quote}\n");
+            }
+        },
+        "sector-analyst" => {
+            if let Some(hot) = bb.get_state("market.hot_stocks") {
+                let _ = write!(ctx, "## 同花顺强势股\n{hot}\n");
+            }
+            if let Some(industry) = bb.get_state("market.industry_ranking") {
+                let _ = write!(ctx, "## 行业横向排名\n{industry}\n");
+            }
+            if let Some(concept) = bb.get_state("raw.concept_blocks") {
+                let _ = write!(ctx, "## 概念板块归属\n{concept}\n");
+            }
+            if let Some(sector) = bb.get_state("raw.sector_info") {
+                let _ = write!(ctx, "## 行业分类\n{sector}\n");
             }
         },
         _ => {
@@ -119,6 +170,9 @@ pub async fn build_analyst_context(
                 "report.policy-analyst",
                 "report.hot-money-tracker",
                 "report.lockup-watcher",
+                "report.research-analyst",
+                "report.sector-analyst",
+                "report.value-investor",
                 "report.bull-researcher",
                 "report.bear-researcher",
                 "report.research-manager",

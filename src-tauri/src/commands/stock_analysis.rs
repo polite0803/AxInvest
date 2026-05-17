@@ -24,8 +24,9 @@ use sea_orm::{
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::RwLock;
+use zeroize::Zeroizing;
 
 /// 搜索股票
 #[tauri::command]
@@ -247,6 +248,103 @@ pub async fn start_stock_analysis(
     }))
 }
 
+/// 供 StockScheduler 等内部调用方使用的分析执行函数（不走 Tauri command 通道）
+/// 供 StockScheduler 等内部调用方使用的分析执行函数（不走 Tauri command 通道）
+pub async fn run_scheduled_analysis(
+    app_handle: &tauri::AppHandle,
+    stock_code: &str,
+    stock_name: &str,
+    date: &str,
+    provider_id: &str,
+) -> Result<(), String> {
+    let db = app_handle.state::<crate::AppState>().sea_db.clone();
+    let analysis_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp_millis();
+    let conversation_id = uuid::Uuid::new_v4().to_string();
+
+    let model = stock_analyses::ActiveModel {
+        id: Set(analysis_id.clone()),
+        stock_code: Set(stock_code.to_string()),
+        stock_name: Set(stock_name.to_string()),
+        analysis_date: Set(date.to_string()),
+        provider_id: Set(provider_id.to_string()),
+        conversation_id: Set(conversation_id.clone()),
+        status: Set("running".to_string()),
+        decision_action: Set(None), decision_position_pct: Set(None),
+        decision_reasoning: Set(None), decision_json: Set(None),
+        blackboard_snapshot: Set(None),
+        created_at: Set(now), updated_at: Set(now),
+    };
+    model.insert(&db).await.map_err(|e| format!("写入分析记录失败: {e}"))?;
+
+    let cancel_token = Arc::new(AtomicBool::new(false));
+
+    // 获取 master_key（从 app state）
+    let master_key = app_handle.state::<crate::AppState>().master_key;
+
+    let runner: Option<Arc<dyn AgentRunner>> = match build_cancel_aware_runner(
+        &db, &master_key, provider_id, cancel_token.clone(),
+    ).await {
+        Ok(r) => Some(Arc::new(r)),
+        Err(e) => { tracing::warn!("[stock_analysis] runner 构建失败: {e}"); None }
+    };
+    let prompts = load_stock_analysis_prompts(&db).await;
+    {
+        let state = app_handle.state::<crate::AppState>();
+        let mut tokens = state.agent_cancel_tokens.lock().await;
+        tokens.insert(analysis_id.clone(), cancel_token.clone());
+    }
+
+    let app = app_handle.clone();
+    let db_clone = db.clone();
+    let data_client: Arc<axagent_astock_data::AStockClient> = app_handle.state::<crate::AppState>().astock_client.clone();
+    let sc = stock_code.to_string();
+    let sn = stock_name.to_string();
+    let d = date.to_string();
+    let aid = analysis_id.clone();
+    let _cid = conversation_id.clone();
+
+    tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel::<AnalysisEvent>(64);
+        let mut event_rx = event_tx.subscribe();
+        let app_for_events = app.clone();
+        tokio::spawn(async move {
+            while let Ok(event) = event_rx.recv().await {
+                let _ = app_for_events.emit("stock-analysis-event", &event);
+            }
+        });
+        let blackboard = Arc::new(RwLock::new(SharedBlackboard::new(&aid, format!("分析 {sc} ({sn})"))));
+        let config = AnalysisConfig::default();
+        let result = StockAnalysisOrchestrator::run(
+            &data_client, blackboard.clone(), sc, sn, d, config, event_tx, runner, prompts, Some(cancel_token),
+        ).await;
+        // Update DB
+        let now = chrono::Utc::now().timestamp_millis();
+        match result {
+            Ok(decision) => {
+                let json = serde_json::to_string(&decision).unwrap_or_default();
+                let snapshot = axagent_stock_analysis::pipeline::export_blackboard_snapshot(&blackboard).await;
+                let _ = stock_analyses::Entity::update_many()
+                    .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
+                    .col_expr(stock_analyses::Column::DecisionAction, Expr::value(&decision.action))
+                    .col_expr(stock_analyses::Column::DecisionPositionPct, Expr::value(decision.position_pct))
+                    .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(&decision.reasoning))
+                    .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&json))
+                    .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(&snapshot))
+                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
+                    .filter(stock_analyses::Column::Id.eq(&aid)).exec(&db_clone).await;
+            }
+            Err(e) => {
+                let _ = stock_analyses::Entity::update_many()
+                    .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {e}")))
+                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
+                    .filter(stock_analyses::Column::Id.eq(&aid)).exec(&db_clone).await;
+            }
+        }
+    });
+    Ok(())
+}
+
 /// 取消分析 — 设置取消令牌让后台任务停止
 #[tauri::command]
 pub async fn cancel_stock_analysis(
@@ -453,8 +551,10 @@ async fn build_cancel_aware_runner(
         .iter()
         .find(|k| k.enabled)
         .ok_or_else(|| "没有启用的 API key".to_string())?;
-    let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, master_key)
-        .map_err(|e| format!("密钥解密失败: {}", e))?;
+    let api_key = Zeroizing::new(
+        axagent_core::crypto::decrypt_key(&key.key_encrypted, master_key)
+            .map_err(|e| format!("密钥解密失败: {}", e))?,
+    );
     let settings = axagent_core::repo::settings::get_settings(db)
         .await
         .unwrap_or_default();
@@ -463,7 +563,9 @@ async fn build_cancel_aware_runner(
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
     let ctx = ProviderRequestContext {
-        api_key,
+        // 密钥移入上游 ProviderRequestContext（String 类型，受限于上游 API 无法 zeroize）
+        // 本地 Zeroizing 副本在离开此作用域后自动清零
+        api_key: api_key.to_string(),
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),
         base_url: Some(resolve_base_url_for_type(&prov.api_host, &prov.provider_type)),
@@ -1181,4 +1283,109 @@ pub async fn compute_value_metrics(
 #[tauri::command]
 pub async fn get_position_limits() -> Result<PositionLimits, String> {
     Ok(PositionLimits::default())
+}
+
+// ── 新增数据源命令 ──
+
+#[tauri::command]
+pub async fn get_stock_research_reports(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Vec<axagent_astock_data::ResearchReport>, String> {
+    state
+        .astock_client
+        .get_research_reports(&stock_code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_stock_consensus_eps(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Option<axagent_astock_data::ConsensusEPS>, String> {
+    state
+        .astock_client
+        .get_consensus_eps(&stock_code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_stock_concept_blocks(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Option<axagent_astock_data::ConceptBlocks>, String> {
+    state
+        .astock_client
+        .get_concept_blocks(&stock_code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_stock_announcements(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Vec<axagent_astock_data::Announcement>, String> {
+    state
+        .astock_client
+        .get_announcements(&stock_code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_hot_stocks(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_astock_data::HotStock>, String> {
+    state
+        .astock_client
+        .get_hot_stocks()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_industry_ranking(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_astock_data::IndustryRank>, String> {
+    state
+        .astock_client
+        .get_industry_ranking()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_cls_flash(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_astock_data::ClsFlashItem>, String> {
+    state
+        .astock_client
+        .get_cls_flash()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_market_dragon_tiger(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_astock_data::MarketDragonTiger>, String> {
+    state
+        .astock_client
+        .get_market_dragon_tiger()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_north_bound_flow(
+    state: State<'_, AppState>,
+) -> Result<Option<axagent_astock_data::NorthBoundFlow>, String> {
+    state
+        .astock_client
+        .get_north_bound_flow()
+        .await
+        .map_err(|e| e.to_string())
 }

@@ -7,6 +7,8 @@ pub struct StockQuote {
     pub code: String,
     pub name: String,
     pub price: f64,
+    /// 昨收价
+    pub pre_close: f64,
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -251,6 +253,126 @@ pub struct StockSearchResult {
     pub market: String,
 }
 
+/// 研报
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchReport {
+    pub title: String,
+    pub institution: String,
+    pub analyst: Option<String>,
+    pub rating: Option<String>,
+    pub target_price: Option<f64>,
+    pub eps_forecast: Vec<EpsForecast>,
+    pub publish_date: String,
+    pub pdf_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpsForecast {
+    pub year: String,
+    pub eps: Option<f64>,
+}
+
+/// 机构一致预期EPS
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsensusEPS {
+    pub stock_code: String,
+    pub consensus_eps: Option<f64>,
+    pub consensus_target_price: Option<f64>,
+    pub rating_avg: Option<String>,
+    pub rating_count: Option<i32>,
+    pub year: String,
+}
+
+/// 同花顺强势股
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotStock {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub change_pct: f64,
+    pub turnover_rate: Option<f64>,
+    pub reason_tags: Vec<String>,
+    pub sector: Option<String>,
+}
+
+/// 概念板块三维归属
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConceptBlocks {
+    pub stock_code: String,
+    pub industry: String,
+    pub concepts: Vec<BlockItem>,
+    pub regions: Vec<BlockItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockItem {
+    pub name: String,
+    pub change_pct: Option<f64>,
+}
+
+/// 公告
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Announcement {
+    pub title: String,
+    pub stock_code: String,
+    pub stock_name: Option<String>,
+    pub announce_date: String,
+    pub ann_type: Option<String>,
+    pub pdf_url: Option<String>,
+}
+
+/// 行业排名
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndustryRank {
+    pub industry_name: String,
+    pub change_pct: f64,
+    pub turnover: Option<f64>,
+    pub leader_code: Option<String>,
+    pub leader_name: Option<String>,
+    pub leader_change_pct: Option<f64>,
+}
+
+/// 财联社快讯
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClsFlashItem {
+    pub title: String,
+    pub content: String,
+    pub publish_time: String,
+    pub source: Option<String>,
+}
+
+/// 全市场龙虎榜
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketDragonTiger {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub date: String,
+    pub net_buy: f64,
+    pub buy_amount: f64,
+    pub sell_amount: f64,
+    pub reason: Option<String>,
+}
+
+/// 北向资金分钟级流向
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NorthBoundFlow {
+    pub date: String,
+    pub sh_flow: f64,
+    pub sz_flow: f64,
+    pub total_flow: f64,
+    pub timestamp: Option<String>,
+}
+
 /// 批量原始数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -267,4 +389,135 @@ pub struct StockRawData {
     pub sector_info: Option<SectorInfo>,
     pub shareholder_trades: Vec<ShareholderTrade>,
     pub dividend_records: Vec<DividendRecord>,
+    pub research_reports: Vec<ResearchReport>,
+    pub consensus_eps: Option<ConsensusEPS>,
+    pub concept_blocks: Option<ConceptBlocks>,
+    pub announcements: Vec<Announcement>,
+}
+
+/// 市场级原始数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketRawData {
+    pub hot_stocks: Vec<HotStock>,
+    pub industry_ranking: Vec<IndustryRank>,
+    pub cls_flash: Vec<ClsFlashItem>,
+    pub market_dragon_tiger: Vec<MarketDragonTiger>,
+    pub north_bound_flow: Option<NorthBoundFlow>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_market_sh_main() {
+        assert_eq!(detect_market_type("600519"), "main_sh");
+    }
+
+    #[test]
+    fn test_detect_market_star() {
+        assert_eq!(detect_market_type("688001"), "star");
+    }
+
+    #[test]
+    fn test_detect_market_sz_main() {
+        assert_eq!(detect_market_type("000001"), "main_sz");
+    }
+
+    #[test]
+    fn test_detect_market_chinext() {
+        assert_eq!(detect_market_type("300750"), "chinext");
+    }
+
+    #[test]
+    fn test_detect_market_bj() {
+        assert_eq!(detect_market_type("830946"), "bj");
+    }
+
+    #[test]
+    fn test_price_limit_main() {
+        assert!((get_price_limit_pct("main_sh") - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_price_limit_star() {
+        assert!((get_price_limit_pct("star") - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_price_limit_bj() {
+        assert!((get_price_limit_pct("bj") - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_st_price_limit() {
+        assert!((get_st_price_limit_pct(true, "main_sh") - 5.0).abs() < 1e-6);
+        assert!((get_st_price_limit_pct(false, "main_sh") - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_kline_period_to_em_code() {
+        assert_eq!(KLinePeriod::Daily.to_em_code(), "101");
+        assert_eq!(KLinePeriod::Weekly.to_em_code(), "102");
+        assert_eq!(KLinePeriod::Min5.to_em_code(), "5");
+    }
+
+    #[test]
+    fn test_stock_quote_serialization() {
+        let quote = StockQuote {
+            code: "600519".to_string(),
+            name: "茅台".to_string(),
+            price: 1800.0,
+            pre_close: 1785.0,
+            open: 1790.0,
+            high: 1810.0,
+            low: 1785.0,
+            volume: 5000000.0,
+            amount: 9000000000.0,
+            change_pct: 0.56,
+            turnover_rate: 0.3,
+            pe: Some(35.0),
+            pb: Some(12.0),
+            total_mv: Some(2250000000000.0),
+            limit_up: None,
+            limit_down: None,
+            is_st: false,
+            timestamp: "2025-01-15 14:00:00".to_string(),
+        };
+        let json = serde_json::to_string(&quote).unwrap();
+        assert!(json.contains("600519"));
+        assert!(json.contains("camelCase") || json.contains("changePct"));
+        let parsed: StockQuote = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.code, "600519");
+    }
+
+    #[test]
+    fn test_kline_serialization() {
+        let kline = KLine {
+            date: "2025-01-15".to_string(),
+            open: 10.0,
+            high: 11.0,
+            low: 9.5,
+            close: 10.5,
+            volume: 10000.0,
+            amount: 105000.0,
+            turnover_rate: Some(0.5),
+        };
+        let json = serde_json::to_string(&kline).unwrap();
+        assert!(json.contains("2025-01-15"));
+        let _parsed: KLine = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
+    fn test_stock_search_result_serialization() {
+        let result = StockSearchResult {
+            code: "600519".to_string(),
+            name: "贵州茅台".to_string(),
+            market: "上海".to_string(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("贵州茅台"));
+        let _parsed: StockSearchResult = serde_json::from_str(&json).unwrap();
+    }
 }

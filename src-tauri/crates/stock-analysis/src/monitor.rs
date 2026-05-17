@@ -4,6 +4,7 @@ use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 use axagent_astock_data::{AStockClient, StockQuote};
+use tauri::Emitter;
 
 /// 监控条件
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -48,6 +49,7 @@ pub struct RealtimeMonitor {
     configs: RwLock<HashMap<String, MonitorConfig>>,
     alert_tx: tokio::sync::broadcast::Sender<MonitorAlert>,
     running: RwLock<bool>,
+    app_handle: RwLock<Option<tauri::AppHandle>>,
 }
 
 impl RealtimeMonitor {
@@ -58,7 +60,13 @@ impl RealtimeMonitor {
             configs: RwLock::new(HashMap::new()),
             alert_tx,
             running: RwLock::new(false),
+            app_handle: RwLock::new(None),
         }
+    }
+
+    /// 设置 Tauri AppHandle 以桥接告警到前端
+    pub async fn set_app_handle(&self, handle: tauri::AppHandle) {
+        *self.app_handle.write().await = Some(handle);
     }
 
     pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<MonitorAlert> {
@@ -261,9 +269,22 @@ impl RealtimeMonitor {
             }
         }
 
-        // 发送告警
-        for alert in alerts {
-            let _ = self.alert_tx.send(alert);
+        // 发送告警 — 内部 broadcast channel + Tauri 前端事件桥接
+        let app_handle = self.app_handle.read().await.clone();
+        for alert in &alerts {
+            let _ = self.alert_tx.send(alert.clone());
+            if let Some(ref app) = app_handle {
+                let _ = app.emit("stock-monitor-alert", serde_json::json!({
+                    "stockCode": alert.stock_code,
+                    "stockName": alert.stock_name,
+                    "alertType": alert.alert_type,
+                    "alertMessage": alert.alert_message,
+                    "currentPrice": alert.current_price,
+                    "changePct": alert.change_pct,
+                    "suggestedAction": alert.suggested_action,
+                    "timestamp": alert.timestamp,
+                }));
+            }
         }
     }
 }

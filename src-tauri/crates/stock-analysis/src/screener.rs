@@ -24,6 +24,26 @@ pub struct ScreenCriteria {
     pub rsi_overbought: bool,
 }
 
+/// 回退候选股列表（沪深300核心成分股，覆盖主要行业）
+const FALLBACK_STOCKS: &[(&str, &str)] = &[
+    ("600519", "贵州茅台"), ("000858", "五粮液"), ("300750", "宁德时代"),
+    ("600036", "招商银行"), ("601318", "中国平安"), ("000333", "美的集团"),
+    ("002475", "立讯精密"), ("600276", "恒瑞医药"), ("300059", "东方财富"),
+    ("000651", "格力电器"), ("002415", "海康威视"), ("600900", "长江电力"),
+    ("601888", "中国中免"), ("300014", "亿纬锂能"), ("002594", "比亚迪"),
+    ("601012", "隆基绿能"), ("000001", "平安银行"), ("600030", "中信证券"),
+    ("000002", "万科A"), ("601166", "兴业银行"), ("601899", "紫金矿业"),
+    ("300124", "汇川技术"), ("600809", "山西汾酒"), ("002714", "牧原股份"),
+    ("000568", "泸州老窖"), ("603259", "药明康德"), ("600887", "伊利股份"),
+    ("002230", "科大讯飞"), ("300274", "阳光电源"), ("601088", "中国神华"),
+    ("600585", "海螺水泥"), ("000725", "京东方A"), ("002304", "洋河股份"),
+    ("300760", "迈瑞医疗"), ("600031", "三一重工"), ("601211", "国泰君安"),
+    ("002241", "歌尔股份"), ("300408", "三环集团"), ("603986", "兆易创新"),
+    ("600745", "闻泰科技"), ("002044", "美年健康"), ("300122", "智飞生物"),
+    ("000063", "中兴通讯"), ("002049", "紫光国微"), ("603501", "韦尔股份"),
+    ("601398", "工商银行"), ("600028", "中国石化"), ("601857", "中国石油"),
+];
+
 /// 筛选结果
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,51 +148,24 @@ impl StockScreener {
         Ok(results)
     }
 
-    /// 从全市场发现热门候选标的（基于沪深300核心成分股 + 当日数据）
+    /// 从全市场发现热门候选标的（优先使用实时热门股/行业排名数据，回退到沪深300成分股）
     pub async fn discover_candidates(client: &AStockClient) -> Result<Vec<ScreenResult>, String> {
-        // 沪深300 核心成分股（简化列表，20只覆盖主要行业）
-        let index_stocks: &[(&str, &str)] = &[
-            ("600519", "贵州茅台"),
-            ("000858", "五粮液"),
-            ("300750", "宁德时代"),
-            ("600036", "招商银行"),
-            ("601318", "中国平安"),
-            ("000333", "美的集团"),
-            ("002475", "立讯精密"),
-            ("600276", "恒瑞医药"),
-            ("300059", "东方财富"),
-            ("000651", "格力电器"),
-            ("002415", "海康威视"),
-            ("600900", "长江电力"),
-            ("601888", "中国中免"),
-            ("300014", "亿纬锂能"),
-            ("002594", "比亚迪"),
-            ("601012", "隆基绿能"),
-            ("000001", "平安银行"),
-            ("600030", "中信证券"),
-            ("000002", "万科A"),
-            ("601166", "兴业银行"),
-        ];
+        // 优先：从实时市场数据获取股票列表
+        let stock_list = Self::fetch_dynamic_candidates(client).await;
 
         let mut candidates = Vec::new();
-
-        for (code, name) in index_stocks {
+        for (code, name) in &stock_list {
             let quote = match client.get_quote(code).await {
                 Ok(q) => q,
                 Err(_) => continue,
             };
-
             let mut reasons = Vec::new();
-            let mut score = 5u32; // 基础分
-
-            // 涨跌幅 > 2% → 关注
+            let mut score = 5u32;
             if quote.change_pct.abs() > 2.0 {
                 let dir = if quote.change_pct > 0.0 { "涨" } else { "跌" };
                 reasons.push(format!("{}幅 {:.2}%", dir, quote.change_pct));
                 score += (quote.change_pct.abs() * 2.0) as u32;
             }
-
-            // 换手率 > 3% → 活跃
             if quote.turnover_rate > 3.0 {
                 reasons.push(format!("换手 {:.2}%", quote.turnover_rate));
                 score += (quote.turnover_rate / 2.0) as u32;
@@ -204,5 +197,42 @@ impl StockScreener {
 
         candidates.sort_by(|a, b| b.score.cmp(&a.score));
         Ok(candidates.into_iter().take(20).collect())
+    }
+
+    /// 从实时市场数据动态获取候选股票列表（热门股 + 行业排名），回退到沪深300
+    async fn fetch_dynamic_candidates(client: &AStockClient) -> Vec<(String, String)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut stocks = Vec::new();
+
+        // 1. 热门个股
+        if let Ok(hot) = client.get_hot_stocks().await {
+            for h in hot.iter().take(30) {
+                if seen.insert(h.stock_code.clone()) {
+                    stocks.push((h.stock_code.clone(), h.stock_name.clone()));
+                }
+            }
+        }
+
+        // 2. 行业排名靠前的龙头
+        if let Ok(industries) = client.get_industry_ranking().await {
+            for ind in industries.iter().take(10) {
+                if let (Some(ref code), Some(ref name)) = (&ind.leader_code, &ind.leader_name) {
+                    if seen.insert(code.clone()) {
+                        stocks.push((code.clone(), name.clone()));
+                    }
+                }
+            }
+        }
+
+        // 回退：沪深300 核心成分股
+        if stocks.is_empty() {
+            for (code, name) in FALLBACK_STOCKS {
+                if seen.insert(code.to_string()) {
+                    stocks.push((code.to_string(), name.to_string()));
+                }
+            }
+        }
+
+        stocks
     }
 }

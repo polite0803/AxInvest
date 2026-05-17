@@ -706,11 +706,10 @@ async fn load_stock_analysis_prompts(
 }
 
 /// 从 settings 表加载用户配置并合并到 AnalysisConfig
-async fn load_analysis_config(
-    db: &sea_orm::DatabaseConnection,
-    config: &mut AnalysisConfig,
-) {
-    if let Ok(Some(v)) = axagent_core::repo::settings::get_setting(db, "stock_analysis_config").await {
+async fn load_analysis_config(db: &sea_orm::DatabaseConnection, config: &mut AnalysisConfig) {
+    if let Ok(Some(v)) =
+        axagent_core::repo::settings::get_setting(db, "stock_analysis_config").await
+    {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&v) {
             if let Some(a) = parsed.get("analysis") {
                 if let Some(rounds) = a.get("maxDebateRounds").and_then(|v| v.as_u64()) {

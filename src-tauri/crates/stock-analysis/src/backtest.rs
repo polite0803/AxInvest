@@ -312,21 +312,44 @@ pub async fn optimize_weights(
     // 基于历史决策分布自适应调整评分权重
     let analyses = stock_analyses::Entity::find()
         .filter(stock_analyses::Column::Status.eq("completed"))
-        .all(db).await.map_err(|e| e.to_string())?;
-    if analyses.len() < 10 { return Ok(ScoringWeights::default()); }
+        .all(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    if analyses.len() < 10 {
+        return Ok(ScoringWeights::default());
+    }
     let (mut buy, mut sell, mut hold) = (0u32, 0u32, 0u32);
-    for a in &analyses { match a.decision_action.as_deref() {
-        Some("买入") | Some("增持") => buy += 1,
-        Some("卖出") | Some("减持") => sell += 1, _ => hold += 1,
-    }}
+    for a in &analyses {
+        match a.decision_action.as_deref() {
+            Some("买入") | Some("增持") => buy += 1,
+            Some("卖出") | Some("减持") => sell += 1,
+            _ => hold += 1,
+        }
+    }
     let total = (buy + sell + hold).max(1) as f64;
     let buy_r = buy as f64 / total;
     let d = ScoringWeights::default();
     let adj = if buy_r > 0.5 {
-        ScoringWeights { trend:(d.trend*0.85).max(10.0), deviation:(d.deviation*0.90).max(10.0), macd:d.macd, volume:d.volume, rsi:(d.rsi*1.15).min(20.0), support:(d.support*1.20).min(20.0) }
+        ScoringWeights {
+            trend: (d.trend * 0.85).max(10.0),
+            deviation: (d.deviation * 0.90).max(10.0),
+            macd: d.macd,
+            volume: d.volume,
+            rsi: (d.rsi * 1.15).min(20.0),
+            support: (d.support * 1.20).min(20.0),
+        }
     } else if buy_r < 0.3 {
-        ScoringWeights { trend:(d.trend*1.10).min(40.0), deviation:(d.deviation*1.05).min(30.0), macd:d.macd, volume:d.volume, rsi:(d.rsi*0.90).max(5.0), support:(d.support*0.85).max(5.0) }
-    } else { d };
+        ScoringWeights {
+            trend: (d.trend * 1.10).min(40.0),
+            deviation: (d.deviation * 1.05).min(30.0),
+            macd: d.macd,
+            volume: d.volume,
+            rsi: (d.rsi * 0.90).max(5.0),
+            support: (d.support * 0.85).max(5.0),
+        }
+    } else {
+        d
+    };
     tracing::info!("optimize_weights: {buy}B/{sell}S/{hold}H trend={:.1}", adj.trend);
     Ok(adj)
 }

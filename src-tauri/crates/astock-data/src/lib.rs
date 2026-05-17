@@ -234,11 +234,16 @@ impl AStockClient {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_financials(stock_code).await {
                     Ok(result) => return Ok(result),
-                    Err(e) => { tracing::warn!("[降级] {} 财务数据失败: {}", name, e); last_err = Some(e); }
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 财务数据失败: {}", name, e);
+                        last_err = Some(e);
+                    },
                 }
             }
         }
-        if let Some(e) = last_err { tracing::warn!("所有财务数据源均失败 (last: {e})"); }
+        if let Some(e) = last_err {
+            tracing::warn!("所有财务数据源均失败 (last: {e})");
+        }
         Ok(vec![])
     }
 
@@ -248,11 +253,16 @@ impl AStockClient {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_news(stock_code, limit).await {
                     Ok(result) => return Ok(result),
-                    Err(e) => { tracing::warn!("[降级] {} 新闻失败: {}", name, e); last_err = Some(e); }
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 新闻失败: {}", name, e);
+                        last_err = Some(e);
+                    },
                 }
             }
         }
-        if let Some(e) = last_err { tracing::warn!("所有新闻源均失败 (last: {e})"); }
+        if let Some(e) = last_err {
+            tracing::warn!("所有新闻源均失败 (last: {e})");
+        }
         Ok(vec![])
     }
 

@@ -274,16 +274,19 @@ impl RealtimeMonitor {
         for alert in &alerts {
             let _ = self.alert_tx.send(alert.clone());
             if let Some(ref app) = app_handle {
-                let _ = app.emit("stock-monitor-alert", serde_json::json!({
-                    "stockCode": alert.stock_code,
-                    "stockName": alert.stock_name,
-                    "alertType": alert.alert_type,
-                    "alertMessage": alert.alert_message,
-                    "currentPrice": alert.current_price,
-                    "changePct": alert.change_pct,
-                    "suggestedAction": alert.suggested_action,
-                    "timestamp": alert.timestamp,
-                }));
+                let _ = app.emit(
+                    "stock-monitor-alert",
+                    serde_json::json!({
+                        "stockCode": alert.stock_code,
+                        "stockName": alert.stock_name,
+                        "alertType": alert.alert_type,
+                        "alertMessage": alert.alert_message,
+                        "currentPrice": alert.current_price,
+                        "changePct": alert.change_pct,
+                        "suggestedAction": alert.suggested_action,
+                        "timestamp": alert.timestamp,
+                    }),
+                );
             }
         }
     }

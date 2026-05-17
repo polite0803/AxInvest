@@ -39,10 +39,7 @@ impl IwencaiVendor {
             .post("https://openapi.iwencai.com/v1/comprehensive/search")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            )
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .json(&body)
             .send()
             .await?;
@@ -50,9 +47,7 @@ impl IwencaiVendor {
         let json: Value = resp.json().await?;
 
         if json["status_code"].as_i64() != Some(0) {
-            let msg = json["status_msg"]
-                .as_str()
-                .unwrap_or("unknown error");
+            let msg = json["status_msg"].as_str().unwrap_or("unknown error");
             return Err(DataError::VendorError {
                 vendor: "iwencai".into(),
                 message: msg.to_string(),
@@ -73,9 +68,7 @@ impl IwencaiVendor {
                 if let Some(components) = item["txt"]["components"].as_array() {
                     for comp in components {
                         if comp["type"].as_str() == Some("table") {
-                            if let Some(code_list) =
-                                comp["data"]["code_list"].as_array()
-                            {
+                            if let Some(code_list) = comp["data"]["code_list"].as_array() {
                                 return code_list.clone();
                             }
                         }
@@ -129,14 +122,8 @@ impl StockVendor for IwencaiVendor {
         Ok(code_list
             .iter()
             .filter_map(|item| {
-                let code = item
-                    .get("code")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let code = item.get("code").and_then(|v| v.as_str()).unwrap_or("");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let market = item
                     .get("market_code")
                     .and_then(|v| v.as_str())
@@ -165,10 +152,7 @@ impl StockVendor for IwencaiVendor {
             .collect())
     }
 
-    async fn get_consensus_eps(
-        &self,
-        stock_code: &str,
-    ) -> Result<Option<ConsensusEPS>, DataError> {
+    async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
         let question = format!("{stock_code} 一致预期EPS 机构预测");
         let json = self.query(&question, 10, 1).await?;
         let code_list = self.extract_code_list(&json);

@@ -92,10 +92,9 @@ impl TdxConnection {
             0x0c, 0x02, 0x18, 0x94, 0x00, 0x01, 0x03, 0x00, 0x03, 0x00, 0x0d, 0x00, 0x02,
         ];
         let setup3: Vec<u8> = vec![
-            0x0c, 0x03, 0x18, 0x99, 0x00, 0x01, 0x20, 0x00, 0x20, 0x00, 0xdb, 0x0f, 0xd5,
-            0xd0, 0xc9, 0xcc, 0xd6, 0xa4, 0xa8, 0xaf, 0x00, 0x00, 0x00, 0x8f, 0xc2, 0x25,
-            0x40, 0x13, 0x00, 0x00, 0xd5, 0x00, 0xc9, 0xcc, 0xbd, 0xf0, 0xd7, 0xea, 0x00,
-            0x00, 0x00, 0x02,
+            0x0c, 0x03, 0x18, 0x99, 0x00, 0x01, 0x20, 0x00, 0x20, 0x00, 0xdb, 0x0f, 0xd5, 0xd0,
+            0xc9, 0xcc, 0xd6, 0xa4, 0xa8, 0xaf, 0x00, 0x00, 0x00, 0x8f, 0xc2, 0x25, 0x40, 0x13,
+            0x00, 0x00, 0xd5, 0x00, 0xc9, 0xcc, 0xbd, 0xf0, 0xd7, 0xea, 0x00, 0x00, 0x00, 0x02,
         ];
 
         self.stream.write_all(&setup1).await?;
@@ -224,12 +223,8 @@ impl TdxConnection {
             if pos + 4 > body.len() {
                 break;
             }
-            let amount_raw = u32::from_le_bytes([
-                body[pos],
-                body[pos + 1],
-                body[pos + 2],
-                body[pos + 3],
-            ]);
+            let amount_raw =
+                u32::from_le_bytes([body[pos], body[pos + 1], body[pos + 2], body[pos + 3]]);
             let amount = get_volume(amount_raw);
             pos += 4;
 
@@ -329,11 +324,7 @@ impl TdxConnection {
         self.parse_bars(category, &body)
     }
 
-    fn parse_bars(
-        &self,
-        category: u16,
-        body: &[u8],
-    ) -> Result<Vec<KLineResult>, DataError> {
+    fn parse_bars(&self, category: u16, body: &[u8]) -> Result<Vec<KLineResult>, DataError> {
         if body.len() < 2 {
             return Ok(vec![]);
         }
@@ -367,21 +358,13 @@ impl TdxConnection {
                 break;
             }
 
-            let vol_raw = u32::from_le_bytes([
-                body[pos],
-                body[pos + 1],
-                body[pos + 2],
-                body[pos + 3],
-            ]);
+            let vol_raw =
+                u32::from_le_bytes([body[pos], body[pos + 1], body[pos + 2], body[pos + 3]]);
             let vol = get_volume(vol_raw);
             pos += 4;
 
-            let amount_raw = u32::from_le_bytes([
-                body[pos],
-                body[pos + 1],
-                body[pos + 2],
-                body[pos + 3],
-            ]);
+            let amount_raw =
+                u32::from_le_bytes([body[pos], body[pos + 1], body[pos + 2], body[pos + 3]]);
             let amount = get_volume(amount_raw);
             pos += 4;
 

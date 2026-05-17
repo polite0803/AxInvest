@@ -385,10 +385,7 @@ pub async fn execute_mcp_tool(
             serde_json::to_string(&dt).map_err(|e| e.to_string())
         },
         "get_hot_stocks" => {
-            let hot = client
-                .get_hot_stocks()
-                .await
-                .map_err(|e| e.to_string())?;
+            let hot = client.get_hot_stocks().await.map_err(|e| e.to_string())?;
             serde_json::to_string(&hot).map_err(|e| e.to_string())
         },
         "get_industry_ranking" => {

@@ -9,7 +9,9 @@ pub struct ThsVendor {
 }
 
 fn val_to_f64(v: &Value) -> Option<f64> {
-    v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_f64())
+    v.as_str()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| v.as_f64())
 }
 
 #[async_trait]
@@ -49,14 +51,8 @@ impl StockVendor for ThsVendor {
         Ok(vec![])
     }
 
-    async fn get_consensus_eps(
-        &self,
-        stock_code: &str,
-    ) -> Result<Option<ConsensusEPS>, DataError> {
-        let url = format!(
-            "https://basic.10jqka.com.cn/{}/worth/",
-            stock_code
-        );
+    async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
+        let url = format!("https://basic.10jqka.com.cn/{}/worth/", stock_code);
         let resp = self
             .http
             .get(&url)
@@ -81,13 +77,17 @@ impl StockVendor for ThsVendor {
         };
 
         let latest = &items[0];
-        let year = latest.get("year")
+        let year = latest
+            .get("year")
             .and_then(|v| v.as_str().or_else(|| v.as_i64().map(|_| "")))
             .unwrap_or("")
             .to_string();
         let consensus_eps = latest.get("avg").and_then(val_to_f64);
-        let rating_count = latest.get("num")
-            .and_then(|v| v.as_str().and_then(|s| s.parse::<i32>().ok()).or_else(|| v.as_i64().map(|i| i as i32)));
+        let rating_count = latest.get("num").and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<i32>().ok())
+                .or_else(|| v.as_i64().map(|i| i as i32))
+        });
 
         if consensus_eps.is_none() && rating_count.is_none() {
             return Ok(None);
@@ -107,10 +107,7 @@ impl StockVendor for ThsVendor {
         &self,
         stock_code: &str,
     ) -> Result<Option<ConceptBlocks>, DataError> {
-        let url = format!(
-            "https://basic.10jqka.com.cn/{}/concept.shtml",
-            stock_code
-        );
+        let url = format!("https://basic.10jqka.com.cn/{}/concept.shtml", stock_code);
         let resp = self
             .http
             .get(&url)
@@ -130,11 +127,16 @@ impl StockVendor for ThsVendor {
             .unwrap_or_default();
 
         let concepts = match blocks {
-            Some(arr) if arr.is_array() => arr.as_array().unwrap().iter()
-                .filter_map(|item| Some(BlockItem {
-                    name: item.get("name")?.as_str()?.to_string(),
-                    change_pct: item.get("change").and_then(val_to_f64),
-                }))
+            Some(arr) if arr.is_array() => arr
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|item| {
+                    Some(BlockItem {
+                        name: item.get("name")?.as_str()?.to_string(),
+                        change_pct: item.get("change").and_then(val_to_f64),
+                    })
+                })
                 .collect(),
             _ => vec![],
         };
@@ -181,14 +183,20 @@ impl StockVendor for ThsVendor {
                 let code = item.get("code")?.as_str()?.to_string();
                 let name = item.get("name")?.as_str()?.to_string();
                 let change_pct = item.get("change_pct").and_then(val_to_f64).unwrap_or(0.0);
-                let turnover_rate = item.get("turnover_ratio")
+                let turnover_rate = item
+                    .get("turnover_ratio")
                     .or_else(|| item.get("hs"))
                     .and_then(val_to_f64);
-                let reason_tags = item.get("reason_type")
+                let reason_tags = item
+                    .get("reason_type")
                     .or_else(|| item.get("reason"))
-                    .and_then(|v| v.as_str().map(|s| s.split(',').map(|t| t.trim().to_string()).collect()))
+                    .and_then(|v| {
+                        v.as_str()
+                            .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    })
                     .unwrap_or_default();
-                let sector = item.get("industry")
+                let sector = item
+                    .get("industry")
                     .or_else(|| item.get("belong"))
                     .and_then(|v| v.as_str().map(|s| s.to_string()));
 
@@ -231,18 +239,22 @@ impl StockVendor for ThsVendor {
         Ok(ranks
             .iter()
             .filter_map(|item| {
-                let industry_name = item.get("industry_name")
+                let industry_name = item
+                    .get("industry_name")
                     .or_else(|| item.get("name"))
                     .and_then(|v| v.as_str())?
                     .to_string();
                 let change_pct = item.get("change_pct").and_then(val_to_f64).unwrap_or(0.0);
-                let turnover = item.get("turnover")
+                let turnover = item
+                    .get("turnover")
                     .or_else(|| item.get("amount"))
                     .and_then(val_to_f64);
-                let leader_code = item.get("leader_code")
+                let leader_code = item
+                    .get("leader_code")
                     .or_else(|| item.get("code"))
                     .and_then(|v| v.as_str().map(|s| s.to_string()));
-                let leader_name = item.get("leader_name")
+                let leader_name = item
+                    .get("leader_name")
                     .and_then(|v| v.as_str().map(|s| s.to_string()));
                 let leader_change_pct = item.get("leader_change_pct").and_then(val_to_f64);
 
@@ -274,22 +286,30 @@ impl StockVendor for ThsVendor {
             return Ok(None);
         }
 
-        let sh_flow = data.get("sh_flow")
+        let sh_flow = data
+            .get("sh_flow")
             .or_else(|| data.get("hgt"))
             .and_then(val_to_f64)
             .unwrap_or(0.0);
-        let sz_flow = data.get("sz_flow")
+        let sz_flow = data
+            .get("sz_flow")
             .or_else(|| data.get("sgt"))
             .and_then(val_to_f64)
             .unwrap_or(0.0);
 
         Ok(Some(NorthBoundFlow {
-            date: data.get("date").or_else(|| data.get("tradedate"))
-                .and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            date: data
+                .get("date")
+                .or_else(|| data.get("tradedate"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             sh_flow,
             sz_flow,
             total_flow: sh_flow + sz_flow,
-            timestamp: data.get("time").and_then(|v| v.as_str().map(|s| s.to_string())),
+            timestamp: data
+                .get("time")
+                .and_then(|v| v.as_str().map(|s| s.to_string())),
         }))
     }
 }

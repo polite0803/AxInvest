@@ -41,10 +41,7 @@ impl StockVendor for AkshareVendor {
             .http
             .get(&url)
             .header("Referer", "https://emweb.securities.eastmoney.com/")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            )
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send()
             .await?;
 
@@ -59,30 +56,19 @@ impl StockVendor for AkshareVendor {
             .take(8)
             .map(|r| FinancialReport {
                 stock_code: stock_code.to_string(),
-                report_date: r["REPORT_DATE"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                report_date: r["REPORT_DATE"].as_str().unwrap_or("").to_string(),
                 revenue: r["TOTAL_OPERATE_INCOME"]
                     .as_str()
                     .and_then(|s| s.parse().ok()),
-                net_profit: r["PARENT_NETPROFIT"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
+                net_profit: r["PARENT_NETPROFIT"].as_str().and_then(|s| s.parse().ok()),
                 eps: r["BASIC_EPS"].as_str().and_then(|s| s.parse().ok()),
                 bps: r["BPS"].as_str().and_then(|s| s.parse().ok()),
-                roe: r["WEIGHTAVG_ROE"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
-                debt_ratio: r["DEBT_ASSET_RATIO"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
+                roe: r["WEIGHTAVG_ROE"].as_str().and_then(|s| s.parse().ok()),
+                debt_ratio: r["DEBT_ASSET_RATIO"].as_str().and_then(|s| s.parse().ok()),
                 gross_margin: r["GROSS_PROFIT_RATIO"]
                     .as_str()
                     .and_then(|s| s.parse().ok()),
-                net_margin: r["NETPROFIT_MARGIN"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
+                net_margin: r["NETPROFIT_MARGIN"].as_str().and_then(|s| s.parse().ok()),
                 revenue_yoy: r["TOTAL_OPERATE_INCOME_YOY"]
                     .as_str()
                     .and_then(|s| s.parse().ok()),
@@ -122,10 +108,7 @@ impl StockVendor for AkshareVendor {
             .http
             .get(&url)
             .header("Referer", "https://so.eastmoney.com/")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            )
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send()
             .await?;
 
@@ -140,9 +123,8 @@ impl StockVendor for AkshareVendor {
             .trim_end_matches(')')
             .trim_end_matches(';');
 
-        let json: Value = serde_json::from_str(json_str).map_err(|e| {
-            DataError::ParseError(format!("jsonp parse failed: {e}"))
-        })?;
+        let json: Value = serde_json::from_str(json_str)
+            .map_err(|e| DataError::ParseError(format!("jsonp parse failed: {e}")))?;
 
         let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {
             Some(arr) => arr,
@@ -208,16 +190,14 @@ impl StockVendor for AkshareVendor {
     }
 
     async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
-        let url = "https://www.cls.cn/nodeapi/updateTelegraphList?app=CailianpressWeb&os=web&sv=7.7.5";
+        let url =
+            "https://www.cls.cn/nodeapi/updateTelegraphList?app=CailianpressWeb&os=web&sv=7.7.5";
 
         let resp = self
             .http
             .get(url)
             .header("Referer", "https://www.cls.cn/")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            )
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .send()
             .await?;
 
@@ -271,21 +251,12 @@ impl StockVendor for AkshareVendor {
             .collect())
     }
 
-    async fn get_consensus_eps(
-        &self,
-        stock_code: &str,
-    ) -> Result<Option<ConsensusEPS>, DataError> {
-        let url = format!(
-            "https://basic.10jqka.com.cn/{}/worth/",
-            stock_code
-        );
+    async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
+        let url = format!("https://basic.10jqka.com.cn/{}/worth/", stock_code);
         let resp = self
             .http
             .get(&url)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            )
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .header("Referer", "https://basic.10jqka.com.cn/")
             .send()
             .await?;
@@ -312,13 +283,11 @@ impl StockVendor for AkshareVendor {
             .unwrap_or("")
             .to_string();
         let consensus_eps = latest.get("avg").and_then(val_to_f64);
-        let rating_count = latest
-            .get("num")
-            .and_then(|v| {
-                v.as_str()
-                    .and_then(|s| s.parse::<i32>().ok())
-                    .or_else(|| v.as_i64().map(|i| i as i32))
-            });
+        let rating_count = latest.get("num").and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<i32>().ok())
+                .or_else(|| v.as_i64().map(|i| i as i32))
+        });
 
         if consensus_eps.is_none() && rating_count.is_none() {
             return Ok(None);

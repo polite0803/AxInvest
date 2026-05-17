@@ -270,12 +270,18 @@ pub async fn run_scheduled_analysis(
         provider_id: Set(provider_id.to_string()),
         conversation_id: Set(conversation_id.clone()),
         status: Set("running".to_string()),
-        decision_action: Set(None), decision_position_pct: Set(None),
-        decision_reasoning: Set(None), decision_json: Set(None),
+        decision_action: Set(None),
+        decision_position_pct: Set(None),
+        decision_reasoning: Set(None),
+        decision_json: Set(None),
         blackboard_snapshot: Set(None),
-        created_at: Set(now), updated_at: Set(now),
+        created_at: Set(now),
+        updated_at: Set(now),
     };
-    model.insert(&db).await.map_err(|e| format!("写入分析记录失败: {e}"))?;
+    model
+        .insert(&db)
+        .await
+        .map_err(|e| format!("写入分析记录失败: {e}"))?;
 
     let cancel_token = Arc::new(AtomicBool::new(false));
 
@@ -283,10 +289,18 @@ pub async fn run_scheduled_analysis(
     let master_key = app_handle.state::<crate::AppState>().master_key;
 
     let runner: Option<Arc<dyn AgentRunner>> = match build_cancel_aware_runner(
-        &db, &master_key, provider_id, cancel_token.clone(),
-    ).await {
+        &db,
+        &master_key,
+        provider_id,
+        cancel_token.clone(),
+    )
+    .await
+    {
         Ok(r) => Some(Arc::new(r)),
-        Err(e) => { tracing::warn!("[stock_analysis] runner 构建失败: {e}"); None }
+        Err(e) => {
+            tracing::warn!("[stock_analysis] runner 构建失败: {e}");
+            None
+        },
     };
     let prompts = load_stock_analysis_prompts(&db).await;
     {
@@ -297,7 +311,8 @@ pub async fn run_scheduled_analysis(
 
     let app = app_handle.clone();
     let db_clone = db.clone();
-    let data_client: Arc<axagent_astock_data::AStockClient> = app_handle.state::<crate::AppState>().astock_client.clone();
+    let data_client: Arc<axagent_astock_data::AStockClient> =
+        app_handle.state::<crate::AppState>().astock_client.clone();
     let sc = stock_code.to_string();
     let sn = stock_name.to_string();
     let d = date.to_string();
@@ -313,33 +328,55 @@ pub async fn run_scheduled_analysis(
                 let _ = app_for_events.emit("stock-analysis-event", &event);
             }
         });
-        let blackboard = Arc::new(RwLock::new(SharedBlackboard::new(&aid, format!("分析 {sc} ({sn})"))));
+        let blackboard =
+            Arc::new(RwLock::new(SharedBlackboard::new(&aid, format!("分析 {sc} ({sn})"))));
         let config = AnalysisConfig::default();
         let result = StockAnalysisOrchestrator::run(
-            &data_client, blackboard.clone(), sc, sn, d, config, event_tx, runner, prompts, Some(cancel_token),
-        ).await;
+            &data_client,
+            blackboard.clone(),
+            sc,
+            sn,
+            d,
+            config,
+            event_tx,
+            runner,
+            prompts,
+            Some(cancel_token),
+        )
+        .await;
         // Update DB
         let now = chrono::Utc::now().timestamp_millis();
         match result {
             Ok(decision) => {
                 let json = serde_json::to_string(&decision).unwrap_or_default();
-                let snapshot = axagent_stock_analysis::pipeline::export_blackboard_snapshot(&blackboard).await;
+                let snapshot =
+                    axagent_stock_analysis::pipeline::export_blackboard_snapshot(&blackboard).await;
                 let _ = stock_analyses::Entity::update_many()
                     .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                     .col_expr(stock_analyses::Column::DecisionAction, Expr::value(&decision.action))
-                    .col_expr(stock_analyses::Column::DecisionPositionPct, Expr::value(decision.position_pct))
-                    .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(&decision.reasoning))
+                    .col_expr(
+                        stock_analyses::Column::DecisionPositionPct,
+                        Expr::value(decision.position_pct),
+                    )
+                    .col_expr(
+                        stock_analyses::Column::DecisionReasoning,
+                        Expr::value(&decision.reasoning),
+                    )
                     .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&json))
                     .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(&snapshot))
                     .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
-                    .filter(stock_analyses::Column::Id.eq(&aid)).exec(&db_clone).await;
-            }
+                    .filter(stock_analyses::Column::Id.eq(&aid))
+                    .exec(&db_clone)
+                    .await;
+            },
             Err(e) => {
                 let _ = stock_analyses::Entity::update_many()
                     .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {e}")))
                     .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
-                    .filter(stock_analyses::Column::Id.eq(&aid)).exec(&db_clone).await;
-            }
+                    .filter(stock_analyses::Column::Id.eq(&aid))
+                    .exec(&db_clone)
+                    .await;
+            },
         }
     });
     Ok(())

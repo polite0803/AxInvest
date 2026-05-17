@@ -17,8 +17,8 @@ use vendors::eastmoney::EastMoneyVendor;
 use vendors::iwencai::IwencaiVendor;
 use vendors::mootdx::MootdxVendor;
 use vendors::sina::SinaVendor;
-use vendors::ths::ThsVendor;
 use vendors::tencent::TencentVendor;
+use vendors::ths::ThsVendor;
 use vendors::StockVendor;
 
 type VendorRef = (String, Box<dyn StockVendor>);
@@ -61,7 +61,12 @@ impl VendorRouting {
             search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],
             margin: vec!["eastmoney".into(), "baidu_stock".into()],
             north_bound: vec!["eastmoney".into(), "baidu_stock".into()],
-            sector: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into(), "iwencai".into()],
+            sector: vec![
+                "eastmoney".into(),
+                "ths".into(),
+                "baidu_stock".into(),
+                "iwencai".into(),
+            ],
             shareholder_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             dividend: vec!["eastmoney".into(), "baidu_stock".into()],
             research_reports: vec!["eastmoney".into(), "baidu_stock".into()],
@@ -104,7 +109,13 @@ impl AStockClient {
         client.register_vendor("ths", Box::new(ThsVendor { http: http.clone() }));
         client.register_vendor("cninfo", Box::new(CninfoVendor { http: http.clone() }));
         client.register_vendor("baidu_stock", Box::new(BaiduStockVendor { http: http.clone() }));
-        client.register_vendor("iwencai", Box::new(IwencaiVendor { http: http.clone(), api_key: String::new() }));
+        client.register_vendor(
+            "iwencai",
+            Box::new(IwencaiVendor {
+                http: http.clone(),
+                api_key: String::new(),
+            }),
+        );
         client.register_vendor("akshare", Box::new(AkshareVendor { http: http.clone() }));
         client.register_vendor("mootdx", Box::new(MootdxVendor::new()));
 

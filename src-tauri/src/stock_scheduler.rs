@@ -104,11 +104,21 @@ impl StockScheduler {
                     let app = self.app_handle.clone();
 
                     tokio::spawn(async move {
-                        tracing::info!("StockScheduler: 开始执行分析 {} ({})", stock_code, stock_name);
+                        tracing::info!(
+                            "StockScheduler: 开始执行分析 {} ({})",
+                            stock_code,
+                            stock_name
+                        );
                         let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
                         if let Err(e) = crate::commands::stock_analysis::run_scheduled_analysis(
-                            &app, &stock_code, &stock_name, &date, &provider_id,
-                        ).await {
+                            &app,
+                            &stock_code,
+                            &stock_name,
+                            &date,
+                            &provider_id,
+                        )
+                        .await
+                        {
                             tracing::error!("StockScheduler: 分析失败 {}: {}", stock_code, e);
                         }
                     });
@@ -212,20 +222,21 @@ impl StockScheduler {
 fn matches_day(date: chrono::NaiveDate, dom: &str, dow: &str) -> bool {
     let day = date.format("%d").to_string();
     let dom_ok = dom == "*" || dom.split(',').any(|p| p == day);
-    let dow_ok = dow == "*" || dow.split(',').any(|p| {
-        // chrono: Mon=1..Sun=7
-        let chrono_dow = date.format("%u").to_string().parse::<u32>().unwrap_or(0);
-        if p.contains('-') {
-            let parts: Vec<&str> = p.split('-').collect();
-            let start: u32 = parts[0].parse().unwrap_or(0);
-            let end: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-            chrono_dow >= start && chrono_dow <= end
-        } else {
-            let target: u32 = p.parse().unwrap_or(99);
-            let target = if target == 0 { 7 } else { target };
-            target == chrono_dow
-        }
-    });
+    let dow_ok = dow == "*"
+        || dow.split(',').any(|p| {
+            // chrono: Mon=1..Sun=7
+            let chrono_dow = date.format("%u").to_string().parse::<u32>().unwrap_or(0);
+            if p.contains('-') {
+                let parts: Vec<&str> = p.split('-').collect();
+                let start: u32 = parts[0].parse().unwrap_or(0);
+                let end: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                chrono_dow >= start && chrono_dow <= end
+            } else {
+                let target: u32 = p.parse().unwrap_or(99);
+                let target = if target == 0 { 7 } else { target };
+                target == chrono_dow
+            }
+        });
     dom_ok && dow_ok
 }
 
@@ -245,8 +256,10 @@ fn compute_next_run(cron_expr: &str) -> Option<i64> {
 
     let now = chrono::Utc::now();
     let today = now.date_naive();
-    let today_target = today.and_hms_opt(hour, minute, 0)?
-        .and_local_timezone(chrono::Utc).single()?;
+    let today_target = today
+        .and_hms_opt(hour, minute, 0)?
+        .and_local_timezone(chrono::Utc)
+        .single()?;
 
     // 检查今天是否满足日/周约束
     if matches_day(today, dom, dow) && today_target > now {
@@ -257,8 +270,10 @@ fn compute_next_run(cron_expr: &str) -> Option<i64> {
     for offset in 1..=31 {
         let candidate = today + chrono::Duration::days(offset);
         if matches_day(candidate, dom, dow) {
-            let target = candidate.and_hms_opt(hour, minute, 0)?
-                .and_local_timezone(chrono::Utc).single()?;
+            let target = candidate
+                .and_hms_opt(hour, minute, 0)?
+                .and_local_timezone(chrono::Utc)
+                .single()?;
             return Some(target.timestamp_millis());
         }
     }

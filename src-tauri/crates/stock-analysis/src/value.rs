@@ -166,9 +166,13 @@ impl ValueEngine {
             details.push("流动性恶化 ✗".into());
         }
 
-        // 无增发（简化：无法从年报判断）
-        leverage += 1;
-        details.push("无增发稀释(默认) ✓".into());
+        // 无增发：EPS 不稀释（用 EPS 不低于上年判断）
+        if current.eps.unwrap_or(0.0) >= previous.eps.unwrap_or(0.0) {
+            leverage += 1;
+            details.push("无增发稀释 ✓".into());
+        } else {
+            details.push("EPS稀释 ✗".into());
+        }
 
         // 运营效率 (2分)
         let margin_curr = current.gross_margin.unwrap_or(0.0);

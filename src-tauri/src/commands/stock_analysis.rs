@@ -972,11 +972,18 @@ pub async fn generate_stock_report(
     let score_json = serde_json::to_string(&score).unwrap_or_default();
     let decision_json = record.decision_json.clone().unwrap_or_default();
 
-    // 从 blackboard_snapshot 尝试恢复分析师报告
+    // 从 blackboard_snapshot 恢复分析师报告（仅提取 report.* 条目）
     let analyst_reports: std::collections::HashMap<String, String> = record
         .blackboard_snapshot
         .as_ref()
-        .and_then(|snap| serde_json::from_str(snap).ok())
+        .and_then(|snap| {
+            serde_json::from_str::<std::collections::HashMap<String, String>>(snap).ok()
+        })
+        .map(|all| {
+            all.into_iter()
+                .filter(|(k, _)| k.starts_with("report."))
+                .collect()
+        })
         .unwrap_or_default();
 
     let html = axagent_stock_analysis::report::generate_html_report(
@@ -1299,10 +1306,20 @@ pub async fn get_value_assessment(
         .get_financials(&stock_code)
         .await
         .map_err(|e| e.to_string())?;
+    let shares = quote
+        .total_mv
+        .map(|mv| {
+            if quote.price > 0.0 {
+                mv / quote.price
+            } else {
+                1_000_000_000.0
+            }
+        })
+        .unwrap_or(1_000_000_000.0);
     Ok(axagent_stock_analysis::value::ValueEngine::assess(
         quote.price,
         &financials,
-        1_000_000_000.0,
+        shares,
     ))
 }
 

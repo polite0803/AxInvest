@@ -147,6 +147,11 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
     let stock_monitor = Some(Arc::new(axagent_stock_analysis::monitor::RealtimeMonitor::new(
         astock_client.clone(),
     )));
+    let trading_engine =
+        Arc::new(tokio::sync::RwLock::new(axagent_stock_analysis::trading::TradingEngine::new(
+            Arc::new(sea_db.clone()),
+            astock_client.clone(),
+        )));
 
     let home = dirs::home_dir().unwrap_or_default();
     let config_home = home.join(".claw");
@@ -383,6 +388,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
         sync_engine,
         astock_client,
         stock_monitor,
+        trading_engine,
         plugin_manager,
     }
 }

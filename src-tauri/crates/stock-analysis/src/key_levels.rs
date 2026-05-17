@@ -92,7 +92,7 @@ impl KeyLevelTracker {
     /// 回测历史快照命中率
     pub async fn backtest_key_levels(
         &self,
-        lookback_days: u32,
+        _lookback_days: u32,
     ) -> Result<KeyLevelBacktestStats, String> {
         use axagent_core::entity::stock_analyses;
         let analyses = stock_analyses::Entity::find()

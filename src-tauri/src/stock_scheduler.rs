@@ -15,6 +15,7 @@ pub struct StockScheduler {
     db: Arc<sea_orm::DatabaseConnection>,
     astock_client: Arc<AStockClient>,
     app_handle: tauri::AppHandle,
+    running: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl StockScheduler {
@@ -27,6 +28,7 @@ impl StockScheduler {
             db,
             astock_client,
             app_handle,
+            running: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -97,11 +99,22 @@ impl StockScheduler {
                         .await
                         .map_err(|e| e.to_string())?;
 
+                    // 并发保护：同一计划不重复触发
+                    {
+                        let mut running = self.running.lock().unwrap();
+                        if !running.insert(schedule.id.clone()) {
+                            tracing::warn!("StockScheduler: 跳过重复触发 {}", schedule.id);
+                            continue;
+                        }
+                    }
+                    let schedule_id = schedule.id.clone();
+
                     // 触发股票分析
                     let stock_code = schedule.stock_code.clone();
                     let stock_name = schedule.stock_name.clone();
                     let provider_id = schedule.provider_id.clone();
                     let app = self.app_handle.clone();
+                    let running_set = self.running.clone();
 
                     tokio::spawn(async move {
                         tracing::info!(
@@ -110,15 +123,19 @@ impl StockScheduler {
                             stock_name
                         );
                         let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-                        if let Err(e) = crate::commands::stock_analysis::run_scheduled_analysis(
+                        let result = crate::commands::stock_analysis::run_scheduled_analysis(
                             &app,
                             &stock_code,
                             &stock_name,
                             &date,
                             &provider_id,
                         )
-                        .await
+                        .await;
+                        // 完成后从 running 集合移除
                         {
+                            let _ = running_set.lock().map(|mut r| r.remove(&schedule_id));
+                        }
+                        if let Err(e) = result {
                             tracing::error!("StockScheduler: 分析失败 {}: {}", stock_code, e);
                         }
                     });

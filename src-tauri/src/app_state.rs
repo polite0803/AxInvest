@@ -88,5 +88,7 @@ pub struct AppState {
     pub astock_client: Arc<AStockClient>,
     /// 实时监控引擎（交易时段定时轮询行情并触发告警）
     pub stock_monitor: Option<Arc<axagent_stock_analysis::monitor::RealtimeMonitor>>,
+    /// 手动交易引擎（单例，避免每次命令调用重新创建）
+    pub trading_engine: Arc<TokioRwLock<axagent_stock_analysis::trading::TradingEngine>>,
     pub plugin_manager: std::sync::Mutex<PluginManager>,
 }

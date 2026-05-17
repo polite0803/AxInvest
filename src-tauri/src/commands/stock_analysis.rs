@@ -17,7 +17,7 @@ use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRisk
 use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
-use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison, TradingEngine};
+use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -164,81 +164,20 @@ pub async fn start_stock_analysis(
     let cancel_tokens = state.agent_cancel_tokens.clone();
     let data_client = state.astock_client.clone(); // Arc 克隆，共享单例缓存
 
-    tokio::spawn(async move {
-        let (event_tx, _) = tokio::sync::broadcast::channel::<AnalysisEvent>(64);
-
-        // 转发事件到 Tauri 前端
-        let mut event_rx = event_tx.subscribe();
-        let app_for_events = app_handle.clone();
-        tokio::spawn(async move {
-            while let Ok(event) = event_rx.recv().await {
-                let _ = app_for_events.emit("stock-analysis-event", &event);
-            }
-        });
-        let blackboard = Arc::new(RwLock::new(SharedBlackboard::new(
-            &analysis_id_clone,
-            format!("分析 {} ({})", stock_code_for_spawn, stock_name_for_spawn),
-        )));
-
-        let blackboard_for_run = blackboard.clone();
-        let result = StockAnalysisOrchestrator::run(
-            &data_client,
-            blackboard_for_run,
-            stock_code_for_spawn,
-            stock_name_for_spawn,
-            date,
-            config,
-            event_tx,
-            runner,
-            prompts,
-            Some(cancel_token),
-        )
-        .await;
-
-        // 清理取消令牌
-        {
-            let mut tokens = cancel_tokens.lock().await;
-            tokens.remove(&analysis_id_clone);
-        }
-
-        // 更新 DB 状态
-        match result {
-            Ok(decision) => {
-                let decision_json = serde_json::to_string(&decision).unwrap_or_default();
-                // 导出完整黑板快照供历史回看
-                let snapshot =
-                    axagent_stock_analysis::pipeline::export_blackboard_snapshot(&blackboard).await;
-                let now = chrono::Utc::now().timestamp_millis();
-                let _ = stock_analyses::Entity::update_many()
-                    .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
-                    .col_expr(stock_analyses::Column::DecisionAction, Expr::value(&decision.action))
-                    .col_expr(
-                        stock_analyses::Column::DecisionPositionPct,
-                        Expr::value(decision.position_pct),
-                    )
-                    .col_expr(
-                        stock_analyses::Column::DecisionReasoning,
-                        Expr::value(&decision.reasoning),
-                    )
-                    .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&decision_json))
-                    .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(&snapshot))
-                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
-                    .filter(stock_analyses::Column::Id.eq(&analysis_id_clone))
-                    .exec(&db)
-                    .await;
-            },
-            Err(e) => {
-                let now = chrono::Utc::now().timestamp_millis();
-                let status = format!("failed: {}", e);
-                let _ = stock_analyses::Entity::update_many()
-                    .col_expr(stock_analyses::Column::Status, Expr::value(&status))
-                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
-                    .filter(stock_analyses::Column::Id.eq(&analysis_id_clone))
-                    .exec(&db)
-                    .await;
-            },
-        }
-    });
+    launch_analysis_worker(
+        app_handle,
+        db,
+        data_client,
+        stock_code_for_spawn,
+        stock_name_for_spawn,
+        date,
+        config,
+        runner,
+        prompts,
+        cancel_token,
+        analysis_id_clone,
+        cancel_tokens,
+    );
 
     Ok(serde_json::json!({
         "analysis_id": analysis_id,
@@ -381,6 +320,83 @@ pub async fn run_scheduled_analysis(
         }
     });
     Ok(())
+}
+
+/// 启动分析后台任务（start_stock_analysis 和 run_scheduled_analysis 共用）
+fn launch_analysis_worker(
+    app: tauri::AppHandle,
+    db: sea_orm::DatabaseConnection,
+    data_client: Arc<axagent_astock_data::AStockClient>,
+    code: String,
+    name: String,
+    date: String,
+    config: AnalysisConfig,
+    runner: Option<Arc<dyn AgentRunner>>,
+    prompts: std::collections::HashMap<String, String>,
+    cancel_token: Arc<AtomicBool>,
+    analysis_id: String,
+    cancel_tokens: Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>>,
+) {
+    tokio::spawn(async move {
+        let (event_tx, _) = tokio::sync::broadcast::channel::<AnalysisEvent>(64);
+        let mut event_rx = event_tx.subscribe();
+        let app_events = app.clone();
+        tokio::spawn(async move {
+            while let Ok(e) = event_rx.recv().await {
+                let _ = app_events.emit("stock-analysis-event", &e);
+            }
+        });
+        let bb = Arc::new(RwLock::new(SharedBlackboard::new(
+            &analysis_id,
+            format!("分析 {code} ({name})"),
+        )));
+        let result = StockAnalysisOrchestrator::run(
+            &data_client,
+            bb.clone(),
+            code,
+            name,
+            date,
+            config,
+            event_tx,
+            runner,
+            prompts,
+            Some(cancel_token),
+        )
+        .await;
+        {
+            let mut t = cancel_tokens.lock().await;
+            t.remove(&analysis_id);
+        }
+        let now = chrono::Utc::now().timestamp_millis();
+        match result {
+            Ok(d) => {
+                let j = serde_json::to_string(&d).unwrap_or_default();
+                let s = axagent_stock_analysis::pipeline::export_blackboard_snapshot(&bb).await;
+                let _ = stock_analyses::Entity::update_many()
+                    .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
+                    .col_expr(stock_analyses::Column::DecisionAction, Expr::value(&d.action))
+                    .col_expr(
+                        stock_analyses::Column::DecisionPositionPct,
+                        Expr::value(d.position_pct),
+                    )
+                    .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(&d.reasoning))
+                    .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&j))
+                    .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(&s))
+                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
+                    .filter(stock_analyses::Column::Id.eq(&analysis_id))
+                    .exec(&db)
+                    .await;
+            },
+            Err(e) => {
+                let _ = stock_analyses::Entity::update_many()
+                    .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {e}")))
+                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
+                    .filter(stock_analyses::Column::Id.eq(&analysis_id))
+                    .exec(&db)
+                    .await;
+            },
+        }
+    });
 }
 
 /// 取消分析 — 设置取消令牌让后台任务停止
@@ -1019,7 +1035,7 @@ pub async fn record_trade(
     trade_time: String,
     notes: Option<String>,
 ) -> Result<trades::Model, String> {
-    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let engine = state.trading_engine.read().await;
     engine
         .execute_trade(
             &stock_code,
@@ -1041,7 +1057,7 @@ pub async fn list_trades(
     stock_code: Option<String>,
     limit: Option<u32>,
 ) -> Result<Vec<trades::Model>, String> {
-    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let engine = state.trading_engine.read().await;
     engine
         .get_trades(stock_code.as_deref(), limit.unwrap_or(50))
         .await
@@ -1052,7 +1068,7 @@ pub async fn list_trades(
 pub async fn get_trade_positions(
     state: State<'_, AppState>,
 ) -> Result<Vec<PositionSummary>, String> {
-    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let engine = state.trading_engine.read().await;
     engine.get_positions().await
 }
 
@@ -1081,7 +1097,7 @@ pub async fn validate_trade(
     quantity: i32,
     price: f64,
 ) -> Result<serde_json::Value, String> {
-    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let engine = state.trading_engine.read().await;
     let result = engine
         .validate_trade(&stock_code, &direction, quantity, price)
         .await;
@@ -1104,7 +1120,7 @@ pub async fn compare_trade_with_analysis(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "交易记录不存在".to_string())?;
 
-    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let engine = state.trading_engine.read().await;
     engine.compare_trade_vs_prediction(&trade).await
 }
 
@@ -1284,7 +1300,7 @@ pub async fn optimize_scoring_weights(
 pub async fn get_portfolio_risk(
     state: State<'_, AppState>,
 ) -> Result<PortfolioRiskMetrics, String> {
-    let engine = TradingEngine::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let engine = state.trading_engine.read().await;
     let positions = engine.get_positions().await?;
     Ok(PortfolioRiskManager::compute_from_positions(&positions))
 }

@@ -218,7 +218,7 @@ impl StockScheduler {
     }
 }
 
-/// 检查日期是否匹配 cron 日/周字段
+/// 检查日期是否匹配 cron 日/周/月字段
 fn matches_day(date: chrono::NaiveDate, dom: &str, dow: &str) -> bool {
     let day = date.format("%d").to_string();
     let dom_ok = dom == "*" || dom.split(',').any(|p| p == day);
@@ -237,7 +237,12 @@ fn matches_day(date: chrono::NaiveDate, dom: &str, dow: &str) -> bool {
                 target == chrono_dow
             }
         });
-    dom_ok && dow_ok
+    // Unix cron 语义：日和周都不为 * 时使用 OR，否则 AND（因为 * 恒真）
+    if dom != "*" && dow != "*" {
+        dom_ok || dow_ok
+    } else {
+        dom_ok && dow_ok
+    }
 }
 
 /// 根据 cron 表达式计算下一次执行时间（返回毫秒时间戳）

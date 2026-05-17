@@ -71,7 +71,7 @@ impl PostCloseReview {
                 .ok()
                 .unwrap_or_default();
             let vol_ratio = if klines.len() >= 6 {
-                let avg_vol_5 = klines.iter().take(5).map(|k| k.volume).sum::<f64>() / 5.0;
+                let avg_vol_5 = klines.iter().rev().take(5).map(|k| k.volume).sum::<f64>() / 5.0;
                 Some(klines.last().map(|k| k.volume).unwrap_or(0.0) / avg_vol_5)
             } else {
                 None

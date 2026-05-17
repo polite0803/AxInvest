@@ -30,6 +30,7 @@ import {
   Settings,
   ShoppingBag,
   SlidersHorizontal,
+  TrendingUp,
   User,
   Wrench,
   Zap,
@@ -66,6 +67,7 @@ const MENU_ICONS: Partial<Record<SettingsSection, React.ReactNode>> = {
   appConfig: <Bot size={16} color={SETTINGS_ICON_COLORS.Bot} />,
   evolution: <Dna size={16} color={SETTINGS_ICON_COLORS.Palette} />,
   cloudWorkspace: <Cloud size={16} color={SETTINGS_ICON_COLORS.Cloud} />,
+  stockAnalysis: <TrendingUp size={16} color={SETTINGS_ICON_COLORS.Settings} />,
 };
 
 // 分组定义：tab key → 包含的 sections
@@ -74,7 +76,7 @@ const TAB_GROUPS: Record<string, SettingsSection[]> = {
   appearance: ["general", "display", "shortcuts"],
   extensions: ["tools", "skillsHub", "plugins", "dashboardPlugins", "workflow", "appConfig", "userProfile"],
   network: ["proxy", "messageChannels", "webhooks", "acp"],
-  data: ["data", "storage", "cloudWorkspace", "backup", "scheduler"],
+  data: ["data", "storage", "cloudWorkspace", "backup", "scheduler", "stockAnalysis"],
   system: ["advanced", "evolution", "about"],
 };
 

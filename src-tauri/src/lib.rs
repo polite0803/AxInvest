@@ -321,6 +321,8 @@ pub fn run() {
             commands::skills_hub::skills_hub_import,
             commands::settings::get_settings,
             commands::settings::save_settings,
+            commands::settings::get_setting,
+            commands::settings::set_setting,
             commands::backup::list_backups,
             commands::backup::create_backup,
             commands::backup::restore_backup,

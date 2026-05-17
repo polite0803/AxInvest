@@ -23,6 +23,7 @@ export { SettingsPanel } from "./SettingsPanel";
 export { SettingsSelect } from "./SettingsSelect";
 export { SettingsSidebar } from "./SettingsSidebar";
 export { ShortcutSettings } from "./ShortcutSettings";
+export { StockAnalysisSettings } from "./StockAnalysisSettings";
 export { ToolManager } from "./ToolManager";
 export { WebhookSettings } from "./WebhookSettings";
 

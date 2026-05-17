@@ -2349,7 +2349,8 @@
     "bocha": "Bocha",
     "zhipu": "Zhipu",
     "expertPromptNote": "Expert prompt note",
-    "modelGroupPlaceholder": "Select model group"
+    "modelGroupPlaceholder": "Select model group",
+    "stockAnalysis": "Stock Analysis"
   },
   "backup": {
     "title": "Backup Center",
@@ -5995,7 +5996,28 @@
     "concentration": "Concentration",
     "holdings": "Holdings",
     "sharesUnit": "",
-    "wanUnit": "0k"
+    "wanUnit": "0k",
+    "settings": {
+      "title": "Stock Analysis Settings",
+      "dataSources": "Data Sources",
+      "analysis": "Analysis Parameters",
+      "trading": "Trading Settings",
+      "model": "Model Parameters",
+      "debateRounds": "Debate Rounds",
+      "klinePeriod": "K-Line Period",
+      "periodDaily": "Daily",
+      "periodWeekly": "Weekly",
+      "periodMonthly": "Monthly",
+      "klineLimit": "K-Line Count",
+      "newsLimit": "News Count",
+      "tradingEnabled": "Enable Trading",
+      "maxSinglePosition": "Max Single Position",
+      "maxTotalPosition": "Max Total Position",
+      "maxPositions": "Max Positions",
+      "temperature": "Temperature",
+      "maxTokens": "Max Tokens",
+      "resetDefaults": "Reset Defaults"
+    }
   },
   "trade": {
     "title": "Trading Log",
@@ -6021,6 +6043,27 @@
       "browser": "Browser",
       "synthesizer": "Synthesizer",
       "executor": "Executor"
+    },
+    "settings": {
+      "title": "Stock Analysis Settings",
+      "dataSources": "Data Sources",
+      "analysis": "Analysis Parameters",
+      "trading": "Trading Settings",
+      "model": "Model Parameters",
+      "debateRounds": "Debate Rounds",
+      "klinePeriod": "K-Line Period",
+      "periodDaily": "Daily",
+      "periodWeekly": "Weekly",
+      "periodMonthly": "Monthly",
+      "klineLimit": "K-Line Count",
+      "newsLimit": "News Count",
+      "tradingEnabled": "Enable Trading",
+      "maxSinglePosition": "Max Single Position",
+      "maxTotalPosition": "Max Total Position",
+      "maxPositions": "Max Positions",
+      "temperature": "Temperature",
+      "maxTokens": "Max Tokens",
+      "resetDefaults": "Reset Defaults"
     }
   }
 }

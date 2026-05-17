@@ -2214,7 +2214,8 @@
     "zhipu": "智谱",
     "modelNamePlaceholder": "GPT 5.4 Think",
     "expertPromptNote": "专家提示词备注",
-    "modelGroupPlaceholder": "选择模型组"
+    "modelGroupPlaceholder": "选择模型组",
+    "stockAnalysis": "股票分析"
   },
   "backup": {
     "title": "备份中心",
@@ -5983,7 +5984,28 @@
     "concentration": "集中度",
     "holdings": "持仓",
     "sharesUnit": "只",
-    "wanUnit": "万"
+    "wanUnit": "万",
+    "settings": {
+      "title": "股票分析设置",
+      "dataSources": "数据源",
+      "analysis": "分析参数",
+      "trading": "交易设置",
+      "model": "模型参数",
+      "debateRounds": "辩论轮数",
+      "klinePeriod": "K线周期",
+      "periodDaily": "日线",
+      "periodWeekly": "周线",
+      "periodMonthly": "月线",
+      "klineLimit": "K线数量",
+      "newsLimit": "新闻数量",
+      "tradingEnabled": "启用交易",
+      "maxSinglePosition": "单股最大仓位",
+      "maxTotalPosition": "总仓位上限",
+      "maxPositions": "最大持仓数",
+      "temperature": "创造性",
+      "maxTokens": "最大输出长度",
+      "resetDefaults": "恢复默认"
+    }
   },
   "trade": {
     "title": "交易日志",
@@ -6009,6 +6031,27 @@
       "browser": "浏览器",
       "synthesizer": "综合者",
       "executor": "执行者"
+    },
+    "settings": {
+      "title": "股票分析设置",
+      "dataSources": "数据源",
+      "analysis": "分析参数",
+      "trading": "交易设置",
+      "model": "模型参数",
+      "debateRounds": "辩论轮数",
+      "klinePeriod": "K线周期",
+      "periodDaily": "日线",
+      "periodWeekly": "周线",
+      "periodMonthly": "月线",
+      "klineLimit": "K线数量",
+      "newsLimit": "新闻数量",
+      "tradingEnabled": "启用交易",
+      "maxSinglePosition": "单股最大仓位",
+      "maxTotalPosition": "总仓位上限",
+      "maxPositions": "最大持仓数",
+      "temperature": "创造性",
+      "maxTokens": "最大输出长度",
+      "resetDefaults": "恢复默认"
     }
   }
 }

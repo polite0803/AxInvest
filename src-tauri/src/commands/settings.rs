@@ -40,3 +40,26 @@ pub async fn save_settings(
         Ok(())
     }
 }
+
+/// 读取单个设置键值
+#[tauri::command]
+pub async fn get_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    axagent_core::repo::settings::get_setting(&state.sea_db, &key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 写入单个设置键值
+#[tauri::command]
+pub async fn set_setting(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    axagent_core::repo::settings::set_setting(&state.sea_db, &key, &value)
+        .await
+        .map_err(|e| e.to_string())
+}

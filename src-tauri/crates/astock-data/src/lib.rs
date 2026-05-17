@@ -229,24 +229,30 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<FinancialReport>, DataError> {
+        let mut last_err = None;
         for name in &self.routing.financials {
             if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_financials(stock_code).await {
-                    return Ok(result);
+                match vendor.get_financials(stock_code).await {
+                    Ok(result) => return Ok(result),
+                    Err(e) => { tracing::warn!("[降级] {} 财务数据失败: {}", name, e); last_err = Some(e); }
                 }
             }
         }
+        if let Some(e) = last_err { tracing::warn!("所有财务数据源均失败 (last: {e})"); }
         Ok(vec![])
     }
 
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        let mut last_err = None;
         for name in &self.routing.news {
             if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_news(stock_code, limit).await {
-                    return Ok(result);
+                match vendor.get_news(stock_code, limit).await {
+                    Ok(result) => return Ok(result),
+                    Err(e) => { tracing::warn!("[降级] {} 新闻失败: {}", name, e); last_err = Some(e); }
                 }
             }
         }
+        if let Some(e) = last_err { tracing::warn!("所有新闻源均失败 (last: {e})"); }
         Ok(vec![])
     }
 

@@ -144,8 +144,10 @@ pub async fn start_stock_analysis(
         },
     };
 
-    // 6. 从 DB 加载专家提示词（种子化后已有）
+    // 6. 从 DB 加载专家提示词和用户配置
     let prompts = load_stock_analysis_prompts(&state.sea_db).await;
+    let mut config = AnalysisConfig::default();
+    load_analysis_config(&state.sea_db, &mut config).await;
 
     // 6b. 注册取消令牌
     {
@@ -177,8 +179,6 @@ pub async fn start_stock_analysis(
             &analysis_id_clone,
             format!("分析 {} ({})", stock_code_for_spawn, stock_name_for_spawn),
         )));
-
-        let config = AnalysisConfig::default();
 
         let blackboard_for_run = blackboard.clone();
         let result = StockAnalysisOrchestrator::run(
@@ -330,7 +330,8 @@ pub async fn run_scheduled_analysis(
         });
         let blackboard =
             Arc::new(RwLock::new(SharedBlackboard::new(&aid, format!("分析 {sc} ({sn})"))));
-        let config = AnalysisConfig::default();
+        let mut config = AnalysisConfig::default();
+        load_analysis_config(&db_clone, &mut config).await;
         let result = StockAnalysisOrchestrator::run(
             &data_client,
             blackboard.clone(),
@@ -702,6 +703,31 @@ async fn load_stock_analysis_prompts(
     }
     tracing::info!("[stock_analysis] 从 DB 加载了 {} 个专家提示词", prompts.len());
     prompts
+}
+
+/// 从 settings 表加载用户配置并合并到 AnalysisConfig
+async fn load_analysis_config(
+    db: &sea_orm::DatabaseConnection,
+    config: &mut AnalysisConfig,
+) {
+    if let Ok(Some(v)) = axagent_core::repo::settings::get_setting(db, "stock_analysis_config").await {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&v) {
+            if let Some(a) = parsed.get("analysis") {
+                if let Some(rounds) = a.get("maxDebateRounds").and_then(|v| v.as_u64()) {
+                    config.max_debate_rounds = rounds as u32;
+                }
+                if let Some(period) = a.get("klinePeriod").and_then(|v| v.as_str()) {
+                    config.kline_period = period.to_string();
+                }
+                if let Some(limit) = a.get("klineLimit").and_then(|v| v.as_u64()) {
+                    config.kline_limit = limit as u32;
+                }
+                if let Some(limit) = a.get("newsLimit").and_then(|v| v.as_u64()) {
+                    config.news_limit = limit as u32;
+                }
+            }
+        }
+    }
 }
 
 // ── MCP Stock Data Tools ──

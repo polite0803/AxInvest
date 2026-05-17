@@ -45,10 +45,7 @@ impl StockVendor for CninfoVendor {
         Ok(vec![])
     }
 
-    async fn get_announcements(
-        &self,
-        stock_code: &str,
-    ) -> Result<Vec<Announcement>, DataError> {
+    async fn get_announcements(&self, stock_code: &str) -> Result<Vec<Announcement>, DataError> {
         let org_id = self.resolve_org_id(stock_code).await;
         let stock_param = if let Some(ref oid) = org_id {
             format!("{stock_code},{oid}")
@@ -93,21 +90,22 @@ impl StockVendor for CninfoVendor {
             .filter_map(|item| {
                 let title = item["announcementTitle"].as_str()?.to_string();
                 let sec_name = item["secName"].as_str().map(|s| s.to_string());
-                let ann_date = item["announcementTime"].as_i64().map(|ts| {
-                    let secs = ts / 1000;
-                    chrono::DateTime::from_timestamp(secs, 0)
-                        .map(|dt| dt.format("%Y-%m-%d").to_string())
-                        .unwrap_or_default()
-                }).unwrap_or_default();
+                let ann_date = item["announcementTime"]
+                    .as_i64()
+                    .map(|ts| {
+                        let secs = ts / 1000;
+                        chrono::DateTime::from_timestamp(secs, 0)
+                            .map(|dt| dt.format("%Y-%m-%d").to_string())
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default();
                 let adj_url = item["adjunctUrl"].as_str().unwrap_or("");
                 let pdf_url = if adj_url.is_empty() {
                     None
                 } else {
                     Some(format!("https://static.cninfo.com.cn/{}", adj_url))
                 };
-                let ann_type = item["announcementTypeName"]
-                    .as_str()
-                    .map(|s| s.to_string());
+                let ann_type = item["announcementTypeName"].as_str().map(|s| s.to_string());
 
                 Some(Announcement {
                     title,
@@ -124,9 +122,7 @@ impl StockVendor for CninfoVendor {
 
 impl CninfoVendor {
     async fn resolve_org_id(&self, stock_code: &str) -> Option<String> {
-        let url = format!(
-            "https://www.cninfo.com.cn/new/data/szse_stock.json"
-        );
+        let url = format!("https://www.cninfo.com.cn/new/data/szse_stock.json");
         let resp = self
             .http
             .get(&url)

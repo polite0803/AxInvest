@@ -104,12 +104,20 @@ impl TradingEngine {
         if let Ok(quote) = self.astock_client.get_quote(stock_code).await {
             let limit_up = quote.limit_up.unwrap_or_else(|| {
                 let limit_pct = get_st_price_limit_pct(quote.is_st, market);
-                let ref_price = if quote.pre_close > 0.0 { quote.pre_close } else { quote.open };
+                let ref_price = if quote.pre_close > 0.0 {
+                    quote.pre_close
+                } else {
+                    quote.open
+                };
                 ref_price * (1.0 + limit_pct / 100.0)
             });
             let limit_down = quote.limit_down.unwrap_or_else(|| {
                 let limit_pct = get_st_price_limit_pct(quote.is_st, market);
-                let ref_price = if quote.pre_close > 0.0 { quote.pre_close } else { quote.open };
+                let ref_price = if quote.pre_close > 0.0 {
+                    quote.pre_close
+                } else {
+                    quote.open
+                };
                 ref_price * (1.0 - limit_pct / 100.0)
             });
 
@@ -228,11 +236,12 @@ impl TradingEngine {
         notes: Option<&str>,
     ) -> Result<trades::Model, String> {
         // 从 settings 表读取交易开关状态
-        let enabled: bool = axagent_core::repo::settings::get_setting(self.db.as_ref(), "trading_enabled")
-            .await
-            .unwrap_or_default()
-            .map(|s| s == "true")
-            .unwrap_or(false);
+        let enabled: bool =
+            axagent_core::repo::settings::get_setting(self.db.as_ref(), "trading_enabled")
+                .await
+                .unwrap_or_default()
+                .map(|s| s == "true")
+                .unwrap_or(false);
         if !self.enabled && !enabled {
             return Err("交易功能未启用，请先在设置中开启".into());
         }

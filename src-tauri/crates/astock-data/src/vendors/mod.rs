@@ -73,10 +73,7 @@ pub trait StockVendor: Send + Sync {
         Ok(vec![])
     }
 
-    async fn get_consensus_eps(
-        &self,
-        stock_code: &str,
-    ) -> Result<Option<ConsensusEPS>, DataError> {
+    async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
         let _ = stock_code;
         Ok(None)
     }
@@ -89,10 +86,7 @@ pub trait StockVendor: Send + Sync {
         Ok(None)
     }
 
-    async fn get_announcements(
-        &self,
-        stock_code: &str,
-    ) -> Result<Vec<Announcement>, DataError> {
+    async fn get_announcements(&self, stock_code: &str) -> Result<Vec<Announcement>, DataError> {
         let _ = stock_code;
         Ok(vec![])
     }
@@ -125,5 +119,5 @@ pub mod eastmoney;
 pub mod iwencai;
 pub mod mootdx;
 pub mod sina;
-pub mod ths;
 pub mod tencent;
+pub mod ths;

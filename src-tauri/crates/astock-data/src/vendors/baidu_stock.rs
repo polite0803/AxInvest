@@ -62,7 +62,9 @@ impl StockVendor for BaiduStockVendor {
         let open = val_to_f64(&result["open"]).unwrap_or(0.0);
         let high = val_to_f64(&result["high"]).unwrap_or(0.0);
         let low = val_to_f64(&result["low"]).unwrap_or(0.0);
-        let _close = val_to_f64(&result["close"]).or(val_to_f64(&result["yestclose"])).unwrap_or(0.0);
+        let _close = val_to_f64(&result["close"])
+            .or(val_to_f64(&result["yestclose"]))
+            .unwrap_or(0.0);
         let volume = val_to_f64(&result["volume"]).unwrap_or(0.0);
         let amount = val_to_f64(&result["amount"]).unwrap_or(0.0);
         let change_pct = val_to_f64(&result["changepercent"]).unwrap_or(0.0);
@@ -86,10 +88,7 @@ impl StockVendor for BaiduStockVendor {
             limit_up: None,
             limit_down: None,
             is_st: false,
-            timestamp: result["time"]
-                .as_str()
-                .unwrap_or("")
-                .to_string(),
+            timestamp: result["time"].as_str().unwrap_or("").to_string(),
         })
     }
 
@@ -157,10 +156,7 @@ impl StockVendor for BaiduStockVendor {
             .iter()
             .map(|item| FinancialReport {
                 stock_code: stock_code.to_string(),
-                report_date: item["reportDate"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                report_date: item["reportDate"].as_str().unwrap_or("").to_string(),
                 revenue: val_to_f64(&item["totalOperateIncome"]),
                 net_profit: val_to_f64(&item["parentNetprofit"]),
                 eps: val_to_f64(&item["basicEps"]),
@@ -261,10 +257,7 @@ impl StockVendor for BaiduStockVendor {
             .map(|item| DragonTigerEntry {
                 stock_code: stock_code.to_string(),
                 date: item["date"].as_str().unwrap_or("").to_string(),
-                dept_name: item["deptName"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                dept_name: item["deptName"].as_str().unwrap_or("").to_string(),
                 buy_amount: val_to_f64(&item["buyAmount"]).unwrap_or(0.0),
                 sell_amount: val_to_f64(&item["sellAmount"]).unwrap_or(0.0),
                 net_amount: val_to_f64(&item["netAmount"]).unwrap_or(0.0),
@@ -290,14 +283,8 @@ impl StockVendor for BaiduStockVendor {
             .iter()
             .map(|item| LockupSchedule {
                 stock_code: stock_code.to_string(),
-                stock_name: item["stockName"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
-                unlock_date: item["unlockDate"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                stock_name: item["stockName"].as_str().unwrap_or("").to_string(),
+                unlock_date: item["unlockDate"].as_str().unwrap_or("").to_string(),
                 unlock_shares: val_to_f64(&item["unlockShares"]).unwrap_or(0.0),
                 unlock_ratio: val_to_f64(&item["unlockRatio"]).unwrap_or(0.0),
                 shareholder: item["shareholder"].as_str().map(|s| s.to_string()),
@@ -357,10 +344,7 @@ impl StockVendor for BaiduStockVendor {
             return Ok(None);
         }
 
-        let sector_name = data["industry"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let sector_name = data["industry"].as_str().unwrap_or("").to_string();
         let concept_tags: Vec<String> = data["concepts"]
             .as_str()
             .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
@@ -373,10 +357,7 @@ impl StockVendor for BaiduStockVendor {
         Ok(Some(SectorInfo {
             stock_code: stock_code.to_string(),
             sector_name,
-            sub_sector: data["subIndustry"]
-                .as_str()
-                .unwrap_or("")
-                .to_string(),
+            sub_sector: data["subIndustry"].as_str().unwrap_or("").to_string(),
             concept_tags,
         }))
     }
@@ -399,14 +380,8 @@ impl StockVendor for BaiduStockVendor {
             .map(|item| ShareholderTrade {
                 stock_code: stock_code.to_string(),
                 date: item["date"].as_str().unwrap_or("").to_string(),
-                shareholder_name: item["shareholderName"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
-                trade_type: item["tradeType"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                shareholder_name: item["shareholderName"].as_str().unwrap_or("").to_string(),
+                trade_type: item["tradeType"].as_str().unwrap_or("").to_string(),
                 shares: val_to_f64(&item["shares"]).unwrap_or(0.0),
                 price: val_to_f64(&item["price"]).unwrap_or(0.0),
                 reason: item["reason"].as_str().map(|s| s.to_string()),
@@ -434,20 +409,13 @@ impl StockVendor for BaiduStockVendor {
                 ex_date: item["exDate"].as_str().unwrap_or("").to_string(),
                 dividend_per_share: val_to_f64(&item["dividendPerShare"]).unwrap_or(0.0),
                 bonus_share_ratio: val_to_f64(&item["bonusShareRatio"]).unwrap_or(0.0),
-                record_date: item["recordDate"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                record_date: item["recordDate"].as_str().unwrap_or("").to_string(),
             })
             .collect())
     }
 
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
-        let url = self.build_url(
-            5351,
-            "",
-            &format!("&query={}", urlencoding::encode(keyword)),
-        );
+        let url = self.build_url(5351, "", &format!("&query={}", urlencoding::encode(keyword)));
         let json = self.fetch_json(&url).await?;
 
         let items = match json["Result"]["data"].as_array() {
@@ -487,18 +455,12 @@ impl StockVendor for BaiduStockVendor {
             .iter()
             .map(|item| ResearchReport {
                 title: item["title"].as_str().unwrap_or("").to_string(),
-                institution: item["institution"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                institution: item["institution"].as_str().unwrap_or("").to_string(),
                 analyst: item["analyst"].as_str().map(|s| s.to_string()),
                 rating: item["rating"].as_str().map(|s| s.to_string()),
                 target_price: val_to_f64(&item["targetPrice"]),
                 eps_forecast: vec![],
-                publish_date: item["publishDate"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                publish_date: item["publishDate"].as_str().unwrap_or("").to_string(),
                 pdf_url: item["pdfUrl"].as_str().map(|s| s.to_string()),
             })
             .collect())
@@ -517,18 +479,17 @@ impl StockVendor for BaiduStockVendor {
             return Ok(None);
         }
 
-        let industry = data["industry"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let industry = data["industry"].as_str().unwrap_or("").to_string();
         let concepts: Vec<BlockItem> = data["conceptList"]
             .as_array()
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|item| Some(BlockItem {
-                        name: item.get("name")?.as_str()?.to_string(),
-                        change_pct: item.get("changePct").and_then(val_to_f64),
-                    }))
+                    .filter_map(|item| {
+                        Some(BlockItem {
+                            name: item.get("name")?.as_str()?.to_string(),
+                            change_pct: item.get("changePct").and_then(val_to_f64),
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -564,17 +525,12 @@ impl StockVendor for BaiduStockVendor {
                     .or_else(|| item.get("changepercent"))
                     .and_then(val_to_f64)
                     .unwrap_or(0.0);
-                let turnover_rate = item
-                    .get("turnoverRatio")
-                    .and_then(val_to_f64);
+                let turnover_rate = item.get("turnoverRatio").and_then(val_to_f64);
                 let reason_tags = item
                     .get("reasonTags")
                     .and_then(|v| {
-                        v.as_str().map(|s| {
-                            s.split(',')
-                                .map(|t| t.trim().to_string())
-                                .collect()
-                        })
+                        v.as_str()
+                            .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
                     })
                     .unwrap_or_default();
                 let sector = item
@@ -625,9 +581,7 @@ impl StockVendor for BaiduStockVendor {
                 let leader_name = item
                     .get("leaderName")
                     .and_then(|v| v.as_str().map(|s| s.to_string()));
-                let leader_change_pct = item
-                    .get("leaderChangePct")
-                    .and_then(val_to_f64);
+                let leader_change_pct = item.get("leaderChangePct").and_then(val_to_f64);
 
                 Some(IndustryRank {
                     industry_name,

@@ -96,9 +96,11 @@ impl StockAnalysisOrchestrator {
         {
             let mut bb = blackboard.write().await;
             let hot_json = serde_json::to_string(&market_data.hot_stocks).unwrap_or_default();
-            let industry_json = serde_json::to_string(&market_data.industry_ranking).unwrap_or_default();
+            let industry_json =
+                serde_json::to_string(&market_data.industry_ranking).unwrap_or_default();
             let cls_json = serde_json::to_string(&market_data.cls_flash).unwrap_or_default();
-            let mdt_json = serde_json::to_string(&market_data.market_dragon_tiger).unwrap_or_default();
+            let mdt_json =
+                serde_json::to_string(&market_data.market_dragon_tiger).unwrap_or_default();
             let nbf_json = market_data
                 .north_bound_flow
                 .as_ref()
@@ -260,8 +262,16 @@ impl StockAnalysisOrchestrator {
         // ── 价值投资评估 ──
         let value_assessment = {
             let financials = &raw.financials;
-            let shares = raw.quote.total_mv
-                .map(|mv| if raw.quote.price > 0.0 { mv / raw.quote.price } else { 1_000_000_000.0 })
+            let shares = raw
+                .quote
+                .total_mv
+                .map(|mv| {
+                    if raw.quote.price > 0.0 {
+                        mv / raw.quote.price
+                    } else {
+                        1_000_000_000.0
+                    }
+                })
                 .unwrap_or(1_000_000_000.0);
             crate::value::ValueEngine::assess(raw.quote.price, financials, shares)
         };
@@ -903,15 +913,29 @@ impl StockAnalysisOrchestrator {
 fn parse_trader_decision(report: &str) -> (String, Option<f64>, Option<f64>) {
     // 尝试 JSON 解析
     if let Some(parsed) = try_parse_json(report) {
-        let action = parsed.get("action").and_then(|v| v.as_str()).unwrap_or("持有").to_string();
-        let stop = parsed.get("stopLoss").or_else(|| parsed.get("stop_loss")).and_then(|v| v.as_f64());
-        let entry = parsed.get("entryPrice").or_else(|| parsed.get("entry_price")).and_then(|v| v.as_f64());
+        let action = parsed
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("持有")
+            .to_string();
+        let stop = parsed
+            .get("stopLoss")
+            .or_else(|| parsed.get("stop_loss"))
+            .and_then(|v| v.as_f64());
+        let entry = parsed
+            .get("entryPrice")
+            .or_else(|| parsed.get("entry_price"))
+            .and_then(|v| v.as_f64());
         return (action, stop, entry);
     }
     // 回退：字符串匹配
-    let action = if report.contains("买入") { "买入".to_string() }
-        else if report.contains("卖出") { "卖出".to_string() }
-        else { "持有".to_string() };
+    let action = if report.contains("买入") {
+        "买入".to_string()
+    } else if report.contains("卖出") {
+        "卖出".to_string()
+    } else {
+        "持有".to_string()
+    };
     let stop = extract_number_after(report, "止损");
     let entry = extract_number_after(report, "入场");
     (action, stop, entry)

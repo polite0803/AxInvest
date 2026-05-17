@@ -220,16 +220,15 @@ impl StockVendor for EastMoneyVendor {
             None => return Ok(vec![]),
         };
 
-        Ok(rows.iter()
-            .map(|r| {
-                LockupSchedule {
-                    stock_code: stock_code.to_string(),
-                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                    unlock_date: r["UNLOCK_DATE"].as_str().unwrap_or("").to_string(),
-                    unlock_shares: r["UNLOCK_SHARES"].as_f64().unwrap_or(0.0),
-                    unlock_ratio: r["PLACING_RATIO"].as_f64().unwrap_or(0.0),
-                    shareholder: r["HOLDER_NAME"].as_str().map(|s| s.to_string()),
-                }
+        Ok(rows
+            .iter()
+            .map(|r| LockupSchedule {
+                stock_code: stock_code.to_string(),
+                stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
+                unlock_date: r["UNLOCK_DATE"].as_str().unwrap_or("").to_string(),
+                unlock_shares: r["UNLOCK_SHARES"].as_f64().unwrap_or(0.0),
+                unlock_ratio: r["PLACING_RATIO"].as_f64().unwrap_or(0.0),
+                shareholder: r["HOLDER_NAME"].as_str().map(|s| s.to_string()),
             })
             .collect())
     }
@@ -480,10 +479,7 @@ impl StockVendor for EastMoneyVendor {
                     rating: r["emRatingName"].as_str().map(|s| s.to_string()),
                     target_price: None,
                     eps_forecast,
-                    publish_date: r["publishDate"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string(),
+                    publish_date: r["publishDate"].as_str().unwrap_or("").to_string(),
                     pdf_url,
                 }
             })
@@ -505,10 +501,7 @@ impl StockVendor for EastMoneyVendor {
             .iter()
             .map(|r| MarketDragonTiger {
                 stock_code: r["SECURITY_CODE"].as_str().unwrap_or("").to_string(),
-                stock_name: r["SECURITY_NAME_ABBR"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
                 date: r["TRADE_DATE"].as_str().unwrap_or("").to_string(),
                 net_buy: r["NET_BUY"].as_f64().unwrap_or(0.0),
                 buy_amount: r["BUY_AMOUNT"].as_f64().unwrap_or(0.0),
@@ -543,18 +536,21 @@ impl StockVendor for EastMoneyVendor {
             .iter()
             .filter_map(|item| {
                 let title = item.get("title")?.as_str()?.to_string();
-                let content = item.get("digest")
+                let content = item
+                    .get("digest")
                     .or_else(|| item.get("content"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let publish_time = item.get("showTime")
+                let publish_time = item
+                    .get("showTime")
                     .or_else(|| item.get("publish_time"))
                     .or_else(|| item.get("ctime"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let source = item.get("source")
+                let source = item
+                    .get("source")
                     .or_else(|| item.get("mediaName"))
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());

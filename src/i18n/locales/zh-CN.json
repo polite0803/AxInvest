@@ -6230,6 +6230,9 @@
     "settings.saveFailed": "设置保存失败",
     "settings.quoteTag": "行情",
     "settings.financialKlineTag": "财务/K线",
-    "settings.newsTag": "新闻"
+    "settings.newsTag": "新闻",
+    "settings.tencentFinance": "腾讯财经",
+    "settings.eastmoney": "东方财富",
+    "settings.sinaFinance": "新浪财经"
   }
 }

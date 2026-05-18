@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "Не удалось сохранить настройки",
     "settings.quoteTag": "Котировки",
     "settings.financialKlineTag": "Финансы/Свечи",
-    "settings.newsTag": "Новости"
+    "settings.newsTag": "Новости",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

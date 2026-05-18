@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "सेटिंग्स सहेजने में विफल",
     "settings.quoteTag": "भाव",
     "settings.financialKlineTag": "वित्तीय/कैंडल",
-    "settings.newsTag": "समाचार"
+    "settings.newsTag": "समाचार",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

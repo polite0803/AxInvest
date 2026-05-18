@@ -6234,6 +6234,9 @@
     "settings.saveFailed": "Failed to save settings",
     "settings.quoteTag": "Quotes",
     "settings.financialKlineTag": "Financial/K-line",
-    "settings.newsTag": "News"
+    "settings.newsTag": "News",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

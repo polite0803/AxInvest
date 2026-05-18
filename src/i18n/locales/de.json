@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "Einstellungen konnten nicht gespeichert werden",
     "settings.quoteTag": "Kurse",
     "settings.financialKlineTag": "Finanzen/Kerze",
-    "settings.newsTag": "Nachrichten"
+    "settings.newsTag": "Nachrichten",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

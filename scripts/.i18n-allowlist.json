@@ -654,8 +654,8 @@
     },
     {
       "file": "src/components/settings/StockAnalysisSettings.tsx",
-      "lines": "79,83,92,101,110,162,211",
-      "reason": "硬编码中文字符串",
+      "lines": "79",
+      "reason": "数据源品牌名 (proper nouns) + JSX 注释",
       "phase": 3
     },
     {

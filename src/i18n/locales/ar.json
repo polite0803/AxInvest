@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "فشل حفظ الإعدادات",
     "settings.quoteTag": "أسعار",
     "settings.financialKlineTag": "مالي/شمعدان",
-    "settings.newsTag": "أخبار"
+    "settings.newsTag": "أخبار",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

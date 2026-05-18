@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "설정 저장 실패",
     "settings.quoteTag": "시세",
     "settings.financialKlineTag": "재무/캔들",
-    "settings.newsTag": "뉴스"
+    "settings.newsTag": "뉴스",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

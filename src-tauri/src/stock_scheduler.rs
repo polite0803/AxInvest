@@ -81,6 +81,16 @@ impl StockScheduler {
                         schedule.stock_name
                     );
 
+                    // 并发保护：同一计划不重复触发（必须在 DB 更新之前检查）
+                    let schedule_id = schedule.id.clone();
+                    {
+                        let mut running = self.running.lock().await;
+                        if !running.insert(schedule_id.clone()) {
+                            tracing::warn!("StockScheduler: 跳过重复触发 {}", schedule_id);
+                            continue;
+                        }
+                    }
+
                     // 更新 last_run_at 并计算 next_run_at
                     let new_next = compute_next_run(&schedule.cron_expression);
                     let _ = analysis_schedules::Entity::update_many()
@@ -100,16 +110,6 @@ impl StockScheduler {
                         .exec(self.db.as_ref())
                         .await
                         .map_err(|e| e.to_string())?;
-
-                    // 并发保护：同一计划不重复触发
-                    {
-                        let mut running = self.running.lock().await;
-                        if !running.insert(schedule.id.clone()) {
-                            tracing::warn!("StockScheduler: 跳过重复触发 {}", schedule.id);
-                            continue;
-                        }
-                    }
-                    let schedule_id = schedule.id.clone();
 
                     // 触发股票分析
                     let stock_code = schedule.stock_code.clone();
@@ -135,10 +135,8 @@ impl StockScheduler {
                         .await;
                         // 完成后从 running 集合移除
                         {
-                            {
-                                let mut r = running_set.lock().await;
-                                r.remove(&schedule_id);
-                            }
+                            let mut r = running_set.lock().await;
+                            r.remove(&schedule_id);
                         }
                         if let Err(e) = result {
                             tracing::error!("StockScheduler: 分析失败 {}: {}", stock_code, e);
@@ -241,8 +239,10 @@ impl StockScheduler {
 }
 
 /// 检查日期是否匹配 cron 日/周/月字段
-fn matches_day(date: chrono::NaiveDate, dom: &str, dow: &str) -> bool {
+fn matches_day(date: chrono::NaiveDate, dom: &str, month: &str, dow: &str) -> bool {
     let day = date.format("%d").to_string();
+    let mon = date.format("%m").to_string();
+    let mon_ok = month == "*" || month.split(',').any(|p| p == mon);
     let dom_ok = dom == "*" || dom.split(',').any(|p| p == day);
     let dow_ok = dow == "*"
         || dow.split(',').any(|p| {
@@ -260,11 +260,12 @@ fn matches_day(date: chrono::NaiveDate, dom: &str, dow: &str) -> bool {
             }
         });
     // Unix cron 语义：日和周都不为 * 时使用 OR，否则 AND（因为 * 恒真）
-    if dom != "*" && dow != "*" {
+    let day_logic = if dom != "*" && dow != "*" {
         dom_ok || dow_ok
     } else {
         dom_ok && dow_ok
-    }
+    };
+    mon_ok && day_logic
 }
 
 /// 根据 cron 表达式计算下一次执行时间（返回毫秒时间戳）
@@ -276,9 +277,19 @@ fn compute_next_run(cron_expr: &str) -> Option<i64> {
         return None;
     }
 
-    let hour: u32 = parts[1].parse().ok()?;
-    let minute: u32 = parts[0].parse().ok()?;
+    // 处理 wildcard：* → 当前值（后续匹配时 * 恒真）
+    let hour: u32 = if parts[1] == "*" {
+        0
+    } else {
+        parts[1].parse().ok()?
+    };
+    let minute: u32 = if parts[0] == "*" {
+        0
+    } else {
+        parts[0].parse().ok()?
+    };
     let dom: &str = parts[2];
+    let _month: &str = parts[3]; // 月字段：31 日前向搜索隐式覆盖跨月场景
     let dow: &str = parts[4];
 
     let now = chrono::Utc::now();
@@ -289,14 +300,14 @@ fn compute_next_run(cron_expr: &str) -> Option<i64> {
         .single()?;
 
     // 检查今天是否满足日/周约束
-    if matches_day(today, dom, dow) && today_target > now {
+    if matches_day(today, dom, _month, dow) && today_target > now {
         return Some(today_target.timestamp_millis());
     }
 
     // 查找下一个满足约束的日期（最多查 366 天，覆盖跨月/跨年场景）
     for offset in 1..=366 {
         let candidate = today + chrono::Duration::days(offset);
-        if matches_day(candidate, dom, dow) {
+        if matches_day(candidate, dom, _month, dow) {
             let target = candidate
                 .and_hms_opt(hour, minute, 0)?
                 .and_local_timezone(chrono::Utc)

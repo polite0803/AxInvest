@@ -117,32 +117,29 @@ impl ValueEngine {
         let mut efficiency = 0u32;
 
         // 盈利能力 (4分)
-        let roa = current.net_profit.unwrap_or(0.0) / 100_000_000.0; // 简化ROA
-        if roa > 0.0 {
+        if current.net_profit.unwrap_or(0.0) > 0.0 {
             profitability += 1;
-            details.push("ROA>0 ✓".into());
+            details.push("净利润>0 ✓".into());
         } else {
-            details.push("ROA≤0 ✗".into());
+            details.push("净利润≤0 ✗".into());
         }
 
-        let cfo_proxy = current.net_margin.unwrap_or(0.0);
-        if cfo_proxy > 0.0 {
+        if current.net_profit.unwrap_or(0.0) > previous.net_profit.unwrap_or(0.0) {
             profitability += 1;
-            details.push("净利率>0 ✓".into());
+            details.push("净利润增长 ✓".into());
         } else {
-            details.push("净利率≤0 ✗".into());
+            details.push("净利润未增长 ✗".into());
         }
 
-        let prev_roa = previous.net_profit.unwrap_or(0.0) / 100_000_000.0;
-        if roa > prev_roa {
+        if current.roe.unwrap_or(0.0) > previous.roe.unwrap_or(0.0) {
             profitability += 1;
-            details.push("ΔROA>0 ✓".into());
+            details.push("ΔROE>0 ✓".into());
         } else {
             details.push("ΔROA≤0 ✗".into());
         }
 
-        let curr_roe = current.roe.unwrap_or(0.0);
-        if cfo_proxy > 0.0 && (curr_roe <= 0.0 || cfo_proxy > curr_roe * 0.5) {
+        // CFO > NI: 营收显著大于净利润表明经营现金流质量好
+        if current.revenue.unwrap_or(0.0) > current.net_profit.unwrap_or(0.0) * 1_0000_0000.0 {
             profitability += 1;
             details.push("盈利质量好 ✓".into());
         } else {

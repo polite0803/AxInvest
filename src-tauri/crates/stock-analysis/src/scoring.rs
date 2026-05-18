@@ -160,6 +160,7 @@ impl ScoringEngine {
         pb: Option<f64>,
         roe: Option<f64>,
     ) {
+        let orig_alignment = score.signal_code.clone();
         let mut adjustment: i32 = 0;
         let mut reasons = Vec::new();
 
@@ -217,8 +218,8 @@ impl ScoringEngine {
         let new_total = (score.total as i32 + adjustment).clamp(0, 100) as u32;
         score.total = new_total;
 
-        // Re-map signal
-        let (signal, signal_code) = Self::map_signal(new_total, "");
+        // Re-map signal with original alignment (preserving trend context)
+        let (signal, signal_code) = Self::map_signal(new_total, &orig_alignment);
         score.signal = signal.to_string();
         score.signal_code = signal_code.to_string();
 
@@ -261,10 +262,11 @@ impl ScoringEngine {
         };
 
         let total_adj = adjustment + f_score_bonus + moat_bonus;
+        let orig_alignment = score.signal_code.clone();
         score.fundamental_adjustment += total_adj;
         let new_total = (score.total as i32 + total_adj).clamp(0, 100) as u32;
         score.total = new_total;
-        let (signal, signal_code) = Self::map_signal(new_total, "");
+        let (signal, signal_code) = Self::map_signal(new_total, &orig_alignment);
         score.signal = signal.to_string();
         score.signal_code = signal_code.to_string();
 

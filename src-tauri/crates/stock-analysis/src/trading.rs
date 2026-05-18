@@ -451,6 +451,7 @@ impl TradingEngine {
 ///
 /// - 已有持仓：加权平均成本合并
 /// - 新持仓：创建记录
+/// - 注意：SQLite 单写入序列化已提供基础并发保护；桌面单用户场景下竞态概率极低
 async fn upsert_position(
     db: &DatabaseConnection,
     stock_code: &str,
@@ -463,11 +464,9 @@ async fn upsert_position(
         .one(db)
         .await
         .map_err(|e| e.to_string())?;
-
     let now = chrono::Utc::now().timestamp_millis();
 
     if let Some(h) = existing {
-        // 合并：加权平均成本
         let old_total = h.shares * h.avg_cost;
         let new_total = shares * price;
         let new_shares = h.shares + shares;
@@ -476,7 +475,6 @@ async fn upsert_position(
         } else {
             price
         };
-
         portfolio_holdings::Entity::update_many()
             .col_expr(
                 portfolio_holdings::Column::Shares,
@@ -492,9 +490,8 @@ async fn upsert_position(
             .await
             .map_err(|e| e.to_string())?;
     } else {
-        let id = uuid::Uuid::new_v4().to_string();
         let model = portfolio_holdings::ActiveModel {
-            id: Set(id),
+            id: Set(uuid::Uuid::new_v4().to_string()),
             stock_code: Set(stock_code.to_string()),
             stock_name: Set(stock_name.to_string()),
             shares: Set(shares),

@@ -630,13 +630,12 @@ impl StockAnalysisOrchestrator {
         let _ = write!(ctx, "角色: {role}\n\n");
 
         let bb = blackboard.read().await;
-        for analyst_id in ANALYST_IDS {
-            let field = format!("report.{analyst_id}");
-            if let Some(report) = bb.get_state(&field) {
+        // 动态读取所有 report.* 条目（覆盖自定义分析师和 value-investor）
+        for (key, report) in &bb.shared_state {
+            if let Some(analyst_id) = key.strip_prefix("report.") {
                 let _ = write!(
                     ctx,
-                    "--- {} 报告 ---\n{}\n",
-                    analyst_id,
+                    "--- {analyst_id} 报告 ---\n{}\n",
                     if report.len() > 500 {
                         &report[..500]
                     } else {
@@ -772,13 +771,11 @@ impl StockAnalysisOrchestrator {
             let _ =
                 write!(ctx, "角色: 交易员\n\n请基于以下分析结果制定具体的A股交易执行方案。\n\n");
 
-            for analyst_id in ANALYST_IDS {
-                let field = format!("report.{analyst_id}");
-                if let Some(report) = bb.get_state(&field) {
+            for (key, report) in &bb.shared_state {
+                if let Some(analyst_id) = key.strip_prefix("report.") {
                     let _ = write!(
                         ctx,
-                        "--- {} 报告 ---\n{}\n\n",
-                        analyst_id,
+                        "--- {analyst_id} 报告 ---\n{}\n\n",
                         if report.len() > 500 {
                             &report[..500]
                         } else {

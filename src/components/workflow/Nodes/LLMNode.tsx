@@ -60,7 +60,7 @@ const LLMNodeComponent: React.FC<NodeProps<LLMNodeData>> = ({ data, selected }) 
           borderRadius: 8,
           overflow: "hidden",
           boxShadow: selected ? `0 0 0 2px ${color}40` : "none",
-          transition: "all 0.2s",
+          transition: "box-shadow 0.2s, transform 0.2s",
         }}
       >
         <div
@@ -76,7 +76,7 @@ const LLMNodeComponent: React.FC<NodeProps<LLMNodeData>> = ({ data, selected }) 
           <span style={{ fontSize: 14 }}>{getModelIcon(data.model || "")}</span>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: color,
               fontWeight: 600,
             }}

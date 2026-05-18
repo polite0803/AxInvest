@@ -43,7 +43,7 @@ function formatSyncTime(value: string | null): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString();
 }
 
-export default function WebDavSync() {
+export function WebDavSync() {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { settings, saveSettings } = useSettingsStore();
@@ -220,9 +220,7 @@ export default function WebDavSync() {
 
   const handleBatchDelete = async () => {
     try {
-      for (const fileName of selectedFileNames) {
-        await invoke("webdav_delete_backup", { fileName });
-      }
+      await Promise.all(selectedFileNames.map((fileName) => invoke("webdav_delete_backup", { fileName })));
       message.success(t("backup.deleteSuccess"));
       setSelectedFileNames([]);
       loadRemoteBackups();

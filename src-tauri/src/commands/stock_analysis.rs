@@ -4,7 +4,7 @@ use axagent_core::entity::{
     analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
 use axagent_core::types::ProviderProxyConfig;
-use axagent_providers::{resolve_base_url_for_type, ProviderAdapter, ProviderRequestContext};
+use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
@@ -22,8 +22,8 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::RwLock;
 use zeroize::Zeroizing;
@@ -188,7 +188,6 @@ pub async fn start_stock_analysis(
 }
 
 /// 供 StockScheduler 等内部调用方使用的分析执行函数（不走 Tauri command 通道）
-/// 供 StockScheduler 等内部调用方使用的分析执行函数（不走 Tauri command 通道）
 pub async fn run_scheduled_analysis(
     app_handle: &tauri::AppHandle,
     stock_code: &str,
@@ -196,7 +195,8 @@ pub async fn run_scheduled_analysis(
     date: &str,
     provider_id: &str,
 ) -> Result<(), String> {
-    let db = app_handle.state::<crate::AppState>().sea_db.clone();
+    let state = app_handle.state::<crate::AppState>();
+    let db = state.sea_db.clone();
     let analysis_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
     let conversation_id = uuid::Uuid::new_v4().to_string();
@@ -207,7 +207,7 @@ pub async fn run_scheduled_analysis(
         stock_name: Set(stock_name.to_string()),
         analysis_date: Set(date.to_string()),
         provider_id: Set(provider_id.to_string()),
-        conversation_id: Set(conversation_id.clone()),
+        conversation_id: Set(conversation_id),
         status: Set("running".to_string()),
         decision_action: Set(None),
         decision_position_pct: Set(None),
@@ -223,9 +223,7 @@ pub async fn run_scheduled_analysis(
         .map_err(|e| format!("写入分析记录失败: {e}"))?;
 
     let cancel_token = Arc::new(AtomicBool::new(false));
-
-    // 获取 master_key（从 app state）
-    let master_key = app_handle.state::<crate::AppState>().master_key;
+    let master_key = state.master_key;
 
     let runner: Option<Arc<dyn AgentRunner>> = match build_cancel_aware_runner(
         &db,
@@ -241,84 +239,32 @@ pub async fn run_scheduled_analysis(
             None
         },
     };
+
     let prompts = load_stock_analysis_prompts(&db).await;
+    let mut config = AnalysisConfig::default();
+    load_analysis_config(&db, &mut config).await;
+
+    let cancel_tokens = state.agent_cancel_tokens.clone();
     {
-        let state = app_handle.state::<crate::AppState>();
-        let mut tokens = state.agent_cancel_tokens.lock().await;
+        let mut tokens = cancel_tokens.lock().await;
         tokens.insert(analysis_id.clone(), cancel_token.clone());
     }
 
-    let app = app_handle.clone();
-    let db_clone = db.clone();
-    let data_client: Arc<axagent_astock_data::AStockClient> =
-        app_handle.state::<crate::AppState>().astock_client.clone();
-    let sc = stock_code.to_string();
-    let sn = stock_name.to_string();
-    let d = date.to_string();
-    let aid = analysis_id.clone();
-    let _cid = conversation_id.clone();
+    launch_analysis_worker(
+        app_handle.clone(),
+        db,
+        state.astock_client.clone(),
+        stock_code.to_string(),
+        stock_name.to_string(),
+        date.to_string(),
+        config,
+        runner,
+        prompts,
+        cancel_token,
+        analysis_id,
+        cancel_tokens,
+    );
 
-    tokio::spawn(async move {
-        let (event_tx, _) = tokio::sync::broadcast::channel::<AnalysisEvent>(64);
-        let mut event_rx = event_tx.subscribe();
-        let app_for_events = app.clone();
-        tokio::spawn(async move {
-            while let Ok(event) = event_rx.recv().await {
-                let _ = app_for_events.emit("stock-analysis-event", &event);
-            }
-        });
-        let blackboard =
-            Arc::new(RwLock::new(SharedBlackboard::new(&aid, format!("分析 {sc} ({sn})"))));
-        let mut config = AnalysisConfig::default();
-        load_analysis_config(&db_clone, &mut config).await;
-        let result = StockAnalysisOrchestrator::run(
-            &data_client,
-            blackboard.clone(),
-            sc,
-            sn,
-            d,
-            config,
-            event_tx,
-            runner,
-            prompts,
-            Some(cancel_token),
-        )
-        .await;
-        // Update DB
-        let now = chrono::Utc::now().timestamp_millis();
-        match result {
-            Ok(decision) => {
-                let json = serde_json::to_string(&decision).unwrap_or_default();
-                let snapshot =
-                    axagent_stock_analysis::pipeline::export_blackboard_snapshot(&blackboard).await;
-                let _ = stock_analyses::Entity::update_many()
-                    .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
-                    .col_expr(stock_analyses::Column::DecisionAction, Expr::value(&decision.action))
-                    .col_expr(
-                        stock_analyses::Column::DecisionPositionPct,
-                        Expr::value(decision.position_pct),
-                    )
-                    .col_expr(
-                        stock_analyses::Column::DecisionReasoning,
-                        Expr::value(&decision.reasoning),
-                    )
-                    .col_expr(stock_analyses::Column::DecisionJson, Expr::value(&json))
-                    .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(&snapshot))
-                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
-                    .filter(stock_analyses::Column::Id.eq(&aid))
-                    .exec(&db_clone)
-                    .await;
-            },
-            Err(e) => {
-                let _ = stock_analyses::Entity::update_many()
-                    .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {e}")))
-                    .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now))
-                    .filter(stock_analyses::Column::Id.eq(&aid))
-                    .exec(&db_clone)
-                    .await;
-            },
-        }
-    });
     Ok(())
 }
 
@@ -808,7 +754,7 @@ pub async fn backtest_all_history(
                 .decision_action
                 .clone()
                 .unwrap_or_else(|| "持有".to_string()),
-            decision_confidence: a.decision_position_pct.map(|p| p / 100.0).unwrap_or(0.5),
+            decision_confidence: 0.5,
         })
         .collect();
 
@@ -940,8 +886,8 @@ pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Resul
 
 /// 列出所有自定义分析师插件
 #[tauri::command]
-pub async fn list_custom_analysts(
-) -> Result<Vec<axagent_stock_analysis::plugin::CustomAnalyst>, String> {
+pub async fn list_custom_analysts()
+-> Result<Vec<axagent_stock_analysis::plugin::CustomAnalyst>, String> {
     let mgr = AnalystPluginManager::new("agency_experts/stock-analysis");
     Ok(mgr.discover_custom_analysts())
 }

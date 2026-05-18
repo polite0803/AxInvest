@@ -1,7 +1,7 @@
 import { useExecutionStore } from "@/stores/feature/executionStore";
 import { Progress, Spin, Tag, theme, Typography } from "antd";
 import { Wrench } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
@@ -10,7 +10,7 @@ interface AgentProgressBarProps {
   conversationId: string;
 }
 
-function getToolDisplayName(toolName: string, t: (key: string, ...args: any[]) => string): string {
+function getToolDisplayName(toolName: string, t: (key: string) => string): string {
   const lower = toolName.toLowerCase();
   const map: Record<string, string> = {
     read: "FileRead",
@@ -51,25 +51,48 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
   const currentToolCall = useExecutionStore((s) => s.currentToolCall);
   const isExecuting = useExecutionStore((s) => s.isActive(conversationId));
 
-  const displayName = useMemo(() => {
+  // 持久化最后一次看到的工具名称，解决 currentToolCall 被 handleToolResult 置 null
+  // 但 phase 仍为 executing 时（工具间隙），UI 显示空转无名称的问题。
+  const lastKnownToolNameRef = useRef<string | null>(null);
+  const prevIsExecutingRef = useRef(false);
+
+  // 清理持久名称：当执行结束（active → inactive）时重置
+  useEffect(() => {
+    if (!isExecuting && prevIsExecutingRef.current) {
+      lastKnownToolNameRef.current = null;
+    }
+    prevIsExecutingRef.current = isExecuting;
+  }, [isExecuting]);
+
+  const currentDisplayName = useMemo(() => {
     return currentToolCall?.conversationId === conversationId
-      ? getToolDisplayName(currentToolCall.toolName, t as any)
+      ? getToolDisplayName(currentToolCall.toolName, t)
       : null;
   }, [currentToolCall?.toolName, currentToolCall?.toolUseId, currentToolCall?.conversationId, conversationId, t]);
 
+  // 当有新的工具名称时，更新持久引用
+  useEffect(() => {
+    if (currentDisplayName) {
+      lastKnownToolNameRef.current = currentDisplayName;
+    }
+  }, [currentDisplayName]);
+
+  // displayName 优先使用当前 currentToolCall 的名称，fallback 到持久化的名称
+  const displayName = currentDisplayName || lastKnownToolNameRef.current;
+
   // 用于动画过渡：当工具切换时短暂闪烁
-  const [lastToolName, setLastToolName] = useState<string | null>(null);
+  const lastToolNameRef = useRef<string | null>(null);
   const [transitioning, setTransitioning] = useState(false);
 
   useEffect(() => {
     if (
       currentToolCall?.conversationId === conversationId
       && currentToolCall?.toolName
-      && currentToolCall.toolName !== lastToolName
+      && currentToolCall.toolName !== lastToolNameRef.current
     ) {
       setTransitioning(true);
       const t = setTimeout(() => setTransitioning(false), 300);
-      setLastToolName(currentToolCall.toolName);
+      lastToolNameRef.current = currentToolCall.toolName;
       return () => clearTimeout(t);
     }
   }, [
@@ -77,7 +100,6 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
     currentToolCall?.toolUseId,
     currentToolCall?.conversationId,
     conversationId,
-    lastToolName,
   ]);
 
   // 仅依赖状态机判断当前对话是否活跃，不依赖全局 currentToolCall
@@ -112,13 +134,13 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
       {/* 左侧指示器 */}
       <Spin size="small" />
 
-      {/* 工具名称 — 仅当 currentToolCall 属于本对话时显示 */}
-      {ownToolActive && displayName && (
+      {/* 工具名称 — 显示当前或最后已知的工具名称 */}
+      {active && displayName && (
         <Tag
           color="processing"
           style={{
             margin: 0,
-            fontSize: 11,
+            fontSize: 12,
             lineHeight: "18px",
             padding: "0 6px",
           }}
@@ -147,7 +169,7 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
         <Text
           type="secondary"
           style={{
-            fontSize: 11,
+            fontSize: 12,
             whiteSpace: "nowrap",
             fontVariantNumeric: "tabular-nums",
           }}
@@ -160,5 +182,3 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
     </div>
   );
 };
-
-export default AgentProgressBar;

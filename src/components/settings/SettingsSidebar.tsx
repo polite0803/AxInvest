@@ -6,6 +6,7 @@ import { Menu, Tabs, theme, Tooltip } from "antd";
 import {
   ArrowLeft,
   Bell,
+  BookOpen,
   Bot,
   Boxes,
   Cable,
@@ -59,7 +60,9 @@ const MENU_ICONS: Partial<Record<SettingsSection, React.ReactNode>> = {
   acp: <Network size={16} color={SETTINGS_ICON_COLORS.Globe} />,
   skillsHub: <ShoppingBag size={16} color={SETTINGS_ICON_COLORS.ShoppingBag} />,
   plugins: <Puzzle size={16} color={SETTINGS_ICON_COLORS.Puzzle} />,
+  knowledgeSettings: <BookOpen size={16} color={SETTINGS_ICON_COLORS.BookOpen} />,
   dashboardPlugins: <LayoutDashboard size={16} color={SETTINGS_ICON_COLORS.LayoutDashboard} />,
+  notificationCenter: <Bell size={16} color={SETTINGS_ICON_COLORS.Bell} />,
   webhooks: <Bell size={16} color={SETTINGS_ICON_COLORS.Bell} />,
   messageChannels: <Send size={16} color={SETTINGS_ICON_COLORS.Send} />,
   advanced: <SlidersHorizontal size={16} color={SETTINGS_ICON_COLORS.Settings} />,
@@ -74,9 +77,18 @@ const MENU_ICONS: Partial<Record<SettingsSection, React.ReactNode>> = {
 const TAB_GROUPS: Record<string, SettingsSection[]> = {
   model: ["providers", "defaultModel", "conversationSettings", "promptTemplates", "searchProviders"],
   appearance: ["general", "display", "shortcuts"],
-  extensions: ["tools", "skillsHub", "plugins", "dashboardPlugins", "workflow", "appConfig", "userProfile"],
+  extensions: [
+    "tools",
+    "skillsHub",
+    "plugins",
+    "knowledgeSettings",
+    "dashboardPlugins",
+    "workflow",
+    "appConfig",
+    "userProfile",
+  ],
   network: ["proxy", "messageChannels", "webhooks", "acp"],
-  data: ["data", "storage", "cloudWorkspace", "backup", "scheduler", "stockAnalysis"],
+  data: ["data", "storage", "cloudWorkspace", "backup", "scheduler", "stockAnalysis", "notificationCenter"],
   system: ["advanced", "evolution", "about"],
 };
 
@@ -130,23 +142,27 @@ export function SettingsSidebar() {
   const skillSections = useSkillExtensionStore((s) => s.settingsSections);
   const { width: tabBarWidth, onMouseDown: onTabBarResize } = useDraggableWidth(72, 48, 200);
 
+  // 预构建 section → tab 反向映射，避免循环中调用 includes
+  const sectionToTab = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [tab, sections] of Object.entries(TAB_GROUPS)) {
+      for (const section of sections) {
+        map.set(section, tab);
+      }
+    }
+    return map;
+  }, []);
+
   // 根据当前选中的 section 反查所属 tab
   const [activeTab, setActiveTab] = useState(() => {
-    for (const [tab, sections] of Object.entries(TAB_GROUPS)) {
-      if (sections.includes(settingsSection)) { return tab; }
-    }
-    return "model";
+    return sectionToTab.get(settingsSection) ?? "model";
   });
 
   // 当 settingsSection 变化时，同步更新 activeTab
   useEffect(() => {
-    for (const [tab, sections] of Object.entries(TAB_GROUPS)) {
-      if (sections.includes(settingsSection)) {
-        setActiveTab(tab);
-        break;
-      }
-    }
-  }, [settingsSection]);
+    const tab = sectionToTab.get(settingsSection);
+    if (tab) { setActiveTab(tab); }
+  }, [settingsSection, sectionToTab]);
 
   const handleTabChange = (key: string) => {
     setActiveTab(key);
@@ -216,6 +232,8 @@ export function SettingsSidebar() {
       {/* Back button */}
       <div
         className="flex items-center gap-2 cursor-pointer"
+        role="button"
+        tabIndex={0}
         style={{
           color: token.colorTextSecondary,
           borderBottom: `1px solid ${token.colorBorderSecondary}`,
@@ -226,6 +244,9 @@ export function SettingsSidebar() {
           paddingBottom: 12,
         }}
         onClick={() => navigate("/")}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") { navigate("/"); }
+        }}
         onMouseEnter={(e) => {
           e.currentTarget.style.color = token.colorText;
           e.currentTarget.style.backgroundColor = token.colorFillSecondary;
@@ -239,7 +260,7 @@ export function SettingsSidebar() {
         <span style={{ fontSize: 14 }}>{t("common.back")}</span>
         <span
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color: token.colorTextQuaternary,
             border: `1px solid ${token.colorBorderSecondary}`,
             borderRadius: 4,
@@ -262,6 +283,8 @@ export function SettingsSidebar() {
         />
         {/* Resize handle */}
         <div
+          role="separator"
+          tabIndex={0}
           onMouseDown={onTabBarResize}
           style={{
             width: 4,

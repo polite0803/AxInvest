@@ -36,8 +36,7 @@ const STOCK_ROLES: &[StockRoleDef] = &[
         id: "stock-analyst",
         name: "股票分析师",
         description: "A股多维分析",
-        system_prompt:
-            "你是专业的 A 股分析师，基于行情数据、财务数据、新闻资讯等对股票进行深度分析。",
+        system_prompt: "你是专业的 A 股分析师，基于行情数据、财务数据、新闻资讯等对股票进行深度分析。",
         max_concurrent: 7,
         timeout_seconds: 600,
     },

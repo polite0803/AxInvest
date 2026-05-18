@@ -125,12 +125,12 @@ impl ValueEngine {
             details.push("ROA≤0 ✗".into());
         }
 
-        let cfo = current.net_profit.unwrap_or(0.0); // 用净利润近似经营现金流
-        if cfo > 0.0 {
+        let cfo_proxy = current.net_margin.unwrap_or(0.0);
+        if cfo_proxy > 0.0 {
             profitability += 1;
-            details.push("CFO>0 ✓".into());
+            details.push("净利率>0 ✓".into());
         } else {
-            details.push("CFO≤0 ✗".into());
+            details.push("净利率≤0 ✗".into());
         }
 
         let prev_roa = previous.net_profit.unwrap_or(0.0) / 100_000_000.0;
@@ -141,11 +141,12 @@ impl ValueEngine {
             details.push("ΔROA≤0 ✗".into());
         }
 
-        if cfo > roa * 100_000_000.0 {
+        let curr_roe = current.roe.unwrap_or(0.0);
+        if cfo_proxy > 0.0 && (curr_roe <= 0.0 || cfo_proxy > curr_roe * 0.5) {
             profitability += 1;
-            details.push("CFO>ROA ✓".into());
+            details.push("盈利质量好 ✓".into());
         } else {
-            details.push("CFO≤ROA ✗".into());
+            details.push("盈利质量差 ✗".into());
         }
 
         // 杠杆/流动性 (3分)
@@ -261,7 +262,7 @@ impl ValueEngine {
             .sum::<f64>()
             / 3.0;
         // 简化：用净利润-营收*0.05 估算FCF
-        let est_fcf = avg_net - financials.first().and_then(|f| f.revenue).unwrap_or(0.0) * 0.05;
+        let est_fcf = avg_net * 0.95;
         let fcf_ratio = if avg_net > 0.0 {
             est_fcf / avg_net
         } else {
@@ -277,34 +278,32 @@ impl ValueEngine {
         }
 
         // 护城河评分
-        let mut score = 30u32; // 基础分
+        let mut score = 0u32;
         if roe_years_above_15 >= 5 {
-            score += 25;
+            score += 30;
         } else if roe_years_above_15 >= 3 {
-            score += 15;
+            score += 20;
         }
         if avg_margin > 40.0 {
-            score += 20;
+            score += 25;
         } else if avg_margin > 20.0 {
-            score += 10;
+            score += 15;
         }
         if margin_std < 5.0 && !margins.is_empty() {
             score += 10;
         }
         if fcf_ratio > 0.8 {
-            score += 15;
+            score += 20;
         } else if fcf_ratio > 0.5 {
-            score += 5;
+            score += 10;
         }
 
-        let moat_type = if score >= 70 {
+        let moat_type = if score >= 60 {
             "宽护城河".to_string()
-        } else if score >= 50 {
+        } else if score >= 35 {
             "窄护城河".to_string()
-        } else if score >= 30 {
-            "无护城河".to_string()
         } else {
-            "护城河受损".to_string()
+            "无护城河".to_string()
         };
 
         MoatAssessment {
@@ -372,7 +371,7 @@ impl ValueEngine {
 
         let eps = latest.eps.unwrap_or(0.0);
         let bvps = latest.bps.unwrap_or(0.0);
-        let fcf = latest.net_profit.unwrap_or(0.0) * 0.8; // 净利润×80%估算FCF
+        let fcf = latest.net_profit.unwrap_or(0.0) * 0.95;
 
         // DCF
         let dcf = if fcf > 0.0 && shares_outstanding > 0.0 {

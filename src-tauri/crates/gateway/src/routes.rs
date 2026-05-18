@@ -1,9 +1,9 @@
 use axum::{
-    middleware,
+    Router, middleware,
     routing::{delete, get, patch, post, put},
-    Router,
 };
-use tower_http::cors::{Any, CorsLayer};
+use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use tower_http::cors::CorsLayer;
 
 use crate::auth::auth_middleware;
 use crate::handlers::{
@@ -16,22 +16,30 @@ use crate::marketplace_handlers::{
     create_review, delete_review, get_marketplace_stats, get_my_review, get_reviews, update_review,
 };
 use crate::metrics::metrics_handler;
+use crate::middleware::rate_limit_middleware;
 use crate::native::{
     anthropic_count_tokens, anthropic_messages, gemini_list_models, gemini_model_operation,
     openai_responses,
 };
 use crate::realtime::realtime_handler;
 use crate::server::GatewayAppState;
-use crate::stock_handlers::{
-    add_watchlist, delete_watchlist, get_analysis, get_kline, get_quote, get_watchlist,
-    list_analyses, search_stock, start_analysis,
-};
 
 pub fn create_router(state: GatewayAppState) -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin([
+            "http://localhost:1419".parse().unwrap(),
+            "http://127.0.0.1:1419".parse().unwrap(),
+            "tauri://localhost".parse().unwrap(),
+        ])
+        .allow_methods([
+            http::Method::GET,
+            http::Method::POST,
+            http::Method::PUT,
+            http::Method::PATCH,
+            http::Method::DELETE,
+            http::Method::OPTIONS,
+        ])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
 
     // Protected routes (require auth)
     let protected = Router::new()
@@ -65,16 +73,6 @@ pub fn create_router(state: GatewayAppState) -> Router {
         .route("/api/jobs/{job_id}/runs/{run_id}/cancel", post(cancel_run))
         .route("/api/jobs/{job_id}/runs/{run_id}/retry", post(retry_run))
         .route("/api/jobs/{job_id}/runs/{run_id}/logs", get(get_run_logs))
-        // Stock analysis
-        .route("/api/stock/search", get(search_stock))
-        .route("/api/stock/quote", get(get_quote))
-        .route("/api/stock/kline", get(get_kline))
-        .route("/api/stock/analysis", post(start_analysis))
-        .route("/api/stock/analysis/{analysis_id}", get(get_analysis))
-        .route("/api/stock/analyses", get(list_analyses))
-        .route("/api/stock/watchlist", get(get_watchlist))
-        .route("/api/stock/watchlist", post(add_watchlist))
-        .route("/api/stock/watchlist/{id}", delete(delete_watchlist))
         // Marketplace reviews
         .route(
             "/api/marketplace/{marketplace_id}/reviews",
@@ -104,7 +102,8 @@ pub fn create_router(state: GatewayAppState) -> Router {
         .route("/health", get(health_check))
         .route("/health/detailed", get(detailed_health_check))
         .route("/v1/realtime", get(realtime_handler))
-        .route("/metrics", get(metrics_handler));
+        .route("/metrics", get(metrics_handler))
+        .layer(middleware::from_fn(rate_limit_middleware));
 
     Router::new()
         .merge(protected)
@@ -127,7 +126,7 @@ mod tests {
         GatewayAppState {
             db,
             master_key: [7u8; 32],
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            started_at: 0,
         }
     }
 

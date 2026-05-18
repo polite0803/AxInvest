@@ -1,9 +1,10 @@
 use crate::error::{AxAgentError, Result};
+#[cfg(not(target_os = "android"))]
+use rmcp::transport::TokioChildProcess;
 use rmcp::{
+    RoleClient, ServiceExt,
     model::{CallToolRequestParams, CallToolResult, Tool},
     transport::streamable_http_client::StreamableHttpClientWorker,
-    transport::TokioChildProcess,
-    RoleClient, ServiceExt,
 };
 
 /// Type alias for a connected MCP client peer.
@@ -13,12 +14,20 @@ use rmcp::{
 type McpPeer = rmcp::service::Peer<RoleClient>;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-#[allow(unused_imports)]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(all(unix, not(target_os = "android")))]
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 use tracing::info;
+
+static SSE_JSON_RPC_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_rpc_id() -> u64 {
+    SSE_JSON_RPC_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Progress update during a tool call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,12 +62,13 @@ pub struct DiscoveredTool {
 ///
 /// On macOS/Linux GUI apps inherit a minimal PATH (`/usr/bin:/bin:…`).
 /// This function runs the user's login shell once and caches the full PATH.
+#[cfg(not(target_os = "android"))]
 fn get_shell_path() -> &'static str {
     static SHELL_PATH: OnceLock<String> = OnceLock::new();
     SHELL_PATH.get_or_init(|| resolve_login_shell_path().unwrap_or_default())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn resolve_login_shell_path() -> Option<String> {
     let current_path = std::env::var("PATH").ok();
     let mut best_path: Option<String> = None;
@@ -75,7 +85,7 @@ fn resolve_login_shell_path() -> Option<String> {
     best_path.or(current_path)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn shell_candidates() -> Vec<String> {
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
@@ -100,7 +110,7 @@ fn shell_candidates() -> Vec<String> {
     candidates
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn read_path_from_shell(shell: &str) -> Option<String> {
     const START: &str = "__AxAgent_PATH_START__";
     const END: &str = "__AxAgent_PATH_END__";
@@ -120,21 +130,17 @@ fn read_path_from_shell(shell: &str) -> Option<String> {
     extract_marked_path(&output.stdout, START, END)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn extract_marked_path(output: &[u8], start: &str, end: &str) -> Option<String> {
     let stdout = String::from_utf8(output.to_vec()).ok()?;
     let start_idx = stdout.find(start)? + start.len();
     let end_idx = stdout[start_idx..].find(end)? + start_idx;
     let path = stdout[start_idx..end_idx].trim().to_string();
 
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
-    }
+    if path.is_empty() { None } else { Some(path) }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn merge_paths(primary: &str, fallback: Option<&str>) -> String {
     let mut merged = Vec::new();
     let mut seen = HashSet::new();
@@ -155,14 +161,14 @@ fn merge_paths(primary: &str, fallback: Option<&str>) -> String {
     merged.join(":")
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn path_score(path: &str) -> usize {
     path.split(':')
         .filter(|segment| !segment.is_empty())
         .count()
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(target_os = "android")))]
 fn resolve_login_shell_path() -> Option<String> {
     // On Windows, packaged Tauri apps may not inherit the full PATH
     // from the user's shell (especially paths added by Node version
@@ -198,7 +204,7 @@ fn resolve_login_shell_path() -> Option<String> {
     Some(deduped.join(";"))
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(target_os = "android")))]
 fn read_registry_path(key: &str) -> Option<String> {
     use std::process::Command;
     let output = Command::new("reg")
@@ -234,6 +240,7 @@ fn read_registry_path(key: &str) -> Option<String> {
 
 /// Inject login-shell PATH into the command unless the user already
 /// provides an explicit PATH in their custom environment variables.
+#[cfg(not(target_os = "android"))]
 fn configure_stdio_env(cmd: &mut tokio::process::Command, env: &HashMap<String, String>) {
     let shell_path = get_shell_path();
     if !shell_path.is_empty() && !env.contains_key("PATH") {
@@ -249,21 +256,19 @@ fn configure_stdio_env(cmd: &mut tokio::process::Command, env: &HashMap<String, 
 /// for `.cmd`/`.bat` extensions — only `cmd.exe /C` does. This helper
 /// wraps the command through `cmd.exe /C` on Windows so that `.cmd` scripts
 /// (npx, npm, etc.) can be found and executed correctly.
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(target_os = "android")))]
 fn build_stdio_command(
     command: &str,
     args: &[String],
     env: &HashMap<String, String>,
 ) -> tokio::process::Command {
-    let mut cmd = tokio::process::Command::new("cmd.exe");
-    let mut all_args: Vec<String> = vec!["/C".to_string(), command.to_string()];
-    all_args.extend_from_slice(args);
-    cmd.args(&all_args);
+    let mut cmd = tokio::process::Command::new(command);
+    cmd.args(args);
     configure_stdio_env(&mut cmd, env);
     cmd
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
 fn build_stdio_command(
     command: &str,
     args: &[String],
@@ -316,6 +321,7 @@ fn extract_call_result(result: &CallToolResult) -> (String, bool) {
 // ---------------------------------------------------------------------------
 
 /// Key for identifying a stdio MCP server configuration.
+#[cfg(not(target_os = "android"))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StdioServerKey {
     pub command: String,
@@ -324,6 +330,7 @@ pub struct StdioServerKey {
     pub server_id: Option<String>,
 }
 
+#[cfg(not(target_os = "android"))]
 impl StdioServerKey {
     pub fn new(command: &str, args: &[String], env: &HashMap<String, String>) -> Self {
         Self {
@@ -342,6 +349,7 @@ impl StdioServerKey {
 }
 
 /// A cached MCP stdio client connection with its last-use timestamp.
+#[cfg(not(target_os = "android"))]
 struct PooledConnection {
     peer: McpPeer,
     cancel_token: rmcp::service::RunningServiceCancellationToken,
@@ -358,11 +366,13 @@ struct PooledConnection {
 /// This eliminates the overhead of process spawn + MCP handshake
 /// for repeated calls to the same server, which is the common
 /// pattern in Agent mode (multiple tool calls per turn).
+#[cfg(not(target_os = "android"))]
 pub struct McpConnectionPool {
     connections: Mutex<HashMap<StdioServerKey, PooledConnection>>,
     idle_timeout: std::time::Duration,
 }
 
+#[cfg(not(target_os = "android"))]
 impl McpConnectionPool {
     /// Create a new connection pool with the given idle timeout.
     pub fn new(idle_timeout: std::time::Duration) -> Self {
@@ -468,6 +478,7 @@ impl McpConnectionPool {
 
 /// Spawn a new stdio MCP client (child process + handshake).
 /// Returns the peer for making calls and a cancellation token for shutdown.
+#[cfg(not(target_os = "android"))]
 async fn spawn_stdio_client(
     command: &str,
     args: &[String],
@@ -506,10 +517,12 @@ async fn spawn_stdio_client(
 }
 
 /// Global MCP connection pool (lazy-initialized).
+#[cfg(not(target_os = "android"))]
 static MCP_POOL: OnceLock<Arc<McpConnectionPool>> = OnceLock::new();
 
 /// Get the global MCP connection pool.
 /// Idle timeout is 5 minutes — connections not used for 5 min are evicted.
+#[cfg(not(target_os = "android"))]
 pub fn global_mcp_pool() -> Arc<McpConnectionPool> {
     MCP_POOL
         .get_or_init(|| Arc::new(McpConnectionPool::new(std::time::Duration::from_secs(300))))
@@ -518,6 +531,7 @@ pub fn global_mcp_pool() -> Arc<McpConnectionPool> {
 
 /// Execute a tool call against an MCP server via stdio transport,
 /// using the connection pool to reuse existing connections.
+#[cfg(not(target_os = "android"))]
 pub async fn call_tool_stdio_pooled(
     command: &str,
     args: &[String],
@@ -564,6 +578,7 @@ pub async fn call_tool_stdio_pooled(
 
 /// Execute a tool call against an MCP server via stdio transport.
 /// (Legacy non-pooled version — kept for backward compatibility and tests)
+#[cfg(not(target_os = "android"))]
 pub async fn call_tool_stdio(
     command: &str,
     args: &[String],
@@ -611,6 +626,7 @@ pub async fn call_tool_stdio(
 }
 
 /// Discover tools from an MCP server via stdio transport.
+#[cfg(not(target_os = "android"))]
 pub async fn discover_tools_stdio(
     command: &str,
     args: &[String],
@@ -651,6 +667,37 @@ pub async fn discover_tools_stdio(
     Ok(tools.iter().map(tool_to_discovered).collect())
 }
 
+#[cfg(target_os = "android")]
+pub async fn call_tool_stdio(
+    _command: &str,
+    _args: &[String],
+    _env: &HashMap<String, String>,
+    _tool_name: &str,
+    _tool_arguments: Value,
+) -> Result<McpToolResult> {
+    Err(AxAgentError::Gateway("MCP stdio transport is not available on Android".into()))
+}
+
+#[cfg(target_os = "android")]
+pub async fn call_tool_stdio_pooled(
+    _command: &str,
+    _args: &[String],
+    _env: &HashMap<String, String>,
+    _tool_name: &str,
+    _tool_arguments: Value,
+) -> Result<McpToolResult> {
+    Err(AxAgentError::Gateway("MCP stdio transport is not available on Android".into()))
+}
+
+#[cfg(target_os = "android")]
+pub async fn discover_tools_stdio(
+    _command: &str,
+    _args: &[String],
+    _env: &HashMap<String, String>,
+) -> Result<Vec<DiscoveredTool>> {
+    Err(AxAgentError::Gateway("MCP stdio transport is not available on Android".into()))
+}
+
 // ---------------------------------------------------------------------------
 // HTTP / SSE transport (Streamable HTTP — handles both)
 // ---------------------------------------------------------------------------
@@ -660,8 +707,23 @@ pub async fn call_tool_http(
     endpoint: &str,
     tool_name: &str,
     tool_arguments: Value,
+    auth_header: Option<&str>,
 ) -> Result<McpToolResult> {
-    let transport = StreamableHttpClientWorker::<reqwest::Client>::new_simple(endpoint);
+    let transport = {
+        use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+        let mut config = StreamableHttpClientTransportConfig::with_uri(endpoint);
+        if let Some(auth) = auth_header {
+            config = config.auth_header(auth.to_string());
+        }
+        StreamableHttpClientWorker::<reqwest::Client>::new(
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
+            config,
+        )
+    };
 
     let client = ()
         .serve(transport)
@@ -690,17 +752,18 @@ pub async fn call_tool_sse(
     endpoint: &str,
     tool_name: &str,
     tool_arguments: Value,
+    auth_header: Option<&str>,
 ) -> Result<McpToolResult> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": next_rpc_id(),
         "method": "tools/call",
         "params": {
             "name": tool_name,
             "arguments": tool_arguments,
         }
     });
-    let response = sse_send_request(endpoint, request).await?;
+    let response = sse_send_request(endpoint, request, auth_header).await?;
     let result_obj = response.get("result").ok_or_else(|| {
         let err = response
             .get("error")
@@ -761,11 +824,11 @@ pub async fn discover_tools_http(endpoint: &str) -> Result<Vec<DiscoveredTool>> 
 pub async fn discover_tools_sse(endpoint: &str) -> Result<Vec<DiscoveredTool>> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": 1,
+        "id": next_rpc_id(),
         "method": "tools/list",
         "params": {}
     });
-    let response = sse_send_request(endpoint, request).await?;
+    let response = sse_send_request(endpoint, request, None).await?;
     tracing::info!(
         "SSE tools/list response: {}",
         serde_json::to_string_pretty(&response).unwrap_or_default()
@@ -808,6 +871,7 @@ pub async fn discover_tools_sse(endpoint: &str) -> Result<Vec<DiscoveredTool>> {
 ///
 /// When `server_id` is provided, OAuth credentials are automatically looked up
 /// and injected for HTTP/SSE transports.
+#[allow(clippy::too_many_arguments)]
 pub async fn call_tool_unified(
     transport: &str,
     command: Option<&str>,
@@ -832,6 +896,7 @@ pub async fn call_tool_unified(
 }
 
 /// Extended unified entry point with optional `server_id` (OAuth) and progress callback.
+#[allow(clippy::too_many_arguments)]
 pub async fn call_tool_unified_with_opts(
     transport: &str,
     command: Option<&str>,
@@ -857,9 +922,7 @@ pub async fn call_tool_unified_with_opts(
     };
 
     // OAuth: resolve credentials for HTTP/SSE servers
-    let _auth_header = server_id.and_then(|_sid| {
-        // 非阻塞检查——如果已存储凭据则使用
-        // 完整 OAuth 流程由 Tauri 命令 start_mcp_oauth_flow 触发
+    let auth_header = server_id.and_then(|_sid| {
         std::env::var("MCP_OAUTH_TOKEN")
             .ok()
             .map(|token| format!("Bearer {token}"))
@@ -867,18 +930,29 @@ pub async fn call_tool_unified_with_opts(
 
     match transport {
         "stdio" => {
-            report("connecting", "启动 MCP 进程...", Some(10));
-            let command = command
-                .ok_or_else(|| AxAgentError::Gateway("stdio transport requires command".into()))?;
-            let args = args.unwrap_or(&[]);
-            let env = env.cloned().unwrap_or_default();
+            #[cfg(target_os = "android")]
+            {
+                let _ = (command, args, env, tool_name, tool_arguments, on_progress);
+                return Err(AxAgentError::Gateway(
+                    "MCP stdio transport is not available on Android".into(),
+                ));
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                report("connecting", "启动 MCP 进程...", Some(10));
+                let command = command.ok_or_else(|| {
+                    AxAgentError::Gateway("stdio transport requires command".into())
+                })?;
+                let args = args.unwrap_or(&[]);
+                let env = env.cloned().unwrap_or_default();
 
-            report("executing", &format!("执行工具: {tool_name}"), Some(50));
-            let mut result =
-                call_tool_stdio_pooled(command, args, &env, tool_name, tool_arguments).await?;
-            report("done", "完成", Some(100));
-            result.progress = progress;
-            Ok(result)
+                report("executing", &format!("执行工具: {tool_name}"), Some(50));
+                let mut result =
+                    call_tool_stdio_pooled(command, args, &env, tool_name, tool_arguments).await?;
+                report("done", "完成", Some(100));
+                result.progress = progress;
+                Ok(result)
+            }
         },
         "http" => {
             report("connecting", "连接 HTTP MCP 服务器...", Some(10));
@@ -886,7 +960,8 @@ pub async fn call_tool_unified_with_opts(
                 .ok_or_else(|| AxAgentError::Gateway("HTTP transport requires endpoint".into()))?;
 
             report("executing", &format!("执行工具: {tool_name}"), Some(50));
-            let mut result = call_tool_http(endpoint, tool_name, tool_arguments).await?;
+            let mut result =
+                call_tool_http(endpoint, tool_name, tool_arguments, auth_header.as_deref()).await?;
             report("done", "完成", Some(100));
             result.progress = progress;
             Ok(result)
@@ -897,7 +972,8 @@ pub async fn call_tool_unified_with_opts(
                 .ok_or_else(|| AxAgentError::Gateway("SSE transport requires endpoint".into()))?;
 
             report("executing", &format!("执行工具: {tool_name}"), Some(50));
-            let mut result = call_tool_sse(endpoint, tool_name, tool_arguments).await?;
+            let mut result =
+                call_tool_sse(endpoint, tool_name, tool_arguments, auth_header.as_deref()).await?;
             report("done", "完成", Some(100));
             result.progress = progress;
             Ok(result)
@@ -918,11 +994,22 @@ pub async fn discover_tools_unified(
 ) -> Result<Vec<DiscoveredTool>> {
     match transport {
         "stdio" => {
-            let command = command
-                .ok_or_else(|| AxAgentError::Gateway("stdio transport requires command".into()))?;
-            let args = args.unwrap_or(&[]);
-            let env = env.cloned().unwrap_or_default();
-            discover_tools_stdio(command, args, &env).await
+            #[cfg(target_os = "android")]
+            {
+                let _ = (command, args, env);
+                return Err(AxAgentError::Gateway(
+                    "MCP stdio transport is not available on Android".into(),
+                ));
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                let command = command.ok_or_else(|| {
+                    AxAgentError::Gateway("stdio transport requires command".into())
+                })?;
+                let args = args.unwrap_or(&[]);
+                let env = env.cloned().unwrap_or_default();
+                discover_tools_stdio(command, args, &env).await
+            }
         },
         "http" => {
             let endpoint = endpoint
@@ -943,7 +1030,11 @@ pub async fn discover_tools_unified(
 // ---------------------------------------------------------------------------
 
 /// Perform a full legacy MCP SSE session: connect → initialize → send request → return response.
-async fn sse_send_request(sse_url: &str, request: Value) -> Result<Value> {
+async fn sse_send_request(
+    sse_url: &str,
+    request: Value,
+    auth_header: Option<&str>,
+) -> Result<Value> {
     use futures::StreamExt;
 
     let client = reqwest::Client::builder()
@@ -954,9 +1045,11 @@ async fn sse_send_request(sse_url: &str, request: Value) -> Result<Value> {
 
     // 1. GET the SSE endpoint to open a persistent stream
     tracing::info!("SSE: connecting to {}", sse_url);
-    let sse_resp = client
-        .get(sse_url)
-        .header("Accept", "text/event-stream")
+    let mut sse_req = client.get(sse_url).header("Accept", "text/event-stream");
+    if let Some(auth) = auth_header {
+        sse_req = sse_req.header("Authorization", auth);
+    }
+    let sse_resp = sse_req
         .send()
         .await
         .map_err(|e| AxAgentError::Gateway(format!("SSE connect failed: {}", e)))?;
@@ -996,7 +1089,7 @@ async fn sse_send_request(sse_url: &str, request: Value) -> Result<Value> {
     // 3. POST initialize handshake
     let init_request = serde_json::json!({
         "jsonrpc": "2.0",
-        "id": 0,
+        "id": next_rpc_id(),
         "method": "initialize",
         "params": {
             "protocolVersion": "2024-11-05",
@@ -1067,16 +1160,16 @@ fn extract_sse_endpoint(buffer: &mut String, base_url: &str) -> Option<String> {
                 data = Some(val.trim());
             }
         }
-        if event_type == Some("endpoint") {
-            if let Some(path) = data {
-                let url = if path.starts_with("http://") || path.starts_with("https://") {
-                    path.to_string()
-                } else {
-                    format!("{}{}", base_url, path)
-                };
-                buffer.drain(..abs_block_end);
-                return Some(url);
-            }
+        if event_type == Some("endpoint")
+            && let Some(path) = data
+        {
+            let url = if path.starts_with("http://") || path.starts_with("https://") {
+                path.to_string()
+            } else {
+                format!("{}{}", base_url, path)
+            };
+            buffer.drain(..abs_block_end);
+            return Some(url);
         }
         search_start = abs_block_end;
     }
@@ -1102,10 +1195,10 @@ where
         match tokio::time::timeout(remaining, stream.next()).await {
             Err(_) => return Err(AxAgentError::Gateway("SSE response timed out".into())),
             Ok(None) => {
-                return Err(AxAgentError::Gateway("SSE stream ended before response".into()))
+                return Err(AxAgentError::Gateway("SSE stream ended before response".into()));
             },
             Ok(Some(Err(e))) => {
-                return Err(AxAgentError::Gateway(format!("SSE read error: {}", e)))
+                return Err(AxAgentError::Gateway(format!("SSE read error: {}", e)));
             },
             Ok(Some(Ok(chunk))) => {
                 let text = String::from_utf8_lossy(chunk.as_ref())
@@ -1148,12 +1241,13 @@ fn extract_sse_json_response(buffer: &mut String) -> Option<Value> {
 
         if is_message {
             let data = data_lines.join("");
-            if let Ok(value) = serde_json::from_str::<Value>(&data) {
-                if value.get("jsonrpc").is_some() && value.get("id").is_some() {
-                    // Remove everything up to and including this event
-                    buffer.drain(..abs_block_end);
-                    return Some(value);
-                }
+            if let Ok(value) = serde_json::from_str::<Value>(&data)
+                && value.get("jsonrpc").is_some()
+                && value.get("id").is_some()
+            {
+                // Remove everything up to and including this event
+                buffer.drain(..abs_block_end);
+                return Some(value);
             }
         }
 
@@ -1166,6 +1260,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn configure_stdio_env_applies_custom_variables() {
         let mut env = HashMap::new();
@@ -1190,6 +1285,7 @@ mod tests {
         assert_eq!(env_map.get("PATH"), Some(&Some("/custom/bin".to_string())));
     }
 
+    #[cfg(not(target_os = "android"))]
     #[tokio::test]
     async fn call_tool_stdio_does_not_hang_when_initialize_stdout_is_non_json_then_eof() {
         let args = vec!["npm notice".to_string()];

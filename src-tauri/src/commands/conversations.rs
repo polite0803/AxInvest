@@ -1,14 +1,21 @@
-#[allow(unused_imports)]
-use crate::commands::proactive::ProactiveService;
 use crate::AppState;
+#[cfg(test)]
+use crate::app_state::SemanticCacheState;
+#[cfg(test)]
+use crate::commands::proactive::ProactiveService;
 use axagent_core::types::*;
 use axagent_providers::{
-    registry::ProviderRegistry, resolve_base_url_for_type, ProviderRequestContext,
+    ProviderRequestContext, extract_reasoning_from_text, registry::ProviderRegistry,
+    resolve_base_url_for_type,
 };
+#[cfg(test)]
+use axagent_runtime_core::prompt_cache::PromptCache;
 use base64::Engine;
 use sea_orm::*;
-use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tauri::{Emitter, State};
 
 fn provider_type_to_registry_key(pt: &ProviderType) -> &'static str {
@@ -29,23 +36,21 @@ async fn resolve_system_prompt(
     conversation: &Conversation,
 ) -> Option<String> {
     // 1. Conversation-level system prompt (highest priority)
-    if let Some(s) = &conversation.system_prompt {
-        if !s.is_empty() {
-            return Some(s.clone());
-        }
+    if let Some(s) = &conversation.system_prompt
+        && !s.is_empty()
+    {
+        return Some(s.clone());
     }
 
-    // 2. Category-level system prompt (middle priority)
     if let Some(ref cat_id) = conversation.category_id {
         if let Ok(categories) =
             axagent_core::repo::conversation_category::list_conversation_categories(db).await
         {
-            if let Some(cat) = categories.iter().find(|c| &c.id == cat_id) {
-                if let Some(ref s) = cat.system_prompt {
-                    if !s.is_empty() {
-                        return Some(s.clone());
-                    }
-                }
+            if let Some(cat) = categories.iter().find(|c| &c.id == cat_id)
+                && let Some(ref s) = cat.system_prompt
+                && !s.is_empty()
+            {
+                return Some(s.clone());
             }
         }
     }
@@ -142,6 +147,7 @@ fn strip_think_tags(content: &str) -> String {
                 s = format!("{}{}", before, after);
                 continue;
             }
+            s.truncate(start);
         }
         break;
     }
@@ -264,17 +270,17 @@ fn strip_display_tags(content: &str) -> String {
                 } else {
                     None
                 };
-                if let Some(start_pos) = start_pos {
-                    if let Some(end_offset) = s[start_pos..].find(&tag_end) {
-                        let after = &s[start_pos + end_offset + tag_end.len()..];
-                        let before = &s[..start_pos];
-                        s = format!(
-                            "{}{}",
-                            before.trim_end_matches('\n'),
-                            after.trim_start_matches('\n')
-                        );
-                        continue;
-                    }
+                if let Some(start_pos) = start_pos
+                    && let Some(end_offset) = s[start_pos..].find(&tag_end)
+                {
+                    let after = &s[start_pos + end_offset + tag_end.len()..];
+                    let before = &s[..start_pos];
+                    s = format!(
+                        "{}{}",
+                        before.trim_end_matches('\n'),
+                        after.trim_start_matches('\n')
+                    );
+                    continue;
                 }
                 break;
             }
@@ -512,11 +518,16 @@ async fn delete_conversation_with_attachments_using(
     }
 
     // 清理关联数据（无 FK 约束，需手动删除避免孤行）
-    let _ = axagent_core::repo::conversation::delete_summary(db, conversation_id).await;
-    let _ = axagent_core::entity::agent_sessions::Entity::delete_many()
+    if let Err(e) = axagent_core::repo::conversation::delete_summary(db, conversation_id).await {
+        tracing::warn!("Failed to delete conversation summary: {}", e);
+    }
+    if let Err(e) = axagent_core::entity::agent_sessions::Entity::delete_many()
         .filter(axagent_core::entity::agent_sessions::Column::ConversationId.eq(conversation_id))
         .exec(db)
-        .await;
+        .await
+    {
+        tracing::warn!("Failed to delete agent sessions: {}", e);
+    }
 
     axagent_core::repo::conversation::delete_conversation(db, conversation_id)
         .await
@@ -744,6 +755,12 @@ async fn consume_stream(
     let mut thinking_durations: Vec<u64> = Vec::new();
     let mut disabled_thinking_strip_state = DisabledThinkingStripState::default();
 
+    // Track inline <think> blocks inside content deltas (DeepSeek v4 style).
+    // These models stream thinking tokens inline in `delta.content` rather than
+    // through a separate `reasoning_content` field.  A single <think> block may
+    // span multiple chunks, so we accumulate across deltas.
+    let mut inline_think_buf: Option<String> = None;
+
     while let Some(result) = stream.next().await {
         // Check for cancellation
         if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
@@ -792,22 +809,100 @@ async fn consume_stream(
                     }
                 }
 
-                // Handle content chunks → close any open <think> block first
+                // Handle content chunks → extract inline <think> blocks (DeepSeek v4 style)
+                //
+                // DeepSeek v4 may stream thinking tokens inline in `delta.content`
+                // as `<think>...reasoning...</think>` (not in a separate
+                // `reasoning_content` field).  We extract these blocks here and
+                // route them through the thinking pipeline so they get the proper
+                // `<think data-axagent="1">` wrapping instead of appearing as raw
+                // text in the UI.
                 if let Some(ref c) = content_delta {
                     if !c.is_empty() {
-                        if first_token_time.is_none() {
-                            first_token_time = Some(std::time::Instant::now());
+                        let extracted_thinking: Option<String>;
+                        let visible_text: String;
+
+                        if let Some(buf) = &mut inline_think_buf {
+                            // Cross-delta accumulation: we saw <think> earlier,
+                            // waiting for </think> to complete the block.
+                            if let Some(close_pos) = c.find("</think>") {
+                                buf.push_str(&c[..close_pos]);
+                                let complete = std::mem::take(buf);
+                                extracted_thinking = Some(complete);
+                                inline_think_buf = None;
+                                visible_text = c[close_pos + "</think>".len()..].to_string();
+                            } else {
+                                buf.push_str(c);
+                                extracted_thinking = None;
+                                visible_text = String::new();
+                            }
+                        } else {
+                            // Check for complete <think>...</think> in this delta
+                            let (vis, think) = extract_reasoning_from_text(c);
+                            if think.is_some() {
+                                visible_text = vis;
+                                extracted_thinking = think;
+                            } else if let Some(start) = c.find("<think") {
+                                // <think> without </think> → might be a cross-delta
+                                // fragment.  Buffer everything after the opening tag.
+                                let after_open = &c[start..];
+                                // Skip injected / closing tags we already know
+                                if !after_open.starts_with("</think>")
+                                    && !after_open.starts_with("<think data-axagent")
+                                    && !after_open.starts_with("<think totalMs")
+                                {
+                                    if let Some(gt_pos) = after_open.find('>') {
+                                        inline_think_buf =
+                                            Some(after_open[gt_pos + 1..].to_string());
+                                    }
+                                    // Only emit content *before* the opening tag as visible;
+                                    // the portion after <think>…</think> is captured in the buffer.
+                                    visible_text = c[..start].to_string();
+                                } else {
+                                    visible_text = vis;
+                                }
+                                extracted_thinking = None;
+                            } else {
+                                visible_text = vis;
+                                extracted_thinking = None;
+                            }
                         }
-                        if in_thinking_block {
-                            let total_ms = thinking_block_start
-                                .map(|s| s.elapsed().as_millis() as u64)
-                                .unwrap_or(0);
-                            thinking_durations.push(total_ms);
-                            emit_content.push_str("\n</think>\n\n");
-                            in_thinking_block = false;
-                            thinking_block_start = None;
+
+                        // ── Feed extracted thinking through the pipeline ──
+                        if let Some(ref think_text) = extracted_thinking {
+                            if !think_text.trim().is_empty() {
+                                if first_token_time.is_none() {
+                                    first_token_time = Some(std::time::Instant::now());
+                                }
+                                if !in_thinking_block {
+                                    if !full_content.is_empty() {
+                                        emit_content.push_str("\n\n");
+                                    }
+                                    emit_content.push_str("<think data-axagent=\"1\">\n");
+                                    in_thinking_block = true;
+                                    thinking_block_start = Some(std::time::Instant::now());
+                                }
+                                emit_content.push_str(think_text.trim());
+                                emit_thinking_signal = Some(String::new());
+                            }
                         }
-                        emit_content.push_str(c);
+
+                        // ── Emit visible text part ──
+                        if !visible_text.is_empty() {
+                            if first_token_time.is_none() {
+                                first_token_time = Some(std::time::Instant::now());
+                            }
+                            if in_thinking_block {
+                                let total_ms = thinking_block_start
+                                    .map(|s| s.elapsed().as_millis() as u64)
+                                    .unwrap_or(0);
+                                thinking_durations.push(total_ms);
+                                emit_content.push_str("\n</think>\n\n");
+                                in_thinking_block = false;
+                                thinking_block_start = None;
+                            }
+                            emit_content.push_str(&visible_text);
+                        }
                     }
                 }
 
@@ -913,6 +1008,14 @@ async fn consume_stream(
         full_content.push_str("\n</think>\n\n");
     }
 
+    // Flush any content buffered in cross-delta inline <think> accumulation.
+    // If the stream ended before </think>, the partial thinking text still
+    // belongs in the final output (won't be properly wrapped as <think>, but
+    // no content is lost).
+    if let Some(buf) = inline_think_buf.take() {
+        full_content.push_str(&buf);
+    }
+
     if suppress_thinking
         && !disabled_thinking_strip_state.in_think_block
         && !disabled_thinking_strip_state.trailing_fragment.is_empty()
@@ -923,6 +1026,7 @@ async fn consume_stream(
 
     // Post-process: replace each <think data-aq> with <think totalMs="N">
     full_content = fixup_think_tags(&full_content, &thinking_durations);
+    full_content = close_unmatched_think_tags(&full_content);
     if suppress_thinking {
         full_content = strip_disabled_thinking_content(&full_content);
     }
@@ -971,6 +1075,134 @@ fn fixup_think_tags(content: &str, durations: &[u64]) -> String {
     }
     result.push_str(remaining);
     result
+}
+
+/// Normalize malformed `<think` opening tags and close unmatched ones.
+///
+/// # Normalization
+///
+/// - `<think` without a proper `>` (e.g. `<think\n` from chunk-boundary
+///   fragmentation) → `<think>`.
+/// - `<think` whose first `>` belongs to `<`think>` or a later tag (e.g.
+///   `<think\nreasoning\n</think>`) → `<think>` placed before the fragment.
+///
+/// # Closing
+///
+/// Counts every `<think[,>]` (injected `totalMs` style OR raw inline style)
+/// and every `</think>`.  Appends missing `</think>\n\n` at the end so the
+/// markdown parser never sees a dangling opening tag.
+fn close_unmatched_think_tags(content: &str) -> String {
+    // ── Step 1: normalize malformed opening tags ──────────────────────────
+    let mut result = String::with_capacity(content.len());
+    let mut remaining = content;
+    let mut open_count = 0usize;
+
+    // We walk through the content looking for <think (opening tag) or </think> (closing tag).
+    // </think> is passed through unchanged; <think is inspected and fixed up.
+    loop {
+        let Some(pos) = remaining.find("<think") else {
+            result.push_str(remaining);
+            break;
+        };
+
+        result.push_str(&remaining[..pos]);
+        let tag_section = &remaining[pos..];
+
+        // ── < / think >  (closing tag) — pass through ──────────────────────
+        if let Some(stripped) = tag_section.strip_prefix("</think>") {
+            result.push_str("</think>");
+            remaining = stripped;
+            continue;
+        }
+
+        open_count += 1;
+
+        // ── <think … >  (opening tag) — check for a proper `>` ────────────
+        // The closing `>` of the opening tag must appear *before* `</think>`
+        // (if a </think> exists at all).  Otherwise the tag is malformed /
+        // fragmented, and we insert `>` right after `<think`.
+        let search_bound = tag_section.find("</think>").unwrap_or(tag_section.len());
+
+        if let Some(gt_pos) = tag_section[..search_bound].find('>') {
+            // Properly formed opening tag — preserve as-is.
+            result.push_str(&tag_section[..=gt_pos]);
+            remaining = &tag_section[gt_pos + 1..];
+        } else {
+            // Malformed: no `>` before `</think>` (or no `</think>` at all).
+            // Insert `>` to close the tag.
+            result.push_str("<think>");
+            remaining = &tag_section["<think".len()..];
+        }
+    }
+
+    // ── Step 2: close unmatched <think> tags ──────────────────────────────
+    let close_count = result.matches("</think>").count();
+    if close_count < open_count {
+        for _ in 0..(open_count - close_count) {
+            result.push_str("</think>\n\n");
+        }
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_think_tags_removes_unclosed_block() {
+        assert_eq!(strip_think_tags("Hello\n<think>secret"), "Hello\n");
+    }
+
+    #[test]
+    fn close_unmatched_think_tags_appends_closure() {
+        assert_eq!(
+            close_unmatched_think_tags("prefix<think>body"),
+            "prefix<think>body</think>\n\n"
+        );
+    }
+
+    #[test]
+    fn close_unmatched_think_tags_balances_injected_and_inline() {
+        // Injected <think totalMs="123"> is always paired, raw <think> is unclosed
+        let input = "<think totalMs=\"123\">\nthinking\n</think>\nvisible<think>deepseek";
+        let out = close_unmatched_think_tags(input);
+        assert_eq!(
+            out,
+            "<think totalMs=\"123\">\nthinking\n</think>\nvisible<think>deepseek</think>\n\n"
+        );
+    }
+
+    #[test]
+    fn close_unmatched_think_tags_fixes_malformed_opening() {
+        // Newline between <think and >  (chunk-boundary fragmentation)
+        let input = "<think\nreasoning\n</think>";
+        let out = close_unmatched_think_tags(input);
+        assert_eq!(out, "<think>\nreasoning\n</think>");
+    }
+
+    #[test]
+    fn close_unmatched_think_tags_handles_pure_inline_think() {
+        // DeepSeek-style <think> inside content, no injected tags
+        let input = "Hello\n<think>secret\nstuff</think>\nworld";
+        assert_eq!(close_unmatched_think_tags(input), input);
+    }
+
+    #[test]
+    fn close_unmatched_think_tags_handles_think_without_close_in_content() {
+        // <think without closing > AND without </think>
+        let input = "visible\n<think\nreasoning without close";
+        let out = close_unmatched_think_tags(input);
+        assert_eq!(out, "visible\n<think>\nreasoning without close</think>\n\n");
+    }
+
+    #[test]
+    fn strip_disabled_thinking_delta_handles_fragmented_tags() {
+        let mut state = DisabledThinkingStripState::default();
+        assert_eq!(strip_disabled_thinking_delta("Hello <thi", &mut state), "Hello ");
+        assert_eq!(strip_disabled_thinking_delta("nk>secret</think> world", &mut state), " world");
+    }
 }
 
 async fn execute_tool_call(
@@ -1069,7 +1301,7 @@ async fn execute_tool_call(
                     return (
                         format!("Error: Tool execution timed out after {}s", timeout_secs),
                         true,
-                    )
+                    );
                 },
             }
         },
@@ -1105,7 +1337,7 @@ async fn execute_tool_call(
                     return (
                         format!("Error: Tool execution timed out after {}s", timeout_secs),
                         true,
-                    )
+                    );
                 },
             }
         },
@@ -1120,6 +1352,7 @@ async fn execute_tool_call(
                     &endpoint,
                     &tool_call.function.name,
                     arguments,
+                    None,
                 ),
             )
             .await
@@ -1129,7 +1362,7 @@ async fn execute_tool_call(
                     return (
                         format!("Error: Tool execution timed out after {}s", timeout_secs),
                         true,
-                    )
+                    );
                 },
             }
         },
@@ -1144,6 +1377,7 @@ async fn execute_tool_call(
                     &endpoint,
                     &tool_call.function.name,
                     arguments,
+                    None,
                 ),
             )
             .await
@@ -1153,7 +1387,7 @@ async fn execute_tool_call(
                     return (
                         format!("Error: Tool execution timed out after {}s", timeout_secs),
                         true,
-                    )
+                    );
                 },
             }
         },
@@ -1220,7 +1454,7 @@ pub async fn generate_ai_title(
     };
 
     // Resolve title summary provider/model: settings override → fallback to conversation model
-    if let (Some(ref pid), Some(ref mid)) =
+    if let (Some(pid), Some(mid)) =
         (&settings.title_summary_provider_id, &settings.title_summary_model_id)
     {
         // Try to use the configured title summary provider
@@ -3503,38 +3737,38 @@ async fn do_compress(
 ) -> Result<String, String> {
     // Resolve compression model: settings override → fallback to conversation model
     let (comp_provider, comp_key, comp_key_id, comp_proxy, comp_model_id, comp_use_max) = if let (
-        Some(ref pid),
-        Some(ref mid),
+        Some(pid),
+        Some(mid),
     ) =
         (&settings.compression_provider_id, &settings.compression_model_id)
     {
         match axagent_core::repo::provider::get_provider(db, pid).await {
-            Ok(p) => {
-                match p.keys.first() {
-                    Some(k) => {
-                        let dk = axagent_core::crypto::decrypt_key(&k.key_encrypted, master_key)
-                            .map_err(|e| e.to_string())?;
-                        let kid = k.id.clone();
-                        let proxy = ProviderProxyConfig::resolve(&p.proxy_config, settings);
-                        let override_umc = axagent_core::repo::provider::get_model(db, pid, mid)
-                            .await
-                            .ok()
-                            .and_then(|m| m.param_overrides)
-                            .and_then(|po| po.use_max_completion_tokens);
-                        (p, dk, kid, proxy, mid.clone(), override_umc)
-                    },
-                    None => {
-                        tracing::warn!("Compression model provider has no key, falling back to conversation model");
-                        (
-                            provider.clone(),
-                            decrypted_key.to_string(),
-                            key_id.to_string(),
-                            proxy_config.clone(),
-                            model_id.to_string(),
-                            use_max_completion_tokens,
-                        )
-                    },
-                }
+            Ok(p) => match p.keys.first() {
+                Some(k) => {
+                    let dk = axagent_core::crypto::decrypt_key(&k.key_encrypted, master_key)
+                        .map_err(|e| e.to_string())?;
+                    let kid = k.id.clone();
+                    let proxy = ProviderProxyConfig::resolve(&p.proxy_config, settings);
+                    let override_umc = axagent_core::repo::provider::get_model(db, pid, mid)
+                        .await
+                        .ok()
+                        .and_then(|m| m.param_overrides)
+                        .and_then(|po| po.use_max_completion_tokens);
+                    (p, dk, kid, proxy, mid.clone(), override_umc)
+                },
+                None => {
+                    tracing::warn!(
+                        "Compression model provider has no key, falling back to conversation model"
+                    );
+                    (
+                        provider.clone(),
+                        decrypted_key.to_string(),
+                        key_id.to_string(),
+                        proxy_config.clone(),
+                        model_id.to_string(),
+                        use_max_completion_tokens,
+                    )
+                },
             },
             Err(_) => {
                 tracing::warn!(
@@ -3839,11 +4073,11 @@ pub async fn send_system_message(
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_conversation {
     use super::*;
     use std::fs;
-    use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use tokio::sync::Mutex;
 
     #[test]
@@ -4068,14 +4302,17 @@ mod tests {
         ));
         let trajectory_storage =
             Arc::new(axagent_trajectory::TrajectoryStorage::new(std::sync::Arc::new(db.clone())));
-        let semantic_cache = Arc::new(tokio::sync::Mutex::new(
-            crate::semantic_cache::SemanticCache::new(
+        let semantic_cache = Arc::new(tokio::sync::Mutex::new(SemanticCacheState {
+            cache: crate::semantic_cache::SemanticCache::new(
                 db.clone(),
                 crate::semantic_cache::CacheConfig::default(),
             )
             .await
             .expect("Failed to create semantic cache"),
-        ));
+            enabled: true,
+            in_memory_entries: Vec::new(),
+            similarity_threshold: 0.85,
+        }));
         let state = crate::AppState {
             sea_db: db.clone(),
             master_key: [0; 32],
@@ -4086,6 +4323,7 @@ mod tests {
             auto_backup_handle: Arc::new(Mutex::new(None)),
             webdav_sync_handle: Arc::new(Mutex::new(None)),
             api_server_handle: Arc::new(Mutex::new(None)),
+            trajectory_cleanup_handle: Arc::new(Mutex::new(None)),
             vector_store,
             indexing_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
             stream_cancel_flags: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -4098,6 +4336,7 @@ mod tests {
             agent_paused: Arc::new(Mutex::new(std::collections::HashSet::new())),
             running_agents: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
             workflow_engine: Arc::new(axagent_runtime::workflow_engine::WorkflowEngine::new()),
+            reflector: Arc::new(axagent_agent::Reflector::new()),
             shared_memory: Arc::new(tokio::sync::RwLock::new(
                 axagent_runtime::shared_memory::SharedMemory::new(),
             )),
@@ -4185,6 +4424,12 @@ mod tests {
             dashboard_registry: None,
             webhook_subscription_manager: None,
             semantic_cache,
+            prompt_cache: Arc::new(PromptCache::new()),
+            tot_sessions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            planner_sessions: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            #[cfg(not(target_os = "android"))]
+            browser_client: Arc::new(tokio::sync::Mutex::new(None)),
+            #[cfg(target_os = "android")]
             browser_client: Arc::new(tokio::sync::Mutex::new(None)),
             dream_consolidator: Arc::new(axagent_trajectory::DreamConsolidator::new()),
             text_grad_engine: Arc::new(tokio::sync::Mutex::new(
@@ -4225,15 +4470,20 @@ mod tests {
             dream_data_provider: Arc::new(axagent_trajectory::TrajectoryDreamDataProvider::new(
                 trajectory_storage.clone(),
             )),
+            #[cfg(not(target_os = "android"))]
             sandbox_executor: Arc::new(
                 axagent_trajectory::SkillSandboxExecutor::with_default_policy(),
             ),
+            #[cfg(target_os = "android")]
+            sandbox_executor: Arc::new(()),
             sync_engine: None,
             astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
             stock_monitor: None,
             plugin_manager: std::sync::Mutex::new(axagent_plugins::PluginManager::new(
                 axagent_plugins::PluginManagerConfig::new(temp_dir.clone()),
             )),
+            shutdown_token: tokio_util::sync::CancellationToken::new(),
+            file_authorizer: Arc::new(axagent_core::file_authorizer::FileAuthorizer::new()),
         };
 
         let attachments = vec![AttachmentInput {

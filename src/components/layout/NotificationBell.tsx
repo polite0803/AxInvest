@@ -34,7 +34,7 @@ export function pushNotification(type: NotificationItem["type"], message: string
 export function NotificationBell() {
   const [, setTick] = useState(0);
   const [open, setOpen] = useState(false);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   // 订阅全局通知变化
   const refresh = useCallback(() => setTick((n) => n + 1), []);
@@ -66,8 +66,8 @@ export function NotificationBell() {
             {n.type === "error" ? "❌" : n.type === "warning" ? "⚠️" : "✅"} {n.message}
           </Text>
           <div>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {new Date(n.time).toLocaleTimeString("zh-CN")}
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {new Date(n.time).toLocaleTimeString(i18n.language)}
             </Text>
           </div>
         </div>

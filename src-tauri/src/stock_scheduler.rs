@@ -8,14 +8,14 @@ use axagent_core::entity::{analysis_schedules, price_alerts};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use tauri::Emitter;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 /// 股票分析调度器
 pub struct StockScheduler {
     db: Arc<sea_orm::DatabaseConnection>,
     astock_client: Arc<AStockClient>,
     app_handle: tauri::AppHandle,
-    running: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    running: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl StockScheduler {
@@ -28,7 +28,7 @@ impl StockScheduler {
             db,
             astock_client,
             app_handle,
-            running: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            running: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -101,7 +101,7 @@ impl StockScheduler {
 
                     // 并发保护：同一计划不重复触发
                     {
-                        let mut running = self.running.lock().unwrap();
+                        let mut running = self.running.lock().await;
                         if !running.insert(schedule.id.clone()) {
                             tracing::warn!("StockScheduler: 跳过重复触发 {}", schedule.id);
                             continue;
@@ -133,7 +133,10 @@ impl StockScheduler {
                         .await;
                         // 完成后从 running 集合移除
                         {
-                            let _ = running_set.lock().map(|mut r| r.remove(&schedule_id));
+                            {
+                                let mut r = running_set.lock().await;
+                                r.remove(&schedule_id);
+                            }
                         }
                         if let Err(e) = result {
                             tracing::error!("StockScheduler: 分析失败 {}: {}", stock_code, e);
@@ -288,8 +291,8 @@ fn compute_next_run(cron_expr: &str) -> Option<i64> {
         return Some(today_target.timestamp_millis());
     }
 
-    // 查找下一个满足约束的日期（最多查 31 天）
-    for offset in 1..=31 {
+    // 查找下一个满足约束的日期（最多查 366 天，覆盖跨月/跨年场景）
+    for offset in 1..=366 {
         let candidate = today + chrono::Duration::days(offset);
         if matches_day(candidate, dom, dow) {
             let target = candidate

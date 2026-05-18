@@ -1,10 +1,3 @@
-#![allow(
-    clippy::struct_excessive_bools,
-    clippy::too_many_lines,
-    clippy::question_mark,
-    clippy::redundant_closure,
-    clippy::map_unwrap_or
-)]
 //! In-memory worker-boot state machine and control registry.
 //!
 //! This provides a foundational control plane for reliable worker startup:
@@ -728,9 +721,7 @@ fn detect_prompt_misdelivery(
     expected_cwd: &str,
     expected_receipt: Option<&WorkerTaskReceipt>,
 ) -> Option<PromptDeliveryObservation> {
-    let Some(prompt) = prompt else {
-        return None;
-    };
+    let prompt = prompt?;
 
     let prompt_snippet = prompt
         .lines()
@@ -759,14 +750,15 @@ fn detect_prompt_misdelivery(
         }
     }
 
-    if let Some(observed_cwd) = detect_observed_shell_cwd(screen_text) {
-        if prompt_visible && !cwd_matches_observed_target(expected_cwd, &observed_cwd) {
-            return Some(PromptDeliveryObservation {
-                target: WorkerPromptTarget::WrongTarget,
-                observed_cwd: Some(observed_cwd),
-                observed_prompt_preview,
-            });
-        }
+    if let Some(observed_cwd) = detect_observed_shell_cwd(screen_text)
+        && prompt_visible
+        && !cwd_matches_observed_target(expected_cwd, &observed_cwd)
+    {
+        return Some(PromptDeliveryObservation {
+            target: WorkerPromptTarget::WrongTarget,
+            observed_cwd: Some(observed_cwd),
+            observed_prompt_preview,
+        });
     }
 
     let shell_error = [
@@ -836,7 +828,7 @@ fn detect_observed_shell_cwd(screen_text: &str) -> Option<String> {
         let tokens = line.split_whitespace().collect::<Vec<_>>();
         tokens
             .iter()
-            .position(|token| is_shell_prompt_token(token))
+            .position(is_shell_prompt_token)
             .and_then(|index| index.checked_sub(1).map(|cwd_index| tokens[cwd_index]))
             .filter(|candidate| looks_like_cwd_label(candidate))
             .map(ToOwned::to_owned)
@@ -938,9 +930,11 @@ mod tests {
         );
 
         let send_before_resolve = registry.send_prompt(&worker.worker_id, Some("ship it"), None);
-        assert!(send_before_resolve
-            .expect_err("prompt delivery should be gated")
-            .contains("not ready for prompt delivery"));
+        assert!(
+            send_before_resolve
+                .expect_err("prompt delivery should be gated")
+                .contains("not ready for prompt delivery")
+        );
 
         let resolved = registry
             .resolve_trust(&worker.worker_id)
@@ -1061,11 +1055,13 @@ mod tests {
 
         assert_eq!(recovered.status, WorkerStatus::ReadyForPrompt);
         assert_eq!(recovered.replay_prompt.as_deref(), Some("Run the worker bootstrap tests"));
-        assert!(recovered
-            .last_error
-            .expect("wrong target error should exist")
-            .message
-            .contains("wrong target"));
+        assert!(
+            recovered
+                .last_error
+                .expect("wrong target error should exist")
+                .message
+                .contains("wrong target")
+        );
         let misdelivery = recovered
             .events
             .iter()
@@ -1213,10 +1209,12 @@ mod tests {
             .terminate(&worker.worker_id)
             .expect("terminate should succeed");
         assert_eq!(finished.status, WorkerStatus::Finished);
-        assert!(finished
-            .events
-            .iter()
-            .any(|event| event.kind == WorkerEventKind::Finished));
+        assert!(
+            finished
+                .events
+                .iter()
+                .any(|event| event.kind == WorkerEventKind::Finished)
+        );
     }
 
     #[test]
@@ -1238,10 +1236,12 @@ mod tests {
         let error = failed.last_error.expect("provider error should exist");
         assert_eq!(error.kind, WorkerFailureKind::Provider);
         assert!(error.message.contains("provider degraded"));
-        assert!(failed
-            .events
-            .iter()
-            .any(|event| event.kind == WorkerEventKind::Failed));
+        assert!(
+            failed
+                .events
+                .iter()
+                .any(|event| event.kind == WorkerEventKind::Failed)
+        );
     }
 
     #[test]
@@ -1306,9 +1306,11 @@ mod tests {
 
         assert_eq!(finished.status, WorkerStatus::Finished);
         assert!(finished.last_error.is_none());
-        assert!(finished
-            .events
-            .iter()
-            .any(|event| event.kind == WorkerEventKind::Finished));
+        assert!(
+            finished
+                .events
+                .iter()
+                .any(|event| event.kind == WorkerEventKind::Finished)
+        );
     }
 }

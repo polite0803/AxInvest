@@ -4,7 +4,7 @@ use sea_orm::DatabaseConnection;
 
 use crate::message_gateway::platform_manager::{PlatformManager, PlatformMessageCallback};
 use axagent_providers::registry::ProviderRegistry;
-use axagent_providers::{resolve_base_url_for_type, ProviderRequestContext};
+use axagent_providers::{ProviderRequestContext, resolve_base_url_for_type};
 
 async fn persist_session_route(
     db: &DatabaseConnection,
@@ -243,11 +243,16 @@ impl PlatformBridge {
 
         conversation::increment_message_count(&self.db, &conv.id).await?;
 
+        let safe_username: String = username
+            .unwrap_or("unknown")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+            .take(32)
+            .collect();
         let system_prompt = format!(
             "You are AxAgent. The user is messaging from {} (username: {}). \
              Provide helpful, concise responses.",
-            platform,
-            username.unwrap_or("unknown")
+            platform, safe_username
         );
 
         let messages: Vec<axagent_core::types::ChatMessage> = vec![

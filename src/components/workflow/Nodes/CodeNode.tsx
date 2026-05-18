@@ -91,7 +91,7 @@ const CodeNodeComponent: React.FC<NodeProps<CodeNodeData>> = ({ data, selected }
           borderRadius: 8,
           overflow: "hidden",
           boxShadow: selected ? `0 0 0 2px ${color}40` : "none",
-          transition: "all 0.2s",
+          transition: "box-shadow 0.2s, transform 0.2s",
         }}
       >
         <div
@@ -107,7 +107,7 @@ const CodeNodeComponent: React.FC<NodeProps<CodeNodeData>> = ({ data, selected }
           <span style={{ fontSize: 14 }}>{getLanguageIcon(language)}</span>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: getLanguageColor(language),
               fontWeight: 600,
             }}

@@ -2,9 +2,18 @@ import { invoke } from "@/lib/invoke";
 import { Alert, Button, Descriptions, Divider, Input, message, Modal, Select, Tabs, Typography, Upload } from "antd";
 import type { UploadProps } from "antd";
 import { Check, Copy, Download, FolderOpen, Upload as UploadIcon } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkflowTemplateResponse } from "../types";
+
+interface N8nConnectionGroup {
+  node: string;
+  index: number;
+}
+
+interface N8nConnection {
+  main?: N8nConnectionGroup[][];
+}
 
 function getImportPreview(
   jsonStr: string,
@@ -16,9 +25,9 @@ function getImportPreview(
     const nodeCount = json.nodes?.length || 0;
     let edgeCount = 0;
     if (isN8n) {
-      const connections = json.connections || {};
+      const connections: Record<string, N8nConnection> = json.connections || {};
       for (const conn of Object.values(connections)) {
-        const main = (conn as any)?.main;
+        const main = conn?.main;
         if (Array.isArray(main)) {
           for (const group of main) {
             if (Array.isArray(group)) { edgeCount += group.length; }
@@ -112,13 +121,13 @@ function BatchImportN8n({ onImportComplete }: { onImportComplete?: () => void })
               {result.errors.length > 0 && (
                 <div style={{ marginTop: 6 }}>
                   {(showAllErrors ? result.errors : result.errors.slice(0, 5)).map((e, i) => (
-                    <div key={i} style={{ color: "#595959", fontSize: 11, marginBottom: 2 }}>{e}</div>
+                    <div key={i} style={{ color: "#595959", fontSize: 12, marginBottom: 2 }}>{e}</div>
                   ))}
                   {result.errors.length > 5 && !showAllErrors && (
                     <Button
                       type="link"
                       size="small"
-                      style={{ padding: 0, fontSize: 11 }}
+                      style={{ padding: 0, fontSize: 12 }}
                       onClick={() => setShowAllErrors(true)}
                     >
                       {t("workflow.importExport.viewAllErrors", { count: result.errors.length })}
@@ -200,10 +209,10 @@ function BatchImportFolder({ onImportComplete }: { onImportComplete?: () => void
               {result.errors.length > 0 && (
                 <div style={{ marginTop: 6 }}>
                   {result.errors.slice(0, 10).map((e, i) => (
-                    <div key={i} style={{ color: "#595959", fontSize: 11, marginBottom: 2 }}>{e}</div>
+                    <div key={i} style={{ color: "#595959", fontSize: 12, marginBottom: 2 }}>{e}</div>
                   ))}
                   {result.errors.length > 10 && (
-                    <div style={{ color: "#999", fontSize: 11 }}>
+                    <div style={{ color: "#999", fontSize: 12 }}>
                       {t("workflow.importExport.moreErrors", { count: result.errors.length - 10 })}
                     </div>
                   )}
@@ -245,6 +254,10 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [importWarnings, setImportWarnings] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    return () => clearTimeout(copiedTimerRef.current);
+  }, []);
 
   const preview = useMemo(() => {
     if (!importData.trim()) { return null; }
@@ -313,7 +326,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       navigator.clipboard.writeText(exportResult);
       setCopied(true);
       message.success(t("workflow.importExport.copiedToClipboard"));
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -396,7 +410,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     rows={10}
                     style={{
                       fontFamily: "Monaco, Consolas, monospace",
-                      fontSize: 11,
+                      fontSize: 12,
                       background: "#1a1a1a",
                     }}
                   />
@@ -452,7 +466,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
               rows={8}
               style={{
                 fontFamily: "Monaco, Consolas, monospace",
-                fontSize: 11,
+                fontSize: 12,
                 background: "#1a1a1a",
               }}
             />
@@ -503,17 +517,17 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             />
           )}
 
-          <p style={{ color: "#666", fontSize: 11, marginTop: 12 }}>
+          <p style={{ color: "#666", fontSize: 12, marginTop: 12 }}>
             {t("workflow.importExport.importHint")}
           </p>
 
-          <Divider style={{ margin: "12px 0", fontSize: 11 }}>{t("workflow.importExport.batchImport")}</Divider>
+          <Divider style={{ margin: "12px 0", fontSize: 12 }}>{t("workflow.importExport.batchImport")}</Divider>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
             {t("workflow.importExport.axagentFolderHint")}
           </Typography.Text>
           <BatchImportFolder onImportComplete={onImportComplete} />
 
-          <Divider style={{ margin: "12px 0", fontSize: 11 }}>{t("workflow.importExport.n8nBatchImport")}</Divider>
+          <Divider style={{ margin: "12px 0", fontSize: 12 }}>{t("workflow.importExport.n8nBatchImport")}</Divider>
           <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
             {t("workflow.importExport.n8nFolderHint")}
           </Typography.Text>

@@ -74,7 +74,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({ askId, question, options }) =
     borderColor: submitted ? token.colorSuccessBorder : token.colorPrimary,
     opacity: appeared ? 1 : 0,
     transform: appeared ? "translateY(0)" : "translateY(-10px)",
-    transition: "all 0.3s ease-out",
+    transition: "box-shadow 0.3s ease-out, transform 0.3s ease-out",
   };
 
   return (
@@ -123,7 +123,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({ askId, question, options }) =
               border: `1px solid ${token.colorBorderSecondary}`,
             }}
           >
-            <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
               {isSingleChoice
                 ? t("agent.selectOneOption")
                 : t("agent.selectOptions")}
@@ -146,7 +146,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({ askId, question, options }) =
                           borderRadius: 6,
                           border: `1px solid ${selectedOption === opt ? token.colorPrimary : token.colorBorder}`,
                           backgroundColor: selectedOption === opt ? `${token.colorPrimary}10` : "transparent",
-                          transition: "all 0.2s",
+                          transition: "box-shadow 0.2s, transform 0.2s",
                         }}
                       >
                         <Text style={{ marginLeft: 6 }}>{opt}</Text>
@@ -199,7 +199,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({ askId, question, options }) =
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
                 <Text
                   type={isNearLimit ? "warning" : "secondary"}
-                  style={{ fontSize: 11 }}
+                  style={{ fontSize: 12 }}
                 >
                   {charCount}/{MAX_CHARS}
                 </Text>

@@ -1,4 +1,3 @@
-#![allow(clippy::must_use_candidate, clippy::unnecessary_map_or)]
 //! In-memory task registry for sub-agent task lifecycle management.
 
 use std::collections::HashMap;
@@ -7,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{validate_packet, TaskPacket, TaskPacketValidationError};
+use crate::{TaskPacket, TaskPacketValidationError, validate_packet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -124,7 +123,7 @@ impl TaskRegistry {
         inner
             .tasks
             .values()
-            .filter(|t| status_filter.map_or(true, |s| t.status == s))
+            .filter(|t| status_filter.is_none_or(|s| t.status == s))
             .cloned()
             .collect()
     }
@@ -356,9 +355,11 @@ mod tests {
         assert!(registry.update("nonexistent", "msg").is_err());
         assert!(registry.output("nonexistent").is_err());
         assert!(registry.append_output("nonexistent", "data").is_err());
-        assert!(registry
-            .set_status("nonexistent", TaskStatus::Running)
-            .is_err());
+        assert!(
+            registry
+                .set_status("nonexistent", TaskStatus::Running)
+                .is_err()
+        );
     }
 
     #[test]

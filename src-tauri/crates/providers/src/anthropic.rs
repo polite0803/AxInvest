@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
 use crate::{
-    build_http_client, parse_base64_data_url, resolve_chat_url, ProviderAdapter,
-    ProviderRequestContext,
+    ProviderAdapter, ProviderRequestContext, build_http_client, parse_base64_data_url,
+    resolve_chat_url,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
@@ -43,6 +43,7 @@ impl AnthropicAdapter {
         resolve_chat_url(&Self::base_url(ctx), ctx.api_path.as_deref(), "/messages")
     }
 
+    #[allow(clippy::result_large_err)]
     fn get_client(&self, ctx: &ProviderRequestContext) -> Result<reqwest::Client> {
         match &ctx.proxy_config {
             Some(c) if c.proxy_type.as_deref() != Some("none") => build_http_client(Some(c)),
@@ -112,7 +113,6 @@ struct AnthropicContentBlock {
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
@@ -256,22 +256,19 @@ fn convert_messages(
 
     // Add cache breakpoint to the final user/tool message to establish a
     // second cache point (Anthropic requires 2+ breakpoints for caching).
-    if let Some(last) = result.last_mut() {
-        if last.role == "user" {
-            let mut content: Vec<serde_json::Value> = match last.content.clone() {
-                serde_json::Value::Array(arr) => arr,
-                other => vec![other],
-            };
-            if let Some(last_block) = content.last_mut() {
-                if let Some(obj) = last_block.as_object_mut() {
-                    obj.insert(
-                        "cache_control".to_string(),
-                        serde_json::json!({"type": "ephemeral"}),
-                    );
-                }
-            }
-            last.content = serde_json::Value::Array(content);
+    if let Some(last) = result.last_mut()
+        && last.role == "user"
+    {
+        let mut content: Vec<serde_json::Value> = match last.content.clone() {
+            serde_json::Value::Array(arr) => arr,
+            other => vec![other],
+        };
+        if let Some(last_block) = content.last_mut()
+            && let Some(obj) = last_block.as_object_mut()
+        {
+            obj.insert("cache_control".to_string(), serde_json::json!({"type": "ephemeral"}));
         }
+        last.content = serde_json::Value::Array(content);
     }
 
     (system, result)
@@ -397,7 +394,10 @@ impl ProviderAdapter for AnthropicAdapter {
 
         if !resp.status().is_success() {
             let s = resp.status();
-            let t = resp.text().await.unwrap_or_default();
+            let t = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("[body read error: {e}]"));
             return Err(AxAgentError::Provider(format!("Anthropic API error {s}: {t}")));
         }
 
@@ -453,6 +453,8 @@ impl ProviderAdapter for AnthropicAdapter {
                 prompt_tokens: ar.usage.input_tokens,
                 completion_tokens: ar.usage.output_tokens,
                 total_tokens: ar.usage.input_tokens + ar.usage.output_tokens,
+                cache_creation_tokens: ar.usage.cache_creation_input_tokens,
+                cache_read_tokens: ar.usage.cache_read_input_tokens,
             },
             tool_calls: if tool_calls.is_empty() {
                 None
@@ -557,12 +559,12 @@ impl ProviderAdapter for AnthropicAdapter {
             let mut accumulated_completion_tokens: u32 = 0;
 
             while let Some(chunk) = byte_stream.next().await {
-                if let Some(ref token) = cancel_token {
-                    if token.load(std::sync::atomic::Ordering::Relaxed) {
-                        let _ = tx
-                            .try_send(Err(AxAgentError::Provider("Stream cancelled".to_string())));
-                        return;
-                    }
+                if let Some(ref token) = cancel_token
+                    && token.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    let _ =
+                        tx.try_send(Err(AxAgentError::Provider("Stream cancelled".to_string())));
+                    return;
                 }
                 match chunk {
                     Ok(bytes) => {
@@ -609,26 +611,25 @@ impl ProviderAdapter for AnthropicAdapter {
                                     }
                                 },
                                 "content_block_start" => {
-                                    if let Some(cb) = json.get("content_block") {
-                                        if cb.get("type").and_then(|t| t.as_str())
+                                    if let Some(cb) = json.get("content_block")
+                                        && cb.get("type").and_then(|t| t.as_str())
                                             == Some("tool_use")
-                                        {
-                                            let id = cb
-                                                .get("id")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("")
-                                                .to_string();
-                                            let name = cb
-                                                .get("name")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or("")
-                                                .to_string();
-                                            current_tool_use = Some(PendingToolUse {
-                                                id,
-                                                name,
-                                                arguments: String::new(),
-                                            });
-                                        }
+                                    {
+                                        let id = cb
+                                            .get("id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let name = cb
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        current_tool_use = Some(PendingToolUse {
+                                            id,
+                                            name,
+                                            arguments: String::new(),
+                                        });
                                     }
                                 },
                                 "content_block_delta" => {
@@ -661,13 +662,12 @@ impl ProviderAdapter for AnthropicAdapter {
                                                 tool_calls: None,
                                             },
                                             "input_json_delta" => {
-                                                if let Some(ref mut tu) = current_tool_use {
-                                                    if let Some(partial) = delta
+                                                if let Some(ref mut tu) = current_tool_use
+                                                    && let Some(partial) = delta
                                                         .get("partial_json")
                                                         .and_then(|v| v.as_str())
-                                                    {
-                                                        tu.arguments.push_str(partial);
-                                                    }
+                                                {
+                                                    tu.arguments.push_str(partial);
                                                 }
                                                 continue; // Don't send a ChatStreamChunk for JSON delta
                                             },
@@ -698,6 +698,8 @@ impl ProviderAdapter for AnthropicAdapter {
                                                 prompt_tokens: accumulated_prompt_tokens,
                                                 completion_tokens: out,
                                                 total_tokens: accumulated_prompt_tokens + out,
+                                                cache_creation_tokens: None,
+                                                cache_read_tokens: None,
                                             }),
                                             tool_calls: None,
                                         }));
@@ -730,6 +732,8 @@ impl ProviderAdapter for AnthropicAdapter {
                                             completion_tokens: accumulated_completion_tokens,
                                             total_tokens: accumulated_prompt_tokens
                                                 + accumulated_completion_tokens,
+                                            cache_creation_tokens: None,
+                                            cache_read_tokens: None,
                                         })
                                     } else {
                                         None
@@ -786,7 +790,10 @@ impl ProviderAdapter for AnthropicAdapter {
 
         if !resp.status().is_success() {
             let s = resp.status();
-            let t = resp.text().await.unwrap_or_default();
+            let t = resp
+                .text()
+                .await
+                .unwrap_or_else(|e| format!("[body read error: {e}]"));
             return Err(AxAgentError::Provider(format!("Anthropic API error {s}: {t}")));
         }
 
@@ -836,6 +843,7 @@ impl ProviderAdapter for AnthropicAdapter {
                     model_type,
                     capabilities: caps,
                     max_tokens: None,
+                    max_output_tokens: None,
                     enabled: true,
                     param_overrides: None,
                     input_price_per_mtok: None,

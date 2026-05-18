@@ -75,9 +75,8 @@ export function resolveProviderIcon(provider: ProviderConfig): IconResult {
   if (modelKey) { return { type: "model", key: modelKey }; }
 
   const nameLower = provider.name.toLowerCase().replace(/\s+/g, "");
-  for (const [keyword, icon] of Object.entries(NAME_TO_PROVIDER)) {
-    if (nameLower.includes(keyword)) { return { type: "provider", key: icon }; }
-  }
+  const nameMatch = Object.entries(NAME_TO_PROVIDER).find(([keyword]) => nameLower.indexOf(keyword) !== -1);
+  if (nameMatch) { return { type: "provider", key: nameMatch[1] }; }
 
   return { type: "provider", key: TYPE_TO_PROVIDER[provider.provider_type] || "openai" };
 }

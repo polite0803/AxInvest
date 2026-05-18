@@ -20,7 +20,7 @@ const MAX_RIGHT_PANEL = 600;
 
 export function WikiGraphPage() {
   const { token } = theme.useToken();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { wikiId } = useParams<{ wikiId: string }>();
   const [searchParams] = useSearchParams();
@@ -174,7 +174,7 @@ export function WikiGraphPage() {
     const now = Date.now();
     const note = await createNote({
       vaultId: wikiIdFromUrl,
-      title: `${t("wiki.newNoteDefault")} ${new Date(now).toLocaleString("zh-CN")}`,
+      title: `${t("wiki.newNoteDefault")} ${new Date(now).toLocaleString(i18n.language)}`,
       filePath: `/new-note-${now}.md`,
       content: "",
       author: "user",
@@ -361,6 +361,8 @@ export function WikiGraphPage() {
             {/* 左拖曳手柄 */}
             <div
               className="shrink-0 cursor-col-resize select-none transition-all duration-300"
+              role="separator"
+              tabIndex={0}
               style={{
                 width: leftAtBoundary ? 5 : 3,
                 background: leftAtBoundary
@@ -429,6 +431,8 @@ export function WikiGraphPage() {
             {/* 右拖曳手柄 */}
             <div
               className="shrink-0 cursor-col-resize select-none transition-all duration-300"
+              role="separator"
+              tabIndex={0}
               style={{
                 width: rightAtBoundary ? 5 : 3,
                 background: rightAtBoundary
@@ -469,7 +473,7 @@ export function WikiGraphPage() {
         style={{
           borderTop: `1px solid ${token.colorBorderSecondary}20`,
           backgroundColor: `${token.colorBgContainer}dd`,
-          fontSize: 11,
+          fontSize: 12,
         }}
       >
         <Text type="secondary">

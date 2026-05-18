@@ -1,3 +1,4 @@
+import { NotificationCenter } from "@/components/notification/NotificationCenter";
 import {
   AboutPage,
   AcpSettings,
@@ -9,6 +10,7 @@ import {
   DisplaySettings,
   EvolutionSettings,
   GeneralSettings,
+  KnowledgeSettings,
   LocalToolSettings,
   McpServerSettings,
   MessageChannelSettings,
@@ -65,7 +67,9 @@ const SECTION_COMPONENTS: Record<SettingsSection, React.ComponentType<any>> = {
   userProfile: UserProfileSettings,
   skillsHub: SkillsPage,
   plugins: PluginMarketplace,
+  knowledgeSettings: KnowledgeSettings,
   dashboardPlugins: DashboardPluginsSettings,
+  notificationCenter: () => <NotificationCenter trigger={<span />} />,
   webhooks: WebhookSettings,
   messageChannels: MessageChannelSettings,
   advanced: AdvancedSettings,
@@ -189,6 +193,8 @@ export function SettingsPage() {
       </div>
       <div
         className="shrink-0 cursor-col-resize select-none"
+        role="separator"
+        tabIndex={0}
         style={{
           width: 5,
           borderRight: "1px solid var(--border-color)",

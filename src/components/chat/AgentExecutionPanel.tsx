@@ -3,7 +3,7 @@ import { Tabs, theme, Tooltip } from "antd";
 import { Bot, GitBranch, History } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import AgentPoolPanel from "./AgentPoolPanel";
+import { AgentPoolPanel } from "./AgentPoolPanel";
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { TrajectoryReplay } from "./TrajectoryReplay";
 import "./AgentExecutionPanel.css";
@@ -61,6 +61,14 @@ export function AgentExecutionPanel({
         >
           <div
             onClick={onToggleCompact}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggleCompact?.();
+              }
+            }}
             style={{
               width: 32,
               height: 32,
@@ -301,5 +309,3 @@ export function AgentExecutionPanel({
     </div>
   );
 }
-
-export default AgentExecutionPanel;

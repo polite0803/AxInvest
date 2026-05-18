@@ -5,10 +5,10 @@
 use axagent_astock_data::AStockClient;
 use axagent_core::entity::{stock_analyses, watchlist_items};
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryOrder, QuerySelect, Set};
 use serde::{Deserialize, Serialize};

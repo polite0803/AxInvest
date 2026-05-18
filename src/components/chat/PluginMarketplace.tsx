@@ -53,7 +53,10 @@ export function PluginMarketplace() {
     setLoading(true);
     try {
       const { invoke } = await import("@/lib/invoke");
-      const data = await invoke<PluginSummary[]>("plugin_list").catch(() => []);
+      const data = await invoke<PluginSummary[]>("plugin_list").catch((e) => {
+        if (import.meta.env.DEV) { console.warn("Failed to fetch plugins:", e); }
+        return [];
+      });
       setPlugins(data);
     } catch {
       // ignore
@@ -155,7 +158,7 @@ export function PluginMarketplace() {
         </div>
 
         {loading && plugins.length === 0 && (
-          <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
             <Loader2 size={14} className="animate-spin" />
             <span>{t("chat.plugins.marketplace.loading")}</span>
           </div>

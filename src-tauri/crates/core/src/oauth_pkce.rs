@@ -1,6 +1,7 @@
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand::Rng;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -23,8 +24,7 @@ pub fn generate_pkce() -> PkceParams {
 }
 
 fn generate_code_verifier() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
+    let bytes: [u8; 32] = Rng::r#gen(&mut OsRng);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

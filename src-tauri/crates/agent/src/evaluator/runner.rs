@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 
 use crate::evaluator::benchmark::{Benchmark, BenchmarkTask, Difficulty, EvaluationMetric};
 use crate::evaluator::metrics::{
-    contains_score, exact_match_score, levenshtein_similarity, AggregateMetrics, MetricsCalculator,
+    AggregateMetrics, MetricsCalculator, contains_score, exact_match_score, levenshtein_similarity,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +76,6 @@ pub struct ScoreResult {
 
 pub struct EvaluationRunner {
     config: RunnerConfig,
-    #[allow(dead_code)]
     metrics_calculator: MetricsCalculator,
 }
 
@@ -98,10 +97,10 @@ impl EvaluationRunner {
         let mut task_results = Vec::new();
 
         for task in &benchmark.tasks {
-            if let Some(max_difficulty) = self.config.max_difficulty {
-                if task.difficulty > max_difficulty {
-                    continue;
-                }
+            if let Some(max_difficulty) = self.config.max_difficulty
+                && task.difficulty > max_difficulty
+            {
+                continue;
             }
 
             let result = self.run_task(task).await;
@@ -132,11 +131,19 @@ impl EvaluationRunner {
         let overall_score = scores.iter().map(|s| s.weighted_score).sum::<f32>();
         let success = scores.iter().all(|s| s.passed) && overall_score >= 0.5;
 
+        let mut score_map: HashMap<String, f32> = HashMap::new();
+        for s in &scores {
+            score_map.insert(s.criteria_name.clone(), s.raw_score);
+        }
+        let task_metrics = self
+            .metrics_calculator
+            .calculate_task_score(task, &score_map);
+
         TaskResult {
             task_id: task.id.clone(),
             task_name: task.name.clone(),
             difficulty: task.difficulty,
-            success,
+            success: success && task_metrics.success,
             duration_ms,
             scores,
             overall_score,

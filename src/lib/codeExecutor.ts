@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 
 export interface ExecutionResult {
   stdout: string;
@@ -23,12 +23,22 @@ export interface PyodideInterface {
   runPythonAsync: (code: string) => Promise<string>;
 }
 
+const PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/";
+// TODO: Set SRI hash for the Pyodide script to prevent supply-chain attacks
+const PYODIDE_SRI = "";
+const PYTHON_EXECUTION_TIMEOUT_MS = 30_000;
+
 class CodeExecutor {
   private pyodide: PyodideInterface | null = null;
   private pyodideLoading: Promise<void> | null = null;
+  private pyodideLoadFailed = false;
 
   async initPyodide(): Promise<void> {
     if (this.pyodide) { return; }
+    if (this.pyodideLoadFailed) {
+      this.pyodideLoadFailed = false;
+      this.pyodideLoading = null;
+    }
     if (this.pyodideLoading) {
       await this.pyodideLoading;
       return;
@@ -38,18 +48,22 @@ class CodeExecutor {
       try {
         await new Promise<void>((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js";
+          script.src = `${PYODIDE_CDN}pyodide.js`;
+          if (PYODIDE_SRI) { script.integrity = PYODIDE_SRI; }
+          script.crossOrigin = "anonymous";
           script.onload = () => resolve();
           script.onerror = () => reject(new Error("Failed to load Pyodide script"));
           document.head.appendChild(script);
         });
 
         this.pyodide = await window.loadPyodide({
-          indexURL: "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/",
+          indexURL: PYODIDE_CDN,
         });
       } catch (e) {
         console.error("Failed to load Pyodide:", e);
         this.pyodide = null;
+        this.pyodideLoadFailed = true;
+        this.pyodideLoading = null;
       }
     })();
 
@@ -72,7 +86,7 @@ class CodeExecutor {
     } catch (error) {
       return {
         stdout: "",
-        stderr: String(error),
+        stderr: "Execution failed. Check your code for errors.",
         exit_code: -1,
         duration_ms: performance.now() - start,
       };
@@ -88,23 +102,39 @@ class CodeExecutor {
       if (!this.pyodide) {
         return {
           stdout: "",
-          stderr: "Pyodide failed to load",
+          stderr: "Pyodide failed to load. Please try again.",
           exit_code: -1,
           duration_ms: performance.now() - start,
         };
       }
 
-      await this.pyodide.runPythonAsync(`
-import sys
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Python execution timed out")), PYTHON_EXECUTION_TIMEOUT_MS);
+      });
+
+      const execPromise = (async () => {
+        const encodedCode = btoa(
+          Array.from(new TextEncoder().encode(code), byte => String.fromCharCode(byte)).join(""),
+        );
+        const result = await this.pyodide!.runPythonAsync(`
+import sys, json, base64
 from io import StringIO
 sys.stdout = StringIO()
 sys.stderr = StringIO()
-      `);
+try:
+    exec(base64.b64decode("${encodedCode}").decode("utf-8"))
+finally:
+    _stdout = sys.stdout.getvalue()
+    _stderr = sys.stderr.getvalue()
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+json.dumps({"stdout": _stdout, "stderr": _stderr})
+`);
+        const parsed = JSON.parse(result);
+        return { stdout: parsed.stdout, stderr: parsed.stderr };
+      })();
 
-      await this.pyodide.runPythonAsync(code);
-
-      const stdout = await this.pyodide.runPythonAsync("sys.stdout.getvalue()");
-      const stderr = await this.pyodide.runPythonAsync("sys.stderr.getvalue()");
+      const { stdout, stderr } = await Promise.race([execPromise, timeoutPromise]);
 
       return {
         stdout,
@@ -115,7 +145,9 @@ sys.stderr = StringIO()
     } catch (error) {
       return {
         stdout: "",
-        stderr: String(error),
+        stderr: error instanceof Error && error.message.includes("timed out")
+          ? "Python execution timed out (30s limit)"
+          : "Execution failed. Check your code for errors.",
         exit_code: -1,
         duration_ms: performance.now() - start,
       };

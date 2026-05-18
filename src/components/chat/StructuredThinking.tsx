@@ -152,16 +152,14 @@ const PHASE_PATTERNS: { phase: ThinkingPhase; keywords: string[] }[] = [
 function detectPhase(line: string): ThinkingPhase | null {
   const lower = line.toLowerCase().trim();
   for (const { phase, keywords } of PHASE_PATTERNS) {
-    for (const kw of keywords) {
-      if (lower.includes(kw)) {
-        return phase;
-      }
+    if (keywords.some((kw) => lower.includes(kw))) {
+      return phase;
     }
   }
   return null;
 }
 
-function parseThinkingBlocks(thinking: string): ThinkingBlock[] {
+function parseThinkingBlocks(thinking: string, t: (key: string) => string): ThinkingBlock[] {
   const lines = thinking.split("\n");
   const blocks: ThinkingBlock[] = [];
   let currentPhase: ThinkingPhase | null = null;
@@ -176,7 +174,7 @@ function parseThinkingBlocks(thinking: string): ThinkingBlock[] {
       if (currentLines.length > 0 && currentPhase) {
         blocks.push({
           phase: currentPhase,
-          title: currentTitle || getDefaultTitle(currentPhase),
+          title: currentTitle || getDefaultTitle(currentPhase, t),
           content: currentLines.join("\n").trim(),
         });
       }
@@ -189,7 +187,7 @@ function parseThinkingBlocks(thinking: string): ThinkingBlock[] {
       if (!currentPhase) {
         // First block, default to analysis
         currentPhase = "analysis";
-        currentTitle = getDefaultTitle("analysis");
+        currentTitle = getDefaultTitle("analysis", t);
       }
       currentLines.push(line);
     }
@@ -199,7 +197,7 @@ function parseThinkingBlocks(thinking: string): ThinkingBlock[] {
   if (currentLines.length > 0 && currentPhase) {
     blocks.push({
       phase: currentPhase,
-      title: currentTitle || getDefaultTitle(currentPhase),
+      title: currentTitle || getDefaultTitle(currentPhase, t),
       content: currentLines.join("\n").trim(),
     });
   }
@@ -208,7 +206,7 @@ function parseThinkingBlocks(thinking: string): ThinkingBlock[] {
   if (blocks.length === 0 && thinking.trim()) {
     blocks.push({
       phase: "analysis",
-      title: getDefaultTitle("analysis"),
+      title: getDefaultTitle("analysis", t),
       content: thinking.trim(),
     });
   }
@@ -227,12 +225,12 @@ function parseThinkingBlocks(thinking: string): ThinkingBlock[] {
   return merged;
 }
 
-function getDefaultTitle(phase: ThinkingPhase): string {
+function getDefaultTitle(phase: ThinkingPhase, t: (key: string) => string): string {
   const titles: Record<ThinkingPhase, string> = {
-    analysis: "分析现状",
-    planning: "制定计划",
-    execution: "执行操作",
-    verification: "验证结果",
+    analysis: t("thinking.phase.analysis"),
+    planning: t("thinking.phase.planning"),
+    execution: t("thinking.phase.execution"),
+    verification: t("thinking.phase.verification"),
   };
   return titles[phase];
 }
@@ -281,7 +279,7 @@ export const StructuredThinking = React.memo(function StructuredThinking({
     onExpandChange?.(next);
   };
 
-  const blocks = useMemo(() => parseThinkingBlocks(thinking), [thinking]);
+  const blocks = useMemo(() => parseThinkingBlocks(thinking, t), [thinking, t]);
 
   const toggleBlock = (idx: number) => {
     setExpandedBlocks((prev) => {
@@ -342,8 +340,8 @@ export const StructuredThinking = React.memo(function StructuredThinking({
             />
           )}
           {!isStreaming && blocks.length > 0 && (
-            <span style={{ fontSize: 11, color: token.colorTextSecondary }}>
-              {blocks.length} 个阶段
+            <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+              {t("thinking.phaseCount", { count: blocks.length })}
             </span>
           )}
         </div>

@@ -70,7 +70,7 @@ fn main() {
     let mut initialize_count: u32 = 0;
 
     fn log_call(log_path: &Option<String>, method: &str) {
-        if let Some(ref path) = log_path {
+        if let Some(path) = log_path {
             if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
                 let _ = writeln!(f, "{method}");
             }
@@ -132,11 +132,7 @@ fn main() {
         let _ = stdout.flush();
     }
 
-    loop {
-        let Some(request) = read_frame(&mut stdin) else {
-            break;
-        };
-
+    while let Some(request) = read_frame(&mut stdin) {
         let method = request["method"].as_str().unwrap_or("");
         log_call(&log_path, method);
 

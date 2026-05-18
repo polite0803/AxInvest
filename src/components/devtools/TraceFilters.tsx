@@ -25,78 +25,78 @@ export function TraceFilters() {
     <div className="p-3 border-b">
       <div className="space-y-3">
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">{t("devtools.sessionId")}</label>
+          <label className="text-xs text-zinc-500 mb-1 block">{t("devtools.sessionId")}</label>
           <Input
             id="trace-filters-input-36"
             placeholder={t("devtools.filterSession")}
             value={localFilter.session_id || ""}
-            onChange={(e) => setLocalFilter({ ...localFilter, session_id: e.target.value || undefined })}
+            onChange={(e) => setLocalFilter((prev) => ({ ...prev, session_id: e.target.value || undefined }))}
             allowClear
           />
         </div>
 
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">{t("devtools.timeRange")}</label>
+          <label className="text-xs text-zinc-500 mb-1 block">{t("devtools.timeRange")}</label>
           <RangePicker
             className="w-full"
             showTime
             onChange={(dates) => {
-              if (dates && dates[0] && dates[1]) {
-                setLocalFilter({
-                  ...localFilter,
-                  from_date: dates[0].toISOString(),
-                  to_date: dates[1].toISOString(),
-                });
+              if (dates?.[0] && dates?.[1]) {
+                setLocalFilter((prev) => ({
+                  ...prev,
+                  from_date: dates[0]!.toISOString(),
+                  to_date: dates[1]!.toISOString(),
+                }));
               } else {
-                setLocalFilter({
-                  ...localFilter,
+                setLocalFilter((prev) => ({
+                  ...prev,
                   from_date: undefined,
                   to_date: undefined,
-                });
+                }));
               }
             }}
           />
         </div>
 
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">{t("devtools.minDuration")}</label>
+          <label className="text-xs text-zinc-500 mb-1 block">{t("devtools.minDuration")}</label>
           <Input
             id="trace-filters-input-37"
             type="number"
             placeholder={t("devtools.minDuration")}
             value={localFilter.min_duration_ms || ""}
             onChange={(e) =>
-              setLocalFilter({
-                ...localFilter,
+              setLocalFilter((prev) => ({
+                ...prev,
                 min_duration_ms: e.target.value ? Number(e.target.value) : undefined,
-              })}
+              }))}
             allowClear
           />
         </div>
 
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">{t("devtools.maxDuration")}</label>
+          <label className="text-xs text-zinc-500 mb-1 block">{t("devtools.maxDuration")}</label>
           <Input
             id="trace-filters-input-38"
             type="number"
             placeholder={t("devtools.maxDuration")}
             value={localFilter.max_duration_ms || ""}
             onChange={(e) =>
-              setLocalFilter({
-                ...localFilter,
+              setLocalFilter((prev) => ({
+                ...prev,
                 max_duration_ms: e.target.value ? Number(e.target.value) : undefined,
-              })}
+              }))}
             allowClear
           />
         </div>
 
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">{t("devtools.errorFilter")}</label>
+          <label className="text-xs text-zinc-500 mb-1 block">{t("devtools.errorFilter")}</label>
           <Select
             className="w-full"
             placeholder={t("devtools.includeErrors")}
             value={localFilter.has_errors}
-            onChange={(value) => setLocalFilter({ ...localFilter, has_errors: value })}
+            onChange={(value) => setLocalFilter((prev) => ({ ...prev, has_errors: value }))}
             allowClear
             options={[
               { value: true, label: t("devtools.errorOnly") },

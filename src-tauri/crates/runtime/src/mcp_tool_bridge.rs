@@ -1,11 +1,3 @@
-#![allow(
-    clippy::await_holding_lock,
-    clippy::doc_markdown,
-    clippy::match_same_arms,
-    clippy::must_use_candidate,
-    clippy::uninlined_format_args,
-    clippy::unnested_or_patterns
-)]
 //! Bridge between MCP tool surface (ListMcpResources, ReadMcpResource, McpAuth, MCP)
 //! and the existing McpServerManager runtime.
 //!
@@ -191,6 +183,7 @@ impl McpToolRegistry {
         }
     }
 
+    #[allow(clippy::await_holding_lock)]
     async fn call_tool_via_manager(
         manager: Arc<tokio::sync::Mutex<McpServerManager>>,
         qualified_tool_name: String,
@@ -230,6 +223,7 @@ impl McpToolRegistry {
             .map_err(|error| format!("failed to serialize MCP tool result: {error}"))
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn call_tool(
         &self,
         server_name: &str,
@@ -273,6 +267,7 @@ impl McpToolRegistry {
     /// This is the preferred execution path — it uses connection pooling and
     /// supports all transport types (stdio/http/sse). Falls back to the legacy
     /// `McpServerManager` path if the server has no transport config stored.
+    #[allow(clippy::await_holding_lock)]
     pub async fn call_tool_via_unified_client(
         &self,
         server_name: &str,
@@ -310,25 +305,25 @@ impl McpToolRegistry {
         drop(inner);
 
         // If we have transport config, use the unified client
-        if let Some(ref transport) = transport {
-            if transport != "builtin" {
-                let result = axagent_core::mcp_client::call_tool_unified(
-                    transport,
-                    command.as_deref(),
-                    args.as_deref(),
-                    env.as_ref(),
-                    endpoint.as_deref(),
-                    tool_name,
-                    arguments.clone(),
-                )
-                .await
-                .map_err(|e| format!("MCP 工具调用失败: {e}"))?;
+        if let Some(ref transport) = transport
+            && transport != "builtin"
+        {
+            let result = axagent_core::mcp_client::call_tool_unified(
+                transport,
+                command.as_deref(),
+                args.as_deref(),
+                env.as_ref(),
+                endpoint.as_deref(),
+                tool_name,
+                arguments.clone(),
+            )
+            .await
+            .map_err(|e| format!("MCP 工具调用失败: {e}"))?;
 
-                if result.is_error {
-                    return Err(format!("MCP 工具返回错误: {}", result.content));
-                }
-                return Ok(serde_json::Value::String(result.content));
+            if result.is_error {
+                return Err(format!("MCP 工具返回错误: {}", result.content));
             }
+            return Ok(serde_json::Value::String(result.content));
         }
 
         // Fallback: try legacy McpServerManager
@@ -561,10 +556,12 @@ mod tests {
             assert!(error.contains("MCP server manager is not configured"));
 
             // Unknown tool should fail
-            assert!(registry
-                .call_tool("srv", "missing", &serde_json::json!({}))
-                .await
-                .is_err());
+            assert!(
+                registry
+                    .call_tool("srv", "missing", &serde_json::json!({}))
+                    .await
+                    .is_err()
+            );
         });
     }
 
@@ -642,10 +639,12 @@ mod tests {
                 None,
             );
 
-            assert!(registry
-                .call_tool("srv", "greet", &serde_json::json!({}))
-                .await
-                .is_err());
+            assert!(
+                registry
+                    .call_tool("srv", "greet", &serde_json::json!({}))
+                    .await
+                    .is_err()
+            );
         });
     }
 
@@ -676,13 +675,17 @@ mod tests {
             assert!(registry.list_resources("missing").is_err());
             assert!(registry.read_resource("missing", "uri").is_err());
             assert!(registry.list_tools("missing").is_err());
-            assert!(registry
-                .call_tool("missing", "tool", &serde_json::json!({}))
-                .await
-                .is_err());
-            assert!(registry
-                .set_auth_status("missing", McpConnectionStatus::Connected)
-                .is_err());
+            assert!(
+                registry
+                    .call_tool("missing", "tool", &serde_json::json!({}))
+                    .await
+                    .is_err()
+            );
+            assert!(
+                registry
+                    .set_auth_status("missing", McpConnectionStatus::Connected)
+                    .is_err()
+            );
         });
     }
 

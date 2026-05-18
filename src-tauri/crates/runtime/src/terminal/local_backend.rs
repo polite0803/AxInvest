@@ -1,22 +1,20 @@
 use async_trait::async_trait;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use super::backend_trait::{
     BackendType, SpawnConfig, TerminalBackend, TerminalExit, TerminalOutput,
 };
 
-#[allow(dead_code)]
 struct LocalPtySession {
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send>,
     _master: Box<dyn MasterPty + Send>,
 }
 
-#[allow(dead_code)]
 pub struct LocalBackend {
     connected: Arc<RwLock<bool>>,
     output_tx: mpsc::UnboundedSender<TerminalOutput>,
@@ -181,6 +179,11 @@ impl TerminalBackend for LocalBackend {
         if let Some(session) = sessions.remove(session_id) {
             let mut s = session.lock().await;
             let _ = s.child.kill();
+            let _ = self.exit_tx.send(TerminalExit {
+                session_id: session_id.to_string(),
+                exit_code: None,
+                timestamp: chrono::Utc::now().timestamp_millis(),
+            });
         }
         Ok(())
     }

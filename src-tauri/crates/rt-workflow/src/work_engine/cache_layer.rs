@@ -4,9 +4,10 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
-#[allow(clippy::type_complexity)]
+type CacheStore = Arc<RwLock<HashMap<String, (Vec<u8>, Instant)>>>;
+
 pub struct InMemoryCache {
-    store: Arc<RwLock<HashMap<String, (Vec<u8>, Instant)>>>,
+    store: CacheStore,
     default_ttl: Duration,
 }
 
@@ -51,10 +52,10 @@ pub trait CacheLayer: Send + Sync {
 impl CacheLayer for InMemoryCache {
     async fn get(&self, key: &str) -> Option<Vec<u8>> {
         let store = self.store.read().await;
-        if let Some((value, expiry)) = store.get(key) {
-            if Instant::now() < *expiry {
-                return Some(value.clone());
-            }
+        if let Some((value, expiry)) = store.get(key)
+            && Instant::now() < *expiry
+        {
+            return Some(value.clone());
         }
         None
     }

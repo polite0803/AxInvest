@@ -188,10 +188,11 @@ impl ValueInvestingEngine {
         if curr.roe.unwrap_or(0.0) > prev.roe.unwrap_or(0.0) {
             score += 1;
         } // ROE增长
-          // CFO > NI: 营收显著大于净利润表明经营现金流质量好
-        if curr.revenue.unwrap_or(0.0) > curr.net_profit.unwrap_or(0.0) * 1_0000_0000.0 {
+        let net_margin = curr.net_margin.unwrap_or(0.0);
+        let curr_roe = curr.roe.unwrap_or(0.0);
+        if net_margin > 0.0 && (curr_roe <= 0.0 || net_margin > curr_roe * 0.5) {
             score += 1;
-        }
+        } // 盈利质量(应计项测试)
 
         // 财务健康 (3分)
         if curr.debt_ratio.unwrap_or(100.0) < prev.debt_ratio.unwrap_or(100.0) {
@@ -309,14 +310,13 @@ impl ValueInvestingEngine {
     }
 
     /// 巴菲特所有者收益 = 净利润 + 折旧摊销 - 资本支出
-    /// 简化：用净利润的110%近似（假设折旧略大于资本支出）
-    /// 巴菲特所有者收益 = 净利润 + 折旧摊销 - 资本支出（简化：净利润 × 1.05）
+    /// 简化：用净利润 × 0.95 近似（假设折旧摊销略大于资本支出）
     fn buffett_owner_earnings(financials: &[FinancialReport]) -> f64 {
         if financials.is_empty() {
             return 0.0;
         }
         let f = &financials[0];
-        let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0; // 亿→元
-        net * 1.05
+        let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0;
+        net * 0.95
     }
 }

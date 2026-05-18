@@ -123,9 +123,23 @@ impl Tool for WebFetchTool {
 
         // JS 渲染分支
         if render_js {
-            return self
-                .fetch_with_js_rendering(url, &prompt, render_wait_ms, start)
-                .await;
+            #[cfg(not(target_os = "android"))]
+            {
+                return self
+                    .fetch_with_js_rendering(url, &prompt, render_wait_ms, start)
+                    .await;
+            }
+            #[cfg(target_os = "android")]
+            {
+                return Ok(ToolResult {
+                    content: "JavaScript rendering is not available on Android".to_string(),
+                    truncated: false,
+                    is_error: true,
+                    metadata: None,
+                    duration_ms: Some(start.elapsed().as_millis() as u64),
+                    progress,
+                });
+            }
         }
 
         let client = shared_http_client();
@@ -241,6 +255,7 @@ impl Tool for WebFetchTool {
 
 impl WebFetchTool {
     /// JS 渲染路径：启动 headless browser 导航 → 等待 → 提取内容
+    #[cfg(not(target_os = "android"))]
     async fn fetch_with_js_rendering(
         &self,
         url: &str,
@@ -405,11 +420,11 @@ fn decode_body(raw: &[u8], content_type: &str) -> String {
         return s.to_string();
     }
 
-    if let Some(meta_charset) = detect_html_charset(raw) {
-        if let Some(enc) = encoding_rs::Encoding::for_label(meta_charset.as_bytes()) {
-            let (decoded, _, _) = enc.decode(raw);
-            return decoded.into_owned();
-        }
+    if let Some(meta_charset) = detect_html_charset(raw)
+        && let Some(enc) = encoding_rs::Encoding::for_label(meta_charset.as_bytes())
+    {
+        let (decoded, _, _) = enc.decode(raw);
+        return decoded.into_owned();
     }
 
     let (decoded, _) = encoding_rs::UTF_8.decode_with_bom_removal(raw);

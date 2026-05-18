@@ -130,12 +130,10 @@ impl TreeOfThoughtsEngine {
         depth
     }
 
-    #[allow(clippy::ptr_arg)]
-    #[allow(dead_code)]
-    fn collect_leaves(&self, node_id: &String) -> Vec<String> {
+    fn collect_leaves(&self, node_id: &str) -> Vec<String> {
         if let Some(node) = self.tree.get(node_id) {
             if node.is_leaf() || node.status == ThoughtStatus::Pruned {
-                return vec![node_id.clone()];
+                return vec![node_id.to_string()];
             }
             node.children
                 .iter()
@@ -220,9 +218,7 @@ approach, perspective, or sub-problem decomposition. Be concise and focused.",
             let tokens = estimate_tokens(&child_node.content);
             trace!(
                 "Generated child node {} with {} tokens from parent {}",
-                child_id,
-                tokens,
-                parent_id
+                child_id, tokens, parent_id
             );
 
             child_node.evaluation_score = 0.0;
@@ -323,11 +319,7 @@ Respond with only a number between 0.0 and 1.0.",
                 || node.content.contains("however")
                 || node.content.contains("first")
                 || node.content.contains("next");
-            if has_structure {
-                0.4
-            } else {
-                0.2
-            }
+            if has_structure { 0.4 } else { 0.2 }
         };
 
         (length_score + diversity_score + structure_score).clamp(0.0, 1.0)
@@ -357,10 +349,11 @@ Respond with only a number between 0.0 and 1.0.",
             if node_id == self.root_id {
                 continue;
             }
-            if let Some(node) = self.tree.get(&node_id) {
-                if node.status == ThoughtStatus::Generated && node.evaluation_score < threshold {
-                    pruned.push(node_id.clone());
-                }
+            if let Some(node) = self.tree.get(&node_id)
+                && node.status == ThoughtStatus::Generated
+                && node.evaluation_score < threshold
+            {
+                pruned.push(node_id.clone());
             }
         }
 
@@ -434,8 +427,17 @@ Respond with only a number between 0.0 and 1.0.",
     }
 
     pub fn select_best_leaf(&self) -> Option<String> {
-        let best_path = self.select_best_path();
-        best_path.last().cloned()
+        let leaves = self.collect_leaves(&self.root_id);
+        leaves
+            .into_iter()
+            .filter_map(|id| self.tree.get(&id))
+            .filter(|n| n.status != ThoughtStatus::Pruned)
+            .max_by(|a, b| {
+                a.evaluation_score
+                    .partial_cmp(&b.evaluation_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|n| n.id.clone())
     }
 
     pub fn get_current_state(&self) -> ToTStateSummary {
@@ -472,6 +474,7 @@ Respond with only a number between 0.0 and 1.0.",
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn backtrack_to(&mut self, node_id: &str) -> Result<(), AxAgentError> {
         if !self.tree.contains_key(node_id) {
             return Err(AxAgentError::Agent {

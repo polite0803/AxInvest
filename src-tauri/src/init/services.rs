@@ -28,13 +28,14 @@ pub fn start_background_services(
     start_skill_watcher(app);
     start_memory_decay_tick(state);
     start_memory_maintenance_tick(state);
-    start_stock_scheduler(app, state);
+    start_trajectory_cleanup(state);
 }
 
 fn start_auto_backup(_app: &tauri::AppHandle, state: &AppState, app_dir: std::path::PathBuf) {
     let db = state.sea_db.clone();
     let app_data = app_dir.clone();
     let handle = state.auto_backup_handle.clone();
+    let shutdown_token = state.shutdown_token.clone();
     tauri::async_runtime::spawn(async move {
         if let Ok(settings) = axagent_core::repo::settings::get_settings(&db).await {
             if settings.auto_backup_enabled && settings.auto_backup_interval_hours > 0 {
@@ -45,6 +46,7 @@ fn start_auto_backup(_app: &tauri::AppHandle, state: &AppState, app_dir: std::pa
                 let interval_secs = interval as u64 * 3600;
                 let db2 = db.clone();
                 let app_dir2 = app_data.clone();
+                let shutdown_token = shutdown_token.clone();
 
                 let initial_delay_secs = match axagent_core::repo::backup::list_backups(&db).await {
                     Ok(backups) if !backups.is_empty() => {
@@ -69,22 +71,29 @@ fn start_auto_backup(_app: &tauri::AppHandle, state: &AppState, app_dir: std::pa
                     let dur = std::time::Duration::from_secs(interval_secs);
                     tokio::time::sleep(std::time::Duration::from_secs(initial_delay_secs)).await;
                     loop {
-                        let backup_dir = axagent_core::repo::backup::resolve_backup_dir(
-                            backup_dir_setting.as_deref(),
-                            &app_dir2,
-                        );
-                        if let Err(e) =
-                            axagent_core::repo::backup::create_backup(&db2, "sqlite", &backup_dir)
-                                .await
-                        {
-                            tracing::warn!("Auto-backup failed: {}", e);
-                        } else {
-                            tracing::info!("Auto-backup created");
-                            let _ =
-                                axagent_core::repo::backup::cleanup_old_backups(&db2, max_count)
-                                    .await;
+                        tokio::select! {
+                            _ = shutdown_token.cancelled() => {
+                                tracing::info!("[auto_backup] 收到关闭信号，停止自动备份");
+                                break;
+                            }
+                            _ = tokio::time::sleep(dur) => {
+                                let backup_dir = axagent_core::repo::backup::resolve_backup_dir(
+                                    backup_dir_setting.as_deref(),
+                                    &app_dir2,
+                                );
+                                if let Err(e) =
+                                    axagent_core::repo::backup::create_backup(&db2, "sqlite", &backup_dir)
+                                        .await
+                                {
+                                    tracing::warn!("Auto-backup failed: {}", e);
+                                } else {
+                                    tracing::info!("Auto-backup created");
+                                    let _ =
+                                        axagent_core::repo::backup::cleanup_old_backups(&db2, max_count)
+                                            .await;
+                                }
+                            }
                         }
-                        tokio::time::sleep(dur).await;
                     }
                 });
                 *handle.lock().await = Some(task);
@@ -158,6 +167,7 @@ fn start_webdav_sync(_app: &tauri::AppHandle, state: &AppState, app_dir: std::pa
     let master_key = state.master_key;
     let app_data_dir = app_dir.clone();
     let handle = state.webdav_sync_handle.clone();
+    let shutdown_token = state.shutdown_token.clone();
     tauri::async_runtime::spawn(async move {
         if let Ok(settings) = axagent_core::repo::settings::get_settings(&db).await {
             if settings.webdav_sync_enabled && settings.webdav_sync_interval_minutes > 0 {
@@ -189,6 +199,7 @@ fn start_webdav_sync(_app: &tauri::AppHandle, state: &AppState, app_dir: std::pa
                     app_data_dir,
                     interval,
                     initial_delay_secs,
+                    shutdown_token,
                 );
                 *handle.lock().await = Some(task);
             }
@@ -1071,18 +1082,51 @@ fn start_cron_scheduler(state: &AppState) {
     tracing::info!("[CronScheduler] 已启动（统一 Cron + ScheduledTask），每30秒轮询一次");
 }
 
-fn start_stock_scheduler(app: &tauri::AppHandle, state: &AppState) {
-    use crate::stock_scheduler::StockScheduler;
-    use axagent_astock_data::AStockClient;
-    use std::sync::Arc;
+fn start_trajectory_cleanup(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let handle = state.trajectory_cleanup_handle.clone();
+    let shutdown_token = state.shutdown_token.clone();
+    let config = axagent_trajectory::TrajectoryCleanupConfig::default();
+    let config_for_log = config.clone();
+    let interval = std::time::Duration::from_secs(24 * 3600);
 
-    let db = Arc::new(state.sea_db.clone());
-    let astock_client = Arc::new(AStockClient::new());
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let scheduler = StockScheduler::new(db, astock_client, app_handle);
-        scheduler.start_with_alerts().await;
+    let task = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {
+                    match trajectory_storage.cleanup(&config) {
+                        Ok(count) if count > 0 => {
+                            tracing::info!(
+                                "[trajectory_cleanup] Cleaned up {} old trajectories",
+                                count
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                "[trajectory_cleanup] cleanup failed: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+                _ = shutdown_token.cancelled() => {
+                    tracing::info!(
+                        "[trajectory_cleanup] Received shutdown signal, stopping"
+                    );
+                    break;
+                }
+            }
+        }
     });
-
-    tracing::info!("[StockScheduler] 已启动，每60秒轮询一次（含价格告警检查）");
+    tauri::async_runtime::spawn(async move {
+        *handle.lock().await = Some(task);
+    });
+    tracing::info!(
+        "[trajectory_cleanup] Started with max_age_days={:?}, max_trajectories={:?}, interval=24h",
+        config_for_log.max_age_days,
+        config_for_log.max_trajectories
+    );
 }

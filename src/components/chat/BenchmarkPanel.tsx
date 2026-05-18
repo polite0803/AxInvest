@@ -45,7 +45,7 @@ interface BenchSuiteInfo {
   }>;
 }
 
-function BenchmarkPanel() {
+export function BenchmarkPanel() {
   const { t } = useTranslation();
   const [suites, setSuites] = useState<BenchSuiteInfo[]>([]);
   const [results, setResults] = useState<BenchResult[]>([]);
@@ -57,7 +57,10 @@ function BenchmarkPanel() {
       const { invoke } = await import("@/lib/invoke");
       const data = await invoke<BenchSuiteInfo[]>(
         "benchmark_list_suites",
-      ).catch(() => []);
+      ).catch((e) => {
+        if (import.meta.env.DEV) { console.warn("Failed to fetch benchmark suites:", e); }
+        return [];
+      });
       setSuites(data);
     } catch {
       // ignore
@@ -170,6 +173,14 @@ function BenchmarkPanel() {
             >
               <div
                 className="flex items-center justify-between cursor-pointer"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setExpandedResult(expandedResult === result.run_id ? null : result.run_id);
+                  }
+                }}
                 onClick={() =>
                   setExpandedResult(
                     expandedResult === result.run_id ? null : result.run_id,
@@ -197,7 +208,7 @@ function BenchmarkPanel() {
               </div>
 
               {expandedResult === result.run_id && (
-                <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
                   <div className="grid grid-cols-2 gap-2 mb-2">
                     <Card size="small" className="bg-green-50 dark:bg-green-900/10 text-center">
                       <Text className="text-lg font-bold text-green-600 block">
@@ -229,7 +240,7 @@ function BenchmarkPanel() {
                           ? <CheckCircle size={10} className="text-green-500 shrink-0" />
                           : task.status === "failed" || task.status === "timeout"
                           ? <XCircle size={10} className="text-red-500 shrink-0" />
-                          : <Clock size={10} className="text-gray-400 shrink-0" />}
+                          : <Clock size={10} className="text-zinc-400 shrink-0" />}
                         <Text className="flex-1 truncate">{task.task_id}</Text>
                         <Text type="secondary">
                           {task.steps_taken}s
@@ -256,5 +267,3 @@ function BenchmarkPanel() {
     </Card>
   );
 }
-
-export default BenchmarkPanel;

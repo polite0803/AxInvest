@@ -9,8 +9,8 @@ use tokio::runtime::Builder;
 use tokio::time::timeout;
 
 use crate::sandbox::{
-    build_linux_sandbox_command, resolve_sandbox_status_for_request, FilesystemIsolationMode,
-    SandboxConfig, SandboxStatus,
+    FilesystemIsolationMode, SandboxConfig, SandboxStatus, build_linux_sandbox_command,
+    resolve_sandbox_status_for_request,
 };
 use axagent_runtime_core::ConfigLoader;
 
@@ -172,8 +172,12 @@ fn sandbox_status_for_input(input: &BashCommandInput, cwd: &std::path::Path) -> 
         |_| SandboxConfig::default(),
         |runtime_config| runtime_config.sandbox().clone(),
     );
+    let sandbox_enabled = input
+        .dangerously_disable_sandbox
+        .and_then(|disabled| if disabled { None } else { Some(true) })
+        .unwrap_or(true);
     let request = config.resolve_request(
-        input.dangerously_disable_sandbox.map(|disabled| !disabled),
+        Some(sandbox_enabled),
         input.namespace_restrictions,
         input.isolate_network,
         input.filesystem_mode,
@@ -243,7 +247,7 @@ fn prepare_sandbox_dirs(cwd: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_bash, BashCommandInput};
+    use super::{BashCommandInput, execute_bash};
     use crate::sandbox::FilesystemIsolationMode;
 
     #[test]

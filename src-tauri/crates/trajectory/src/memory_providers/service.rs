@@ -371,12 +371,12 @@ impl MemoryService {
             };
         }
 
-        if let Err(e) = self.storage.index_memory_fts(
+        if let Err(e) = crate::storage::TrajectoryStorage::block_on(self.storage.index_memory_fts(
             &entry.id,
             &entry.memory_type,
             &entry.content,
             &entry.tags,
-        ) {
+        )) {
             tracing::warn!("Failed to sync FTS5 index for new memory: {}", e);
         }
 
@@ -437,12 +437,14 @@ impl MemoryService {
                 };
             }
 
-            if let Err(e) = self.storage.index_memory_fts(
-                &updated.id,
-                &updated.memory_type,
-                &updated.content,
-                &updated.tags,
-            ) {
+            if let Err(e) =
+                crate::storage::TrajectoryStorage::block_on(self.storage.index_memory_fts(
+                    &updated.id,
+                    &updated.memory_type,
+                    &updated.content,
+                    &updated.tags,
+                ))
+            {
                 tracing::warn!("Failed to sync FTS5 index for replaced memory: {}", e);
             }
 
@@ -491,7 +493,9 @@ impl MemoryService {
                 };
             }
 
-            if let Err(e) = self.storage.delete_memory_fts(&id) {
+            if let Err(e) =
+                crate::storage::TrajectoryStorage::block_on(self.storage.delete_memory_fts(&id))
+            {
                 tracing::warn!("Failed to remove memory from FTS5 index: {}", e);
             }
 
@@ -570,7 +574,7 @@ impl MemoryService {
                         success: false,
                         message: "记忆已在最低层".to_string(),
                         new_usage: None,
-                    }
+                    };
                 },
             };
 
@@ -625,7 +629,9 @@ impl MemoryService {
                     if let Err(e) = self.storage.delete_memory(id) {
                         tracing::warn!("Failed to evict memory {}: {}", id, e);
                     }
-                    if let Err(e) = self.storage.delete_memory_fts(id) {
+                    if let Err(e) = crate::storage::TrajectoryStorage::block_on(
+                        self.storage.delete_memory_fts(id),
+                    ) {
                         tracing::warn!("Failed to remove evicted memory from FTS5: {}", e);
                     }
                     mem.entries.remove(id);
@@ -657,7 +663,9 @@ impl MemoryService {
             if let Err(e) = self.storage.delete_memory(id) {
                 tracing::warn!("Failed to delete expired memory {}: {}", id, e);
             }
-            if let Err(e) = self.storage.delete_memory_fts(id) {
+            if let Err(e) =
+                crate::storage::TrajectoryStorage::block_on(self.storage.delete_memory_fts(id))
+            {
                 tracing::warn!("Failed to remove expired memory from FTS5: {}", e);
             }
             mem.entries.remove(id);
@@ -673,7 +681,9 @@ impl MemoryService {
                 if let Err(e) = self.storage.delete_memory(&entry.id) {
                     tracing::warn!("Failed to delete decayed memory {}: {}", entry.id, e);
                 }
-                if let Err(e) = self.storage.delete_memory_fts(&entry.id) {
+                if let Err(e) = crate::storage::TrajectoryStorage::block_on(
+                    self.storage.delete_memory_fts(&entry.id),
+                ) {
                     tracing::warn!("Failed to remove decayed memory from FTS5: {}", e);
                 }
                 evicted += 1;
@@ -1230,13 +1240,13 @@ impl MemoryService {
         }
 
         for eid in &related_entity_ids {
-            if let Ok(Some(entity)) = self.storage.get_entity(eid) {
-                if !entities.iter().any(|e| e.id == entity.id) {
-                    entity_contents.push(format!(
-                        "[related:{}:{}] {}",
-                        entity.entity_type, entity.name, entity.mention_count
-                    ));
-                }
+            if let Ok(Some(entity)) = self.storage.get_entity(eid)
+                && !entities.iter().any(|e| e.id == entity.id)
+            {
+                entity_contents.push(format!(
+                    "[related:{}:{}] {}",
+                    entity.entity_type, entity.name, entity.mention_count
+                ));
             }
         }
 
@@ -1260,7 +1270,7 @@ impl MemoryService {
                 return DisambiguationResult {
                     merged: 0,
                     total: 0,
-                }
+                };
             },
         };
 
@@ -1445,7 +1455,7 @@ impl MemoryService {
                         success: false,
                         message: format!("未知反馈类型: {}", feedback),
                         new_usage: None,
-                    }
+                    };
                 },
             }
 

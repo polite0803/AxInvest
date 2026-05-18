@@ -106,6 +106,12 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  css: {
+    transformer: "lightningcss",
+    lightningcss: {
+      errorRecovery: true, // Tailwind v4 CSS var() 在 @media 中会触发 strict 模式错误
+    },
+  },
   build: {
     sourcemap: false, // 生产构建不暴露源码
     modulePreload: { polyfill: false },
@@ -186,10 +192,9 @@ export default defineConfig(async () => ({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // TODO: 这些测试需要修复 CI 兼容性问题后重新启用
+    // 已知问题：mock 依赖缺失、异步竞态导致 CI 环境偶发失败
     exclude: [
-      "src/pages/__tests__/ChatPage.test.tsx",
-      "src/components/chat/__tests__/InputArea.test.tsx",
-      "src/components/files/__tests__/FilesPage.test.tsx",
       "src/components/settings/__tests__/ProviderDetail.test.tsx",
     ],
   },

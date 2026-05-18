@@ -1,3 +1,4 @@
+import type { Citation } from "@/types";
 import { CheckCircleOutlined, CopyOutlined, DownloadOutlined, FileTextOutlined } from "@ant-design/icons";
 import { Button, Card, Divider, Select, Space, Tabs, Tag, Typography } from "antd";
 import DOMPurify from "dompurify";
@@ -8,14 +9,6 @@ import { CredibilityBadge } from "./CredibilityBadge";
 const { Text, Title } = Typography;
 
 type ReportFormat = "markdown" | "html" | "json";
-
-interface Citation {
-  id: string;
-  sourceUrl: string;
-  sourceTitle: string;
-  sourceType: string;
-  credibility: number;
-}
 
 interface ResearchReport {
   id: string;
@@ -33,29 +26,62 @@ interface ReportViewerProps {
   onReset?: () => void;
 }
 
-function getSourceTypeName(sourceType: string): string {
-  const nameMap: Record<string, string> = {
-    web: "网页",
-    academic: "学术",
-    wikipedia: "维基百科",
-    github: "GitHub",
-    documentation: "文档",
-    news: "新闻",
-    blog: "博客",
-    forum: "论坛",
-    unknown: "未知",
-  };
-  return nameMap[sourceType.toLowerCase()] || sourceType;
-}
-
 export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewerProps) {
   const { t } = useTranslation();
+  const getSourceTypeName = (sourceType: string): string =>
+    t(`report.sourceType.${sourceType.toLowerCase()}`, sourceType);
   const [selectedFormat, setSelectedFormat] = useState<ReportFormat>("markdown");
+
+  const sanitizedHtml = useMemo(() => {
+    if (!report) { return ""; }
+    const rawHtml = report.content
+      .replace(/#\s+(.+)/g, "<h1>$1</h1>")
+      .replace(/##\s+(.+)/g, "<h2>$1</h2>")
+      .replace(/\n/g, "<br/>");
+    return DOMPurify.sanitize(rawHtml, {
+      ALLOWED_TAGS: [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "br",
+        "hr",
+        "ul",
+        "ol",
+        "li",
+        "strong",
+        "em",
+        "b",
+        "i",
+        "u",
+        "s",
+        "a",
+        "code",
+        "pre",
+        "blockquote",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "span",
+        "div",
+        "img",
+        "sub",
+        "sup",
+      ],
+      ALLOWED_ATTR: ["href", "src", "alt", "title", "target", "rel"],
+    });
+  }, [report?.content]);
 
   if (!report) {
     return (
       <Card className="h-full">
-        <div className="flex items-center justify-center h-64 text-gray-400">
+        <div className="flex items-center justify-center h-64 text-zinc-400">
           <div className="text-center">
             <FileTextOutlined style={{ fontSize: 48 }} className="mb-4" />
             <div>{t("reportViewer.noReport")}</div>
@@ -106,52 +132,6 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
   );
 
   const renderHtmlPreview = () => {
-    // 净化 LLM 生成的 HTML 内容，防止 XSS 攻击（如 <script>、onclick 等）
-    const sanitizedHtml = useMemo(() => {
-      const rawHtml = report.content
-        .replace(/#\s+(.+)/g, "<h1>$1</h1>")
-        .replace(/##\s+(.+)/g, "<h2>$1</h2>")
-        .replace(/\n/g, "<br/>");
-      return DOMPurify.sanitize(rawHtml, {
-        ALLOWED_TAGS: [
-          "h1",
-          "h2",
-          "h3",
-          "h4",
-          "h5",
-          "h6",
-          "p",
-          "br",
-          "hr",
-          "ul",
-          "ol",
-          "li",
-          "strong",
-          "em",
-          "b",
-          "i",
-          "u",
-          "s",
-          "a",
-          "code",
-          "pre",
-          "blockquote",
-          "table",
-          "thead",
-          "tbody",
-          "tr",
-          "th",
-          "td",
-          "span",
-          "div",
-          "img",
-          "sub",
-          "sup",
-        ],
-        ALLOWED_ATTR: ["href", "src", "alt", "title", "class", "id", "target", "rel"],
-      });
-    }, [report.content]);
-
     return (
       <div
         style={{
@@ -171,14 +151,14 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
   const tabItems = [
     {
       key: "preview",
-      label: "预览",
+      label: t("reportViewer.preview"),
       children: selectedFormat === "markdown" ? renderMarkdownPreview() : renderHtmlPreview(),
     },
     {
       key: "references",
       label: (
         <span>
-          参考文献 <Tag>{report.citations.length}</Tag>
+          {t("reportViewer.references")} <Tag>{report.citations.length}</Tag>
         </span>
       ),
       children: (
@@ -205,9 +185,9 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
     },
     {
       key: "summary",
-      label: "摘要",
+      label: t("reportViewer.summary"),
       children: (
-        <Card className="bg-gray-50">
+        <Card className="bg-zinc-50">
           <Text>{report.summary || t("reportViewer.noSummary")}</Text>
         </Card>
       ),
@@ -223,7 +203,7 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
           </Title>
           {report.createdAt && (
             <Text type="secondary" className="text-sm">
-              生成时间: {new Date(report.createdAt).toLocaleString()}
+              {t("reportViewer.generatedAt")} {new Date(report.createdAt).toLocaleString()}
             </Text>
           )}
         </div>
@@ -242,16 +222,16 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
               style={{ width: 120 }}
             />
             <Button icon={<DownloadOutlined />} onClick={() => handleExport(selectedFormat)}>
-              导出
+              {t("reportViewer.export")}
             </Button>
           </Space>
           <Space>
             <Button icon={<CopyOutlined />} onClick={handleCopy}>
-              复制报告
+              {t("reportViewer.copyReport")}
             </Button>
             {onReset && (
               <Button onClick={onReset} type="primary">
-                开始新研究
+                {t("reportViewer.startNewResearch")}
               </Button>
             )}
           </Space>
@@ -263,7 +243,9 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
           <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
             <Text type="warning" className="text-sm">
               <CheckCircleOutlined className="mr-1" />
-              注意: 报告中包含 {report.citations.filter((c) => c.credibility < 0.5).length} 个低可信度来源，请谨慎使用
+              {t("reportViewer.lowCredibilityWarning", {
+                count: report.citations.filter((c) => c.credibility < 0.5).length,
+              })}
             </Text>
           </div>
         )}
@@ -293,7 +275,15 @@ export function ReportOutlineView({ outline, onSectionClick }: ReportOutlineView
         {outline.sections.map((section, index) => (
           <div
             key={section.id}
-            className="cursor-pointer hover:bg-gray-50 p-2 rounded"
+            className="cursor-pointer hover:bg-zinc-50 p-2 rounded"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSectionClick?.(section.id);
+              }
+            }}
             onClick={() => onSectionClick?.(section.id)}
           >
             <Text strong>
@@ -310,5 +300,3 @@ export function ReportOutlineView({ outline, onSectionClick }: ReportOutlineView
     </Card>
   );
 }
-
-export default ReportViewer;

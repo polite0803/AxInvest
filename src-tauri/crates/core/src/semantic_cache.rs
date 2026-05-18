@@ -169,7 +169,6 @@ impl ApproximateIndex {
         }
     }
 
-    #[allow(dead_code)]
     fn remove_entry(&mut self, key: &str) {
         for bucket in &mut self.buckets {
             bucket.entry_keys.retain(|k| k != key);
@@ -317,19 +316,19 @@ impl SemanticCache {
             }
         }
 
-        if let Some(key) = matching_key {
-            if let Some(entry) = self.entries.get_mut(&key) {
-                entry.last_accessed = Utc::now();
-                entry.access_count += 1;
-                self.hits += 1;
-                debug!(
-                    key = %key,
-                    similarity = %best_sim,
-                    access_count = %entry.access_count,
-                    "Semantic cache hit"
-                );
-                return Some(entry);
-            }
+        if let Some(key) = matching_key
+            && let Some(entry) = self.entries.get_mut(&key)
+        {
+            entry.last_accessed = Utc::now();
+            entry.access_count += 1;
+            self.hits += 1;
+            debug!(
+                key = %key,
+                similarity = %best_sim,
+                access_count = %entry.access_count,
+                "Semantic cache hit"
+            );
+            return Some(entry);
         }
 
         debug!("Semantic cache miss");
@@ -396,14 +395,17 @@ impl SemanticCache {
     /// Returns the number of entries that were removed.
     pub fn invalidate_expired(&mut self) -> usize {
         let before = self.entries.len();
-        self.entries.retain(|key, entry| {
-            if is_expired(entry) {
-                debug!(key = %key, "Removing expired cache entry");
-                false
-            } else {
-                true
-            }
-        });
+        let expired_keys: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| is_expired(entry))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in &expired_keys {
+            debug!(key = %key, "Removing expired cache entry");
+            self.entries.remove(key);
+            self.index.remove_entry(key);
+        }
         let removed = before - self.entries.len();
         if removed > 0 {
             info!(removed = %removed, "Invalidated expired cache entries");
@@ -439,6 +441,7 @@ impl SemanticCache {
         for (key, _) in entries.iter().take(to_evict) {
             debug!(key = %key, "Evicting least used cache entry");
             self.entries.remove(key);
+            self.index.remove_entry(key);
         }
 
         info!(evicted = %to_evict, "Evicted least used cache entries");
@@ -877,9 +880,11 @@ mod tests {
         let evicted = cache.invalidate_least_used(1);
         assert_eq!(evicted, 1);
         assert_eq!(cache.entries.len(), 1);
-        assert!(cache
-            .entries
-            .contains_key(&embedding_hash(&create_test_embedding(0.2))));
+        assert!(
+            cache
+                .entries
+                .contains_key(&embedding_hash(&create_test_embedding(0.2)))
+        );
     }
 
     #[test]

@@ -98,8 +98,20 @@ impl Tool for FileWriteTool {
     }
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let file_path = input["file_path"].as_str().unwrap();
-        let content = input["content"].as_str().unwrap();
+        let file_path = input["file_path"].as_str().unwrap_or("");
+        if file_path.is_empty() {
+            return Err(ToolError::invalid_input_for("FileWrite", "缺少 file_path 参数"));
+        }
+        if file_path.contains("..") {
+            return Err(ToolError::invalid_input_for(
+                "FileWrite",
+                "file_path 包含路径遍历字符 '..'",
+            ));
+        }
+        let content = input["content"].as_str().unwrap_or("");
+        if content.is_empty() && !input["content"].is_string() {
+            return Err(ToolError::invalid_input_for("FileWrite", "缺少 content 参数"));
+        }
 
         let path = Path::new(file_path);
 
@@ -123,19 +135,21 @@ impl Tool for FileWriteTool {
         let action = if existed { "更新" } else { "创建" };
         let mut output = format!("✅ 已{}文件: {}\n", action, file_path);
 
-        if let Some(old) = old_content {
-            if old != content && old.len() < 50_000 && content.len() < 50_000 {
-                // 生成简单 diff
-                output.push_str("\n## 变更对比\n```diff\n");
-                for diff in diff::lines(&old, content) {
-                    match diff {
-                        diff::Result::Left(l) => output.push_str(&format!("-{}\n", l)),
-                        diff::Result::Right(r) => output.push_str(&format!("+{}\n", r)),
-                        diff::Result::Both(b, _) => output.push_str(&format!(" {}\n", b)),
-                    }
+        if let Some(old) = old_content
+            && old != content
+            && old.len() < 50_000
+            && content.len() < 50_000
+        {
+            // 生成简单 diff
+            output.push_str("\n## 变更对比\n```diff\n");
+            for diff in diff::lines(&old, content) {
+                match diff {
+                    diff::Result::Left(l) => output.push_str(&format!("-{}\n", l)),
+                    diff::Result::Right(r) => output.push_str(&format!("+{}\n", r)),
+                    diff::Result::Both(b, _) => output.push_str(&format!(" {}\n", b)),
                 }
-                output.push_str("```\n");
             }
+            output.push_str("```\n");
         }
 
         let lines = content.lines().count();

@@ -93,12 +93,14 @@ impl BacktestEngine {
         }
 
         let entry_idx = klines.iter().position(|k| k.date.as_str() >= analysis_date);
-        let entry_price = entry_idx.map(|i| klines[i].close);
+        let entry_price = match entry_idx {
+            Some(i) => Some(klines[i].close),
+            None => return Err(format!("{stock_code} 在 {analysis_date} 无K线数据，无法回测")),
+        };
 
-        // 取第 holding_days 根K线（或最后可用的）
         let exit_idx = entry_idx
             .map(|i| (i + holding_days as usize).min(klines.len() - 1))
-            .unwrap_or(klines.len() - 1);
+            .unwrap();
         let exit_price = klines[exit_idx].close;
 
         // 计算持有期间最大回撤

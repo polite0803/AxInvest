@@ -213,6 +213,7 @@ impl MessageGateway {
             .insert(handler.transport_type(), Arc::new(handler));
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn register_endpoint(&self, endpoint: AgentEndpoint) -> Result<(), GatewayError> {
         let mut state = self
             .state
@@ -233,6 +234,7 @@ impl MessageGateway {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn unregister_endpoint(&self, agent_id: &str) -> Result<AgentEndpoint, GatewayError> {
         let mut state = self
             .state
@@ -257,6 +259,7 @@ impl MessageGateway {
         Ok(endpoint)
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn send_message(&self, message: &AgentMessage) -> Result<(), GatewayError> {
         let state = self
             .state
@@ -282,6 +285,7 @@ impl MessageGateway {
         handler.send(&message.to, message).await
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn broadcast(
         &self,
         agent_ids: &[String],
@@ -295,10 +299,10 @@ impl MessageGateway {
             })?;
 
         for agent_id in agent_ids {
-            if let Some(endpoint) = state.endpoints.get(agent_id) {
-                if let Some(handler) = self.transport_handlers.get(&endpoint.transport) {
-                    handler.send(agent_id, message).await?;
-                }
+            if let Some(endpoint) = state.endpoints.get(agent_id)
+                && let Some(handler) = self.transport_handlers.get(&endpoint.transport)
+            {
+                handler.send(agent_id, message).await?;
             }
         }
 

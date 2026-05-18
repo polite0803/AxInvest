@@ -56,7 +56,6 @@ function assessCredibility(url: string): "high" | "medium" | "low" {
     "docker.com",
     "kubernetes.io",
   ];
-
   const mediumDomains = [
     "medium.com",
     "dev.to",
@@ -69,15 +68,12 @@ function assessCredibility(url: string): "high" | "medium" | "low" {
     "infoq.cn",
     "cnblogs.com",
   ];
-
-  const urlLower = url.toLowerCase();
-
-  if (highDomains.some((d) => urlLower.includes(d))) {
-    return "high";
-  }
-  if (mediumDomains.some((d) => urlLower.includes(d))) {
-    return "medium";
-  }
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    const isMatch = (domain: string) => hostname === domain || hostname.endsWith("." + domain);
+    if (highDomains.some(isMatch)) { return "high"; }
+    if (mediumDomains.some(isMatch)) { return "medium"; }
+  } catch { /* invalid URL */ }
   return "low";
 }
 
@@ -148,7 +144,7 @@ export function sortResultsByRelevance(
 ): SearchResultItem[] {
   const queryTerms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
 
-  return [...results].sort((a, b) => {
+  return results.toSorted((a, b) => {
     const scoreA = computeRelevanceScore(a, queryTerms);
     const scoreB = computeRelevanceScore(b, queryTerms);
     return scoreB - scoreA;

@@ -1,38 +1,33 @@
-//! MCP 连接健康监控
-//!
-//! 定期检查连接池中的 MCP 服务器健康状态，自动重连不健康的连接，
-//! 并通过 Tauri 事件通知前端状态变化。
-
+#[cfg(not(target_os = "android"))]
 use std::collections::HashMap;
+#[cfg(not(target_os = "android"))]
 use std::sync::Arc;
+#[cfg(not(target_os = "android"))]
 use std::time::Duration;
 
+#[cfg(not(target_os = "android"))]
 use tokio::sync::Mutex;
 
+#[cfg(not(target_os = "android"))]
 use crate::mcp_client::McpConnectionPool;
 
-/// 服务器健康状态
+#[cfg(not(target_os = "android"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HealthStatus {
-    /// 连接正常
     Healthy,
-    /// 连接异常（不可恢复）
     Unhealthy { reason: String },
 }
 
-/// MCP 健康监控器
-///
-/// 定期检查连接池中所有活跃连接的状态，对不健康的连接尝试自动重连。
+#[cfg(not(target_os = "android"))]
 pub struct McpHealthMonitor {
     pool: Arc<McpConnectionPool>,
     check_interval: Duration,
-    #[allow(dead_code)]
     unhealthy_count: Mutex<HashMap<String, u32>>,
     unhealthy_threshold: u32,
 }
 
+#[cfg(not(target_os = "android"))]
 impl McpHealthMonitor {
-    /// 创建新的健康监控器
     #[must_use]
     pub fn new(pool: Arc<McpConnectionPool>) -> Self {
         Self {
@@ -43,26 +38,21 @@ impl McpHealthMonitor {
         }
     }
 
-    /// 设置检查间隔
     #[must_use]
     pub fn with_interval(mut self, interval: Duration) -> Self {
         self.check_interval = interval;
         self
     }
 
-    /// 设置不健康阈值（连续不健康次数超过阈值则上报）
     #[must_use]
     pub fn with_threshold(mut self, threshold: u32) -> Self {
         self.unhealthy_threshold = threshold;
         self
     }
 
-    /// 启动健康监控循环
-    /// 返回 JoinHandle，调用方可 await 或 abort
     pub fn start(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(self.check_interval);
-            // 跳过首次立即触发
             tick.tick().await;
 
             loop {
@@ -75,7 +65,6 @@ impl McpHealthMonitor {
         })
     }
 
-    /// 执行一次全量健康检查
     pub async fn check_now(&self) -> Vec<HealthReport> {
         let reports = Vec::new();
         let pool_size = self.pool.len().await;
@@ -86,27 +75,43 @@ impl McpHealthMonitor {
             return reports;
         }
 
-        // 通过检查池大小变化判断是否有连接被驱逐
-        // 实际健康检查依赖连接池自身的驱逐逻辑（在 get_or_connect 中检测）
         let after_check = self.pool.len().await;
         if after_check < pool_size {
-            tracing::warn!(
-                "[McpHealth] 健康检查期间驱逐了 {} 个不健康连接",
-                pool_size - after_check
-            );
+            let evicted = pool_size - after_check;
+            tracing::warn!("[McpHealth] 健康检查期间驱逐了 {} 个不健康连接", evicted);
+            self.increment_unhealthy_count("evicted_pool", evicted)
+                .await;
         }
 
         reports
     }
+
+    pub async fn increment_unhealthy_count(&self, server_id: &str, count: usize) {
+        let mut map = self.unhealthy_count.lock().await;
+        let entry = map.entry(server_id.to_string()).or_insert(0);
+        *entry += count as u32;
+    }
+
+    pub async fn is_unhealthy(&self, server_id: &str) -> bool {
+        let map = self.unhealthy_count.lock().await;
+        map.get(server_id)
+            .is_some_and(|&c| c >= self.unhealthy_threshold)
+    }
+
+    pub async fn reset_unhealthy_count(&self, server_id: &str) {
+        let mut map = self.unhealthy_count.lock().await;
+        map.remove(server_id);
+    }
 }
 
-/// 健康检查报告
+#[cfg(not(target_os = "android"))]
 #[derive(Debug, Clone)]
 pub struct HealthReport {
     pub server_id: String,
     pub status: HealthStatus,
 }
 
+#[cfg(not(target_os = "android"))]
 impl Default for McpHealthMonitor {
     fn default() -> Self {
         Self::new(Arc::new(McpConnectionPool::new(Duration::from_secs(300))))
@@ -117,6 +122,7 @@ impl Default for McpHealthMonitor {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn health_monitor_has_sensible_defaults() {
         let monitor = McpHealthMonitor::default();
@@ -124,6 +130,7 @@ mod tests {
         assert_eq!(monitor.unhealthy_threshold, 3);
     }
 
+    #[cfg(not(target_os = "android"))]
     #[test]
     fn health_status_equality() {
         assert_eq!(HealthStatus::Healthy, HealthStatus::Healthy);
@@ -133,5 +140,21 @@ mod tests {
                 reason: "timeout".into()
             }
         );
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[tokio::test]
+    async fn unhealthy_count_tracking() {
+        let monitor = McpHealthMonitor::default();
+        assert!(!monitor.is_unhealthy("server1").await);
+
+        monitor.increment_unhealthy_count("server1", 1).await;
+        assert!(!monitor.is_unhealthy("server1").await);
+
+        monitor.increment_unhealthy_count("server1", 2).await;
+        assert!(monitor.is_unhealthy("server1").await);
+
+        monitor.reset_unhealthy_count("server1").await;
+        assert!(!monitor.is_unhealthy("server1").await);
     }
 }

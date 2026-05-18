@@ -4479,6 +4479,12 @@ mod tests_conversation {
             sync_engine: None,
             astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
             stock_monitor: None,
+            trading_engine: Arc::new(tokio::sync::RwLock::new(
+                axagent_stock_analysis::trading::TradingEngine::new(
+                    Arc::new(db.clone()),
+                    Arc::new(axagent_astock_data::AStockClient::new()),
+                ),
+            )),
             plugin_manager: std::sync::Mutex::new(axagent_plugins::PluginManager::new(
                 axagent_plugins::PluginManagerConfig::new(temp_dir.clone()),
             )),

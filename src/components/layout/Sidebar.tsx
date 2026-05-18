@@ -25,10 +25,16 @@ const pageKeyToPath: Record<PageKey, string> = {
 };
 
 function pathToPageKey(path: string): PageKey {
-  if (path === "/" || path === "") { return "chat"; }
-  if (path.startsWith("/skill/")) { return path; }
+  if (path === "/" || path === "") {
+    return "chat";
+  }
+  if (path.startsWith("/skill/")) {
+    return path;
+  }
   const key = path.slice(1);
-  if (key in pageKeyToPath) { return key as PageKey; }
+  if (key in pageKeyToPath) {
+    return key as PageKey;
+  }
   return "chat";
 }
 
@@ -107,7 +113,8 @@ function NavItemButton({
   const location = useLocation();
 
   const isActive = item.isPlugin
-    ? location.pathname === item.path || location.pathname.startsWith(item.path + "/")
+    ? location.pathname === item.path
+      || location.pathname.startsWith(item.path + "/")
     : activePage === item.key;
   const label = item.isPlugin ? item.labelKey : t(item.labelKey);
   const tooltipText = item.isPlugin ? `${label} (${item.pluginName})` : label;
@@ -117,7 +124,9 @@ function NavItemButton({
   const shortcutLabel = action
     ? formatShortcutForDisplay(getShortcutBinding(settings, action))
     : "";
-  const title = shortcutLabel ? `${tooltipText} (${shortcutLabel})` : tooltipText;
+  const title = shortcutLabel
+    ? `${tooltipText} (${shortcutLabel})`
+    : tooltipText;
 
   return (
     <button
@@ -132,7 +141,15 @@ function NavItemButton({
       }}
     >
       <div className="ax-nav-indicator" />
-      <span style={{ display: "flex", alignItems: "center", flexShrink: 0, width: 20, justifyContent: "center" }}>
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexShrink: 0,
+          width: 20,
+          justifyContent: "center",
+        }}
+      >
         {item.icon}
       </span>
       {!sidebarCollapsed && (
@@ -148,7 +165,14 @@ function NavItemButton({
         </span>
       )}
       {shortcutLabel && (
-        <span style={{ marginLeft: "auto", fontSize: 10, color: token.colorTextQuaternary, flexShrink: 0 }}>
+        <span
+          style={{
+            marginLeft: "auto",
+            fontSize: 10,
+            color: token.colorTextQuaternary,
+            flexShrink: 0,
+          }}
+        >
           {shortcutLabel}
         </span>
       )}
@@ -189,7 +213,10 @@ function UserAvatarButton({
       </div>
     );
   }
-  if ((profile.avatarType === "url" || profile.avatarType === "file") && profile.avatarValue) {
+  if (
+    (profile.avatarType === "url" || profile.avatarType === "file")
+    && profile.avatarValue
+  ) {
     const src = profile.avatarType === "file" ? resolvedAvatarSrc : profile.avatarValue;
     return <Avatar size={size} src={src} style={{ cursor: "pointer" }} />;
   }
@@ -210,7 +237,10 @@ export function Sidebar() {
   const activePage = pathToPageKey(location.pathname);
   const profile = useUserProfileStore((s) => s.profile);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const resolvedAvatarSrc = useResolvedAvatarSrc(profile.avatarType, profile.avatarValue);
+  const resolvedAvatarSrc = useResolvedAvatarSrc(
+    profile.avatarType,
+    profile.avatarValue,
+  );
   const settings = useSettingsStore((s) => s.settings);
   const skillNavItems = useSkillExtensionStore((s) => s.navItems);
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
@@ -246,7 +276,10 @@ export function Sidebar() {
       sections.push({
         key: "work",
         labelKey: "sidebar.sectionWork",
-        items: [...topPlugins, ...builtinNavItems.filter((n) => n.key === "chat")],
+        items: [
+          ...topPlugins,
+          ...builtinNavItems.filter((n) => n.key === "chat"),
+        ],
       });
     } else {
       sections.push({
@@ -305,7 +338,14 @@ export function Sidebar() {
         {sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
       </button>
 
-      <nav style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+      <nav
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
         {sections.map((section) => (
           <div key={section.key} style={{ marginBottom: 4 }}>
             {!sidebarCollapsed && (
@@ -315,7 +355,9 @@ export function Sidebar() {
             )}
             {section.items.map((item) => {
               const label = item.isPlugin ? item.labelKey : t(item.labelKey);
-              const tooltipText = item.isPlugin ? `${label} (${item.pluginName})` : label;
+              const tooltipText = item.isPlugin
+                ? `${label} (${item.pluginName})`
+                : label;
               return (
                 <Tooltip
                   key={item.key}
@@ -351,14 +393,20 @@ export function Sidebar() {
         </button>
       </Tooltip>
 
-      <Tooltip title={sidebarCollapsed ? (profile.name || t("userProfile.title")) : ""} placement="right">
+      <Tooltip
+        title={sidebarCollapsed ? profile.name || t("userProfile.title") : ""}
+        placement="right"
+      >
         <button
           type="button"
           className="ax-sidebar-user"
           onClick={() => setProfileModalOpen(true)}
           aria-label={t("userProfile.title")}
         >
-          <UserAvatarButton profile={profile} resolvedAvatarSrc={resolvedAvatarSrc} />
+          <UserAvatarButton
+            profile={profile}
+            resolvedAvatarSrc={resolvedAvatarSrc}
+          />
           {!sidebarCollapsed && (
             <span
               className="ax-sidebar-user-name"
@@ -373,7 +421,10 @@ export function Sidebar() {
         </button>
       </Tooltip>
 
-      <UserProfileModal open={profileModalOpen} onClose={() => setProfileModalOpen(false)} />
+      <UserProfileModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+      />
     </div>
   );
 }

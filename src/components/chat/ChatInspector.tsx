@@ -1,7 +1,7 @@
 import { useArtifactStore, useConversationStore } from "@/stores";
 import { Descriptions, Empty, List, Tabs, Tag, theme, Typography } from "antd";
 import { FileText, Info, Paperclip, Search, Wrench } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface ChatInspectorProps {
@@ -32,12 +32,24 @@ export function ChatInspector({
       }
       : undefined;
   });
+
+  const [conversationCreatedFormatted, setConversationCreatedFormatted] = useState("");
+  useEffect(() => {
+    if (conversation?.created_at) {
+      setConversationCreatedFormatted(
+        new Date(conversation.created_at).toLocaleString(),
+      );
+    }
+  }, [conversation?.created_at]);
+
   const workspaceSnapshot = useConversationStore((s) => s.workspaceSnapshot);
   const messages = useConversationStore((s) => s.messages);
   const { artifacts } = useArtifactStore();
 
   const contextSources = useMemo(() => {
-    if (!workspaceSnapshot) { return []; }
+    if (!workspaceSnapshot) {
+      return [];
+    }
     const sources: { type: string; title: string }[] = [];
     if (workspaceSnapshot.knowledgeBinding?.knowledgeBaseIds?.length) {
       workspaceSnapshot.knowledgeBinding.knowledgeBaseIds.forEach((id) =>
@@ -45,10 +57,16 @@ export function ChatInspector({
       );
     }
     if (workspaceSnapshot.searchPolicy?.enabled) {
-      sources.push({ type: "search", title: workspaceSnapshot.searchPolicy.searchProviderId ?? "search" });
+      sources.push({
+        type: "search",
+        title: workspaceSnapshot.searchPolicy.searchProviderId ?? "search",
+      });
     }
     if (workspaceSnapshot.memoryPolicy?.enabled) {
-      sources.push({ type: "memory", title: workspaceSnapshot.memoryPolicy.namespaceId ?? "memory" });
+      sources.push({
+        type: "memory",
+        title: workspaceSnapshot.memoryPolicy.namespaceId ?? "memory",
+      });
     }
     if (workspaceSnapshot.toolBinding?.serverIds?.length) {
       workspaceSnapshot.toolBinding.serverIds.forEach((id) => sources.push({ type: "tool", title: id }));
@@ -57,20 +75,23 @@ export function ChatInspector({
   }, [workspaceSnapshot]);
 
   const toolCalls = useMemo(() => {
-    return messages
-      .flatMap((m) => {
-        if (m.role !== "assistant" || !m.content) { return []; }
-        const calls: { name: string; messageId: string }[] = [];
-        const regex = /tool_call|function_call|<tool>(.*?)<\/tool>/g;
-        if (regex.test(m.content)) {
-          calls.push({ name: "tool_call", messageId: m.id });
-        }
-        return calls;
-      });
+    return messages.flatMap((m) => {
+      if (m.role !== "assistant" || !m.content) {
+        return [];
+      }
+      const calls: { name: string; messageId: string }[] = [];
+      const regex = /tool_call|function_call|<tool>(.*?)<\/tool>/g;
+      if (regex.test(m.content)) {
+        calls.push({ name: "tool_call", messageId: m.id });
+      }
+      return calls;
+    });
   }, [messages]);
 
   const conversationArtifacts = useMemo(() => {
-    if (!conversationId) { return []; }
+    if (!conversationId) {
+      return [];
+    }
     return artifacts.filter((a) => a.conversationId === conversationId);
   }, [artifacts, conversationId]);
 
@@ -170,19 +191,14 @@ export function ChatInspector({
                 {conversation.model_id || "-"}
               </Descriptions.Item>
               <Descriptions.Item label={t("gateway.created")}>
-                {new Date(conversation.created_at).toLocaleString()}
+                {conversationCreatedFormatted}
               </Descriptions.Item>
               <Descriptions.Item label={t("chat.inspector.tools")}>
                 {conversation.message_count}
               </Descriptions.Item>
             </Descriptions>
           )
-          : (
-            <Empty
-              description={t("common.noData")}
-              style={{ marginTop: 48 }}
-            />
-          ),
+          : <Empty description={t("common.noData")} style={{ marginTop: 48 }} />,
       },
       {
         key: "artifacts",
@@ -211,7 +227,15 @@ export function ChatInspector({
           ),
       },
     ],
-    [t, conversationId, contextSources, toolCalls, messages, conversation, conversationArtifacts],
+    [
+      t,
+      conversationId,
+      contextSources,
+      toolCalls,
+      messages,
+      conversation,
+      conversationArtifacts,
+    ],
   );
 
   return (

@@ -29,8 +29,12 @@ function getSpanTypeColor(type_: SpanType): string {
 }
 
 function formatDuration(ms?: number): string {
-  if (!ms) { return "-"; }
-  if (ms < 1000) { return `${ms}ms`; }
+  if (!ms) {
+    return "-";
+  }
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
   return `${(ms / 1000).toFixed(2)}s`;
 }
 
@@ -55,7 +59,9 @@ export function Timeline({ spans }: TimelineProps) {
     while (current.parent_span_id) {
       depth++;
       current = spanMap.get(current.parent_span_id) || current;
-      if (depth > 20) { break; }
+      if (depth > 20) {
+        break;
+      }
     }
     return depth;
   };
@@ -68,8 +74,12 @@ export function Timeline({ spans }: TimelineProps) {
       <div className="relative">
         <div className="absolute left-0 top-0 bottom-0 w-px bg-zinc-300" />
         {sortedSpans.map((span) => {
+          // eslint-disable-next-line react-doctor/rendering-hydration-mismatch-time
           const spanStart = new Date(span.start_time).getTime();
-          const spanEnd = span.end_time ? new Date(span.end_time).getTime() : spanStart + (span.duration_ms || 0);
+          // eslint-disable-next-line react-doctor/rendering-hydration-mismatch-time
+          const spanEnd = span.end_time
+            ? new Date(span.end_time).getTime()
+            : spanStart + (span.duration_ms || 0);
           const left = ((spanStart - startTime) / totalDuration) * 100;
           const width = ((spanEnd - spanStart) / totalDuration) * 100;
           const depth = getDepth(span);
@@ -85,7 +95,9 @@ export function Timeline({ spans }: TimelineProps) {
                 title={
                   <div>
                     <div>{span.name}</div>
-                    <div>Start: {dayjs(span.start_time).format("HH:mm:ss.SSS")}</div>
+                    <div>
+                      Start: {dayjs(span.start_time).format("HH:mm:ss.SSS")}
+                    </div>
                     <div>Duration: {formatDuration(span.duration_ms)}</div>
                     {span.errors.length > 0 && (
                       <div className="text-red-400">

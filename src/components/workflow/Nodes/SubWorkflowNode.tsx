@@ -17,7 +17,10 @@ interface SubWorkflowNodeData {
   isAsync?: boolean;
 }
 
-const SubWorkflowNodeComponent: React.FC<NodeProps<SubWorkflowNodeData>> = ({ data, selected }) => {
+const SubWorkflowNodeComponent: React.FC<NodeProps<SubWorkflowNodeData>> = ({
+  data,
+  selected,
+}) => {
   const { t } = useTranslation();
   const color = "#eb2f96";
   const subWorkflowId = data.subWorkflowId || t("workflow.subWorkflowNode.notSelected");
@@ -103,7 +106,7 @@ const SubWorkflowNodeComponent: React.FC<NodeProps<SubWorkflowNodeData>> = ({ da
 
           <div
             style={{
-              fontSize: 10,
+              fontSize: 12,
               color: color,
               marginBottom: 6,
               padding: "4px 6px",

@@ -18,7 +18,10 @@ interface LoopNodeData {
   itemsVar?: string;
 }
 
-const LoopNodeComponent: React.FC<NodeProps<LoopNodeData>> = ({ data, selected }) => {
+const LoopNodeComponent: React.FC<NodeProps<LoopNodeData>> = ({
+  data,
+  selected,
+}) => {
   const { t } = useTranslation();
   const color = "#fa8c16";
   const loopType = data.loopType || "forEach";
@@ -109,7 +112,7 @@ const LoopNodeComponent: React.FC<NodeProps<LoopNodeData>> = ({ data, selected }
           {data.itemsVar && (
             <div
               style={{
-                fontSize: 10,
+                fontSize: 12,
                 color: "#888",
                 marginBottom: 6,
                 padding: "4px 6px",

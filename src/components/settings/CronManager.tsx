@@ -20,12 +20,22 @@ interface CronJob {
 
 interface CronManagerProps {
   jobs: CronJob[];
-  onAdd: (job: { name: string; schedule: string; prompt: string; platform?: string }) => void;
+  onAdd: (job: {
+    name: string;
+    schedule: string;
+    prompt: string;
+    platform?: string;
+  }) => void;
   onDelete: (id: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
 }
 
-export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProps) {
+export function CronManager({
+  jobs,
+  onAdd,
+  onDelete,
+  onToggle,
+}: CronManagerProps) {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const [modalOpen, setModalOpen] = useState(false);
@@ -36,7 +46,7 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
 
   const handleAdd = () => {
     if (!name.trim() || !schedule.trim() || !prompt.trim()) {
-      message.error("Name, schedule, and prompt are required");
+      message.error(t("settings.cron.validationRequired"));
       return;
     }
     onAdd({
@@ -50,7 +60,7 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
     setPrompt("");
     setPlatform("");
     setModalOpen(false);
-    message.success("Cron job added");
+    message.success(t("settings.cron.added"));
   };
 
   const columns = [
@@ -61,7 +71,9 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
       render: (name: string, record: CronJob) => (
         <div>
           <div className="font-medium">{name}</div>
-          <Text type="secondary" style={{ fontSize: 12 }}>{record.schedule}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {record.schedule}
+          </Text>
         </div>
       ),
     },
@@ -83,7 +95,11 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
       dataIndex: "last_run_at",
       key: "last_run_at",
       render: (lastRun: number | null) =>
-        lastRun ? new Date(lastRun).toLocaleString() : <Text type="secondary">{t("cronManager.never")}</Text>,
+        lastRun
+          ? (
+            new Date(lastRun).toLocaleString()
+          )
+          : <Text type="secondary">{t("cronManager.never")}</Text>,
     },
     {
       title: "Status",
@@ -119,7 +135,11 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
     <div className="p-6">
       <SettingsGroup title={t("cronManager.title")}>
         <div style={{ marginBottom: 12 }}>
-          <Button type="primary" icon={<Plus size={14} />} onClick={() => setModalOpen(true)}>
+          <Button
+            type="primary"
+            icon={<Plus size={14} />}
+            onClick={() => setModalOpen(true)}
+          >
             Add Cron Job
           </Button>
         </div>
@@ -156,7 +176,7 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
               id="cron-manager-input-47"
               value={schedule}
               onChange={(e) => setSchedule(e.target.value)}
-              placeholder="0 9 * * *"
+              placeholder={t("settings.cron.schedulePlaceholder")}
             />
             <Text type="secondary" style={{ fontSize: 12 }}>
               Examples: "0 9 * * *" (daily 9am), "*/30 * * * *" (every 30 min)
@@ -178,7 +198,7 @@ export function CronManager({ jobs, onAdd, onDelete, onToggle }: CronManagerProp
               id="cron-manager-input-49"
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
-              placeholder="telegram / discord / web"
+              placeholder={t("settings.cron.platformPlaceholder")}
             />
           </div>
         </div>

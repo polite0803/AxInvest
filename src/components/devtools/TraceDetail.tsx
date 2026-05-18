@@ -1,5 +1,6 @@
 import { useTracerStore } from "@/stores/devtools/tracerStore";
 import { Button, Card, Col, Descriptions, Row, Space, Tabs, Tag, Typography } from "antd";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CostChart } from "./CostChart";
 import { DurationChart } from "./DurationChart";
@@ -10,9 +11,15 @@ import { Timeline } from "./Timeline";
 const { Text } = Typography;
 
 function formatDuration(ms?: number): string {
-  if (!ms) { return "-"; }
-  if (ms < 1000) { return `${ms}ms`; }
-  if (ms < 60000) { return `${(ms / 1000).toFixed(1)}s`; }
+  if (!ms) {
+    return "-";
+  }
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  if (ms < 60000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
@@ -21,8 +28,12 @@ function formatCost(cost: number): string {
 }
 
 function formatTokens(tokens: number): string {
-  if (tokens < 1000) { return `${tokens}`; }
-  if (tokens < 1000000) { return `${(tokens / 1000).toFixed(1)}K`; }
+  if (tokens < 1000) {
+    return `${tokens}`;
+  }
+  if (tokens < 1000000) {
+    return `${(tokens / 1000).toFixed(1)}K`;
+  }
   return `${(tokens / 1000000).toFixed(1)}M`;
 }
 
@@ -30,7 +41,18 @@ export function TraceDetail() {
   const { t } = useTranslation();
   const { selectedTrace, selectedSpan, tree, metrics, exportTrace } = useTracerStore();
 
-  if (!selectedTrace) { return null; }
+  const [startedAtFormatted, setStartedAtFormatted] = useState("");
+  useEffect(() => {
+    if (selectedTrace) {
+      setStartedAtFormatted(
+        new Date(selectedTrace.summary.started_at).toLocaleString(),
+      );
+    }
+  }, [selectedTrace?.summary.started_at]);
+
+  if (!selectedTrace) {
+    return null;
+  }
 
   const { trace, summary } = selectedTrace;
 
@@ -51,8 +73,12 @@ export function TraceDetail() {
             </Text>
           </div>
           <Space>
-            <Button onClick={() => handleExport("json")}>{t("devtools.exportJson")}</Button>
-            <Button onClick={() => handleExport("csv")}>{t("devtools.exportCsv")}</Button>
+            <Button onClick={() => handleExport("json")}>
+              {t("devtools.exportJson")}
+            </Button>
+            <Button onClick={() => handleExport("csv")}>
+              {t("devtools.exportCsv")}
+            </Button>
           </Space>
         </div>
 
@@ -99,7 +125,7 @@ export function TraceDetail() {
                   {trace.metadata.agent_version}
                 </Descriptions.Item>
                 <Descriptions.Item label={t("devtools.startedAt")}>
-                  {new Date(summary.started_at).toLocaleString()}
+                  {startedAtFormatted}
                 </Descriptions.Item>
               </Descriptions>
             </Card>

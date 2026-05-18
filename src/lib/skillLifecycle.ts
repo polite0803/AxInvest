@@ -13,7 +13,10 @@ const LIFECYCLE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 async function readLifecycleData(
   skillName: string,
-): Promise<{ hooks: SkillLifecycleHooks | null; permissions: SkillPermissions | undefined }> {
+): Promise<{
+  hooks: SkillLifecycleHooks | null;
+  permissions: SkillPermissions | undefined;
+}> {
   const cached = lifecycleCache.get(skillName);
   if (cached && Date.now() - cached.ts < LIFECYCLE_CACHE_TTL_MS) {
     return { hooks: cached.hooks, permissions: cached.permissions };
@@ -32,23 +35,22 @@ async function readLifecycleData(
   }
 }
 
-/** 清除指定 skill 的缓存 */
-export function invalidateLifecycleCache(skillName: string): void {
-  lifecycleCache.delete(skillName);
-}
-
 async function executeHooks(
   actions: SkillCommandAction[],
   skillName: string,
   permissions?: SkillPermissions,
 ): Promise<void> {
-  if (!actions || actions.length === 0) { return; }
+  if (!actions || actions.length === 0) {
+    return;
+  }
   const router = getActionRouter();
-  await Promise.all(actions.map((action) =>
-    router.execute(action, { skillName, permissions }).catch((e) => {
-      console.error(`[Lifecycle] Hook execution failed for ${skillName}:`, e);
-    })
-  ));
+  await Promise.all(
+    actions.map((action) =>
+      router.execute(action, { skillName, permissions }).catch((e) => {
+        console.error(`[Lifecycle] Hook execution failed for ${skillName}:`, e);
+      })
+    ),
+  );
 }
 
 export async function triggerOnInstall(skillName: string): Promise<void> {

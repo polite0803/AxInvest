@@ -1,14 +1,14 @@
 import { invoke } from "@/lib/invoke";
 import { create } from "zustand";
 
-export interface ToolScore {
+interface ToolScore {
   tool_id: string;
   tool_name: string;
   score: number;
   reasons: string[];
 }
 
-export interface AlternativeSet {
+interface AlternativeSet {
   description: string;
   tools: string[];
   tradeoffs: string[];
@@ -82,7 +82,9 @@ export const useRecommendationStore = create<RecommendationState>((set) => ({
 
   getToolsByCategory: async (category: string) => {
     try {
-      const tools = await invoke<ToolInfo[]>("get_tools_by_category", { category });
+      const tools = await invoke<ToolInfo[]>("get_tools_by_category", {
+        category,
+      });
       return tools;
     } catch (error) {
       set({ error: String(error) });

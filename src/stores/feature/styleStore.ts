@@ -1,32 +1,8 @@
 import { invoke, isTauri } from "@/lib/invoke";
-import type {
-  CodeStyleTemplate,
-  CodeTemplate,
-  DocumentFormat,
-  DocumentStyleProfile,
-  LearnedPattern,
-  LearnedPatternType,
-  PatternType,
-  StyleDimensions,
-  StylePattern,
-  StyleVector,
-  UserStyleProfile,
-} from "@/types";
+import type { DocumentStyleProfile, StyleDimensions, StyleVector, UserStyleProfile } from "@/types";
 import { create } from "zustand";
 
-export type {
-  CodeStyleTemplate,
-  CodeTemplate,
-  DocumentFormat,
-  DocumentStyleProfile,
-  LearnedPattern,
-  LearnedPatternType,
-  PatternType,
-  StyleDimensions,
-  StylePattern,
-  StyleVector,
-  UserStyleProfile,
-};
+export type { DocumentStyleProfile, StyleDimensions, StyleVector, UserStyleProfile };
 
 export interface StyleMigratorStats {
   total_profiles: number;
@@ -44,10 +20,19 @@ interface StyleStore {
   loadStyleProfile: (userId: string) => Promise<void>;
   applyStyleToCode: (code: string, userId?: string) => Promise<string>;
   applyStyleToDocument: (content: string, userId?: string) => Promise<string>;
-  adjustStyleDimension: (dimension: keyof StyleDimensions, value: number) => void;
+  adjustStyleDimension: (
+    dimension: keyof StyleDimensions,
+    value: number,
+  ) => void;
   resetToDefaults: () => void;
-  learnFromCodeSamples: (userId: string, samples: CodeSample[]) => Promise<void>;
-  learnFromMessages: (userId: string, messages: MessageSample[]) => Promise<void>;
+  learnFromCodeSamples: (
+    userId: string,
+    samples: CodeSample[],
+  ) => Promise<void>;
+  learnFromMessages: (
+    userId: string,
+    messages: MessageSample[],
+  ) => Promise<void>;
   exportProfile: (userId: string) => Promise<string | null>;
   importProfile: (userId: string, json: string) => Promise<void>;
   getStats: () => Promise<StyleMigratorStats | null>;
@@ -114,13 +99,18 @@ export const useStyleStore = create<StyleStore>((set, get) => ({
     }
     set({ isLoading: true, error: null });
     try {
-      const profile = await invoke<UserStyleProfile | null>("style_get_profile", {
-        userId,
-      });
+      const profile = await invoke<UserStyleProfile | null>(
+        "style_get_profile",
+        {
+          userId,
+        },
+      );
       set({ currentProfile: profile, isLoading: false });
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to load style profile",
+        error: error instanceof Error
+          ? error.message
+          : "Failed to load style profile",
         isLoading: false,
       });
     }
@@ -155,7 +145,9 @@ export const useStyleStore = create<StyleStore>((set, get) => ({
       return result;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to apply document style",
+        error: error instanceof Error
+          ? error.message
+          : "Failed to apply document style",
         isApplying: false,
       });
       return content;
@@ -164,7 +156,9 @@ export const useStyleStore = create<StyleStore>((set, get) => ({
 
   adjustStyleDimension: (dimension: keyof StyleDimensions, value: number) => {
     const { currentProfile } = get();
-    if (!currentProfile) { return; }
+    if (!currentProfile) {
+      return;
+    }
 
     const updatedDimensions = {
       ...currentProfile.code_style_vector.dimensions,
@@ -221,7 +215,9 @@ export const useStyleStore = create<StyleStore>((set, get) => ({
       set({ currentProfile: profile, isLoading: false });
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to learn from samples",
+        error: error instanceof Error
+          ? error.message
+          : "Failed to learn from samples",
         isLoading: false,
       });
     }
@@ -230,10 +226,13 @@ export const useStyleStore = create<StyleStore>((set, get) => ({
   learnFromMessages: async (userId: string, messages: MessageSample[]) => {
     set({ isLoading: true, error: null });
     try {
-      const profile = await invoke<DocumentStyleProfile>("style_learn_messages", {
-        userId,
-        messages,
-      });
+      const profile = await invoke<DocumentStyleProfile>(
+        "style_learn_messages",
+        {
+          userId,
+          messages,
+        },
+      );
       const { currentProfile } = get();
       if (currentProfile) {
         set({
@@ -246,7 +245,9 @@ export const useStyleStore = create<StyleStore>((set, get) => ({
       }
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : "Failed to learn from messages",
+        error: error instanceof Error
+          ? error.message
+          : "Failed to learn from messages",
         isLoading: false,
       });
     }

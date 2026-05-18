@@ -1,5 +1,6 @@
 import { ANALYST_NAMES } from "@/types";
 import { Card, Tag, Typography } from "antd";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   expertId: string;
@@ -27,6 +28,7 @@ function tryParse(report: string): ParsedReport | null {
 }
 
 export function AnalystReportCard({ expertId, report }: Props) {
+  const { t } = useTranslation();
   const name = ANALYST_NAMES[expertId] || expertId;
   const parsed = tryParse(report);
 
@@ -94,7 +96,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
       {/* 置信度 */}
       {confidence != null && (
         <div className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>
-          置信度: {(confidence * 100).toFixed(0)}%
+          {t("stockAnalysis.confidence")}: {(confidence * 100).toFixed(0)}%
         </div>
       )}
     </Card>

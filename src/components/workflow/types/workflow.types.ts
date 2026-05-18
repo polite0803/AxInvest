@@ -52,25 +52,6 @@ export interface TriggerConfig {
   config: unknown;
 }
 
-export interface ManualTriggerConfig {}
-
-export interface ScheduleTriggerConfig {
-  cron: string;
-  timezone: string;
-  enabled: boolean;
-}
-
-export interface WebhookTriggerConfig {
-  path: string;
-  method: string;
-  auth_type: string;
-}
-
-export interface EventTriggerConfig {
-  event_type: string;
-  filter?: unknown;
-}
-
 export type OutputMode = "json" | "text" | "artifact";
 
 export interface AgentNodeConfig {
@@ -322,7 +303,11 @@ export interface WorkflowEdge {
   label?: string;
 }
 
-export type OnFailureAction = "abort" | "retryThenAbort" | "runErrorBranch" | "continueWithDefault";
+export type OnFailureAction =
+  | "abort"
+  | "retryThenAbort"
+  | "runErrorBranch"
+  | "continueWithDefault";
 
 export interface RetryPolicy {
   max_retries: number;
@@ -405,29 +390,100 @@ export interface ValidationResult {
 
 export const NODE_CATEGORIES = [
   { id: "trigger", labelKey: "workflow.categories.trigger", color: "#722ed1" },
-  { id: "execution", labelKey: "workflow.categories.execution", color: "#52c41a" },
+  {
+    id: "execution",
+    labelKey: "workflow.categories.execution",
+    color: "#52c41a",
+  },
   { id: "agent", labelKey: "workflow.categories.agent", color: "#1890ff" },
   { id: "llm", labelKey: "workflow.categories.llm", color: "#13c2c2" },
   { id: "flow", labelKey: "workflow.categories.flow", color: "#fa8c16" },
-  { id: "integration", labelKey: "workflow.categories.integration", color: "#eb2f96" },
+  {
+    id: "integration",
+    labelKey: "workflow.categories.integration",
+    color: "#eb2f96",
+  },
 ] as const;
 
-export const NODE_TYPE_MAP: Record<string, { labelKey: string; category: string; color: string }> = {
-  trigger: { labelKey: "workflow.nodeTypes.trigger", category: "trigger", color: "#722ed1" },
-  agent: { labelKey: "workflow.nodeTypes.agent", category: "agent", color: "#1890ff" },
-  llm: { labelKey: "workflow.nodeTypes.llm", category: "llm", color: "#13c2c2" },
-  condition: { labelKey: "workflow.nodeTypes.condition", category: "flow", color: "#fa8c16" },
-  parallel: { labelKey: "workflow.nodeTypes.parallel", category: "flow", color: "#fa8c16" },
-  loop: { labelKey: "workflow.nodeTypes.loop", category: "flow", color: "#fa8c16" },
-  validation: { labelKey: "workflow.nodeTypes.validation", category: "flow", color: "#722ed1" },
-  merge: { labelKey: "workflow.nodeTypes.merge", category: "flow", color: "#fa8c16" },
-  delay: { labelKey: "workflow.nodeTypes.delay", category: "flow", color: "#fa8c16" },
-  subWorkflow: { labelKey: "workflow.nodeTypes.subWorkflow", category: "integration", color: "#eb2f96" },
-  documentParser: { labelKey: "workflow.nodeTypes.documentParser", category: "integration", color: "#eb2f96" },
-  vectorRetrieve: { labelKey: "workflow.nodeTypes.vectorRetrieve", category: "integration", color: "#eb2f96" },
-  end: { labelKey: "workflow.nodeTypes.end", category: "flow", color: "#fa8c16" },
-  tool: { labelKey: "workflow.nodeTypes.tool", category: "execution", color: "#52c41a" },
-  code: { labelKey: "workflow.nodeTypes.code", category: "execution", color: "#52c41a" },
+export const NODE_TYPE_MAP: Record<
+  string,
+  { labelKey: string; category: string; color: string }
+> = {
+  trigger: {
+    labelKey: "workflow.nodeTypes.trigger",
+    category: "trigger",
+    color: "#722ed1",
+  },
+  agent: {
+    labelKey: "workflow.nodeTypes.agent",
+    category: "agent",
+    color: "#1890ff",
+  },
+  llm: {
+    labelKey: "workflow.nodeTypes.llm",
+    category: "llm",
+    color: "#13c2c2",
+  },
+  condition: {
+    labelKey: "workflow.nodeTypes.condition",
+    category: "flow",
+    color: "#fa8c16",
+  },
+  parallel: {
+    labelKey: "workflow.nodeTypes.parallel",
+    category: "flow",
+    color: "#fa8c16",
+  },
+  loop: {
+    labelKey: "workflow.nodeTypes.loop",
+    category: "flow",
+    color: "#fa8c16",
+  },
+  validation: {
+    labelKey: "workflow.nodeTypes.validation",
+    category: "flow",
+    color: "#722ed1",
+  },
+  merge: {
+    labelKey: "workflow.nodeTypes.merge",
+    category: "flow",
+    color: "#fa8c16",
+  },
+  delay: {
+    labelKey: "workflow.nodeTypes.delay",
+    category: "flow",
+    color: "#fa8c16",
+  },
+  subWorkflow: {
+    labelKey: "workflow.nodeTypes.subWorkflow",
+    category: "integration",
+    color: "#eb2f96",
+  },
+  documentParser: {
+    labelKey: "workflow.nodeTypes.documentParser",
+    category: "integration",
+    color: "#eb2f96",
+  },
+  vectorRetrieve: {
+    labelKey: "workflow.nodeTypes.vectorRetrieve",
+    category: "integration",
+    color: "#eb2f96",
+  },
+  end: {
+    labelKey: "workflow.nodeTypes.end",
+    category: "flow",
+    color: "#fa8c16",
+  },
+  tool: {
+    labelKey: "workflow.nodeTypes.tool",
+    category: "execution",
+    color: "#52c41a",
+  },
+  code: {
+    labelKey: "workflow.nodeTypes.code",
+    category: "execution",
+    color: "#52c41a",
+  },
 };
 
 export interface SkillMatchResult {
@@ -448,47 +504,11 @@ export interface SemanticCheckResult {
 
 export type SkillReplacementAction = "replace" | "keep" | "upgrade_existing";
 
-export interface SkillUpgradeSuggestion {
-  name: string;
-  description: string;
-  input_schema: Record<string, unknown> | null;
-  output_schema: Record<string, unknown> | null;
-  reasoning: string;
-}
-
-export interface SkillUpgradeRequest {
-  existing_skill_id: string;
-  generated_name: string;
-  generated_description: string;
-  generated_input_schema: Record<string, unknown> | null;
-  generated_output_schema: Record<string, unknown> | null;
-}
-
 export interface ToolInfo {
   tool_name: string;
   tool_type: string;
   description: string;
 }
-
-export interface ToolMatchResult {
-  tool_name: string;
-  tool_type: string;
-  description: string;
-  similarity_score: number;
-  match_reasons: string[];
-}
-
-export interface NodeToolMatch {
-  node_id: string | null;
-  tool_name: string;
-  matches: ToolMatchResult[];
-}
-
-export interface ToolSemanticCheckResult {
-  matches: NodeToolMatch[];
-}
-
-export type ToolReplacementAction = "replace" | "keep" | "upgrade_existing";
 
 export interface ToolUpgradeSuggestion {
   name: string;

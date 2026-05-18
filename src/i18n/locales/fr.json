@@ -4,6 +4,10 @@
     "title": "Espace de Travail Intelligent",
     "description": "Assistant de Travail Alimenté par IA"
   },
+  "artifact": {
+    "copiedToClipboard": "",
+    "copyFailed": ""
+  },
   "nav": {
     "chat": "Chat",
     "knowledge": "Connaissances",
@@ -1817,6 +1821,7 @@
       "desc": "Manage automated scheduled tasks",
       "executed": "Executed",
       "quickCreated": "Quick created",
+      "unknownTemplateType": "",
       "refreshed": "Refreshed"
     },
     "localTools": {
@@ -2163,6 +2168,9 @@
     "workflow": {
       "title": "Workflow Settings",
       "description": "Manage workflow templates and editor settings",
+      "createdSuccess": "",
+      "deletedSuccess": "",
+      "sampleAdded": "",
       "createNew": "Create New Template",
       "visualEditor": "Visual Editor",
       "visualEditorDesc": "Create and edit workflows with drag-and-drop DAG editor",
@@ -2436,6 +2444,8 @@
     "retry": "Réessayer",
     "default": "Défaut",
     "operationFailed": "Operation failed",
+    "key": "",
+    "value": "",
     "hide": "Hide",
     "searchPlaceholder": "Search..."
   },
@@ -2493,10 +2503,13 @@
     "openSettings": "Ouvrir les paramètres",
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
-    "conflictApp3": "WeChat (Windows)"
+    "conflictApp3": "WeChat (Windows)",
+    "conflictError": "Raccourci déjà utilisé, veuillez essayer une autre combinaison"
   },
   "tray": {
     "show": "Afficher",
+    "key": "",
+    "value": "",
     "hide": "Masquer",
     "quit": "Quitter"
   },
@@ -5960,6 +5973,9 @@
     "yes": "Yes",
     "no": "No",
     "cancel": "Cancel",
+    "createdSuccess": "",
+    "deletedSuccess": "",
+    "sampleAdded": "",
     "createNew": "Create New Dataset"
   },
   "loraConfig": {
@@ -6152,6 +6168,15 @@
     "concentration": "Concentration",
     "holdings": "Positions",
     "sharesUnit": "",
-    "wanUnit": "0k"
+    "wanUnit": "0k",
+    "analystCount": "{{current}}/{{total}} analystes",
+    "debateRounds": "{{current}}/{{total}} tours de débat",
+    "riskAssessCount": "{{count}} évaluations",
+    "offlineMode": "Mode hors ligne (LLM Driver non connecté)",
+    "charCount": "{{count}} caractères",
+    "settings.saveFailed": "Échec de la sauvegarde des paramètres",
+    "settings.quoteTag": "Cours",
+    "settings.financialKlineTag": "Financier/Chandelier",
+    "settings.newsTag": "Actualités"
   }
 }

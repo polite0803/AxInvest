@@ -4,6 +4,10 @@
     "title": "مساحة العمل الذكية",
     "description": "مساعد عمل يعمل بالذكاء الاصطناعي"
   },
+  "artifact": {
+    "copiedToClipboard": "",
+    "copyFailed": ""
+  },
   "nav": {
     "chat": "المحادثة",
     "knowledge": "قاعدة المعرفة",
@@ -1815,6 +1819,7 @@
       "desc": "Manage automated scheduled tasks",
       "executed": "Executed",
       "quickCreated": "Quick created",
+      "unknownTemplateType": "",
       "refreshed": "Refreshed"
     },
     "titleSummaryPromptDefault": "بناءً على محتوى المحادثة التالي، قم بتوليد عنوان قصير وموجز (لا يزيد عن 20 حرفاً). أعد نص العنوان فقط، بدون علامات اقتباس أو أي شروحات إضافية.",
@@ -2163,6 +2168,9 @@
     "workflow": {
       "title": "Workflow Settings",
       "description": "Manage workflow templates and editor settings",
+      "createdSuccess": "",
+      "deletedSuccess": "",
+      "sampleAdded": "",
       "createNew": "Create New Template",
       "visualEditor": "Visual Editor",
       "visualEditorDesc": "Create and edit workflows with drag-and-drop DAG editor",
@@ -2436,6 +2444,8 @@
     },
     "default": "افتراضي",
     "operationFailed": "Operation failed",
+    "key": "",
+    "value": "",
     "hide": "Hide",
     "searchPlaceholder": "Search..."
   },
@@ -2464,10 +2474,13 @@
     "openSettings": "فتح الإعدادات",
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
-    "conflictApp3": "WeChat (Windows)"
+    "conflictApp3": "WeChat (Windows)",
+    "conflictError": "الاختصار قيد الاستخدام بالفعل، يرجى تجربة مفاتيح أخرى"
   },
   "tray": {
     "show": "إظهار",
+    "key": "",
+    "value": "",
     "hide": "إخفاء",
     "quit": "إنهاء"
   },
@@ -5960,6 +5973,9 @@
     "yes": "Yes",
     "no": "No",
     "cancel": "Cancel",
+    "createdSuccess": "",
+    "deletedSuccess": "",
+    "sampleAdded": "",
     "createNew": "Create New Dataset"
   },
   "loraConfig": {
@@ -6152,6 +6168,15 @@
     "concentration": "تركيز",
     "holdings": "الحيازات",
     "sharesUnit": "",
-    "wanUnit": "0ألف"
+    "wanUnit": "0ألف",
+    "analystCount": "{{current}}/{{total}} محللين",
+    "debateRounds": "{{current}}/{{total}} جولات نقاش",
+    "riskAssessCount": "{{count}} تقييمات",
+    "offlineMode": "وضع غير متصل (LLM غير متصل)",
+    "charCount": "{{count}} حرف",
+    "settings.saveFailed": "فشل حفظ الإعدادات",
+    "settings.quoteTag": "أسعار",
+    "settings.financialKlineTag": "مالي/شمعدان",
+    "settings.newsTag": "أخبار"
   }
 }

@@ -10,7 +10,10 @@ interface AgentProgressBarProps {
   conversationId: string;
 }
 
-function getToolDisplayName(toolName: string, t: (key: string) => string): string {
+function getToolDisplayName(
+  toolName: string,
+  t: (key: string) => string,
+): string {
   const lower = toolName.toLowerCase();
   const map: Record<string, string> = {
     read: "FileRead",
@@ -28,6 +31,7 @@ function getToolDisplayName(toolName: string, t: (key: string) => string): strin
     task: t("progressBar.tool.task"),
     mcp: t("progressBar.tool.mcp"),
   };
+  // js-set-map-lookups: 子串匹配无法用 Set.has 替代（需部分匹配 toolName）
   for (const [key, display] of Object.entries(map)) {
     if (lower.includes(key)) {
       return display;
@@ -68,7 +72,13 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
     return currentToolCall?.conversationId === conversationId
       ? getToolDisplayName(currentToolCall.toolName, t)
       : null;
-  }, [currentToolCall?.toolName, currentToolCall?.toolUseId, currentToolCall?.conversationId, conversationId, t]);
+  }, [
+    currentToolCall?.toolName,
+    currentToolCall?.toolUseId,
+    currentToolCall?.conversationId,
+    conversationId,
+    t,
+  ]);
 
   // 当有新的工具名称时，更新持久引用
   useEffect(() => {
@@ -145,7 +155,10 @@ export const AgentProgressBar: React.FC<AgentProgressBarProps> = ({
             padding: "0 6px",
           }}
         >
-          <Wrench size={10} style={{ marginRight: 4, verticalAlign: "middle" }} />
+          <Wrench
+            size={10}
+            style={{ marginRight: 4, verticalAlign: "middle" }}
+          />
           {t("progressBar.executing", { name: displayName })}
         </Tag>
       )}

@@ -1,29 +1,9 @@
 import { invoke } from "@/lib/invoke";
-import type {
-  CompiledPage,
-  CompileResult,
-  LintIssue,
-  LintResult,
-  SchemaVersion,
-  Wiki,
-  WikiOperation,
-  WikiPage,
-  WikiSource,
-} from "@/types";
+import type { CompileResult, LintResult, SchemaVersion, Wiki, WikiOperation, WikiPage, WikiSource } from "@/types";
 import { create } from "zustand";
 
 // 从 @/types 重导出，保持向后兼容
-export type {
-  CompiledPage,
-  CompileResult,
-  LintIssue,
-  LintResult,
-  SchemaVersion,
-  Wiki,
-  WikiOperation,
-  WikiPage,
-  WikiSource,
-};
+export type { CompileResult, LintResult, SchemaVersion, Wiki, WikiOperation, WikiSource };
 
 export interface IngestResult {
   source_id: string;
@@ -36,7 +16,7 @@ export interface QueryResult {
   total: number;
 }
 
-export interface PageResult {
+interface PageResult {
   note_id: string;
   title: string;
   content_snippet: string;
@@ -55,7 +35,11 @@ interface LlmWikiState {
 
   loadWikis: () => Promise<void>;
   selectWiki: (wikiId: string | null) => void;
-  createWiki: (name: string, rootPath: string, description?: string) => Promise<Wiki | null>;
+  createWiki: (
+    name: string,
+    rootPath: string,
+    description?: string,
+  ) => Promise<Wiki | null>;
   deleteWiki: (wikiId: string) => Promise<void>;
 
   ingestSource: (
@@ -65,7 +49,10 @@ interface LlmWikiState {
     url?: string,
     title?: string,
   ) => Promise<IngestResult | null>;
-  compileWiki: (wikiId: string, sourceIds: string[]) => Promise<CompileResult | null>;
+  compileWiki: (
+    wikiId: string,
+    sourceIds: string[],
+  ) => Promise<CompileResult | null>;
   queryWiki: (
     wikiId: string,
     query: string,
@@ -122,7 +109,11 @@ export const useLlmWikiStore = create<LlmWikiState>((set) => ({
 
   createWiki: async (name, rootPath, description) => {
     try {
-      const wiki = await invoke<Wiki>("llm_wiki_create", { name, rootPath, description });
+      const wiki = await invoke<Wiki>("llm_wiki_create", {
+        name,
+        rootPath,
+        description,
+      });
       set((s) => ({ wikis: [...s.wikis, wiki] }));
       return wiki;
     } catch (e) {
@@ -241,7 +232,10 @@ export const useLlmWikiStore = create<LlmWikiState>((set) => ({
 
   loadOperations: async (wikiId) => {
     try {
-      const operations = await invoke<WikiOperation[]>("llm_wiki_operations_list", { wikiId });
+      const operations = await invoke<WikiOperation[]>(
+        "llm_wiki_operations_list",
+        { wikiId },
+      );
       set({ operations });
     } catch (e) {
       set({ error: String(e) });

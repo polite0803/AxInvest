@@ -1,3 +1,4 @@
+#![allow(clippy::useless_format, clippy::redundant_closure, clippy::let_and_return)]
 pub mod calendar;
 mod error;
 pub mod indicators;

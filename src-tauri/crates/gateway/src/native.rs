@@ -1196,6 +1196,7 @@ mod tests {
             db: handle.conn.clone(),
             master_key,
             started_at: 0,
+            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
         };
         (create_router(state.clone()), handle, gateway_key.plain_key, state)
     }
@@ -1606,6 +1607,7 @@ mod tests {
             db: handle.conn.clone(),
             master_key,
             started_at: 0,
+            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
         });
         let response = app
             .oneshot(

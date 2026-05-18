@@ -22,6 +22,7 @@ pub struct GatewayAppState {
     pub db: DatabaseConnection,
     pub master_key: [u8; 32],
     pub started_at: i64,
+    pub astock_client: std::sync::Arc<axagent_astock_data::AStockClient>,
 }
 
 /// TLS certificate material.
@@ -123,6 +124,7 @@ impl GatewayServer {
             db: pool,
             master_key,
             started_at,
+            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
         };
 
         // ── Bind HTTP listener ──────────────────────────────────────────

@@ -127,6 +127,7 @@ mod tests {
             db,
             master_key: [7u8; 32],
             started_at: 0,
+            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
         }
     }
 

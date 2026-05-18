@@ -1,4 +1,9 @@
-#![allow(clippy::useless_format, clippy::redundant_closure, clippy::let_and_return)]
+#![allow(
+    clippy::useless_format,
+    clippy::redundant_closure,
+    clippy::let_and_return,
+    clippy::if_same_then_else
+)]
 pub mod calendar;
 mod error;
 pub mod indicators;

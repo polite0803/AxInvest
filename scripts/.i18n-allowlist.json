@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 144,
-  "total_files": 144,
+  "total_entries": 145,
+  "total_files": 143,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -30,19 +30,19 @@
     },
     {
       "file": "src/components/chat/AgentExecutionPanel.tsx",
-      "lines": "256",
+      "lines": "180,188,208,216,248,256",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "207,219,226,243,261,264,320,322",
+      "lines": "196,197,205,207,208,209,215,216,217,219,222,223,224,226,231,232,233,241,243,250,251,253,254,259,261,262,264,311,312,320,322",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "167",
+      "lines": "97,100,112,115,116,128,131,134,135,137,138,145,153,154,167,168",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -72,7 +72,7 @@
     },
     {
       "file": "src/components/chat/ChatView.tsx",
-      "lines": "274",
+      "lines": "249,250,253,254,255,259,260,264,268,270,274,2894,2975,2995,3079,3095,3102,3107,3134,3136",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -96,13 +96,13 @@
     },
     {
       "file": "src/components/chat/McpContainerNode.tsx",
-      "lines": "133,158",
+      "lines": "114,133,158",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/PermissionModal.tsx",
-      "lines": "289",
+      "lines": "51,52,53,58,60,70,72,76,77,81,85,88,207,208,217,224,232,241,246,261,270,274,275,276,278,279,284,289,297,316",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -114,7 +114,7 @@
     },
     {
       "file": "src/components/chat/ReportViewer.tsx",
-      "lines": "35",
+      "lines": "33,35,38,39,40,42,43,44,45,46,174,181,208,226,245,250,254,266",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -138,7 +138,7 @@
     },
     {
       "file": "src/components/chat/TeammatePanel.tsx",
-      "lines": "175",
+      "lines": "83,144,145,152,153,159,160,174,175",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -150,7 +150,7 @@
     },
     {
       "file": "src/components/chat/UserProfilePanel.tsx",
-      "lines": "197",
+      "lines": "190,196,197",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -186,7 +186,7 @@
     },
     {
       "file": "src/components/gateway/GatewayMonitor.tsx",
-      "lines": "196",
+      "lines": "122,128,190,196",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -198,7 +198,7 @@
     },
     {
       "file": "src/components/help/HelpPanel.tsx",
-      "lines": "242",
+      "lines": "217,218,220,221,229,230,242,243",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -210,7 +210,7 @@
     },
     {
       "file": "src/components/layout/ContentArea.tsx",
-      "lines": "52,131,133,136",
+      "lines": "49,52,112,115,127,128,130,131,133,136",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -282,13 +282,13 @@
     },
     {
       "file": "src/components/settings/KnowledgeSettings.tsx",
-      "lines": "1113",
+      "lines": "1054,1064,1103,1113",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "801",
+      "lines": "95,100,382,387,414,419,789,792,798,801",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -300,19 +300,19 @@
     },
     {
       "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "475",
+      "lines": "224,227,252,255,274,277,352,355,358,410,413,472,475",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/ProviderDetail.tsx",
-      "lines": "1839",
+      "lines": "1783,1805,1817,1839",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/ProviderList.tsx",
-      "lines": "312",
+      "lines": "302,312",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -330,7 +330,7 @@
     },
     {
       "file": "src/components/settings/WebDavSync.tsx",
-      "lines": "411",
+      "lines": "411,413",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -408,7 +408,7 @@
     },
     {
       "file": "src/components/wiki/WikiNodeContextMenu.tsx",
-      "lines": "72",
+      "lines": "57,71,72",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -420,19 +420,19 @@
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/SubWorkflowPropertyPanel.tsx",
-      "lines": "163",
+      "lines": "159,163",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/ToolPropertyPanel.tsx",
-      "lines": "155",
+      "lines": "153,155",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/TriggerPropertyPanel.tsx",
-      "lines": "122",
+      "lines": "122,146",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -444,13 +444,13 @@
     },
     {
       "file": "src/hooks/useGlobalShortcutManager.ts",
-      "lines": "189,205,209",
+      "lines": "183,185,187,189,204,205,209",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/hooks/useVoiceChat.ts",
-      "lines": "244",
+      "lines": "11,13,15,242,244",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -540,7 +540,7 @@
     },
     {
       "file": "src/lib/browserMock.ts",
-      "lines": "1784",
+      "lines": "120,122,124,126,1141,1142,1147,1148,1149,1154,1156,1163,1165,1172,1176,1177,1182,1183,1184,1189,1191,1198,1200,1207,1211,1212,1217,1218,1219,1224,1746,1753,1757,1764,1767,1774,1777,1784",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -558,13 +558,13 @@
     },
     {
       "file": "src/lib/exportChat.ts",
-      "lines": "129",
+      "lines": "127,129",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/lib/invoke.ts",
-      "lines": "94",
+      "lines": "12,14,16,18,19,20,21,22,23,25,26,27,29,33,85,92,94,274,283,287",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -576,7 +576,7 @@
     },
     {
       "file": "src/lib/shortcuts.ts",
-      "lines": "293",
+      "lines": "283,285,287,289,291,293",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -600,7 +600,7 @@
     },
     {
       "file": "src/lib/skillLifecycle.ts",
-      "lines": "82",
+      "lines": "35,82,84",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -618,25 +618,25 @@
     },
     {
       "file": "src/pages/ChatPage.tsx",
-      "lines": "327",
+      "lines": "201,202,215,216,237,244,250,257,272,285,287,300,314,327",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/pages/SettingsPage.tsx",
-      "lines": "79,81",
+      "lines": "73,75,79,81",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "495",
+      "lines": "271,345,347,361,388,390,426,428,429,431,466,470,491,495",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/sdk/index.ts",
-      "lines": "151",
+      "lines": "20,23,26,29,37,48,57,65,72,109,115,120,125,130,139,144,149,151,154",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -666,7 +666,7 @@
     },
     {
       "file": "src/stores/domain/streamStore.ts",
-      "lines": "19",
+      "lines": "15,16,17,18,19,43,45,56,283",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -684,7 +684,7 @@
     },
     {
       "file": "src/stores/feature/executionStore.ts",
-      "lines": "185",
+      "lines": "169,184,185",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -702,7 +702,7 @@
     },
     {
       "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "85",
+      "lines": "49,51,58,59,60,61,67,69,74,76,83,85",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -744,7 +744,7 @@
     },
     {
       "file": "src/types/index.ts",
-      "lines": "863",
+      "lines": "148,542,823,824,826,831,832,833,834,835,836,838,839,840,842,860,861,863",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -785,18 +785,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/chat/InputArea.tsx",
-      "lines": "159",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/settings/StockAnalysisSettings.tsx",
-      "lines": "63,79,83,92,101,110,162,211",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
       "file": "src/components/stock-analysis/AnalysisProgress.tsx",
       "lines": "40,42,45,73",
       "reason": "硬编码中文字符串",
@@ -811,12 +799,6 @@
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
       "lines": "8,9,10,11,12,27,28,29,30,31",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
-      "lines": "61",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -845,14 +827,26 @@
       "phase": 3
     },
     {
-      "file": "src/pages/QuickBarPage.tsx",
-      "lines": "1297",
+      "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
+      "lines": "61",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
-      "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
-      "lines": "46,83,102,104,161,166,179,183,184,196",
+      "file": "src/components/settings/StockAnalysisSettings.tsx",
+      "lines": "63,79,83,92,101,110,162,211",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/settings/SettingsSidebar.tsx",
+      "lines": "92",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/types/stock-analysis.ts",
+      "lines": "82,83,84,85,86,87,88,89,90,91,92,93,94,95",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -863,8 +857,20 @@
       "phase": 3
     },
     {
-      "file": "src/types/stock-analysis.ts",
-      "lines": "82,83,84,85,86,87,88,89,90,91,92,93,94,95",
+      "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
+      "lines": "46,83,102,104,161,166,179,183,184,196",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "lines": "159",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/pages/QuickBarPage.tsx",
+      "lines": "1297",
       "reason": "硬编码中文字符串",
       "phase": 3
     }

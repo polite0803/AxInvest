@@ -83,7 +83,7 @@ const AgentNodeComponent: React.FC<NodeProps<AgentNodeData>> = ({ data, selected
           borderRadius: 8,
           overflow: "hidden",
           boxShadow: selected ? `0 0 0 2px ${borderColor}40` : "none",
-          transition: "all 0.2s",
+          transition: "box-shadow 0.2s, transform 0.2s",
         }}
       >
         <div
@@ -99,7 +99,7 @@ const AgentNodeComponent: React.FC<NodeProps<AgentNodeData>> = ({ data, selected
           <span style={{ fontSize: 14 }}>{displayIcon}</span>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: color,
               fontWeight: 600,
             }}

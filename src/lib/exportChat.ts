@@ -11,7 +11,7 @@ function browserDownload(filename: string, content: string, mimeType: string) {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 async function saveFile(
@@ -20,8 +20,10 @@ async function saveFile(
   filters: { name: string; extensions: string[] }[],
 ) {
   if (isTauri()) {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    const { writeTextFile, writeFile } = await import("@tauri-apps/plugin-fs");
+    const [{ save }, { writeTextFile, writeFile }] = await Promise.all([
+      import("@tauri-apps/plugin-dialog"),
+      import("@tauri-apps/plugin-fs"),
+    ]);
     const filePath = await save({ defaultPath: defaultName, filters });
     if (!filePath) { return false; }
     try {
@@ -47,7 +49,7 @@ async function saveFile(
     a.href = url;
     a.download = defaultName;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
   return true;
 }
@@ -151,7 +153,7 @@ export function buildHtmlTranscript(messages: Message[], title: string, options?
       .replace(/\n/g, "<br>");
 
     const time = m.created_at
-      ? new Date(m.created_at).toLocaleString("zh-CN")
+      ? new Date(m.created_at).toLocaleString(i18n.language)
       : "";
 
     return `<div class="message ${alignClass}">
@@ -164,7 +166,7 @@ export function buildHtmlTranscript(messages: Message[], title: string, options?
   }).join("\n");
 
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${i18n.language}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">

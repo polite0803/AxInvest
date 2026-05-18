@@ -140,10 +140,8 @@ const toolIcons: Record<string, React.ReactNode> = {
 
 function getToolIcon(name: string): React.ReactNode {
   const lower = name.toLowerCase();
-  for (const [key, icon] of Object.entries(toolIcons)) {
-    if (lower.includes(key)) { return icon; }
-  }
-  return <Wrench size={12} />;
+  const entry = Object.entries(toolIcons).find(([key]) => lower.indexOf(key) !== -1);
+  return entry ? entry[1] : <Wrench size={12} />;
 }
 
 // ── Component ────────────────────────────────────────────────────────────
@@ -188,9 +186,10 @@ export const ExecutionTimeline = React.memo(
       }
 
       // Tool calls for this conversation
+      const poolItemMap = new Map(poolItems.map((p) => [p.id, p]));
       for (const tc of Object.values(toolCalls)) {
         // Only include tool calls that belong to this conversation
-        const poolItem = poolItems.find((p) => p.id === tc.toolUseId);
+        const poolItem = poolItemMap.get(tc.toolUseId);
         if (poolItem) {
           result.push(toolCallToEvent(tc));
         }
@@ -262,6 +261,14 @@ export const ExecutionTimeline = React.memo(
         children: (
           <div
             onClick={handleClick}
+            role="button"
+            tabIndex={msgId ? 0 : -1}
+            onKeyDown={(e) => {
+              if ((e.key === "Enter" || e.key === " ") && msgId) {
+                e.preventDefault();
+                handleClick?.();
+              }
+            }}
             style={{
               display: "flex",
               flexDirection: "column",
@@ -322,7 +329,7 @@ export const ExecutionTimeline = React.memo(
             {evt.description && (
               <Typography.Text
                 type="secondary"
-                style={{ fontSize: 11, fontFamily: "monospace" }}
+                style={{ fontSize: 12, fontFamily: "monospace" }}
                 ellipsis
               >
                 {evt.description}
@@ -343,7 +350,7 @@ export const ExecutionTimeline = React.memo(
             {evt.detail && evt.status === "completed" && (
               <Typography.Text
                 type="secondary"
-                style={{ fontSize: 11, color: token.colorTextTertiary }}
+                style={{ fontSize: 12, color: token.colorTextTertiary }}
                 ellipsis
               >
                 {evt.detail}
@@ -355,7 +362,7 @@ export const ExecutionTimeline = React.memo(
               <div
                 style={{
                   padding: "4px 8px",
-                  fontSize: 11,
+                  fontSize: 12,
                   backgroundColor: token.colorErrorBg,
                   borderRadius: token.borderRadiusSM,
                   color: token.colorError,
@@ -397,21 +404,21 @@ export const ExecutionTimeline = React.memo(
             {t("chat.timeline.title")}
           </span>
           <span style={{ color: token.colorTextSecondary }}>
-            {total} 个事件
+            {t("chat.timeline.totalEvents", { total: String(total) })}
           </span>
           {completed > 0 && (
             <Tag color="green" style={{ margin: 0, fontSize: 10 }}>
-              {completed} 完成
+              {t("chat.timeline.completed", { completed: String(completed) })}
             </Tag>
           )}
           {running > 0 && (
             <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>
-              {running} 运行中
+              {t("chat.timeline.running", { running: String(running) })}
             </Tag>
           )}
           {failed > 0 && (
             <Tag color="red" style={{ margin: 0, fontSize: 10 }}>
-              {failed} 失败
+              {t("chat.timeline.failed", { failed: String(failed) })}
             </Tag>
           )}
           <div style={{ flex: 1 }} />

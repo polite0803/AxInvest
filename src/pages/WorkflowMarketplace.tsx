@@ -95,6 +95,69 @@ function formatDate(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleDateString();
 }
 
+/**
+ * Extracted component for rendering a template card.
+ * Fixes react-doctor/no-render-in-render by moving renderTemplateCard() out of WorkflowMarketplace.
+ */
+function TemplateCard({
+  template,
+  onTemplateClick,
+}: {
+  template: MarketplaceTemplate;
+  onTemplateClick: (template: MarketplaceTemplate) => void;
+}) {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+
+  return (
+    <Card
+      hoverable
+      className="marketplace-card"
+      onClick={() => onTemplateClick(template)}
+      cover={
+        <div
+          className="flex items-center justify-center h-32"
+          style={{
+            backgroundColor: token.colorBgContainer,
+            borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          }}
+        >
+          <span style={{ fontSize: 48 }}>📄</span>
+        </div>
+      }
+      styles={{
+        body: { padding: "16px" },
+      }}
+    >
+      <Card.Meta
+        title={
+          <Space size={4}>
+            <Text strong>{template.name}</Text>
+            {template.isFeatured && <Tag color="gold" style={{ margin: 0 }}>{t("marketplace.featured")}</Tag>}
+          </Space>
+        }
+        description={
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: "block" }}>
+              {template.description}
+            </Text>
+            <Space size={8}>
+              <Tag color="blue" style={{ margin: 0, fontSize: 12 }}>
+                <StarOutlined style={{ fontSize: 12, marginRight: 4 }} />
+                {template.rating}
+              </Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                <DownloadOutlined style={{ fontSize: 12, marginRight: 4 }} />
+                {template.downloads}
+              </Text>
+            </Space>
+          </div>
+        }
+      />
+    </Card>
+  );
+}
+
 export function WorkflowMarketplace() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -203,54 +266,6 @@ export function WorkflowMarketplace() {
   const handleImportSubmit = async (jsonData: string) => {
     return await invoke<{ id: string; warnings: string[]; errors: string[] }>("import_workflow_template", { jsonData });
   };
-
-  const renderTemplateCard = (template: MarketplaceTemplate) => (
-    <Card
-      hoverable
-      className="marketplace-card"
-      onClick={() => handleTemplateClick(template)}
-      cover={
-        <div
-          className="flex items-center justify-center h-32"
-          style={{
-            backgroundColor: token.colorBgContainer,
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
-          }}
-        >
-          <span style={{ fontSize: 48 }}>📄</span>
-        </div>
-      }
-      styles={{
-        body: { padding: "16px" },
-      }}
-    >
-      <Card.Meta
-        title={
-          <Space size={4}>
-            <Text strong>{template.name}</Text>
-            {template.isFeatured && <Tag color="gold" style={{ margin: 0 }}>{t("marketplace.featured")}</Tag>}
-          </Space>
-        }
-        description={
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12, display: "block" }}>
-              {template.description}
-            </Text>
-            <Space size={8}>
-              <Tag color="blue" style={{ margin: 0, fontSize: 12 }}>
-                <StarOutlined style={{ fontSize: 12, marginRight: 4 }} />
-                {template.rating}
-              </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                <DownloadOutlined style={{ fontSize: 12, marginRight: 4 }} />
-                {template.downloads}
-              </Text>
-            </Space>
-          </div>
-        }
-      />
-    </Card>
-  );
 
   const renderReviewsTab = () => (
     <div className="space-y-4">
@@ -409,7 +424,7 @@ export function WorkflowMarketplace() {
                     ? (
                       filteredTemplates.map((t) => (
                         <div key={t.id} style={{ position: "relative" }}>
-                          {renderTemplateCard(t)}
+                          <TemplateCard template={t} onTemplateClick={handleTemplateClick} />
                           <Button
                             type="primary"
                             icon={<DLOutlined />}
@@ -436,23 +451,27 @@ export function WorkflowMarketplace() {
               label: t("marketplace.featured"),
               children: (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-                  {templates
-                    .filter((t) => t.isFeatured)
-                    .map((t) => (
-                      <div key={t.id} style={{ position: "relative" }}>
-                        {renderTemplateCard(t)}
-                        <Button
-                          type="primary"
-                          icon={<DLOutlined />}
-                          style={{ position: "absolute", top: 8, right: 8 }}
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownload(t);
-                          }}
-                        />
-                      </div>
-                    ))}
+                  {templates.flatMap((t) =>
+                    t.isFeatured
+                      ? [
+                        (
+                          <div key={t.id} style={{ position: "relative" }}>
+                            <TemplateCard template={t} onTemplateClick={handleTemplateClick} />
+                            <Button
+                              type="primary"
+                              icon={<DLOutlined />}
+                              style={{ position: "absolute", top: 8, right: 8 }}
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(t);
+                              }}
+                            />
+                          </div>
+                        ),
+                      ]
+                      : []
+                  )}
                 </div>
               ),
             },

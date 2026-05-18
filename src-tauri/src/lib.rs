@@ -57,14 +57,17 @@ pub fn run() {
         // 此标记在 `android_utils::mark_startup_phase` 可用之前写入，
         // 直接写入外部可访问路径（用户可通过文件管理器读取）。
         tracing::info!("=== AxAgent Android START ===");
-        let _ = std::fs::write(
+        // 注意：使用 append 而非 overwrite，防止跨启动丢失日志
+        let boot_msg = "[BOOT] run() entered\n";
+        let boot_paths = [
             "/storage/emulated/0/Download/axagent-crash.log",
-            "[BOOT] run() entered\n",
-        );
-        let _ = std::fs::write(
             "/storage/emulated/0/Android/data/top.axagent.desktop/files/axagent-crash.log",
-            "[BOOT] run() entered\n",
-        );
+        ];
+        for bp in &boot_paths {
+            // 追加而非覆盖
+            let existing = std::fs::read_to_string(bp).unwrap_or_default();
+            let _ = std::fs::write(bp, existing + &boot_msg);
+        }
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -525,6 +528,7 @@ pub fn run() {
             commands::agent::record_feedback,
             // Proactive commands
             commands::proactive::proactive_list_suggestions,
+            commands::proactive::proactive_refresh_suggestions,
             commands::proactive::proactive_predict,
             commands::proactive::proactive_list_reminders,
             commands::proactive::proactive_dismiss_suggestion,
@@ -553,14 +557,23 @@ pub fn run() {
             commands::agent_advanced::tot_get_state,
             commands::agent_advanced::tot_backtrack,
             commands::agent_advanced::tot_explore,
+            commands::agent_advanced::tot_score_node,
+            commands::agent_advanced::tot_traverse,
+            commands::agent_advanced::tot_prune,
+            commands::agent_advanced::tot_get_best_path,
             commands::agent_advanced::planner_replan,
             commands::agent_advanced::planner_rollback,
+            commands::agent_advanced::planner_diff_versions,
             commands::agent_advanced::planner_get_history,
             commands::agent_advanced::planner_get_versions,
             commands::agent_advanced::semantic_cache_stats,
             commands::agent_advanced::semantic_cache_clear,
             commands::agent_advanced::semantic_cache_set_enabled,
+            commands::agent_advanced::semantic_cache_lookup,
+            commands::agent_advanced::semantic_cache_store,
+            commands::agent_advanced::semantic_cache_set_threshold,
             commands::agent_advanced::error_get_report,
+            commands::agent_advanced::get_prompt_cache_state,
             commands::agent::skill_evolution_start,
             commands::agent::skill_evolution_status,
             commands::agent::user_profile_get,
@@ -760,6 +773,12 @@ pub fn run() {
             commands::rl::rl_train_policy,
             commands::rl::rl_export_model,
             commands::rl::rl_import_model,
+            commands::reflection::reflect_on_task,
+            commands::reflection::get_reflection_history,
+            commands::reflection::clear_reflection_history,
+            commands::reflection::get_reflection_insights,
+            commands::reflection::search_reflection_insights,
+            commands::reflection::get_reflection_insight_stats,
             commands::evolution::get_evolution_stats,
             commands::fine_tune::list_datasets,
             commands::fine_tune::get_dataset,
@@ -784,6 +803,8 @@ pub fn run() {
             commands::tool_recommender::record_tool_usage,
             #[cfg(not(mobile))]
             commands::screen_vision::analyze_screen,
+            #[cfg(not(mobile))]
+            commands::screen_vision::analyze_image,
             #[cfg(not(mobile))]
             commands::screen_vision::find_element_on_screen,
             #[cfg(not(mobile))]
@@ -881,8 +902,20 @@ pub fn run() {
             commands::plugin::plugin_disable,
             commands::plugin::plugin_uninstall,
             commands::plugin::plugin_update,
+            // PTY
+            commands::pty::pty_create_session,
+            commands::pty::pty_kill_session,
+            commands::pty::pty_remove_session,
+            commands::pty::pty_write,
+            commands::pty::pty_resize,
+            commands::pty::pty_list_sessions,
+            commands::pty::pty_analyze_output,
+            commands::pty::pty_get_suggestions,
             // File authorizer
+            commands::files::file_authorize,
+            commands::files::file_check_authorization,
             commands::files::file_revoke_authorization,
+            commands::files::request_file_permission,
             // Metrics
             commands::agent_nudge::get_invoke_metrics,
             commands::agent_nudge::proactive_convert_to_nudge,
@@ -1275,7 +1308,7 @@ pub fn run() {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         let app = window.app_handle();
                         let state = app.state::<AppState>();
-                        if state.close_to_tray.load(Ordering::Relaxed) {
+                        if state.close_to_tray.load(Ordering::Acquire) {
                             let _ = window.hide();
                             api.prevent_close();
                         } else {
@@ -1308,8 +1341,10 @@ pub fn run() {
                 let lower = error_msg.to_lowercase();
                 if lower.contains("webview2") || lower.contains("webview") || lower.contains("edge")
                 {
-                    let user_ok = windows_utils::show_warning_ok_cancel("AxAgent",
-                        "æœªæ£€æµ‹åˆ° Microsoft Edge WebView2 Runtimeï¼ŒAxAgent æ— æ³•å¯åŠ¨ã€‚\n\nç‚¹å‡»ã€Œç¡®å®šã€æ‰“å¼€ä¸‹è½½é¡µé¢è¿›è¡Œå®‰è£…ï¼Œå®‰è£…å®ŒæˆåŽé‡æ–°å¯åŠ¨ AxAgentã€‚");
+                    let user_ok = windows_utils::show_warning_ok_cancel(
+                        "AxAgent",
+                        "æœªæ£€æµ‹åˆ° Microsoft Edge WebView2 Runtimeï¼ŒAxAgent æ— æ³•å¯åŠ¨ã€‚\n\nç‚¹å‡»ã€Œç¡®å®šã€æ‰“å¼€ä¸‹è½½é¡µé¢è¿›è¡Œå®‰è£…ï¼Œå®‰è£…å®ŒæˆåŽé‡æ–°å¯åŠ¨ AxAgentã€‚",
+                    );
                     if user_ok {
                         let _ = std::process::Command::new("cmd")
                             .args(["/c", "start", "https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download"])
@@ -1342,6 +1377,45 @@ pub fn run() {
                     let _ = w.set_focus();
                 }
             }
+        }
+
+        // 优雅关闭：通知后台任务停止并等待完成 (S-39)
+        if let tauri::RunEvent::Exit = _event {
+            let state = _app.state::<AppState>();
+            state.shutdown_token.cancel();
+            tracing::info!("[shutdown] 正在停止后台任务...");
+
+            let rt_handle = tokio::runtime::Handle::try_current().unwrap_or_else(|_| {
+                tokio::runtime::Runtime::new()
+                    .expect("Failed to create runtime for cleanup")
+                    .handle()
+                    .clone()
+            });
+
+            let timeout = std::time::Duration::from_secs(5);
+            let await_handle = |handle: &std::sync::Arc<
+                tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+            >,
+                                name: &str| {
+                let mut guard = rt_handle.block_on(handle.lock());
+                if let Some(mut h) = guard.take() {
+                    match rt_handle.block_on(async { tokio::time::timeout(timeout, &mut h).await })
+                    {
+                        Ok(Ok(())) => tracing::info!("[shutdown] {} 已优雅停止", name),
+                        Ok(Err(e)) => tracing::warn!("[shutdown] {} join 错误: {}", name, e),
+                        Err(_) => {
+                            tracing::warn!("[shutdown] {} 超时 ({:?})，强制中止", name, timeout);
+                            h.abort();
+                        },
+                    }
+                }
+            };
+
+            await_handle(&state.auto_backup_handle, "auto_backup");
+            await_handle(&state.webdav_sync_handle, "webdav_sync");
+            await_handle(&state.api_server_handle, "api_server");
+            await_handle(&state.trajectory_cleanup_handle, "trajectory_cleanup");
+            tracing::info!("[shutdown] 退出完成");
         }
     });
 }

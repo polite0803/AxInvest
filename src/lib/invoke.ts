@@ -2,6 +2,13 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { handleCommand } from "./browserMock";
 
+declare global {
+  interface Window {
+    isTauri?: boolean;
+  }
+  var isTauri: boolean | undefined;
+}
+
 export type UnlistenFn = () => void;
 
 /** Default timeout for Tauri invoke calls (5 minutes). Set to 0 to disable. */
@@ -64,6 +71,8 @@ export async function invokeWithRetry<T>(
 
   let lastError: unknown;
 
+  // 指数退避重试循环：每次重试依赖前一次失败后才执行，且每次间隔
+  // 基于前一次尝试次数计算退避延迟，必须顺序执行，不能并行。
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await invoke<T>(cmd, args, timeoutMs);
@@ -109,6 +118,7 @@ interface InvokeRecord {
 
 const _invokeHistory: InvokeRecord[] = [];
 const MAX_INVOKE_HISTORY = 500;
+const MAX_INVOKE_COUNTS = 200;
 const _invokeCounts = new Map<string, { total: number; failed: number; totalDurationMs: number }>();
 
 export interface InvokeMetricsSnapshot {
@@ -138,6 +148,18 @@ function recordInvocation(cmd: string, durationMs: number, success: boolean, err
   stats.totalDurationMs += durationMs;
   if (!success) { stats.failed++; }
   _invokeCounts.set(cmd, stats);
+  if (_invokeCounts.size > MAX_INVOKE_COUNTS) {
+    const oldestKey = _invokeCounts.keys().next().value;
+    if (oldestKey !== undefined) {
+      _invokeCounts.delete(oldestKey);
+    }
+  }
+}
+
+// 清空 invoke 历史记录和统计计数器
+export function clearInvokeHistory() {
+  _invokeHistory.length = 0;
+  _invokeCounts.clear();
 }
 
 function percentile(sorted: number[], pct: number): number {
@@ -152,8 +174,7 @@ function percentile(sorted: number[], pct: number): number {
 export function getInvokeMetrics(): InvokeMetricsSnapshot {
   const byCommand = Array.from(_invokeCounts.entries()).map(([command, stats]) => {
     const durations = _invokeHistory
-      .filter((r) => r.command === command)
-      .map((r) => r.durationMs)
+      .flatMap((r) => r.command === command ? [r.durationMs] : [])
       .sort((a, b) => a - b);
     return {
       command,
@@ -271,7 +292,7 @@ function recordDiag(
         }
       }
     }
-  } catch { /* 诊断自身出错，静默忽略 */ }
+  } catch { /* diagnostic: ignore self-check errors */ }
 }
 
 /**
@@ -280,11 +301,11 @@ function recordDiag(
  */
 export async function checkIpcHealth(): Promise<{ ok: boolean; detail: string; isTauri: boolean }> {
   if (!isTauri()) {
-    return { ok: false, detail: "非 Tauri 环境，__TAURI_INTERNALS__ 未注入", isTauri: false };
+    return { ok: false, detail: "Not a Tauri environment, __TAURI_INTERNALS__ not injected", isTauri: false };
   }
   try {
     await invoke<unknown>("get_settings", undefined, 5000);
-    return { ok: true, detail: "IPC 通道正常", isTauri: true };
+    return { ok: true, detail: "IPC channel OK", isTauri: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, detail: msg.slice(0, 200), isTauri: true };
@@ -292,10 +313,7 @@ export async function checkIpcHealth(): Promise<{ ok: boolean; detail: string; i
 }
 
 export function isTauri(): boolean {
-  // 使用与 @tauri-apps/api/core 相同的检测方式：
-  // window.isTauri 由 Tauri 运行时在初始化时设置，仅 Tauri 环境下为 true。
-  // 不要检查 __TAURI_INTERNALS__，因为浏览器模式下它可能被注入但 IPC 通道不存在。
-  return !!(globalThis as any).isTauri || !!(typeof window !== "undefined" && (window as any).isTauri);
+  return !!globalThis.isTauri || !!(typeof window !== "undefined" && window.isTauri);
 }
 
 /**
@@ -403,5 +421,6 @@ export async function listen<T>(
     return tauriListen<T>(event, handler);
   }
   // Browser mode: no-op listener
+  console.warn("[invoke] listen() called in browser mode - events will not fire");
   return () => {};
 }

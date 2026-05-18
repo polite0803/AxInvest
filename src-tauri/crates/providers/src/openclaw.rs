@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::anthropic::AnthropicAdapter;
 use crate::openai::OpenAIAdapter;
 use crate::openai_responses::OpenAIResponsesAdapter;
-use crate::{build_http_client, ProviderAdapter, ProviderRequestContext};
+use crate::{ProviderAdapter, ProviderRequestContext, build_http_client};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenClawApiMode {
@@ -50,10 +50,10 @@ impl OpenClawAdapter {
             match mode.to_lowercase().as_str() {
                 "chat_completions" | "chatcompletions" => return OpenClawApiMode::ChatCompletions,
                 "codex_responses" | "responses" | "openai_responses" => {
-                    return OpenClawApiMode::CodexResponses
+                    return OpenClawApiMode::CodexResponses;
                 },
                 "anthropic_messages" | "anthropic" | "messages" => {
-                    return OpenClawApiMode::AnthropicMessages
+                    return OpenClawApiMode::AnthropicMessages;
                 },
                 _ => {},
             }
@@ -155,10 +155,11 @@ impl OpenClawAdapter {
             .unwrap_or_else(|| "http://localhost:8100".to_string())
     }
 
+    #[allow(clippy::result_large_err)]
     fn get_client(ctx: &ProviderRequestContext) -> Result<reqwest::Client> {
         match &ctx.proxy_config {
             Some(c) if c.proxy_type.as_deref() != Some("none") => build_http_client(Some(c)),
-            _ => Ok(reqwest::Client::new()),
+            _ => crate::build_default_http_client(),
         }
     }
 

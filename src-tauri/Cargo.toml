@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 version = "1.5.9"
-edition = "2021"
+edition = "2024"
 license = "AGPL-3.0-only"
 
 [workspace.dependencies]
@@ -22,9 +22,9 @@ anyhow = "1"
 reqwest = { version = "0.13", features = ["json"] }
 sqlite-vec = "0.1.8-alpha.1"
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
-sysinfo = "0.32"
 lazy_static = "1"
 sha2 = "0.10"
+hex = "0.4"
 image = { version = "0.25", features = ["png"] }
 xcap = "0.9.4"
 enigo = "0.6"
@@ -36,8 +36,12 @@ version = "1.5.9"
 description = "AxAgent - AI Chat Desktop App"
 authors = ["刘小平 <polite0803@outlook.com>"]
 license = "AGPL-3.0-only"
-edition = "2021"
+edition = "2024"
 default-run = "AxAgent"
+
+[features]
+default = ["notification"]
+notification = ["dep:tauri-plugin-notification"]
 
 [lib]
 name = "axagent_lib"
@@ -81,6 +85,7 @@ axagent-prompt-guard = { path = "crates/prompt-guard" }
 axagent-astock-data = { path = "crates/astock-data" }
 axagent-stock-analysis = { path = "crates/stock-analysis" }
 tokio = { workspace = true }
+tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { workspace = true }
 sea-orm = { workspace = true }
 chrono = { workspace = true }
@@ -94,6 +99,7 @@ toml = "0.8"
 rcgen = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "ring"] }
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = { version = "2", optional = true }
 reqwest = { workspace = true }
 zip = "2"
 tempfile = "3"
@@ -103,6 +109,7 @@ dirs = "5"
 hostname = "0.3"
 lazy_static = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
 notify = "8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 

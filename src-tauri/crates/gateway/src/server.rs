@@ -1,16 +1,16 @@
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::{
+    Router,
     body::Body,
     extract::State as AxumState,
-    http::{header, Request, StatusCode},
+    http::{Request, StatusCode, header},
     response::{IntoResponse, Response},
-    Router,
 };
-use axum_server::{tls_rustls::RustlsConfig, Handle};
+use axum_server::{Handle, tls_rustls::RustlsConfig};
 use sea_orm::DatabaseConnection;
 use tokio::task::JoinHandle;
 
@@ -21,7 +21,7 @@ use axagent_core::error::{AxAgentError, Result};
 pub struct GatewayAppState {
     pub db: DatabaseConnection,
     pub master_key: [u8; 32],
-    pub astock_client: std::sync::Arc<axagent_astock_data::AStockClient>,
+    pub started_at: i64,
 }
 
 /// TLS certificate material.
@@ -118,10 +118,11 @@ impl GatewayServer {
         master_key: [u8; 32],
         config: GatewayStartConfig,
     ) -> Result<Self> {
+        let started_at = axagent_core::utils::now_ts();
         let app_state = GatewayAppState {
             db: pool,
             master_key,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            started_at,
         };
 
         // ── Bind HTTP listener ──────────────────────────────────────────

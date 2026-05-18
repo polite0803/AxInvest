@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use axagent_core::entity::{notes, wiki_operations, wiki_pages, wiki_sources, wikis};
-use axagent_core::repo::note::{calculate_content_hash, CreateNoteInput, Note, UpdateNoteInput};
+use axagent_core::repo::note::{CreateNoteInput, Note, UpdateNoteInput, calculate_content_hash};
 use axagent_core::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_core::utils::gen_id;
 use axagent_providers::{ProviderAdapter, ProviderRequestContext};
@@ -39,7 +39,6 @@ pub struct WikiCompiler {
     llm_adapter: Arc<dyn ProviderAdapter>,
     llm_ctx: ProviderRequestContext,
     llm_model: String,
-    #[allow(dead_code)]
     quality_threshold: f64,
     use_llm_quality_eval: bool,
 }
@@ -300,9 +299,7 @@ impl WikiCompiler {
             3. All distinct entities found\n\
             4. Comparisons where applicable\n\
             5. Ensure each concept page links to related concepts with [[wikilinks]]",
-            language_instruction,
-            schema,
-            sources_text
+            language_instruction, schema, sources_text
         )
     }
 
@@ -409,10 +406,10 @@ impl WikiCompiler {
             let end = (start + chunk_size).min(content.len());
             let mut chunk_end = end;
 
-            if end < content.len() {
-                if let Some(pos) = content[start..end].rfind('\n') {
-                    chunk_end = start + pos + 1;
-                }
+            if end < content.len()
+                && let Some(pos) = content[start..end].rfind('\n')
+            {
+                chunk_end = start + pos + 1;
             }
 
             chunks.push(content[start..chunk_end].to_string());
@@ -489,23 +486,22 @@ impl WikiCompiler {
             match serde_json::from_str::<serde_json::Value>(&clean_json) {
                 Ok(value) => {
                     if value.is_object() {
-                        if let Ok(page) = serde_json::from_value::<CompiledPage>(value.clone()) {
+                        if let Ok(page) = serde_json::from_value::<CompiledPage>(value.clone())
+                            && !page.content.is_empty()
+                            && !page.title.is_empty()
+                            && Self::is_valid_page_type(&page.page_type)
+                        {
+                            pages.push(page);
+                        }
+                    } else if value.is_array()
+                        && let Ok(arr) = serde_json::from_value::<Vec<CompiledPage>>(value)
+                    {
+                        for page in arr {
                             if !page.content.is_empty()
                                 && !page.title.is_empty()
                                 && Self::is_valid_page_type(&page.page_type)
                             {
                                 pages.push(page);
-                            }
-                        }
-                    } else if value.is_array() {
-                        if let Ok(arr) = serde_json::from_value::<Vec<CompiledPage>>(value) {
-                            for page in arr {
-                                if !page.content.is_empty()
-                                    && !page.title.is_empty()
-                                    && Self::is_valid_page_type(&page.page_type)
-                                {
-                                    pages.push(page);
-                                }
                             }
                         }
                     }
@@ -542,24 +538,24 @@ impl WikiCompiler {
         let mut titles_seen = Vec::new();
 
         for line in raw_text.lines() {
-            if let Some(ref re) = h2_re {
-                if let Some(cap) = re.captures(line) {
-                    if let Some(title) = current_title.take() {
-                        let content = current_content.join("\n");
-                        if !content.trim().is_empty() {
-                            pages.push(CompiledPage {
-                                title: title.clone(),
-                                content,
-                                page_type: infer_page_type(&title),
-                                source_ids: Vec::new(),
-                            });
-                        }
-                        current_content = Vec::new();
+            if let Some(ref re) = h2_re
+                && let Some(cap) = re.captures(line)
+            {
+                if let Some(title) = current_title.take() {
+                    let content = current_content.join("\n");
+                    if !content.trim().is_empty() {
+                        pages.push(CompiledPage {
+                            title: title.clone(),
+                            content,
+                            page_type: infer_page_type(&title),
+                            source_ids: Vec::new(),
+                        });
                     }
-                    current_title = Some(cap.get(1).unwrap().as_str().to_string());
-                    titles_seen.push(current_title.clone().unwrap());
-                    continue;
+                    current_content = Vec::new();
                 }
+                current_title = Some(cap.get(1).unwrap().as_str().to_string());
+                titles_seen.push(current_title.clone().unwrap());
+                continue;
             }
             if current_title.is_some() {
                 current_content.push(line.to_string());
@@ -736,6 +732,15 @@ impl WikiCompiler {
         } else {
             self.calculate_quality_score(page).await
         };
+
+        if score < self.quality_threshold {
+            tracing::warn!(
+                "Page '{}' quality score {:.2} below threshold {:.2}",
+                page.title,
+                score,
+                self.quality_threshold
+            );
+        }
 
         let wiki_page = wiki_pages::Entity::find()
             .filter(wiki_pages::Column::NoteId.eq(&note.id))
@@ -1342,6 +1347,8 @@ mod tests {
                     prompt_tokens: 0,
                     completion_tokens: 0,
                     total_tokens: 0,
+                    cache_creation_tokens: None,
+                    cache_read_tokens: None,
                 },
                 tool_calls: None,
             })
@@ -1351,6 +1358,7 @@ mod tests {
             &self,
             _ctx: &ProviderRequestContext,
             _request: ChatRequest,
+            _cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         ) -> Pin<Box<dyn Stream<Item = axagent_core::error::Result<ChatStreamChunk>> + Send>>
         {
             Box::pin(futures::stream::empty())

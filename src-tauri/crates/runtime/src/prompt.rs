@@ -319,13 +319,13 @@ fn render_project_context(project_context: &ProjectContext) -> String {
         lines.push("Git status snapshot:".to_string());
         lines.push(status.clone());
     }
-    if let Some(ref gc) = project_context.git_context {
-        if !gc.recent_commits.is_empty() {
-            lines.push(String::new());
-            lines.push("Recent commits (last 5):".to_string());
-            for c in &gc.recent_commits {
-                lines.push(format!("  {} {}", c.hash, c.subject));
-            }
+    if let Some(ref gc) = project_context.git_context
+        && !gc.recent_commits.is_empty()
+    {
+        lines.push(String::new());
+        lines.push("Recent commits (last 5):".to_string());
+        for c in &gc.recent_commits {
+            lines.push(format!("  {} {}", c.hash, c.subject));
         }
     }
     if let Some(diff) = &project_context.git_diff {
@@ -633,9 +633,9 @@ fn get_actions_section() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        ContextFile, ProjectContext, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, SystemPromptBuilder,
         collapse_blank_lines, display_context_path, normalize_instruction_content,
         render_instruction_content, render_instruction_files, truncate_instruction_content,
-        ContextFile, ProjectContext, SystemPromptBuilder, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     };
     use crate::config::ConfigLoader;
     use std::fs;
@@ -905,8 +905,8 @@ mod tests {
         let previous = std::env::current_dir().expect("cwd");
         let original_home = std::env::var("HOME").ok();
         let original_claw_home = std::env::var("CLAW_CONFIG_HOME").ok();
-        std::env::set_var("HOME", &root);
-        std::env::set_var("CLAW_CONFIG_HOME", root.join("missing-home"));
+        unsafe { std::env::set_var("HOME", &root) };
+        unsafe { std::env::set_var("CLAW_CONFIG_HOME", root.join("missing-home")) };
         std::env::set_current_dir(&root).expect("change cwd");
         let prompt = super::load_system_prompt(&root, "2026-03-31", "linux", "6.8")
             .expect("system prompt should load")
@@ -917,14 +917,14 @@ mod tests {
             );
         std::env::set_current_dir(previous).expect("restore cwd");
         if let Some(value) = original_home {
-            std::env::set_var("HOME", value);
+            unsafe { std::env::set_var("HOME", value) };
         } else {
-            std::env::remove_var("HOME");
+            unsafe { std::env::remove_var("HOME") };
         }
         if let Some(value) = original_claw_home {
-            std::env::set_var("CLAW_CONFIG_HOME", value);
+            unsafe { std::env::set_var("CLAW_CONFIG_HOME", value) };
         } else {
-            std::env::remove_var("CLAW_CONFIG_HOME");
+            unsafe { std::env::remove_var("CLAW_CONFIG_HOME") };
         }
 
         assert!(prompt.contains("Project rules"));
@@ -979,10 +979,12 @@ mod tests {
             .expect("write instructions.md");
 
         let context = ProjectContext::discover(&nested, "2026-03-31").expect("context should load");
-        assert!(context
-            .instruction_files
-            .iter()
-            .any(|file| file.path.ends_with(".claw/instructions.md")));
+        assert!(
+            context
+                .instruction_files
+                .iter()
+                .any(|file| file.path.ends_with(".claw/instructions.md"))
+        );
         assert!(
             render_instruction_files(&context.instruction_files).contains("instruction markdown")
         );

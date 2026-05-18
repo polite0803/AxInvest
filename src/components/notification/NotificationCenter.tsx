@@ -23,7 +23,7 @@ interface NotificationCenterProps {
   trigger?: React.ReactNode;
 }
 
-export default function NotificationCenter({ trigger }: NotificationCenterProps) {
+export function NotificationCenter({ trigger }: NotificationCenterProps) {
   const { t } = useTranslation();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visible, setVisible] = useState(false);
@@ -200,7 +200,7 @@ export default function NotificationCenter({ trigger }: NotificationCenterProps)
                       alignItems: "center",
                     }}
                   >
-                    <Text type="secondary" style={{ fontSize: 11 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
                       {formatTime(notification.timestamp)}
                     </Text>
                     {notification.action && (

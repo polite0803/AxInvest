@@ -35,7 +35,7 @@ impl ResourceLimits {
 
     /// 应用资源限制到当前进程及其子进程
     pub fn apply_to_current_process(&self) -> Result<(), String> {
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(all(unix, not(target_os = "android")))]
         self.apply_rlimit()?;
 
         #[cfg(target_os = "windows")]
@@ -52,7 +52,7 @@ impl ResourceLimits {
         Ok(())
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(all(unix, not(target_os = "android")))]
     fn apply_rlimit(&self) -> Result<(), String> {
         // RLIMIT_CPU: 进程可使用的 CPU 时间（秒）
         self.set_rlimit(
@@ -81,7 +81,7 @@ impl ResourceLimits {
         Ok(())
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(all(unix, not(target_os = "android")))]
     fn set_rlimit(&self, resource: u32, soft: u64, hard: u64) -> Result<(), String> {
         let rlim = libc::rlimit {
             rlim_cur: soft.min(hard),
@@ -101,9 +101,9 @@ impl ResourceLimits {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::HANDLE;
         use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_JOB_MEMORY,
+            JOB_OBJECT_LIMIT_PROCESS_MEMORY, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectExtendedLimitInformation, SetInformationJobObject,
         };
 
         let name: Vec<u16> = std::ffi::OsStr::new("AxAgent_Sandbox_Job")
@@ -119,8 +119,18 @@ impl ResourceLimits {
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         info.BasicLimitInformation.LimitFlags =
             JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY;
-        info.ProcessMemoryLimit = self.max_memory_bytes as usize;
-        info.JobMemoryLimit = self.max_memory_bytes.saturating_mul(2) as usize;
+        info.ProcessMemoryLimit = if std::mem::size_of::<usize>() < 8 {
+            self.max_memory_bytes.min(usize::MAX as u64) as usize
+        } else {
+            self.max_memory_bytes as usize
+        };
+        let limit = self.max_memory_bytes.saturating_mul(2);
+        let limit = if std::mem::size_of::<usize>() < 8 {
+            limit.min(usize::MAX as u64) as usize
+        } else {
+            limit as usize
+        };
+        info.JobMemoryLimit = limit;
 
         let ret = unsafe {
             SetInformationJobObject(

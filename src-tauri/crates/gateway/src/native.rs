@@ -2,11 +2,11 @@ use axagent_core::{
     crypto::decrypt_key,
     types::{GatewayKey, ProviderConfig, ProviderProxyConfig, ProviderType, TokenUsage},
 };
-use axagent_providers::{build_http_client, resolve_base_url_for_type, ProviderRequestContext};
+use axagent_providers::{ProviderRequestContext, build_http_client, resolve_base_url_for_type};
 use axum::{
-    body::{to_bytes, Body, Bytes},
+    body::{Body, Bytes, to_bytes},
     extract::{Extension, Path, Request, State},
-    http::{header, HeaderMap, HeaderName, Method, StatusCode},
+    http::{HeaderMap, HeaderName, Method, StatusCode, header},
     response::IntoResponse,
 };
 use futures::StreamExt;
@@ -106,6 +106,7 @@ impl NativeProtocol {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn upstream_path(self, gemini_model: Option<&str>) -> Result<String, axum::response::Response> {
         match self {
             NativeProtocol::OpenAiResponses => Ok("/v1/responses".to_string()),
@@ -161,10 +162,10 @@ struct OpenAiResponsesStreamState {
 
 impl OpenAiResponsesStreamState {
     fn observe_sse_line(&mut self, line: &str) {
-        if let Some(value) = parse_sse_json_line(line) {
-            if value.get("type").and_then(|v| v.as_str()) == Some("response.completed") {
-                self.usage = extract_openai_response_usage(&value);
-            }
+        if let Some(value) = parse_sse_json_line(line)
+            && value.get("type").and_then(|v| v.as_str()) == Some("response.completed")
+        {
+            self.usage = extract_openai_response_usage(&value);
         }
     }
 
@@ -212,6 +213,8 @@ impl AnthropicMessagesStreamState {
             prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
+            cache_creation_tokens: None,
+            cache_read_tokens: None,
         })
     }
 }
@@ -295,18 +298,28 @@ fn extract_openai_response_usage(value: &serde_json::Value) -> Option<TokenUsage
             .and_then(|response| response.get("usage"))
     })?;
 
-    let prompt_tokens = usage.get("input_tokens")?.as_u64()? as u32;
-    let completion_tokens = usage.get("output_tokens")?.as_u64()? as u32;
+    let prompt_tokens: u32 = usage
+        .get("input_tokens")?
+        .as_u64()?
+        .try_into()
+        .unwrap_or(u32::MAX);
+    let completion_tokens: u32 = usage
+        .get("output_tokens")?
+        .as_u64()?
+        .try_into()
+        .unwrap_or(u32::MAX);
     let total_tokens = usage
         .get("total_tokens")
         .and_then(|value| value.as_u64())
-        .map(|value| value as u32)
+        .map(|value| value.try_into().unwrap_or(u32::MAX))
         .unwrap_or(prompt_tokens + completion_tokens);
 
     Some(TokenUsage {
         prompt_tokens,
         completion_tokens,
         total_tokens,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
     })
 }
 
@@ -319,6 +332,8 @@ fn extract_anthropic_message_usage(value: &serde_json::Value) -> Option<TokenUsa
         prompt_tokens,
         completion_tokens,
         total_tokens: prompt_tokens + completion_tokens,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
     })
 }
 
@@ -328,6 +343,8 @@ fn extract_anthropic_count_tokens_usage(value: &serde_json::Value) -> Option<Tok
         prompt_tokens,
         completion_tokens: 0,
         total_tokens: prompt_tokens,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
     })
 }
 
@@ -345,6 +362,8 @@ fn extract_gemini_generate_content_usage(value: &serde_json::Value) -> Option<To
         prompt_tokens,
         completion_tokens,
         total_tokens,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
     })
 }
 
@@ -354,6 +373,8 @@ fn extract_gemini_count_tokens_usage(value: &serde_json::Value) -> Option<TokenU
         prompt_tokens,
         completion_tokens: 0,
         total_tokens: prompt_tokens,
+        cache_creation_tokens: None,
+        cache_read_tokens: None,
     })
 }
 
@@ -395,6 +416,7 @@ fn should_copy_response_header(name: &HeaderName) -> bool {
     !matches!(name.as_str(), "content-length" | "connection" | "transfer-encoding")
 }
 
+#[allow(clippy::result_large_err)]
 fn extract_model_from_body(
     body_json: Option<&serde_json::Value>,
     protocol: NativeProtocol,
@@ -418,28 +440,13 @@ fn build_upstream_url(
     base_url: &str,
     path: &str,
     query: Option<&str>,
-    protocol: NativeProtocol,
-    api_key: &str,
+    _protocol: NativeProtocol,
+    _api_key: &str,
 ) -> String {
     let mut url = join_upstream_base_and_path(base_url, path);
     if let Some(query) = query.filter(|value| !value.is_empty()) {
         url.push('?');
         url.push_str(query);
-    }
-    if matches!(
-        protocol,
-        NativeProtocol::GeminiModels
-            | NativeProtocol::GeminiGenerateContent
-            | NativeProtocol::GeminiStreamGenerateContent
-            | NativeProtocol::GeminiCountTokens
-    ) {
-        if url.contains('?') {
-            url.push('&');
-        } else {
-            url.push('?');
-        }
-        url.push_str("key=");
-        url.push_str(api_key);
     }
     url
 }
@@ -571,6 +578,7 @@ async fn resolve_native_context(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn record_native_outcome(
     db: &sea_orm::DatabaseConnection,
     gateway_key: &GatewayKey,
@@ -584,24 +592,25 @@ async fn record_native_outcome(
     error_message: Option<&str>,
     aggregate_usage: bool,
 ) {
-    if aggregate_usage && status_code < 400 {
-        if let Some(usage) = usage {
-            let _ = axagent_core::repo::gateway::record_usage(
-                db,
-                &gateway_key.id,
-                provider_id,
-                model_id,
-                usage.prompt_tokens as u64,
-                usage.completion_tokens as u64,
-            )
-            .await;
-        }
+    if aggregate_usage
+        && status_code < 400
+        && let Some(usage) = usage
+    {
+        let _ = axagent_core::repo::gateway::record_usage(
+            db,
+            &gateway_key.id,
+            provider_id,
+            model_id,
+            usage.prompt_tokens as u64,
+            usage.completion_tokens as u64,
+        )
+        .await;
     }
 
     let elapsed = start_time.elapsed().as_millis() as i32;
-    let request_tokens = usage.map(|usage| usage.prompt_tokens as i32).unwrap_or(0);
+    let request_tokens = usage.map(|usage| usage.prompt_tokens as i64).unwrap_or(0);
     let response_tokens = usage
-        .map(|usage| usage.completion_tokens as i32)
+        .map(|usage| usage.completion_tokens as i64)
         .unwrap_or(0);
     let _ = axagent_core::repo::gateway_request_log::record_request_log(
         db,
@@ -620,6 +629,7 @@ async fn record_native_outcome(
     .await;
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn proxy_buffered_response(
     protocol: NativeProtocol,
     gateway_key: &GatewayKey,
@@ -697,6 +707,7 @@ fn is_event_stream(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::result_large_err)]
 fn build_upstream_request(
     client: reqwest::Client,
     protocol: NativeProtocol,
@@ -736,7 +747,9 @@ fn build_upstream_request(
         NativeProtocol::GeminiModels
         | NativeProtocol::GeminiGenerateContent
         | NativeProtocol::GeminiStreamGenerateContent
-        | NativeProtocol::GeminiCountTokens => {},
+        | NativeProtocol::GeminiCountTokens => {
+            request = request.header("x-goog-api-key", api_key);
+        },
     }
 
     if *method != Method::GET {
@@ -746,6 +759,7 @@ fn build_upstream_request(
     Ok(request)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn proxy_stream_response(
     protocol: NativeProtocol,
     gateway_key: GatewayKey,
@@ -777,7 +791,9 @@ async fn proxy_stream_response(
                     }
                 },
                 Err(e) => {
-                    stream_error = Some(format!("Stream error: {e}. This may be caused by network instability, proxy issues, or the provider terminating the connection. Please try again."));
+                    stream_error = Some(format!(
+                        "Stream error: {e}. This may be caused by network instability, proxy issues, or the provider terminating the connection. Please try again."
+                    ));
                     break;
                 },
             }
@@ -826,7 +842,7 @@ async fn handle_native_request(
             return error_response(
                 StatusCode::BAD_REQUEST,
                 &format!("Failed to read request body: {e}"),
-            )
+            );
         },
     };
 
@@ -836,7 +852,7 @@ async fn handle_native_request(
         match serde_json::from_slice::<serde_json::Value>(&body) {
             Ok(value) => Some(value),
             Err(e) => {
-                return error_response(StatusCode::BAD_REQUEST, &format!("Invalid JSON body: {e}"))
+                return error_response(StatusCode::BAD_REQUEST, &format!("Invalid JSON body: {e}"));
             },
         }
     };
@@ -1015,16 +1031,16 @@ mod tests {
     use super::*;
     use axagent_core::{
         crypto::{encrypt_key, key_prefix},
-        db::{create_test_pool, DbHandle},
+        db::{DbHandle, create_test_pool},
         repo::{gateway, gateway_request_log, provider},
         types::{CreateProviderInput, Model, ModelCapability, ModelType, ProviderType, TokenUsage},
     };
     use axum::{
-        body::{to_bytes, Body},
-        extract::State,
-        http::{header, HeaderMap, Method, Request, Response, StatusCode},
-        routing::any,
         Router,
+        body::{Body, to_bytes},
+        extract::State,
+        http::{HeaderMap, Method, Request, Response, StatusCode, header},
+        routing::any,
     };
     use serde_json::json;
     use std::sync::{Arc, Mutex};
@@ -1156,6 +1172,7 @@ mod tests {
                 model_type: ModelType::Chat,
                 capabilities: vec![ModelCapability::TextChat],
                 max_tokens: Some(4096),
+                max_output_tokens: None,
                 enabled: true,
                 param_overrides: None,
                 input_price_per_mtok: None,
@@ -1178,7 +1195,7 @@ mod tests {
         let state = GatewayAppState {
             db: handle.conn.clone(),
             master_key,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            started_at: 0,
         };
         (create_router(state.clone()), handle, gateway_key.plain_key, state)
     }
@@ -1216,6 +1233,7 @@ mod tests {
                 model_type: ModelType::Chat,
                 capabilities: vec![ModelCapability::TextChat],
                 max_tokens: Some(4096),
+                max_output_tokens: None,
                 enabled: true,
                 param_overrides: None,
                 input_price_per_mtok: None,
@@ -1587,7 +1605,7 @@ mod tests {
         let app = create_router(GatewayAppState {
             db: handle.conn.clone(),
             master_key,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            started_at: 0,
         });
         let response = app
             .oneshot(

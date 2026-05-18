@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tokio::time::interval;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -97,12 +97,11 @@ impl WebSocketTransportHandler {
             loop {
                 tokio::select! {
                     Some(msg) = rx.recv() => {
-                        if let Ok(json) = serde_json::to_string(&msg) {
-                            if let Err(e) = write.send(Message::Text(json.into())).await {
+                        if let Ok(json) = serde_json::to_string(&msg)
+                            && let Err(e) = write.send(Message::Text(json.into())).await {
                                 tracing::error!("WebSocket send error for {}: {}", agent_id, e);
                                 break;
                             }
-                        }
                     }
                     _ = ping_interval.tick() => {
                         if let Err(e) = write.send(Message::Ping(Vec::new().into())).await {
@@ -156,17 +155,17 @@ impl WebSocketTransportHandler {
                 ping_timer.tick().await;
                 let states = connection_states.read().await;
                 if let Some(state) = states.get(&agent_id) {
-                    if *state == ConnectionState::Connected {
-                        if let Some(tx) = connections.read().await.get(&agent_id) {
-                            let ping_msg = AgentMessage::new(
-                                "heartbeat",
-                                &agent_id,
-                                crate::message_gateway::MessagePayload::Text {
-                                    content: "ping".to_string(),
-                                },
-                            );
-                            let _ = tx.try_send(ping_msg);
-                        }
+                    if *state == ConnectionState::Connected
+                        && let Some(tx) = connections.read().await.get(&agent_id)
+                    {
+                        let ping_msg = AgentMessage::new(
+                            "heartbeat",
+                            &agent_id,
+                            crate::message_gateway::MessagePayload::Text {
+                                content: "ping".to_string(),
+                            },
+                        );
+                        let _ = tx.try_send(ping_msg);
                     }
                 } else {
                     break;
@@ -281,7 +280,10 @@ impl HTTPTransportHandler {
         Self {
             config: HTTPTransportConfig::default(),
             connections: Arc::new(RwLock::new(HashMap::new())),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
@@ -431,7 +433,6 @@ pub struct SSETransportHandler {
     streams: Arc<RwLock<HashMap<String, mpsc::Sender<AgentMessage>>>>,
 }
 
-#[allow(dead_code)]
 impl SSETransportHandler {
     pub fn new() -> Self {
         Self {
@@ -446,7 +447,7 @@ impl SSETransportHandler {
         self
     }
 
-    async fn establish_sse_connection(
+    pub async fn establish_sse_connection(
         &self,
         _endpoint: &AgentEndpoint,
     ) -> Result<(), GatewayError> {
@@ -485,6 +486,10 @@ impl TransportHandler for SSETransportHandler {
     async fn connect(&self, endpoint: &AgentEndpoint) -> Result<(), GatewayError> {
         let connections = self.connections.clone();
         let endpoint = endpoint.clone();
+
+        if let Err(e) = self.establish_sse_connection(&endpoint).await {
+            tracing::warn!("Failed to establish SSE connection to {}: {}", endpoint.url, e);
+        }
 
         tokio::spawn(async move {
             let mut conns = connections.write().await;
@@ -601,7 +606,7 @@ impl TransportHandler for StdioTransportHandler {
                 reason: e.to_string(),
             })?;
 
-        println!("{}", json);
+        tracing::debug!(%json, "AgentMessage prepared for transport");
 
         Ok(())
     }

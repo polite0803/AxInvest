@@ -24,7 +24,8 @@ export const ChartPreview = memo(function ChartPreview({
 <html>
 <head>
 <meta charset="utf-8">
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"><\/script>
+<!-- TODO: Add SRI integrity hash for echarts CDN script -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"><\/script>
 <style>
   body { margin: 0; background: ${bgColor}; }
   #chart { width: 100%; height: 100%; }
@@ -49,6 +50,7 @@ window.addEventListener('resize', function() { chart.resize(); });
     <iframe
       ref={iframeRef}
       sandbox="allow-scripts"
+      title="Chart Preview"
       style={{
         width: width || "100%",
         height: height || 400,

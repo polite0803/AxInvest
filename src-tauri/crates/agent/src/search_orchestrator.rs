@@ -290,7 +290,6 @@ mod tests {
             }
         }
 
-        #[allow(dead_code)]
         fn failing(source_type: SourceType) -> Self {
             Self {
                 source_type,
@@ -526,13 +525,15 @@ mod tests {
     #[test]
     fn test_get_high_credibility_results_none_match() {
         let orch = SearchOrchestrator::new();
-        let results = vec![SearchResult::new(
-            SourceType::Web,
-            "https://a.com".to_string(),
-            "A".to_string(),
-            "s".to_string(),
-        )
-        .with_credibility(0.3)];
+        let results = vec![
+            SearchResult::new(
+                SourceType::Web,
+                "https://a.com".to_string(),
+                "A".to_string(),
+                "s".to_string(),
+            )
+            .with_credibility(0.3),
+        ];
         let high = orch.get_high_credibility_results(&results, 0.8);
         assert!(high.is_empty());
     }
@@ -700,5 +701,19 @@ mod tests {
 
         let err = OrchestratorError::Timeout("t1".to_string());
         assert!(err.to_string().contains("t1"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_with_failing_provider() {
+        let provider = Arc::new(MockSearchProvider::failing(SourceType::Web));
+        let orch = SearchOrchestrator::new().with_provider(provider);
+
+        let query = SearchQuery::new("test query".to_string())
+            .with_sources(vec![SourceType::Web])
+            .with_max_results(10);
+        let plan = SearchPlan::new(vec![query]);
+
+        let result = orch.execute(&plan).await;
+        assert!(result.is_err() || result.unwrap().is_empty());
     }
 }

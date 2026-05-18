@@ -1,6 +1,7 @@
 import { invoke, isTauri, listen, type UnlistenFn } from "@/lib/invoke";
 import { useProviderStore, useSettingsStore } from "@/stores";
 import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
+import type { Model } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
 import { Input, theme, Tooltip, Typography } from "antd";
 import {
@@ -294,6 +295,510 @@ function pushRecent(query: string) {
 
 /* ── Component ────────────────────────────────────────────────────── */
 
+/**
+ * Extracted component for rendering the tile grid.
+ * Fixes react-doctor/no-render-in-render by moving renderTileGrid() out of QuickBarPage.
+ */
+function TileGrid({
+  categorizedCommands,
+  onTileClick,
+}: {
+  categorizedCommands: Record<string, CommandDef[]>;
+  onTileClick: (cmd: CommandDef) => void;
+}) {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const borderColor = token.colorBorderSecondary;
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+      {CATEGORY_GROUPS.map((group) => {
+        const cmds = categorizedCommands[group.key];
+        if (!cmds.length) { return null; }
+        return (
+          <div key={group.key} style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: token.colorTextSecondary,
+                marginBottom: 8,
+                paddingLeft: 2,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <span
+                style={{
+                  width: 3,
+                  height: 12,
+                  borderRadius: 2,
+                  backgroundColor: group.borderColor,
+                  display: "inline-block",
+                }}
+              />
+              {t(group.labelKey)}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                gap: 6,
+              }}
+            >
+              {cmds.map((cmd) => (
+                <button
+                  key={cmd.key}
+                  onClick={() => onTileClick(cmd)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 6,
+                    padding: "10px 12px",
+                    backgroundColor: token.colorBgElevated,
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    textAlign: "left" as const,
+                    transition: "box-shadow 0.15s ease, transform 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = cmd.color;
+                    e.currentTarget.style.backgroundColor = `${cmd.color}10`;
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = borderColor;
+                    e.currentTarget.style.backgroundColor = token.colorBgElevated;
+                    e.currentTarget.style.transform = "none";
+                  }}
+                >
+                  <span style={{ color: cmd.color, display: "flex" }}>{cmd.icon}</span>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: token.colorText, lineHeight: 1.4 }}>
+                      {cmd.labelKey}
+                    </div>
+                    <div style={{ fontSize: 10, color: token.colorTextQuaternary, lineHeight: 1.3, marginTop: 1 }}>
+                      {cmd.descKey}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Extracted component for rendering command input mode.
+ * Fixes react-doctor/no-render-in-render by moving renderCommandMode() out of QuickBarPage.
+ */
+function CommandMode({
+  inputRef,
+  setCommandMode,
+  setInput,
+  setActiveCommand,
+  setShowCommands,
+  setSelectedCmd,
+  input,
+  loading,
+  showCommands,
+  selectedCmd,
+  hasResult,
+  showModelList,
+  handleSubmit,
+  handleKeyDown,
+  clearAll,
+  activeCmdDef,
+  COMMANDS,
+}: {
+  inputRef: React.Ref<any>;
+  setCommandMode: React.Dispatch<React.SetStateAction<boolean>>;
+  setInput: React.Dispatch<React.SetStateAction<string>>;
+  setActiveCommand: React.Dispatch<React.SetStateAction<CommandType | null>>;
+  setShowCommands: React.Dispatch<React.SetStateAction<boolean>>;
+  setSelectedCmd: React.Dispatch<React.SetStateAction<number>>;
+  activeCommand: CommandType | null;
+  input: string;
+  loading: boolean;
+  showCommands: boolean;
+  selectedCmd: number;
+  hasResult: boolean;
+  showModelList: boolean;
+  handleSubmit: () => void;
+  handleKeyDown: (e: React.KeyboardEvent) => void;
+  clearAll: () => void;
+  activeCmdDef: CommandDef | null | undefined;
+  COMMANDS: CommandDef[];
+}) {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const borderColor = token.colorBorderSecondary;
+  const showClear = input.length > 0 || hasResult;
+
+  return (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 10px",
+          flexShrink: 0,
+          position: "relative",
+        }}
+      >
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            setCommandMode(false);
+            setInput("");
+            setActiveCommand(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              setCommandMode(false);
+              setInput("");
+              setActiveCommand(null);
+            }
+          }}
+          style={{ opacity: 0.4, cursor: "pointer", fontSize: 14, flexShrink: 0, color: token.colorTextSecondary }}
+          title={t("quickbar.cmdTile")}
+        >
+          ←
+        </span>
+        {activeCmdDef && (
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "1px 6px",
+              backgroundColor: `${activeCmdDef.color}15`,
+              color: activeCmdDef.color,
+              borderRadius: 4,
+              flexShrink: 0,
+              fontFamily: "var(--code-font-family, monospace)",
+            }}
+          >
+            /{activeCmdDef.key}
+          </span>
+        )}
+        <Input
+          id="quick-bar-page-input-131"
+          ref={inputRef}
+          placeholder={showCommands
+            ? t("quickbar.selectCommand")
+            : activeCmdDef
+            ? t("quickbar.inputPlaceholderCommand", { cmdLabel: activeCmdDef.labelKey })
+            : t("quickbar.inputPlaceholder")}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onPressEnter={handleSubmit}
+          onKeyDown={handleKeyDown}
+          variant="borderless"
+          disabled={loading}
+          style={{ flex: 1, fontSize: 14, backgroundColor: "transparent" }}
+        />
+        {loading
+          ? <Loader2 size={16} className="animate-spin" style={{ opacity: 0.5, flexShrink: 0 }} />
+          : showClear && (
+            <button
+              onClick={clearAll}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: 4, opacity: 0.4 }}
+            >
+              <X size={14} color={token.colorTextSecondary} />
+            </button>
+          )}
+      </div>
+
+      {showCommands && (
+        <div
+          style={{
+            margin: "0 10px",
+            padding: "4px 0",
+            backgroundColor: token.colorBgElevated,
+            border: `1px solid ${borderColor}`,
+            borderRadius: 8,
+            boxShadow: `0 4px 16px rgba(0,0,0,0.2)`,
+            zIndex: 10,
+            flexShrink: 0,
+            maxHeight: 240,
+            overflowY: "auto",
+          }}
+        >
+          {(() => {
+            const partial = input.trimStart().slice(1).toLowerCase();
+            const visible = COMMANDS.filter((c) =>
+              c.key.startsWith(partial) || c.labelKey.toLowerCase().includes(partial)
+            );
+            return visible.map((cmd, idx) => (
+              <div
+                key={cmd.key}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setInput(`/${cmd.key} `);
+                  setActiveCommand(cmd.key);
+                  setShowCommands(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    setInput(`/${cmd.key} `);
+                    setActiveCommand(cmd.key);
+                    setShowCommands(false);
+                  }
+                }}
+                onMouseEnter={() => setSelectedCmd(idx)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "6px 12px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  backgroundColor: idx === selectedCmd ? token.colorFillSecondary : "transparent",
+                  color: token.colorText,
+                  transition: "background-color 0.1s",
+                }}
+              >
+                <span style={{ color: cmd.color, display: "flex" }}>{cmd.icon}</span>
+                <span style={{ fontWeight: 500, fontFamily: "var(--code-font-family, monospace)", minWidth: 50 }}>
+                  /{cmd.key}
+                </span>
+                <span style={{ opacity: 0.5 }}>{cmd.labelKey}</span>
+                <span style={{ opacity: 0.35, marginLeft: "auto", fontSize: 10 }}>{cmd.descKey}</span>
+              </div>
+            ));
+          })()}
+        </div>
+      )}
+
+      {!hasResult && !showCommands && !showModelList && (
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            padding: "2px 10px 6px",
+            fontSize: 10,
+            color: token.colorTextQuaternary,
+            flexShrink: 0,
+            overflow: "hidden",
+            flexWrap: "wrap",
+          }}
+        >
+          {COMMANDS.map((c) => (
+            <span
+              key={c.key}
+              role="button"
+              tabIndex={0}
+              onClick={() => {
+                setInput(`/${c.key} `);
+                setActiveCommand(c.key);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  setInput(`/${c.key} `);
+                  setActiveCommand(c.key);
+                }
+              }}
+              style={{ cursor: "pointer", whiteSpace: "nowrap", opacity: 0.6 }}
+              title={`/${c.key} - ${c.descKey}`}
+            >
+              /{c.key}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * 提取的结果区组件 - 替代内联 renderResult() 函数
+ * 修复 react-doctor/no-render-in-render
+ */
+interface QuickBarResultProps {
+  hasResult: boolean;
+  showModelList: boolean;
+  result: string;
+  copied: boolean;
+  currentModels: Model[];
+  activeModelId: string | null;
+  selectedWikiId: string | null;
+  runModelSwitch: (modelId: string) => void;
+  handleCopy: () => void;
+  handleContinue: () => void;
+  setLoading: (v: boolean) => void;
+  setResult: React.Dispatch<React.SetStateAction<string>>;
+}
+
+function QuickBarResult({
+  hasResult,
+  showModelList,
+  result,
+  copied,
+  currentModels,
+  activeModelId,
+  selectedWikiId,
+  runModelSwitch,
+  handleCopy,
+  handleContinue,
+  setLoading,
+  setResult,
+}: QuickBarResultProps) {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const borderColor = token.colorBorderSecondary;
+
+  const actionBtnStyle = (color: string): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    background: "none",
+    border: "none",
+    cursor: "pointer",
+    padding: "3px 8px",
+    borderRadius: 4,
+    fontSize: 12,
+    color,
+    transition: "background-color 0.15s",
+  });
+
+  const actionHover = (bg: string) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.backgroundColor = bg;
+  };
+
+  if (!hasResult && !showModelList) { return null; }
+
+  if (showModelList) {
+    return (
+      <>
+        <div style={{ height: 1, backgroundColor: borderColor, flexShrink: 0 }} />
+        <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
+          {currentModels.map((m) => (
+            <div
+              key={m.model_id}
+              role="button"
+              tabIndex={0}
+              onClick={() => runModelSwitch(m.model_id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") { runModelSwitch(m.model_id); }
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 14px",
+                cursor: "pointer",
+                fontSize: 13,
+                backgroundColor: m.model_id === activeModelId ? token.colorFillSecondary : "transparent",
+                color: token.colorText,
+                transition: "background-color 0.1s",
+              }}
+            >
+              <ModelIcon model={m.model_id} size={20} type="avatar" />
+              <span style={{ flex: 1 }}>{m.model_id}</span>
+              {m.model_id === activeModelId && (
+                <span style={{ fontSize: 10, color: token.colorPrimary }}>{t("quickbar.result.current")}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ height: 1, backgroundColor: borderColor, flexShrink: 0 }} />
+      <div
+        style={{
+          flex: 1,
+          padding: "10px 14px",
+          overflowY: "auto",
+          fontSize: 13,
+          lineHeight: 1.7,
+          color: token.colorText,
+          maxHeight: "55vh",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
+      >
+        <Typography.Text style={{ fontSize: 13 }}>{result}</Typography.Text>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 12px",
+          borderTop: `1px solid ${borderColor}`,
+          flexShrink: 0,
+        }}
+      >
+        <Tooltip title={copied ? t("quickbar.result.copied") : t("quickbar.result.copy")}>
+          <button
+            onClick={handleCopy}
+            style={actionBtnStyle(copied ? token.colorSuccess : token.colorTextSecondary)}
+            onMouseEnter={actionHover(token.colorFillSecondary)}
+            onMouseLeave={actionHover("transparent")}
+          >
+            <Copy size={12} /> {copied ? t("quickbar.result.copied") : t("quickbar.result.copy")}
+          </button>
+        </Tooltip>
+        <Tooltip title={t("quickbar.result.saveWiki")}>
+          <button
+            onClick={async () => {
+              if (!result.trim()) { return; }
+              setLoading(true);
+              try {
+                if (!selectedWikiId) {
+                  setResult((p) => p + "\n\n❌ " + t("quickbar.result.noWikiSelected"));
+                  setLoading(false);
+                  return;
+                }
+                const safeTitle = `QuickBar - ${new Date().toLocaleString()}`;
+                await invoke("llm_wiki_ingest", {
+                  wikiId: selectedWikiId,
+                  sourceType: "markdown",
+                  path: `quickbar/${safeTitle.replace(/[/\\:*?"<>|]/g, "_")}.md`,
+                  title: safeTitle,
+                });
+                setResult((p) => p + `\n\n✅ ${t("quickbar.result.savedWiki")}`);
+              } catch (e) {
+                setResult((p) => p + `\n\n❌ ${String(e)}`);
+              }
+              setLoading(false);
+            }}
+            style={actionBtnStyle(token.colorTextSecondary)}
+            onMouseEnter={actionHover(token.colorFillSecondary)}
+            onMouseLeave={actionHover("transparent")}
+          >
+            <BookOpen size={12} /> {t("quickbar.result.saveWiki")}
+          </button>
+        </Tooltip>
+        <Tooltip title={t("quickbar.result.continueAsk")}>
+          <button
+            onClick={handleContinue}
+            style={actionBtnStyle(token.colorTextSecondary)}
+            onMouseEnter={actionHover(token.colorFillSecondary)}
+            onMouseLeave={actionHover("transparent")}
+          >
+            <ArrowRight size={12} /> {t("quickbar.result.continueAsk")}
+          </button>
+        </Tooltip>
+        <div style={{ flex: 1 }} />
+      </div>
+    </>
+  );
+}
+
 export function QuickBarPage() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -302,8 +807,7 @@ export function QuickBarPage() {
   /* Resolve i18n labels into CommandDef */
   const COMMANDS: CommandDef[] = useMemo(
     () => COMMAND_DEFS.map((d) => ({ ...d, labelKey: t(d.labelKey), descKey: t(d.descKey) }) as unknown as CommandDef),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [t],
   );
 
   const [input, setInput] = useState("");
@@ -320,6 +824,8 @@ export function QuickBarPage() {
 
   const inputRef = useRef<any>(null);
   const unlistenRef = useRef<UnlistenFn[]>([]);
+  const resultTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const settings = useSettingsStore((s) => s.settings);
   const activeProviderId = settings.default_provider_id;
@@ -337,7 +843,15 @@ export function QuickBarPage() {
   /* ── Lifecycle ──────────────────────────────────────────────────── */
 
   useEffect(() => {
-    setTimeout(() => inputRef.current?.focus(), 150);
+    const timer = setTimeout(() => inputRef.current?.focus(), 150);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(resultTimerRef.current);
+      clearTimeout(copiedTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -403,18 +917,20 @@ export function QuickBarPage() {
       await op();
       let text = "";
       cleanupListeners();
-      const u1 = await listen<{ conversationId: string; assistantMessageId: string; text: string }>(
-        "agent-stream-text",
-        (event) => {
-          text += event.payload.text;
-          setResult(text);
-        },
-      );
-      const u2 = await listen("agent-done", () => setLoading(false));
-      const u3 = await listen<{ message: string }>("agent-error", (event) => {
-        setResult(`${t("quickbar.result.error")}: ${event.payload.message}`);
-        setLoading(false);
-      });
+      const [u1, u2, u3] = await Promise.all([
+        listen<{ conversationId: string; assistantMessageId: string; text: string }>(
+          "agent-stream-text",
+          (event) => {
+            text += event.payload.text;
+            setResult(text);
+          },
+        ),
+        listen("agent-done", () => setLoading(false)),
+        listen<{ message: string }>("agent-error", (event) => {
+          setResult(`${t("quickbar.result.error")}: ${event.payload.message}`);
+          setLoading(false);
+        }),
+      ]);
       unlistenRef.current = [u1, u2, u3];
     } catch (e) {
       setResult(`${t("quickbar.result.error")}: ${String(e)}`);
@@ -577,7 +1093,8 @@ export function QuickBarPage() {
     store.saveSettings({ default_model_id: modelId });
     setShowModelList(false);
     setResult(`✅ ${t("quickbar.result.modelSwitched")}`);
-    setTimeout(() => setResult(""), 1500);
+    clearTimeout(resultTimerRef.current);
+    resultTimerRef.current = setTimeout(() => setResult(""), 1500);
   };
 
   const runNewConversation = useCallback(async () => {
@@ -744,7 +1261,8 @@ export function QuickBarPage() {
     try {
       await navigator.clipboard.writeText(result);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {}
   }, [result]);
 
@@ -767,393 +1285,16 @@ export function QuickBarPage() {
 
   const borderColor = token.colorBorderSecondary;
   const hasResult = result.length > 0;
-  const showClear = input.length > 0 || hasResult;
   const categorizedCommands = useMemo(() => {
     const map: Record<string, CommandDef[]> = {};
     for (const g of CATEGORY_GROUPS) { map[g.key] = COMMANDS.filter((c) => c.category === g.key); }
     return map;
   }, [COMMANDS]);
 
-  /* ── Reusable styles ──────────────────────────────────────────────── */
-
-  const actionBtnStyle = (color: string): React.CSSProperties => ({
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 4,
-    background: "none",
-    border: "none",
-    cursor: "pointer",
-    padding: "3px 8px",
-    borderRadius: 4,
-    fontSize: 11,
-    color,
-    transition: "background-color 0.15s",
-  });
-
-  const actionHover = (bg: string) => (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.backgroundColor = bg;
-  };
-
-  /* ── Render: Tile grid mode ─────────────────────────────────────── */
-
-  const renderTileGrid = () => (
-    <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-      {CATEGORY_GROUPS.map((group) => {
-        const cmds = categorizedCommands[group.key];
-        if (!cmds.length) { return null; }
-        return (
-          <div key={group.key} style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: token.colorTextSecondary,
-                marginBottom: 8,
-                paddingLeft: 2,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              <span
-                style={{
-                  width: 3,
-                  height: 12,
-                  borderRadius: 2,
-                  backgroundColor: group.borderColor,
-                  display: "inline-block",
-                }}
-              />
-              {t(group.labelKey)}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-                gap: 6,
-              }}
-            >
-              {cmds.map((cmd) => (
-                <button
-                  key={cmd.key}
-                  onClick={() => handleTileClick(cmd)}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
-                    gap: 6,
-                    padding: "10px 12px",
-                    backgroundColor: token.colorBgElevated,
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    textAlign: "left" as const,
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = cmd.color;
-                    e.currentTarget.style.backgroundColor = `${cmd.color}10`;
-                    e.currentTarget.style.transform = "translateY(-1px)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = borderColor;
-                    e.currentTarget.style.backgroundColor = token.colorBgElevated;
-                    e.currentTarget.style.transform = "none";
-                  }}
-                >
-                  <span style={{ color: cmd.color, display: "flex" }}>{cmd.icon}</span>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: token.colorText, lineHeight: 1.4 }}>
-                      {cmd.labelKey}
-                    </div>
-                    <div style={{ fontSize: 10, color: token.colorTextQuaternary, lineHeight: 1.3, marginTop: 1 }}>
-                      {cmd.descKey}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  /* ── Render: Command input mode ──────────────────────────────────── */
-
   const activeCmdDef = activeCommand ? getCommand(activeCommand) : null;
 
-  const renderCommandMode = () => (
-    <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "8px 10px",
-          flexShrink: 0,
-          position: "relative",
-        }}
-      >
-        <span
-          onClick={() => {
-            setCommandMode(false);
-            setInput("");
-            setActiveCommand(null);
-          }}
-          style={{ opacity: 0.4, cursor: "pointer", fontSize: 14, flexShrink: 0, color: token.colorTextSecondary }}
-          title={t("quickbar.cmdTile")}
-        >
-          ←
-        </span>
-        {activeCmdDef && (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              padding: "1px 6px",
-              backgroundColor: `${activeCmdDef.color}15`,
-              color: activeCmdDef.color,
-              borderRadius: 4,
-              flexShrink: 0,
-              fontFamily: "var(--code-font-family, monospace)",
-            }}
-          >
-            /{activeCmdDef.key}
-          </span>
-        )}
-        <Input
-          id="quick-bar-page-input-131"
-          ref={inputRef}
-          placeholder={showCommands
-            ? t("quickbar.selectCommand")
-            : activeCmdDef
-            ? t("quickbar.inputPlaceholderCommand", { cmdLabel: activeCmdDef.labelKey })
-            : t("quickbar.inputPlaceholder")}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onPressEnter={handleSubmit}
-          onKeyDown={handleKeyDown}
-          variant="borderless"
-          disabled={loading}
-          style={{ flex: 1, fontSize: 14, backgroundColor: "transparent" }}
-        />
-        {loading
-          ? <Loader2 size={16} className="animate-spin" style={{ opacity: 0.5, flexShrink: 0 }} />
-          : showClear && (
-            <button
-              onClick={clearAll}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 4, opacity: 0.4 }}
-            >
-              <X size={14} color={token.colorTextSecondary} />
-            </button>
-          )}
-      </div>
-
-      {showCommands && (
-        <div
-          style={{
-            margin: "0 10px",
-            padding: "4px 0",
-            backgroundColor: token.colorBgElevated,
-            border: `1px solid ${borderColor}`,
-            borderRadius: 8,
-            boxShadow: `0 4px 16px rgba(0,0,0,0.2)`,
-            zIndex: 10,
-            flexShrink: 0,
-            maxHeight: 240,
-            overflowY: "auto",
-          }}
-        >
-          {(() => {
-            const partial = input.trimStart().slice(1).toLowerCase();
-            const visible = COMMANDS.filter((c) =>
-              c.key.startsWith(partial) || c.labelKey.toLowerCase().includes(partial)
-            );
-            return visible.map((cmd, idx) => (
-              <div
-                key={cmd.key}
-                onClick={() => {
-                  setInput(`/${cmd.key} `);
-                  setActiveCommand(cmd.key);
-                  setShowCommands(false);
-                }}
-                onMouseEnter={() => setSelectedCmd(idx)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "6px 12px",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  backgroundColor: idx === selectedCmd ? token.colorFillSecondary : "transparent",
-                  color: token.colorText,
-                  transition: "background-color 0.1s",
-                }}
-              >
-                <span style={{ color: cmd.color, display: "flex" }}>{cmd.icon}</span>
-                <span style={{ fontWeight: 500, fontFamily: "var(--code-font-family, monospace)", minWidth: 50 }}>
-                  /{cmd.key}
-                </span>
-                <span style={{ opacity: 0.5 }}>{cmd.labelKey}</span>
-                <span style={{ opacity: 0.35, marginLeft: "auto", fontSize: 10 }}>{cmd.descKey}</span>
-              </div>
-            ));
-          })()}
-        </div>
-      )}
-
-      {!hasResult && !showCommands && !showModelList && (
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            padding: "2px 10px 6px",
-            fontSize: 10,
-            color: token.colorTextQuaternary,
-            flexShrink: 0,
-            overflow: "hidden",
-            flexWrap: "wrap",
-          }}
-        >
-          {COMMANDS.map((c) => (
-            <span
-              key={c.key}
-              onClick={() => {
-                setInput(`/${c.key} `);
-                setActiveCommand(c.key);
-              }}
-              style={{ cursor: "pointer", whiteSpace: "nowrap", opacity: 0.6 }}
-              title={`/${c.key} - ${c.descKey}`}
-            >
-              /{c.key}
-            </span>
-          ))}
-        </div>
-      )}
-    </>
-  );
-
-  /* ── Render: Result area ─────────────────────────────────────────── */
-
-  const renderResult = () => {
-    if (!hasResult && !showModelList) { return null; }
-    if (showModelList) {
-      return (
-        <>
-          <div style={{ height: 1, backgroundColor: borderColor, flexShrink: 0 }} />
-          <div style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
-            {currentModels.map((m) => (
-              <div
-                key={m.model_id}
-                onClick={() => runModelSwitch(m.model_id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "8px 14px",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  backgroundColor: m.model_id === activeModelId ? token.colorFillSecondary : "transparent",
-                  color: token.colorText,
-                  transition: "background-color 0.1s",
-                }}
-              >
-                <ModelIcon model={m.model_id} size={20} type="avatar" />
-                <span style={{ flex: 1 }}>{m.model_id}</span>
-                {m.model_id === activeModelId && (
-                  <span style={{ fontSize: 10, color: token.colorPrimary }}>{t("quickbar.result.current")}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </>
-      );
-    }
-    return (
-      <>
-        <div style={{ height: 1, backgroundColor: borderColor, flexShrink: 0 }} />
-        <div
-          style={{
-            flex: 1,
-            padding: "10px 14px",
-            overflowY: "auto",
-            fontSize: 13,
-            lineHeight: 1.7,
-            color: token.colorText,
-            maxHeight: "55vh",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          <Typography.Text style={{ fontSize: 13 }}>{result}</Typography.Text>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "5px 12px",
-            borderTop: `1px solid ${borderColor}`,
-            flexShrink: 0,
-          }}
-        >
-          <Tooltip title={copied ? t("quickbar.result.copied") : t("quickbar.result.copy")}>
-            <button
-              onClick={handleCopy}
-              style={actionBtnStyle(copied ? token.colorSuccess : token.colorTextSecondary)}
-              onMouseEnter={actionHover(token.colorFillSecondary)}
-              onMouseLeave={actionHover("transparent")}
-            >
-              <Copy size={12} /> {copied ? t("quickbar.result.copied") : t("quickbar.result.copy")}
-            </button>
-          </Tooltip>
-          <Tooltip title={t("quickbar.result.saveWiki")}>
-            <button
-              onClick={async () => {
-                if (!result.trim()) { return; }
-                setLoading(true);
-                try {
-                  if (!selectedWikiId) {
-                    setResult((p) => p + "\n\n❌ " + t("quickbar.result.noWikiSelected"));
-                    setLoading(false);
-                    return;
-                  }
-                  const safeTitle = `QuickBar - ${new Date().toLocaleString()}`;
-                  await invoke("llm_wiki_ingest", {
-                    wikiId: selectedWikiId,
-                    sourceType: "markdown",
-                    path: `quickbar/${safeTitle.replace(/[/\\:*?"<>|]/g, "_")}.md`,
-                    title: safeTitle,
-                  });
-                  setResult((p) => p + `\n\n✅ ${t("quickbar.result.savedWiki")}`);
-                } catch (e) {
-                  setResult((p) => p + `\n\n❌ ${String(e)}`);
-                }
-                setLoading(false);
-              }}
-              style={actionBtnStyle(token.colorTextSecondary)}
-              onMouseEnter={actionHover(token.colorFillSecondary)}
-              onMouseLeave={actionHover("transparent")}
-            >
-              <BookOpen size={12} /> {t("quickbar.result.saveWiki")}
-            </button>
-          </Tooltip>
-          <Tooltip title={t("quickbar.result.continueAsk")}>
-            <button
-              onClick={handleContinue}
-              style={actionBtnStyle(token.colorTextSecondary)}
-              onMouseEnter={actionHover(token.colorFillSecondary)}
-              onMouseLeave={actionHover("transparent")}
-            >
-              <ArrowRight size={12} /> {t("quickbar.result.continueAsk")}
-            </button>
-          </Tooltip>
-          <div style={{ flex: 1 }} />
-        </div>
-      </>
-    );
-  };
+  /* ── Reusable styles ──────────────────────────────────────────────── */
+  /* 已提取到 QuickBarResult 组件中 */
 
   /* ── Main render ─────────────────────────────────────────────────── */
 
@@ -1247,7 +1388,7 @@ export function QuickBarPage() {
                   alignItems: "center",
                   gap: 8,
                   padding: "4px 14px",
-                  fontSize: 11,
+                  fontSize: 12,
                   color: token.colorTextQuaternary,
                   flexShrink: 0,
                   overflowX: "auto",
@@ -1255,13 +1396,22 @@ export function QuickBarPage() {
                 }}
               >
                 <span style={{ flexShrink: 0 }}>{t("quickbar.recent")}:</span>
-                {recentItems.map((item, i) => (
+                {recentItems.map((item) => (
                   <span
-                    key={i}
+                    key={item}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => {
                       setCommandMode(true);
                       setInput(item);
                       setTimeout(() => inputRef.current?.focus(), 50);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        setCommandMode(true);
+                        setInput(item);
+                        setTimeout(() => inputRef.current?.focus(), 50);
+                      }
                     }}
                     style={{
                       cursor: "pointer",
@@ -1276,9 +1426,17 @@ export function QuickBarPage() {
                   </span>
                 ))}
                 <span
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     saveRecent([]);
                     setRecentItems([]);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      saveRecent([]);
+                      setRecentItems([]);
+                    }
                   }}
                   style={{ cursor: "pointer", opacity: 0.35, marginLeft: "auto", flexShrink: 0 }}
                 >
@@ -1286,7 +1444,7 @@ export function QuickBarPage() {
                 </span>
               </div>
             )}
-            {renderTileGrid()}
+            <TileGrid categorizedCommands={categorizedCommands} onTileClick={handleTileClick} />
             {!hasResult && (
               <div
                 style={{
@@ -1304,7 +1462,26 @@ export function QuickBarPage() {
           </>
         )
         : (
-          renderCommandMode()
+          <CommandMode
+            inputRef={inputRef}
+            setCommandMode={setCommandMode}
+            setInput={setInput}
+            setActiveCommand={setActiveCommand}
+            setShowCommands={setShowCommands}
+            setSelectedCmd={setSelectedCmd}
+            activeCommand={activeCommand}
+            input={input}
+            loading={loading}
+            showCommands={showCommands}
+            selectedCmd={selectedCmd}
+            hasResult={hasResult}
+            showModelList={showModelList}
+            handleSubmit={handleSubmit}
+            handleKeyDown={handleKeyDown}
+            clearAll={clearAll}
+            activeCmdDef={activeCmdDef}
+            COMMANDS={COMMANDS}
+          />
         )}
 
       {!commandMode && !hasResult && recentItems.length === 0 && (
@@ -1323,7 +1500,20 @@ export function QuickBarPage() {
         </div>
       )}
 
-      {renderResult()}
+      <QuickBarResult
+        hasResult={hasResult}
+        showModelList={showModelList}
+        result={result}
+        copied={copied}
+        currentModels={currentModels}
+        activeModelId={activeModelId}
+        selectedWikiId={selectedWikiId}
+        runModelSwitch={runModelSwitch}
+        handleCopy={handleCopy}
+        handleContinue={handleContinue}
+        setLoading={setLoading}
+        setResult={setResult}
+      />
     </div>
   );
 }

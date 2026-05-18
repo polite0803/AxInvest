@@ -1,5 +1,6 @@
 import { CheckOutlined, CopyOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Button, Space, theme, Typography } from "antd";
+import i18next from "i18next";
 import React from "react";
 
 const { Text, Paragraph } = Typography;
@@ -58,23 +59,23 @@ function ErrorFallback({ error, errorInfo, onRetry }: ErrorFallbackProps) {
             💥
           </div>
           <Text strong style={{ fontSize: 24, display: "block", marginBottom: 8 }}>
-            Something went wrong
+            {i18next.t("errorBoundary.somethingWentWrong")}
           </Text>
           <Text type="secondary">
-            The application encountered an unexpected error. Please try again or contact support.
+            {i18next.t("errorBoundary.unexpectedError")}
           </Text>
         </div>
 
         <Space size="middle" style={{ marginBottom: 32 }}>
           <Button type="primary" icon={<ReloadOutlined />} onClick={onRetry} size="large">
-            Retry
+            {i18next.t("errorBoundary.retry")}
           </Button>
           <Button
             icon={copied ? <CheckOutlined /> : <CopyOutlined />}
             onClick={handleCopy}
             size="large"
           >
-            {copied ? "Copied!" : "Copy Error"}
+            {copied ? i18next.t("errorBoundary.copied") : i18next.t("errorBoundary.copyError")}
           </Button>
         </Space>
 
@@ -88,7 +89,7 @@ function ErrorFallback({ error, errorInfo, onRetry }: ErrorFallbackProps) {
           }}
         >
           <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-            Error Details
+            {i18next.t("errorBoundary.errorDetails")}
           </Text>
           <Paragraph
             code
@@ -113,6 +114,7 @@ interface GlobalErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
   errorInfo: React.ErrorInfo | null;
+  retryKey: number;
 }
 
 interface GlobalErrorBoundaryProps {
@@ -130,6 +132,7 @@ class GlobalErrorBoundary extends React.Component<
       hasError: false,
       error: null,
       errorInfo: null,
+      retryKey: 0,
     };
   }
 
@@ -150,15 +153,16 @@ class GlobalErrorBoundary extends React.Component<
   }
 
   handleRetry = () => {
-    this.setState({
+    this.setState((prev) => ({
       hasError: false,
       error: null,
       errorInfo: null,
-    });
+      retryKey: prev.retryKey + 1,
+    }));
   };
 
   render() {
-    const { hasError, error, errorInfo } = this.state;
+    const { hasError, error, errorInfo, retryKey } = this.state;
     const { children, FallbackComponent } = this.props;
 
     if (hasError && error) {
@@ -166,7 +170,7 @@ class GlobalErrorBoundary extends React.Component<
       return <Fallback error={error} errorInfo={errorInfo ?? undefined} onRetry={this.handleRetry} />;
     }
 
-    return children;
+    return <React.Fragment key={retryKey}>{children}</React.Fragment>;
   }
 }
 

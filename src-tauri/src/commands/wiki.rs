@@ -1,6 +1,6 @@
 use crate::AppState;
 use axagent_core::hybrid_search::{HybridSearchOptions, HybridSearcher};
-use axagent_core::rag::{collection_id, RAGSource, WikiVaultRAG};
+use axagent_core::rag::{RAGSource, WikiVaultRAG, collection_id};
 use axagent_core::repo::louvain::{self, LouvainResult};
 use axagent_core::repo::note::{CreateNoteInput, GraphData, Note, NoteLink, UpdateNoteInput};
 use axagent_core::repo::note_graph::LinkGraph;
@@ -598,7 +598,7 @@ pub async fn sync_knowledge_document_to_wiki(
                         "Document file not found at '{}' and no indexed chunks available. \
                          The document may have been deleted or the source is a remote URL.",
                         doc.source_path
-                    ))
+                    ));
                 },
             }
         }
@@ -809,7 +809,7 @@ pub async fn wiki_import_obsidian_vault(
         existing.iter().map(|n| n.title.clone()).collect();
 
     let mut md_files: Vec<std::path::PathBuf> = Vec::new();
-    collect_md_files(root, root, &mut md_files);
+    collect_md_files(root, &mut md_files);
 
     let mut imported = 0usize;
     let mut failed = 0usize;
@@ -900,12 +900,7 @@ pub async fn wiki_import_obsidian_vault(
     })
 }
 
-#[allow(clippy::only_used_in_recursion)]
-fn collect_md_files(
-    base: &std::path::Path,
-    current: &std::path::Path,
-    files: &mut Vec<std::path::PathBuf>,
-) {
+fn collect_md_files(current: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
     if let Ok(entries) = std::fs::read_dir(current) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -917,7 +912,7 @@ fn collect_md_files(
                 if dir_name.starts_with('.') {
                     continue;
                 }
-                collect_md_files(base, &path, files);
+                collect_md_files(&path, files);
             } else if path.extension().map(|e| e == "md").unwrap_or(false) {
                 files.push(path);
             }

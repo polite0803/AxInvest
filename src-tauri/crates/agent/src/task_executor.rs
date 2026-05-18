@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::timeout;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +152,10 @@ pub enum TaskExecutorError {
 
 impl TaskExecutor {
     pub fn new() -> Self {
+        Self::default_inner().with_inner_executor(DefaultTaskExecutorImpl)
+    }
+
+    fn default_inner() -> Self {
         let decomposer = Arc::new(TaskDecomposer::new());
         let (event_sender, _) = broadcast::channel(100);
 
@@ -169,7 +173,6 @@ impl TaskExecutor {
         self
     }
 
-    #[allow(dead_code)]
     pub(crate) fn with_inner_executor(mut self, executor: DefaultTaskExecutorImpl) -> Self {
         self.inner_executor = Arc::new(executor);
         self
@@ -852,10 +855,12 @@ mod tests {
         };
         let result = executor.execute_task(&context).await.unwrap();
         assert_eq!(result["task_id"], "r1");
-        assert!(result["output"]
-            .as_str()
-            .unwrap()
-            .contains("Reasoning completed"));
+        assert!(
+            result["output"]
+                .as_str()
+                .unwrap()
+                .contains("Reasoning completed")
+        );
     }
 
     #[tokio::test]
@@ -886,10 +891,12 @@ mod tests {
         };
         let result = executor.execute_task(&context).await.unwrap();
         assert_eq!(result["task_id"], "q1");
-        assert!(result["output"]
-            .as_str()
-            .unwrap()
-            .contains("Query executed"));
+        assert!(
+            result["output"]
+                .as_str()
+                .unwrap()
+                .contains("Query executed")
+        );
     }
 
     #[tokio::test]
@@ -1067,5 +1074,11 @@ mod tests {
         let executor = TaskExecutor::new();
         let result = executor.execute_with_groups().await;
         assert!(matches!(result, Err(ExecutionError::NotPrepared)));
+    }
+
+    #[tokio::test]
+    async fn test_task_executor_with_inner_executor() {
+        let executor = TaskExecutor::new().with_inner_executor(DefaultTaskExecutorImpl);
+        assert!(executor.get_graph().await.is_none());
     }
 }

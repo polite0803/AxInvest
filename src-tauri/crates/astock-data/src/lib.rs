@@ -145,10 +145,18 @@ impl AStockClient {
 
     async fn cache_set(&self, key: String, value: String, ttl_secs: i64) {
         let mut cache = self.cache.write().await;
-        // 容量检查：超出上限时清理过期条目
         if cache.len() >= Self::MAX_CACHE_SIZE {
             let now = chrono::Utc::now().timestamp();
             cache.retain(|_, (expiry, _)| *expiry > now);
+            if cache.len() >= Self::MAX_CACHE_SIZE {
+                if let Some(oldest_key) = cache
+                    .iter()
+                    .min_by_key(|(_, (expiry, _))| *expiry)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.remove(&oldest_key);
+                }
+            }
         }
         let expiry = chrono::Utc::now().timestamp() + ttl_secs;
         cache.insert(key, (expiry, value));

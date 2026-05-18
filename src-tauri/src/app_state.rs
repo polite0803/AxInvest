@@ -2,16 +2,129 @@ use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::SemanticCache;
 use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::SyncEngine;
+use axagent_core::file_authorizer::FileAuthorizer;
 use axagent_plugins::PluginManager;
 use axagent_runtime::dashboard_registry::DashboardRegistry;
 use axagent_runtime::webhook_subscription::WebhookSubscriptionManager;
+use axagent_runtime_core::prompt_cache::PromptCache;
 use sea_orm::DatabaseConnection;
-use std::sync::atomic::AtomicBool;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use std::path::PathBuf;
 use tokio::sync::RwLock as TokioRwLock;
+
+// Tree of Thoughts types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TotNode {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub content: String,
+    pub score: Option<f64>,
+    pub children: Vec<String>,
+    pub depth: u32,
+    pub thought_type: String,
+    pub metadata: serde_json::Value,
+}
+
+impl Default for TotNode {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            parent_id: None,
+            content: String::new(),
+            score: None,
+            children: Vec::new(),
+            depth: 0,
+            thought_type: "reasoning".to_string(),
+            metadata: serde_json::Value::Null,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TotSession {
+    pub nodes: HashMap<String, TotNode>,
+    pub current_node_id: Option<String>,
+    pub root_node_id: Option<String>,
+    pub traversal_strategy: String,
+    pub pruning_threshold: f64,
+    pub max_depth: u32,
+    pub max_branches: u32,
+}
+
+impl Default for TotSession {
+    fn default() -> Self {
+        Self {
+            nodes: HashMap::new(),
+            current_node_id: None,
+            root_node_id: None,
+            traversal_strategy: "bfs".to_string(),
+            pruning_threshold: 0.3,
+            max_depth: 5,
+            max_branches: 3,
+        }
+    }
+}
+
+// Replanning types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannerAction {
+    pub id: String,
+    pub timestamp: i64,
+    pub action_type: String,
+    pub data: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannerVersion {
+    pub id: u32,
+    pub timestamp: i64,
+    pub reason: String,
+    pub state: serde_json::Value,
+    pub action_snapshot: Vec<PlannerAction>,
+    pub diff_from_previous: Option<PlannerVersionDiff>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannerVersionDiff {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub actions_added: Vec<PlannerAction>,
+    pub actions_removed: Vec<String>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannerSession {
+    pub actions: Vec<PlannerAction>,
+    pub versions: Vec<PlannerVersion>,
+    pub current_version: u32,
+}
+
+// Semantic cache (add enabled flag)
+pub struct SemanticCacheState {
+    pub cache: SemanticCache,
+    pub enabled: bool,
+    pub in_memory_entries: Vec<InMemoryCacheEntry>,
+    pub similarity_threshold: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InMemoryCacheEntry {
+    pub query_hash: String,
+    pub query_text: String,
+    pub query_embedding: Vec<f32>,
+    pub response: String,
+    pub model_id: Option<String>,
+    pub created_at: i64,
+    pub access_count: u32,
+    pub ttl_secs: u64,
+}
 
 pub struct AppState {
     pub sea_db: DatabaseConnection,
@@ -23,6 +136,9 @@ pub struct AppState {
     pub auto_backup_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub webdav_sync_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub api_server_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    pub trajectory_cleanup_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// 优雅关闭信号，通知所有后台任务停止
+    pub shutdown_token: CancellationToken,
     pub vector_store: Arc<axagent_core::vector_store::VectorStore>,
     pub indexing_semaphore: Arc<tokio::sync::Semaphore>,
     pub stream_cancel_flags: Arc<Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>>,
@@ -39,6 +155,7 @@ pub struct AppState {
     pub agent_paused: Arc<Mutex<std::collections::HashSet<String>>>,
     pub running_agents: Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>,
     pub workflow_engine: Arc<axagent_runtime::workflow_engine::WorkflowEngine>,
+    pub reflector: Arc<axagent_agent::Reflector>,
     // 以下字段从 std::sync::RwLock 改为 tokio::sync::RwLock
     // 原因：std::sync::RwLock 的 guard 是 !Send，在异步上下文中跨 await 持有会导致未定义行为
     // 且 std::sync::RwLock 在 panic 时会毒化，后续所有 .unwrap() 都会崩溃
@@ -69,10 +186,18 @@ pub struct AppState {
     pub proactive_service: Arc<tokio::sync::RwLock<ProactiveService>>,
     pub dashboard_registry: Option<Arc<DashboardRegistry>>,
     pub webhook_subscription_manager: Option<Arc<WebhookSubscriptionManager>>,
-    pub semantic_cache: Arc<tokio::sync::Mutex<SemanticCache>>,
-    // 浏览器客户端：使用 tokio::sync::Mutex 取代全局 static mut，避免数据竞争
+    pub semantic_cache: Arc<tokio::sync::Mutex<SemanticCacheState>>,
+    pub prompt_cache: Arc<PromptCache>,
+    // Tree of Thoughts state
+    pub tot_sessions: Arc<tokio::sync::Mutex<HashMap<String, TotSession>>>,
+    // Replanning state
+    pub planner_sessions: Arc<tokio::sync::Mutex<HashMap<String, PlannerSession>>>,
+    // Browser client: use tokio::sync::Mutex to replace global static mut to avoid data race
+    #[cfg(not(target_os = "android"))]
     pub browser_client:
         Arc<tokio::sync::Mutex<Option<axagent_core::browser_automation::PlaywrightClient>>>,
+    #[cfg(target_os = "android")]
+    pub browser_client: Arc<tokio::sync::Mutex<Option<()>>>,
     pub dream_consolidator: Arc<axagent_trajectory::DreamConsolidator>,
     pub text_grad_engine: Arc<tokio::sync::Mutex<axagent_trajectory::TextGradEngine>>,
     pub auto_tool_creator: Arc<tokio::sync::Mutex<axagent_trajectory::AutoToolCreator>>,
@@ -82,7 +207,10 @@ pub struct AppState {
     pub constitution: Arc<axagent_trajectory::ImmutableConstitution>,
     pub process_reward_model: Arc<tokio::sync::Mutex<axagent_trajectory::ProcessRewardModel>>,
     pub dream_data_provider: Arc<axagent_trajectory::TrajectoryDreamDataProvider>,
+    #[cfg(not(target_os = "android"))]
     pub sandbox_executor: Arc<axagent_trajectory::SkillSandboxExecutor>,
+    #[cfg(target_os = "android")]
+    pub sandbox_executor: Arc<()>,
     pub sync_engine: Option<Arc<SyncEngine>>,
     /// 股票数据客户端（单例，内含请求级缓存）
     pub astock_client: Arc<AStockClient>,
@@ -91,4 +219,12 @@ pub struct AppState {
     /// 手动交易引擎（单例，避免每次命令调用重新创建）
     pub trading_engine: Arc<TokioRwLock<axagent_stock_analysis::trading::TradingEngine>>,
     pub plugin_manager: std::sync::Mutex<PluginManager>,
+    pub file_authorizer: Arc<FileAuthorizer>,
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
+        tracing::info!("[shutdown] CancellationToken 已通知，后台任务应停止");
+    }
 }

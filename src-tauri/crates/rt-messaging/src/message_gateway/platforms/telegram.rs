@@ -75,12 +75,11 @@ impl PlatformAdapter for TelegramAdapter {
                             if let Some(msg) = update.message {
                                 last_update_id = last_update_id.max(update.update_id);
 
-                                if let Some(ref allowed) = allowed_users {
-                                    if let Some(ref user) = msg.from {
-                                        if !allowed.contains(&user.id) {
-                                            continue;
-                                        }
-                                    }
+                                if let Some(ref allowed) = allowed_users
+                                    && let Some(ref user) = msg.from
+                                    && !allowed.contains(&user.id)
+                                {
+                                    continue;
                                 }
 
                                 let username = msg.from.as_ref().and_then(|u| u.username.clone());
@@ -91,8 +90,20 @@ impl PlatformAdapter for TelegramAdapter {
                                     .unwrap_or_default();
                                 let text = msg.text.clone().unwrap_or_default();
                                 let chat_id = msg.chat.id;
+                                let _msg_id = msg.message_id;
+                                let _msg_date = msg.date;
 
                                 if !text.is_empty() {
+                                    if text.starts_with('/')
+                                        && let Some(cmd_reply) =
+                                            handle_telegram_command(&text, &username, &user_id)
+                                    {
+                                        send_telegram_message(
+                                            &client, &bot_token, chat_id, &cmd_reply,
+                                        )
+                                        .await;
+                                        continue;
+                                    }
                                     let cb =
                                         crate::message_gateway::platforms::get_message_callback();
                                     if let Some(cb) = cb {
@@ -202,7 +213,6 @@ impl Default for TelegramAdapter {
     }
 }
 
-#[allow(dead_code)]
 fn handle_telegram_command(text: &str, username: &Option<String>, user_id: &str) -> Option<String> {
     let name = username.as_deref().unwrap_or(user_id);
 
@@ -238,7 +248,6 @@ struct TelegramUpdate {
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
 struct TelegramApiMessage {
     message_id: i64,
     from: Option<TelegramUser>,

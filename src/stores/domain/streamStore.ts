@@ -1,5 +1,7 @@
+import i18n from "@/i18n";
 import { invoke, isTauri, type UnlistenFn } from "@/lib/invoke";
-import type { Message } from "@/types";
+import { useExecutionStore } from "@/stores/feature/executionStore";
+import type { Conversation, Message } from "@/types";
 import { create } from "zustand";
 
 // ─── Module-level variables (exported for use by conversationStore) ───
@@ -12,18 +14,16 @@ export let _listenerGen = 0;
 
 // ─── 卡住的流看门狗 ───
 
-/** 流超过此时间（毫秒）无更新则视为卡住，自动取消 */
+// 流超过此毫秒数无更新则视为卡住，自动取消
 const STUCK_STREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟
 /** 看门狗检查间隔 */
-const WATCHDOG_INTERVAL_MS = 30 * 1000; // 30 秒
+// 看门狗检查间隔: 30 秒
+const WATCHDOG_INTERVAL_MS = 30 * 1000;
 
 let _watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
-/**
- * 启动卡住的流看门狗。
- * 定期检查 streamingStartTimestamps，如果某个流超过 STUCK_STREAM_TIMEOUT_MS
- * 仍未结束，自动取消该流并标记消息为错误状态。
- */
+// 启动流看门狗：定期检查 streamingStartTimestamps，
+// 超过 STUCK_STREAM_TIMEOUT_MS 未结束则自动取消并标记错误。
 export function startStreamWatchdog() {
   if (_watchdogTimer !== null) { return; }
 
@@ -40,20 +40,19 @@ export function startStreamWatchdog() {
 
     for (const convId of stuckConversationIds) {
       console.warn(
-        `[StreamWatchdog] 流卡住: conversationId=${convId}, 已运行 ${
+        `[StreamWatchdog] stream stuck: conversationId=${convId}, running ${
           Math.round((now - state.streamingStartTimestamps[convId]) / 1000)
-        }s，自动取消`,
+        }s, auto-cancelling`,
       );
 
-      // 标记消息为错误
       const msgId = state.activeStreams[convId];
       if (msgId && _conversationStoreRef) {
-        _conversationStoreRef.setState((s: any) => ({
+        _conversationStoreRef.setState((s) => ({
           messages: s.messages.map((m: Message) =>
-            m.id === msgId
+            m.id === msgId && m.status === "partial"
               ? {
                 ...m,
-                content: m.content + "\n\n> ⚠️ 流式响应超时（5分钟无更新），已自动中断",
+                content: m.content + "\n\n> " + i18n.t("stream.timeout"),
                 status: "error" as const,
               }
               : m
@@ -61,15 +60,12 @@ export function startStreamWatchdog() {
         }));
       }
 
-      // 取消该流
       state.cancelCurrentStream(convId);
     }
   }, WATCHDOG_INTERVAL_MS);
 }
 
-/**
- * 停止卡住的流看门狗（应用退出或不再需要时调用）
- */
+// 停止流看门狗（应用退出时调用）
 export function stopStreamWatchdog() {
   if (_watchdogTimer !== null) {
     clearInterval(_watchdogTimer);
@@ -91,7 +87,6 @@ export interface StreamBuffer {
   thinking: string | null;
 }
 
-export let _streamBuffer: StreamBuffer | null = null;
 /**
  * Preserved buffers from conversations the user navigated away from while streaming.
  * When switching back, these are used instead of the live buffer (which may have
@@ -100,25 +95,6 @@ export let _streamBuffer: StreamBuffer | null = null;
  */
 const _orphanedBuffers = new Map<string, StreamBuffer>();
 
-export function preserveOrphanedBuffer() {
-  if (_streamBuffer && _streamBuffer.content) {
-    _orphanedBuffers.set(_streamBuffer.conversationId, { ..._streamBuffer });
-  }
-}
-
-export function takeOrphanedBuffer(conversationId: string): StreamBuffer | undefined {
-  const buf = _orphanedBuffers.get(conversationId);
-  if (buf) {
-    _orphanedBuffers.delete(conversationId);
-  }
-  return buf;
-}
-
-export function clearOrphanedBuffer(conversationId: string) {
-  _orphanedBuffers.delete(conversationId);
-}
-/** Prefix injected before streaming content (e.g., search result tags) */
-export let _streamPrefix = "";
 /** Conversations whose stream completed while the user was viewing a different
  *  conversation.  When the user switches back we trigger a fetchMessages so the
  *  final AI response is loaded from the backend. */
@@ -139,15 +115,6 @@ export const STREAM_MAX_CHUNK_SIZE = 500;
 
 let _flushTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleFlush(set: GenericSet<unknown>, get: GenericGet<unknown>) {
-  if (_flushTimer === null) {
-    _flushTimer = setTimeout(() => {
-      _flushTimer = null;
-      flushPendingStreamChunk(set as GenericSet<ConversationStoreLike>, get as GenericGet<ConversationStoreLike>);
-    }, 0);
-  }
-}
-
 export function cancelScheduledFlush() {
   if (_flushTimer !== null) {
     clearTimeout(_flushTimer);
@@ -163,6 +130,72 @@ export interface PendingUiChunk {
   providerId?: string;
 }
 
+// ─── Per-conversation stream session state ───
+//
+// Encapsulates all mutable state that was previously stored in module-level
+// variables.  Each conversation gets its own session so that concurrent streams
+// don't corrupt each other's data (race-condition fix).
+
+const DEFAULT_SESSION_KEY = "__default__";
+
+export interface StreamSessionState {
+  streamBuffer: StreamBuffer | null;
+  streamPrefix: string;
+  pendingUiChunk: PendingUiChunk | null;
+  streamUiFlushTimer: ReturnType<typeof setTimeout> | null;
+  isMultiModelActive: boolean;
+  multiModelTotalRemaining: number;
+  multiModelDoneResolve: (() => void) | null;
+  multiModelFirstModelId: string | null;
+  multiModelFirstMessageId: string | null;
+  userManuallySelectedVersion: boolean;
+  multiModelBuffers: Map<string, StreamBuffer>;
+}
+
+const _streamSessions = new Map<string, StreamSessionState>();
+
+function resolveSessionKey(conversationId?: string): string {
+  return conversationId ?? DEFAULT_SESSION_KEY;
+}
+
+export function getOrCreateSession(conversationId: string): StreamSessionState {
+  let session = _streamSessions.get(conversationId);
+  if (!session) {
+    session = {
+      streamBuffer: null,
+      streamPrefix: "",
+      pendingUiChunk: null,
+      streamUiFlushTimer: null,
+      isMultiModelActive: false,
+      multiModelTotalRemaining: 0,
+      multiModelDoneResolve: null,
+      multiModelFirstModelId: null,
+      multiModelFirstMessageId: null,
+      userManuallySelectedVersion: false,
+      multiModelBuffers: new Map(),
+    };
+    _streamSessions.set(conversationId, session);
+  }
+  return session;
+}
+
+export function removeSession(conversationId: string): void {
+  const session = _streamSessions.get(conversationId);
+  if (session) {
+    if (session.streamUiFlushTimer !== null) {
+      clearTimeout(session.streamUiFlushTimer);
+    }
+    _streamSessions.delete(conversationId);
+  }
+}
+
+// ─── Backward-compatible exported variables ───
+// These mirror the default session's state for callers that don't pass
+// conversationId.  Prefer using session-based APIs (getOrCreateSession) in
+// new code.
+
+export let _streamBuffer: StreamBuffer | null = null;
+export let _streamPrefix = "";
 export let _pendingUiChunk: PendingUiChunk | null = null;
 export let _streamUiFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -216,6 +249,9 @@ export let _userManuallySelectedVersion = false;
 
 // ─── Setter functions for module-level variables ───
 // conversationStore needs to mutate these from outside this module.
+// All setters accept an optional conversationId to target a specific session.
+// When omitted, the default session AND the backward-compatible exported
+// variable are updated.
 
 export function setUnlisten(value: UnlistenFn | null) {
   _unlisten = value;
@@ -223,11 +259,24 @@ export function setUnlisten(value: UnlistenFn | null) {
 export function incrementListenerGen() {
   return ++_listenerGen;
 }
-export function setStreamBuffer(value: StreamBuffer | null) {
-  _streamBuffer = value;
+export function setStreamBuffer(value: StreamBuffer | null, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  if (value) {
+    getOrCreateSession(key).streamBuffer = value;
+  } else {
+    const session = _streamSessions.get(key);
+    if (session) { session.streamBuffer = value; }
+  }
+  if (key === DEFAULT_SESSION_KEY) {
+    _streamBuffer = value;
+  }
 }
-export function setStreamPrefix(value: string) {
-  _streamPrefix = value;
+export function setStreamPrefix(value: string, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  getOrCreateSession(key).streamPrefix = value;
+  if (key === DEFAULT_SESSION_KEY) {
+    _streamPrefix = value;
+  }
 }
 export function clearPendingConversationRefresh() {
   _pendingConversationRefresh.clear();
@@ -238,60 +287,139 @@ export function addPendingConversationRefresh(id: string) {
 export function deletePendingConversationRefresh(id: string) {
   _pendingConversationRefresh.delete(id);
 }
-export function setPendingUiChunk(value: PendingUiChunk | null) {
-  _pendingUiChunk = value;
+export function setPendingUiChunk(value: PendingUiChunk | null, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  if (value) {
+    getOrCreateSession(key).pendingUiChunk = value;
+  } else {
+    const session = _streamSessions.get(key);
+    if (session) { session.pendingUiChunk = value; }
+  }
+  if (key === DEFAULT_SESSION_KEY) {
+    _pendingUiChunk = value;
+  }
 }
-export function setStreamUiFlushTimer(value: ReturnType<typeof setTimeout> | null) {
-  _streamUiFlushTimer = value;
+export function setStreamUiFlushTimer(value: ReturnType<typeof setTimeout> | null, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) { session.streamUiFlushTimer = value; }
+  if (key === DEFAULT_SESSION_KEY) {
+    _streamUiFlushTimer = value;
+  }
 }
 export function incrementActiveMessageLoadSeq() {
   return ++_activeMessageLoadSeq;
 }
 
-export function setMultiModelTotalRemaining(value: number) {
-  _multiModelTotalRemaining = value;
+export function setMultiModelTotalRemaining(value: number, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  getOrCreateSession(key).multiModelTotalRemaining = value;
+  if (key === DEFAULT_SESSION_KEY) {
+    _multiModelTotalRemaining = value;
+  }
 }
-export function decrementMultiModelTotalRemaining() {
-  _multiModelTotalRemaining--;
+export function decrementMultiModelTotalRemaining(conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) {
+    session.multiModelTotalRemaining--;
+    if (key === DEFAULT_SESSION_KEY) {
+      _multiModelTotalRemaining = session.multiModelTotalRemaining;
+    }
+  }
 }
-export function setMultiModelDoneResolve(value: (() => void) | null) {
-  _multiModelDoneResolve = value;
+export function setMultiModelDoneResolve(value: (() => void) | null, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) { session.multiModelDoneResolve = value; }
+  if (key === DEFAULT_SESSION_KEY) {
+    _multiModelDoneResolve = value;
+  }
 }
-export function setIsMultiModelActive(value: boolean) {
-  _isMultiModelActive = value;
+export function setIsMultiModelActive(value: boolean, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  getOrCreateSession(key).isMultiModelActive = value;
+  if (key === DEFAULT_SESSION_KEY) {
+    _isMultiModelActive = value;
+  }
 }
-export function setMultiModelFirstModelId(value: string | null) {
-  _multiModelFirstModelId = value;
+export function setMultiModelFirstModelId(value: string | null, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) { session.multiModelFirstModelId = value; }
+  if (key === DEFAULT_SESSION_KEY) {
+    _multiModelFirstModelId = value;
+  }
 }
-export function setMultiModelFirstMessageId(value: string | null) {
-  _multiModelFirstMessageId = value;
+export function setMultiModelFirstMessageId(value: string | null, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) { session.multiModelFirstMessageId = value; }
+  if (key === DEFAULT_SESSION_KEY) {
+    _multiModelFirstMessageId = value;
+  }
 }
-export function setUserManuallySelectedVersion(value: boolean) {
-  _userManuallySelectedVersion = value;
+export function setUserManuallySelectedVersion(value: boolean, conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) { session.userManuallySelectedVersion = value; }
+  if (key === DEFAULT_SESSION_KEY) {
+    _userManuallySelectedVersion = value;
+  }
 }
 
 /** Reset all multi-model module-level state to defaults */
-export function resetMultiModelState() {
-  _isMultiModelActive = false;
-  _multiModelTotalRemaining = 0;
-  _multiModelFirstModelId = null;
-  _multiModelFirstMessageId = null;
-  _userManuallySelectedVersion = false;
-  _multiModelDoneResolve = null;
+export function resetMultiModelState(conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session) {
+    session.isMultiModelActive = false;
+    session.multiModelTotalRemaining = 0;
+    session.multiModelFirstModelId = null;
+    session.multiModelFirstMessageId = null;
+    session.userManuallySelectedVersion = false;
+    session.multiModelDoneResolve = null;
+  }
+  if (key === DEFAULT_SESSION_KEY) {
+    _isMultiModelActive = false;
+    _multiModelTotalRemaining = 0;
+    _multiModelFirstModelId = null;
+    _multiModelFirstMessageId = null;
+    _userManuallySelectedVersion = false;
+    _multiModelDoneResolve = null;
+  }
 }
 
-/** 完整重置所有模块级可变状态。仅供测试使用。
- *
- * 注意：这些变量故意放在模块级而非 Zustand store 中，
- * 因为流式处理是性能关键路径（每 50ms 到达一个 chunk），
- * Zustand 的不可变更新周期会显著增加 CPU 开销。
- * 当前以 setter/getter 函数封装，resetStreamRuntime 保证测试隔离。 */
+export function preserveOrphanedBuffer(conversationId?: string) {
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (session && session.streamBuffer && session.streamBuffer.content) {
+    _orphanedBuffers.set(session.streamBuffer.conversationId, { ...session.streamBuffer });
+  }
+}
+
+export function takeOrphanedBuffer(conversationId: string): StreamBuffer | undefined {
+  const buf = _orphanedBuffers.get(conversationId);
+  if (buf) {
+    _orphanedBuffers.delete(conversationId);
+  }
+  return buf;
+}
+
+export function clearOrphanedBuffer(conversationId: string) {
+  _orphanedBuffers.delete(conversationId);
+}
+
+// 完整重置所有模块级可变状态。仅供测试使用。
+// 这些变量放在模块级而非 Zustand store 中，
+// 因为流式处理每 50ms 到达一个 chunk，
+// Zustand 不可变更新周期会增加 CPU 开销。
+// resetStreamRuntime 保证测试隔离。
 export function resetStreamRuntime() {
   _unlisten?.();
   _unlisten = null;
   _listenerGen = 0;
   _streamBuffer = null;
-  _orphanedBuffers.clear();
   _streamPrefix = "";
   _pendingConversationRefresh.clear();
   cancelScheduledFlush();
@@ -304,6 +432,13 @@ export function resetStreamRuntime() {
   _messageIndex.clear();
   _conversationStoreRef = null;
   resetMultiModelState();
+  _orphanedBuffers.clear();
+  for (const session of _streamSessions.values()) {
+    if (session.streamUiFlushTimer !== null) {
+      clearTimeout(session.streamUiFlushTimer);
+    }
+  }
+  _streamSessions.clear();
 }
 
 // ─── Generic type for set/get that can update messages ───
@@ -323,6 +458,19 @@ interface ConversationStoreLike {
 
 // ─── Helper functions ───
 
+function scheduleFlush(set: GenericSet<unknown>, get: GenericGet<unknown>, conversationId?: string) {
+  if (_flushTimer === null) {
+    _flushTimer = setTimeout(() => {
+      _flushTimer = null;
+      flushPendingStreamChunk(
+        set as GenericSet<ConversationStoreLike>,
+        get as GenericGet<ConversationStoreLike>,
+        conversationId,
+      );
+    }, 0);
+  }
+}
+
 export function appendStreamChunk<T extends ConversationStoreLike>(
   set: GenericSet<T>,
   get: GenericGet<T>,
@@ -332,38 +480,64 @@ export function appendStreamChunk<T extends ConversationStoreLike>(
   model_id?: string,
   providerId?: string,
 ) {
-  // Accumulate into stream buffer only in single-stream mode
-  // (parallel multi-model streams would corrupt the shared buffer)
-  if (!_isMultiModelActive) {
-    if (!_streamBuffer || _streamBuffer.conversationId !== conversationId) {
+  const session = getOrCreateSession(conversationId);
+
+  // 单模型模式用会话缓冲区，多模型模式用 per-messageId 缓冲防止互相覆盖
+  if (!session.isMultiModelActive) {
+    if (!session.streamBuffer || session.streamBuffer.conversationId !== conversationId) {
       // Preserve the previous conversation's buffer before overwriting
-      if (_streamBuffer && _streamBuffer.conversationId !== conversationId && _streamBuffer.content) {
-        preserveOrphanedBuffer();
+      if (
+        session.streamBuffer && session.streamBuffer.conversationId !== conversationId && session.streamBuffer.content
+      ) {
+        preserveOrphanedBuffer(session.streamBuffer.conversationId);
       }
-      _streamBuffer = { messageId, conversationId, content: _streamPrefix, resolvedId: null, thinking: null };
-      _streamPrefix = ""; // consumed
+      session.streamBuffer = {
+        messageId,
+        conversationId,
+        content: session.streamPrefix,
+        resolvedId: null,
+        thinking: null,
+      };
+      session.streamPrefix = ""; // consumed
     }
-    _streamBuffer.content += content ?? "";
+    session.streamBuffer.content += content ?? "";
     // Track ID resolution (placeholder → real ID)
-    if (_streamBuffer.messageId !== messageId && !_streamBuffer.resolvedId) {
-      _streamBuffer.resolvedId = messageId;
+    if (session.streamBuffer.messageId !== messageId && !session.streamBuffer.resolvedId) {
+      session.streamBuffer.resolvedId = messageId;
+    }
+  } else {
+    // 多模型模式：每个 messageId 独立缓冲
+    let buf = session.multiModelBuffers.get(messageId);
+    if (!buf) {
+      buf = { messageId, conversationId, content: session.streamPrefix, resolvedId: null, thinking: null };
+      session.streamPrefix = "";
+      session.multiModelBuffers.set(messageId, buf);
+    }
+    buf.content += content ?? "";
+    if (buf.messageId !== messageId && !buf.resolvedId) {
+      buf.resolvedId = messageId;
     }
   }
+
+  // Sync backward-compatible exported variables
+  _streamBuffer = session.streamBuffer;
+  _streamPrefix = session.streamPrefix;
+  _isMultiModelActive = session.isMultiModelActive;
 
   // Only update messages in UI if this is the active conversation
   if (get().activeConversationId !== conversationId) { return; }
 
   if (
-    _pendingUiChunk && (
-      _pendingUiChunk.conversationId !== conversationId
-      || _pendingUiChunk.messageId !== messageId
+    session.pendingUiChunk && (
+      session.pendingUiChunk.conversationId !== conversationId
+      || session.pendingUiChunk.messageId !== messageId
     )
   ) {
-    flushPendingStreamChunk(set, get);
+    flushPendingStreamChunk(set, get, conversationId);
   }
 
-  if (!_pendingUiChunk) {
-    _pendingUiChunk = {
+  if (!session.pendingUiChunk) {
+    session.pendingUiChunk = {
       messageId,
       conversationId,
       content: "",
@@ -372,35 +546,45 @@ export function appendStreamChunk<T extends ConversationStoreLike>(
     };
   }
 
-  _pendingUiChunk.content += content ?? "";
+  session.pendingUiChunk.content += content ?? "";
+  _pendingUiChunk = session.pendingUiChunk;
 
-  const contentLength = _pendingUiChunk.content.length;
+  const contentLength = session.pendingUiChunk.content.length;
   if (contentLength >= STREAM_MAX_CHUNK_SIZE) {
-    flushPendingStreamChunk(set, get);
-  } else if (_streamUiFlushTimer === null) {
-    _streamUiFlushTimer = setTimeout(() => {
-      _streamUiFlushTimer = null;
-      scheduleFlush(set as GenericSet<unknown>, get as GenericGet<unknown>);
+    flushPendingStreamChunk(set, get, conversationId);
+  } else if (session.streamUiFlushTimer === null) {
+    session.streamUiFlushTimer = setTimeout(() => {
+      session.streamUiFlushTimer = null;
+      scheduleFlush(set as GenericSet<unknown>, get as GenericGet<unknown>, conversationId);
     }, STREAM_UI_FLUSH_INTERVAL_MS);
+    _streamUiFlushTimer = session.streamUiFlushTimer;
   }
 }
 
 export function flushPendingStreamChunk<T extends ConversationStoreLike>(
   set: GenericSet<T>,
   get: GenericGet<T>,
+  conversationId?: string,
 ) {
-  if (_streamUiFlushTimer !== null) {
-    clearTimeout(_streamUiFlushTimer);
-    _streamUiFlushTimer = null;
+  const key = resolveSessionKey(conversationId);
+  const session = _streamSessions.get(key);
+  if (!session) { return; }
+
+  if (session.streamUiFlushTimer !== null) {
+    clearTimeout(session.streamUiFlushTimer);
+    session.streamUiFlushTimer = null;
   }
   cancelScheduledFlush();
 
-  const pending = _pendingUiChunk;
+  const pending = session.pendingUiChunk;
+  session.pendingUiChunk = null;
   _pendingUiChunk = null;
+  _streamUiFlushTimer = null;
   if (!pending) { return; }
 
-  const { messageId, content, conversationId, model_id: chunkModelId, providerId: chunkProviderId } = pending;
-  if (get().activeConversationId !== conversationId) { return; }
+  const { messageId, content, conversationId: chunkConvId, model_id: chunkModelId, providerId: chunkProviderId } =
+    pending;
+  if (get().activeConversationId !== chunkConvId) { return; }
 
   set((s) => {
     // 1. Direct ID match via index — O(1) append to existing message
@@ -441,7 +625,7 @@ export function flushPendingStreamChunk<T extends ConversationStoreLike>(
     // streamingMessageId is a real ID and companion chunks must NOT hijack it —
     // they fall through to case 3 and create their own message entries.
     if (s.streamingMessageId && s.streamingMessageId !== messageId) {
-      if (!_isMultiModelActive || s.streamingMessageId.startsWith("temp-")) {
+      if (!session.isMultiModelActive || s.streamingMessageId.startsWith("temp-")) {
         const placeholderIdx = _messageIndex.get(s.streamingMessageId);
         if (
           placeholderIdx !== undefined && placeholderIdx < s.messages.length
@@ -479,12 +663,15 @@ export function flushPendingStreamChunk<T extends ConversationStoreLike>(
     }
 
     // 3. No placeholder found — create new assistant message with full buffered content
-    const isMultiModel = _isMultiModelActive;
+    const isMultiModel = session.isMultiModelActive;
+    const bufferContent = isMultiModel
+      ? session.multiModelBuffers.get(messageId)?.content
+      : session.streamBuffer?.content;
     const newMessage: Message = {
       id: messageId,
-      conversation_id: conversationId,
+      conversation_id: chunkConvId,
       role: "assistant",
-      content: _streamBuffer?.content ?? (content ?? ""),
+      content: bufferContent ?? (content ?? ""),
       provider_id: chunkProviderId ?? null,
       model_id: chunkModelId ?? null,
       token_count: null,
@@ -512,14 +699,31 @@ export function flushPendingStreamChunk<T extends ConversationStoreLike>(
 
 // ─── Lazy reference to conversationStore (avoids circular import) ───
 // Set by conversationStore during its initialization.
-let _conversationStoreRef: {
-  getState: () => any;
-  setState: (partial: any) => void;
-} | null = null;
+
+interface ConversationStoreRefState {
+  activeConversationId: string | null;
+  conversations: Conversation[];
+  messages: Message[];
+  streamingMessageId: string | null;
+  multiModelParentId: string | null;
+  pendingCompanionModels: Array<{ providerId: string; model_id: string }>;
+  multiModelDoneMessageIds: string[];
+}
+
+interface ConversationStoreRef {
+  getState: () => ConversationStoreRefState;
+  setState: (
+    partial:
+      | Partial<ConversationStoreRefState>
+      | ((state: ConversationStoreRefState) => Partial<ConversationStoreRefState>),
+  ) => void;
+}
+
+let _conversationStoreRef: ConversationStoreRef | null = null;
 
 /** Register the conversationStore reference so cancelCurrentStream can call it.
  *  Called once by conversationStore during module initialization. */
-export function registerConversationStoreRef(ref: typeof _conversationStoreRef) {
+export function registerConversationStoreRef(ref: ConversationStoreRef) {
   _conversationStoreRef = ref;
 }
 
@@ -632,6 +836,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     // If no specific conversation, cancel ALL active streams
     if (!activeConvId) { return; }
 
+    const session = _streamSessions.get(activeConvId);
+
     // Flush pending UI chunk through conversationStore if available
     if (convRef) {
       flushPendingStreamChunk(
@@ -639,11 +845,28 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           convRef.setState(fn(convRef.getState()));
         },
         () => convRef.getState(),
+        activeConvId,
       );
     }
 
+    // Clean up session state
+    if (session) {
+      session.pendingUiChunk = null;
+      session.streamBuffer = null;
+      // 清理被取消对话的多模型缓冲
+      if (session.isMultiModelActive) {
+        for (const [msgId, buf] of session.multiModelBuffers) {
+          if (buf.conversationId === activeConvId) {
+            session.multiModelBuffers.delete(msgId);
+          }
+        }
+      }
+    }
+
+    // Sync backward-compatible variables
     _pendingUiChunk = null;
     _streamBuffer = null;
+
     // Only clear the pending refresh for the conversation being cancelled,
     // not all conversations (other conversations may have completed streams
     // that need to be loaded when the user switches back to them).
@@ -654,22 +877,23 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     // Clean up multi-model state on cancel.
     // Must resolve _multiModelDoneResolve BEFORE resetMultiModelState sets it to null,
     // otherwise sendMultiModelMessage hangs forever at `await allDone`.
-    if (_isMultiModelActive) {
-      if (_multiModelDoneResolve) {
-        const r = _multiModelDoneResolve;
-        setMultiModelDoneResolve(null);
+    if (session?.isMultiModelActive) {
+      if (session.multiModelDoneResolve) {
+        const r = session.multiModelDoneResolve;
+        session.multiModelDoneResolve = null;
         r();
       }
-      resetMultiModelState();
+      resetMultiModelState(activeConvId);
       if (convRef) {
         convRef.setState({ pendingCompanionModels: [], multiModelParentId: null, multiModelDoneMessageIds: [] });
       }
     }
 
-    if (_streamUiFlushTimer !== null) {
-      clearTimeout(_streamUiFlushTimer);
-      _streamUiFlushTimer = null;
+    if (session && session.streamUiFlushTimer !== null) {
+      clearTimeout(session.streamUiFlushTimer);
+      session.streamUiFlushTimer = null;
     }
+    _streamUiFlushTimer = null;
 
     // Tell the backend to cancel the stream — fire and forget
     if (isTauri()) {
@@ -677,7 +901,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         console.warn("[IPC]", e);
       });
       // Also cancel the agent if in agent mode
-      const conv = convRef?.getState().conversations?.find((c: any) => c.id === activeConvId);
+      const conv = convRef?.getState().conversations?.find((c) => c.id === activeConvId);
       if (conv?.mode === "agent") {
         invoke("agent_cancel", { request: { conversationId: activeConvId } }).catch((e: unknown) => {
           console.warn("[IPC]", e);
@@ -701,11 +925,23 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       thinkingActiveMessageIds: updatedThinking,
     });
 
+    // Proactively clean up execution phase for cancelled conversations.
+    // cancelCurrentStream removes activeStreams immediately but the backend
+    // agent-cancelled event (which normally transitions the phase) may be
+    // delayed or lost, leaving AgentProgressBar spinning indefinitely.
+    const execStore = useExecutionStore.getState();
+    if (execStore.isActive(activeConvId)) {
+      execStore.handleCancelled({ conversationId: activeConvId, reason: "cancelled" });
+    }
+
     if (streamMsgId && convRef) {
-      convRef.setState((s: any) => ({
+      convRef.setState((s) => ({
         messages: s.messages.map((m: Message) => m.id === streamMsgId ? { ...m, status: "partial" as const } : m),
       }));
     }
+
+    // Remove the session after all cleanup is done
+    removeSession(activeConvId);
   },
 
   isConversationStreaming: (conversationId: string) => {

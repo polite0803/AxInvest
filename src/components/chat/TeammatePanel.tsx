@@ -3,7 +3,7 @@ import type { AgentPoolItem, TeammateStatus, WorkerMessage } from "@/types";
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, TeamOutlined } from "@ant-design/icons";
 
 const _EMPTY: never[] = [];
-import { Button, Collapse, message, Tag, Typography } from "antd";
+import { Button, Collapse, message, Tag, theme, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type CreateTeamData, CreateTeamModal, type TeammateBackendType } from "./CreateTeamModal";
@@ -91,6 +91,7 @@ export function TeammatePanel({
   const pool = useExecutionStore((s) => s.agentPool[conversationId] || _EMPTY);
   const upsertPoolItem = useExecutionStore((s) => s.upsertPoolItem);
   const { t } = useTranslation();
+  const { token } = theme.useToken();
   const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [creatingTeam, setCreatingTeam] = useState(false);
 
@@ -158,11 +159,11 @@ export function TeammatePanel({
 
                 {/* 消息列表 */}
                 {tm.messages && tm.messages.length > 0 && (
-                  <div className="mt-1 max-h-40 overflow-y-auto rounded bg-gray-50 p-1">
+                  <div className="mt-1 max-h-40 overflow-y-auto rounded bg-zinc-50 p-1">
                     {tm.messages.map((msg, i) => (
                       <div
                         key={i}
-                        className="border-b border-gray-100 py-0.5"
+                        className="border-b border-zinc-100 py-0.5"
                         style={{ fontSize: 12, lineHeight: "18px" }}
                       >
                         {formatMessage(msg)}
@@ -174,7 +175,7 @@ export function TeammatePanel({
                 {/* 持续时长 */}
                 {tm.duration !== undefined && tm.status === "completed" && (
                   <div className="mt-1">
-                    <Text type="secondary" style={{ fontSize: 11 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
                       {t("teammatePanel.duration", { seconds: (tm.duration / 1000).toFixed(1) })}
                     </Text>
                   </div>
@@ -190,11 +191,11 @@ export function TeammatePanel({
   return (
     <div
       className="mb-2 rounded border"
-      style={{ borderColor: "#d9d9d9", backgroundColor: "#fff" }}
+      style={{ borderColor: token.colorBorderSecondary, backgroundColor: token.colorBgContainer }}
     >
       <div
         className="border-b px-3 py-2 flex items-center justify-between"
-        style={{ borderColor: "#f0f0f0" }}
+        style={{ borderColor: token.colorBorderSecondary }}
       >
         <Text strong style={{ fontSize: 13 }}>
           <TeamOutlined className="mr-1" />
@@ -247,5 +248,3 @@ export function TeammatePanel({
     </div>
   );
 }
-
-export default TeammatePanel;

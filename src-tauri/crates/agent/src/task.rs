@@ -18,15 +18,18 @@ impl TaskType {
             TaskType::Validation => "validation",
         }
     }
+}
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for TaskType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "tool_call" => Some(TaskType::ToolCall),
-            "reasoning" => Some(TaskType::Reasoning),
-            "query" => Some(TaskType::Query),
-            "validation" => Some(TaskType::Validation),
-            _ => None,
+            "tool_call" => Ok(TaskType::ToolCall),
+            "reasoning" => Ok(TaskType::Reasoning),
+            "query" => Ok(TaskType::Query),
+            "validation" => Ok(TaskType::Validation),
+            _ => Err(()),
         }
     }
 }
@@ -186,7 +189,7 @@ impl TaskGraph {
         while visited.len() < self.tasks.len() {
             let batch: Vec<String> = in_degree
                 .iter()
-                .filter(|(id, &degree)| degree == 0 && !visited.contains(*id))
+                .filter(|(id, degree)| **degree == 0 && !visited.contains(*id))
                 .map(|(id, _)| id.clone())
                 .collect();
 
@@ -207,10 +210,10 @@ impl TaskGraph {
             for task_id in &batch {
                 visited.insert(task_id.clone());
                 for task in &self.tasks {
-                    if task.dependencies.contains(task_id) {
-                        if let Some(degree) = in_degree.get_mut(&task.id) {
-                            *degree -= 1;
-                        }
+                    if task.dependencies.contains(task_id)
+                        && let Some(degree) = in_degree.get_mut(&task.id)
+                    {
+                        *degree -= 1;
                     }
                 }
             }
@@ -316,11 +319,11 @@ mod tests {
 
     #[test]
     fn test_task_type_from_str() {
-        assert_eq!(TaskType::from_str("tool_call"), Some(TaskType::ToolCall));
-        assert_eq!(TaskType::from_str("reasoning"), Some(TaskType::Reasoning));
-        assert_eq!(TaskType::from_str("query"), Some(TaskType::Query));
-        assert_eq!(TaskType::from_str("validation"), Some(TaskType::Validation));
-        assert_eq!(TaskType::from_str("unknown"), None);
+        assert_eq!("tool_call".parse::<TaskType>().ok(), Some(TaskType::ToolCall));
+        assert_eq!("reasoning".parse::<TaskType>().ok(), Some(TaskType::Reasoning));
+        assert_eq!("query".parse::<TaskType>().ok(), Some(TaskType::Query));
+        assert_eq!("validation".parse::<TaskType>().ok(), Some(TaskType::Validation));
+        assert_eq!("unknown".parse::<TaskType>().ok(), None);
     }
 
     #[test]

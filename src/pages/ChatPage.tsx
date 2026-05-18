@@ -1,7 +1,7 @@
-import { AgentExecutionPanel } from "@/components/chat/AgentExecutionPanel";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import type { ChatViewScrollApi } from "@/components/chat/ChatView";
 import { ChatView } from "@/components/chat/ChatView";
+import { RightPanelContainer } from "@/components/chat/RightPanelContainer";
 import { ScrollToMessageProvider } from "@/components/chat/ScrollToMessageContext";
 import { TabBar } from "@/components/chat/TabBar";
 import { useConversationStore, useProviderStore, useSettingsStore, useTabStore } from "@/stores";
@@ -124,8 +124,9 @@ export function ChatPage() {
 
   // 同步标签标题
   useEffect(() => {
+    const convMap = new Map(conversations.map((c) => [c.id, c]));
     for (const tab of tabs) {
-      const conv = conversations.find((c) => c.id === tab.conversationId);
+      const conv = convMap.get(tab.conversationId);
       if (conv && conv.title !== tab.title) {
         updateTabTitle(conv.id, conv.title);
       }
@@ -187,7 +188,7 @@ export function ChatPage() {
   const rightPanelContent = showRightPanel && scrollApi && activeConversationId
     ? (
       <ScrollToMessageProvider scrollTo={scrollApi.scrollTo} scrollBoxRef={scrollApi.scrollBoxRef}>
-        <AgentExecutionPanel
+        <RightPanelContainer
           conversationId={activeConversationId}
           compactMode={rightPanelCollapsed}
           onToggleCompact={toggleRightPanel}
@@ -216,6 +217,12 @@ export function ChatPage() {
       {!sidebarCollapsed && (
         <div
           onMouseDown={handleLeftMouseDown}
+          role="separator"
+          aria-label="resize handle"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); }
+          }}
           style={{
             width: 4,
             cursor: "col-resize",
@@ -251,6 +258,12 @@ export function ChatPage() {
       {showRightPanel && !rightPanelCollapsed && (
         <div
           onMouseDown={handleRightMouseDown}
+          role="separator"
+          aria-label="resize handle"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); }
+          }}
           style={{
             width: 4,
             cursor: "col-resize",
@@ -311,7 +324,7 @@ export function ChatPage() {
           >
             {rightPanelCollapsed ? <ChevronRight size={14} /> : <PanelRight size={14} />}
           </button>
-          {/* 始终渲染 AgentExecutionPanel，由 compactMode 控制内部展示 */}
+          {/* 始终渲染右侧面板，由 compactMode 控制内部展示 */}
           {rightPanelContent || (
             <div
               style={{

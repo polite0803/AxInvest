@@ -193,7 +193,7 @@ impl IngestPipeline {
 
         let mut pages_generated = 0usize;
 
-        if let (Some(ref adapter), Some(ref ctx), Some(ref model)) =
+        if let (Some(adapter), Some(ctx), Some(model)) =
             (&self.llm_adapter, &self.llm_ctx, &self.llm_model)
         {
             let purpose = self.load_purpose(wiki_id).await.ok();
@@ -291,7 +291,7 @@ impl IngestPipeline {
 
         let mut pages_generated = 0usize;
 
-        if let (Some(ref adapter), Some(ref ctx), Some(ref model)) =
+        if let (Some(adapter), Some(ctx), Some(model)) =
             (&self.llm_adapter, &self.llm_ctx, &self.llm_model)
         {
             let purpose = self.load_purpose(wiki_id).await.ok();
@@ -446,6 +446,7 @@ Output ONLY valid JSON inside a ```json fenced code block."#
         serde_json::from_str(trimmed).map_err(|e| format!("Failed to parse analysis JSON: {}", e))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn generate_wiki_pages(
         &self,
         adapter: &dyn ProviderAdapter,

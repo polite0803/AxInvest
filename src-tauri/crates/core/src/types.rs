@@ -70,13 +70,13 @@ impl ProviderProxyConfig {
     /// If provider has explicit proxy_type, use it (even "none" to disable).
     /// Otherwise fall back to global settings.
     pub fn resolve(provider: &Option<Self>, global_settings: &AppSettings) -> Option<Self> {
-        if let Some(config) = provider {
-            if config.proxy_type.is_some() {
-                if config.proxy_type.as_deref() == Some("none") {
-                    return None;
-                }
-                return Some(config.clone());
+        if let Some(config) = provider
+            && config.proxy_type.is_some()
+        {
+            if config.proxy_type.as_deref() == Some("none") {
+                return None;
             }
+            return Some(config.clone());
         }
         // Fall back to global proxy
         match global_settings.proxy_type.as_deref() {
@@ -130,6 +130,7 @@ pub struct Model {
     pub model_type: ModelType,
     pub capabilities: Vec<ModelCapability>,
     pub max_tokens: Option<u32>,
+    pub max_output_tokens: Option<u32>,
     pub enabled: bool,
     pub param_overrides: Option<ModelParamOverrides>,
     /// Input price per million tokens (USD). When set, used for accurate cost calculation.
@@ -1134,6 +1135,10 @@ pub struct TokenUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1662,24 +1667,13 @@ impl SourceRef {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceConfig {
     pub embedding_provider: Option<String>,
     pub embedding_dimensions: Option<i32>,
     pub retrieval_threshold: Option<f32>,
     pub retrieval_top_k: Option<i32>,
-}
-
-impl SourceConfig {
-    pub fn default() -> Self {
-        Self {
-            embedding_provider: None,
-            embedding_dimensions: None,
-            retrieval_threshold: None,
-            retrieval_top_k: None,
-        }
-    }
 }
 
 // Artifacts
@@ -1836,8 +1830,8 @@ pub struct GatewayRequestLog {
     pub provider_id: Option<String>,
     pub status_code: i32,
     pub duration_ms: i32,
-    pub request_tokens: i32,
-    pub response_tokens: i32,
+    pub request_tokens: i64,
+    pub response_tokens: i64,
     pub error_message: Option<String>,
     pub created_at: i64,
 }

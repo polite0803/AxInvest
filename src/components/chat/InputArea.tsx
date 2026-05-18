@@ -84,16 +84,16 @@ import {
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import CommandSuggest from "./CommandSuggest";
+import { CommandSuggest } from "./CommandSuggest";
 import { ConversationSettingsModal } from "./ConversationSettingsModal";
-import ModelRoutingConfigPanel from "./ModelRoutingConfigPanel";
+import { ModelRoutingConfigPanel } from "./ModelRoutingConfigPanel";
 import { ModelSelector } from "./ModelSelector";
 import { PlanHistoryPanel } from "./PlanHistoryPanel";
 import { PromptTemplateSelector } from "./PromptTemplateSelector";
 import { VoiceCall } from "./VoiceCall";
 
 async function fileToAttachmentInput(file: File): Promise<AttachmentInput> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const base64 = (reader.result as string).split(",")[1] || "";
@@ -103,6 +103,9 @@ async function fileToAttachmentInput(file: File): Promise<AttachmentInput> {
         file_size: file.size,
         data: base64,
       });
+    };
+    reader.onerror = () => {
+      reject(new Error(`Failed to read file: ${file.name}`));
     };
     reader.readAsDataURL(file);
   });
@@ -516,7 +519,7 @@ export function InputArea() {
             color="blue"
             style={{
               margin: 0,
-              fontSize: 11,
+              fontSize: 12,
               lineHeight: "18px",
               padding: "0 6px",
               display: "inline-flex",
@@ -574,7 +577,7 @@ export function InputArea() {
 
     const renderGroup = (title: string, servers: typeof mcpServers) => (
       <div key={title}>
-        <div style={{ fontSize: 11, color: token.colorTextSecondary, padding: "4px 0", fontWeight: 600 }}>{title}</div>
+        <div style={{ fontSize: 12, color: token.colorTextSecondary, padding: "4px 0", fontWeight: 600 }}>{title}</div>
         {servers.map((server) => (
           <div key={server.id} style={{ padding: "3px 0" }}>
             <Checkbox
@@ -588,7 +591,7 @@ export function InputArea() {
                   <span style={{ fontWeight: 500 }}>{server.alias || server.name}</span>
                   {server.description && (
                     <span
-                      style={{ display: "block", fontSize: 11, color: token.colorTextSecondary, lineHeight: "16px" }}
+                      style={{ display: "block", fontSize: 12, color: token.colorTextSecondary, lineHeight: "16px" }}
                     >
                       {server.description}
                     </span>
@@ -612,7 +615,7 @@ export function InputArea() {
       <div style={{ minWidth: 260, maxHeight: 360, overflowY: "auto", padding: "4px 0" }}>
         {/* Mode selector */}
         <div style={{ padding: "4px 0 8px", borderBottom: `1px solid ${token.colorBorderSecondary}`, marginBottom: 8 }}>
-          <div style={{ fontSize: 11, color: token.colorTextSecondary, marginBottom: 6 }}>{t("chat.mcp.mode")}</div>
+          <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 6 }}>{t("chat.mcp.mode")}</div>
           <div style={{ display: "flex", gap: 4 }}>
             {(["auto", "manual", "disabled"] as const).map((mode) => (
               <Button
@@ -620,7 +623,7 @@ export function InputArea() {
                 size="small"
                 type={mcpMode === mode ? "primary" : "default"}
                 onClick={() => setMcpMode(mode)}
-                style={{ flex: 1, fontSize: 11 }}
+                style={{ flex: 1, fontSize: 12 }}
               >
                 {mode === "auto"
                   ? t("chat.mcp.modeAuto")
@@ -716,6 +719,10 @@ export function InputArea() {
   );
 
   // Expert menu items — 专家角色选择（所有模式通用）
+  // 通过 selector 订阅 store 状态变更，确保 useMemo 响应式更新
+  const expertBuiltinRoles = useExpertStore((s) => s.builtinRoles);
+  const agencyRoles = useExpertStore((s) => s.agencyRoles);
+  const customRoles = useExpertStore((s) => s.customRoles);
   const expertMenuItems = useMemo<MenuProps["items"]>(() => {
     const grouped = useExpertStore.getState().getRolesByCategory();
     const items: MenuProps["items"] = [];
@@ -742,7 +749,7 @@ export function InputArea() {
       }
     }
     return items;
-  }, []);
+  }, [expertBuiltinRoles, agencyRoles, customRoles, t]);
 
   // Mode menu items (Q&A, Agent, Gateway options)
   const modeMenuItems = useMemo<MenuProps["items"]>(() => {
@@ -978,7 +985,7 @@ export function InputArea() {
           >
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
                 color: token.colorTextSecondary,
                 textTransform: "uppercase",
@@ -1011,7 +1018,7 @@ export function InputArea() {
           <div style={{ marginBottom: safeMem.length > 0 && safeWikis.length > 0 ? 8 : 0 }}>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
                 color: token.colorTextSecondary,
                 textTransform: "uppercase",
@@ -1045,7 +1052,7 @@ export function InputArea() {
           <div>
             <div
               style={{
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
                 color: token.colorTextSecondary,
                 textTransform: "uppercase",
@@ -1119,8 +1126,9 @@ export function InputArea() {
 
     for (const provider of providers) {
       if (!provider.enabled) { continue; }
-      const model = provider.models.find((item) => item.enabled);
-      if (model) { return model; }
+      for (const item of provider.models) {
+        if (item.enabled) { return item; }
+      }
     }
 
     return null;
@@ -1613,39 +1621,39 @@ export function InputArea() {
           } else if (type === "drop") {
             setIsDragging(false);
             const { paths } = event.payload;
-            const files: File[] = [];
-            for (const filePath of paths) {
+            const mimeMap: Record<string, string> = {
+              png: "image/png",
+              jpg: "image/jpeg",
+              jpeg: "image/jpeg",
+              gif: "image/gif",
+              webp: "image/webp",
+              svg: "image/svg+xml",
+              bmp: "image/bmp",
+              ico: "image/x-icon",
+              pdf: "application/pdf",
+              txt: "text/plain",
+              json: "application/json",
+              csv: "text/csv",
+              md: "text/markdown",
+              html: "text/html",
+              js: "text/javascript",
+              ts: "text/typescript",
+              zip: "application/zip",
+            };
+            const fileResults = await Promise.all(paths.map(async (filePath) => {
               try {
                 const fileName = filePath.split(/[\\/]/).pop() || "file";
                 const ext = fileName.split(".").pop()?.toLowerCase() || "";
-                const mimeMap: Record<string, string> = {
-                  png: "image/png",
-                  jpg: "image/jpeg",
-                  jpeg: "image/jpeg",
-                  gif: "image/gif",
-                  webp: "image/webp",
-                  svg: "image/svg+xml",
-                  bmp: "image/bmp",
-                  ico: "image/x-icon",
-                  pdf: "application/pdf",
-                  txt: "text/plain",
-                  json: "application/json",
-                  csv: "text/csv",
-                  md: "text/markdown",
-                  html: "text/html",
-                  js: "text/javascript",
-                  ts: "text/typescript",
-                  zip: "application/zip",
-                };
                 const mimeType = mimeMap[ext] || "application/octet-stream";
                 const bytes = await readFile(filePath);
                 const blob = new Blob([bytes], { type: mimeType });
-                const file = new globalThis.File([blob], fileName);
-                files.push(file);
+                return new globalThis.File([blob], fileName);
               } catch (err) {
                 console.error("[drag-drop] Failed to read file:", filePath, err);
+                return null;
               }
-            }
+            }));
+            const files = fileResults.filter((f): f is File => f !== null);
             if (files.length > 0) {
               setAttachedFiles((prev) => [...prev, ...files]);
             }
@@ -1805,6 +1813,7 @@ export function InputArea() {
         multiple
         style={{ display: "none" }}
         onChange={handleFileChange}
+        aria-label={t("input.uploadFile")}
       />
       <input
         ref={photoInputRef}
@@ -1813,6 +1822,7 @@ export function InputArea() {
         capture="environment"
         style={{ display: "none" }}
         onChange={handlePhotoChange}
+        aria-label={t("input.takePhoto")}
       />
       <input
         ref={audioInputRef}
@@ -1821,6 +1831,7 @@ export function InputArea() {
         capture
         style={{ display: "none" }}
         onChange={handleAudioChange}
+        aria-label={t("input.recordAudio")}
       />
       <input
         ref={videoInputRef}
@@ -1940,6 +1951,12 @@ export function InputArea() {
         {/* Drag-to-resize handle */}
         <div
           onMouseDown={handleResizeMouseDown}
+          role="separator"
+          aria-label="resize handle"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); }
+          }}
           style={{
             height: 10,
             cursor: "ns-resize",
@@ -1975,7 +1992,7 @@ export function InputArea() {
                   {cm.modelName}
                 </span>
                 {cm.providerName && (
-                  <span style={{ color: token.colorTextQuaternary, fontSize: 11 }}>
+                  <span style={{ color: token.colorTextQuaternary, fontSize: 12 }}>
                     {cm.providerName}
                   </span>
                 )}
@@ -1990,6 +2007,14 @@ export function InputArea() {
             {/* Clear all companion models */}
             <span
               className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs cursor-pointer"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  clearAllCompanionModels();
+                }
+              }}
               style={{
                 borderRadius: token.borderRadiusSM,
                 color: token.colorTextTertiary,
@@ -2033,7 +2058,7 @@ export function InputArea() {
             visible={showSuggest}
           />
           <textarea
-            className="axagent-input-textarea"
+            className="axagent-input-textarea outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
             ref={textareaRef}
             data-testid="message-input"
             value={value}
@@ -2045,7 +2070,6 @@ export function InputArea() {
             style={{
               width: "100%",
               border: "none",
-              outline: "none",
               resize: "none",
               padding: "4px 16px 8px",
               fontSize: token.fontSize,
@@ -2588,7 +2612,7 @@ export function InputArea() {
             </Dropdown>
           )}
           {contextCount > 0 && (
-            <span style={{ fontSize: 11, color: token.colorTextSecondary }}>
+            <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
               {contextCount} {t("chat.contextMessages")}
             </span>
           )}

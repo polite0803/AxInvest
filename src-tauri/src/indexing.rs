@@ -18,7 +18,7 @@ use axagent_core::types::*;
 use axagent_core::vector_store::{VectorSearchResult, VectorStore};
 
 use axagent_providers::{
-    registry::ProviderRegistry, resolve_base_url_for_type, ProviderAdapter, ProviderRequestContext,
+    ProviderAdapter, ProviderRequestContext, registry::ProviderRegistry, resolve_base_url_for_type,
 };
 
 // ── AsyncEmbedFn implementation ──────────────────────────────────────────────
@@ -389,6 +389,7 @@ pub async fn index_memory_item(
 ///
 /// Uses the `FromText` chunk strategy since note content is already plain text.
 /// The collection name follows the pattern `wiki_{wiki_id}`.
+#[allow(clippy::too_many_arguments)]
 pub async fn index_wiki_note(
     db: &DatabaseConnection,
     master_key: &[u8; 32],
@@ -428,6 +429,7 @@ pub async fn index_wiki_note(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn index_source(
     db: &DatabaseConnection,
     master_key: &[u8; 32],
@@ -446,7 +448,7 @@ pub async fn index_source(
                 "{} '{}' has no embedding provider configured",
                 container.container_type_str(),
                 container.id
-            )))
+            )));
         },
     };
     let dimensions = config.embedding_dimensions.map(|d| d as usize);
@@ -572,6 +574,7 @@ static RAG_CACHE: std::sync::LazyLock<
 
 const RAG_CACHE_TTL_SECS: u64 = 30;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn collect_rag_context(
     db: &DatabaseConnection,
     master_key: &[u8; 32],

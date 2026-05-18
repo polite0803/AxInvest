@@ -6,6 +6,7 @@ import type { Note } from "@/types";
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, HistoryOutlined, SaveOutlined } from "@ant-design/icons";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button, message, Modal, Popconfirm, Select, Spin, theme } from "antd";
+import DOMPurify from "dompurify";
 import { ArrowLeft, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -117,18 +118,21 @@ export function WikiEditorPage({ noteId, onBack }: WikiEditorPageProps) {
         const currentNotes = useWikiStore.getState().notes;
 
         const suggestions = currentNotes
-          .filter((n) => n.id !== noteId && n.title.toLowerCase().includes(search))
-          .map((n) => ({
-            kind: window.monaco.languages.CompletionItemKind.Reference,
-            label: n.title,
-            insertText: `[[${n.title}]]`,
-            range: {
-              startLineNumber: position.lineNumber,
-              startColumn: openBracketCol,
-              endLineNumber: position.lineNumber,
-              endColumn: position.column,
-            },
-          }));
+          .flatMap((n) =>
+            n.id !== noteId && n.title.toLowerCase().includes(search)
+              ? [{
+                kind: window.monaco.languages.CompletionItemKind.Reference,
+                label: n.title,
+                insertText: `[[${n.title}]]`,
+                range: {
+                  startLineNumber: position.lineNumber,
+                  startColumn: openBracketCol,
+                  endLineNumber: position.lineNumber,
+                  endColumn: position.column,
+                },
+              }]
+              : []
+          );
 
         return { suggestions };
       },
@@ -197,8 +201,7 @@ export function WikiEditorPage({ noteId, onBack }: WikiEditorPageProps) {
   }
 
   const noteOptions = notes
-    .filter((n) => n.id !== noteId)
-    .map((n) => ({ value: n.title, label: n.title }));
+    .flatMap((n) => n.id !== noteId ? [{ value: n.title, label: n.title }] : []);
 
   return (
     <div className="h-full flex flex-col" style={{ overflow: "hidden", backgroundColor: token.colorBgElevated }}>
@@ -305,7 +308,7 @@ export function WikiEditorPage({ noteId, onBack }: WikiEditorPageProps) {
                     color: token.colorText,
                     lineHeight: 1.7,
                   }}
-                  dangerouslySetInnerHTML={{ __html: markdownToHtml(content) }}
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(markdownToHtml(content)) }}
                 />
               )
               : (

@@ -127,6 +127,7 @@ impl ModelDownloader {
     }
 
     /// 从 HuggingFace Hub 下载模型文件
+    #[cfg(not(target_os = "android"))]
     async fn download_from_hf(
         &self,
         repo: &str,
@@ -142,7 +143,6 @@ impl ModelDownloader {
                 ))
             })?;
 
-        // hf_hub 的 API 是同步的，用 spawn_blocking 避免阻塞 async 运行时
         let cache_dir = self.cache_dir.clone();
         let repo_id = repo.to_string();
         let fname = filename.to_string();
@@ -165,7 +165,6 @@ impl ModelDownloader {
             crate::error::AxAgentError::ModelDownload(format!("Copy to cache: {}", e))
         })?;
 
-        // SHA256 完整性校验
         if !expected_sha256.is_empty() {
             let actual = Self::sha256_file(&dest)?;
             if actual != expected_sha256 {
@@ -179,6 +178,18 @@ impl ModelDownloader {
 
         tracing::info!(filename = %filename, "Downloaded from HuggingFace Hub");
         Ok(dest)
+    }
+
+    #[cfg(target_os = "android")]
+    async fn download_from_hf(
+        &self,
+        _repo: &str,
+        _filename: &str,
+        _expected_sha256: &str,
+    ) -> Result<PathBuf> {
+        Err(crate::error::AxAgentError::ModelDownload(
+            "HuggingFace Hub is not available on Android".to_string(),
+        ))
     }
 
     /// 从直链下载模型文件（支持断点续传）
@@ -209,16 +220,14 @@ impl ModelDownloader {
 
         let mut request = client.get(url);
         let has_partial = tmp_path.exists();
-        if has_partial {
-            if let Ok(meta) = tokio::fs::metadata(&tmp_path).await {
-                let range = format!("bytes={}-", meta.len());
-                request = request.header("Range", range);
-                tracing::info!(
-                    filename = %filename,
-                    bytes = meta.len(),
-                    "Resuming download"
-                );
-            }
+        if has_partial && let Ok(meta) = tokio::fs::metadata(&tmp_path).await {
+            let range = format!("bytes={}-", meta.len());
+            request = request.header("Range", range);
+            tracing::info!(
+                filename = %filename,
+                bytes = meta.len(),
+                "Resuming download"
+            );
         }
 
         let response = request.send().await.map_err(|e| {

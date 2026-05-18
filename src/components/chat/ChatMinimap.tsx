@@ -201,8 +201,11 @@ function useModelName(model_id?: string | null, providerId?: string | null): str
     if (!model_id) { return ""; }
     for (const p of providers) {
       if (providerId && p.id !== providerId) { continue; }
-      const model = p.models?.find((m) => m.model_id === model_id);
-      if (model) { return model.name || model.model_id; }
+      if (p.models) {
+        for (const m of p.models) {
+          if (m.model_id === model_id) { return m.name || m.model_id; }
+        }
+      }
     }
     const parts = model_id.split("/");
     return parts[parts.length - 1];
@@ -334,6 +337,14 @@ function FaqItem({ entry, isActive, token }: {
       <div
         ref={dotRef}
         onClick={() => scrollTo(entry.msg.id)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            scrollTo(entry.msg.id);
+          }
+        }}
         style={{
           width: 16,
           height: 16,
@@ -347,7 +358,7 @@ function FaqItem({ entry, isActive, token }: {
           color: isActive ? "#fff" : token.colorTextSecondary,
           backgroundColor: isActive ? token.colorPrimary : token.colorFillQuaternary,
           border: `1px solid ${isActive ? token.colorPrimary : token.colorBorderSecondary}`,
-          transition: "all 0.2s",
+          transition: "box-shadow 0.2s, transform 0.2s",
           margin: "0 auto",
           overflow: "hidden",
           ...(hovered && !isActive
@@ -372,6 +383,14 @@ function FaqItem({ entry, isActive, token }: {
       {hovered && createPortal(
         <div
           onClick={() => scrollTo(entry.msg.id)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              scrollTo(entry.msg.id);
+            }
+          }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
           style={getCardStyle()}
@@ -426,6 +445,14 @@ function StickyHeader({ entries }: { entries: MinimapEntry[] }) {
       }}
     >
       <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
         style={{
           display: "flex",
           alignItems: "center",
@@ -505,6 +532,14 @@ function StickyDropdownItem({ entry, isActive, token }: {
   return (
     <div
       onClick={() => scrollTo(entry.msg.id)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          scrollTo(entry.msg.id);
+        }
+      }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -523,7 +558,7 @@ function StickyDropdownItem({ entry, isActive, token }: {
         if (!isActive) { e.currentTarget.style.backgroundColor = isActive ? token.colorPrimaryBg : "transparent"; }
       }}
     >
-      <span style={{ width: 24, textAlign: "right", fontSize: 11, color: token.colorTextQuaternary, flexShrink: 0 }}>
+      <span style={{ width: 24, textAlign: "right", fontSize: 12, color: token.colorTextQuaternary, flexShrink: 0 }}>
         #{entry.index + 1}
       </span>
       <span style={{ flexShrink: 0 }}>

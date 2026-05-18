@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import {
   Alert,
   Button,
@@ -83,7 +83,7 @@ interface CloudProviderPresetDto {
   use_path_style: boolean;
 }
 
-export default function CloudWorkspaceSelector() {
+export function CloudWorkspaceSelector() {
   const { t } = useTranslation();
   const { settings, saveSettings, fetchSettings } = useSettingsStore();
   const [storageType, setStorageType] = useState<CloudStorageType>("s3");
@@ -462,7 +462,7 @@ export default function CloudWorkspaceSelector() {
           {record.conflict && <AlertTriangle size={14} className="text-orange-500" />}
           {record.is_dir
             ? <FolderOpen size={14} className="text-blue-500" />
-            : <Globe size={14} className="text-gray-500" />}
+            : <Globe size={14} className="text-zinc-500" />}
           <span>{name}</span>
           {record.conflict && (
             <Tag color="orange" style={{ marginLeft: 8 }}>

@@ -1,659 +1,77 @@
-import { getConvIcon } from "@/lib/convIcon";
-import { SyncOutlined } from "@ant-design/icons";
-import Actions from "@ant-design/x/es/actions";
-import Bubble from "@ant-design/x/es/bubble";
-import type { BubbleItemType, BubbleListRef, RoleType } from "@ant-design/x/es/bubble/interface";
-import Prompts from "@ant-design/x/es/prompts";
-import { ModelIcon } from "@lobehub/icons";
-import {
-  Alert,
-  App,
-  Avatar,
-  Button,
-  Dropdown,
-  Input,
-  Modal,
-  Popconfirm,
-  Popover,
-  Spin,
-  Tag,
-  theme,
-  Tooltip,
-  Typography,
-} from "antd";
-import type { InputRef } from "antd";
-import {
-  ArrowDown,
-  ArrowDownRight,
-  ArrowLeftRight,
-  ArrowUp,
-  ArrowUpRight,
-  Bot,
-  Brain,
-  ChartNoAxesColumn,
-  Check,
-  ChevronDown,
-  Clock,
-  Code,
-  Coins,
-  Copy,
-  FileCode,
-  FileImage,
-  FileText,
-  FileType,
-  GitBranch,
-  Globe,
-  Languages,
-  Lightbulb,
-  ListTodo,
-  MessageSquare,
-  Pencil,
-  RotateCcw,
-  Scissors,
-  Search,
-  Share2,
-  Sparkles,
-  TextCursorInput,
-  Timer,
-  Trash2,
-  TrendingUp,
-  User,
-  X,
-  Zap,
-} from "lucide-react";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-
+import { listen } from "@tauri-apps/api/event";
+import { App, Button, Input, Modal, Spin, theme } from "antd";
+import DOMPurify from "dompurify";
+import { ChevronDown } from "lucide-react";
 import NodeRenderer from "markstream-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
-import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { ModuleErrorBoundary } from "@/components/layout/ModuleErrorBoundary";
 import { useResolvedDarkMode } from "@/hooks/useResolvedDarkMode";
-import { type ChatMarkdownNode, parseChatMarkdown, stripAxAgentTags } from "@/lib/chatMarkdown";
-import { hasMultipleModelVersions } from "@/lib/chatMultiModel";
-import { parseSearchContent } from "@/lib/searchUtils";
+import { logIpcError } from "@/lib/invoke";
+import { estimateTokens } from "@/lib/tokenEstimator";
 import {
   setupAgentEventListeners,
   setupDreamEventListeners,
   setupPlanEventListeners,
   syncAllStoresToDomain,
-  useAgentProfileStore,
   useAgentStore,
+  useCacheStore,
   useCompressStore,
   useConversationStore,
+  useExpertStore,
   usePlanStore,
   useProviderStore,
   useSettingsStore,
   useStreamStore,
-  useUserProfileStore,
 } from "@/stores";
-import { useContinuationStore } from "@/stores/feature/continuationStore";
-import { useExecutionStore } from "@/stores/feature/executionStore";
-import { useExpertStore } from "@/stores/feature/expertStore";
+import { useAppConfigStore } from "@/stores/feature/appConfigStore";
+import { useProactiveStore } from "@/stores/feature/proactiveStore";
 import { useTopicGroupStore } from "@/stores/feature/topicGroupStore";
-import { useTranslation } from "react-i18next";
-import { formatDuration, formatSpeed, formatTokenCount } from "../gateway/tokenFormat";
-import { ProactiveSuggestionBar } from "../proactive/ProactiveSuggestionBar";
-import { AgentProgressBar } from "./AgentProgressBar";
-import { AskUserCard } from "./AskUserCard";
-import { AttachmentPreview } from "./AttachmentPreview";
-import { BreadcrumbBar } from "./BreadcrumbBar";
-import { ChatMinimap, MinimapScrollProvider } from "./ChatMinimap";
-import {
-  CHAT_SCROLL_IS_REVERSED,
-  getDistanceToHistoryTop,
-  getScrollTopAfterPrepend,
-  hasScrollLayoutMetricsChanged,
-  shouldIgnoreScrollDepartureFromBottom,
-  shouldKeepAutoScroll,
-  shouldShowScrollToBottom,
-  shouldStickToBottomOnLayoutChange,
-} from "./chatScroll";
-import { ChatScrollIndicator } from "./ChatScrollIndicator";
-import { getStreamingLoadingState, shouldRenderAssistantMarkdownFromContent } from "./chatStreaming";
-import { CodeBlockPreviewModal } from "./CodeBlockPreviewModal";
-import { ContextBar, estimateConversationTokens } from "./ContextBar";
-import { ContextGraphPanel } from "./ContextGraphPanel";
-import { DeleteLastVersionPopover } from "./DeleteLastVersionPopover";
-import { ExpertBadge } from "./ExpertBadge";
-import { ExpertSelector } from "./ExpertSelector";
-import { ExtractMemoriesModal } from "./ExtractMemoriesModal";
-import { AgentRoleSelect, InputArea } from "./InputArea";
-import { ModelSelector } from "./ModelSelector";
-import { ModelTags } from "./ModelTags";
-import { LayoutSwitcher, MultiModelDisplay, type MultiModelDisplayMode } from "./MultiModelDisplay";
-import { PermissionCard } from "./PermissionCard";
-import { PermissionModal } from "./PermissionModal";
-import { PlanCard } from "./PlanCard";
-import { QuickCommandBar } from "./QuickCommandBar";
-import { ToolCallCard } from "./ToolCallCard";
-import { buildAssistantDisplayContent, shouldHideAssistantBubble } from "./toolCallDisplay";
-import { TopicGroupDivider } from "./TopicGroupDivider";
-import { VersionPagination } from "./VersionPagination";
-import { WorkflowBadge } from "./WorkflowBadge";
-import { WorkflowEndMarker } from "./WorkflowEndMarker";
-import { WorkflowSuggestionCard } from "./WorkflowSuggestionCard";
 
-import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
-import { invoke } from "@/lib/invoke";
-import type { ConversationStats, Message } from "@/types";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { registerHighlight } from "stream-markdown";
+
+import Bubble from "@ant-design/x/es/bubble";
+import { ContextPredictionPanel } from "../proactive/ContextPredictionPanel";
+import { PrefetchIndicator } from "../proactive/PrefetchIndicator";
+import { ProactiveSuggestionBar } from "../proactive/ProactiveSuggestionBar";
+import { ReminderList } from "../proactive/ReminderList";
+import { AgentProgressBar } from "./AgentProgressBar";
+import { AgentStatsPanel } from "./AgentStatsPanel";
+import { BreadcrumbBar } from "./BreadcrumbBar";
+import { CacheIndicator } from "./CacheIndicator";
 import {
-  AssistantMarkdown,
   type CodeBlockPreviewPayload,
   getChatCodeThemes,
   setCodeBlockPreviewHandler,
   setMermaidOpenModalHandler,
-  THINKING_LOADING_MARKER,
 } from "./ChatMarkdownNodes";
+import { ChatMinimap, MinimapScrollProvider } from "./ChatMinimap";
+import { ChatScrollIndicator } from "./ChatScrollIndicator";
+import { CodeBlockPreviewModal } from "./CodeBlockPreviewModal";
+import { ContextBar, estimateConversationTokens } from "./ContextBar";
+import { ContextClassificationBar } from "./ContextClassificationBar";
+import type { ContextSegment } from "./ContextClassificationBar";
+import { ContextGraphPanel } from "./ContextGraphPanel";
+import { ExpertSelector } from "./ExpertSelector";
+import { ExtractMemoriesModal } from "./ExtractMemoriesModal";
+import { InputArea } from "./InputArea";
+import { PermissionModal } from "./PermissionModal";
+import { PlanCard } from "./PlanCard";
+import { QuickCommandBar } from "./QuickCommandBar";
+import { SteerInput } from "./SteerInput";
+import { WorkflowEndMarker } from "./WorkflowEndMarker";
+import { WorkflowProgressPanel } from "./WorkflowProgressPanel";
+import { WorkflowSuggestionCard } from "./WorkflowSuggestionCard";
 
-function AssistantFooter({
-  msg,
-  conversationId,
-  assistantCopyText,
-  getModelDisplayInfo,
-  onEditMessage,
-  isStreaming = false,
-  displayMode,
-  onDisplayModeChange,
-  onMultiModelDetected,
-}: {
-  msg: Message;
-  conversationId: string;
-  assistantCopyText: string;
-  getModelDisplayInfo: (
-    model_id?: string | null,
-    providerId?: string | null,
-  ) => { modelName: string; providerName: string };
-  onEditMessage: (messageId: string, content: string, role: "user" | "assistant") => void;
-  isStreaming?: boolean;
-  displayMode?: MultiModelDisplayMode;
-  onDisplayModeChange?: (parentMsgId: string, mode: MultiModelDisplayMode) => void;
-  onMultiModelDetected?: (parentMsgId: string, versions: Message[]) => void;
-}) {
-  const { token } = theme.useToken();
-  const { t } = useTranslation();
-  const { message: messageApi } = App.useApp();
-  const [allVersions, setAllVersions] = useState<Message[]>([]);
-  const listMessageVersions = useConversationStore((s) => s.listMessageVersions);
-  const regenerateMessage = useConversationStore((s) => s.regenerateMessage);
-  const regenerateWithModel = useConversationStore((s) => s.regenerateWithModel);
-  const deleteMessageGroup = useConversationStore((s) => s.deleteMessageGroup);
-  const deleteMessage = useConversationStore((s) => s.deleteMessage);
-  const branchConversation = useConversationStore((s) => s.branchConversation);
-  const { copy: copyAssistant, isCopied: assistantCopied } = useCopyToClipboard();
-  // Branch modal state
-  const [branchModalOpen, setBranchModalOpen] = useState(false);
-  const [branchAsChild, setBranchAsChild] = useState(false);
-  const [branchTitle, setBranchTitle] = useState("");
-  const conversations = useConversationStore((s) => s.conversations);
-  const currentConvTitle = conversations.find((c) => c.id === conversationId)?.title ?? "";
-  // Track message count to re-fetch versions when companion messages appear
-  const messagesLength = useConversationStore((s) => s.messages.length);
-  const storeMessages = useConversationStore((s) => s.messages);
-
-  useEffect(() => {
-    if (msg.parent_message_id && conversationId) {
-      listMessageVersions(conversationId, msg.parent_message_id).then((v) => {
-        if (v) { setAllVersions(v); }
-      });
-    }
-  }, [msg.parent_message_id, msg.id, conversationId, listMessageVersions, messagesLength]);
-
-  // Merge DB-fetched versions with in-store companion messages for real-time visibility
-  const mergedVersions = useMemo(() => {
-    if (!msg.parent_message_id) { return allVersions; }
-    const dbIds = new Set(allVersions.map((v) => v.id));
-    const extra = storeMessages.filter(
-      (m) => m.parent_message_id === msg.parent_message_id && m.role === "assistant" && !dbIds.has(m.id) && m.model_id,
-    );
-    return extra.length > 0 ? [...allVersions, ...extra] : allVersions;
-  }, [allVersions, storeMessages, msg.parent_message_id]);
-
-  // Check if this message has multiple model versions
-  const hasMultiModels = useMemo(() => hasMultipleModelVersions(mergedVersions), [mergedVersions]);
-
-  // Report the latest version snapshot to parent so cached multi-model state
-  // can be updated or cleared after deletes/switches.
-  useEffect(() => {
-    if (msg.parent_message_id && onMultiModelDetected) {
-      onMultiModelDetected(msg.parent_message_id, mergedVersions);
-    }
-  }, [msg.parent_message_id, mergedVersions, onMultiModelDetected]);
-
-  // Current message's model for ModelSelector highlight
-  const currentModelOverride = useMemo(() => {
-    if (msg.provider_id && msg.model_id) {
-      return { providerId: msg.provider_id, model_id: msg.model_id };
-    }
-    return null;
-  }, [msg.provider_id, msg.model_id]);
-
-  const handleModelSelect = useCallback(async (providerId: string, model_id: string) => {
-    try {
-      if (providerId === msg.provider_id && model_id === msg.model_id) {
-        // Same model → regular regenerate
-        await regenerateMessage(msg.id);
-      } else {
-        // Different model → generate with new model
-        await regenerateWithModel(msg.id, providerId, model_id);
-      }
-    } catch (e) {
-      messageApi.error(String(e));
-    }
-  }, [msg.id, msg.provider_id, msg.model_id, regenerateMessage, regenerateWithModel, messageApi]);
-  const totalTokens = (msg.prompt_tokens ?? 0) + (msg.completion_tokens ?? 0);
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      {!isStreaming
-        && (msg.prompt_tokens != null || msg.completion_tokens != null || msg.tokens_per_second != null
-          || msg.first_token_latency_ms != null)
-        && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 11,
-              color: token.colorTextDescription,
-              lineHeight: "16px",
-              marginTop: -6,
-              marginBottom: 4,
-              flexWrap: "wrap",
-            }}
-          >
-            {msg.prompt_tokens != null && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <ArrowUp size={10} />
-                <span style={{ textShadow: "0 0 4px rgba(0,240,255,0.3)" }}>{formatTokenCount(msg.prompt_tokens)}</span>
-                {" "}
-                {t("chat.tokens")}
-              </span>
-            )}
-            {msg.completion_tokens != null && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <ArrowDown size={10} />
-                <span style={{ textShadow: "0 0 4px rgba(0,240,255,0.3)" }}>
-                  {formatTokenCount(msg.completion_tokens)}
-                </span>{" "}
-                {t("chat.tokens")}
-              </span>
-            )}
-            {totalTokens > 0 && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <Coins size={10} />
-                {t("chat.totalTokens")}:{" "}
-                <span style={{ textShadow: "0 0 4px rgba(0,240,255,0.3)" }}>{formatTokenCount(totalTokens)}</span>
-              </span>
-            )}
-            {msg.tokens_per_second != null && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <Zap size={10} />
-                {formatSpeed(msg.tokens_per_second)}
-              </span>
-            )}
-            {msg.first_token_latency_ms != null && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <TextCursorInput size={10} />
-                {formatDuration(msg.first_token_latency_ms)}
-              </span>
-            )}
-          </div>
-        )}
-      {!isStreaming && (
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <VersionPagination msg={msg} conversationId={conversationId} allVersions={mergedVersions} />
-          <Actions
-            items={[
-              {
-                key: "copy",
-                icon: assistantCopied ? <Check size={14} style={{ color: token.colorSuccess }} /> : <Copy size={14} />,
-                label: t("chat.copy"),
-                onItemClick: () => {
-                  void copyAssistant(assistantCopyText).then(ok => {
-                    if (ok) { messageApi.success(t("chat.copied")); }
-                  });
-                },
-              },
-              {
-                key: "regenerate",
-                icon: <RotateCcw size={14} />,
-                label: t("chat.regenerate"),
-                onItemClick: async () => {
-                  try {
-                    await regenerateMessage(msg.id);
-                  } catch (e) {
-                    messageApi.error(String(e));
-                  }
-                },
-              },
-              ...(msg.role === "assistant" && msg.status !== "partial"
-                ? [{
-                  key: "continue",
-                  icon: <MessageSquare size={14} />,
-                  label: t("continuation.continueFromHere"),
-                  onItemClick: async () => {
-                    try {
-                      await useContinuationStore.getState().startContinue(conversationId, msg.id, true);
-                    } catch (e) {
-                      messageApi.error(String(e));
-                    }
-                  },
-                }]
-                : []),
-              ...(msg.role === "assistant"
-                ? [{
-                  key: "edit",
-                  icon: <Pencil size={14} />,
-                  label: t("chat.editMessage"),
-                  onItemClick: () => {
-                    onEditMessage(msg.id, msg.content, "assistant");
-                  },
-                }]
-                : []),
-              {
-                key: "model",
-                actionRender: () => (
-                  <ModelSelector
-                    onSelect={handleModelSelect}
-                    overrideCurrentModel={currentModelOverride}
-                  >
-                    <Tooltip title={t("chat.switchModel")}>
-                      <span className="axagent-action-item" style={{ color: token.colorTextSecondary }}>
-                        <ArrowLeftRight size={14} />
-                      </span>
-                    </Tooltip>
-                  </ModelSelector>
-                ),
-              },
-              {
-                key: "branch",
-                actionRender: () => (
-                  <Dropdown
-                    menu={{
-                      items: [
-                        {
-                          key: "independent",
-                          label: t("chat.branchIndependent"),
-                          onClick: () => {
-                            setBranchAsChild(false);
-                            setBranchTitle(currentConvTitle);
-                            setBranchModalOpen(true);
-                          },
-                        },
-                        {
-                          key: "child",
-                          label: t("chat.branchChild"),
-                          onClick: () => {
-                            setBranchAsChild(true);
-                            setBranchTitle(currentConvTitle);
-                            setBranchModalOpen(true);
-                          },
-                        },
-                      ],
-                    }}
-                    trigger={["click"]}
-                    placement="bottom"
-                  >
-                    <Tooltip title={t("chat.branchConversation")}>
-                      <span className="axagent-action-item" style={{ color: token.colorTextSecondary }}>
-                        <GitBranch size={14} />
-                      </span>
-                    </Tooltip>
-                  </Dropdown>
-                ),
-              },
-              {
-                key: "delete",
-                actionRender: () => {
-                  const isLastVersion = mergedVersions.filter((v) => v.id !== msg.id).length === 0;
-
-                  if (isLastVersion) {
-                    // Last version — Popover with 3 buttons
-                    return (
-                      <DeleteLastVersionPopover
-                        msg={msg}
-                        conversationId={conversationId}
-                        deleteMessage={deleteMessage}
-                        deleteMessageGroup={deleteMessageGroup}
-                      />
-                    );
-                  }
-
-                  // Multiple versions — standard Popconfirm
-                  return (
-                    <Popconfirm
-                      title={t("chat.confirmDeleteVersion")}
-                      onConfirm={async () => {
-                        try {
-                          await deleteMessage(msg.id);
-                        } catch (e) {
-                          messageApi.error(String(e));
-                        }
-                      }}
-                      okText={t("common.confirm")}
-                      cancelText={t("common.cancel")}
-                    >
-                      <Tooltip title={t("chat.delete")}>
-                        <span className="axagent-action-item" style={{ color: token.colorError }}>
-                          <Trash2 size={14} />
-                        </span>
-                      </Tooltip>
-                    </Popconfirm>
-                  );
-                },
-              },
-            ]}
-          />
-        </div>
-      )}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-        {hasMultiModels && displayMode && onDisplayModeChange && msg.parent_message_id && (
-          <LayoutSwitcher
-            currentMode={displayMode}
-            onModeChange={(mode) => onDisplayModeChange(msg.parent_message_id!, mode)}
-          />
-        )}
-        <ModelTags
-          msg={msg}
-          conversationId={conversationId}
-          allVersions={mergedVersions}
-          getModelDisplayInfo={getModelDisplayInfo}
-        />
-      </div>
-      <Modal
-        open={branchModalOpen}
-        title={t("chat.branchConversation")}
-        onCancel={() => setBranchModalOpen(false)}
-        onOk={async () => {
-          try {
-            const title = branchTitle.trim() || currentConvTitle;
-            await branchConversation(conversationId, msg.id, branchAsChild, title);
-            messageApi.success(t("chat.branchCreated"));
-            setBranchModalOpen(false);
-          } catch (e) {
-            messageApi.error(String(e));
-          }
-        }}
-        okText={t("common.confirm")}
-        cancelText={t("common.cancel")}
-        width={400}
-        destroyOnHidden
-      >
-        <Input
-          id="chat-view-input-6"
-          value={branchTitle}
-          onChange={(e) => setBranchTitle(e.target.value)}
-          placeholder={t("chat.branchTitlePlaceholder")}
-          autoFocus
-          onPressEnter={async () => {
-            try {
-              const title = branchTitle.trim() || currentConvTitle;
-              await branchConversation(conversationId, msg.id, branchAsChild, title);
-              messageApi.success(t("chat.branchCreated"));
-              setBranchModalOpen(false);
-            } catch (e) {
-              messageApi.error(String(e));
-            }
-          }}
-        />
-      </Modal>
-    </div>
-  );
-}
-
-// ── Export helpers ──────────────────────────────────────────────────────
-
-import {
-  copyTranscript,
-  exportAsHTML,
-  exportAsJSON,
-  exportAsMarkdown,
-  exportAsPNG,
-  exportAsText,
-} from "@/lib/exportChat";
-
-// ── Stats Popover ──────────────────────────────────────────────────────
-
-function StatsPopoverContent({ stats, t, token }: {
-  stats: ConversationStats | null;
-  t: (key: string) => string;
-  token: Record<string, any>;
-}) {
-  if (!stats) {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", padding: "24px 40px" }}>
-        <Spin size="small" />
-      </div>
-    );
-  }
-
-  const items: Array<{
-    icon: React.ReactNode;
-    label: string;
-    value: string;
-    sub?: Array<{ icon: React.ReactNode; label: string; value: string }>;
-  }> = [
-    {
-      icon: <MessageSquare size={14} />,
-      label: t("chat.stats.totalMessages"),
-      value: stats.total_messages.toLocaleString(),
-      sub: [
-        {
-          icon: <User size={12} />,
-          label: t("chat.stats.userMessages"),
-          value: stats.total_user_messages.toLocaleString(),
-        },
-        {
-          icon: <Bot size={12} />,
-          label: t("chat.stats.assistantMessages"),
-          value: stats.total_assistant_messages.toLocaleString(),
-        },
-      ],
-    },
-    {
-      icon: <Coins size={14} />,
-      label: t("chat.stats.totalTokens"),
-      value: formatTokenCount(stats.total_tokens),
-      sub: [
-        {
-          icon: <ArrowUpRight size={12} />,
-          label: t("chat.stats.inputTokens"),
-          value: formatTokenCount(stats.total_prompt_tokens),
-        },
-        {
-          icon: <ArrowDownRight size={12} />,
-          label: t("chat.stats.outputTokens"),
-          value: formatTokenCount(stats.total_completion_tokens),
-        },
-      ],
-    },
-    ...(stats.avg_first_token_latency_ms != null
-      ? [{
-        icon: <Zap size={14} />,
-        label: t("chat.stats.avgFirstToken"),
-        value: formatDuration(stats.avg_first_token_latency_ms),
-      }]
-      : []),
-    ...(stats.avg_response_time_ms != null
-      ? [{
-        icon: <Clock size={14} />,
-        label: t("chat.stats.avgResponseTime"),
-        value: formatDuration(stats.avg_response_time_ms),
-      }]
-      : []),
-    ...(stats.avg_tokens_per_second != null
-      ? [{
-        icon: <Timer size={14} />,
-        label: t("chat.stats.avgSpeed"),
-        value: formatSpeed(stats.avg_tokens_per_second),
-      }]
-      : []),
-  ];
-
-  return (
-    <div style={{ minWidth: 220, maxWidth: 280 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
-        <ChartNoAxesColumn size={14} />
-        {t("chat.stats.title")}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {items.map((item, i) => (
-          <div key={i}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 13,
-                  color: token.colorTextSecondary,
-                }}
-              >
-                {item.icon}
-                {item.label}
-              </span>
-              <span style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-                {item.value}
-              </span>
-            </div>
-            {item.sub && (
-              <div style={{ marginLeft: 20, marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
-                {item.sub.map((s, j) => (
-                  <div
-                    key={j}
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
-                  >
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: 12,
-                        color: token.colorTextDescription,
-                      }}
-                    >
-                      {s.icon}
-                      {s.label}
-                    </span>
-                    <span style={{ fontSize: 12, color: token.colorTextSecondary, fontVariantNumeric: "tabular-nums" }}>
-                      {s.value}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {i < items.length - 1 && (
-              <div style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, marginTop: 10 }} />
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Component ──────────────────────────────────────────────────────────
+import { useChatViewMessages } from "./ChatViewMessages";
+import { BubbleStyleOverrides, StreamingStyles } from "./ChatViewStreaming";
+import { ChatViewToolbar } from "./ChatViewToolbar";
+import { ChatViewWelcome } from "./ChatViewWelcome";
+import { FilePermissionDialog } from "./FilePermissionDialog";
+import type { FilePermissionRequest } from "./FilePermissionDialog";
+import { useChatViewActions } from "./useChatViewActions";
+import { useChatViewScroll } from "./useChatViewScroll";
 
 function ChatViewInner({ onScrollToReady }: {
   onScrollToReady?: (
@@ -664,7 +82,6 @@ function ChatViewInner({ onScrollToReady }: {
   const { token } = theme.useToken();
   const { message: messageApi } = App.useApp();
 
-  // ── Store selectors ────────────────────────────────────────────────
   const conversations = useConversationStore((s) => s.conversations);
   const activeConversationId = useConversationStore((s) => s.activeConversationId);
   const setActiveConversation = useConversationStore((s) => s.setActiveConversation);
@@ -675,296 +92,79 @@ function ChatViewInner({ onScrollToReady }: {
   const activeStreams = useStreamStore((s) => s.activeStreams);
   const streaming = activeConversationId ? (activeConversationId in activeStreams) : false;
   const compressing = useCompressStore((s) => s.compressing);
-
-  // 虚拟滚动：限制渲染数量，防止超大对话 DOM 爆炸
-  const ESTIMATED_BUBBLE_HEIGHT = 200;
-  const VIRTUAL_OVERSCAN = 8;
-  const streamingMessageId = useStreamStore((s) => s.streamingMessageId);
-  const multiModelParentId = useConversationStore((s) => s.multiModelParentId);
-  const multiModelDoneMessageIds = useConversationStore((s) => s.multiModelDoneMessageIds);
-  const thinkingActiveMessageIds = useStreamStore((s) => s.thinkingActiveMessageIds);
+  const settings = useSettingsStore((s) => s.settings);
+  const bubbleStyle = settings.bubble_style;
+  const providers = useProviderStore((s) => s.providers);
+  const isDarkMode = useResolvedDarkMode(settings.theme_mode);
   const storeError = useConversationStore((s) => s.error);
   const updateConversation = useConversationStore((s) => s.updateConversation);
   const fetchConversation = useConversationStore((s) => s.fetchConversations);
   const toggleArchive = useConversationStore((s) => s.toggleArchive);
-  const titleGeneratingConversationId = useConversationStore((s) => s.titleGeneratingConversationId);
-  const regenerateTitle = useConversationStore((s) => s.regenerateTitle);
   const loadOlderMessages = useConversationStore((s) => s.loadOlderMessages);
-  const regenerateMessage = useConversationStore((s) => s.regenerateMessage);
-  const deleteMessage = useConversationStore((s) => s.deleteMessage);
-  const deleteMessageGroup = useConversationStore((s) => s.deleteMessageGroup);
-  const switchMessageVersion = useConversationStore((s) => s.switchMessageVersion);
-  const updateMessageContent = useConversationStore((s) => s.updateMessageContent);
-  const removeContextClear = useConversationStore((s) => s.removeContextClear);
-  const getCompressionSummary = useCompressStore((s) => s.getCompressionSummary);
-  const deleteCompression = useCompressStore((s) => s.deleteCompression);
-  const [summaryModalOpen, setSummaryModalOpen] = useState(false);
-  const [summaryModalText, setSummaryModalText] = useState("");
-  const [extractMemoriesOpen, setExtractMemoriesOpen] = useState(false);
-  const [previewPayload, setPreviewPayload] = useState<CodeBlockPreviewPayload | null>(null);
-  const [previewModalOpen, setPreviewModalOpen] = useState(false);
-  const [mermaidPreviewSvg, setMermaidPreviewSvg] = useState<string | null>(null);
-  const [mermaidPreviewOpen, setMermaidPreviewOpen] = useState(false);
-  const [toolCount, setToolCount] = useState(0);
+  const streamingMessageId = useStreamStore((s) => s.streamingMessageId);
+  const cacheStore = useCacheStore();
+  const fetchCacheState = useCacheStore((s) => s.fetchCacheState);
 
-  useEffect(() => {
-    invoke<number>("get_tool_count").then(setToolCount).catch(() => {});
-  }, []);
-  const createConversation = useConversationStore((s) => s.createConversation);
-  const providers = useProviderStore((s) => s.providers);
-  const providersLoading = useProviderStore((s) => s.loading);
-  const settings = useSettingsStore((s) => s.settings);
-  const bubbleStyle = settings.bubble_style;
-  const profile = useUserProfileStore((s) => s.profile);
-  const resolvedAvatarSrc = useResolvedAvatarSrc(profile.avatarType, profile.avatarValue);
-  const isDarkMode = useResolvedDarkMode(settings.theme_mode);
-  const { copy: copyMessage, isCopiedFor: isUserMsgCopied } = useCopyToClipboard();
+  const activeConversation = conversations.find((c) => c.id === activeConversationId);
+
+  // 合并 preview 模态框状态，避免级联 setState
+  const [previewState, setPreviewState] = useState<{ payload: CodeBlockPreviewPayload | null; open: boolean }>({
+    payload: null,
+    open: false,
+  });
+  // 合并 mermaid 预览模态框状态，避免级联 setState
+  const [mermaidState, setMermaidState] = useState<{ svg: string | null; open: boolean }>({
+    svg: null,
+    open: false,
+  });
+
+  const [filePermDialogOpen, setFilePermDialogOpen] = useState(false);
+  const [filePermRequest, setFilePermRequest] = useState<FilePermissionRequest | null>(null);
+
   const { darkTheme: codeBlockDarkTheme, lightTheme: codeBlockLightTheme, themes: codeBlockThemes } = useMemo(
     () => getChatCodeThemes(settings.code_theme, settings.code_theme_light),
     [settings.code_theme, settings.code_theme_light],
   );
+
   const bubbleListThemeKey = `bubble-list:${isDarkMode ? "dark" : "light"}:${settings.code_theme ?? ""}:${
     settings.code_theme_light ?? ""
   }`;
 
-  // Pre-load Shiki themes into the singleton highlighter when theme settings change
   useEffect(() => {
     if (codeBlockThemes.length > 0) {
-      registerHighlight({ themes: codeBlockThemes as import("@shikijs/types").ThemeInput[] }).catch(() => {});
+      registerHighlight({ themes: codeBlockThemes as import("@shikijs/types").ThemeInput[] }).catch(
+        logIpcError("preload_highlight_themes"),
+      );
     }
   }, [codeBlockThemes, codeBlockDarkTheme, codeBlockLightTheme, isDarkMode]);
 
-  // Register module-level preview handler for code blocks
   useEffect(() => {
     setCodeBlockPreviewHandler((payload: CodeBlockPreviewPayload) => {
-      setPreviewPayload(payload);
-      setPreviewModalOpen(true);
+      setPreviewState({ payload, open: true });
     });
     return () => {
       setCodeBlockPreviewHandler(null);
     };
   }, []);
 
-  // Register module-level preview handler for mermaid
   useEffect(() => {
     setMermaidOpenModalHandler((svgString: string | null) => {
-      setMermaidPreviewSvg(svgString);
-      setMermaidPreviewOpen(true);
+      setMermaidState({ svg: svgString, open: true });
     });
     return () => {
       setMermaidOpenModalHandler(null);
     };
   }, []);
 
-  const activeConversation = conversations.find((c) => c.id === activeConversationId);
-  const isTitleGenerating = activeConversationId != null && titleGeneratingConversationId === activeConversationId;
-
-  const [expertOpen, setExpertOpen] = useState(false);
-
-  const renderConvIconForChat = useCallback((size: number, model_id?: string | null) => {
-    if (!activeConversation) {
-      return <Avatar icon={<Bot size={16} />} style={{ background: token.colorPrimary }} size={size} />;
-    }
-    const customIcon = getConvIcon(activeConversation.id);
-    if (customIcon) {
-      if (customIcon.type === "emoji") {
-        return (
-          <Avatar size={size} style={{ fontSize: Math.round(size * 0.5), backgroundColor: token.colorPrimaryBg }}>
-            {customIcon.value}
-          </Avatar>
-        );
-      }
-      return <Avatar size={size} src={customIcon.value} />;
-    }
-    const mid = model_id ?? activeConversation.model_id;
-    if (mid) {
-      return <ModelIcon model={mid} size={size} type="avatar" />;
-    }
-    return <Avatar icon={<Bot size={16} />} style={{ background: token.colorPrimary }} size={size} />;
-  }, [activeConversation, token.colorPrimary, token.colorPrimaryBg]);
-
-  // ── User avatar helper (mirrors Sidebar.tsx pattern) ───────────────
-  const renderUserAvatar = useCallback(() => {
-    const size = 32;
-    if (profile.avatarType === "emoji" && profile.avatarValue) {
-      return (
-        <div
-          style={{
-            width: size,
-            height: size,
-            borderRadius: "50%",
-            backgroundColor: token.colorFillSecondary,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-          }}
-        >
-          {profile.avatarValue}
-        </div>
-      );
-    }
-    if ((profile.avatarType === "url" || profile.avatarType === "file") && profile.avatarValue) {
-      const src = profile.avatarType === "file" ? resolvedAvatarSrc : profile.avatarValue;
-      return <Avatar size={size} src={src} />;
-    }
-    return <Avatar size={size} icon={<User size={16} />} style={{ backgroundColor: token.colorPrimary }} />;
-  }, [profile, token, resolvedAvatarSrc]);
-  const userAvatar = useMemo(() => renderUserAvatar(), [renderUserAvatar]);
-
-  // ── Bubble style variant helper ────────────────────────────────────
-  const getBubbleVariant = useCallback(
-    (isUser: boolean): { variant: "filled" | "outlined" | "shadow" | "borderless"; style?: React.CSSProperties } => {
-      switch (bubbleStyle) {
-        case "compact":
-          return { variant: "borderless" };
-        case "minimal":
-          return { variant: "borderless", style: { padding: "4px 8px" } };
-        case "modern":
-        default:
-          return { variant: isUser ? "shadow" : "outlined" };
-      }
-    },
-    [bubbleStyle],
-  );
-
-  // ── Title editing state ────────────────────────────────────────────
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const [stickToBottom, setStickToBottom] = useState(true);
-  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingMessageRole, setEditingMessageRole] = useState<"user" | "assistant" | null>(null);
-  const [editingContent, setEditingContent] = useState("");
-  const [editSaving, setEditSaving] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const titleInputRef = useRef<InputRef>(null);
-  const skipTitleSaveRef = useRef(false);
-
-  // ── Stats popover state ─────────────────────────────────────────────
-  const [statsOpen, setStatsOpen] = useState(false);
-  const [stats, setStats] = useState<ConversationStats | null>(null);
-  const handleStatsOpenChange = useCallback(async (open: boolean) => {
-    setStatsOpen(open);
-    if (open && activeConversationId) {
-      setStats(null);
-      try {
-        const data = await invoke<ConversationStats>("get_conversation_stats", {
-          conversationId: activeConversationId,
-        }, 5_000);
-        setStats(data);
-      } catch {
-        setStats(null);
-      }
-    }
-  }, [activeConversationId]);
-
-  // ── Topic group toggle ─────────────────────────────────────────────
-  const topicGroupEnabled = useTopicGroupStore((s) =>
-    activeConversationId ? s.enabledByConversation[activeConversationId] : false
-  );
-  const handleTopicGroupToggle = useCallback(() => {
-    if (!activeConversationId) { return; }
-    const enabled = !topicGroupEnabled;
-    useTopicGroupStore.getState().setEnabled(activeConversationId, enabled);
-    if (enabled) {
-      useTopicGroupStore.getState().autoDetect(activeConversationId);
-    }
-  }, [activeConversationId, topicGroupEnabled]);
-
-  const messageAreaRef = useRef<HTMLDivElement>(null);
-  const bubbleListRef = useRef<BubbleListRef | null>(null);
-  const scrollBoxRef = useRef<HTMLElement | null>(null);
-  const scrollContentRef = useRef<HTMLElement | null>(null);
-  const pendingScrollConversationIdRef = useRef<string | null>(activeConversationId ?? null);
-  const stickToBottomRef = useRef(stickToBottom);
-  const scrollLayoutMetricsRef = useRef({ scrollHeight: 0, clientHeight: 0 });
-  const lastUserScrollIntentAtRef = useRef(0);
-  const contentRendererMessageIdsRef = useRef<Set<string>>(new Set());
-
-  const markUserScrollIntent = useCallback(() => {
-    lastUserScrollIntentAtRef.current = Date.now();
-  }, []);
-
-  // Keep scrollBoxRef in sync with bubbleListRef
   useEffect(() => {
-    scrollBoxRef.current = (bubbleListRef.current?.scrollBoxNativeElement as HTMLElement) ?? null;
-    scrollContentRef.current = (scrollBoxRef.current?.firstElementChild as HTMLElement | null) ?? null;
-  });
+    fetchCacheState();
+  }, [fetchCacheState, activeConversationId]);
 
-  useEffect(() => {
-    stickToBottomRef.current = stickToBottom;
-  }, [stickToBottom]);
-
-  useEffect(() => {
-    const scrollBox = scrollBoxRef.current;
-    if (!scrollBox) { return; }
-
-    const handleUserIntent = () => {
-      markUserScrollIntent();
-    };
-
-    scrollBox.addEventListener("wheel", handleUserIntent, { passive: true });
-    scrollBox.addEventListener("touchstart", handleUserIntent, { passive: true });
-    scrollBox.addEventListener("touchmove", handleUserIntent, { passive: true });
-    scrollBox.addEventListener("pointerdown", handleUserIntent, { passive: true });
-
-    return () => {
-      scrollBox.removeEventListener("wheel", handleUserIntent);
-      scrollBox.removeEventListener("touchstart", handleUserIntent);
-      scrollBox.removeEventListener("touchmove", handleUserIntent);
-      scrollBox.removeEventListener("pointerdown", handleUserIntent);
-    };
-  }, [activeConversationId, bubbleListThemeKey, markUserScrollIntent, messages.length]);
-
-  // Scroll callback for ChatMinimap — finds bubble DOM element by message ID
-  const minimapScrollTo = useCallback((messageId: string) => {
-    // scrollBoxRef may not be populated yet on first load; fall back to DOM query
-    let scrollBox = scrollBoxRef.current;
-    if (!scrollBox) {
-      scrollBox = (bubbleListRef.current?.scrollBoxNativeElement as HTMLElement)
-        ?? document.querySelector<HTMLElement>(".ant-bubble-list-scroll-box");
-      if (scrollBox) { scrollBoxRef.current = scrollBox; }
-    }
-    if (!scrollBox) { return; }
-    const marker = scrollBox.querySelector(`[data-axagent-msg="${messageId}"]`);
-    if (!marker) { return; }
-    // Walk up from marker to find the bubble wrapper (near-child of scrollBox)
-    let el: Element = marker;
-    for (;;) {
-      const parent = el.parentElement;
-      if (!parent || parent === scrollBox) { break; }
-      if (parent.parentElement === scrollBox) { break; }
-      el = parent;
-    }
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
-  // 将 scrollTo 能力和 scrollBoxRef 暴露给父组件，供右侧面板点击跳转使用
-  useEffect(() => {
-    onScrollToReady?.({ scrollTo: minimapScrollTo, scrollBoxRef });
-  }, [minimapScrollTo]);
-
-  useEffect(() => {
-    if (editingTitle && titleInputRef.current) {
-      titleInputRef.current.focus();
-    }
-  }, [editingTitle]);
-
-  useEffect(() => {
-    pendingScrollConversationIdRef.current = activeConversationId ?? null;
-    setShowScrollToBottom(false);
-    setStickToBottom(true);
-    scrollLayoutMetricsRef.current = { scrollHeight: 0, clientHeight: 0 };
-    contentRendererMessageIdsRef.current.clear();
-  }, [activeConversationId]);
-
-  // Auto-load active plan from DB when conversation switches (for app restart recovery)
   useEffect(() => {
     if (!activeConversationId) { return; }
     const conversation = conversations.find((c) => c.id === activeConversationId);
     if (conversation?.mode === "agent") {
       const { activePlans, loadActivePlan } = usePlanStore.getState();
-      // Only load if we don't already have a plan in memory
       if (!activePlans[activeConversationId]) {
         void loadActivePlan(activeConversationId);
       }
@@ -972,32 +172,11 @@ function ChatViewInner({ onScrollToReady }: {
   }, [activeConversationId, conversations]);
 
   useEffect(() => {
-    if (!streaming || !streamingMessageId) {
-      return;
-    }
-    contentRendererMessageIdsRef.current.add(streamingMessageId);
-  }, [streaming, streamingMessageId]);
-
-  const syncScrollToBottomVisibility = useCallback(() => {
-    const target = scrollBoxRef.current;
-    if (!target) { return; }
-    const nextShowScrollToBottom = shouldShowScrollToBottom(
-      target.scrollHeight,
-      target.scrollTop,
-      target.clientHeight,
-      CHAT_SCROLL_IS_REVERSED,
-    );
-    setShowScrollToBottom((prev) => (prev === nextShowScrollToBottom ? prev : nextShowScrollToBottom));
-  }, []);
-
-  // Load agent tool history from DB on conversation switch
-  useEffect(() => {
     if (activeConversation?.mode === "agent" && activeConversationId) {
       useAgentStore.getState().loadToolHistory(activeConversationId);
     }
   }, [activeConversationId, activeConversation?.mode]);
 
-  // Show store errors as notifications
   useEffect(() => {
     if (storeError) {
       messageApi.error(storeError);
@@ -1005,7 +184,6 @@ function ChatViewInner({ onScrollToReady }: {
     }
   }, [storeError, messageApi]);
 
-  // ── Agent + Plan + Dream event listeners ──────────────────────────────
   useEffect(() => {
     const cleanupAgent = setupAgentEventListeners();
     const cleanupPlan = setupPlanEventListeners();
@@ -1018,1908 +196,349 @@ function ChatViewInner({ onScrollToReady }: {
     };
   }, []);
 
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<FilePermissionRequest>("file-permission-request", (event) => {
+      setFilePermRequest(event.payload);
+      setFilePermDialogOpen(true);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  const prevMessageCount = useRef(messages.length);
+
+  const buildChatContext = (): Record<string, unknown> => {
+    const now = new Date();
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+    const content = lastUserMsg?.content || "";
+
+    const fileRegex = /[\w/\\-]+\.(tsx?|jsx?|py|rs|go|java|rb|php|html|css|json|yml|yaml|md|sql|sh)/gi;
+    const fileMatches = content.match(fileRegex) || [];
+
+    const langMap: Record<string, string> = {
+      ts: "typescript",
+      tsx: "typescript",
+      js: "javascript",
+      jsx: "javascript",
+      py: "python",
+      rs: "rust",
+      go: "go",
+      java: "java",
+      rb: "ruby",
+      php: "php",
+      html: "html",
+      css: "css",
+      json: "json",
+      yml: "yaml",
+      yaml: "yaml",
+      md: "markdown",
+      sql: "sql",
+      sh: "shell",
+    };
+
+    const current_file = fileMatches.length > 0 ? fileMatches[0] : null;
+    let current_language = null;
+    if (current_file) {
+      const ext = current_file.split(".").pop()?.toLowerCase() || "";
+      current_language = langMap[ext] || null;
+    }
+
+    const recent_actions: string[] = [];
+    if (messages.length > 0) { recent_actions.push("UserMessaged"); }
+    if (
+      content.includes("error") || content.includes("Error") || content.includes("bug") || content.includes("修复")
+      || content.includes("报错")
+    ) {
+      recent_actions.push("ErrorDetected");
+    }
+    if (
+      content.includes("refactor") || content.includes("优化") || content.includes("重构")
+      || content.includes("improve")
+    ) {
+      recent_actions.push("RefactorKeyword");
+    }
+    if (content.includes("test") || content.includes("测试") || content.includes("spec")) {
+      recent_actions.push("TestKeyword");
+    }
+    if (
+      content.includes("document") || content.includes("文档") || content.includes("readme") || content.includes("doc")
+    ) {
+      recent_actions.push("DocKeyword");
+    }
+    if (fileMatches.length > 0) { recent_actions.push("FileOpened"); }
+
+    const detected_errors = content.toLowerCase().includes("error") || content.includes("报错")
+      ? ["error_detected_in_context"]
+      : [];
+    const detected_patterns = fileMatches.map((f) => ({
+      pattern: `file_reference_${f}`,
+      match_type: "file_reference",
+    }));
+
+    const activity = messages.length > 0 && now.getTime() / 1000 - (lastUserMsg?.created_at || 0) < 60
+      ? "high" as const
+      : "medium" as const;
+
+    const projectTypeMap: Record<string, string> = {
+      ts: "typescript",
+      tsx: "typescript",
+      js: "javascript",
+      jsx: "javascript",
+      py: "python",
+      rs: "rust",
+      go: "go",
+      java: "java",
+      rb: "ruby",
+      php: "php",
+    };
+    let project_type: string | null = null;
+    if (fileMatches.length > 0) {
+      const exts = fileMatches.flatMap((f) => {
+        const r = f.split(".").pop()?.toLowerCase();
+        return r ? [r] : [];
+      });
+      const counts = new Map<string, number>();
+      for (const ext of exts) {
+        counts.set(ext, (counts.get(ext) || 0) + 1);
+      }
+      let dominantExt = "";
+      let dominantCount = 0;
+      for (const [ext, cnt] of counts) {
+        if (cnt > dominantCount) {
+          dominantCount = cnt;
+          dominantExt = ext;
+        }
+      }
+      if (dominantExt && projectTypeMap[dominantExt]) {
+        project_type = projectTypeMap[dominantExt];
+      }
+    }
+
+    return {
+      current_file,
+      current_language,
+      recent_actions,
+      time_of_day: now.getHours(),
+      day_of_week: now.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase(),
+      project_type,
+      user_activity_level: activity,
+      detected_errors,
+      detected_patterns,
+    };
+  };
+
+  useEffect(() => {
+    if (
+      useAppConfigStore.getState().features.proactiveMode
+      && messages.length > prevMessageCount.current
+      && activeConversationId
+    ) {
+      const { refreshSuggestions } = useProactiveStore.getState();
+      refreshSuggestions(buildChatContext());
+    }
+    prevMessageCount.current = messages.length;
+  }, [messages.length, activeConversationId]);
+
   const currentAgentStatus = useAgentStore(
     (s) => (activeConversationId ? s.agentStatus[activeConversationId] : undefined),
   );
 
-  const agentToolCalls = useExecutionStore((s) => s.toolCalls);
-  const agentPendingPermissions = useAgentStore((s) => s.pendingPermissions);
-  const agentPendingAskUser = useAgentStore((s) => s.pendingAskUser);
+  const bubbleListRef = useRef<any>(null);
+  const messageAreaRef = useRef<HTMLDivElement | null>(null);
 
-  const handleTitleClick = useCallback(() => {
-    if (!activeConversation) { return; }
-    setTitleDraft(activeConversation.title);
-    setEditingTitle(true);
-  }, [activeConversation]);
+  const actions = useChatViewActions({
+    activeConversationId,
+    activeConversation,
+    messages,
+    bubbleListRef,
+    messageAreaRef,
+    loadOlderMessages,
+  });
 
-  const handleTitleSave = useCallback(async () => {
-    if (skipTitleSaveRef.current) {
-      skipTitleSaveRef.current = false;
-      return;
-    }
-    setEditingTitle(false);
-    const trimmed = titleDraft.trim();
-    if (!trimmed || !activeConversation || trimmed === activeConversation.title) { return; }
-    await updateConversation(activeConversation.id, { title: trimmed });
-  }, [titleDraft, activeConversation, updateConversation]);
+  const contextBarModel = useMemo(() => {
+    if (!activeConversation) { return null; }
+    const provider = providers.find((p) => p.id === activeConversation.provider_id);
+    const model = provider?.models.find((m) => m.model_id === activeConversation.model_id);
+    return {
+      name: model?.name ?? activeConversation.model_id,
+      maxTokens: model?.max_tokens ?? activeConversation.max_tokens ?? undefined,
+    };
+  }, [activeConversation, providers]);
 
-  const handleRegenerateTitle = useCallback(async () => {
-    if (!activeConversation || isTitleGenerating) { return; }
-    skipTitleSaveRef.current = true;
-    setEditingTitle(false);
-    await regenerateTitle(activeConversation.id);
-  }, [activeConversation, isTitleGenerating, regenerateTitle]);
+  const topicGroupEnabled = useTopicGroupStore((s) =>
+    activeConversationId ? s.enabledByConversation[activeConversationId] : false
+  );
 
-  const handleLoadOlderMessages = useCallback(async () => {
-    const scrollContainer = bubbleListRef.current?.scrollBoxNativeElement as HTMLDivElement | null | undefined;
-    const previousScrollHeight = scrollContainer?.scrollHeight ?? 0;
-    const previousScrollTop = scrollContainer?.scrollTop ?? 0;
-    await loadOlderMessages();
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        if (!scrollContainer) { return; }
-        scrollContainer.scrollTop = getScrollTopAfterPrepend(
-          previousScrollTop,
-          previousScrollHeight,
-          scrollContainer.scrollHeight,
-          CHAT_SCROLL_IS_REVERSED,
-        );
-      });
-    });
-  }, [loadOlderMessages]);
+  const msgState = useChatViewMessages({
+    activeConversationId,
+    activeConversation,
+    messages,
+    streaming,
+    compressing,
+    bubbleStyle,
+    bubbleListRef,
+    handleEditMessage: actions.handleEditMessage,
+  });
 
-  const handleBubbleListScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget;
-    setShowScrollToBottom(
-      shouldShowScrollToBottom(
-        target.scrollHeight,
-        target.scrollTop,
-        target.clientHeight,
-        CHAT_SCROLL_IS_REVERSED,
-      ),
-    );
-    const keepAutoScroll = shouldKeepAutoScroll(
-      target.scrollHeight,
-      target.scrollTop,
-      target.clientHeight,
-      CHAT_SCROLL_IS_REVERSED,
-      1,
-    );
-    const hadRecentUserScrollIntent = Date.now() - lastUserScrollIntentAtRef.current < 250;
-    if (
-      shouldIgnoreScrollDepartureFromBottom(
-        keepAutoScroll,
-        stickToBottomRef.current,
-        hadRecentUserScrollIntent,
-      )
-    ) {
-      bubbleListRef.current?.scrollTo({ top: "bottom", behavior: "auto" });
-      setShowScrollToBottom(false);
-      return;
-    }
-    if (keepAutoScroll !== stickToBottomRef.current) {
-      setStickToBottom(keepAutoScroll);
-    }
-    if (!hasOlderMessages || loading || loadingOlder) { return; }
-    const distanceToHistoryTop = getDistanceToHistoryTop(
-      target.scrollHeight,
-      target.scrollTop,
-      target.clientHeight,
-      CHAT_SCROLL_IS_REVERSED,
-    );
-    if (distanceToHistoryTop > 24) { return; }
-    void handleLoadOlderMessages();
-  }, [handleLoadOlderMessages, hasOlderMessages, loading, loadingOlder]);
-
-  const handleScrollToBottom = useCallback(() => {
-    bubbleListRef.current?.scrollTo({ top: "bottom", behavior: "smooth" });
-    setShowScrollToBottom(false);
-    setStickToBottom(true);
-  }, []);
+  const scroll = useChatViewScroll({
+    bubbleListRef,
+    activeConversationId,
+    bubbleListThemeKey,
+    messageCount: messages.length,
+    streaming,
+    hasOlderMessages,
+    loading,
+    loadingOlder,
+    loadOlderMessages,
+    allBubbleItems: msgState.allBubbleItems,
+    lastBubbleKey: msgState.lastBubbleKey,
+  });
 
   useEffect(() => {
-    const scrollBox = scrollBoxRef.current;
-    const scrollContent = scrollContentRef.current;
-    if (!scrollBox || !scrollContent || typeof ResizeObserver === "undefined") { return; }
+    onScrollToReady?.({ scrollTo: scroll.minimapScrollTo, scrollBoxRef: scroll.scrollBoxRef });
+  }, [scroll.minimapScrollTo]);
 
-    scrollLayoutMetricsRef.current = {
-      scrollHeight: scrollBox.scrollHeight,
-      clientHeight: scrollBox.clientHeight,
-    };
-
-    let frameId = 0;
-
-    const handleLayoutResize = () => {
-      frameId = 0;
-      const target = scrollBoxRef.current;
-      if (!target) { return; }
-
-      const nextMetrics = {
-        scrollHeight: target.scrollHeight,
-        clientHeight: target.clientHeight,
-      };
-      const previousMetrics = scrollLayoutMetricsRef.current;
-
-      if (!hasScrollLayoutMetricsChanged(previousMetrics, nextMetrics)) {
-        return;
-      }
-
-      scrollLayoutMetricsRef.current = nextMetrics;
-
-      if (shouldStickToBottomOnLayoutChange(previousMetrics, nextMetrics, stickToBottomRef.current)) {
-        bubbleListRef.current?.scrollTo({ top: "bottom", behavior: "auto" });
-        setShowScrollToBottom(false);
-        return;
-      }
-
-      syncScrollToBottomVisibility();
-    };
-
-    const observer = new ResizeObserver(() => {
-      if (frameId) {
-        window.cancelAnimationFrame(frameId);
-      }
-      frameId = window.requestAnimationFrame(handleLayoutResize);
-    });
-
-    observer.observe(scrollBox);
-    observer.observe(scrollContent);
-
-    return () => {
-      observer.disconnect();
-      if (frameId) {
-        window.cancelAnimationFrame(frameId);
-      }
-    };
-  }, [activeConversationId, bubbleListThemeKey, messages.length, syncScrollToBottomVisibility]);
-
-  // Scroll to bottom when streaming starts (user sent a message while scrolled up)
-  const prevStreamingRef = useRef(false);
-  useEffect(() => {
-    if (streaming && !prevStreamingRef.current) {
-      // Delay to let the new message bubble render before scrolling
-      setTimeout(() => {
-        bubbleListRef.current?.scrollTo({ top: "bottom", behavior: "smooth" });
-        setShowScrollToBottom(false);
-        setStickToBottom(true);
-      }, 50);
-    }
-    prevStreamingRef.current = streaming;
-  }, [streaming]);
-
-  // ── Export menu ────────────────────────────────────────────────────
-  const exportMenuItems = useMemo(
-    () => [
-      {
-        key: "copy-md",
-        label: t("chat.copyMarkdown"),
-        icon: <Copy size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await copyTranscript(messages, activeConversation?.title ?? "chat", "markdown", {
-              includeThinking: false,
-            });
-            if (ok) { messageApi.success(t("chat.copied")); }
-          } catch (e) {
-            console.error("Copy MD failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "png",
-        label: t("chat.exportPng"),
-        icon: <FileImage size={14} />,
-        onClick: async () => {
-          try {
-            const ok = await exportAsPNG(messageAreaRef.current, activeConversation?.title ?? "chat");
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export PNG failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "md",
-        label: t("chat.exportMd"),
-        icon: <FileCode size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsMarkdown(messages, activeConversation?.title ?? "chat");
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export MD failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "export-md-no-thinking",
-        label: t("chat.exportMdNoThinking"),
-        icon: <FileCode size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsMarkdown(messages, activeConversation?.title ?? "chat", {
-              includeThinking: false,
-            });
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export MD (no thinking) failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "txt",
-        label: t("chat.exportTxt"),
-        icon: <FileType size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsText(messages, activeConversation?.title ?? "chat");
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export TXT failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "export-txt-no-thinking",
-        label: t("chat.exportTxtNoThinking"),
-        icon: <FileType size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsText(messages, activeConversation?.title ?? "chat", { includeThinking: false });
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export TXT (no thinking) failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "json",
-        label: t("chat.exportJson"),
-        icon: <FileText size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsJSON(messages, activeConversation?.title ?? "chat");
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export JSON failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "export-json-no-thinking",
-        label: t("chat.exportJsonNoThinking"),
-        icon: <FileText size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsJSON(messages, activeConversation?.title ?? "chat", { includeThinking: false });
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export JSON (no thinking) failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "html",
-        label: t("chat.exportHtml"),
-        icon: <Globe size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsHTML(messages, activeConversation?.title ?? "chat");
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export HTML failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-      {
-        key: "export-html-no-thinking",
-        label: t("chat.exportHtmlNoThinking"),
-        icon: <Globe size={14} />,
-        onClick: async () => {
-          if (messages.length === 0) {
-            messageApi.warning(t("chat.noMessages"));
-            return;
-          }
-          try {
-            const ok = await exportAsHTML(messages, activeConversation?.title ?? "chat", { includeThinking: false });
-            if (ok) { messageApi.success(t("chat.exportSuccess")); }
-          } catch (e) {
-            console.error("Export HTML (no thinking) failed:", e);
-            messageApi.error(t("chat.exportFailed"));
-          }
-        },
-      },
-    ],
-    [messages, activeConversation, t, messageApi],
-  );
-
-  // ── Welcome prompt items ───────────────────────────────────────────
-  const greetingText = useMemo(() => {
-    const hour = new Date().getHours();
-    let key: string;
-    if (hour >= 5 && hour < 12) { key = "chat.greetingMorning"; }
-    else if (hour >= 12 && hour < 14) { key = "chat.greetingNoon"; }
-    else if (hour >= 14 && hour < 18) { key = "chat.greetingAfternoon"; }
-    else { key = "chat.greetingEvening"; }
-    return `👋 ${t(key)}`;
-  }, [t]);
-
-  const promptItems = useMemo(
-    () => [
-      { key: "1", icon: <Code size={16} />, label: t("chat.welcomePromptCoding"), scenario: "coding" },
-      { key: "2", icon: <Lightbulb size={16} />, label: t("chat.welcomePromptCreative"), scenario: "creative" },
-      { key: "3", icon: <Languages size={16} />, label: t("chat.welcomePromptTranslation"), scenario: "translation" },
-      { key: "4", icon: <FileText size={16} />, label: t("chat.welcomePromptWriting"), scenario: "writing" },
-      { key: "5", icon: <Search size={16} />, label: t("chat.welcomePromptResearch"), scenario: "research" },
-      { key: "6", icon: <ChartNoAxesColumn size={16} />, label: t("chat.welcomePromptAnalysis"), scenario: "analysis" },
-      { key: "7", icon: <TrendingUp size={16} />, label: t("chat.welcomePromptInvestment"), scenario: "investment" },
-      { key: "8", icon: <Share2 size={16} />, label: t("chat.welcomePromptSocialMedia"), scenario: "social_media" },
-    ],
-    [t],
-  );
-
-  const handlePromptClick = useCallback(
-    async (info: { data: { label?: unknown; scenario?: string } }) => {
-      const label = info.data.label;
-      const text = typeof label === "string" ? label : "";
-      const scenario = info.data.scenario;
-      if (!text) { return; }
-
-      try {
-        if (!activeConversationId) {
-          if (providersLoading || providers.length === 0) {
-            messageApi.warning(t("chat.noModel"));
-            return;
-          }
-          let provider = settings.default_provider_id
-            ? providers.find((p) => p.id === settings.default_provider_id && p.enabled)
-            : undefined;
-          let model = provider?.models.find(
-            (m) => m.model_id === settings.default_model_id && m.enabled,
-          );
-          if (!provider || !model) {
-            provider = providers.find((p) => p.enabled && p.models.some((m) => m.enabled));
-            model = provider?.models.find((m) => m.enabled);
-          }
-          if (!provider || !model) {
-            messageApi.warning(t("chat.noModel"));
-            return;
-          }
-          await createConversation(text.slice(0, 30), model.model_id, provider.id, { scenario });
-        }
-
-        useConversationStore.getState().setPendingPromptText(text);
-      } catch (e) {
-        console.error("[handlePromptClick] error:", e);
-        messageApi.error(String(e));
-      }
-    },
-    [activeConversationId, providers, providersLoading, settings, createConversation, messageApi, t],
-  );
-
-  // ── Bubble items (only show active messages) ────────────────────────
   const activeMessages = useMemo(
     () => messages.filter((msg) => msg.is_active !== false),
     [messages],
   );
-  const messageById = useMemo(
-    () => new Map(messages.map((msg) => [msg.id, msg])),
-    [messages],
-  );
-  // Separate lookup: prefixed parent key → active assistant message (for stable bubble keys)
-  const assistantByParentId = useMemo(() => {
-    const map = new Map<string, Message>();
-    for (const msg of messages) {
-      if (msg.role === "assistant" && msg.parent_message_id && msg.is_active !== false) {
-        map.set(`ai:${msg.parent_message_id}`, msg);
-      }
-    }
-    return map;
-  }, [messages]);
 
-  // Pre-compute parent IDs that have responses from multiple distinct models
-  // (from in-store messages — may be incomplete after fetchMessages since DB only returns active)
-  const multiModelResponseParents = useMemo(() => {
-    const modelsByParent = new Map<string, Set<string>>();
-    for (const msg of messages) {
-      if (msg.role === "assistant" && msg.parent_message_id) {
-        if (!modelsByParent.has(msg.parent_message_id)) {
-          modelsByParent.set(msg.parent_message_id, new Set());
-        }
-        // Use model_id if available; fall back to a per-message key so that
-        // error messages (which may lack model_id) are still counted as
-        // distinct model responses and don't break multi-model detection.
-        modelsByParent.get(msg.parent_message_id)!.add(msg.model_id || `__no_model_${msg.id}`);
-      }
-    }
-    const result = new Set<string>();
-    for (const [parentId, models] of modelsByParent) {
-      if (models.size > 1) { result.add(parentId); }
-    }
-    return result;
-  }, [messages]);
+  const tokenUsed = activeMessages.length > 0
+    ? estimateConversationTokens(activeMessages.map(m => ({ role: m.role, content: m.content })))
+    : 0;
 
-  // Ref-based multi-model version cache — updated by AssistantFooter when it
-  // loads all versions from DB (which includes inactive versions not in store).
-  const multiModelVersionsRef = useRef<Map<string, Message[]>>(new Map());
-  const handleMultiModelDetected = useCallback((parentMsgId: string, versions: Message[]) => {
-    const hadCached = multiModelVersionsRef.current.has(parentMsgId);
-    const stillMultiModel = hasMultipleModelVersions(versions);
+  const [showTokenDetail, setShowTokenDetail] = useState(false);
 
-    if (stillMultiModel) {
-      multiModelVersionsRef.current.set(parentMsgId, versions);
-    } else {
-      multiModelVersionsRef.current.delete(parentMsgId);
-    }
-
-    if (hadCached !== stillMultiModel || !multiModelResponseParents.has(parentMsgId)) {
-      // Trigger re-render so aiRole picks up the updated cache state.
-      setDisplayModeOverrides((prev) => new Map(prev));
-    }
-  }, [multiModelResponseParents]);
-
-  // Per-message display mode overrides (temporary, not persisted)
-  const [displayModeOverrides, setDisplayModeOverrides] = useState<Map<string, MultiModelDisplayMode>>(new Map());
-  const handleDisplayModeOverride = useCallback((parentMsgId: string, mode: MultiModelDisplayMode) => {
-    setDisplayModeOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(parentMsgId, mode);
-      return next;
-    });
-  }, []);
-
-  const userSearchContentById = useMemo(() => {
-    const next = new Map<string, ReturnType<typeof parseSearchContent>>();
-    for (const msg of activeMessages) {
-      if (msg.role === "user") {
-        next.set(msg.id, parseSearchContent(msg.content));
-      }
-    }
-    return next;
-  }, [activeMessages]);
-
-  // Defer rendering of chat bubbles during rapid streaming updates.
-  // React will keep showing the previous stable bubbleItems while the new
-  // ones are being computed, keeping the UI responsive (no jank during
-  // 50ms streaming flushes). The scroll position still uses the non-deferred
-  // messages.length so auto-scroll remains instantaneous.
-  const deferredActiveMessages = useDeferredValue(activeMessages);
-  const deferredThinkingIds = useDeferredValue(thinkingActiveMessageIds);
-  const deferredSearchContent = useDeferredValue(userSearchContentById);
-
-  const bubbleItemCacheRef = useRef<Map<string, { signature: string; item: BubbleItemType }>>(new Map());
-  const bubbleItems: BubbleItemType[] = useMemo(() => {
-    const cache = bubbleItemCacheRef.current;
-    const nextCache = new Map<string, { signature: string; item: BubbleItemType }>();
-    const nextItems: BubbleItemType[] = [];
-
-    for (const msg of deferredActiveMessages) {
-      // Skip tool result messages (displayed inline via :::mcp containers)
-      if (msg.role === "tool") { continue; }
-
-      if (msg.role === "system" && msg.content === "<!-- context-clear -->") {
-        const signature = "context-clear";
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : {
-            key: msg.id,
-            role: "context-clear",
-            content: msg.id,
-            variant: "borderless" as const,
-          };
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
-        continue;
-      }
-
-      if (msg.role === "system" && msg.content === "<!-- context-compressed -->") {
-        const signature = "context-compressed";
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : {
-            key: msg.id,
-            role: "context-compressed",
-            content: msg.id,
-            variant: "borderless" as const,
-          };
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
-        continue;
-      }
-
-      if (msg.role === "user") {
-        const { userContent } = userSearchContentById.get(msg.id) ?? parseSearchContent(msg.content);
-        const signature = `user:${userContent}`;
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : { key: msg.id, role: "user", content: userContent };
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
-        continue;
-      }
-
-      let aiContent = msg.role === "assistant"
-        ? buildAssistantDisplayContent(msg, deferredActiveMessages)
-        : msg.content;
-      if (shouldHideAssistantBubble(msg, aiContent)) { continue; }
-      // Close unclosed think block during streaming
-      if (msg.role === "assistant" && deferredThinkingIds.has(msg.id) && aiContent.includes("<think")) {
-        const lastOpen = aiContent.lastIndexOf("<think");
-        const lastClose = aiContent.lastIndexOf("</think>");
-        if (lastClose < lastOpen) {
-          aiContent += THINKING_LOADING_MARKER + "\n</think>\n\n";
-        }
-      }
-      if (msg.role === "assistant" && !aiContent.includes('data-axagent="1"')) {
-        const parentSearch = msg.parent_message_id
-          ? deferredSearchContent.get(msg.parent_message_id)
-          : undefined;
-        if (parentSearch?.hasSearch && parentSearch.sources.length > 0) {
-          const { sources } = parentSearch;
-          const resultsJson = JSON.stringify(sources.map((s) => ({ title: s.title, url: s.url })));
-          aiContent = `<web-search status="done" data-axagent="1">\n${resultsJson}\n</web-search>\n\n${aiContent}`;
-        }
-      }
-
-      // Use parent_message_id as stable key for assistant bubbles to avoid
-      // unmount/remount flash when switching versions. Prefix with "ai:" to
-      // prevent key collision with the user message (which shares the same id).
-      // Skip duplicate assistant messages with the same parent (multi-model parallel race).
-      const stableKey = msg.parent_message_id ? `ai:${msg.parent_message_id}` : msg.id;
-      if (nextCache.has(stableKey)) { continue; // already rendered for this parent
-       }
-      const signature = `ai:${msg.id}:${aiContent}`;
-      const cached = cache.get(stableKey);
-      const item = cached?.signature === signature
-        ? cached.item
-        : { key: stableKey, role: "ai", content: aiContent };
-      nextCache.set(stableKey, { signature, item });
-      nextItems.push(item);
-    }
-
-    bubbleItemCacheRef.current = nextCache;
-    return nextItems;
-  }, [deferredActiveMessages, deferredThinkingIds, deferredSearchContent]);
-
-  // Append compressing placeholder when compression is in progress
-  const consumeSwitch = useExpertStore((s) => s.consumeSwitch);
-  const getRoleById = useExpertStore((s) => s.getRoleById);
-
-  // Expert switch separator — useEffect is the correct place for state mutation
-  const [expertSwitchBubble, setExpertSwitchBubble] = useState<BubbleItemType | null>(null);
-  useEffect(() => {
-    if (!activeConversationId) { return; }
-    const sw = consumeSwitch(activeConversationId);
-    if (!sw) { return; }
-    const role = getRoleById(sw.roleId);
-    const name = role?.name ?? t("chat.generalAssistant");
-    const icon = role?.icon ?? "\uD83E\uDD16";
-    setExpertSwitchBubble({
-      key: `__expert-switch__${sw.roleId}__${Date.now()}`,
-      role: "expert-switch",
-      content: JSON.stringify({ icon, name: t("chat.switchedTo", { name }) }),
-      variant: "borderless" as const,
-    } as BubbleItemType);
-  }, [activeConversationId, consumeSwitch, getRoleById]);
-
-  // Reactive selectors for topic group state — ensures allBubbleItems recomputes
-  // when topic groups are toggled/collapsed/expanded without depending on getState().
-  const topicGroupEnabledByConv = useTopicGroupStore((s) =>
-    activeConversationId ? s.enabledByConversation[activeConversationId] : undefined
-  );
-  const topicGroupsByConv = useTopicGroupStore((s) =>
-    activeConversationId ? s.groupsByConversation[activeConversationId] : null
-  );
-
-  const allBubbleItems = useMemo(() => {
-    let items = bubbleItems;
-
-    // Inject topic group dividers if enabled
-    const topicEnabled = activeConversationId && topicGroupEnabledByConv;
-    const topicGroups = activeConversationId ? topicGroupsByConv : null;
-    if (topicEnabled && topicGroups && topicGroups.length > 0) {
-      const msgKeyToGroup = new Map<string, typeof topicGroups[0]>();
-      for (const g of topicGroups) {
-        for (const mid of g.messageIds) {
-          msgKeyToGroup.set(mid, g);
-        }
-      }
-
-      const enhanced: typeof items = [];
-      let lastGroupId: string | null = null;
-
-      for (const item of items) {
-        const key = String(item.key);
-        const group = msgKeyToGroup.get(key);
-        if (group && group.id !== lastGroupId) {
-          lastGroupId = group.id;
-          enhanced.push({
-            key: `__topic-group__${group.id}`,
-            role: "topic-group",
-            content: group,
-            variant: "borderless" as const,
-          } as BubbleItemType);
-        }
-        if (group && group.collapsed) {
-          continue;
-        }
-        enhanced.push(item);
-      }
-      items = enhanced;
-    }
-
-    // Append expert switch separator if present
-    if (expertSwitchBubble) {
-      items = [...items, expertSwitchBubble];
-    }
-
-    if (compressing) {
-      items = [
-        ...items,
-        {
-          key: "__compressing__",
-          role: "context-compressing",
-          content: "",
-          variant: "borderless" as const,
-        },
-      ];
-    }
-
-    return items;
-  }, [bubbleItems, compressing, activeConversationId, expertSwitchBubble, topicGroupEnabledByConv, topicGroupsByConv]);
-
-  // 虚拟滚动：使用 @tanstack/react-virtual 限制 DOM 渲染
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    count: allBubbleItems.length,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => ESTIMATED_BUBBLE_HEIGHT,
-    overscan: VIRTUAL_OVERSCAN,
-  });
-
-  // 同步虚拟滚动容器 ref 与 Bubble.List 内部 scrollBox
-  useEffect(() => {
-    const nativeEl = bubbleListRef.current?.scrollBoxNativeElement;
-    if (nativeEl && nativeEl !== scrollContainerRef.current) {
-      scrollContainerRef.current = nativeEl as HTMLDivElement;
-      // Force the virtualizer to re-measure now that the scroll element is available.
-      // Without this, the virtualizer initializes with a null scroll element and may
-      // produce an incorrect visible range (e.g. only 2 items for a 6-item list).
-      virtualizer.measure();
-    }
-  });
-
-  const visibleBubbleItems = useMemo(() => {
-    const range = virtualizer.range;
-    // Skip virtual scrolling for short conversations (< 30 items) — avoids
-    // the virtualizer producing incorrect ranges when the scroll container
-    // ref is not immediately available (e.g. on initial mount).
-    if (allBubbleItems.length < 30) {
-      return allBubbleItems;
-    }
-    if (range) {
-      return allBubbleItems.slice(range.startIndex, range.endIndex + 1);
-    }
-    return allBubbleItems;
-  }, [allBubbleItems, virtualizer.range]);
-
-  const hiddenEarlierCount = useMemo(() => {
-    const range = virtualizer.range;
-    return range ? range.startIndex : 0;
-  }, [virtualizer.range]);
-
-  const lastBubbleKey = allBubbleItems.length > 0
-    ? String(allBubbleItems[allBubbleItems.length - 1].key)
-    : "";
-
-  useEffect(() => {
-    const rafId = window.requestAnimationFrame(() => {
-      if (stickToBottom) {
-        bubbleListRef.current?.scrollTo({ top: "bottom", behavior: "auto" });
-        setShowScrollToBottom(false);
-        return;
-      }
-      syncScrollToBottomVisibility();
-    });
-    return () => window.cancelAnimationFrame(rafId);
-  }, [allBubbleItems, stickToBottom, syncScrollToBottomVisibility]);
-
-  useEffect(() => {
-    if (!activeConversationId || bubbleItems.length === 0) { return; }
-    if (pendingScrollConversationIdRef.current !== activeConversationId) { return; }
-
-    let frame1 = 0;
-    let frame2 = 0;
-    frame1 = window.requestAnimationFrame(() => {
-      frame2 = window.requestAnimationFrame(() => {
-        bubbleListRef.current?.scrollTo({ top: "bottom", behavior: "auto" });
-        pendingScrollConversationIdRef.current = null;
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frame1);
-      window.cancelAnimationFrame(frame2);
-    };
-  }, [activeConversationId, bubbleItems.length, lastBubbleKey]);
-  const aiContentNodesCacheRef = useRef<
-    Map<string, {
-      content: string;
-      nodes: ChatMarkdownNode[];
-    }>
-  >(new Map());
-  const aiContentNodesById = useMemo(() => {
-    const cache = aiContentNodesCacheRef.current;
-    const next = new Map<string, ChatMarkdownNode[]>();
-
-    for (const item of bubbleItems) {
-      if (item.role !== "ai" || typeof item.content !== "string") {
-        continue;
-      }
-      // Skip error messages — they render as Alert, not markdown
-      const msg = assistantByParentId.get(String(item.key)) ?? messageById.get(String(item.key));
-      if (msg?.status === "error") {
-        continue;
-      }
-      // Skip the actively streaming message — NodeRenderer handles incremental
-      // parsing internally via its `content` prop. Keep that same renderer path
-      // after completion so the message does not switch from `content` to
-      // `nodes` and visibly re-render a second time.
-      const shouldRenderFromContent = shouldRenderAssistantMarkdownFromContent(
-        streaming && msg?.id === streamingMessageId,
-        Boolean(msg?.id && contentRendererMessageIdsRef.current.has(msg.id)),
-      );
-      if (shouldRenderFromContent) {
-        continue;
-      }
-
-      const messageId = String(item.key);
-      const cached = cache.get(messageId);
-      if (cached && cached.content === item.content) {
-        next.set(messageId, cached.nodes);
-        continue;
-      }
-
-      const nodes = parseChatMarkdown(item.content);
-      // LRU 淘汰：缓存上限 100 条
-      if (cache.size >= 100) {
-        const firstKey = cache.keys().next().value;
-        if (firstKey !== undefined) { cache.delete(firstKey); }
-      }
-      cache.set(messageId, { content: item.content, nodes });
-      next.set(messageId, nodes);
-    }
-
-    for (const messageId of Array.from(cache.keys())) {
-      if (!next.has(messageId)) {
-        cache.delete(messageId);
-      }
-    }
-
-    return next;
-  }, [bubbleItems, assistantByParentId, messageById, streaming, streamingMessageId]);
-  // ── Format timestamp ──────────────────────────────────────────────
-  const formatTime = useCallback((ts: number) => {
-    const d = new Date(ts);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  }, []);
-
-  // ── Resolve model name for the conversation ──────────────────────
-  const getModelDisplayInfo = useCallback((model_id?: string | null, providerId?: string | null) => {
-    const mid = model_id ?? activeConversation?.model_id;
-    const pid = providerId ?? activeConversation?.provider_id;
-    if (!mid) { return { modelName: "AI", providerName: "" }; }
-    const provider = providers.find((p) => p.id === pid);
-    const model = provider?.models.find((m) => m.model_id === mid);
-    return { modelName: model?.name ?? mid, providerName: provider?.name ?? "" };
-  }, [activeConversation, providers]);
-
-  const handleEditMessage = useCallback((messageId: string, content: string, role: "user" | "assistant") => {
-    setEditingMessageId(messageId);
-    setEditingMessageRole(role);
-    setEditingContent(content);
-  }, []);
-
-  const handleEditSaveOnly = useCallback(async () => {
-    if (!editingMessageId) { return; }
-    setEditSaving(true);
-    try {
-      await updateMessageContent(editingMessageId, editingContent);
-      setEditingMessageId(null);
-      setEditingMessageRole(null);
-      setEditingContent("");
-    } catch (e) {
-      messageApi.error(String(e));
-    } finally {
-      setEditSaving(false);
-    }
-  }, [editingMessageId, editingContent, updateMessageContent, messageApi]);
-
-  const handleEditSaveAndResend = useCallback(async () => {
-    if (!editingMessageId) { return; }
-    setEditSaving(true);
-    try {
-      await updateMessageContent(editingMessageId, editingContent);
-      // regenerateMessage expects an AI message ID to find the parent user message
-      const msgs = useConversationStore.getState().messages;
-      const aiMsg = msgs.find(m => m.parent_message_id === editingMessageId && m.is_active);
-      setEditingMessageId(null);
-      setEditingMessageRole(null);
-      setEditingContent("");
-      await regenerateMessage(aiMsg?.id);
-    } catch (e) {
-      messageApi.error(String(e));
-    } finally {
-      setEditSaving(false);
-    }
-  }, [editingMessageId, editingContent, updateMessageContent, regenerateMessage, messageApi]);
-
-  // ── Roles ──────────────────────────────────────────────────────────
-  const userRole = useCallback((bubbleData: BubbleItemType) => {
-    const msg = messageById.get(String(bubbleData.key));
-    const attachments = msg?.attachments ?? [];
-    return {
-      placement: "end" as const,
-      ...getBubbleVariant(true),
-      avatar: userAvatar,
-      contentRender: attachments.length > 0
-        ? (content: string) => (
-          <div style={{ textAlign: "right" }}>
-            <span data-axagent-msg={msg?.id} style={{ height: 0, overflow: "hidden", lineHeight: 0 }} />
-            {content && (
-              settings.render_user_markdown
-                ? (
-                  <AssistantMarkdown
-                    content={content}
-                    isDarkMode={isDarkMode}
-                    isStreaming={false}
-                    codeBlockDarkTheme={codeBlockDarkTheme}
-                    codeBlockLightTheme={codeBlockLightTheme}
-                    codeBlockThemes={codeBlockThemes}
-                    codeFontFamily={settings.code_font_family || undefined}
-                  />
-                )
-                : <div style={{ whiteSpace: "pre-wrap" }}>{content}</div>
-            )}
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                marginTop: content ? 8 : 0,
-                justifyContent: "flex-end",
-              }}
-            >
-              {attachments.map((att, i) => (
-                <AttachmentPreview
-                  key={att.id || `${att.file_name}-${i}`}
-                  att={att}
-                  themeColor={token.colorPrimary}
-                />
-              ))}
-            </div>
-          </div>
-        )
-        : (content: string) => (
-          <>
-            <span data-axagent-msg={msg?.id} style={{ height: 0, overflow: "hidden", lineHeight: 0 }} />
-            {settings.render_user_markdown
-              ? (
-                <AssistantMarkdown
-                  content={content}
-                  isDarkMode={isDarkMode}
-                  isStreaming={false}
-                  codeBlockDarkTheme={codeBlockDarkTheme}
-                  codeBlockLightTheme={codeBlockLightTheme}
-                  codeBlockThemes={codeBlockThemes}
-                  codeFontFamily={settings.code_font_family || undefined}
-                />
-              )
-              : content}
-          </>
-        ),
-      header: (
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Typography.Text style={{ fontSize: 13 }}>{profile.name || t("chat.you")}</Typography.Text>
-            {msg && (
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                {formatTime(msg.created_at)}
-              </Typography.Text>
-            )}
-          </div>
-        </div>
-      ),
-      footer: (
-        <Actions
-          items={[
-            {
-              key: "copy",
-              icon: (() => {
-                const ct = stripAxAgentTags(String(bubbleData.content ?? ""));
-                return isUserMsgCopied(ct)
-                  ? <Check size={14} style={{ color: token.colorSuccess }} />
-                  : <Copy size={14} />;
-              })(),
-              label: t("chat.copy"),
-              onItemClick: () => {
-                void copyMessage(stripAxAgentTags(String(bubbleData.content ?? ""))).then(ok => {
-                  if (ok) { messageApi.success(t("chat.copied")); }
-                });
-              },
-            },
-            {
-              key: "edit",
-              icon: <Pencil size={14} />,
-              label: t("chat.editMessage"),
-              onItemClick: () => {
-                if (msg) {
-                  handleEditMessage(msg.id, msg.content, "user");
-                }
-              },
-            },
-            {
-              key: "regenerate",
-              icon: <RotateCcw size={14} />,
-              label: t("chat.regenerate"),
-              onItemClick: async () => {
-                try {
-                  await regenerateMessage();
-                } catch (e) {
-                  messageApi.error(String(e));
-                }
-              },
-            },
-            {
-              key: "delete",
-              actionRender: () => (
-                <Popconfirm
-                  title={t("chat.confirmDeleteMessage")}
-                  onConfirm={async () => {
-                    if (msg && activeConversationId) {
-                      try {
-                        await deleteMessageGroup(activeConversationId, msg.id);
-                      } catch (e) {
-                        messageApi.error(String(e));
-                      }
-                    }
-                  }}
-                  okText={t("common.confirm")}
-                  cancelText={t("common.cancel")}
-                >
-                  <Tooltip title={t("chat.delete")}>
-                    <span className="axagent-action-item" style={{ color: token.colorError }}>
-                      <Trash2 size={14} />
-                    </span>
-                  </Tooltip>
-                </Popconfirm>
-              ),
-            },
-          ]}
-        />
-      ),
-    };
-  }, [
-    activeConversationId,
-    codeBlockDarkTheme,
-    codeBlockLightTheme,
-    codeBlockThemes,
-    deleteMessageGroup,
-    formatTime,
-    getBubbleVariant,
-    handleEditMessage,
-    isDarkMode,
-    messageApi,
-    messageById,
-    profile.name,
-    regenerateMessage,
-    settings.code_font_family,
-    settings.render_user_markdown,
-    t,
-    token.colorError,
-    token.colorPrimary,
-    userAvatar,
-  ]);
-
-  const aiRole = useCallback((bubbleData: BubbleItemType) => {
-    // bubbleData.key is parent_message_id for stable rendering ("ai:xxx" format)
-    const msg = assistantByParentId.get(String(bubbleData.key))
-      ?? (() => {
-        // Fallback: extract parent_id from key "ai:xxx" and find active assistant message.
-        // messageById uses actual message IDs, not "ai:xxx" keys, so direct lookup fails.
-        const key = String(bubbleData.key);
-        if (key.startsWith("ai:")) {
-          const parentId = key.slice(3);
-          return messages.find((m) =>
-            m.parent_message_id === parentId && m.role === "assistant" && m.is_active !== false
-          ) ?? messageById.get(key);
-        }
-        return messageById.get(key);
-      })();
-    const isStreaming = streaming && msg?.id === streamingMessageId;
-    const shouldRenderFromContent = shouldRenderAssistantMarkdownFromContent(
-      isStreaming,
-      Boolean(msg?.id && contentRendererMessageIdsRef.current.has(msg.id)),
-    );
-    const assistantCopyText = stripAxAgentTags(
-      msg?.content ?? (typeof bubbleData.content === "string" ? bubbleData.content : ""),
-    );
-    const parsedNodes = shouldRenderFromContent
-      ? undefined
-      : aiContentNodesById.get(String(bubbleData.key));
-    const { bubbleLoading: rawBubbleLoading, footerLoading } = getStreamingLoadingState(
-      isStreaming,
-      bubbleData.content,
-    );
-    // In multi-model mode, never hide the footer (which contains ModelTags) via
-    // the Ant Design Bubble loading state — Bubble hides footer when loading=true.
-    // In agent mode, never hide content because tool call cards must remain visible.
-    const isMultiModelMsg = !!multiModelParentId && msg?.parent_message_id === multiModelParentId;
-    const isAgentMsg = activeConversation?.mode === "agent";
-    const bubbleLoading = (isMultiModelMsg || isAgentMsg) ? false : rawBubbleLoading;
-
-    // Determine effective display mode for this message
-    const parentId = msg?.parent_message_id;
-    // Check both store-based detection and ref-based detection (from AssistantFooter DB queries)
-    const hasMultiModels = !!parentId && (
-      multiModelResponseParents.has(parentId) || multiModelVersionsRef.current.has(parentId)
-    );
-    const effectiveDisplayMode: MultiModelDisplayMode = hasMultiModels
-      ? (displayModeOverrides.get(parentId) ?? settings.multi_model_display_mode ?? "tabs")
-      : "tabs";
-    const isNonTabsMultiModel = hasMultiModels && effectiveDisplayMode !== "tabs";
-
-    return {
-      placement: "start" as const,
-      ...getBubbleVariant(false),
-      avatar: isNonTabsMultiModel ? undefined : renderConvIconForChat(32, msg?.model_id),
-      loading: bubbleLoading,
-      contentRender: (content: string) => {
-        const msgMarker = <span data-axagent-msg={msg?.id} style={{ height: 0, overflow: "hidden", lineHeight: 0 }} />;
-        if (msg?.status === "error") {
-          // 当错误消息有实质内容时（非纯错误字符串），使用 Markdown 渲染以保持可读性，
-          // 同时用 Alert 的 description 区域展示完整格式内容
-          return (
-            <>
-              {msgMarker}
-              <Alert
-                type="error"
-                message={content.length > 200 ? content.slice(0, 200) + "…" : content}
-                description={content.length > 100
-                  ? (
-                    <div style={{ maxHeight: 500, overflowY: "auto", marginTop: 4 }}>
-                      <AssistantMarkdown
-                        content={content}
-                        isDarkMode={isDarkMode}
-                        isStreaming={false}
-                        codeBlockDarkTheme={codeBlockDarkTheme}
-                        codeBlockLightTheme={codeBlockLightTheme}
-                        codeBlockThemes={codeBlockThemes}
-                        codeFontFamily={settings.code_font_family || undefined}
-                      />
-                    </div>
-                  )
-                  : undefined}
-                showIcon
-              />
-            </>
-          );
-        }
-
-        // Multi-model non-tabs mode: render all versions in side-by-side or stacked layout
-        if (isNonTabsMultiModel && parentId && activeConversationId) {
-          // Prefer ref-based versions (from AssistantFooter DB query, includes inactive)
-          // Fall back to store-based versions (only has active during normal load)
-          const refVersions = multiModelVersionsRef.current.get(parentId);
-          const storeVersions = messages.filter(
-            (m) => m.parent_message_id === parentId && m.role === "assistant",
-          );
-          const allVersions = refVersions && refVersions.length > storeVersions.length
-            ? refVersions
-            : storeVersions;
-          return (
-            <>
-              {msgMarker}
-              <MultiModelDisplay
-                versions={allVersions}
-                activeMessageId={msg!.id}
-                mode={effectiveDisplayMode as "side-by-side" | "stacked"}
-                conversationId={activeConversationId}
-                onSwitchVersion={(pid, mid) => switchMessageVersion(activeConversationId, pid, mid)}
-                onDeleteVersion={(mid) => deleteMessage(mid)}
-                streamingMessageId={streamingMessageId}
-                multiModelDoneMessageIds={multiModelDoneMessageIds}
-                getModelDisplayInfo={getModelDisplayInfo}
-                renderContent={(vMsg, isVersionStreaming) => (
-                  <AssistantMarkdown
-                    content={buildAssistantDisplayContent(vMsg, activeMessages)}
-                    isDarkMode={isDarkMode}
-                    isStreaming={isVersionStreaming}
-                    codeBlockDarkTheme={codeBlockDarkTheme}
-                    codeBlockLightTheme={codeBlockLightTheme}
-                    codeBlockThemes={codeBlockThemes}
-                    codeFontFamily={settings.code_font_family || undefined}
-                  />
-                )}
-              />
-            </>
-          );
-        }
-
-        // In multi-model mode we disabled Bubble's built-in loading to keep
-        // footer visible, so show inline loading dots when content is empty.
-        if (isMultiModelMsg && rawBubbleLoading) {
-          return (
-            <>
-              {msgMarker}
-              <span className="axagent-streaming-dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </>
-          );
-        }
-
-        const isAgentMode = activeConversation?.mode === "agent";
-        const msgPermissions = isAgentMode && msg && activeConversationId
-          ? Object.values(agentPendingPermissions).filter((pr) =>
-            pr.conversationId === activeConversationId && (
-              pr.assistantMessageId === msg.id
-              // Fallback: permission emitted before assistant message ID was set
-              || (pr.assistantMessageId === "" && msg.id === streamingMessageId)
-            )
-          )
-          : [];
-        const msgAskUsers = isAgentMode && msg && activeConversationId
-          ? Object.values(agentPendingAskUser).filter((ask) =>
-            ask.conversationId === activeConversationId && (
-              ask.assistantMessageId === msg.id
-              || (ask.assistantMessageId === "" && msg.id === streamingMessageId)
-            )
-          )
-          : [];
-
-        // In agent mode: show inline loading dots only when no content AND no permissions/asks yet
-        if (isAgentMsg && rawBubbleLoading && msgPermissions.length === 0 && msgAskUsers.length === 0) {
-          return (
-            <>
-              {msgMarker}
-              <span className="axagent-streaming-dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </>
-          );
-        }
-
-        return (
-          <>
-            {msgMarker}
-            <AssistantMarkdown
-              content={content}
-              nodes={parsedNodes}
-              isDarkMode={isDarkMode}
-              isStreaming={isStreaming}
-              codeBlockDarkTheme={codeBlockDarkTheme}
-              codeBlockLightTheme={codeBlockLightTheme}
-              codeBlockThemes={codeBlockThemes}
-              codeFontFamily={settings.code_font_family || undefined}
-            />
-            {msgPermissions.map((pr) => {
-              const resolvedTc = agentToolCalls[pr.toolUseId];
-              const permStatus = resolvedTc?.approvalStatus === "approved"
-                ? "approved"
-                : resolvedTc?.approvalStatus === "denied"
-                ? "denied"
-                : "pending";
-              return (
-                <PermissionCard
-                  key={pr.toolUseId}
-                  conversationId={pr.conversationId}
-                  toolUseId={pr.toolUseId}
-                  toolName={pr.toolName}
-                  input={pr.input}
-                  status={permStatus}
-                />
-              );
-            })}
-            {msgAskUsers.map((ask) => (
-              <AskUserCard
-                key={ask.askId}
-                askId={ask.askId}
-                conversationId={ask.conversationId}
-                question={ask.question}
-                options={ask.options}
-              />
-            ))}
-            {isAgentMode && msg && activeConversationId && Object.values(agentToolCalls).filter(
-                  (tc) => tc.assistantMessageId === msg.id && tc.executionStatus !== "queued",
-                ).length > 0
-              && (
-                <ToolCallCard
-                  toolCalls={Object.values(agentToolCalls).filter(
-                    (tc) => tc.assistantMessageId === msg.id && tc.executionStatus !== "queued",
-                  )}
-                />
-              )}
-            {/* Show loading dots when agent is streaming but footer dots are NOT showing (no text content yet) */}
-            {isAgentMsg && isStreaming && !footerLoading && (
-              <div className="axagent-streaming-dots" aria-hidden="true" style={{ marginTop: 8 }}>
-                <span />
-                <span />
-                <span />
-              </div>
-            )}
-          </>
-        );
+  const classificationSegments = useMemo<ContextSegment[]>(() => {
+    const segments: ContextSegment[] = [
+      {
+        key: "messages",
+        labelKey: "chat.context.messages",
+        tokens: tokenUsed,
+        color: "#1677ff",
       },
-      header: (() => {
-        if (isNonTabsMultiModel) { return null; }
-        const { modelName, providerName } = getModelDisplayInfo(msg?.model_id, msg?.provider_id);
-        return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {providerName && (
-                <Tag
-                  style={{
-                    fontSize: 11,
-                    margin: 0,
-                    padding: "0 4px",
-                    lineHeight: "18px",
-                    color: token.colorPrimary,
-                    backgroundColor: token.colorPrimaryBg,
-                    border: "none",
-                  }}
-                >
-                  {providerName}
-                </Tag>
-              )}
-              <Typography.Text style={{ fontSize: 13 }}>
-                {modelName}
-              </Typography.Text>
-              {msg && (
-                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                  {formatTime(msg.created_at)}
-                </Typography.Text>
-              )}
-              {msg?.status === "partial" && !isStreaming
-                && !(multiModelParentId && msg.parent_message_id === multiModelParentId) && (
-                <Tag
-                  color="warning"
-                  style={{ fontSize: 10, margin: 0, padding: "0 4px", lineHeight: "16px", border: "none" }}
-                >
-                  {t("chat.partial")}
-                </Tag>
-              )}
-            </div>
-          </div>
-        );
-      })(),
-      footer: msg && activeConversationId
-        ? (
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {footerLoading && !isNonTabsMultiModel && (
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  color: token.colorPrimary,
-                }}
-                aria-label={t("chat.generating")}
-              >
-                <span className="axagent-streaming-dots" aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </span>
-              </div>
-            )}
-            <AssistantFooter
-              msg={msg}
-              conversationId={activeConversationId}
-              assistantCopyText={assistantCopyText}
-              getModelDisplayInfo={getModelDisplayInfo}
-              onEditMessage={handleEditMessage}
-              isStreaming={isStreaming}
-              displayMode={effectiveDisplayMode}
-              onDisplayModeChange={handleDisplayModeOverride}
-              onMultiModelDetected={handleMultiModelDetected}
-            />
-          </div>
-        )
-        : footerLoading
-        ? (
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              color: token.colorPrimary,
-            }}
-            aria-label={t("chat.generating")}
-          >
-            <span className="axagent-streaming-dots" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-          </div>
-        )
-        : null,
-    };
-  }, [
-    activeConversation,
-    activeConversationId,
-    activeMessages,
-    agentPendingPermissions,
-    agentToolCalls,
-    aiContentNodesById,
-    assistantByParentId,
-    codeBlockDarkTheme,
-    codeBlockLightTheme,
-    codeBlockThemes,
-    deleteMessage,
-    displayModeOverrides,
-    formatTime,
-    getBubbleVariant,
-    getModelDisplayInfo,
-    handleDisplayModeOverride,
-    handleEditMessage,
-    handleMultiModelDetected,
-    isDarkMode,
-    messageById,
-    messages,
-    multiModelDoneMessageIds,
-    multiModelParentId,
-    multiModelResponseParents,
-    renderConvIconForChat,
-    settings,
-    streaming,
-    streamingMessageId,
-    switchMessageVersion,
-    t,
-    token.colorPrimary,
-    token.colorTextDescription,
-  ]);
+    ];
 
-  const contextClearRole = useCallback((bubbleData: BubbleItemType) => {
-    const msgId = String(bubbleData.content ?? "");
-    return {
-      placement: "start" as const,
-      variant: "borderless" as const,
-      className: "context-clear-bubble",
-      contentRender: () => (
-        <div
-          style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "8px 0", width: "100%" }}
-        >
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorBorderSecondary}` }} />
-          <span
-            style={{
-              margin: "0 12px",
-              color: token.colorTextQuaternary,
-              fontSize: 12,
-              display: "inline-flex",
-              alignItems: "center",
-              whiteSpace: "nowrap",
-              userSelect: "none",
-            }}
-          >
-            <Scissors size={14} style={{ marginRight: 4 }} /> {t("chat.contextCleared")}
-            <X
-              size={14}
-              style={{ marginLeft: 6, cursor: "pointer" }}
-              onClick={() => {
-                void removeContextClear(msgId).catch((err) => {
-                  messageApi.error(String(err));
-                });
-              }}
-            />
-          </span>
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorBorderSecondary}` }} />
-        </div>
-      ),
-    };
-  }, [messageApi, removeContextClear, t, token.colorBorderSecondary, token.colorTextQuaternary]);
+    const systemPrompt = activeConversation?.system_prompt;
+    if (systemPrompt) {
+      segments.push({
+        key: "system_prompt",
+        labelKey: "chat.context.systemPrompt",
+        tokens: estimateTokens(systemPrompt),
+        color: "#52c41a",
+      });
+    }
 
-  const contextCompressedRole = useCallback((_bubbleData: BubbleItemType) => {
-    return {
-      placement: "start" as const,
-      variant: "borderless" as const,
-      className: "context-clear-bubble",
-      contentRender: () => (
-        <div
-          style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "8px 0", width: "100%" }}
-        >
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorPrimaryBorder}` }} />
-          <span
-            style={{
-              margin: "0 12px",
-              color: token.colorPrimary,
-              fontSize: 12,
-              display: "inline-flex",
-              alignItems: "center",
-              whiteSpace: "nowrap",
-              userSelect: "none",
-              cursor: "pointer",
-              gap: 4,
-            }}
-          >
-            <span
-              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-              onClick={async () => {
-                const convId = activeConversationId;
-                if (!convId) { return; }
-                const summary = await getCompressionSummary(convId);
-                setSummaryModalText(summary?.summary_text ?? t("chat.noSummary"));
-                setSummaryModalOpen(true);
-              }}
-            >
-              <Zap size={14} /> {t("chat.contextCompressed")}
-            </span>
-            <Popconfirm
-              title={t("chat.deleteCompressionConfirm")}
-              onConfirm={async () => {
-                try {
-                  await deleteCompression();
-                } catch {
-                  // error already logged in store
-                }
-              }}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <X
-                size={14}
-                style={{ cursor: "pointer", color: token.colorTextTertiary, flexShrink: 0 }}
-                onClick={(e) => e.stopPropagation()}
-              />
-            </Popconfirm>
-          </span>
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorPrimaryBorder}` }} />
-        </div>
-      ),
-    };
-  }, [
-    activeConversationId,
-    deleteCompression,
-    getCompressionSummary,
-    t,
-    token.colorPrimary,
-    token.colorPrimaryBorder,
-    token.colorTextTertiary,
-  ]);
+    const knowledgeCount = activeConversation?.enabled_knowledge_base_ids?.length ?? 0;
+    if (knowledgeCount > 0) {
+      segments.push({
+        key: "knowledge",
+        labelKey: "chat.context.knowledge",
+        tokens: knowledgeCount * 500,
+        color: "#fa8c16",
+      });
+    }
 
-  const contextCompressingRole = useCallback(() => {
-    return {
-      placement: "start" as const,
-      variant: "borderless" as const,
-      className: "context-clear-bubble",
-      contentRender: () => (
-        <div
-          style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "8px 0", width: "100%" }}
-        >
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorPrimaryBorder}` }} />
-          <span
-            style={{
-              margin: "0 12px",
-              color: token.colorPrimary,
-              fontSize: 12,
-              display: "inline-flex",
-              alignItems: "center",
-              whiteSpace: "nowrap",
-              userSelect: "none",
-            }}
-          >
-            <Spin size="small" style={{ marginRight: 6 }} /> {t("chat.compressing")}
-          </span>
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorPrimaryBorder}` }} />
-        </div>
-      ),
-    };
-  }, [t, token.colorPrimary, token.colorPrimaryBorder]);
+    const memoryCount = activeConversation?.enabled_memory_namespace_ids?.length ?? 0;
+    if (memoryCount > 0) {
+      segments.push({
+        key: "memory",
+        labelKey: "chat.context.memory",
+        tokens: memoryCount * 200,
+        color: "#eb2f96",
+      });
+    }
 
-  const expertSwitchRole = useCallback((bubbleData: BubbleItemType) => {
-    let icon = "\uD83E\uDD16";
-    let name = t("chat.switchedTo", { name: t("chat.generalAssistant") });
-    try {
-      const data = JSON.parse(String(bubbleData.content ?? "{}"));
-      icon = data.icon || icon;
-      name = data.name || name;
-    } catch { /* use defaults */ }
-    return {
-      placement: "start" as const,
-      variant: "borderless" as const,
-      className: "context-clear-bubble",
-      contentRender: () => (
-        <div
-          style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "12px 0", width: "100%" }}
-        >
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorPrimaryBorder}` }} />
-          <span
-            style={{
-              margin: "0 12px",
-              color: token.colorPrimary,
-              fontSize: 12,
-              display: "inline-flex",
-              alignItems: "center",
-              whiteSpace: "nowrap",
-              userSelect: "none",
-            }}
-          >
-            <span style={{ marginRight: 4 }}>{icon}</span> {name}
-          </span>
-          <div style={{ flex: 1, height: 1, borderTop: `1px dashed ${token.colorPrimaryBorder}` }} />
-        </div>
-      ),
-    };
-  }, [token.colorPrimary, token.colorPrimaryBorder]);
+    if (actions.toolCount > 0) {
+      segments.push({
+        key: "tools",
+        labelKey: "chat.context.tools",
+        tokens: actions.toolCount * 200,
+        color: "#722ed1",
+      });
+    }
 
-  const topicGroupRole = useCallback((bubbleData: BubbleItemType) => {
-    const group = bubbleData.content as import("@/stores/feature/topicGroupStore").TopicGroup;
-    if (!group || !activeConversationId) { return {} as any; }
-    return {
-      placement: "start" as const,
-      variant: "borderless" as const,
-      className: "context-clear-bubble",
-      contentRender: () => <TopicGroupDivider conversationId={activeConversationId} group={group} />,
-    };
-  }, [activeConversationId]);
+    const skillCount = activeConversation?.enabled_skill_ids?.length ?? 0;
+    if (skillCount > 0) {
+      segments.push({
+        key: "skills",
+        labelKey: "chat.context.skills",
+        tokens: skillCount * 300,
+        color: "#13c2c2",
+      });
+    }
 
-  const roles: RoleType = useMemo(() => ({
-    user: userRole,
-    ai: aiRole,
-    "context-clear": contextClearRole,
-    "context-compressed": contextCompressedRole,
-    "context-compressing": contextCompressingRole,
-    "expert-switch": expertSwitchRole,
-    "topic-group": topicGroupRole,
-  }), [
-    aiRole,
-    contextClearRole,
-    contextCompressedRole,
-    contextCompressingRole,
-    expertSwitchRole,
-    userRole,
-    topicGroupRole,
-  ]);
+    return segments;
+  }, [tokenUsed, activeConversation, actions.toolCount]);
 
-  // ── Render ─────────────────────────────────────────────────────────
   return (
     <div className="ax-cyber-grid flex flex-col h-full min-h-0">
-      {/* Bubble style overrides */}
-      <style>
-        {`
-        @keyframes axagent-think-spin {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
-        }
-        @keyframes axagent-stream-dot-bounce {
-          0%, 80%, 100% {
-            transform: translateY(0);
-            opacity: 0.45;
-          }
-          40% {
-            transform: translateY(-3px);
-            opacity: 1;
-          }
-        }
-        .ant-bubble-end .ant-bubble-content {
-          width: auto;
-          max-width: 100%;
-          margin-inline-start: auto;
-        }
-        .ant-bubble,
-        .ant-bubble-content-wrapper,
-        .ant-bubble-body {
-          min-width: 0;
-          max-width: 100%;
-        }
-        .ant-bubble-footer {
-          margin-block-start: 4px !important;
-        }
-        .ant-bubble-start .ant-bubble-body {
-          width: 100%;
-        }
-        .ant-bubble-content {
-          overflow: hidden;
-          min-width: 0;
-        }
-        .ant-bubble-content .markstream-react {
-          overflow: hidden;
-          min-width: 0;
-        }
-        .ant-bubble-content .ant-think,
-        .ant-bubble-content .ant-think-content,
-        .ant-bubble-content .ant-think-description {
-          max-width: 100%;
-          min-width: 0;
-          overflow: hidden;
-        }
-        .ant-bubble-content .code-block-node,
-        .ant-bubble-content .code-block-container {
-          overflow-x: auto;
-          max-width: 100%;
-          min-width: 0 !important;
-          width: 100%;
-          box-sizing: border-box;
-        }
-        .bubble-compact .ant-bubble {
-          margin-bottom: 4px;
-        }
-        .bubble-compact .ant-bubble-content {
-          padding: 6px 10px;
-        }
-        .context-clear-bubble.ant-bubble {
-          width: 100%;
-          padding-inline-end: 0 !important;
-          padding-inline-start: 0 !important;
-        }
-        .context-clear-bubble .ant-bubble-content-wrapper {
-          flex: 1;
-        }
-        .bubble-minimal .ant-bubble-content {
-          background: transparent !important;
-          box-shadow: none !important;
-          border: none !important;
-          padding: 4px 0;
-        }
-        .axagent-streaming-dots {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          min-height: 16px;
-        }
-        .axagent-streaming-dots span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: currentColor;
-          animation: axagent-stream-dot-bounce 1s ease-in-out infinite;
-        }
-        .axagent-streaming-dots span:nth-child(2) {
-          animation-delay: 0.15s;
-        }
-        .axagent-streaming-dots span:nth-child(3) {
-          animation-delay: 0.3s;
-        }
-      `}
-      </style>
+      <StreamingStyles />
+      <BubbleStyleOverrides />
 
-      {/* Top Bar */}
-      <div className="flex items-center gap-2 px-3 py-3">
-        {activeConversation
-          ? (
-            <>
-              {renderConvIconForChat(24)}
-              {editingTitle
-                ? (
-                  <div className="flex items-center gap-1">
-                    <Input
-                      id="chat-view-input-7"
-                      ref={titleInputRef}
-                      value={titleDraft}
-                      onChange={(e) => setTitleDraft(e.target.value)}
-                      onBlur={handleTitleSave}
-                      onPressEnter={handleTitleSave}
-                      size="small"
-                      style={{ maxWidth: 240 }}
-                    />
-                    <Tooltip title={t("chat.aiGenerateTitle")}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={isTitleGenerating ? <SyncOutlined spin /> : <Sparkles size={14} />}
-                        disabled={isTitleGenerating}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRegenerateTitle();
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                )
-                : (
-                  <Typography.Text
-                    className="cursor-pointer select-none"
-                    onClick={handleTitleClick}
-                  >
-                    {activeConversation.title}
-                    {isTitleGenerating
-                      ? <SyncOutlined spin className="ml-1 text-xs opacity-50" />
-                      : <Pencil size={12} className="ml-1 text-xs opacity-50" />}
-                  </Typography.Text>
-                )}
+      <ChatViewToolbar
+        activeConversation={activeConversation}
+        activeConversationId={activeConversationId}
+        editingTitle={actions.editingTitle}
+        titleDraft={actions.titleDraft}
+        setTitleDraft={actions.setTitleDraft}
+        titleInputRef={actions.titleInputRef}
+        handleTitleClick={actions.handleTitleClick}
+        handleTitleSave={actions.handleTitleSave}
+        handleRegenerateTitle={actions.handleRegenerateTitle}
+        isTitleGenerating={actions.isTitleGenerating}
+        renderConvIconForChat={msgState.renderConvIconForChat}
+        topicGroupEnabled={topicGroupEnabled}
+        handleTopicGroupToggle={actions.handleTopicGroupToggle}
+        statsOpen={actions.statsOpen}
+        stats={actions.stats}
+        handleStatsOpenChange={actions.handleStatsOpenChange}
+        exportMenuItems={actions.exportMenuItems}
+        setExtractMemoriesOpen={actions.setExtractMemoriesOpen}
+        setExpertOpen={actions.setExpertOpen}
+        streamingMessageId={streamingMessageId}
+        token={token}
+      />
 
-              {activeConversation?.mode === "agent" && (
-                <WorkflowBadge
-                  sessionType={activeConversation?.session_type ?? "conversation"}
-                  workflowTemplateId={activeConversation?.workflow_template_id}
-                  workflowStatus={activeConversation?.workflow_status}
-                  onSelectWorkflow={(templateId, workflowId) => {
-                    if (templateId === "") {
-                      void updateConversation(activeConversation.id, {
-                        session_type: "conversation",
-                        workflow_template_id: null,
-                      });
-                    } else {
-                      void updateConversation(activeConversation.id, {
-                        session_type: "workflow",
-                        workflow_template_id: workflowId || templateId,
-                        // 工作流与专家/角色互斥：选中工作流时清除专家和代理角色
-                        expert_role_id: null,
-                        agent_profile_id: null,
-                      });
-                    }
-                    fetchConversation();
-                  }}
-                  onRemoveWorkflow={() => {
-                    void updateConversation(activeConversation.id, {
-                      session_type: "conversation",
-                      workflow_template_id: null,
-                    });
-                    fetchConversation();
-                  }}
-                  disabled={!!streamingMessageId}
-                />
-              )}
-              {activeConversation?.mode === "agent"
-                && activeConversation?.session_type !== "workflow" && (
-                <>
-                  <ExpertBadge
-                    expertRoleId={activeConversation.expert_role_id ?? null}
-                    onClick={() => setExpertOpen(true)}
-                  />
-                  <AgentRoleSelect
-                    value={activeConversation.agent_profile_id ?? ""}
-                    onChange={(profileId) => {
-                      const profile = useAgentProfileStore.getState().getProfileById(profileId);
-                      updateConversation(activeConversation.id, {
-                        agent_profile_id: profileId || null,
-                        system_prompt: profile?.systemPrompt || undefined,
-                        // 工作流与专家/角色互斥：选中代理角色时切换为对话模式
-                        session_type: "conversation",
-                        workflow_template_id: null,
-                      });
-                    }}
-                  />
-                </>
-              )}
-
-              <div className="flex-1" />
-
-              <Tooltip
-                title={topicGroupEnabled
-                  ? t("topicGroup.disableAutoGroup")
-                  : t("topicGroup.autoGroup")}
-              >
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ListTodo size={14} style={{ color: topicGroupEnabled ? token.colorPrimary : undefined }} />}
-                  onClick={handleTopicGroupToggle}
-                />
-              </Tooltip>
-              <ModelSelector />
-              <Popover
-                content={<StatsPopoverContent stats={stats} t={t} token={token} />}
-                trigger="click"
-                open={statsOpen}
-                onOpenChange={handleStatsOpenChange}
-                placement="bottomRight"
-              >
-                <Tooltip title={t("chat.stats.title")}>
-                  <Button type="text" icon={<ChartNoAxesColumn size={14} />} size="small" />
-                </Tooltip>
-              </Popover>
-              <Dropdown menu={{ items: exportMenuItems }} trigger={["click"]}>
-                <Button type="text" icon={<Share2 size={14} />} size="small" />
-              </Dropdown>
-              <Tooltip title={t("chat.extractMemories")}>
-                <Button
-                  type="text"
-                  icon={<Brain size={14} />}
-                  size="small"
-                  onClick={() => setExtractMemoriesOpen(true)}
-                  disabled={!activeConversationId}
-                />
-              </Tooltip>
-            </>
-          )
-          : (
-            <>
-              <Typography.Text type="secondary">{t("chat.welcome")}</Typography.Text>
-              <div className="flex-1" />
-              <ModelSelector />
-            </>
-          )}
-      </div>
-
-      {/* Breadcrumb navigation for sub-agent sessions */}
       <BreadcrumbBar
         conversations={conversations}
         activeConversationId={activeConversationId}
         setActiveConversation={setActiveConversation}
       />
 
-      {/* ContextBar：显示当前上下文状态 + Token 用量 */}
-      {(() => {
-        const contextBarModel = activeConversation
-          ? (() => {
-            const provider = providers.find((p) => p.id === activeConversation.provider_id);
-            const model = provider?.models.find((m) => m.model_id === activeConversation.model_id);
-            return {
-              name: model?.name ?? activeConversation.model_id,
-              maxTokens: model?.max_tokens ?? activeConversation.max_tokens ?? undefined,
-            };
-          })()
-          : null;
+      {contextBarModel && (
+        <ContextBar
+          modelName={contextBarModel.name}
+          searchEnabled={activeConversation?.search_enabled ?? false}
+          toolCount={actions.toolCount}
+          knowledgeCount={activeConversation?.enabled_knowledge_base_ids?.length ?? 0}
+          memoryEnabled={(activeConversation?.enabled_memory_namespace_ids?.length ?? 0) > 0}
+          tokenUsed={tokenUsed > 0 ? tokenUsed : undefined}
+          tokenMax={contextBarModel.maxTokens}
+          onTokenClick={() => setShowTokenDetail((v) => !v)}
+        />
+      )}
 
-        return (
-          <ContextBar
-            modelName={contextBarModel?.name}
-            searchEnabled={activeConversation?.search_enabled ?? false}
-            toolCount={toolCount}
-            knowledgeCount={activeConversation?.enabled_knowledge_base_ids?.length ?? 0}
-            memoryEnabled={(activeConversation?.enabled_memory_namespace_ids?.length ?? 0) > 0}
-            tokenUsed={activeMessages.length > 0
-              ? estimateConversationTokens(activeMessages.map(m => ({ role: m.role, content: m.content })))
-              : undefined}
-            tokenMax={contextBarModel?.maxTokens}
-          />
-        );
-      })()}
+      {showTokenDetail && classificationSegments.length > 0 && (
+        <ContextClassificationBar
+          segments={classificationSegments}
+          maxTokens={contextBarModel?.maxTokens}
+        />
+      )}
 
-      {/* Message Area */}
+      <AgentStatsPanel />
+
+      <CacheIndicator
+        cacheValid={cacheStore.cacheValid}
+        hasPendingChanges={cacheStore.hasPendingChanges}
+        tokensSaved={cacheStore.tokensSaved}
+        cacheHits={cacheStore.cacheHits}
+      />
+
       <div
         ref={messageAreaRef}
         data-message-area
@@ -2930,10 +549,6 @@ function ChatViewInner({ onScrollToReady }: {
         aria-atomic="false"
         aria-label={t("chat.messageArea")}
         style={{
-          // CSS containment for long conversations: tells the browser to skip
-          // off-screen bubble rendering. Only applied when 50+ messages to avoid
-          // affecting short conversations where full virtualization overhead isn't
-          // worth it.
           ...(messages.length > 50
             ? {
               contentVisibility: "auto",
@@ -2944,35 +559,15 @@ function ChatViewInner({ onScrollToReady }: {
       >
         {messages.length === 0
           ? (
-            activeConversationId && loading
-              ? (
-                <div
-                  className="flex flex-col items-center justify-center h-full"
-                  style={{ gap: 12, padding: "0 24px", color: token.colorTextSecondary }}
-                >
-                  <SyncOutlined spin style={{ fontSize: 20, color: token.colorPrimary }} />
-                  <Typography.Text type="secondary">
-                    {t("chat.loadingConversation")}
-                  </Typography.Text>
-                </div>
-              )
-              : (
-                <div className="flex flex-col items-center justify-center h-full" style={{ padding: "0 24px" }}>
-                  <Typography.Title level={3} className="ax-neon-text" style={{ marginBottom: 24, fontWeight: 500 }}>
-                    {greetingText}
-                  </Typography.Title>
-                  <Prompts
-                    items={promptItems}
-                    onItemClick={handlePromptClick}
-                    wrap
-                    style={{ marginTop: 16 }}
-                  />
-                </div>
-              )
+            <ChatViewWelcome
+              loading={loading}
+              activeConversationId={activeConversationId}
+              onPromptClick={actions.handlePromptClick}
+              token={token}
+            />
           )
           : (
             <>
-              {/* 上下文图谱 — 可视化当前对话的上下文关系 */}
               {activeConversationId && (() => {
                 const ctxProvider = providers.find((p) => p.id === activeConversation?.provider_id);
                 const ctxModel = ctxProvider?.models.find((m) => m.model_id === activeConversation?.model_id);
@@ -2992,28 +587,27 @@ function ChatViewInner({ onScrollToReady }: {
                   </div>
                 );
               })()}
-              {/* 虚拟滚动：当有更早消息未渲染时，显示加载提示 */}
-              {hiddenEarlierCount > 0 && hiddenEarlierCount === allBubbleItems.length && (
+              {msgState.hiddenEarlierCount > 0 && msgState.hiddenEarlierCount === msgState.allBubbleItems.length && (
                 <div style={{ textAlign: "center", padding: "8px 0" }}>
                   <Button
                     size="small"
                     type="link"
                     loading={loadingOlder}
                     onClick={() => {
-                      virtualizer.scrollToIndex(0, { behavior: "smooth" });
+                      msgState.virtualizer.scrollToIndex(0, { behavior: "smooth" });
                     }}
                   >
-                    {t("chat.showAllMessages", { count: allBubbleItems.length })}
+                    {t("chat.showAllMessages", { count: msgState.allBubbleItems.length })}
                   </Button>
                 </div>
               )}
               <Bubble.List
                 key={bubbleListThemeKey}
                 ref={bubbleListRef}
-                items={visibleBubbleItems}
+                items={msgState.visibleBubbleItems}
                 autoScroll={false}
-                onScroll={handleBubbleListScroll}
-                role={roles}
+                onScroll={scroll.handleBubbleListScroll}
+                role={msgState.roles}
                 style={{
                   height: "100%",
                   padding: settings.chat_minimap_enabled && settings.chat_minimap_style === "sticky"
@@ -3036,8 +630,7 @@ function ChatViewInner({ onScrollToReady }: {
                   />
                 )}
               {(() => {
-                const suggestion = useAgentStore.getState()
-                  .workflowMatchSuggestion;
+                const suggestion = useAgentStore.getState().workflowMatchSuggestion;
                 if (
                   suggestion
                   && suggestion.conversationId === activeConversation?.id
@@ -3056,12 +649,10 @@ function ChatViewInner({ onScrollToReady }: {
                           workflow_template_id: templateId,
                         });
                         fetchConversation();
-                        useAgentStore.getState()
-                          .setWorkflowMatchSuggestion(null);
+                        useAgentStore.getState().setWorkflowMatchSuggestion(null);
                       }}
                       onDismiss={() => {
-                        useAgentStore.getState()
-                          .setWorkflowMatchSuggestion(null);
+                        useAgentStore.getState().setWorkflowMatchSuggestion(null);
                       }}
                     />
                   );
@@ -3069,14 +660,13 @@ function ChatViewInner({ onScrollToReady }: {
                 return null;
               })()}
               <ChatScrollIndicator />
-              <MinimapScrollProvider scrollTo={minimapScrollTo} scrollBoxRef={scrollBoxRef}>
+              <MinimapScrollProvider scrollTo={scroll.minimapScrollTo} scrollBoxRef={scroll.scrollBoxRef}>
                 <ChatMinimap />
               </MinimapScrollProvider>
             </>
           )}
       </div>
 
-      {/* Agent status bar — 通用状态文本 + 执行进度指示器 */}
       {currentAgentStatus && (
         <div
           data-testid="agent-status"
@@ -3092,29 +682,32 @@ function ChatViewInner({ onScrollToReady }: {
           <Spin size="small" /> {currentAgentStatus}
         </div>
       )}
-      {/* Proactive 建议栏 */}
       <ProactiveSuggestionBar />
+      <ProactivePanelsSection context={buildChatContext()} />
 
       {activeConversation?.mode === "agent" && activeConversationId && (
         <AgentProgressBar conversationId={activeConversationId} />
       )}
 
-      {/* Plan Card — 计划审批与执行（agent 模式） */}
+      {activeConversation?.mode === "agent" && activeConversationId && (
+        <WorkflowProgressPanel conversationId={activeConversationId} />
+      )}
+
       {activeConversation?.mode === "agent" && activeConversationId && (
         <PlanCardWrapper conversationId={activeConversationId} />
       )}
 
-      {/* Quick Command Bar — 快捷操作（仅 agent 模式显示） */}
       {activeConversation?.mode === "agent" && <QuickCommandBar />}
 
-      {/* Input Area */}
+      {activeConversation?.mode === "agent" && activeConversationId && streaming && <SteerInput />}
+
       <div className="relative">
-        {showScrollToBottom && (
+        {scroll.showScrollToBottom && (
           <Button
             size="small"
             shape="round"
             icon={<ChevronDown size={14} />}
-            onClick={handleScrollToBottom}
+            onClick={scroll.handleScrollToBottom}
             aria-label={t("chat.scrollToBottom")}
             style={{
               position: "absolute",
@@ -3131,12 +724,21 @@ function ChatViewInner({ onScrollToReady }: {
         <InputArea />
       </div>
 
-      {/* Permission Modal — 全局权限审批弹窗 */}
       <PermissionModal />
-      {/* Expert Selector — 专家角色选择弹窗 */}
+      {filePermRequest && (
+        <FilePermissionDialog
+          open={filePermDialogOpen}
+          onClose={() => {
+            setFilePermDialogOpen(false);
+            setFilePermRequest(null);
+          }}
+          path={filePermRequest.path}
+          reason={filePermRequest.reason}
+        />
+      )}
       <ExpertSelector
-        open={expertOpen}
-        onClose={() => setExpertOpen(false)}
+        open={actions.expertOpen}
+        onClose={() => actions.setExpertOpen(false)}
         selectedRoleId={activeConversation?.expert_role_id ?? null}
         onSelect={(roleId) => {
           if (!activeConversationId) { return; }
@@ -3147,7 +749,6 @@ function ChatViewInner({ onScrollToReady }: {
           updateConversation(activeConversationId, {
             expert_role_id: roleId,
             system_prompt: role.systemPrompt || undefined,
-            // 工作流与专家/角色互斥：选中专家时切换为对话模式
             session_type: "conversation",
             workflow_template_id: null,
           });
@@ -3170,19 +771,19 @@ function ChatViewInner({ onScrollToReady }: {
             updatePermissionMode(activeConversationId, role.recommendPermissionMode);
           }
 
-          setExpertOpen(false);
+          actions.setExpertOpen(false);
         }}
       />
       <Modal
         title={t("chat.compressionSummary")}
-        open={summaryModalOpen}
-        onCancel={() => setSummaryModalOpen(false)}
+        open={msgState.summaryModalOpen}
+        onCancel={() => msgState.setSummaryModalOpen(false)}
         footer={null}
         width={640}
       >
         <div style={{ maxHeight: 480, overflow: "auto", padding: "8px 0" }}>
           <NodeRenderer
-            content={summaryModalText}
+            content={msgState.summaryModalText}
             isDark={isDarkMode}
             customId="summary"
             final
@@ -3194,28 +795,29 @@ function ChatViewInner({ onScrollToReady }: {
       </Modal>
       <Modal
         title={t("chat.editMessage")}
-        open={!!editingMessageId}
+        open={!!actions.editingMessageId}
         onCancel={() => {
-          setEditingMessageId(null);
-          setEditingMessageRole(null);
-          setEditingContent("");
+          actions.resetEditing();
         }}
         footer={[
           <Button
             key="cancel"
             onClick={() => {
-              setEditingMessageId(null);
-              setEditingMessageRole(null);
-              setEditingContent("");
+              actions.resetEditing();
             }}
           >
             {t("common.cancel")}
           </Button>,
-          <Button key="save" onClick={handleEditSaveOnly} loading={editSaving}>
+          <Button key="save" onClick={actions.handleEditSaveOnly} loading={actions.editSaving}>
             {t("chat.saveOnly")}
           </Button>,
-          ...(editingMessageRole === "assistant" ? [] : [
-            <Button key="saveResend" type="primary" onClick={handleEditSaveAndResend} loading={editSaving}>
+          ...(actions.editingMessageRole === "assistant" ? [] : [
+            <Button
+              key="saveResend"
+              type="primary"
+              onClick={actions.handleEditSaveAndResend}
+              loading={actions.editSaving}
+            >
               {t("chat.saveAndResend")}
             </Button>,
           ]),
@@ -3224,48 +826,43 @@ function ChatViewInner({ onScrollToReady }: {
       >
         <Input.TextArea
           id="chat-view-input-textarea-8"
-          value={editingContent}
-          onChange={(e) => setEditingContent(e.target.value)}
+          value={actions.editingContent}
+          onChange={(e) => actions.setEditingContent(e.target.value)}
           autoSize={{ minRows: 3, maxRows: 12 }}
           style={{ marginTop: 8 }}
         />
       </Modal>
       <CodeBlockPreviewModal
-        payload={previewPayload}
-        open={previewModalOpen}
-        onClose={() => setPreviewModalOpen(false)}
+        payload={previewState.payload}
+        open={previewState.open}
+        onClose={() => setPreviewState({ payload: null, open: false })}
       />
       <Modal
         title={`Mermaid ${t("common.preview")}`}
-        open={mermaidPreviewOpen}
-        onCancel={() => {
-          setMermaidPreviewOpen(false);
-          setMermaidPreviewSvg(null);
-        }}
+        open={mermaidState.open}
+        onCancel={() => setMermaidState({ svg: null, open: false })}
         footer={null}
         width="80vw"
         style={{ top: 32 }}
         styles={{ body: { height: "calc(80vh - 55px)", overflow: "auto", padding: 16 } }}
         destroyOnHidden
       >
-        {mermaidPreviewSvg && (
+        {mermaidState.svg && (
           <div
             style={{ width: "100%", display: "flex", justifyContent: "center" }}
-            dangerouslySetInnerHTML={{ __html: mermaidPreviewSvg }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(mermaidState.svg) }}
           />
         )}
       </Modal>
       <ExtractMemoriesModal
-        open={extractMemoriesOpen}
-        onClose={() => setExtractMemoriesOpen(false)}
+        open={actions.extractMemoriesOpen}
+        onClose={() => actions.setExtractMemoriesOpen(false)}
         conversationId={activeConversationId ?? ""}
       />
+      <PrefetchIndicator />
     </div>
   );
 }
-
-// Wrap with ModuleErrorBoundary for error isolation
-import { ModuleErrorBoundary } from "@/components/layout/ModuleErrorBoundary";
 
 export interface ChatViewScrollApi {
   scrollTo: (messageId: string) => void;
@@ -3282,14 +879,32 @@ export function ChatView({ onScrollToReady }: {
   );
 }
 
-// ── PlanCard 包装组件 ──────────────────────────────────────────────────
-
 function PlanCardWrapper({ conversationId }: { conversationId: string }) {
   const plan = usePlanStore((s) => s.activePlans[conversationId]);
   if (!plan) { return null; }
   return (
     <div style={{ padding: "8px 16px" }}>
       <PlanCard plan={plan} conversationId={conversationId} />
+    </div>
+  );
+}
+
+function ProactivePanelsSection({ context }: { context: Record<string, unknown> }) {
+  const proactiveMode = useAppConfigStore((s) => s.features.proactiveMode);
+
+  if (!proactiveMode) { return null; }
+
+  return (
+    <div className="border-b border-border px-4 py-2">
+      <details className="group">
+        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground select-none">
+          Proactive Insights &amp; Reminders
+        </summary>
+        <div className="mt-2 space-y-2">
+          <ContextPredictionPanel context={context} />
+          <ReminderList />
+        </div>
+      </details>
     </div>
   );
 }

@@ -52,21 +52,65 @@ function extractText(children: any[] | undefined): string {
   return parts.join("");
 }
 
+/**
+ * 单个子节点渲染组件 - 将 renderNode 函数调用包装为组件
+ * 修复 react-doctor/no-render-in-render：直接返回 renderNode 结果，而非 JSX 内插值调用
+ */
+function NodeChild({
+  child,
+  indexKey,
+  index,
+  ctx,
+  renderNode,
+}: {
+  child: any;
+  indexKey: string | undefined;
+  index: number;
+  ctx: any;
+  renderNode: (child: any, key: string, ctx: any) => React.ReactNode;
+}) {
+  return renderNode(child, `${String(indexKey ?? "vmr-container")}-${index}`, ctx);
+}
+
+/**
+ * 渲染非 MCP 容器节点的提取组件
+ * 修复 react-doctor/no-render-in-render：将 renderNode 调用移出 McpContainerNode
+ */
+function DefaultContainer({
+  node,
+  ctx,
+  renderNode,
+  indexKey,
+}: {
+  node: any;
+  ctx: any;
+  renderNode?: ((child: any, key: string, ctx: any) => React.ReactNode) | undefined;
+  indexKey: string | undefined;
+}) {
+  return (
+    <div className={`vmr-container vmr-container-${node.name ?? "unknown"}`}>
+      {Array.isArray(node.children) && ctx && renderNode
+        ? node.children.map((child: any, i: number) => (
+          <NodeChild
+            key={`${String(indexKey ?? "vmr-container")}-${i}`}
+            child={child}
+            indexKey={indexKey}
+            index={i}
+            ctx={ctx}
+            renderNode={renderNode}
+          />
+        ))
+        : null}
+    </div>
+  );
+}
+
 export function McpContainerNode(props: NodeComponentProps<any>) {
-  const { node, ctx, renderNode, indexKey } = props;
+  const { node } = props;
 
   if (node.name !== "mcp") {
-    return (
-      <div className={`vmr-container vmr-container-${node.name ?? "unknown"}`}>
-        {Array.isArray(node.children) && ctx && renderNode
-          ? node.children.map((child: any, i: number) => (
-            <React.Fragment key={`${String(indexKey ?? "vmr-container")}-${i}`}>
-              {renderNode(child, `${String(indexKey ?? "vmr-container")}-${i}`, ctx)}
-            </React.Fragment>
-          ))
-          : null}
-      </div>
-    );
+    const { node: n, ctx, renderNode, indexKey } = props;
+    return <DefaultContainer node={n} ctx={ctx} renderNode={renderNode} indexKey={indexKey as string | undefined} />;
   }
 
   return <McpToolCard node={node} />;

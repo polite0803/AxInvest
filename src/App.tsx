@@ -4,6 +4,7 @@ import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ContentArea } from "@/components/layout/ContentArea";
 import { GlobalCopyMenu } from "@/components/layout/GlobalCopyMenu";
 import { GlobalErrorBoundary } from "@/components/layout/GlobalErrorBoundary";
+import { ModuleErrorBoundary } from "@/components/layout/ModuleErrorBoundary";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { InteractiveTutorial } from "@/components/onboarding/InteractiveTutorial";
@@ -28,17 +29,8 @@ import {
 import { useShadcnTheme } from "@/theme/shadcnTheme";
 import type { ThemePreset } from "@/theme/shadcnTheme";
 import { App as AntdApp, ConfigProvider, Layout, theme } from "antd";
-import deDE from "antd/locale/de_DE";
-import enUS from "antd/locale/en_US";
-import esES from "antd/locale/es_ES";
-import frFR from "antd/locale/fr_FR";
-import jaJP from "antd/locale/ja_JP";
-import koKR from "antd/locale/ko_KR";
-import ptBR from "antd/locale/pt_BR";
-import ruRU from "antd/locale/ru_RU";
-import zhCN from "antd/locale/zh_CN";
 import { enableD2, setDefaultI18nMap } from "markstream-react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import "./i18n";
@@ -90,7 +82,7 @@ function AppInner() {
         } catch { /* not a Tauri webview window */ }
       });
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [navigate]);
 
   // These hooks use useNavigate() and must be inside BrowserRouter
   useKeyboardShortcuts();
@@ -200,7 +192,9 @@ function AppInner() {
           : (
             <>
               <SkillPanels />
-              <TitleBar />
+              <ModuleErrorBoundary moduleName="TitleBar">
+                <TitleBar />
+              </ModuleErrorBoundary>
               <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
               <GlobalCopyMenu />
               <Layout
@@ -216,7 +210,9 @@ function AppInner() {
                       flexShrink: 0,
                     }}
                   >
-                    <Sidebar />
+                    <ModuleErrorBoundary moduleName="Sidebar">
+                      <Sidebar />
+                    </ModuleErrorBoundary>
                   </div>
                 )}
                 <Content className="overflow-hidden">
@@ -249,6 +245,36 @@ function AppRoot() {
   const language = useSettingsStore((s) => s.settings.language);
   const isDark = useResolvedDarkMode(themeMode, themePreset);
 
+  const localeMap = useMemo<Record<string, string>>(() => ({
+    "zh-CN": "zh_CN",
+    "ja": "ja_JP",
+    "ko": "ko_KR",
+    "de": "de_DE",
+    "fr": "fr_FR",
+    "es": "es_ES",
+    "ru": "ru_RU",
+    "pt-BR": "pt_BR",
+  }), []);
+
+  const [antdLocale, setAntdLocale] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const localeCode = localeMap[language] || "en_US";
+    import(`antd/locale/${localeCode}`)
+      .then((mod) => {
+        if (!cancelled) { setAntdLocale(mod.default); }
+      })
+      .catch(() => {
+        import("antd/locale/en_US").then((m) => {
+          if (!cancelled) { setAntdLocale(m.default); }
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, localeMap]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = isDark ? "dark" : "light";
   }, [isDark]);
@@ -260,11 +286,23 @@ function AppRoot() {
 
   // Load persisted settings from backend on startup, then apply native settings
   useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
     const init = async () => {
       const t0 = performance.now();
 
       if (isTauri()) {
-        await checkIpcHealth();
+        const health = await checkIpcHealth();
+        if (!health.ok) {
+          console.warn(`[启动] IPC 健康检查失败: ${health.detail}`);
+          await new Promise((r) => {
+            const t = setTimeout(r, 2000);
+            timers.push(t);
+          });
+          const retry = await checkIpcHealth();
+          if (!retry.ok) {
+            console.error(`[启动] IPC 重试仍失败: ${retry.detail}`);
+          }
+        }
       }
 
       try {
@@ -301,7 +339,7 @@ function AppRoot() {
           }
         } catch (e) {
           const errorStr = String(e);
-          if (errorStr.includes("os error 2") || errorStr.includes("系统找不到指定的文件")) {
+          if (errorStr.includes("os error 2")) {
             console.debug("Autostart skipped: executable path not found (may occur in portable mode)");
           } else {
             console.warn("Failed to set autostart:", e);
@@ -313,6 +351,7 @@ function AppRoot() {
       await showWindow();
     };
     init();
+    return () => timers.forEach(clearTimeout);
   }, []);
 
   // Sync i18n language with settings store
@@ -378,23 +417,7 @@ function AppRoot() {
     <GlobalErrorBoundary>
       <BrowserRouter>
         <ConfigProvider
-          locale={i18n.language === "zh-CN"
-            ? zhCN
-            : i18n.language === "ja"
-            ? jaJP
-            : i18n.language === "ko"
-            ? koKR
-            : i18n.language === "de"
-            ? deDE
-            : i18n.language === "fr"
-            ? frFR
-            : i18n.language === "es"
-            ? esES
-            : i18n.language === "ru"
-            ? ruRU
-            : i18n.language === "pt-BR"
-            ? ptBR
-            : enUS}
+          locale={antdLocale}
           theme={themeConfig}
           modal={{ centered: true, styles: { mask: { backdropFilter: "blur(4px)" } } }}
         >

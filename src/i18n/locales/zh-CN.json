@@ -18,8 +18,7 @@
     "devTools": "开发工具",
     "workflow": "工作流",
     "wiki": "知识库",
-    "app": "AxAgent",
-    "stockAnalysis": "股票分析"
+    "app": "AxAgent"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -146,6 +145,8 @@
     "moveToCategory": "移动到分类",
     "removeFromCategory": "移出分类",
     "categoryNamePlaceholder": "分类名称",
+    "manageCategories": "管理分类",
+    "noCategories": "暂无分类，点击上方按钮创建",
     "inspector": {
       "title": "检查器",
       "sources": "来源",
@@ -169,7 +170,10 @@
       "enabled": "已启用",
       "disabled": "已禁用",
       "count": "{{count}} 个",
-      "tokenMax": "Token上限"
+      "tokenMax": "Token上限",
+      "messages": "消息",
+      "systemPrompt": "系统提示",
+      "skills": "技能"
     },
     "artifacts": {
       "empty": "暂无制品",
@@ -179,8 +183,12 @@
     },
     "branch": {
       "compare": "分支对比",
+      "compareTitle": "分支对比",
       "left": "左侧",
-      "right": "右侧"
+      "right": "右侧",
+      "current": "当前",
+      "unknownModel": "未知模型",
+      "selectVersion": "选择版本"
     },
     "search": {
       "title": "联网搜索",
@@ -328,6 +336,11 @@
       "result": "结果",
       "error": "错误",
       "attempts": "尝试次数",
+      "loading": "加载中...",
+      "cancelled": "已取消",
+      "cancelFailed": "取消失败",
+      "cancel": "取消",
+      "noSteps": "暂无步骤",
       "performance": {
         "name": "性能优化",
         "description": "分析和优化代码性能瓶颈"
@@ -543,6 +556,8 @@
     "workspaceLocked": "会话开始后工作区目录不可修改",
     "lambda": "λ (TD)",
     "agentStats": {
+      "askUser": "个询问",
+      "loading": "加载中...",
       "pause": "暂停",
       "paused": "已暂停",
       "pending": "待处理",
@@ -580,29 +595,31 @@
       "renderError": "图表生成失败: {{error}}"
     },
     "collaboration": {
+      "title": "协作会话",
+      "noSessions": "暂无共享会话",
       "copied": "已复制",
-      "copyCode": "复制代码",
-      "noSessions": "暂无协作会话",
-      "participants": "参与者",
+      "copyCode": "复制邀请码",
       "session": "会话",
-      "sessionShare": {
-        "copied": "已复制",
-        "copy": "复制",
-        "enterInviteCode": "输入邀请码",
-        "fileAccess": "文件访问",
-        "inviteCode": "邀请码",
-        "joinMode": "加入模式",
-        "joinSession": "加入会话",
-        "modelAccess": "模型访问",
-        "permissions": "权限",
-        "requireApproval": "需要审批",
-        "shareMode": "分享模式",
-        "terminalAccess": "终端访问",
-        "title": "会话共享",
-        "codePlaceholder": "XXXX-XXXX"
-      },
+      "participants": "参与者",
       "sharedResources": "共享资源",
-      "title": "协作"
+      "sessionShare": {
+        "title": "会话分享",
+        "shareMode": "分享",
+        "joinMode": "加入",
+        "inviteCode": "邀请码",
+        "copy": "复制",
+        "permissions": "权限设置",
+        "terminalAccess": "终端访问",
+        "fileAccess": "文件访问",
+        "modelAccess": "模型访问",
+        "requireApproval": "需要审批",
+        "enterInviteCode": "输入邀请码",
+        "codePlaceholder": "请输入邀请码",
+        "joinSession": "加入会话",
+        "copyFailed": "复制失败",
+        "joinFailed": "加入失败",
+        "maxParticipants": "最大参与者数"
+      }
     },
     "conversationNotFound": "对话未找到",
     "copyMarkdown": "复制 Markdown",
@@ -654,16 +671,28 @@
     },
     "steer": "引导",
     "steerPlaceholder": "输入引导指令...",
+    "steerSent": "引导指令已发送",
+    "steerError": "引导指令发送失败",
     "totalTokens": "总 Tokens",
     "tokens": "个令牌",
     "vision": {
+      "analyze": "分析",
       "analyzedImage": "已分析图片",
       "analyzing": "分析中...",
+      "confidence": "置信度",
       "description": "描述",
       "elements": "元素",
       "extractedText": "提取文本",
       "imageAnalysis": "图片分析",
       "model": "模型",
+      "uploadImage": "点击或拖拽上传图片",
+      "taskLabels": {
+        "ImageDescription": "图片描述",
+        "Ocr": "OCR 文字提取",
+        "UiElementDetection": "UI 元素检测",
+        "ChartAnalysis": "图表分析",
+        "CodeScreenshotReading": "代码阅读"
+      },
       "ui": {
         "actionable": "可操作",
         "analyzing": "分析中...",
@@ -694,11 +723,12 @@
       "tool": "工具",
       "agent": "智能体",
       "status": "状态",
-      "completed": "完成",
-      "failed": "失败",
-      "running": "运行中",
+      "completed": "{{completed}} 完成",
+      "failed": "{{failed}} 失败",
+      "running": "{{running}} 运行中",
       "cancelled": "已取消",
-      "pending": "等待中"
+      "pending": "等待中",
+      "totalEvents": "{{total}} 个事件"
     },
     "agent": {
       "acceptEdits": "接受编辑",
@@ -820,6 +850,10 @@
       "user": "用户",
       "system": "系统",
       "assistant": "助手"
+    },
+    "sidebar": {
+      "fallbackTitle": "对话",
+      "searchPastSessions": "搜索历史会话"
     }
   },
   "gateway": {
@@ -2215,7 +2249,12 @@
     "modelNamePlaceholder": "GPT 5.4 Think",
     "expertPromptNote": "专家提示词备注",
     "modelGroupPlaceholder": "选择模型组",
-    "stockAnalysis": "股票分析"
+    "knowledgeSettings": {
+      "title": "知识库"
+    },
+    "notificationCenter": {
+      "title": "通知"
+    }
   },
   "backup": {
     "title": "备份中心",
@@ -2470,7 +2509,8 @@
     "proxyTestFailed": "代理测试失败",
     "invalidFormat": "格式无效",
     "page": "出错了",
-    "message": "错误"
+    "message": "错误",
+    "pageNotFound": "抱歉，您访问的页面不存在。"
   },
   "desktop": {
     "title": "桌面集成",
@@ -3203,7 +3243,14 @@
     "searchPlaceholder": "搜索笔记...",
     "selectWiki": "选择 Wiki",
     "selectWikiPrompt": "请选择一个 Wiki",
-    "source": "源码",
+    "source": {
+      "title": "标题",
+      "type": "类型",
+      "status": "状态",
+      "chunks": "分块",
+      "path": "路径",
+      "deleteNotImplemented": "删除功能尚未实现"
+    },
     "sources": "来源",
     "sync": {
       "byWiki": "按 Wiki",
@@ -3861,6 +3908,62 @@
     "noUndoAvailable": "无可撤销操作",
     "noRedoAvailable": "无可重做操作",
     "nodeDropFailed": "节点放置失败",
+    "knowledgeSettings": {
+      "title": "知识库"
+    },
+    "notificationCenter": {
+      "title": "通知"
+    },
+    "chatRightPanel": {
+      "agent": "智能体",
+      "hierarchy": "层级",
+      "research": "调研",
+      "git": "Git",
+      "task": "任务",
+      "code": "代码",
+      "artifact": "产出",
+      "imageGen": "生图",
+      "visionAnalysis": "视觉分析",
+      "report": "报告",
+      "citation": "引用",
+      "inspector": "检查",
+      "browser": "浏览器",
+      "computer": "桌面",
+      "benchmark": "评测",
+      "chart": "图表",
+      "snapshot": "快照",
+      "profile": "用户",
+      "errorRecovery": "恢复",
+      "collaboration": "协作",
+      "evolution": "进化",
+      "steer": "引导",
+      "cache": "缓存",
+      "branchCompare": "分支对比",
+      "gateway": "网关",
+      "contextClass": "上下文",
+      "cronResult": "定时结果",
+      "reflection": "反思",
+      "researchSources": "研究来源",
+      "categoryEdit": "分类编辑",
+      "filePermission": "文件权限",
+      "sessionShare": "会话分享",
+      "prefetch": "预取",
+      "reminders": "提醒",
+      "contextPrediction": "上下文预测",
+      "teammate": "协作"
+    },
+    "report": {
+      "sourceType": {
+        "web": "网页",
+        "academic": "学术",
+        "wikipedia": "维基百科",
+        "documentation": "文档",
+        "news": "新闻",
+        "blog": "博客",
+        "forum": "论坛",
+        "unknown": "未知"
+      }
+    },
     "rightPanel": {
       "addTagsPlaceholder": "添加标签...",
       "deleteEdge": "删除连线",
@@ -4229,7 +4332,7 @@
     "exportMarkdown": "导出 Markdown",
     "passRate": "通过率",
     "overallScore": "总体得分",
-    "taskCount": "任务数",
+    "taskCount": "{{count}} 个任务",
     "totalDuration": "总耗时",
     "waiting": "等待",
     "noResult": "暂无结果",
@@ -4257,7 +4360,10 @@
     "difficultyMedium": "中等",
     "difficultyHard": "困难",
     "difficultyExpert": "专家",
-    "includeTraces": "包含追踪记录"
+    "includeTraces": "包含追踪记录",
+    "tags": "标签: {{tags}}",
+    "none": "无",
+    "response": "响应"
   },
   "traceExplorer": {
     "selectTrace": "选择一个 trace 查看详情"
@@ -4437,21 +4543,32 @@
     "completed": "已完成",
     "contextPrediction": "上下文预测",
     "delete": "删除",
+    "deleteConfirm": "确定要删除此提醒吗？",
     "description": "描述",
     "descriptionPlaceholder": "输入描述...",
     "dismiss": "忽略",
     "dismissAll": "全部忽略",
     "estimatedTime": "预计时间",
+    "everyInterval": "每{{interval}}{{unit}}",
+    "everySingle": "每{{unit}}",
     "inDays": "{{count}} 天后",
     "language": "语言",
     "loading": "加载中...",
     "moreSuggestions": "更多建议",
     "noPredictions": "暂无预测",
     "noReminders": "暂无提醒",
+    "overdue": "已过期",
     "prefetchReady": "预取就绪",
     "prefetching": "预取中...",
+    "recurrenceUnitDay": "天",
+    "recurrenceUnitDays": "天",
+    "recurrenceUnitMonth": "月",
+    "recurrenceUnitMonths": "月",
+    "recurrenceUnitWeek": "周",
+    "recurrenceUnitWeeks": "周",
     "reminders": "提醒",
     "scheduledAt": "计划时间",
+    "scheduledWas": "计划时间: {{time}}",
     "snooze": "稍后提醒",
     "suggestedActions": "建议操作",
     "suggestions": "建议",
@@ -4460,7 +4577,10 @@
     "today": "今天",
     "tomorrow": "明天",
     "unknown": "未知",
-    "yesterday": "昨天"
+    "yesterday": "昨天",
+    "retry": "重试",
+    "applied": "已应用",
+    "copied": "已复制到剪贴板"
   },
   "review": {
     "commentPlaceholder": "输入评论...",
@@ -5397,6 +5517,7 @@
     "sourceTypeWeb": "网页",
     "sourceTypeAcademic": "学术",
     "sourceTypeWikipedia": "维基百科",
+    "sourceTypeGithub": "GitHub",
     "sourceTypeDocumentation": "文档",
     "sourceTypeNews": "新闻",
     "sourceTypeBlog": "博客",
@@ -5425,12 +5546,27 @@
     "error": "错误",
     "citations": "引用",
     "copyReport": "复制报告",
-    "mockFinding": ""
+    "mockFinding": "模拟研究发现",
+    "progress": {
+      "phasePlanning": "规划",
+      "phaseSearching": "搜索",
+      "phaseExtracting": "提取",
+      "phaseAnalyzing": "分析",
+      "phaseSynthesizing": "综合",
+      "phaseReporting": "报告",
+      "currentPhase": "当前阶段: {{phase}}"
+    }
   },
   "reportViewer": {
-    "noReport": "暂无生成报告",
+    "preview": "预览",
+    "references": "参考文献",
+    "summary": "摘要",
+    "generatedAt": "生成时间:",
+    "export": "导出",
+    "copyReport": "复制报告",
+    "startNewResearch": "开始新研究",
+    "lowCredibilityWarning": "注意: 报告中包含 {{count}} 个低可信度来源，请谨慎使用",
     "noReferences": "暂无参考文献",
-    "noOutline": "暂无大纲",
     "noSummary": "暂无摘要"
   },
   "citationManager": {
@@ -5558,7 +5694,35 @@
     "selectExpert": "选择专家角色"
   },
   "permissionModal": {
-    "title": "权限审批"
+    "title": "权限审批",
+    "deny": "拒绝",
+    "allow": "允许",
+    "alwaysAllow": "始终允许",
+    "unknownTool": "未知工具",
+    "pendingCount": "待审批 {{count}} 项 (当前第 {{current}} 项)",
+    "pendingOne": "待审批 1 项",
+    "expandDetails": "展开参数详情",
+    "collapseDetails": "收起参数详情",
+    "noParams": "(无参数)",
+    "riskExecute": " — 此操作可能修改系统状态，请谨慎审批",
+    "riskWrite": " — 此操作将创建或修改文件",
+    "riskRead": " — 此操作仅读取数据，不会修改任何内容",
+    "riskLevel": "风险等级：{{level}}",
+    "approveError": "审批失败",
+    "toolDesc": {
+      "readFilePath": "读取 {{path}}",
+      "readFile": "读取文件 {{file}}",
+      "readFileGeneric": "读取文件或目录内容",
+      "writeFile": "写入文件 {{path}}",
+      "writeFileGeneric": "创建或修改文件",
+      "execCommand": "执行命令: {{cmd}}",
+      "execShell": "执行 Shell 命令",
+      "deletePath": "删除 {{path}}",
+      "deleteGeneric": "删除文件或目录",
+      "webSearch": "搜索网络获取信息",
+      "mcpTool": "执行 MCP 工具",
+      "execTool": "执行 {{toolName}}"
+    }
   },
   "teammatePanel": {
     "memberCount": "{{count}} 名队友",
@@ -5642,8 +5806,12 @@
     "success": "成功",
     "failed": "失败",
     "schedule": "调度",
+    "scheduleDescription": "描述",
     "platform": "平台",
-    "time": "时间"
+    "time": "时间",
+    "loading": "正在加载定时任务结果…",
+    "prefix": "定时任务: {{jobName}}",
+    "emptyResult": "无执行结果"
   },
   "errorBoundary": {
     "title": "出了点问题",
@@ -5651,7 +5819,8 @@
   },
   "cacheIndicator": {
     "notEstablished": "Prompt 缓存未建立。会话首轮。",
-    "pendingChanges": "检测到待生效变更。变更将在下次会话生效。使用 --now 强制生效。"
+    "pendingChanges": "检测到待生效变更。变更将在下次会话生效。使用 --now 强制生效。",
+    "active": "缓存已激活。{{hits}} 次命中，~{{tokens}} tokens 已节省。"
   },
   "artifactPanel": {
     "fullscreen": "全屏"
@@ -5673,13 +5842,34 @@
   "reflection": {
     "noReflection": "暂无反思结果",
     "title": "反思",
+    "qualityScore": "质量评分",
+    "excellent": "优秀",
+    "good": "良好",
+    "needsImprovement": "需要改进",
+    "startReflection": "开始反思",
+    "reflecting": "反思中...",
+    "analyzing": "正在分析任务执行...",
     "qualityAnalysis": "质量分析",
     "efficiencyAnalysis": "效率分析",
+    "errorPatterns": "错误模式",
+    "reusablePatterns": "可复用模式",
+    "knowledgeSuggestions": "知识建议",
+    "improvementSuggestions": "改进建议",
     "generatedInsights": "生成的洞察",
-    "usageCount": "使用次数"
+    "usageCount": "使用次数",
+    "summary": "摘要",
+    "qualityMetrics": "质量指标",
+    "taskSuccessScore": "任务成功率",
+    "toolEfficiencyScore": "工具效率",
+    "iterationEfficiencyScore": "迭代效率",
+    "timeEfficiencyScore": "时间效率",
+    "errorRecoveryScore": "错误恢复",
+    "goalCompletionScore": "目标完成度",
+    "reflectError": "反思失败",
+    "retry": "重试"
   },
   "subAgentCard": {
-    "fork": "Fork"
+    "viewConversation": "查看子会话"
   },
   "modelParam": {
     "topP": "Top P"
@@ -5910,68 +6100,104 @@
     }
   },
   "chat:workflow.templateList.presetsImported": "导入成功",
+  "agentRole": {
+    "coordinator": "协调者",
+    "researcher": "研究员",
+    "planner": "规划者",
+    "developer": "开发者",
+    "reviewer": "审查者",
+    "browser": "浏览器",
+    "synthesizer": "综合者",
+    "executor": "执行者"
+  },
+  "stream": {
+    "timeout": "⚠️ 流式响应超时（5分钟无更新），已自动中断"
+  },
+  "report": {
+    "source": {
+      "web": "网页",
+      "academic": "学术",
+      "wikipedia": "维基百科",
+      "documentation": "文档",
+      "news": "新闻",
+      "blog": "博客",
+      "forum": "论坛",
+      "unknown": "未知"
+    },
+    "citations": "参考文献",
+    "generatedAt": "生成时间: {{time}}",
+    "export": "导出",
+    "copyReport": "复制报告",
+    "startNewResearch": "开始新研究",
+    "preview": "预览",
+    "summary": "摘要",
+    "lowCredibilityNotice": "注意: 报告中包含 {{count}} 个低可信度来源，请谨慎使用",
+    "sourceType": {
+      "web": "网页",
+      "academic": "学术",
+      "wikipedia": "维基百科",
+      "documentation": "文档",
+      "news": "新闻",
+      "blog": "博客",
+      "forum": "论坛",
+      "unknown": "未知"
+    }
+  },
+  "chatRightPanel": {
+    "agent": "智能体",
+    "hierarchy": "层级",
+    "research": "调研",
+    "git": "Git",
+    "task": "任务",
+    "code": "代码",
+    "artifact": "产出",
+    "imageGen": "生图",
+    "visionAnalysis": "视觉分析",
+    "report": "报告",
+    "citation": "引用",
+    "inspector": "检查",
+    "browser": "浏览器",
+    "computer": "桌面",
+    "benchmark": "评测",
+    "chart": "图表",
+    "snapshot": "快照",
+    "profile": "用户",
+    "errorRecovery": "恢复",
+    "collaboration": "协作",
+    "evolution": "进化",
+    "steer": "引导",
+    "cache": "缓存",
+    "branchCompare": "分支对比",
+    "gateway": "网关",
+    "contextClass": "上下文",
+    "cronResult": "定时结果",
+    "reflection": "反思",
+    "researchSources": "研究来源",
+    "categoryEdit": "分类编辑",
+    "filePermission": "文件权限",
+    "sessionShare": "会话分享",
+    "prefetch": "预取",
+    "reminders": "提醒",
+    "contextPrediction": "上下文预测",
+    "teammate": "协作",
+    "steerInput": "引导"
+  },
+  "knowledgeSettings": {
+    "title": "知识库"
+  },
+  "notificationCenter": {
+    "title": "通知"
+  },
+  "thinking": {
+    "phase": {
+      "analysis": "分析现状",
+      "planning": "制定计划",
+      "execution": "执行操作",
+      "verification": "验证结果"
+    },
+    "phaseCount": "{{count}} 个阶段"
+  },
   "stockAnalysis": {
-    "title": "股票分析",
-    "searchPlaceholder": "输入股票代码或名称",
-    "startAnalysis": "开始分析",
-    "analyzing": "分析中...",
-    "starting": "正在启动分析引擎...",
-    "price": "最新价",
-    "open": "开",
-    "high": "高",
-    "low": "低",
-    "volume": "量",
-    "volumeUnit": "万手",
-    "stage.dataLoading": "数据加载",
-    "stage.analysis": "多维度分析",
-    "stage.debate": "多空辩论",
-    "stage.risk": "风险评估",
-    "stage.decision": "投资决策",
-    "debate": "多空辩论",
-    "debateRound": "第{round}轮",
-    "bull": "多方",
-    "bear": "空方",
-    "riskAssessment": "风险评估",
-    "risk.aggressive": "激进",
-    "risk.conservative": "保守",
-    "risk.neutral": "中性",
-    "finalDecision": "最终决策",
-    "position": "仓位",
-    "targetPrice": "目标价",
-    "stopLoss": "止损",
-    "riskLevel": "风险等级",
-    "confidence": "置信度",
-    "emptyHint": "搜索股票代码开始分析",
-    "emptyHintDetail": "支持沪深A股，输入代码或名称搜索（如：600519、贵州茅台）",
-    "watchlist": "自选股",
-    "tab.market": "行情",
-    "tab.analysts": "分析师",
-    "tab.debate": "辩论",
-    "tab.risk": "风险",
-    "tab.decision": "决策",
-    "compare": "多股对比",
-    "stockCode1": "股票代码1",
-    "stockCode2": "股票代码2",
-    "compareBtn": "对比",
-    "change": "涨跌幅",
-    "alert.title": "价格告警",
-    "alert.code": "代码",
-    "alert.name": "名称",
-    "alert.condition": "条件",
-    "alert.price": "价格",
-    "alert.above": "突破",
-    "alert.below": "跌破",
-    "alert.empty": "暂无告警",
-    "alert.triggered": "价格告警已触发！",
-    "klineChart": "K线",
-    "volumeChart": "成交量",
-    "loadHistory": "点击加载历史分析报告",
-    "history": "历史分析",
-    "debateHistory": "历史辩论",
-    "addToWatchlist": "加入自选",
-    "addedToWatchlist": "已加入自选",
-    "inWatchlist": "已在自选",
-    "addFailed": "操作失败",
     "actionBuy": "买入",
     "actionSell": "卖出",
     "actionIncrease": "增持",
@@ -5984,74 +6210,6 @@
     "concentration": "集中度",
     "holdings": "持仓",
     "sharesUnit": "只",
-    "wanUnit": "万",
-    "settings": {
-      "title": "股票分析设置",
-      "dataSources": "数据源",
-      "analysis": "分析参数",
-      "trading": "交易设置",
-      "model": "模型参数",
-      "debateRounds": "辩论轮数",
-      "klinePeriod": "K线周期",
-      "periodDaily": "日线",
-      "periodWeekly": "周线",
-      "periodMonthly": "月线",
-      "klineLimit": "K线数量",
-      "newsLimit": "新闻数量",
-      "tradingEnabled": "启用交易",
-      "maxSinglePosition": "单股最大仓位",
-      "maxTotalPosition": "总仓位上限",
-      "maxPositions": "最大持仓数",
-      "temperature": "创造性",
-      "maxTokens": "最大输出长度",
-      "resetDefaults": "恢复默认"
-    }
-  },
-  "trade": {
-    "title": "交易日志",
-    "disabledHint": "开启后可手动记录买卖交易，自动跟踪持仓成本与盈亏",
-    "stockCode": "代码",
-    "stockName": "名称",
-    "buy": "买",
-    "sell": "卖",
-    "price": "价格",
-    "quantity": "数量",
-    "cost": "成本",
-    "shares": "持仓",
-    "pnl": "盈亏",
-    "recorded": "已记录",
-    "fillRequired": "请填写必要信息",
-    "toggleFailed": "切换失败",
-    "agentRole": {
-      "coordinator": "协调者",
-      "researcher": "研究员",
-      "planner": "规划者",
-      "developer": "开发者",
-      "reviewer": "审查者",
-      "browser": "浏览器",
-      "synthesizer": "综合者",
-      "executor": "执行者"
-    },
-    "settings": {
-      "title": "股票分析设置",
-      "dataSources": "数据源",
-      "analysis": "分析参数",
-      "trading": "交易设置",
-      "model": "模型参数",
-      "debateRounds": "辩论轮数",
-      "klinePeriod": "K线周期",
-      "periodDaily": "日线",
-      "periodWeekly": "周线",
-      "periodMonthly": "月线",
-      "klineLimit": "K线数量",
-      "newsLimit": "新闻数量",
-      "tradingEnabled": "启用交易",
-      "maxSinglePosition": "单股最大仓位",
-      "maxTotalPosition": "总仓位上限",
-      "maxPositions": "最大持仓数",
-      "temperature": "创造性",
-      "maxTokens": "最大输出长度",
-      "resetDefaults": "恢复默认"
-    }
+    "wanUnit": "万"
   }
 }

@@ -1,9 +1,9 @@
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtySessionConfig {
@@ -57,7 +57,6 @@ struct PtySessionInner {
 
 pub struct PtySession {
     id: String,
-    #[allow(dead_code)]
     config: PtySessionConfig,
     inner: Arc<tokio::sync::Mutex<Option<PtySessionInner>>>,
     output_tx: mpsc::UnboundedSender<PtyOutputEvent>,
@@ -269,6 +268,14 @@ impl PtySession {
                 .map_err(|e| format!("Failed to resize PTY: {}", e)),
             None => Err("PTY session not available".to_string()),
         }
+    }
+
+    pub async fn reset_size(&self) -> Result<(), String> {
+        self.resize(self.config.rows, self.config.cols).await
+    }
+
+    pub fn config(&self) -> &PtySessionConfig {
+        &self.config
     }
 
     pub async fn kill(&self) -> Result<(), String> {

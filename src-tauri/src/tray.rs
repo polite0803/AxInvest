@@ -1,24 +1,26 @@
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 use tauri::{
+    AppHandle, Manager,
     image::Image,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Manager,
 };
 
 const TRAY_ID: &str = "axagent-tray";
 
-static TRAY_LABELS: LazyLock<std::sync::RwLock<(String, String)>> =
-    LazyLock::new(|| std::sync::RwLock::new(("显示主窗口".to_string(), "退出".to_string())));
+static TRAY_LABELS: LazyLock<Mutex<(String, String)>> =
+    LazyLock::new(|| Mutex::new(("显示主窗口".to_string(), "退出".to_string())));
 
 #[tauri::command]
 pub fn set_tray_labels(app: AppHandle, show_label: String, quit_label: String) {
-    *TRAY_LABELS.write().unwrap() = (show_label.clone(), quit_label.clone());
-    let _ = sync_tray_menu(&app);
+    *TRAY_LABELS.lock().unwrap() = (show_label.clone(), quit_label.clone());
+    if let Err(e) = sync_tray_menu(&app) {
+        tracing::warn!("Failed to sync tray menu: {}", e);
+    }
 }
 
 fn build_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
-    let (show_label, quit_label) = TRAY_LABELS.read().unwrap().clone();
+    let (show_label, quit_label) = TRAY_LABELS.lock().unwrap().clone();
     let show = MenuItem::with_id(app, "show", &show_label, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", &quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;

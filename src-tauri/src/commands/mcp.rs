@@ -68,7 +68,7 @@ pub async fn test_mcp_server(
 
     let timeout_duration = std::time::Duration::from_secs(TEST_TIMEOUT_SECS);
 
-    let result = tokio::time::timeout(timeout_duration, async {
+    tokio::time::timeout(timeout_duration, async {
         match server.transport.as_str() {
             "stdio" => {
                 let command = server
@@ -122,9 +122,7 @@ pub async fn test_mcp_server(
         }
     })
     .await
-    .map_err(|_| format!("连接测试超时（{} 秒）", TEST_TIMEOUT_SECS))?;
-
-    result
+    .map_err(|_| format!("连接测试超时（{} 秒）", TEST_TIMEOUT_SECS))?
 }
 
 #[tauri::command]
@@ -195,8 +193,11 @@ pub async fn hot_reload_mcp_server(
     // 3. Evict any cached connections for this server in the MCP pool
     //    so the next tool call will establish a fresh connection
     {
-        let pool = axagent_core::mcp_client::global_mcp_pool();
-        pool.evict_by_server_id(&id);
+        #[cfg(not(target_os = "android"))]
+        {
+            let pool = axagent_core::mcp_client::global_mcp_pool();
+            pool.evict_by_server_id(&id);
+        }
     }
 
     // 4. Emit event so frontend can update its tool list

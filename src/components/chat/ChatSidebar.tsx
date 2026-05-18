@@ -21,7 +21,7 @@ import {
   useUIStore,
   useWorkflowEditorStore,
 } from "@/stores";
-import { _suppressSidebarAutoSelect, resetSidebarAutoSelectSuppression } from "@/stores/domain/conversationStore";
+import { isSidebarAutoSelectSuppressed, resetSidebarAutoSelectSuppression } from "@/stores/domain/conversationStore";
 import type { Conversation, Message } from "@/types";
 import Conversations from "@ant-design/x/es/conversations";
 import type { ConversationItemType } from "@ant-design/x/es/conversations/interface";
@@ -38,7 +38,6 @@ import {
   Modal,
   Radio,
   Space,
-  Tag,
   theme,
   Tooltip,
 } from "antd";
@@ -73,6 +72,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CategoryManagerModal } from "./CategoryManagerModal";
+import { GatewaySessionBadge } from "./GatewaySessionBadge";
 
 function getDateGroup(timestamp: number): string {
   const now = new Date();
@@ -139,13 +140,22 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
   const [fts5ResultIds, setFts5ResultIds] = useState<string[] | null>(null);
 
   useEffect(() => {
+    // 以下分支互斥：无搜索词直接返回 null，异步搜索后 then/catch 各自只有一次 setState
     if (!debouncedSearch) {
       setFts5ResultIds(null);
       return;
     }
+    let cancelled = false;
     invoke<Array<{ id: string }>>("search_conversations", { query: debouncedSearch })
-      .then((results) => setFts5ResultIds(results.map((r) => r.id)))
-      .catch(() => setFts5ResultIds(null));
+      .then((results) => {
+        if (!cancelled) { setFts5ResultIds(results.map((r) => r.id)); }
+      })
+      .catch(() => {
+        if (!cancelled) { setFts5ResultIds(null); }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [debouncedSearch]);
   const [searchVisible, setSearchVisible] = useState(false);
   const [advancedSearchVisible, setAdvancedSearchVisible] = useState(false);
@@ -162,6 +172,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
   const [archiveTargetIds, setArchiveTargetIds] = useState<string[]>([]);
   const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const conversationsLoading = useConversationStore((s) => s.loading);
 
   // Auto-expand parent when active conversation is a child
@@ -177,7 +188,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
   useEffect(() => {
     // Suppress auto-select when the active conversation was just deleted/archived.
     // The user explicitly closed the conversation and should see the welcome screen.
-    if (_suppressSidebarAutoSelect) {
+    if (isSidebarAutoSelectSuppressed()) {
       resetSidebarAutoSelectSuppression();
       return;
     }
@@ -187,7 +198,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
       if (lastConv) {
         setActiveConversation(lastConv.id);
       } else {
-        const sorted = [...conversations].sort((a, b) => {
+        const sorted = conversations.toSorted((a, b) => {
           if (a.is_pinned !== b.is_pinned) { return a.is_pinned ? -1 : 1; }
           return b.updated_at - a.updated_at;
         });
@@ -397,10 +408,8 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
         // Single archive
         await archiveToKnowledgeBase(archiveTargetId, selectedKbId);
       } else if (archiveTargetIds.length > 0) {
-        // Batch archive
-        for (const id of archiveTargetIds) {
-          await archiveToKnowledgeBase(id, selectedKbId);
-        }
+        // Batch archive — run in parallel
+        await Promise.all(archiveTargetIds.map((id) => archiveToKnowledgeBase(id, selectedKbId)));
         exitMultiSelect();
       }
       messageApi.success(t("chat.archivedSuccess", { count: archiveTargetId ? 1 : archiveTargetIds.length }));
@@ -490,7 +499,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
     } else {
       icon = (
         <Avatar size={20} style={{ fontSize: 12, backgroundColor: token.colorPrimaryBg, color: token.colorPrimary }}>
-          {(conv.title || "对")[0]}
+          {(conv.title || t("chat.sidebar.fallbackTitle"))[0]}
         </Avatar>
       );
     }
@@ -567,12 +576,12 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                 />
               )}
               {conv.mode === "gateway" && (
-                <Tag
-                  style={{ fontSize: 10, lineHeight: "16px", padding: "0 4px", margin: 0, flexShrink: 0 }}
-                  color="blue"
-                >
-                  {t("settings.messageChannels")}
-                </Tag>
+                <GatewaySessionBadge
+                  platform={(() => {
+                    const m = conv.title.match(/^\[(\w+)\]/);
+                    return m ? m[1] : "";
+                  })()}
+                />
               )}
               <Pin size={12} style={{ color: token.colorTextQuaternary, flexShrink: 0 }} />
             </span>
@@ -588,12 +597,12 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                 />
               )}
               {conv.mode === "gateway" && (
-                <Tag
-                  style={{ fontSize: 10, lineHeight: "16px", padding: "0 4px", margin: 0, flexShrink: 0 }}
-                  color="blue"
-                >
-                  {t("settings.messageChannels")}
-                </Tag>
+                <GatewaySessionBadge
+                  platform={(() => {
+                    const m = conv.title.match(/^\[(\w+)\]/);
+                    return m ? m[1] : "";
+                  })()}
+                />
               )}
             </span>
           );
@@ -612,6 +621,20 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                     else { next.add(conv.id); }
                     return next;
                   });
+                }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setExpandedParentIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(conv.id)) { next.delete(conv.id); }
+                      else { next.add(conv.id); }
+                      return next;
+                    });
+                  }
                 }}
                 style={{ cursor: "pointer", display: "flex", alignItems: "center", flexShrink: 0 }}
               >
@@ -745,7 +768,12 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
     if (segments.length === 2) { return segments.join("/"); }
     // Show last 2 segments, but if duplicate exists among all ws dirs, extend to 3
     const short2 = segments.slice(-2).join("/");
-    const wsPaths = Array.from(new Set(conversations.map((c) => c.workspace_dir).filter(Boolean) as string[]));
+    const wsPaths = Array.from(
+      new Set(conversations.flatMap((c) => {
+        const dir = c.workspace_dir;
+        return dir ? [dir] : [];
+      })),
+    );
     const hasConflict = wsPaths.some((p) => {
       const s = p.replace(/\\/g, "/").split("/").filter(Boolean);
       return s.length >= 2 && s.slice(-2).join("/") === short2 && p !== path;
@@ -815,6 +843,15 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                   onClick={(e) => {
                     e.stopPropagation();
                     void handleNewConversation();
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void handleNewConversation();
+                    }
                   }}
                   style={{
                     cursor: "pointer",
@@ -1004,11 +1041,14 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
 
       // Build "move to workspace" submenu
       const wsChildren = wsDirs
-        .filter((d) => d !== conv.workspace_dir)
-        .map((d) => ({
-          key: `move-ws:${d}`,
-          label: <span className="truncate" style={{ maxWidth: 180, display: "inline-block" }}>{d}</span>,
-        }));
+        .flatMap((d) =>
+          d !== conv.workspace_dir
+            ? [{
+              key: `move-ws:${d}`,
+              label: <span className="truncate" style={{ maxWidth: 180, display: "inline-block" }}>{d}</span>,
+            }]
+            : []
+        );
       if (conv.workspace_dir) {
         wsChildren.unshift({
           key: "remove-ws",
@@ -1130,7 +1170,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
             return;
           }
           if (menuInfo.key === "detach-parent") {
-            void updateConversation(conv.id, { parent_conversation_id: null as unknown as string });
+            void updateConversation(conv.id, { parent_conversation_id: null });
             return;
           }
           if (menuInfo.key === "go-parent" && parentId) {
@@ -1193,11 +1233,14 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
     const parentId = conv.parent_conversation_id;
 
     const wsChildren = wsDirs
-      .filter((d) => d !== conv.workspace_dir)
-      .map((d) => ({
-        key: `move-ws:${d}`,
-        label: <span className="truncate" style={{ maxWidth: 180, display: "inline-block" }}>{d}</span>,
-      }));
+      .flatMap((d) =>
+        d !== conv.workspace_dir
+          ? [{
+            key: `move-ws:${d}`,
+            label: <span className="truncate" style={{ maxWidth: 180, display: "inline-block" }}>{d}</span>,
+          }]
+          : []
+      );
     if (conv.workspace_dir) {
       wsChildren.unshift({
         key: "remove-ws",
@@ -1305,7 +1348,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
           return;
         }
         if (menuInfo.key === "detach-parent") {
-          void updateConversation(conv.id, { parent_conversation_id: null as unknown as string });
+          void updateConversation(conv.id, { parent_conversation_id: null });
           return;
         }
         if (menuInfo.key === "go-parent" && parentId) {
@@ -1464,7 +1507,7 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                     style={{ color: token.colorPrimary }}
                   />
                 </Tooltip>
-                <Tooltip title={t("chat.searchPastSessions") ?? "搜索历史会话"}>
+                <Tooltip title={t("chat.searchPastSessions")}>
                   <Button
                     type="text"
                     size="small"
@@ -1501,6 +1544,15 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                     icon={<ListTodo size={16} />}
                     size="small"
                     onClick={() => setMultiSelectMode(true)}
+                    style={{ color: token.colorPrimary }}
+                  />
+                </Tooltip>
+                <Tooltip title={t("chat.manageCategories")}>
+                  <Button
+                    type="text"
+                    icon={<FolderOpen size={16} />}
+                    size="small"
+                    onClick={() => setCategoryManagerOpen(true)}
                     style={{ color: token.colorPrimary }}
                   />
                 </Tooltip>
@@ -1613,7 +1665,6 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
             onChange={(e) =>
               handleSearch(e.target.value)}
             size="small"
-            autoFocus
           />
         </div>
       )}
@@ -1628,6 +1679,19 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
                     <div
                       key={conv.id}
                       className="flex items-center gap-2 cursor-pointer"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          if (archivedMultiSelect) {
+                            toggleArchivedSelect(conv.id);
+                          } else {
+                            setActiveConversation(conv.id);
+                            setShowArchived(false);
+                          }
+                        }
+                      }}
                       style={{ padding: "8px 12px", borderRadius: 6, margin: "0 8px" }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.backgroundColor = token.colorFillContent;
@@ -1844,6 +1908,11 @@ export function ChatSidebar({ onCollapseChange }: { onCollapseChange?: (collapse
           setActiveConversation(result.session_id);
           setAdvancedSearchVisible(false);
         }}
+      />
+
+      <CategoryManagerModal
+        open={categoryManagerOpen}
+        onClose={() => setCategoryManagerOpen(false)}
       />
     </div>
   );

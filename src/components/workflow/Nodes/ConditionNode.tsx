@@ -77,7 +77,7 @@ const ConditionNodeComponent: React.FC<NodeProps<ConditionNodeData>> = ({ data, 
           borderRadius: 8,
           overflow: "hidden",
           boxShadow: selected ? `0 0 0 2px ${borderColor}40` : "none",
-          transition: "all 0.2s",
+          transition: "box-shadow 0.2s, transform 0.2s",
         }}
       >
         <div
@@ -93,7 +93,7 @@ const ConditionNodeComponent: React.FC<NodeProps<ConditionNodeData>> = ({ data, 
           <span style={{ fontSize: 14 }}>🔀</span>
           <span
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: color,
               fontWeight: 600,
             }}

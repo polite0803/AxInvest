@@ -18,7 +18,7 @@ interface UserProfileData {
   behavior_patterns: { pattern: string; frequency: number; confidence: number }[];
 }
 
-export default function UserProfilePanel() {
+export function UserProfilePanel() {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [profile, setProfile] = useState<UserProfileData | null>(null);
@@ -56,7 +56,7 @@ export default function UserProfilePanel() {
           onClick={() => setExpanded(true)}
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -82,7 +82,7 @@ export default function UserProfilePanel() {
           onClick={() => setExpanded(false)}
           className="text-muted-foreground hover:text-foreground transition-colors"
         >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -188,12 +188,14 @@ export default function UserProfilePanel() {
           value={newPrefKey}
           onChange={(e) => setNewPrefKey(e.target.value)}
           placeholder="key"
+          aria-label={t("userProfile.prefKey")}
           className="flex-1 text-[11px] px-1.5 py-0.5 rounded bg-muted/30 border-none outline-none placeholder:text-muted-foreground/40"
         />
         <input
           value={newPrefValue}
           onChange={(e) => setNewPrefValue(e.target.value)}
           placeholder="value"
+          aria-label={t("userProfile.prefValue")}
           className="flex-1 text-[11px] px-1.5 py-0.5 rounded bg-muted/30 border-none outline-none placeholder:text-muted-foreground/40"
           onKeyDown={(e) => e.key === "Enter" && addPreference()}
         />

@@ -16,8 +16,6 @@
 //! - Semantic cache hit check (if embedding matches, return cached)
 //! - Cost budget enforcement (downgrade tier if budget exceeded)
 
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 
 // ─── Route Decision ───
@@ -48,6 +46,7 @@ pub enum ModelTier {
 }
 
 impl ModelTier {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             ModelTier::Budget => "budget",

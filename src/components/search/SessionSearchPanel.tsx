@@ -70,7 +70,9 @@ export function SessionSearchPanel({
   };
 
   const handleSaveFilter = () => {
-    if (!filterName.trim()) { return; }
+    if (!filterName.trim()) {
+      return;
+    }
 
     const filter: SavedFilter = {
       name: filterName,
@@ -90,18 +92,23 @@ export function SessionSearchPanel({
   };
 
   const highlightText = (text: string, ranges: [number, number][]) => {
-    if (!ranges || ranges.length === 0) { return text; }
+    if (!ranges || ranges.length === 0) {
+      return text;
+    }
 
     const parts: React.ReactNode[] = [];
     let lastEnd = 0;
 
-    ranges.forEach(([start, end], index) => {
+    ranges.forEach(([start, end], _index) => {
       if (start > lastEnd) {
         parts.push(text.slice(lastEnd, start));
       }
+      {
+        /* computed highlight ranges, safe to use index as key */
+      }
       parts.push(
         <mark
-          key={index}
+          key={`hl-${start}-${end}`}
           style={{
             backgroundColor: "var(--accent-primary, #89b4fa)",
             color: "var(--background, #1e1e2e)",
@@ -213,7 +220,11 @@ export function SessionSearchPanel({
 
           {showFilters && (
             <Card size="small" style={{ marginBottom: 8 }}>
-              <Space direction="vertical" style={{ width: "100%" }} size="small">
+              <Space
+                direction="vertical"
+                style={{ width: "100%" }}
+                size="small"
+              >
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                   <Checkbox
                     checked={searchOptions.useRegex}
@@ -272,9 +283,9 @@ export function SessionSearchPanel({
                 </Popconfirm>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {recentSearches.map((q, i) => (
+                {recentSearches.map((q, _i) => (
                   <Tag
-                    key={i}
+                    key={q}
                     style={{ cursor: "pointer", padding: "4px 12px" }}
                     onClick={() => {
                       setQuery(q);
@@ -291,7 +302,10 @@ export function SessionSearchPanel({
 
           {savedFilters.length > 0 && (
             <div>
-              <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
+              <Text
+                type="secondary"
+                style={{ display: "block", marginBottom: 8 }}
+              >
                 <Star size={14} style={{ marginRight: 4 }} />
                 {t("search.savedFilters")}
               </Text>
@@ -327,13 +341,7 @@ export function SessionSearchPanel({
             </div>
           )}
 
-          {error && (
-            <Alert
-              type="error"
-              message={error}
-              style={{ marginTop: 8 }}
-            />
-          )}
+          {error && <Alert type="error" message={error} style={{ marginTop: 8 }} />}
 
           {results.length > 0
             ? (

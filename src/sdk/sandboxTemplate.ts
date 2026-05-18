@@ -12,7 +12,7 @@
 import type { SkillPermissions } from "./types";
 
 /** RPC 调用默认超时（毫秒） */
-export const DEFAULT_RPC_TIMEOUT_MS = 15000;
+const DEFAULT_RPC_TIMEOUT_MS = 15000;
 
 export interface SandboxTemplateOptions {
   skillName: string;
@@ -30,7 +30,11 @@ export interface SandboxTemplateOptions {
  * 生成 Skill 沙箱 HTML 完整页面
  */
 export function generateSandboxHtml(options: SandboxTemplateOptions): string {
-  const { skillName, htmlContent, rpcTimeoutMs = DEFAULT_RPC_TIMEOUT_MS } = options;
+  const {
+    skillName,
+    htmlContent,
+    rpcTimeoutMs = DEFAULT_RPC_TIMEOUT_MS,
+  } = options;
 
   const runtimeScript = generateRuntimeScript(rpcTimeoutMs);
 

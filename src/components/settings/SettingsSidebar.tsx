@@ -75,7 +75,13 @@ const MENU_ICONS: Partial<Record<SettingsSection, React.ReactNode>> = {
 
 // 分组定义：tab key → 包含的 sections
 const TAB_GROUPS: Record<string, SettingsSection[]> = {
-  model: ["providers", "defaultModel", "conversationSettings", "promptTemplates", "searchProviders"],
+  model: [
+    "providers",
+    "defaultModel",
+    "conversationSettings",
+    "promptTemplates",
+    "searchProviders",
+  ],
   appearance: ["general", "display", "shortcuts"],
   extensions: [
     "tools",
@@ -88,7 +94,15 @@ const TAB_GROUPS: Record<string, SettingsSection[]> = {
     "userProfile",
   ],
   network: ["proxy", "messageChannels", "webhooks", "acp"],
-  data: ["data", "storage", "cloudWorkspace", "backup", "scheduler", "stockAnalysis", "notificationCenter"],
+  data: [
+    "data",
+    "storage",
+    "cloudWorkspace",
+    "backup",
+    "scheduler",
+    "stockAnalysis",
+    "notificationCenter",
+  ],
   system: ["advanced", "evolution", "about"],
 };
 
@@ -109,7 +123,9 @@ function useDraggableWidth(initial: number, min: number, max: number) {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!dragging.current) { return; }
+      if (!dragging.current) {
+        return;
+      }
       const dx = e.clientX - startRef.current.startX;
       setWidth(Math.max(min, Math.min(max, startRef.current.startWidth + dx)));
     };
@@ -124,11 +140,14 @@ function useDraggableWidth(initial: number, min: number, max: number) {
     };
   }, [min, max]);
 
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    startRef.current = { startX: e.clientX, startWidth: width };
-  }, [width]);
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      startRef.current = { startX: e.clientX, startWidth: width };
+    },
+    [width],
+  );
 
   return { width, onMouseDown };
 }
@@ -140,7 +159,11 @@ export function SettingsSidebar() {
   const settingsSection = useUIStore((s) => s.settingsSection);
   const setSettingsSection = useUIStore((s) => s.setSettingsSection);
   const skillSections = useSkillExtensionStore((s) => s.settingsSections);
-  const { width: tabBarWidth, onMouseDown: onTabBarResize } = useDraggableWidth(72, 48, 200);
+  const { width: tabBarWidth, onMouseDown: onTabBarResize } = useDraggableWidth(
+    72,
+    48,
+    200,
+  );
 
   // 预构建 section → tab 反向映射，避免循环中调用 includes
   const sectionToTab = useMemo(() => {
@@ -161,7 +184,9 @@ export function SettingsSidebar() {
   // 当 settingsSection 变化时，同步更新 activeTab
   useEffect(() => {
     const tab = sectionToTab.get(settingsSection);
-    if (tab) { setActiveTab(tab); }
+    if (tab) {
+      setActiveTab(tab);
+    }
   }, [settingsSection, sectionToTab]);
 
   const handleTabChange = (key: string) => {
@@ -193,12 +218,16 @@ export function SettingsSidebar() {
     // 在最后添加技能扩展项
     const items = key === "extensions" ? [...builtin, ...skillItems] : builtin;
 
-    const tabLabel = t(`settings.tab${key.charAt(0).toUpperCase() + key.slice(1)}`);
+    const tabLabel = t(
+      `settings.tab${key.charAt(0).toUpperCase() + key.slice(1)}`,
+    );
     return {
       key,
       label: (
         <Tooltip title={tabLabel} placement="right">
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+          >
             {TAB_ICONS[key]}
             {tabBarWidth > 120 && <span style={{ fontSize: 13 }}>{tabLabel}</span>}
           </span>
@@ -245,7 +274,9 @@ export function SettingsSidebar() {
         }}
         onClick={() => navigate("/")}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") { navigate("/"); }
+          if (e.key === "Enter" || e.key === " ") {
+            navigate("/");
+          }
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.color = token.colorText;
@@ -272,13 +303,20 @@ export function SettingsSidebar() {
           Esc
         </span>
       </div>
-      <div className="flex-1 pt-1" style={{ overflowY: "auto", display: "flex" }}>
+      <div
+        className="flex-1 pt-1"
+        style={{ overflowY: "auto", display: "flex" }}
+      >
         <Tabs
           activeKey={activeTab}
           onChange={handleTabChange}
           items={tabItems}
           tabPlacement="start"
-          tabBarStyle={{ width: tabBarWidth, flexShrink: 0, transition: "width 0.05s" }}
+          tabBarStyle={{
+            width: tabBarWidth,
+            flexShrink: 0,
+            transition: "width 0.05s",
+          }}
           style={{ height: "100%", flex: 1 }}
         />
         {/* Resize handle */}

@@ -4,6 +4,10 @@
     "title": "스마트 워크스페이스",
     "description": "AI 기반 워크 어시스턴트"
   },
+  "artifact": {
+    "copiedToClipboard": "",
+    "copyFailed": ""
+  },
   "nav": {
     "chat": "채팅",
     "knowledge": "지식",
@@ -1854,6 +1858,7 @@
       "desc": "Manage automated scheduled tasks",
       "executed": "Executed",
       "quickCreated": "Quick created",
+      "unknownTemplateType": "",
       "refreshed": "Refreshed"
     },
     "localTools": {
@@ -2200,6 +2205,9 @@
     "workflow": {
       "title": "Workflow Settings",
       "description": "Manage workflow templates and editor settings",
+      "createdSuccess": "",
+      "deletedSuccess": "",
+      "sampleAdded": "",
       "createNew": "Create New Template",
       "visualEditor": "Visual Editor",
       "visualEditorDesc": "Create and edit workflows with drag-and-drop DAG editor",
@@ -2436,6 +2444,8 @@
     "retry": "재시도",
     "default": "기본값",
     "operationFailed": "Operation failed",
+    "key": "",
+    "value": "",
     "hide": "Hide",
     "searchPlaceholder": "Search..."
   },
@@ -2493,10 +2503,13 @@
     "openSettings": "설정 열기",
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
-    "conflictApp3": "WeChat (Windows)"
+    "conflictApp3": "WeChat (Windows)",
+    "conflictError": "단축키가 다른 애플리케이션에서 사용 중입니다. 다른 키를 시도하세요"
   },
   "tray": {
     "show": "표시",
+    "key": "",
+    "value": "",
     "hide": "숨기기",
     "quit": "종료"
   },
@@ -5960,6 +5973,9 @@
     "yes": "Yes",
     "no": "No",
     "cancel": "Cancel",
+    "createdSuccess": "",
+    "deletedSuccess": "",
+    "sampleAdded": "",
     "createNew": "Create New Dataset"
   },
   "loraConfig": {
@@ -6152,6 +6168,15 @@
     "concentration": "집중도",
     "holdings": "보유",
     "sharesUnit": "주",
-    "wanUnit": "만"
+    "wanUnit": "만",
+    "analystCount": "{{current}}/{{total}} 애널리스트",
+    "debateRounds": "{{current}}/{{total}} 토론 라운드",
+    "riskAssessCount": "{{count}} 평가",
+    "offlineMode": "오프라인 모드 (LLM 드라이버 연결 안 됨)",
+    "charCount": "{{count}} 자",
+    "settings.saveFailed": "설정 저장 실패",
+    "settings.quoteTag": "시세",
+    "settings.financialKlineTag": "재무/캔들",
+    "settings.newsTag": "뉴스"
   }
 }

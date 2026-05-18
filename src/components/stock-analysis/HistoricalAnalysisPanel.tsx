@@ -58,7 +58,7 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
               <span>
                 {key.replace("report.", "")}
                 <Tag style={{ marginLeft: 8 }}>
-                  {value.length} 字
+                  {t("stockAnalysis.charCount", { count: value.length })}
                 </Tag>
               </span>
             ),

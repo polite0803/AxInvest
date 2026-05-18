@@ -10,7 +10,11 @@ interface DockerConfigModalProps {
   onConnect: (config: { socketPath: string }) => void;
 }
 
-export function DockerConfigModal({ open, onClose, onConnect }: DockerConfigModalProps) {
+export function DockerConfigModal({
+  open,
+  onClose,
+  onConnect,
+}: DockerConfigModalProps) {
   const { t } = useTranslation();
   const [socketPath, setSocketPath] = useState("");
 
@@ -34,7 +38,6 @@ export function DockerConfigModal({ open, onClose, onConnect }: DockerConfigModa
             id="docker-config-modal-input-64"
             value={socketPath}
             onChange={(e) => setSocketPath(e.target.value)}
-            placeholder="unix:///var/run/docker.sock"
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
             Leave empty for default Docker socket

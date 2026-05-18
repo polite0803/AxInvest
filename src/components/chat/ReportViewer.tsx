@@ -2,7 +2,7 @@ import type { Citation } from "@/types";
 import { CheckCircleOutlined, CopyOutlined, DownloadOutlined, FileTextOutlined } from "@ant-design/icons";
 import { Button, Card, Divider, Select, Space, Tabs, Tag, Typography } from "antd";
 import DOMPurify from "dompurify";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CredibilityBadge } from "./CredibilityBadge";
 
@@ -26,14 +26,28 @@ interface ReportViewerProps {
   onReset?: () => void;
 }
 
-export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewerProps) {
+export function ReportViewer({
+  report,
+  onCopy,
+  onExport,
+  onReset,
+}: ReportViewerProps) {
   const { t } = useTranslation();
   const getSourceTypeName = (sourceType: string): string =>
     t(`report.sourceType.${sourceType.toLowerCase()}`, sourceType);
   const [selectedFormat, setSelectedFormat] = useState<ReportFormat>("markdown");
 
+  const [createdAtFormatted, setCreatedAtFormatted] = useState("");
+  useEffect(() => {
+    if (report?.createdAt) {
+      setCreatedAtFormatted(new Date(report.createdAt).toLocaleString());
+    }
+  }, [report?.createdAt]);
+
   const sanitizedHtml = useMemo(() => {
-    if (!report) { return ""; }
+    if (!report) {
+      return "";
+    }
     const rawHtml = report.content
       .replace(/#\s+(.+)/g, "<h1>$1</h1>")
       .replace(/##\s+(.+)/g, "<h2>$1</h2>")
@@ -152,7 +166,9 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
     {
       key: "preview",
       label: t("reportViewer.preview"),
-      children: selectedFormat === "markdown" ? renderMarkdownPreview() : renderHtmlPreview(),
+      children: selectedFormat === "markdown"
+        ? renderMarkdownPreview()
+        : renderHtmlPreview(),
     },
     {
       key: "references",
@@ -168,12 +184,19 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
               <ol style={{ paddingLeft: 20 }}>
                 {report.citations.map((citation) => (
                   <li key={citation.id} className="mb-2">
-                    <a href={citation.sourceUrl} target="_blank" rel="noopener noreferrer">
+                    <a
+                      href={citation.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       {citation.sourceTitle}
                     </a>
                     <Space size="small" className="ml-2">
                       <Tag>{getSourceTypeName(citation.sourceType)}</Tag>
-                      <CredibilityBadge score={citation.credibility} size="small" />
+                      <CredibilityBadge
+                        score={citation.credibility}
+                        size="small"
+                      />
                     </Space>
                   </li>
                 ))}
@@ -203,7 +226,7 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
           </Title>
           {report.createdAt && (
             <Text type="secondary" className="text-sm">
-              {t("reportViewer.generatedAt")} {new Date(report.createdAt).toLocaleString()}
+              {t("reportViewer.generatedAt")} {createdAtFormatted}
             </Text>
           )}
         </div>
@@ -221,7 +244,10 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
               ]}
               style={{ width: 120 }}
             />
-            <Button icon={<DownloadOutlined />} onClick={() => handleExport(selectedFormat)}>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => handleExport(selectedFormat)}
+            >
               {t("reportViewer.export")}
             </Button>
           </Space>
@@ -244,7 +270,8 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
             <Text type="warning" className="text-sm">
               <CheckCircleOutlined className="mr-1" />
               {t("reportViewer.lowCredibilityWarning", {
-                count: report.citations.filter((c) => c.credibility < 0.5).length,
+                count: report.citations.filter((c) => c.credibility < 0.5)
+                  .length,
               })}
             </Text>
           </div>
@@ -255,11 +282,17 @@ export function ReportViewer({ report, onCopy, onExport, onReset }: ReportViewer
 }
 
 interface ReportOutlineViewProps {
-  outline: { title: string; sections: { id: string; title: string; description: string }[] } | null;
+  outline: {
+    title: string;
+    sections: { id: string; title: string; description: string }[];
+  } | null;
   onSectionClick?: (sectionId: string) => void;
 }
 
-export function ReportOutlineView({ outline, onSectionClick }: ReportOutlineViewProps) {
+export function ReportOutlineView({
+  outline,
+  onSectionClick,
+}: ReportOutlineViewProps) {
   const { t } = useTranslation();
   if (!outline) {
     return (

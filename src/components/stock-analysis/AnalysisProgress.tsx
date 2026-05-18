@@ -37,12 +37,16 @@ export function AnalysisProgress() {
     ).length;
     switch (currentStage) {
       case 1:
-        return analystCount > 0 ? `${analystCount}/${TOTAL_ANALYSTS} 分析师` : null;
+        return analystCount > 0
+          ? t("stockAnalysis.analystCount", { current: analystCount, total: TOTAL_ANALYSTS })
+          : null;
       case 2:
-        return debateRounds.length > 0 ? `${debateRounds.length}/3 轮辩论` : null;
+        return debateRounds.length > 0
+          ? t("stockAnalysis.debateRounds", { current: debateRounds.length, total: 3 })
+          : null;
       case 3:
         return Object.keys(riskAssessments).length > 0
-          ? `${Object.keys(riskAssessments).length} 项评估`
+          ? t("stockAnalysis.riskAssessCount", { count: Object.keys(riskAssessments).length })
           : null;
       default:
         return null;
@@ -70,7 +74,7 @@ export function AnalysisProgress() {
       )}
       {llmStatus === "placeholder" && (
         <Tag color="orange" style={{ marginBottom: 8 }}>
-          ⚠️ 离线模式 (LLM Driver 未连接，占位数据)
+          ⚠️ {t("stockAnalysis.offlineMode")}
         </Tag>
       )}
       <Steps

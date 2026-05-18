@@ -22,7 +22,6 @@ const AGENT_COLORS: Record<string, string> = {
   plan: "#fa8c16",
   research: "#eb2f96",
   review: "#13c2c2",
-  "stock-analysis": "#eb2f96",
 };
 
 function hashColor(str: string): string {
@@ -37,7 +36,9 @@ function hashColor(str: string): string {
 function getTypeColor(type: string, agentType?: string): string {
   switch (type) {
     case "sub_agent":
-      return agentType ? (AGENT_COLORS[agentType] ?? hashColor(agentType)) : "#722ed1";
+      return agentType
+        ? (AGENT_COLORS[agentType] ?? hashColor(agentType))
+        : "#722ed1";
     case "worker":
       return "#fa8c16";
     case "workflow_step":
@@ -50,12 +51,21 @@ function getTypeColor(type: string, agentType?: string): string {
 function getTypeIcon(type: string, agentType?: string): string {
   switch (type) {
     case "sub_agent":
-      if (agentType === "explore") { return "🔍"; }
-      if (agentType === "build") { return "🏗"; }
-      if (agentType === "plan") { return "📋"; }
-      if (agentType === "research") { return "🔬"; }
-      if (agentType === "review") { return "✅"; }
-      if (agentType === "stock-analysis") { return "📈"; }
+      if (agentType === "explore") {
+        return "🔍";
+      }
+      if (agentType === "build") {
+        return "🏗";
+      }
+      if (agentType === "plan") {
+        return "📋";
+      }
+      if (agentType === "research") {
+        return "🔬";
+      }
+      if (agentType === "review") {
+        return "✅";
+      }
       return "🔧";
     case "worker":
       return "⚡";
@@ -85,8 +95,15 @@ function getTypeLabel(type: string): string {
 
 function StatusBadge({ status }: { status: AgentPoolItem["status"] }) {
   const { t } = useTranslation();
-  const config: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
-    pending: { icon: <Clock size={13} />, color: "#8c8c8c", label: t("agentPool.status.pending") },
+  const config: Record<
+    string,
+    { icon: React.ReactNode; color: string; label: string }
+  > = {
+    pending: {
+      icon: <Clock size={13} />,
+      color: "#8c8c8c",
+      label: t("agentPool.status.pending"),
+    },
     running: {
       icon: <LoadingOutlined spin style={{ fontSize: 13 }} />,
       color: "#1890ff",
@@ -102,7 +119,11 @@ function StatusBadge({ status }: { status: AgentPoolItem["status"] }) {
       color: "#ff4d4f",
       label: t("agentPool.status.failed"),
     },
-    cancelled: { icon: <SkipForward size={13} />, color: "#faad14", label: t("agentPool.status.cancelled") },
+    cancelled: {
+      icon: <SkipForward size={13} />,
+      color: "#faad14",
+      label: t("agentPool.status.cancelled"),
+    },
   };
   const c = config[status] || config.pending;
   return (
@@ -120,7 +141,9 @@ function StatusBadge({ status }: { status: AgentPoolItem["status"] }) {
 function WorkerMessageLog({ messages }: { messages?: WorkerMessage[] }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  if (!messages || messages.length === 0) { return null; }
+  if (!messages || messages.length === 0) {
+    return null;
+  }
 
   return (
     <div className="worker-msg-log">
@@ -137,9 +160,10 @@ function WorkerMessageLog({ messages }: { messages?: WorkerMessage[] }) {
       </button>
       {expanded && (
         <div className="worker-msg-log__list">
+          {/* message log appended sequentially, safe to use index as key */}
           {messages.map((msg, i) => (
             <div
-              key={i}
+              key={`${msg.workerId}-${msg.timestamp || i}`}
               className={`worker-msg-log__entry worker-msg-log__entry--${msg.messageType}`}
             >
               <span className="worker-msg-log__type">{msg.messageType}</span>
@@ -210,7 +234,10 @@ function PoolItemCard({ item }: { item: AgentPoolItem }) {
         <span className="pool-item__name" style={{ color }}>
           {item.name}
         </span>
-        <span className="pool-item__type-tag" style={{ borderColor: color + "40", color }}>
+        <span
+          className="pool-item__type-tag"
+          style={{ borderColor: color + "40", color }}
+        >
           {typeLabel}
         </span>
         <StatusBadge status={item.status} />
@@ -235,7 +262,10 @@ function PoolItemCard({ item }: { item: AgentPoolItem }) {
         <div className="pool-item__progress">
           <div
             className="pool-item__progress-bar"
-            style={{ width: `${Math.min(item.progress, 100)}%`, backgroundColor: color }}
+            style={{
+              width: `${Math.min(item.progress, 100)}%`,
+              backgroundColor: color,
+            }}
           />
         </div>
       )}
@@ -277,7 +307,9 @@ function PoolItemCard({ item }: { item: AgentPoolItem }) {
 
 function PoolSummaryBar({ summary }: { summary: AgentPoolSummary }) {
   const { t } = useTranslation();
-  if (summary.total === 0) { return null; }
+  if (summary.total === 0) {
+    return null;
+  }
 
   return (
     <div className="pool-summary">
@@ -323,7 +355,10 @@ interface AgentPoolPanelProps {
   visible?: boolean;
 }
 
-export function AgentPoolPanel({ conversationId, visible = true }: AgentPoolPanelProps) {
+export function AgentPoolPanel({
+  conversationId,
+  visible = true,
+}: AgentPoolPanelProps) {
   const pool = useExecutionStore((s) => s.agentPool[conversationId] || _EMPTY);
 
   const summary = useMemo(() => {
@@ -342,13 +377,19 @@ export function AgentPoolPanel({ conversationId, visible = true }: AgentPoolPane
     return items.sort((a, b) => {
       const aHasDeps = (a.dependsOn?.length || 0) > 0;
       const bHasDeps = (b.dependsOn?.length || 0) > 0;
-      if (aHasDeps && !bHasDeps) { return 1; }
-      if (!aHasDeps && bHasDeps) { return -1; }
+      if (aHasDeps && !bHasDeps) {
+        return 1;
+      }
+      if (!aHasDeps && bHasDeps) {
+        return -1;
+      }
       return (a.startedAt || 0) - (b.startedAt || 0);
     });
   }, [pool]);
 
-  if (!visible || pool.length === 0) { return null; }
+  if (!visible || pool.length === 0) {
+    return null;
+  }
 
   return (
     <div className="agent-pool-panel" data-component="agent-pool-panel">

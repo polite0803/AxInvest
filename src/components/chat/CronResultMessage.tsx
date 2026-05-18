@@ -1,5 +1,6 @@
 import { Card, Tag, Typography } from "antd";
 import { CheckCircle, Clock, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text, Paragraph } = Typography;
@@ -24,6 +25,12 @@ export function CronResultMessage({
   platform,
 }: CronResultMessageProps) {
   const { t, i18n } = useTranslation();
+
+  const [timestampFormatted, setTimestampFormatted] = useState("");
+  useEffect(() => {
+    setTimestampFormatted(new Date(timestamp).toLocaleString(i18n.language));
+  }, [timestamp, i18n.language]);
+
   return (
     <Card
       size="small"
@@ -33,8 +40,16 @@ export function CronResultMessage({
           <Clock size={14} />
           <span>{t("cronResult.prefix", { jobName })}</span>
           {success
-            ? <Tag color="success" icon={<CheckCircle size={12} />}>{t("cronResult.success")}</Tag>
-            : <Tag color="error" icon={<XCircle size={12} />}>{t("cronResult.failed")}</Tag>}
+            ? (
+              <Tag color="success" icon={<CheckCircle size={12} />}>
+                {t("cronResult.success")}
+              </Tag>
+            )
+            : (
+              <Tag color="error" icon={<XCircle size={12} />}>
+                {t("cronResult.failed")}
+              </Tag>
+            )}
         </div>
       }
     >
@@ -57,7 +72,7 @@ export function CronResultMessage({
         )}
         <div className="flex items-center justify-between">
           <Text type="secondary">{t("cronResult.time")}</Text>
-          <Text>{new Date(timestamp).toLocaleString(i18n.language)}</Text>
+          <Text>{timestampFormatted}</Text>
         </div>
         <Paragraph
           ellipsis={{ rows: 3, expandable: true }}

@@ -16,14 +16,17 @@ export interface ValidationNodeData {
   maxRetries: number;
 }
 
-export interface Assertion {
+interface Assertion {
   type: "equals" | "contains" | "matches" | "exists" | "custom";
   expected?: string;
   actual?: string;
   expression?: string;
 }
 
-const ValidationNodeComponent: React.FC<NodeProps<ValidationNodeData>> = ({ data, selected }) => {
+const ValidationNodeComponent: React.FC<NodeProps<ValidationNodeData>> = ({
+  data,
+  selected,
+}) => {
   const { t } = useTranslation();
   const color = "#722ed1";
   const assertions = data.assertions || [];
@@ -102,7 +105,7 @@ const ValidationNodeComponent: React.FC<NodeProps<ValidationNodeData>> = ({ data
           <Tag
             style={{
               margin: 0,
-              fontSize: 10,
+              fontSize: 12,
               padding: "4px 8px",
               background: `${color}20`,
               border: `1px solid ${color}50`,
@@ -110,13 +113,15 @@ const ValidationNodeComponent: React.FC<NodeProps<ValidationNodeData>> = ({ data
               fontWeight: 500,
             }}
           >
-            {t("workflow.validationNode.assertionCount", { count: assertions.length })}
+            {t("workflow.validationNode.assertionCount", {
+              count: assertions.length,
+            })}
           </Tag>
 
           <div
             style={{
               marginTop: 6,
-              fontSize: 10,
+              fontSize: 12,
               color: "#888",
             }}
           >

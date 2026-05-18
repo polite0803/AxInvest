@@ -38,6 +38,7 @@ const DEFAULTS: StockAnalysisConfig = {
 const SETTINGS_KEY = "stock_analysis_config";
 
 function useStockAnalysisConfig() {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<StockAnalysisConfig>(DEFAULTS);
   const [loading, setLoading] = useState(true);
 
@@ -60,7 +61,7 @@ function useStockAnalysisConfig() {
     try {
       await invoke("set_setting", { key: SETTINGS_KEY, value: JSON.stringify(merged) });
     } catch {
-      message.error("设置保存失败");
+      message.error(t("stockAnalysis.settings.saveFailed"));
     }
   };
 
@@ -80,7 +81,7 @@ export function StockAnalysisSettings() {
       <SettingsGroup title={t("stockAnalysis.settings.dataSources")}>
         <div style={rowStyle} className="flex items-center justify-between">
           <span>
-            腾讯财经 <Tag color="blue">行情</Tag>
+            腾讯财经 <Tag color="blue">{t("stockAnalysis.settings.quoteTag")}</Tag>
           </span>
           <Switch
             checked={config.dataSources.tencent}
@@ -89,7 +90,7 @@ export function StockAnalysisSettings() {
         </div>
         <div style={rowStyle} className="flex items-center justify-between">
           <span>
-            东方财富 <Tag color="green">财务/K线</Tag>
+            东方财富 <Tag color="green">{t("stockAnalysis.settings.financialKlineTag")}</Tag>
           </span>
           <Switch
             checked={config.dataSources.eastmoney}
@@ -98,7 +99,7 @@ export function StockAnalysisSettings() {
         </div>
         <div style={rowStyle} className="flex items-center justify-between">
           <span>
-            新浪财经 <Tag color="orange">新闻</Tag>
+            新浪财经 <Tag color="orange">{t("stockAnalysis.settings.newsTag")}</Tag>
           </span>
           <Switch
             checked={config.dataSources.sina}

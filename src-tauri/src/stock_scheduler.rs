@@ -11,6 +11,7 @@ use tauri::Emitter;
 use tokio::time::{Duration, interval};
 
 /// 股票分析调度器
+#[allow(dead_code)]
 pub struct StockScheduler {
     db: Arc<sea_orm::DatabaseConnection>,
     astock_client: Arc<AStockClient>,
@@ -18,6 +19,7 @@ pub struct StockScheduler {
     running: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
+#[allow(dead_code)]
 impl StockScheduler {
     pub fn new(
         db: Arc<sea_orm::DatabaseConnection>,

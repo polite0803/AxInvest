@@ -539,7 +539,7 @@ async fn build_cancel_aware_runner(
     master_key: &[u8; 32],
     provider_id: &str,
     cancel_token: Arc<AtomicBool>,
-) -> Result<impl AgentRunner, String> {
+) -> Result<impl AgentRunner + use<>, String> {
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await
         .map_err(|e| format!("Provider 查询失败: {}", e))?;

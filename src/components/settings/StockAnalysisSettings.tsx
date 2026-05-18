@@ -77,11 +77,11 @@ export function StockAnalysisSettings() {
 
   return (
     <div className="p-6 pb-12">
-      {/* 数据源 */}
+      {/* Data sources */}
       <SettingsGroup title={t("stockAnalysis.settings.dataSources")}>
         <div style={rowStyle} className="flex items-center justify-between">
           <span>
-            腾讯财经 <Tag color="blue">{t("stockAnalysis.settings.quoteTag")}</Tag>
+            {t("stockAnalysis.settings.tencentFinance")} <Tag color="blue">{t("stockAnalysis.settings.quoteTag")}</Tag>
           </span>
           <Switch
             checked={config.dataSources.tencent}
@@ -90,7 +90,8 @@ export function StockAnalysisSettings() {
         </div>
         <div style={rowStyle} className="flex items-center justify-between">
           <span>
-            东方财富 <Tag color="green">{t("stockAnalysis.settings.financialKlineTag")}</Tag>
+            {t("stockAnalysis.settings.eastmoney")}{" "}
+            <Tag color="green">{t("stockAnalysis.settings.financialKlineTag")}</Tag>
           </span>
           <Switch
             checked={config.dataSources.eastmoney}
@@ -99,7 +100,7 @@ export function StockAnalysisSettings() {
         </div>
         <div style={rowStyle} className="flex items-center justify-between">
           <span>
-            新浪财经 <Tag color="orange">{t("stockAnalysis.settings.newsTag")}</Tag>
+            {t("stockAnalysis.settings.sinaFinance")} <Tag color="orange">{t("stockAnalysis.settings.newsTag")}</Tag>
           </span>
           <Switch
             checked={config.dataSources.sina}

@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "設定儲存失敗",
     "settings.quoteTag": "行情",
     "settings.financialKlineTag": "財務/K線",
-    "settings.newsTag": "新聞"
+    "settings.newsTag": "新聞",
+    "settings.tencentFinance": "騰訊財經",
+    "settings.eastmoney": "東方財富",
+    "settings.sinaFinance": "新浪財經"
   }
 }

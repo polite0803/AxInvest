@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "Échec de la sauvegarde des paramètres",
     "settings.quoteTag": "Cours",
     "settings.financialKlineTag": "Financier/Chandelier",
-    "settings.newsTag": "Actualités"
+    "settings.newsTag": "Actualités",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "Error al guardar configuración",
     "settings.quoteTag": "Cotizaciones",
     "settings.financialKlineTag": "Financiero/Velas",
-    "settings.newsTag": "Noticias"
+    "settings.newsTag": "Noticias",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

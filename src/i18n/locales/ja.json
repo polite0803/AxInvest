@@ -6177,6 +6177,9 @@
     "settings.saveFailed": "設定の保存に失敗しました",
     "settings.quoteTag": "相場",
     "settings.financialKlineTag": "財務/ローソク足",
-    "settings.newsTag": "ニュース"
+    "settings.newsTag": "ニュース",
+    "settings.tencentFinance": "Tencent Finance",
+    "settings.eastmoney": "East Money",
+    "settings.sinaFinance": "Sina Finance"
   }
 }

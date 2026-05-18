@@ -5,8 +5,10 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+axagent-astock-data = { path = "../astock-data" }
 axagent-core = { path = "../core" }
 axagent-providers = { path = "../providers" }
+chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 269,
-  "total_files": 127,
+  "total_entries": 144,
+  "total_files": 144,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -30,26 +30,26 @@
     },
     {
       "file": "src/components/chat/AgentExecutionPanel.tsx",
-      "lines": "180,208,248",
+      "lines": "256",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "196,208,215,222,232,250,253,311",
+      "lines": "207,219,226,243,261,264,320,322",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "97,100,112,115,116,128,131,145",
+      "lines": "167",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/ArtifactPanel.tsx",
       "lines": "49,52",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -72,7 +72,7 @@
     },
     {
       "file": "src/components/chat/ChatView.tsx",
-      "lines": "2894,2975,2995,3079,3095,3102,3107,3134,3136",
+      "lines": "274",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -96,13 +96,13 @@
     },
     {
       "file": "src/components/chat/McpContainerNode.tsx",
-      "lines": "114",
+      "lines": "133,158",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/PermissionModal.tsx",
-      "lines": "51,52,53,58,60,70,72,76,77,81,85,88,207,208,217,224,232,241,261,270,274,276,278,279,284,297,316",
+      "lines": "289",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -114,7 +114,7 @@
     },
     {
       "file": "src/components/chat/ReportViewer.tsx",
-      "lines": "38,39,40,42,43,44,45,46,174,181,208,226,245,250,254,266",
+      "lines": "35",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -138,7 +138,7 @@
     },
     {
       "file": "src/components/chat/TeammatePanel.tsx",
-      "lines": "83,144,152,159,174",
+      "lines": "175",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -150,8 +150,8 @@
     },
     {
       "file": "src/components/chat/UserProfilePanel.tsx",
-      "lines": "190,196",
-      "reason": "硬编码英文占位符",
+      "lines": "197",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -175,18 +175,18 @@
     {
       "file": "src/components/fine-tune/DatasetManager.tsx",
       "lines": "33,41,47",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/fine-tune/LoRAConfig.tsx",
       "lines": "47,51",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/gateway/GatewayMonitor.tsx",
-      "lines": "122,190",
+      "lines": "196",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -198,7 +198,7 @@
     },
     {
       "file": "src/components/help/HelpPanel.tsx",
-      "lines": "218,221,230,243",
+      "lines": "242",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -210,14 +210,14 @@
     },
     {
       "file": "src/components/layout/ContentArea.tsx",
-      "lines": "49,112,115",
+      "lines": "52,131,133,136",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/link/AddGatewayLinkModal.tsx",
       "lines": "101",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -259,13 +259,13 @@
     {
       "file": "src/components/settings/CloudWorkspaceSelector.tsx",
       "lines": "735,758,790",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/CronManager.tsx",
       "lines": "39,53,181",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -282,13 +282,13 @@
     },
     {
       "file": "src/components/settings/KnowledgeSettings.tsx",
-      "lines": "1054,1103",
+      "lines": "1113",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "95,382,414,789,798",
+      "lines": "801",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -300,20 +300,20 @@
     },
     {
       "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "224,252,274,352,355,410,472",
+      "lines": "475",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/ProviderDetail.tsx",
-      "lines": "1783,1817",
-      "reason": "硬编码英文占位符",
+      "lines": "1839",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/ProviderList.tsx",
-      "lines": "302",
-      "reason": "硬编码英文占位符",
+      "lines": "312",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -330,14 +330,14 @@
     },
     {
       "file": "src/components/settings/WebDavSync.tsx",
-      "lines": "413",
-      "reason": "硬编码英文占位符",
+      "lines": "411",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/WebhookSettings.tsx",
       "lines": "351",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -379,19 +379,19 @@
     {
       "file": "src/components/terminal/DockerConfigModal.tsx",
       "lines": "37",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/terminal/SshConfigModal.tsx",
       "lines": "67",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/wiki/IngestPanel.tsx",
       "lines": "163",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -408,7 +408,7 @@
     },
     {
       "file": "src/components/wiki/WikiNodeContextMenu.tsx",
-      "lines": "57,71",
+      "lines": "72",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -420,20 +420,20 @@
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/SubWorkflowPropertyPanel.tsx",
-      "lines": "159",
-      "reason": "硬编码英文占位符",
+      "lines": "163",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/ToolPropertyPanel.tsx",
-      "lines": "153",
-      "reason": "硬编码英文占位符",
+      "lines": "155",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/TriggerPropertyPanel.tsx",
-      "lines": "146",
-      "reason": "硬编码英文占位符",
+      "lines": "122",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -444,13 +444,13 @@
     },
     {
       "file": "src/hooks/useGlobalShortcutManager.ts",
-      "lines": "183,185,187,204",
+      "lines": "189,205,209",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/hooks/useVoiceChat.ts",
-      "lines": "11,13,15,242",
+      "lines": "244",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -540,7 +540,7 @@
     },
     {
       "file": "src/lib/browserMock.ts",
-      "lines": "120,122,124,126,1141,1142,1147,1156,1165,1176,1177,1182,1191,1200,1211,1212,1217,1746,1757,1767,1777",
+      "lines": "1784",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -558,13 +558,13 @@
     },
     {
       "file": "src/lib/exportChat.ts",
-      "lines": "127",
+      "lines": "129",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/lib/invoke.ts",
-      "lines": "12,14,16,18,20,22,26,85,274,283,287",
+      "lines": "94",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -576,7 +576,7 @@
     },
     {
       "file": "src/lib/shortcuts.ts",
-      "lines": "283,287,291",
+      "lines": "293",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -600,7 +600,7 @@
     },
     {
       "file": "src/lib/skillLifecycle.ts",
-      "lines": "35,84",
+      "lines": "82",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -618,33 +618,27 @@
     },
     {
       "file": "src/pages/ChatPage.tsx",
-      "lines": "201,215,237,250,272,287,314",
+      "lines": "327",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/pages/SettingsPage.tsx",
-      "lines": "73,75",
+      "lines": "79,81",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "271,345,347,361,388,426,429,466,491",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/sdk/index.ts",
-      "lines": "20,23,26,29,37,48,57,65,72,109,115,120,125,130,139,144,149,154",
+      "lines": "495",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/sdk/index.ts",
       "lines": "151",
-      "reason": "t() fallback 参数",
-      "phase": 2
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
       "file": "src/sdk/rpcBridge.ts",
@@ -672,7 +666,7 @@
     },
     {
       "file": "src/stores/domain/streamStore.ts",
-      "lines": "15,16,17,18,43,45,56,283",
+      "lines": "19",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -690,7 +684,7 @@
     },
     {
       "file": "src/stores/feature/executionStore.ts",
-      "lines": "169,184",
+      "lines": "185",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -708,7 +702,7 @@
     },
     {
       "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "49,58,59,67,74,83",
+      "lines": "85",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -750,7 +744,7 @@
     },
     {
       "file": "src/types/index.ts",
-      "lines": "148,542,823,824,831,832,833,834,835,836,839,840,860,861",
+      "lines": "863",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -775,710 +769,104 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
       "lines": "154,176",
-      "reason": "硬编码中文注释",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/types/workflow.types.ts",
       "lines": "77,79,81",
-      "reason": "硬编码中文注释",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Nodes/AgentNode.tsx",
       "lines": "15,17,19,21",
-      "reason": "硬编码中文注释",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "197",
-      "reason": "{/* 头部 */}"
+      "file": "src/components/chat/InputArea.tsx",
+      "lines": "159",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "209",
-      "reason": "{/* 描述/摘要 */}"
+      "file": "src/components/settings/StockAnalysisSettings.tsx",
+      "lines": "63,79,83,92,101,110,162,211",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "216",
-      "reason": "{/* 错误 */}"
+      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
+      "lines": "40,42,45,73",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "223",
-      "reason": "{/* 进度条 */}"
+      "file": "src/components/stock-analysis/AnalystReportCard.tsx",
+      "lines": "55,62,69,75,77,87,94,97",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "233",
-      "reason": "{/* 元信息 */}"
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "8,9,10,11,12,27,28,29,30,31",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "251",
-      "reason": "{/* Worker 消息日志 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "254",
-      "reason": "{/* 子会话跳转 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "312",
-      "reason": "/** 是否在 agent 模式下显示 */"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "135",
-      "reason": "{/* 左侧指示器 */}"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "138",
-      "reason": "{/* 工具名称 — 显示当前或最后已知的工具名称 */}"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "154",
-      "reason": "{/* 进度条 — 仅当有本对话的工具调用时显示 */}"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "168",
-      "reason": "{/* 耗时 — 仅当有本对话的工具调用时显示 */}"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "249",
-      "reason": "content.includes(\"error\") || content.includes(\"Error\") || content.includes(\"bug\") || content.includes(\"修复\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "250",
-      "reason": "|| content.includes(\"报错\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "255",
-      "reason": "content.includes(\"refactor\") || content.includes(\"优化\") || content.includes(\"重构\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "260",
-      "reason": "if (content.includes(\"test\") || content.includes(\"测试\") || content.includes(\"spec\")) {"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "264",
-      "reason": "content.includes(\"document\") || content.includes(\"文档\") || content.includes(\"readme\") || content.includes(\"doc\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "270",
-      "reason": "const detected_errors = content.toLowerCase().includes(\"error\") || content.includes(\"报错\")"
-    },
-    {
-      "file": "src/components/chat/PermissionModal.tsx",
-      "lines": "246",
-      "reason": "{/* 工具名称和风险等级 */}"
-    },
-    {
-      "file": "src/components/chat/PermissionModal.tsx",
-      "lines": "275",
-      "reason": "{/* 请求原因 */}"
-    },
-    {
-      "file": "src/components/chat/PermissionModal.tsx",
-      "lines": "289",
-      "reason": "{/* 输入参数 */}"
-    },
-    {
-      "file": "src/components/chat/ReportViewer.tsx",
-      "lines": "33",
-      "reason": "wikipedia: \"维基百科\","
-    },
-    {
-      "file": "src/components/chat/ReportViewer.tsx",
-      "lines": "35",
-      "reason": "documentation: \"文档\","
-    },
-    {
-      "file": "src/components/chat/TeammatePanel.tsx",
-      "lines": "145",
-      "reason": "JSX comment: 头部：状态 + 名称"
-    },
-    {
-      "file": "src/components/chat/TeammatePanel.tsx",
-      "lines": "153",
-      "reason": "JSX comment: 当前任务"
-    },
-    {
-      "file": "src/components/chat/TeammatePanel.tsx",
-      "lines": "160",
-      "reason": "JSX comment: 消息列表"
-    },
-    {
-      "file": "src/components/chat/TeammatePanel.tsx",
-      "lines": "175",
-      "reason": "JSX comment: 持续时长"
-    },
-    {
-      "file": "src/components/gateway/GatewayMonitor.tsx",
-      "lines": "128",
-      "reason": "JSX comment: 指标卡片"
-    },
-    {
-      "file": "src/components/gateway/GatewayMonitor.tsx",
-      "lines": "196",
-      "reason": "JSX comment: 请求日志"
-    },
-    {
-      "file": "src/components/layout/ContentArea.tsx",
-      "lines": "127",
-      "reason": "JSX comment: 技能声明式动态路由"
-    },
-    {
-      "file": "src/components/layout/ContentArea.tsx",
-      "lines": "130",
-      "reason": "JSX comment: 技能 catch-all 路由"
-    },
-    {
-      "file": "src/hooks/useVoiceChat.ts",
-      "lines": "244",
-      "reason": "Debug log: WebSocket reconnect message"
-    },
-    {
-      "file": "src/stores/feature/executionStore.ts",
-      "lines": "185",
-      "reason": "Debug warn: 非法阶段转换"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "19",
-      "reason": "JSDoc: 默认重试配置"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "21",
-      "reason": "JSDoc: 最大重试次数"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "23",
-      "reason": "JSDoc: 初始退避延迟"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "25",
-      "reason": "JSDoc: 最大退避延迟"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "27",
-      "reason": "JSDoc: 退避倍数"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "29",
-      "reason": "JSDoc: 超时时间"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "33",
-      "reason": "JSDoc: 可重试的瞬时错误模式"
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "92",
-      "reason": "Debug log: IPC 重试"
-    },
-    {
-      "file": "src/pages/SettingsPage.tsx",
-      "lines": "79",
-      "reason": "JSDoc: ErrorBoundary description"
-    },
-    {
-      "file": "src/stores/domain/streamStore.ts",
-      "lines": "19",
-      "reason": "JSDoc: 看门狗检查间隔"
-    },
-    {
-      "file": "src/types/index.ts",
-      "lines": "826",
-      "reason": "JSDoc: Skill 清单定义"
-    },
-    {
-      "file": "src/types/index.ts",
-      "lines": "838",
-      "reason": "JSDoc: 生命周期钩子"
-    },
-    {
-      "file": "src/types/index.ts",
-      "lines": "842",
-      "reason": "JSDoc: 权限白名单"
-    },
-    {
-      "file": "src/types/index.ts",
-      "lines": "863",
-      "reason": "JSDoc: 生命周期钩子"
-    },
-    {
-      "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "51",
-      "reason": "Content heuristic: 写/创建/生成"
-    },
-    {
-      "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "60",
-      "reason": "Content heuristic: 搜索/查找"
-    },
-    {
-      "file": "src/stores/feature/proactiveStore.ts",
+      "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
       "lines": "61",
-      "reason": "Content heuristic: 什么是/怎么"
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "69",
-      "reason": "Content heuristic: 重构/优化/改进"
+      "file": "src/components/stock-analysis/RiskMatrix.tsx",
+      "lines": "5,7,8,9,10,11",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "76",
-      "reason": "Content heuristic: 翻译/译为"
+      "file": "src/components/stock-analysis/TradePanel.tsx",
+      "lines": "9,10",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/stores/feature/proactiveStore.ts",
-      "lines": "85",
-      "reason": "Content heuristic: 修复/错误/bug"
+      "file": "src/components/stock-analysis/__tests__/DecisionBanner.test.tsx",
+      "lines": "37,39,40,47",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/UserProfilePanel.tsx",
-      "lines": "197",
-      "reason": "Placeholder: value"
+      "file": "src/components/stock-analysis/__tests__/TradePanel.test.tsx",
+      "lines": "40,49,51",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentExecutionPanel.tsx",
-      "lines": "188",
-      "reason": "{/* 头部摘要栏 */}"
+      "file": "src/pages/QuickBarPage.tsx",
+      "lines": "1297",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentExecutionPanel.tsx",
-      "lines": "216",
-      "reason": "{/* 进度条 */}"
+      "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
+      "lines": "46,83,102,104,161,166,179,183,184,196",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentExecutionPanel.tsx",
-      "lines": "256",
-      "reason": "{/* 标签页 */}"
+      "file": "src/stores/feature/stockAnalysisStore.ts",
+      "lines": "295",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     },
     {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "205",
-      "reason": "{/* 头部 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "217",
-      "reason": "{/* 描述/摘要 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "224",
-      "reason": "{/* 错误 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "231",
-      "reason": "{/* 进度条 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "241",
-      "reason": "{/* 元信息 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "259",
-      "reason": "{/* Worker 消息日志 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "262",
-      "reason": "{/* 子会话跳转 */}"
-    },
-    {
-      "file": "src/components/chat/AgentPoolPanel.tsx",
-      "lines": "320",
-      "reason": "/** 是否在 agent 模式下显示 */"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "134",
-      "reason": "{/* 左侧指示器 */}"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "137",
-      "reason": "{/* 工具名称 — 显示当前或最后已知的工具名称 */}"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "153",
-      "reason": "{/* 进度条 — 仅当有本对话的工具调用时显示 */}"
-    },
-    {
-      "file": "src/components/chat/AgentProgressBar.tsx",
-      "lines": "167",
-      "reason": "{/* 耗时 — 仅当有本对话的工具调用时显示 */}"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "253",
-      "reason": "content.includes(\"error\") || content.includes(\"Error\") || content.includes(\"bug\") || content.includes(\"修复\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "254",
-      "reason": "|| content.includes(\"报错\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "259",
-      "reason": "content.includes(\"refactor\") || content.includes(\"优化\") || content.includes(\"重构\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "268",
-      "reason": "content.includes(\"document\") || content.includes(\"文档\") || content.includes(\"readme\") || content.includes(\"doc\")"
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "274",
-      "reason": "const detected_errors = content.toLowerCase().includes(\"error\") || content.includes(\"报错\")"
-    },
-    {
-      "file": "src/components/chat/McpContainerNode.tsx",
-      "lines": "133",
-      "reason": "|| trimmed.startsWith(\"错误\")"
-    },
-    {
-      "file": "src/components/help/HelpPanel.tsx",
-      "lines": "217",
-      "reason": "{/* 遮罩 */}"
-    },
-    {
-      "file": "src/components/help/HelpPanel.tsx",
-      "lines": "220",
-      "reason": "{/* 面板 */}"
-    },
-    {
-      "file": "src/components/help/HelpPanel.tsx",
-      "lines": "229",
-      "reason": "{/* 搜索框 */}"
-    },
-    {
-      "file": "src/components/help/HelpPanel.tsx",
-      "lines": "242",
-      "reason": "{/* 内容 */}"
-    },
-    {
-      "file": "src/components/layout/ContentArea.tsx",
-      "lines": "128",
-      "reason": "{/* 技能声明式动态路由 */}"
-    },
-    {
-      "file": "src/components/layout/ContentArea.tsx",
-      "lines": "131",
-      "reason": "{/* 技能 catch-all 路由 */}"
-    },
-    {
-      "file": "src/components/settings/KnowledgeSettings.tsx",
-      "lines": "1064",
-      "reason": "{/* 查询增强 */}"
-    },
-    {
-      "file": "src/components/settings/KnowledgeSettings.tsx",
-      "lines": "1113",
-      "reason": "{/* 重排序 */}"
-    },
-    {
-      "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "100",
-      "reason": "{/* 连接状态指示器 */}"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "227",
-      "reason": "{/* 工具栏 */}"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "255",
-      "reason": "{/* 搜索和筛选 */}"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "277",
-      "reason": "{/* 列表 */}"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "358",
-      "reason": "{/* 编辑弹窗 */}"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "413",
-      "reason": "{/* 版本历史弹窗 */}"
-    },
-    {
-      "file": "src/components/settings/PromptTemplatesSettings.tsx",
-      "lines": "475",
-      "reason": "{/* 版本内容查看 */}"
-    },
-    {
-      "file": "src/components/wiki/WikiNodeContextMenu.tsx",
-      "lines": "72",
-      "reason": "{/* 菜单 — 玻璃态 */}"
-    },
-    {
-      "file": "src/hooks/useGlobalShortcutManager.ts",
-      "lines": "205",
-      "reason": "reason = \"快捷键已被其他应用程序占用，请尝试更换快捷键\";"
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1148",
-      "reason": "groupName: \"文件读取\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1149",
-      "reason": "description: \"只读文件操作：读取、搜索、列出目录和文件信息\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1154",
-      "reason": "description: \"读取文件内容。支持文本文件（可指定行范围）、图片、PDF。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1163",
-      "reason": "description: \"使用 glob 模式搜索文件。返回匹配的文件路径列表。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1172",
-      "reason": "description: \"在文件中搜索匹配正则表达式的内容。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1183",
-      "reason": "groupName: \"文件写入\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1184",
-      "reason": "description: \"写入文件操作：创建、编辑、删除、移动文件\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1189",
-      "reason": "description: \"创建新文件或完全覆盖已有文件（⚠️ 不可逆）。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1198",
-      "reason": "description: \"精确编辑文件（字符串替换）。通过 old_string/new_string 搜索替换。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1207",
-      "reason": "description: \"删除指定路径的文件。此操作不可逆。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1218",
-      "reason": "groupName: \"Shell 命令\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1219",
-      "reason": "description: \"Shell 命令执行和代码 REPL\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1224",
-      "reason": "description: \"执行 shell 命令。适用：运行测试、构建、git 操作。危险命令需权限确认。\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1753",
-      "reason": "copyHint: \"添加到 Cursor User settings.json\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1764",
-      "reason": "copyHint: \"添加到 .continue/config.json 的 models 数组\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1774",
-      "reason": "copyHint: \"添加到环境变量或 .env 文件\","
-    },
-    {
-      "file": "src/lib/browserMock.ts",
-      "lines": "1784",
-      "reason": "copyHint: \"适用于任何支持 OpenAI API 的客户端\","
-    },
-    {
-      "file": "src/lib/exportChat.ts",
-      "lines": "129",
-      "reason": "/** 构建 HTML 格式的对话抄本，带内联 CSS 样式保持聊天气泡外观 */"
-    },
-    {
-      "file": "src/lib/shortcuts.ts",
-      "lines": "285",
-      "reason": "apps: \"飞书/微信/企业微信/钉钉\","
-    },
-    {
-      "file": "src/lib/shortcuts.ts",
-      "lines": "289",
-      "reason": "apps: \"QQ/微信\","
-    },
-    {
-      "file": "src/lib/shortcuts.ts",
-      "lines": "293",
-      "reason": "apps: \"微信 (Windows)\","
-    },
-    {
-      "file": "src/lib/skillLifecycle.ts",
-      "lines": "82",
-      "reason": "/** 刷新技能扩展（技能文件变更时） */"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "202",
-      "reason": "{/* 左侧会话列表 */}"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "216",
-      "reason": "{/* 左侧拖拽手柄 */}"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "244",
-      "reason": "{/* 中间主区域 */}"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "257",
-      "reason": "{/* 右侧拖拽手柄 */}"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "285",
-      "reason": "{/* 右侧面板 */}"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "300",
-      "reason": "{/* 折叠/展开按钮 — 始终在 ChatPage 层级，覆盖在面板左上角 */}"
-    },
-    {
-      "file": "src/pages/ChatPage.tsx",
-      "lines": "327",
-      "reason": "{/* 始终渲染右侧面板，由 compactMode 控制内部展示 */}"
-    },
-    {
-      "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "390",
-      "reason": "{/* 中央图谱 */}"
-    },
-    {
-      "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "428",
-      "reason": "{/* 右侧详情面板 */}"
-    },
-    {
-      "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "431",
-      "reason": "{/* 右拖曳手柄 */}"
-    },
-    {
-      "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "470",
-      "reason": "{/* 底部状态栏 — 玻璃态 */}"
-    },
-    {
-      "file": "src/pages/WikiGraphPage.tsx",
-      "lines": "495",
-      "reason": "{/* 右键菜单 */}"
-    },
-    {
-      "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "387",
-      "reason": "placeholder=\"npx\""
-    },
-    {
-      "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "419",
-      "reason": "placeholder=\"http://localhost:3000\""
-    },
-    {
-      "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "792",
-      "reason": "<Input name=\"command\" placeholder=\"npx\" />"
-    },
-    {
-      "file": "src/components/settings/McpServerSettings.tsx",
-      "lines": "801",
-      "reason": "<Input name=\"endpoint\" placeholder=\"http://localhost:3000\" />"
-    },
-    {
-      "file": "src/components/settings/ProviderDetail.tsx",
-      "lines": "1805",
-      "reason": "placeholder=\"sk-...\""
-    },
-    {
-      "file": "src/components/settings/ProviderDetail.tsx",
-      "lines": "1839",
-      "reason": "placeholder=\"gpt-5.4-think\""
-    },
-    {
-      "file": "src/components/settings/ProviderList.tsx",
-      "lines": "312",
-      "reason": "<Input name=\"api_host\" placeholder=\"https://api.openai.com\" />"
-    },
-    {
-      "file": "src/components/settings/WebDavSync.tsx",
-      "lines": "411",
-      "reason": "<Input name=\"host\" placeholder=\"https://dav.example.com/dav/\" />"
-    },
-    {
-      "file": "src/components/workflow/Panels/PropertyPanels/SubWorkflowPropertyPanel.tsx",
-      "lines": "163",
-      "reason": "placeholder=\"subworkflow_output\""
-    },
-    {
-      "file": "src/components/workflow/Panels/PropertyPanels/ToolPropertyPanel.tsx",
-      "lines": "155",
-      "reason": "placeholder=\"tool_output\""
-    },
-    {
-      "file": "src/components/workflow/Panels/PropertyPanels/TriggerPropertyPanel.tsx",
-      "lines": "122",
-      "reason": "placeholder=\"message.created\""
-    },
-    {
-      "file": "src/lib/invoke.ts",
-      "lines": "94",
-      "reason": "Debug log: IPC retry message"
+      "file": "src/types/stock-analysis.ts",
+      "lines": "82,83,84,85,86,87,88,89,90,91,92,93,94,95",
+      "reason": "硬编码中文字符串",
+      "phase": 3
     }
   ]
 }

@@ -4,6 +4,7 @@ import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ContentArea } from "@/components/layout/ContentArea";
 import { GlobalCopyMenu } from "@/components/layout/GlobalCopyMenu";
 import { GlobalErrorBoundary } from "@/components/layout/GlobalErrorBoundary";
+import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
 import { ModuleErrorBoundary } from "@/components/layout/ModuleErrorBoundary";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TitleBar } from "@/components/layout/TitleBar";
@@ -32,7 +33,7 @@ import {
 } from "@/stores";
 import { useShadcnTheme } from "@/theme/shadcnTheme";
 import type { ThemePreset } from "@/theme/shadcnTheme";
-import { App as AntdApp, ConfigProvider, Layout, theme } from "antd";
+import { App as AntdApp, ConfigProvider, Drawer, Layout, theme } from "antd";
 import { enableD2, setDefaultI18nMap } from "markstream-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -76,6 +77,8 @@ function AppInner() {
   const isInSettings = location.pathname === "/settings"
     || location.pathname.startsWith("/settings/");
   const deviceLayout = useUIStore((s) => s.deviceLayout);
+  const mobileNavOpen = useUIStore((s) => s.mobileNavOpen);
+  const setMobileNavOpen = useUIStore((s) => s.setMobileNavOpen);
 
   // 同步检测 QuickBar 窗口（在首次渲染前），避免 ChatPage 先渲染导致崩溃
   const [isQuickBarWindow] = useState(() => {
@@ -246,44 +249,72 @@ function AppInner() {
           : (
             <>
               <SkillPanels />
-              {deviceLayout !== "mobile" && (
-                <ModuleErrorBoundary moduleName="TitleBar">
-                  <TitleBar />
-                </ModuleErrorBoundary>
-              )}
+              <ModuleErrorBoundary moduleName="TitleBar">
+                <TitleBar />
+              </ModuleErrorBoundary>
               <ModuleErrorBoundary moduleName="SkillStatusBar">
                 <SkillStatusBar alignment="right" />
               </ModuleErrorBoundary>
               <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
               <GlobalCopyMenu />
-              <Layout
-                hasSider={!isInSettings}
-                className="flex-1 overflow-hidden"
-                style={{ backgroundColor: "transparent" }}
-              >
-                {!isInSettings && (
-                  <div
-                    style={{
-                      backgroundColor: "transparent",
-                      borderRight: "1px solid var(--border-color)",
-                      flexShrink: 0,
-                    }}
+              {/* 移动端：滑出式导航抽屉 + 全宽内容区 + 底部导航栏 */}
+              {deviceLayout === "mobile" && (
+                <>
+                  <Drawer
+                    open={mobileNavOpen}
+                    onClose={() => setMobileNavOpen(false)}
+                    placement="left"
+                    width={280}
+                    styles={{ body: { padding: 0 } }}
+                    closeIcon={null}
                   >
                     <ModuleErrorBoundary moduleName="Sidebar">
                       <Sidebar />
                     </ModuleErrorBoundary>
+                  </Drawer>
+                  <div className="flex-1 overflow-hidden" style={{ display: "flex", flexDirection: "column" }}>
+                    <div
+                      className="ax-page-transition"
+                      style={{ flex: 1, minHeight: 0 }}
+                      key={location.key}
+                    >
+                      <ContentArea />
+                    </div>
+                    <MobileBottomNav />
                   </div>
-                )}
-                <Content className="overflow-hidden">
-                  <div
-                    className="ax-page-transition"
-                    style={{ height: "100%" }}
-                    key={location.key}
-                  >
-                    <ContentArea />
-                  </div>
-                </Content>
-              </Layout>
+                </>
+              )}
+              {/* 平板/桌面：固定侧边栏 + 内容区 */}
+              {deviceLayout !== "mobile" && (
+                <Layout
+                  hasSider={!isInSettings}
+                  className="flex-1 overflow-hidden"
+                  style={{ backgroundColor: "transparent" }}
+                >
+                  {!isInSettings && (
+                    <div
+                      style={{
+                        backgroundColor: "transparent",
+                        borderRight: "1px solid var(--border-color)",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ModuleErrorBoundary moduleName="Sidebar">
+                        <Sidebar />
+                      </ModuleErrorBoundary>
+                    </div>
+                  )}
+                  <Content className="overflow-hidden">
+                    <div
+                      className="ax-page-transition"
+                      style={{ height: "100%" }}
+                      key={location.key}
+                    >
+                      <ContentArea />
+                    </div>
+                  </Content>
+                </Layout>
+              )}
               <ModuleErrorBoundary moduleName="StatusBarWidget">
                 <StatusBarWidget />
               </ModuleErrorBoundary>

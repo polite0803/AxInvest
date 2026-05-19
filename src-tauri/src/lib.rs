@@ -1363,9 +1363,9 @@ pub fn run() {
                         "æœªæ£€æµ‹åˆ° Microsoft Edge WebView2 Runtimeï¼ŒAxAgent æ— æ³•å¯åŠ¨ã€‚\n\nç‚¹å‡»ã€Œç¡®å®šã€æ‰“å¼€ä¸‹è½½é¡µé¢è¿›è¡Œå®‰è£…ï¼Œå®‰è£…å®ŒæˆåŽé‡æ–°å¯åŠ¨ AxAgentã€‚",
                     );
                     if user_ok {
-                        let _ = std::process::Command::new("cmd")
-                            .args(["/c", "start", "https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download"])
-                            .spawn();
+                        let _ = open::that(
+                            "https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download",
+                        );
                     }
                 } else {
                     windows_utils::show_error_dialog(
@@ -1432,6 +1432,12 @@ pub fn run() {
             await_handle(&state.webdav_sync_handle, "webdav_sync");
             await_handle(&state.api_server_handle, "api_server");
             await_handle(&state.trajectory_cleanup_handle, "trajectory_cleanup");
+            // 集中式 TaskManager 兜底清理
+            rt_handle.block_on(
+                state
+                    .task_manager
+                    .shutdown(std::time::Duration::from_secs(5)),
+            );
             tracing::info!("[shutdown] 退出完成");
         }
     });

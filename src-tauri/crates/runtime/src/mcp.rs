@@ -50,7 +50,9 @@ pub fn unwrap_ccr_proxy_url(url: &str) -> String {
         if matches!(parts.next(), Some("mcp_url"))
             && let Some(value) = parts.next()
         {
-            return percent_decode(value);
+            return urlencoding::decode(value)
+                .unwrap_or(std::borrow::Cow::Borrowed(value))
+                .into_owned();
         }
     }
 
@@ -169,35 +171,6 @@ fn collapse_underscores(value: &str) -> String {
         }
     }
     collapsed
-}
-
-fn percent_decode(value: &str) -> String {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'%' if index + 2 < bytes.len() => {
-                let hex = &value[index + 1..index + 3];
-                if let Ok(byte) = u8::from_str_radix(hex, 16) {
-                    decoded.push(byte);
-                    index += 3;
-                    continue;
-                }
-                decoded.push(bytes[index]);
-                index += 1;
-            },
-            b'+' => {
-                decoded.push(b' ');
-                index += 1;
-            },
-            byte => {
-                decoded.push(byte);
-                index += 1;
-            },
-        }
-    }
-    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 #[cfg(test)]

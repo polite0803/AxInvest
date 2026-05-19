@@ -43,6 +43,9 @@ const LazyWikiEditPage = lazy(() => import("@/pages/WikiEditPage").then((m) => (
 const LazyQuickBarPage = lazy(() => import("@/pages/QuickBarPage").then((m) => ({ default: m.QuickBarPage })));
 const LazyTerminalPage = lazy(() => import("@/pages/TerminalPage").then((m) => ({ default: m.TerminalPage })));
 const LazyFilesPage = lazy(() => import("@/pages/FilesPage").then((m) => ({ default: m.FilesPage })));
+const LazyStockAnalysisPage = lazy(() =>
+  import("@/pages/StockAnalysisPage").then((m) => ({ default: m.StockAnalysisPage }))
+);
 
 function PageLoader() {
   return (
@@ -199,6 +202,10 @@ export function ContentArea() {
           <Route
             path="/terminal"
             element={<SafeLazyPage Page={LazyTerminalPage} />}
+          />
+          <Route
+            path="/stock-analysis"
+            element={<SafeLazyPage Page={LazyStockAnalysisPage} />}
           />
           <Route
             path="/devtools/trace-explorer"

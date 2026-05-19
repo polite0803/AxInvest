@@ -61,7 +61,7 @@ pub fn run() {
         let boot_msg = "[BOOT] run() entered\n";
         let boot_paths = [
             "/storage/emulated/0/Download/axagent-crash.log",
-            "/storage/emulated/0/Android/data/top.axagent.desktop/files/axagent-crash.log",
+            "/storage/emulated/0/Android/data/top.axinvest.desktop/files/axagent-crash.log",
         ];
         for bp in &boot_paths {
             // 追加而非覆盖

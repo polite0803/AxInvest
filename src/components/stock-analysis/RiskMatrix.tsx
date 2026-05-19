@@ -28,7 +28,7 @@ export function RiskMatrix() {
 
   return (
     <Card size="small" title={t("stockAnalysis.riskAssessment")}>
-      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(200px, 100%), 1fr))" }}>
         {Object.entries(riskAssessments).map(([type, report]) => {
           const color = RISK_COLORS[type]
             || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
@@ -36,7 +36,9 @@ export function RiskMatrix() {
           return (
             <div key={type} className="p-2 rounded" style={{ background: "var(--color-bg-elevated)" }}>
               <Tag color={color}>{label}</Tag>
-              <p className="text-xs mt-1" style={{ whiteSpace: "pre-wrap" }}>{report}</p>
+              <p className="text-xs mt-1" style={{ whiteSpace: "pre-wrap", maxHeight: 250, overflow: "auto" }}>
+                {report}
+              </p>
             </div>
           );
         })}

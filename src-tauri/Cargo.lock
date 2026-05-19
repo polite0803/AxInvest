@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "axagent"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "android_logger",
  "async-trait",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-agent"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axagent-core",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-core"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-gateway"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axagent-astock-data",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-migration"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "sea-orm",
  "sea-orm-migration",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-npm"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "flate2",
  "reqwest 0.13.2",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-plugins"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "axagent-npm",
  "axagent-runtime-core",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-prompt-guard"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "regex",
  "serde",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-providers"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-dashboard"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-messaging"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-theme"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1051,7 +1051,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-webhook"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axagent-rt-messaging",
@@ -1070,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-workflow"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "axagent-core",
@@ -1087,7 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime-core"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-telemetry"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "axagent-core",
  "chrono",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-tools"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1239,7 +1239,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-trajectory"
-version = "1.5.9"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",

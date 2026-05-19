@@ -102,6 +102,7 @@ fn test_stock_raw_data_serialization() {
             limit_up: Some(1850.0),
             limit_down: Some(1500.0),
             is_st: false,
+            pre_close: 1648.0,
             timestamp: "now".into(),
         },
         klines: vec![],
@@ -115,6 +116,10 @@ fn test_stock_raw_data_serialization() {
         sector_info: None,
         shareholder_trades: vec![],
         dividend_records: vec![],
+        research_reports: vec![],
+        consensus_eps: None,
+        concept_blocks: None,
+        announcements: vec![],
     };
     let json = serde_json::to_string(&raw).unwrap();
     assert!(json.contains("600519"));

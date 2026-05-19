@@ -30,8 +30,8 @@ fn external_diagnostic_paths() -> Vec<PathBuf> {
 
     // 尝试多个常用路径，只要一个可用即可
     let external_candidates = [
-        "/storage/emulated/0/Android/data/top.axagent.desktop/files",
-        "/sdcard/Android/data/top.axagent.desktop/files",
+        "/storage/emulated/0/Android/data/top.axinvest.desktop/files",
+        "/sdcard/Android/data/top.axinvest.desktop/files",
         "/storage/emulated/0/Download",
         "/sdcard/Download",
     ];

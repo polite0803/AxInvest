@@ -884,7 +884,8 @@
     "sidebar": {
       "fallbackTitle": "Chat",
       "searchPastSessions": "Search past sessions"
-    }
+    },
+    "proactiveInsights": "Proactive Insights & Reminders"
   },
   "gateway": {
     "title": "Gateway",
@@ -2855,7 +2856,8 @@
     "selectImage": "Select image",
     "imageUrl": "Image URL",
     "emoji": "Emoji",
-    "urlPlaceholder": "Enter image URL"
+    "urlPlaceholder": "Enter image URL",
+    "profileTab": "Profile"
   },
   "files": {
     "images": "Images",
@@ -3300,44 +3302,6 @@
     },
     "notificationCenter": {
       "title": "Notifications"
-    },
-    "chatRightPanel": {
-      "agent": "Agent",
-      "hierarchy": "Hierarchy",
-      "research": "Research",
-      "git": "Git",
-      "task": "Tasks",
-      "code": "Code",
-      "artifact": "Artifacts",
-      "imageGen": "Image",
-      "visionAnalysis": "Vision",
-      "report": "Report",
-      "citation": "Citations",
-      "inspector": "Inspector",
-      "browser": "Browser",
-      "computer": "Desktop",
-      "benchmark": "Bench",
-      "chart": "Chart",
-      "snapshot": "Snapshot",
-      "profile": "Profile",
-      "errorRecovery": "Recovery",
-      "collaboration": "Collab",
-      "evolution": "Evolution",
-      "steer": "Steer",
-      "cache": "Cache",
-      "branchCompare": "Branch",
-      "gateway": "Gateway",
-      "contextClass": "Context",
-      "cronResult": "Cron",
-      "reflection": "Reflection",
-      "researchSources": "Sources",
-      "categoryEdit": "Category",
-      "filePermission": "FilePerm",
-      "sessionShare": "Share",
-      "prefetch": "Prefetch",
-      "reminders": "Reminders",
-      "contextPrediction": "Prediction",
-      "teammate": "Team"
     },
     "report": {
       "sourceType": {
@@ -6212,6 +6176,11 @@
     },
     "phaseCount": "{{count}} phases"
   },
+  "pasteButton": {
+    "emptyClipboard": "Clipboard is empty",
+    "clipboardUnavailable": "Long-press to paste manually",
+    "pasteFromClipboard": "Paste from clipboard"
+  },
   "stockAnalysis": {
     "actionBuy": "Buy",
     "actionSell": "Sell",
@@ -6227,11 +6196,11 @@
     "sharesUnit": "",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
-    "debateRounds": "{{current}}/{{total}} debate rounds",
+    "debateRounds": "{{current}}/{{total}} rounds",
     "riskAssessCount": "{{count}} assessments",
-    "offlineMode": "Offline mode (LLM Driver not connected, placeholder data)",
+    "offlineMode": "Offline mode",
     "charCount": "{{count}} chars",
-    "settings.saveFailed": "Failed to save settings",
+    "settings.saveFailed": "Failed to save",
     "settings.quoteTag": "Quotes",
     "settings.financialKlineTag": "Financial/K-line",
     "settings.newsTag": "News",

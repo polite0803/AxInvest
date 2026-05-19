@@ -858,7 +858,8 @@
     "sidebar": {
       "fallbackTitle": "对话",
       "searchPastSessions": "搜索历史会话"
-    }
+    },
+    "proactiveInsights": "主动洞察与提醒"
   },
   "gateway": {
     "title": "网关",
@@ -2589,7 +2590,8 @@
     "selectImage": "选择图片",
     "imageUrl": "图片链接",
     "emoji": "表情符号",
-    "urlPlaceholder": "输入图片 URL"
+    "urlPlaceholder": "输入图片 URL",
+    "profileTab": "个人信息"
   },
   "files": {
     "images": "图片",
@@ -3922,44 +3924,6 @@
     "notificationCenter": {
       "title": "通知"
     },
-    "chatRightPanel": {
-      "agent": "智能体",
-      "hierarchy": "层级",
-      "research": "调研",
-      "git": "Git",
-      "task": "任务",
-      "code": "代码",
-      "artifact": "产出",
-      "imageGen": "生图",
-      "visionAnalysis": "视觉分析",
-      "report": "报告",
-      "citation": "引用",
-      "inspector": "检查",
-      "browser": "浏览器",
-      "computer": "桌面",
-      "benchmark": "评测",
-      "chart": "图表",
-      "snapshot": "快照",
-      "profile": "用户",
-      "errorRecovery": "恢复",
-      "collaboration": "协作",
-      "evolution": "进化",
-      "steer": "引导",
-      "cache": "缓存",
-      "branchCompare": "分支对比",
-      "gateway": "网关",
-      "contextClass": "上下文",
-      "cronResult": "定时结果",
-      "reflection": "反思",
-      "researchSources": "研究来源",
-      "categoryEdit": "分类编辑",
-      "filePermission": "文件权限",
-      "sessionShare": "会话分享",
-      "prefetch": "预取",
-      "reminders": "提醒",
-      "contextPrediction": "上下文预测",
-      "teammate": "协作"
-    },
     "report": {
       "sourceType": {
         "web": "网页",
@@ -5289,14 +5253,14 @@
     },
     "tab": {
       "all": "全部",
-      "knowledge": "知识库",
+      "knowledge": "RAG 知识库",
       "memory": "记忆",
-      "wiki": "知识库"
+      "wiki": "Wiki 知识库"
     },
     "type": {
-      "knowledge": "知识库",
+      "knowledge": "RAG 知识库",
       "memory": "记忆",
-      "wiki": "知识库"
+      "wiki": "Wiki 知识库"
     },
     "typeDesc": {
       "knowledge": "RAG 向量知识库，支持文档导入与语义检索",
@@ -6207,6 +6171,11 @@
       "verification": "验证结果"
     },
     "phaseCount": "{{count}} 个阶段"
+  },
+  "pasteButton": {
+    "emptyClipboard": "剪贴板为空",
+    "clipboardUnavailable": "请长按输入框手动粘贴",
+    "pasteFromClipboard": "从剪贴板粘贴"
   },
   "stockAnalysis": {
     "actionBuy": "买入",

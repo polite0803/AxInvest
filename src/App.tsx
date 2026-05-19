@@ -11,6 +11,8 @@ import { InteractiveTutorial } from "@/components/onboarding/InteractiveTutorial
 import { WelcomeWizard } from "@/components/onboarding/WelcomeWizard";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SkillPanels } from "@/components/skill/SkillPanels";
+import { SkillStatusBar } from "@/components/skill/SkillStatusBar";
+import { StatusBarWidget } from "@/components/terminal/StatusBarWidget";
 import { useCommandPalette } from "@/hooks/useCommandPalette";
 import { useGlobalOverlayScrollbars } from "@/hooks/useGlobalOverlayScrollbars";
 import { useGlobalShortcutManager } from "@/hooks/useGlobalShortcutManager";
@@ -34,6 +36,18 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useTranslation } from "react-i18next";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import "./i18n";
+// antd 语言包 — 静态导入确保 Rolldown 正确打包
+import antdArEG from "antd/locale/ar_EG";
+import antdDeDE from "antd/locale/de_DE";
+import antdEnUS from "antd/locale/en_US";
+import antdEsES from "antd/locale/es_ES";
+import antdFrFR from "antd/locale/fr_FR";
+import antdHiIN from "antd/locale/hi_IN";
+import antdJaJP from "antd/locale/ja_JP";
+import antdKoKR from "antd/locale/ko_KR";
+import antdRuRU from "antd/locale/ru_RU";
+import antdZhCN from "antd/locale/zh_CN";
+import antdZhTW from "antd/locale/zh_TW";
 
 const LazyQuickBarPage = lazy(() => import("@/pages/QuickBarPage").then((m) => ({ default: m.QuickBarPage })));
 
@@ -230,6 +244,9 @@ function AppInner() {
               <ModuleErrorBoundary moduleName="TitleBar">
                 <TitleBar />
               </ModuleErrorBoundary>
+              <ModuleErrorBoundary moduleName="SkillStatusBar">
+                <SkillStatusBar alignment="right" />
+              </ModuleErrorBoundary>
               <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
               <GlobalCopyMenu />
               <Layout
@@ -260,6 +277,9 @@ function AppInner() {
                   </div>
                 </Content>
               </Layout>
+              <ModuleErrorBoundary moduleName="StatusBarWidget">
+                <StatusBarWidget />
+              </ModuleErrorBoundary>
             </>
           )}
       </div>
@@ -289,39 +309,46 @@ function AppRoot() {
   const localeMap = useMemo<Record<string, string>>(
     () => ({
       "zh-CN": "zh_CN",
+      "zh-TW": "zh_TW",
       ja: "ja_JP",
       ko: "ko_KR",
       de: "de_DE",
       fr: "fr_FR",
       es: "es_ES",
       ru: "ru_RU",
+      hi: "hi_IN",
+      ar: "ar_EG",
       "pt-BR": "pt_BR",
     }),
     [],
   );
 
-  const [antdLocale, setAntdLocale] = useState<any>(null);
+  const staticLocaleMap = useMemo<Record<string, any>>(
+    () => ({
+      zh_CN: antdZhCN,
+      zh_TW: antdZhTW,
+      en_US: antdEnUS,
+      ja_JP: antdJaJP,
+      ko_KR: antdKoKR,
+      de_DE: antdDeDE,
+      fr_FR: antdFrFR,
+      es_ES: antdEsES,
+      ru_RU: antdRuRU,
+      hi_IN: antdHiIN,
+      ar_EG: antdArEG,
+    }),
+    [],
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    const localeCode = localeMap[language] || "en_US";
-    import(`antd/locale/${localeCode}`)
-      .then((mod) => {
-        if (!cancelled) {
-          setAntdLocale(mod.default);
-        }
-      })
-      .catch(() => {
-        import("antd/locale/en_US").then((m) => {
-          if (!cancelled) {
-            setAntdLocale(m.default);
-          }
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [language, localeMap]);
+  const antdLocale = useMemo(() => {
+    if (localeMap[language]) {
+      return staticLocaleMap[localeMap[language]] ?? antdZhCN;
+    }
+    if (language?.startsWith("zh")) {
+      return antdZhCN;
+    }
+    return staticLocaleMap["en_US"];
+  }, [language, localeMap, staticLocaleMap]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = isDark ? "dark" : "light";

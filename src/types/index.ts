@@ -692,6 +692,7 @@ export type BuiltinPageKey =
   | "link"
   | "gateway"
   | "files"
+  | "terminal"
   | "settings"
   | "marketplace"
   | "wiki";
@@ -727,6 +728,9 @@ export type SettingsSection =
   | "plugins"
   | "knowledgeSettings"
   | "notificationCenter"
+  | "imageGen"
+  | "theme"
+  | "cron"
   | string;
 
 // === Generated Tool ===

@@ -6,7 +6,7 @@
   "entries": [
     {
       "file": "src/App.tsx",
-      "lines": "362,382",
+      "lines": "362,366,382,386",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -655,7 +655,7 @@
     {
       "file": "src/components/settings/StockAnalysisSettings.tsx",
       "lines": "79",
-      "reason": "数据源品牌名 (proper nouns) + JSX 注释",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -678,7 +678,7 @@
     },
     {
       "file": "src/components/settings/SettingsSidebar.tsx",
-      "lines": "73,98",
+      "lines": "73,78,98",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -691,19 +691,19 @@
     {
       "file": "src/components/chat/InputArea.tsx",
       "lines": "167",
-      "reason": "JSDoc 注释或内部常量",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/AnalystReportCard.tsx",
       "lines": "77,79",
-      "reason": "JSDoc 注释或内部常量",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/RiskMatrix.tsx",
       "lines": "5,14",
-      "reason": "JSDoc 注释或内部常量",
+      "reason": "硬编码中文字符串",
       "phase": 3
     }
   ]

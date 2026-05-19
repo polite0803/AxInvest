@@ -1,3 +1,5 @@
+import { QualityScore } from "@/components/llm-wiki/QualityScore";
+import { SyncStatus } from "@/components/llm-wiki/SyncStatus";
 import { GraphData, GraphView } from "@/components/wiki/GraphView";
 import { WikiDetailPanel } from "@/components/wiki/WikiDetailPanel";
 import { WikiFilePanel } from "@/components/wiki/WikiFilePanel";
@@ -387,6 +389,9 @@ export function WikiGraphPage() {
             loading={graphLoading}
           />
         </Tooltip>
+
+        <SyncStatus wikiId={wikiIdFromUrl} />
+        <QualityScore wikiId={wikiIdFromUrl} />
       </div>
 
       {/* 主工作区 */}

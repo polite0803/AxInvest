@@ -1,5 +1,7 @@
+import { Icon } from "@/components/common/Icon";
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
 import { NAV_ICON_COLORS } from "@/lib/iconColors";
+import { invoke, isTauri } from "@/lib/invoke";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import type { ShortcutAction } from "@/lib/shortcuts";
 import { resolveIconComponent } from "@/lib/skillIcons";
@@ -7,7 +9,7 @@ import { useHelpStore, useSettingsStore, useSkillExtensionStore, useUIStore, use
 import type { AppSettings, PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar, theme, Tooltip } from "antd";
-import { Database, HelpCircle, LineChart, MessageSquare, Router, User } from "lucide-react";
+import { Globe, LineChart, Moon, Pin, PinOff, RotateCcw, Settings, Sun, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -20,6 +22,7 @@ const pageKeyToPath: Record<PageKey, string> = {
   link: "/link",
   gateway: "/gateway",
   files: "/files",
+  terminal: "/terminal",
   settings: "/settings",
   "stock-analysis": "/stock-analysis",
 };
@@ -50,21 +53,21 @@ interface NavItem {
 const builtinNavItems: NavItem[] = [
   {
     key: "chat",
-    icon: <MessageSquare size={18} color={NAV_ICON_COLORS.MessageSquare} />,
+    icon: <Icon icon="fluent:chat-20-filled" size={20} color={NAV_ICON_COLORS.MessageSquare} />,
     labelKey: "nav.chat",
     path: "/",
     isPlugin: false,
   },
   {
     key: "knowledge",
-    icon: <Database size={18} color={NAV_ICON_COLORS.Database} />,
+    icon: <Icon icon="fluent:book-database-20-filled" size={20} color={NAV_ICON_COLORS.Database} />,
     labelKey: "nav.knowledge",
     path: "/knowledge",
     isPlugin: false,
   },
   {
     key: "gateway",
-    icon: <Router size={18} color={NAV_ICON_COLORS.Router} />,
+    icon: <Icon icon="fluent:globe-20-filled" size={20} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.gateway",
     path: "/gateway",
     isPlugin: false,
@@ -74,6 +77,20 @@ const builtinNavItems: NavItem[] = [
     icon: <LineChart size={18} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.stockAnalysis",
     path: "/stock-analysis",
+    isPlugin: false,
+  },
+  {
+    key: "terminal",
+    icon: <Icon icon="fluent:terminal-20-filled" size={20} color={NAV_ICON_COLORS.Database} />,
+    labelKey: "nav.terminal",
+    path: "/terminal",
+    isPlugin: false,
+  },
+  {
+    key: "files",
+    icon: <Icon icon="fluent:folder-20-filled" size={20} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.files",
+    path: "/files",
     isPlugin: false,
   },
 ];
@@ -229,6 +246,84 @@ function UserAvatarButton({
   );
 }
 
+/** Mobile action buttons — mirrors TitleBar actions on Android where they get clipped */
+function MobileActions() {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const navigate = useNavigate();
+  const settings = useSettingsStore((s) => s.settings);
+  const saveSettings = useSettingsStore((s) => s.saveSettings);
+  const [pinned, setPinned] = useState(settings.always_on_top ?? false);
+
+  const isMobile = isTauri() && /Android/.test(navigator.userAgent);
+  if (!isMobile) { return null; }
+
+  const togglePin = async () => {
+    const next = !pinned;
+    setPinned(next);
+    try {
+      await invoke("set_always_on_top", { enabled: next });
+      saveSettings({ always_on_top: next });
+    } catch {
+      setPinned(!next);
+    }
+  };
+
+  const cycleTheme = () => {
+    const next = settings.theme_mode === "dark" ? "system" : settings.theme_mode === "system" ? "light" : "dark";
+    saveSettings({ theme_mode: next });
+  };
+
+  const ThemeIcon = settings.theme_mode === "dark" ? Moon : settings.theme_mode === "light" ? Sun : Globe;
+  const btnBase: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    border: "none",
+    backgroundColor: "transparent",
+    cursor: "pointer",
+    color: token.colorTextSecondary,
+    transition: "color 0.15s",
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 2,
+        justifyContent: "center",
+        padding: "4px 0",
+        borderTop: `1px solid ${token.colorBorderSecondary}`,
+      }}
+    >
+      <Tooltip title={t("desktop.alwaysOnTop")} placement="right">
+        <button style={btnBase} onClick={togglePin}>
+          {pinned ? <Pin size={16} /> : <PinOff size={16} />}
+        </button>
+      </Tooltip>
+      <Tooltip title={t("settings.groupTheme")} placement="right">
+        <button style={btnBase} onClick={cycleTheme}>
+          <ThemeIcon size={16} />
+        </button>
+      </Tooltip>
+      <Tooltip title={t("desktop.reloadPage")} placement="right">
+        <button style={btnBase} onClick={() => window.location.reload()}>
+          <RotateCcw size={16} />
+        </button>
+      </Tooltip>
+      <Tooltip title={t("settings.openSettings")} placement="right">
+        <button style={btnBase} onClick={() => navigate("/settings")}>
+          <Settings size={16} />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -380,6 +475,9 @@ export function Sidebar() {
 
       <div className="flex-1" />
 
+      {/* Mobile action buttons (TitleBar actions on Android) */}
+      <MobileActions />
+
       {/* Help button */}
       <Tooltip title={t("help.title")} placement="right">
         <button
@@ -389,7 +487,7 @@ export function Sidebar() {
           aria-label={t("help.title")}
           style={{ justifyContent: "center" }}
         >
-          <HelpCircle size={20} style={{ color: token.colorTextQuaternary }} />
+          <Icon icon="fluent:question-circle-20-filled" size={20} color={token.colorTextQuaternary} />
         </button>
       </Tooltip>
 

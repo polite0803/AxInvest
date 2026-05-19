@@ -833,7 +833,8 @@
     "sidebar": {
       "fallbackTitle": "Discussion",
       "searchPastSessions": "Rechercher des sessions passées"
-    }
+    },
+    "proactiveInsights": "Aperçus proactifs & rappels"
   },
   "gateway": {
     "title": "Passerelle",
@@ -2597,7 +2598,8 @@
     "selectImage": "Sélectionner une image",
     "imageUrl": "URL de l'image",
     "emoji": "Emoji",
-    "urlPlaceholder": "Saisir l'URL de l'image"
+    "urlPlaceholder": "Saisir l'URL de l'image",
+    "profileTab": "Profil"
   },
   "files": {
     "images": "Images",
@@ -3900,44 +3902,6 @@
     },
     "notificationCenter": {
       "title": "Notifications"
-    },
-    "chatRightPanel": {
-      "agent": "Agent",
-      "hierarchy": "Hiérarchie",
-      "research": "Recherche",
-      "git": "Git",
-      "task": "Tâches",
-      "code": "Code",
-      "artifact": "Artefacts",
-      "imageGen": "Image",
-      "visionAnalysis": "Vision",
-      "report": "Rapport",
-      "citation": "Citations",
-      "inspector": "Inspecteur",
-      "browser": "Navigateur",
-      "computer": "Bureau",
-      "benchmark": "Bench",
-      "chart": "Graphique",
-      "snapshot": "Capture",
-      "profile": "Profil",
-      "errorRecovery": "Récupération",
-      "collaboration": "Collab",
-      "evolution": "Évolution",
-      "steer": "Orienter",
-      "cache": "Cache",
-      "branchCompare": "Branche",
-      "gateway": "GW",
-      "contextClass": "Contexte",
-      "cronResult": "Cron",
-      "reflection": "Réflexion",
-      "researchSources": "Sources",
-      "categoryEdit": "Catégorie",
-      "filePermission": "Fichier",
-      "sessionShare": "Partager",
-      "prefetch": "Précharg.",
-      "reminders": "Rappels",
-      "contextPrediction": "Prédiction",
-      "teammate": "Équipe"
     },
     "report": {
       "sourceType": {
@@ -6155,29 +6119,34 @@
     },
     "phaseCount": "{{count}} phases"
   },
+  "pasteButton": {
+    "emptyClipboard": "Presse-papiers vide",
+    "clipboardUnavailable": "Appui long pour coller manuellement",
+    "pasteFromClipboard": "Coller depuis le presse-papiers"
+  },
   "stockAnalysis": {
-    "actionBuy": "Acheter",
-    "actionSell": "Vendre",
-    "actionIncrease": "Augmenter",
-    "actionHold": "Conserver",
-    "actionReduce": "Réduire",
-    "recentAnalysis": "Analyse Récente",
-    "targetPriceNote": "Objectif ¥{{price}}",
-    "totalMarketValue": "Valeur Marché",
-    "unrealizedPnl": "P&L Latent",
+    "actionBuy": "Buy",
+    "actionSell": "Sell",
+    "actionIncrease": "Increase",
+    "actionHold": "Hold",
+    "actionReduce": "Reduce",
+    "recentAnalysis": "Recent Analysis",
+    "targetPriceNote": "Target ¥{{price}}",
+    "totalMarketValue": "Total Mkt Value",
+    "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
-    "holdings": "Positions",
+    "holdings": "Holdings",
     "sharesUnit": "",
     "wanUnit": "0k",
-    "analystCount": "{{current}}/{{total}} analystes",
-    "debateRounds": "{{current}}/{{total}} tours de débat",
-    "riskAssessCount": "{{count}} évaluations",
-    "offlineMode": "Mode hors ligne (LLM Driver non connecté)",
-    "charCount": "{{count}} caractères",
-    "settings.saveFailed": "Échec de la sauvegarde des paramètres",
-    "settings.quoteTag": "Cours",
-    "settings.financialKlineTag": "Financier/Chandelier",
-    "settings.newsTag": "Actualités",
+    "analystCount": "{{current}}/{{total}} analysts",
+    "debateRounds": "{{current}}/{{total}} rounds",
+    "riskAssessCount": "{{count}} assessments",
+    "offlineMode": "Offline mode",
+    "charCount": "{{count}} chars",
+    "settings.saveFailed": "Failed to save",
+    "settings.quoteTag": "Quotes",
+    "settings.financialKlineTag": "Financial/K-line",
+    "settings.newsTag": "News",
     "settings.tencentFinance": "Tencent Finance",
     "settings.eastmoney": "East Money",
     "settings.sinaFinance": "Sina Finance"

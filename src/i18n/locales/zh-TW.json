@@ -833,7 +833,8 @@
     "sidebar": {
       "fallbackTitle": "對話",
       "searchPastSessions": "搜尋歷史工作階段"
-    }
+    },
+    "proactiveInsights": "主動洞察與提醒"
   },
   "gateway": {
     "title": "閘道",
@@ -2597,7 +2598,8 @@
     "selectImage": "選擇圖片",
     "imageUrl": "圖片連結",
     "emoji": "表情符號",
-    "urlPlaceholder": "輸入圖片 URL"
+    "urlPlaceholder": "輸入圖片 URL",
+    "profileTab": "個人資訊"
   },
   "files": {
     "images": "圖片",
@@ -3506,44 +3508,6 @@
     },
     "notificationCenter": {
       "title": "通知"
-    },
-    "chatRightPanel": {
-      "agent": "智能體",
-      "hierarchy": "層級",
-      "research": "調研",
-      "git": "Git",
-      "task": "任務",
-      "code": "程式碼",
-      "artifact": "產出",
-      "imageGen": "生圖",
-      "visionAnalysis": "視覺分析",
-      "report": "報告",
-      "citation": "引用",
-      "inspector": "檢查",
-      "browser": "瀏覽器",
-      "computer": "桌面",
-      "benchmark": "評測",
-      "chart": "圖表",
-      "snapshot": "快照",
-      "profile": "用戶",
-      "errorRecovery": "恢復",
-      "collaboration": "協作",
-      "evolution": "進化",
-      "steer": "引導",
-      "cache": "快取",
-      "branchCompare": "分支對比",
-      "gateway": "網關",
-      "contextClass": "上下文",
-      "cronResult": "定時結果",
-      "reflection": "反思",
-      "researchSources": "研究來源",
-      "categoryEdit": "分類編輯",
-      "filePermission": "檔案權限",
-      "sessionShare": "工作階段分享",
-      "prefetch": "預取",
-      "reminders": "提醒",
-      "contextPrediction": "上下文預測",
-      "teammate": "協作"
     },
     "report": {
       "sourceType": {
@@ -5254,14 +5218,14 @@
     },
     "tab": {
       "all": "全部",
-      "knowledge": "知識庫",
+      "knowledge": "RAG 知識庫",
       "memory": "記憶",
-      "wiki": "知識庫"
+      "wiki": "Wiki 知識庫"
     },
     "type": {
-      "knowledge": "知識庫",
+      "knowledge": "RAG 知識庫",
       "memory": "記憶",
-      "wiki": "知識庫"
+      "wiki": "Wiki 知識庫"
     },
     "typeDesc": {
       "knowledge": "RAG 向量知識庫，支持文檔導入與語義檢索",
@@ -6155,6 +6119,11 @@
     },
     "phaseCount": "{{count}} 個階段"
   },
+  "pasteButton": {
+    "emptyClipboard": "剪貼板為空",
+    "clipboardUnavailable": "請長按輸入框手動貼上",
+    "pasteFromClipboard": "從剪貼板貼上"
+  },
   "stockAnalysis": {
     "actionBuy": "買入",
     "actionSell": "賣出",
@@ -6172,7 +6141,7 @@
     "analystCount": "{{current}}/{{total}} 分析師",
     "debateRounds": "{{current}}/{{total}} 輪辯論",
     "riskAssessCount": "{{count}} 項評估",
-    "offlineMode": "離線模式 (LLM Driver 未連接，佔位資料)",
+    "offlineMode": "離線模式",
     "charCount": "{{count}} 字",
     "settings.saveFailed": "設定儲存失敗",
     "settings.quoteTag": "行情",

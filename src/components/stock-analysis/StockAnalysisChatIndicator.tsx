@@ -4,6 +4,9 @@ import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
+/** 后端返回的分析动作常量（用于比较，不做 UI 展示） */
+const A = { BUY: "买入", INCREASE: "增持", HOLD: "持有", REDUCE: "减持", SELL: "卖出" } as const;
+
 /**
  * ChatView 中嵌入的股票分析状态指示器
  *
@@ -89,9 +92,9 @@ export function StockAnalysisChatIndicator() {
             {" · "}
             <Tag
               bordered={false}
-              color={decision.action === "买入" || decision.action === "增持"
+              color={decision.action === A.BUY || decision.action === A.INCREASE
                 ? "red"
-                : decision.action === "卖出" || decision.action === "减持"
+                : decision.action === A.SELL || decision.action === A.REDUCE
                 ? "green"
                 : "default"}
               style={{ fontSize: 12 }}
@@ -100,17 +103,17 @@ export function StockAnalysisChatIndicator() {
             </Tag>
             {decision.confidence > 0 && (
               <span style={{ marginLeft: 4, fontSize: 12 }}>
-                置信度 {(decision.confidence * 100).toFixed(0)}%
+                {t("stockAnalysis.confidence")} {(decision.confidence * 100).toFixed(0)}%
               </span>
             )}
             {decision.targetPrice && (
               <span style={{ marginLeft: 4, fontSize: 12 }}>
-                目标价 ¥{decision.targetPrice.toFixed(2)}
+                {t("stockAnalysis.targetPrice")} ¥{decision.targetPrice.toFixed(2)}
               </span>
             )}
             {decision.stopLoss && (
               <span style={{ marginLeft: 4, fontSize: 12 }}>
-                止损 ¥{decision.stopLoss.toFixed(2)}
+                {t("stockAnalysis.stopLoss")} ¥{decision.stopLoss.toFixed(2)}
               </span>
             )}
           </span>

@@ -6205,6 +6205,17 @@
     "settings.newsTag": "新闻",
     "settings.tencentFinance": "腾讯财经",
     "settings.eastmoney": "东方财富",
-    "settings.sinaFinance": "新浪财经"
+    "settings.sinaFinance": "新浪财经",
+    "progress.fetchingData": "正在获取股票数据，请稍候...",
+    "progress.started": "分析已启动，正在加载数据...",
+    "progress.dataLoaded": "数据加载完成: K线{{kline}}条, 新闻{{news}}条",
+    "progress.analystProgress": "[{{name}}] {{status}}",
+    "progress.reportReady": "✅ {{name}}: 报告已生成",
+    "progress.debateRound": "辩论第 {{round}}/{{total}} 轮完成",
+    "progress.riskDone": "✅ {{name}}: 风险评估完成",
+    "progress.investmentPlan": "交易执行方案已制定，正在生成最终决策...",
+    "progress.completed": "✅ 分析完成!",
+    "progress.llmFallback": "⚠️ LLM 未连接，使用占位数据",
+    "progress.error": "❌ 分析出错: {{msg}}"
   }
 }

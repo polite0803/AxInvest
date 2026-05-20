@@ -10,6 +10,7 @@ import type {
   StockSearchResult,
 } from "@/types";
 import { ANALYST_NAMES } from "@/types";
+import i18n from "i18next";
 import { create } from "zustand";
 
 interface StockAnalysisState {
@@ -148,7 +149,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       status: "loading",
       error: null,
       currentStage: 0,
-      progressMessage: "正在获取股票数据，请稍候...",
+      progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
       progressPct: 0,
       chatIndicatorDismissed: false,
       analystReports: {},
@@ -246,13 +247,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       const { type, payload } = event.payload;
       switch (type) {
         case "started":
-          set({ status: "running", progressMessage: "分析已启动，正在加载数据...", progressPct: 5 });
+          set({ status: "running", progressMessage: i18n.t("stockAnalysis.progress.started"), progressPct: 5 });
           break;
         case "dataLoaded": {
           const dlPayload = payload as Record<string, unknown>;
           set({
             currentStage: 0,
-            progressMessage: `数据加载完成: K线${dlPayload.klineCount ?? "?"}条, 新闻${dlPayload.newsCount ?? "?"}条`,
+            progressMessage: i18n.t("stockAnalysis.progress.dataLoaded", {
+              kline: dlPayload.klineCount ?? "?",
+              news: dlPayload.newsCount ?? "?",
+            }),
             progressPct: 10,
           });
           break;
@@ -266,7 +270,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           if (stage >= 0) { set({ currentStage: stage }); }
           const name = ANALYST_NAMES[expertId] ?? expertId;
           set({
-            progressMessage: `[${name}] ${status}`,
+            progressMessage: i18n.t("stockAnalysis.progress.analystProgress", { name, status }),
             progressPct: pct > 0 ? Math.max(pct, get().progressPct) : get().progressPct,
           });
           break;
@@ -277,7 +281,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             analystReports: { ...s.analystReports, [expertId]: reportText },
           }));
           const name = ANALYST_NAMES[expertId] ?? expertId;
-          set({ progressMessage: `✅ ${name}: 报告已生成` });
+          set({ progressMessage: i18n.t("stockAnalysis.progress.reportReady", { name }) });
           break;
         }
         case "debateRound": {
@@ -291,7 +295,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
                 bear: bearArgument as string,
               },
             ],
-            progressMessage: `辩论第 ${round as number}/3 轮完成`,
+            progressMessage: i18n.t("stockAnalysis.progress.debateRound", { round: round as number, total: 3 }),
           }));
           break;
         }
@@ -301,14 +305,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             riskAssessments: { ...s.riskAssessments, [riskType]: report },
           }));
           const name = ANALYST_NAMES[riskType] ?? riskType;
-          set({ progressMessage: `✅ ${name}: 风险评估完成` });
+          set({ progressMessage: i18n.t("stockAnalysis.progress.riskDone", { name }) });
           break;
         }
         case "investmentPlan": {
           const { plan } = payload as Record<string, string>;
           set((s) => ({
             analystReports: { ...s.analystReports, "investment-plan": plan },
-            progressMessage: "交易执行方案已制定，正在生成最终决策...",
+            progressMessage: i18n.t("stockAnalysis.progress.investmentPlan"),
             progressPct: 85,
           }));
           break;
@@ -319,7 +323,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           set({
             decision: payload as unknown as StockDecision,
             status: "completed",
-            progressMessage: "✅ 分析完成!",
+            progressMessage: i18n.t("stockAnalysis.progress.completed"),
             progressPct: 100,
           });
           break;
@@ -329,7 +333,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             error: msg,
             status: msg.includes("LLM") ? "running" : "error",
             llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
-            progressMessage: msg.includes("LLM") ? "⚠️ LLM 未连接，使用占位数据" : `❌ 分析出错: ${msg}`,
+            progressMessage: msg.includes("LLM")
+              ? i18n.t("stockAnalysis.progress.llmFallback")
+              : i18n.t("stockAnalysis.progress.error", { msg }),
           });
           break;
         }

@@ -92,6 +92,8 @@ if (canRunFrontend) {
 
   step("TypeScript 类型检查", "npx tsc --noEmit");
 
+  step("i18n 键完整性检查", "node scripts/check-i18n-key-exists.mjs");
+
   if (!quick && !frontendOnly) {
     step("Vitest 单元测试", "npx vitest run");
   }

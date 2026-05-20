@@ -22,7 +22,8 @@
     "devTools": "أدوات المطور",
     "workflow": "سير العمل",
     "wiki": "Wiki",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "Stock Analysis"
   },
   "sidebar": {
     "sectionWork": "العمل",
@@ -6225,6 +6226,53 @@
     "addedToWatchlist": "Added",
     "inWatchlist": "In Watchlist",
     "addFailed": "Operation Failed",
+    "settings": {
+      "title": "Stock Analysis Settings",
+      "dataSources": "Data Sources",
+      "analysis": "Analysis Parameters",
+      "trading": "Trading Settings",
+      "model": "Model Parameters",
+      "debateRounds": "Debate Rounds",
+      "klinePeriod": "K-Line Period",
+      "periodDaily": "Daily",
+      "periodWeekly": "Weekly",
+      "periodMonthly": "Monthly",
+      "klineLimit": "K-Line Count",
+      "newsLimit": "News Count",
+      "tradingEnabled": "Enable Trading",
+      "maxSinglePosition": "Max Single Position",
+      "maxTotalPosition": "Max Total Position",
+      "maxPositions": "Max Positions",
+      "temperature": "Temperature",
+      "maxTokens": "Max Tokens",
+      "resetDefaults": "Reset Defaults"
+    }
+  },
+  "trade": {
+    "title": "Trading Log",
+    "disabledHint": "Enable to manually record buy/sell trades. Automatically tracks position cost and P&L.",
+    "stockCode": "Code",
+    "stockName": "Name",
+    "buy": "Buy",
+    "sell": "Sell",
+    "price": "Price",
+    "quantity": "Qty",
+    "cost": "Cost",
+    "shares": "Position",
+    "pnl": "P&L",
+    "recorded": "Recorded",
+    "fillRequired": "Please fill in required fields",
+    "toggleFailed": "Toggle failed",
+    "agentRole": {
+      "coordinator": "Coordinator",
+      "researcher": "Researcher",
+      "planner": "Planner",
+      "developer": "Developer",
+      "reviewer": "Reviewer",
+      "browser": "Browser",
+      "synthesizer": "Synthesizer",
+      "executor": "Executor"
+    },
     "settings": {
       "title": "Stock Analysis Settings",
       "dataSources": "Data Sources",

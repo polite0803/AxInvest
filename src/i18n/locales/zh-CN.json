@@ -22,7 +22,8 @@
     "devTools": "开发工具",
     "workflow": "工作流",
     "wiki": "知识库",
-    "app": "AxAgent"
+    "app": "AxAgent",
+    "stockAnalysis": "股票分析"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -6278,6 +6279,53 @@
     "addedToWatchlist": "已加入自选",
     "inWatchlist": "已在自选",
     "addFailed": "操作失败",
+    "settings": {
+      "title": "股票分析设置",
+      "dataSources": "数据源",
+      "analysis": "分析参数",
+      "trading": "交易设置",
+      "model": "模型参数",
+      "debateRounds": "辩论轮数",
+      "klinePeriod": "K线周期",
+      "periodDaily": "日线",
+      "periodWeekly": "周线",
+      "periodMonthly": "月线",
+      "klineLimit": "K线数量",
+      "newsLimit": "新闻数量",
+      "tradingEnabled": "启用交易",
+      "maxSinglePosition": "单股最大仓位",
+      "maxTotalPosition": "总仓位上限",
+      "maxPositions": "最大持仓数",
+      "temperature": "创造性",
+      "maxTokens": "最大输出长度",
+      "resetDefaults": "恢复默认"
+    }
+  },
+  "trade": {
+    "title": "交易日志",
+    "disabledHint": "开启后可手动记录买卖交易，自动跟踪持仓成本与盈亏",
+    "stockCode": "代码",
+    "stockName": "名称",
+    "buy": "买",
+    "sell": "卖",
+    "price": "价格",
+    "quantity": "数量",
+    "cost": "成本",
+    "shares": "持仓",
+    "pnl": "盈亏",
+    "recorded": "已记录",
+    "fillRequired": "请填写必要信息",
+    "toggleFailed": "切换失败",
+    "agentRole": {
+      "coordinator": "协调者",
+      "researcher": "研究员",
+      "planner": "规划者",
+      "developer": "开发者",
+      "reviewer": "审查者",
+      "browser": "浏览器",
+      "synthesizer": "综合者",
+      "executor": "执行者"
+    },
     "settings": {
       "title": "股票分析设置",
       "dataSources": "数据源",

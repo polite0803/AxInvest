@@ -46,7 +46,7 @@ export function StockAnalysisPage() {
   // 从 URL ?code= 参数自动加载行情（对话页触发时使用）
   useEffect(() => {
     const code = searchParams.get("code");
-    if (code && !useStockAnalysisStore.getState().stockCode) {
+    if (code) {
       getStockQuote(code);
       getStockKline(code, "daily", 120);
     }

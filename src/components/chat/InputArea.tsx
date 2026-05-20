@@ -167,6 +167,7 @@ const _draftCache = new Map<string, string>();
 /** 检测并处理股票分析触发命令：@600519 或 /analyze 600519 */
 async function handleStockAnalysisTrigger(
   trimmed: string,
+  navigate: ReturnType<typeof import("react-router-dom").useNavigate>,
   messageApi: ReturnType<typeof import("antd").App.useApp>["message"],
   t: ReturnType<typeof import("react-i18next").useTranslation>["t"],
 ): Promise<boolean> {
@@ -179,6 +180,7 @@ async function handleStockAnalysisTrigger(
     await setupEventListener();
     const defaultProviderId = useProviderStore.getState().providers.find((p) => p.enabled)?.id ?? "";
     await startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), defaultProviderId);
+    navigate(`/stock-analysis?code=${stockCode}`);
   } catch (e) {
     console.error("[StockAnalysis] Failed to start analysis:", e);
     messageApi.error(String(t("stockAnalysis.startFailed")));
@@ -1743,7 +1745,7 @@ export function InputArea() {
       return;
     }
 
-    if (await handleStockAnalysisTrigger(trimmed, messageApi, t)) {
+    if (await handleStockAnalysisTrigger(trimmed, navigate, messageApi, t)) {
       setValue("");
       return;
     }

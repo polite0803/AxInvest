@@ -4,6 +4,10 @@
     "title": "Smart Workspace",
     "description": "AI-Powered Work Assistant"
   },
+  "artifact": {
+    "copiedToClipboard": "Copied to clipboard",
+    "copyFailed": "Failed to copy"
+  },
   "nav": {
     "chat": "Chat",
     "knowledge": "Knowledge Sources",
@@ -18,8 +22,7 @@
     "devTools": "DevTools",
     "workflow": "Workflow",
     "wiki": "Wiki",
-    "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "app": "AxAgent"
   },
   "sidebar": {
     "sectionWork": "Work",
@@ -187,6 +190,8 @@
     "moveToCategory": "Move to Category",
     "removeFromCategory": "Remove from Category",
     "categoryNamePlaceholder": "Category name",
+    "manageCategories": "Manage Categories",
+    "noCategories": "No categories yet. Create one above.",
     "inspector": {
       "title": "Inspector",
       "sources": "Sources",
@@ -210,7 +215,10 @@
       "enabled": "Enabled",
       "disabled": "Disabled",
       "count": "{{count}} items",
-      "tokenMax": "Token Limit"
+      "tokenMax": "Token Limit",
+      "messages": "Messages",
+      "systemPrompt": "System Prompt",
+      "skills": "Skills"
     },
     "contextGraph": {
       "title": "Context Graph",
@@ -245,8 +253,12 @@
     },
     "branch": {
       "compare": "Branch Compare",
+      "compareTitle": "Branch Compare",
       "left": "Left",
-      "right": "Right"
+      "right": "Right",
+      "current": "Current",
+      "unknownModel": "Unknown Model",
+      "selectVersion": "Select Version"
     },
     "search": {
       "title": "Web Search",
@@ -416,6 +428,11 @@
       "result": "Result:",
       "error": "Error:",
       "attempts": "{{count}} attempts",
+      "loading": "Loading...",
+      "cancelled": "Cancelled",
+      "cancelFailed": "Cancel failed",
+      "cancel": "Cancel",
+      "noSteps": "No steps",
       "decompositionSaved": "Decomposition workflow saved successfully",
       "semanticCheckTitle": "Similar Skills Found",
       "semanticCheckDescription": "The following generated atomic skills have high semantic similarity with existing skills. You can choose to use the existing skill or keep the generated one.",
@@ -619,6 +636,8 @@
     "tabCloseOthers": "Close Other Tabs",
     "tabCloseRight": "Close Tabs to the Right",
     "agentStats": {
+      "askUser": "questions",
+      "loading": "Loading...",
       "pause": "Pause",
       "paused": "Paused",
       "pending": "Pending",
@@ -656,29 +675,31 @@
       "renderError": "Chart generation failed: {{error}}"
     },
     "collaboration": {
+      "title": "Collaboration",
+      "noSessions": "No shared sessions",
       "copied": "Copied",
-      "copyCode": "Copy code",
-      "noSessions": "No collaboration sessions",
-      "participants": "Participants",
+      "copyCode": "Copy invite code",
       "session": "Session",
-      "sessionShare": {
-        "codePlaceholder": "XXXX-XXXX",
-        "copied": "Copied",
-        "copy": "Copy",
-        "enterInviteCode": "Enter invite code",
-        "fileAccess": "File Access",
-        "inviteCode": "Invite Code",
-        "joinMode": "Join Mode",
-        "joinSession": "Join Session",
-        "modelAccess": "Model Access",
-        "permissions": "Permissions",
-        "requireApproval": "Require Approval",
-        "shareMode": "Share Mode",
-        "terminalAccess": "Terminal Access",
-        "title": "Session Sharing"
-      },
+      "participants": "Participants",
       "sharedResources": "Shared Resources",
-      "title": "Collaboration"
+      "sessionShare": {
+        "title": "Session Sharing",
+        "shareMode": "Share",
+        "joinMode": "Join",
+        "inviteCode": "Invite Code",
+        "copy": "Copy",
+        "permissions": "Permissions",
+        "terminalAccess": "Terminal Access",
+        "fileAccess": "File Access",
+        "modelAccess": "Model Access",
+        "requireApproval": "Require Approval",
+        "enterInviteCode": "Enter invite code",
+        "codePlaceholder": "Enter invite code",
+        "joinSession": "Join Session",
+        "copyFailed": "Copy failed",
+        "joinFailed": "Join failed",
+        "maxParticipants": "Max Participants"
+      }
     },
     "conversationNotFound": "Conversation not found",
     "copyMarkdown": "Copy Markdown",
@@ -730,16 +751,28 @@
     },
     "steer": "Steer",
     "steerPlaceholder": "Enter steering instruction...",
+    "steerSent": "Steering instruction sent",
+    "steerError": "Failed to send steering instruction",
     "totalTokens": "Total Tokens",
     "tokens": "tokens",
     "vision": {
+      "analyze": "Analyze",
       "analyzedImage": "Analyzed image",
       "analyzing": "Analyzing...",
+      "confidence": "Confidence",
       "description": "Description",
       "elements": "Elements",
       "extractedText": "Extracted text",
       "imageAnalysis": "Image Analysis",
       "model": "Model",
+      "uploadImage": "Click or drag to upload an image",
+      "taskLabels": {
+        "ImageDescription": "Image Description",
+        "Ocr": "OCR / Text Extraction",
+        "UiElementDetection": "UI Element Detection",
+        "ChartAnalysis": "Chart Analysis",
+        "CodeScreenshotReading": "Code Reading"
+      },
       "ui": {
         "actionable": "Actionable",
         "analyzing": "Analyzing...",
@@ -770,11 +803,12 @@
       "tool": "Tool",
       "agent": "Agent",
       "status": "Status",
-      "completed": "Completed",
-      "failed": "Failed",
-      "running": "Running",
+      "completed": "{{completed}} completed",
+      "failed": "{{failed}} failed",
+      "running": "{{running}} running",
       "cancelled": "Cancelled",
-      "pending": "Pending"
+      "pending": "Pending",
+      "totalEvents": "{{total}} events"
     },
     "agent": {
       "acceptEdits": "Accept Edits",
@@ -846,7 +880,12 @@
       "user": "User",
       "system": "System",
       "assistant": "Assistant"
-    }
+    },
+    "sidebar": {
+      "fallbackTitle": "Chat",
+      "searchPastSessions": "Search past sessions"
+    },
+    "proactiveInsights": "Proactive Insights & Reminders"
   },
   "gateway": {
     "title": "Gateway",
@@ -1981,7 +2020,8 @@
       "workflow_knowledge_to_codeDesc": "Generate code from knowledge base",
       "executed": "Executed",
       "quickCreated": "Quick created",
-      "refreshed": "Refreshed"
+      "refreshed": "Refreshed",
+      "unknownTemplateType": "Unknown template type"
     },
     "userProfile": {
       "title": "User Profile",
@@ -2350,7 +2390,12 @@
     "zhipu": "Zhipu",
     "expertPromptNote": "Expert prompt note",
     "modelGroupPlaceholder": "Select model group",
-    "stockAnalysis": "Stock Analysis"
+    "knowledgeSettings": {
+      "title": "Knowledge"
+    },
+    "notificationCenter": {
+      "title": "Notifications"
+    }
   },
   "backup": {
     "title": "Backup Center",
@@ -2558,6 +2603,8 @@
     "default": "Default",
     "operationFailed": "Operation failed",
     "hide": "Hide",
+    "key": "Key",
+    "value": "Value",
     "searchPlaceholder": "Search..."
   },
   "plan": {
@@ -2645,7 +2692,8 @@
     "openSettings": "Open Settings",
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
-    "conflictApp3": "WeChat (Windows)"
+    "conflictApp3": "WeChat (Windows)",
+    "conflictError": "Shortcut is already in use by another application, please try a different key combination"
   },
   "tray": {
     "show": "Show",
@@ -2664,7 +2712,9 @@
     "gatewayStartFailed": "Gateway start failed",
     "proxyTestFailed": "Proxy test failed",
     "invalidFormat": "Invalid format",
-    "page": "Error"
+    "page": "Error",
+    "message": "错误",
+    "pageNotFound": "Sorry, the page you visited does not exist."
   },
   "desktop": {
     "title": "Desktop Integration",
@@ -2806,7 +2856,8 @@
     "selectImage": "Select image",
     "imageUrl": "Image URL",
     "emoji": "Emoji",
-    "urlPlaceholder": "Enter image URL"
+    "urlPlaceholder": "Enter image URL",
+    "profileTab": "Profile"
   },
   "files": {
     "images": "Images",
@@ -3245,6 +3296,24 @@
       "legacySuffix": "(Legacy)",
       "templatesTab": "Templates",
       "searchTemplates": "Search templates..."
+    },
+    "knowledgeSettings": {
+      "title": "Knowledge"
+    },
+    "notificationCenter": {
+      "title": "Notifications"
+    },
+    "report": {
+      "sourceType": {
+        "web": "Web",
+        "academic": "Academic",
+        "wikipedia": "Wikipedia",
+        "documentation": "Doc",
+        "news": "News",
+        "blog": "Blog",
+        "forum": "Forum",
+        "unknown": "Unknown"
+      }
     },
     "rightPanel": {
       "addTagsPlaceholder": "Add tags...",
@@ -3918,7 +3987,7 @@
     "exportMarkdown": "Export Markdown",
     "passRate": "Pass Rate",
     "overallScore": "Overall Score",
-    "taskCount": "Task Count",
+    "taskCount": "{{count}} tasks",
     "totalDuration": "Total Duration",
     "waiting": "Waiting",
     "noResult": "No Result",
@@ -3946,7 +4015,10 @@
     "difficultyMedium": "Medium",
     "difficultyHard": "Hard",
     "difficultyExpert": "Expert",
-    "includeTraces": "Include Traces"
+    "includeTraces": "Include Traces",
+    "tags": "Tags: {{tags}}",
+    "none": "None",
+    "response": "Response"
   },
   "traceExplorer": {
     "selectTrace": "Select a trace to view details"
@@ -4493,8 +4565,7 @@
     "quickCapture": "Quick capture...",
     "refresh": "Refresh",
     "startImport": "Import",
-    "vaultPath": "Vault path...",
-    "sourceLabel": "Source"
+    "vaultPath": "Vault path..."
   },
   "notification": {
     "clear": "Clear",
@@ -4521,21 +4592,32 @@
     "completed": "Completed",
     "contextPrediction": "Context Prediction",
     "delete": "Delete",
+    "deleteConfirm": "Are you sure you want to delete this reminder?",
     "description": "Description",
     "descriptionPlaceholder": "Enter description...",
     "dismiss": "Dismiss",
     "dismissAll": "Dismiss All",
     "estimatedTime": "Estimated Time",
+    "everyInterval": "Every {{interval}} {{unit}}",
+    "everySingle": "Every {{unit}}",
     "inDays": "In {{count}} days",
     "language": "Language",
     "loading": "Loading...",
     "moreSuggestions": "More Suggestions",
     "noPredictions": "No predictions",
     "noReminders": "No reminders",
+    "overdue": "Overdue",
     "prefetchReady": "Prefetch ready",
     "prefetching": "Prefetching...",
+    "recurrenceUnitDay": "day",
+    "recurrenceUnitDays": "days",
+    "recurrenceUnitMonth": "month",
+    "recurrenceUnitMonths": "months",
+    "recurrenceUnitWeek": "week",
+    "recurrenceUnitWeeks": "weeks",
     "reminders": "Reminders",
     "scheduledAt": "Scheduled at",
+    "scheduledWas": "Scheduled: {{time}}",
     "snooze": "Snooze",
     "suggestedActions": "Suggested Actions",
     "suggestions": "Suggestions",
@@ -4544,7 +4626,10 @@
     "today": "Today",
     "tomorrow": "Tomorrow",
     "unknown": "Unknown",
-    "yesterday": "Yesterday"
+    "yesterday": "Yesterday",
+    "retry": "Retry",
+    "applied": "Applied",
+    "copied": "Copied to clipboard"
   },
   "review": {
     "commentPlaceholder": "Enter comment...",
@@ -5156,12 +5241,6 @@
     "lastActive": "Last Active"
   },
   "sourceManager": {
-    "createSource": "Create Source",
-    "typeLabel": "Type",
-    "sourceName": "Name",
-    "description": "Description",
-    "rootPath": "Root Path",
-    "embeddingModel": "Embedding Model",
     "type": {
       "knowledge": "Knowledge",
       "memory": "Memory",
@@ -5410,6 +5489,7 @@
     "sourceTypeWeb": "Web",
     "sourceTypeAcademic": "Academic",
     "sourceTypeWikipedia": "Wikipedia",
+    "sourceTypeGithub": "GitHub",
     "sourceTypeDocumentation": "Documentation",
     "sourceTypeNews": "News",
     "sourceTypeBlog": "Blog",
@@ -5438,13 +5518,28 @@
     "error": "Error",
     "citations": "Citations",
     "copyReport": "Copy Report",
-    "mockFinding": "Mock Research Finding"
+    "mockFinding": "Mock Research Finding",
+    "progress": {
+      "phasePlanning": "Planning",
+      "phaseSearching": "Searching",
+      "phaseExtracting": "Extracting",
+      "phaseAnalyzing": "Analyzing",
+      "phaseSynthesizing": "Synthesizing",
+      "phaseReporting": "Reporting",
+      "currentPhase": "Current phase: {{phase}}"
+    }
   },
   "reportViewer": {
-    "noReport": "No report generated yet",
-    "noReferences": "No references available",
-    "noOutline": "No outline available",
-    "noSummary": "No summary available"
+    "preview": "Preview",
+    "references": "References",
+    "summary": "Summary",
+    "generatedAt": "Generated at:",
+    "export": "Export",
+    "copyReport": "Copy Report",
+    "startNewResearch": "New Research",
+    "lowCredibilityWarning": "Note: Report contains {{count}} low-credibility source(s), use with caution",
+    "noReferences": "No references",
+    "noSummary": "No summary"
   },
   "citationManager": {
     "totalCitations": "Total Citations:",
@@ -5571,7 +5666,35 @@
     "selectExpert": "Select Expert Role"
   },
   "permissionModal": {
-    "title": "Permission Approval"
+    "title": "Permission Approval",
+    "deny": "Deny",
+    "allow": "Allow",
+    "alwaysAllow": "Always Allow",
+    "unknownTool": "Unknown Tool",
+    "pendingCount": "{{count}} pending (current #{{current}})",
+    "pendingOne": "1 pending",
+    "expandDetails": "Expand details",
+    "collapseDetails": "Collapse details",
+    "noParams": "(no parameters)",
+    "riskExecute": " — This operation may modify system state, please review carefully",
+    "riskWrite": " — This operation will create or modify files",
+    "riskRead": " — This operation only reads data, no modifications will be made",
+    "riskLevel": "Risk level: {{level}}",
+    "approveError": "Approval failed",
+    "toolDesc": {
+      "readFilePath": "Read {{path}}",
+      "readFile": "Read file {{file}}",
+      "readFileGeneric": "Read file or directory contents",
+      "writeFile": "Write file {{path}}",
+      "writeFileGeneric": "Create or modify file",
+      "execCommand": "Execute command: {{cmd}}",
+      "execShell": "Execute shell command",
+      "deletePath": "Delete {{path}}",
+      "deleteGeneric": "Delete file or directory",
+      "webSearch": "Search the web for information",
+      "mcpTool": "Execute MCP tool",
+      "execTool": "Execute {{toolName}}"
+    }
   },
   "teammatePanel": {
     "memberCount": "{{count}} teammates",
@@ -5614,7 +5737,10 @@
     "yes": "Yes",
     "no": "No",
     "cancel": "Cancel",
-    "createNew": "Create New Dataset"
+    "createNew": "Create New Dataset",
+    "createdSuccess": "Dataset created successfully",
+    "deletedSuccess": "Dataset deleted",
+    "sampleAdded": "Sample added successfully"
   },
   "loraConfig": {
     "trainingSetup": "Training Setup",
@@ -5655,8 +5781,12 @@
     "success": "Success",
     "failed": "Failed",
     "schedule": "Schedule",
+    "scheduleDescription": "Description",
     "platform": "Platform",
-    "time": "Time"
+    "time": "Time",
+    "loading": "Loading cron job result…",
+    "prefix": "Cron: {{jobName}}",
+    "emptyResult": "No result"
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -5664,7 +5794,11 @@
   },
   "cacheIndicator": {
     "notEstablished": "Prompt cache not established. First turn in session.",
-    "pendingChanges": "Pending changes detected. Changes apply next session. Use --now to force."
+    "pendingChanges": "Pending changes detected. Changes apply next session. Use --now to force.",
+    "active": "Cache active. {{hits}} hits, ~{{tokens}} tokens saved.",
+    "fresh": "Fresh",
+    "pending": "Pending",
+    "cached": "Cached"
   },
   "artifactPanel": {
     "fullscreen": "Fullscreen"
@@ -5686,13 +5820,34 @@
   "reflection": {
     "noReflection": "No reflection available",
     "title": "Reflection",
+    "qualityScore": "Quality Score",
+    "excellent": "Excellent",
+    "good": "Good",
+    "needsImprovement": "Needs Improvement",
+    "startReflection": "Start Reflection",
+    "reflecting": "Reflecting...",
+    "analyzing": "Analyzing task execution...",
     "qualityAnalysis": "Quality Analysis",
     "efficiencyAnalysis": "Efficiency Analysis",
+    "errorPatterns": "Error Patterns",
+    "reusablePatterns": "Reusable Patterns",
+    "knowledgeSuggestions": "Knowledge Suggestions",
+    "improvementSuggestions": "Improvement Suggestions",
     "generatedInsights": "Generated Insights",
-    "usageCount": "Usage count"
+    "usageCount": "Usage count",
+    "summary": "Summary",
+    "qualityMetrics": "Quality Metrics",
+    "taskSuccessScore": "Task Success",
+    "toolEfficiencyScore": "Tool Efficiency",
+    "iterationEfficiencyScore": "Iteration Efficiency",
+    "timeEfficiencyScore": "Time Efficiency",
+    "errorRecoveryScore": "Error Recovery",
+    "goalCompletionScore": "Goal Completion",
+    "reflectError": "Reflection Failed",
+    "retry": "Retry"
   },
   "subAgentCard": {
-    "fork": "Fork"
+    "viewConversation": "View Sub-Conversation"
   },
   "modelParam": {
     "topP": "Top P"
@@ -5922,69 +6077,114 @@
       "ar": "Arabic"
     }
   },
+  "agentRole": {
+    "coordinator": "Coordinator",
+    "researcher": "Researcher",
+    "planner": "Planner",
+    "developer": "Developer",
+    "reviewer": "Reviewer",
+    "browser": "Browser",
+    "synthesizer": "Synthesizer",
+    "executor": "Executor"
+  },
+  "stream": {
+    "timeout": "⚠️ Stream timeout (no update for 5 minutes), automatically stopped"
+  },
+  "chat:workflow": {
+    "templateList": {
+      "presetsImported": "导入成功"
+    }
+  },
+  "report": {
+    "source": {
+      "web": "Web",
+      "academic": "Academic",
+      "wikipedia": "Wikipedia",
+      "documentation": "Documentation",
+      "news": "News",
+      "blog": "Blog",
+      "forum": "Forum",
+      "unknown": "Unknown"
+    },
+    "citations": "References",
+    "generatedAt": "Generated at: {{time}}",
+    "export": "Export",
+    "copyReport": "Copy report",
+    "startNewResearch": "Start new research",
+    "preview": "Preview",
+    "summary": "Summary",
+    "lowCredibilityNotice": "Note: Report contains {{count}} low-credibility sources, use with caution",
+    "sourceType": {
+      "web": "Web",
+      "academic": "Academic",
+      "wikipedia": "Wikipedia",
+      "documentation": "Doc",
+      "news": "News",
+      "blog": "Blog",
+      "forum": "Forum",
+      "unknown": "Unknown"
+    }
+  },
+  "chatRightPanel": {
+    "agent": "Agent",
+    "hierarchy": "Hierarchy",
+    "research": "Research",
+    "git": "Git",
+    "task": "Tasks",
+    "code": "Code",
+    "artifact": "Artifacts",
+    "imageGen": "Image",
+    "visionAnalysis": "Vision",
+    "report": "Report",
+    "citation": "Citations",
+    "inspector": "Inspector",
+    "browser": "Browser",
+    "computer": "Desktop",
+    "benchmark": "Bench",
+    "chart": "Chart",
+    "snapshot": "Snapshot",
+    "profile": "Profile",
+    "errorRecovery": "Recovery",
+    "collaboration": "Collab",
+    "evolution": "Evolution",
+    "steer": "Steer",
+    "cache": "Cache",
+    "branchCompare": "Branch",
+    "gateway": "Gateway",
+    "contextClass": "Context",
+    "cronResult": "Cron",
+    "reflection": "Reflection",
+    "researchSources": "Sources",
+    "categoryEdit": "Category",
+    "filePermission": "FilePerm",
+    "sessionShare": "Share",
+    "prefetch": "Prefetch",
+    "reminders": "Reminders",
+    "contextPrediction": "Prediction",
+    "teammate": "Team",
+    "steerInput": "SteerInput"
+  },
+  "knowledgeSettings": {
+    "title": "Knowledge"
+  },
+  "notificationCenter": {
+    "title": "Notifications"
+  },
+  "thinking": {
+    "phase": {
+      "analysis": "Analyze",
+      "planning": "Plan",
+      "execution": "Execute",
+      "verification": "Verify"
+    },
+    "phaseCount": "{{count}} phases"
+  },
+  "pasteButton": {
+    "emptyClipboard": "Clipboard is empty",
+    "clipboardUnavailable": "Long-press to paste manually",
+    "pasteFromClipboard": "Paste from clipboard"
+  },
   "stockAnalysis": {
-    "title": "Stock Analysis",
-    "searchPlaceholder": "Enter stock code or name",
-    "startAnalysis": "Start Analysis",
-    "analyzing": "Analyzing...",
-    "loadingHint": "Preparing analysis, please wait...",
-    "starting": "Starting analysis engine...",
-    "price": "Price",
-    "open": "Open",
-    "high": "High",
-    "low": "Low",
-    "volume": "Volume",
-    "volumeUnit": "10K lots",
-    "stage.dataLoading": "Data Loading",
-    "stage.analysis": "Multi-Dimension Analysis",
-    "stage.debate": "Bull-Bear Debate",
-    "stage.risk": "Risk Assessment",
-    "stage.decision": "Investment Decision",
-    "debate": "Bull-Bear Debate",
-    "debateRound": "Round {round}",
-    "bull": "Bull",
-    "bear": "Bear",
-    "riskAssessment": "Risk Assessment",
-    "risk.aggressive": "Aggressive",
-    "risk.conservative": "Conservative",
-    "risk.neutral": "Neutral",
-    "finalDecision": "Final Decision",
-    "position": "Position",
-    "targetPrice": "Target Price",
-    "stopLoss": "Stop Loss",
-    "riskLevel": "Risk Level",
-    "confidence": "Confidence",
-    "emptyHint": "Search stock code to start analysis",
-    "emptyHintDetail": "Supports A-shares. Enter code or name (e.g. 600519, Kweichow Moutai)",
-    "watchlist": "Watchlist",
-    "tab.market": "Market",
-    "tab.analysts": "Analysts",
-    "tab.debate": "Debate",
-    "tab.risk": "Risk",
-    "tab.decision": "Decision",
-    "compare": "Compare",
-    "stockCode1": "Stock Code 1",
-    "stockCode2": "Stock Code 2",
-    "compareBtn": "Compare",
-    "change": "Change",
-    "alert.title": "Price Alert",
-    "alert.code": "Code",
-    "alert.name": "Name",
-    "alert.condition": "Condition",
-    "alert.price": "Price",
-    "alert.above": "Above",
-    "alert.below": "Below",
-    "alert.empty": "No alerts",
-    "alert.triggered": "Price alert triggered!",
-    "klineChart": "Candlestick",
-    "volumeChart": "Volume",
-    "loadHistory": "Click to load history report",
-    "history": "Analysis History",
-    "debateHistory": "Debate History",
-    "addToWatchlist": "Add to Watchlist",
-    "addedToWatchlist": "Added",
-    "inWatchlist": "In Watchlist",
-    "addFailed": "Operation Failed",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",
@@ -5998,30 +6198,6 @@
     "holdings": "Holdings",
     "sharesUnit": "",
     "wanUnit": "0k",
-    "settings": {
-      "title": "Stock Analysis Settings",
-      "dataSources": "Data Sources",
-      "analysis": "Analysis Parameters",
-      "trading": "Trading Settings",
-      "model": "Model Parameters",
-      "debateRounds": "Debate Rounds",
-      "klinePeriod": "K-Line Period",
-      "periodDaily": "Daily",
-      "periodWeekly": "Weekly",
-      "periodMonthly": "Monthly",
-      "klineLimit": "K-Line Count",
-      "newsLimit": "News Count",
-      "tradingEnabled": "Enable Trading",
-      "maxSinglePosition": "Max Single Position",
-      "maxTotalPosition": "Max Total Position",
-      "maxPositions": "Max Positions",
-      "temperature": "Temperature",
-      "maxTokens": "Max Tokens",
-      "resetDefaults": "Reset Defaults"
-    },
-    "completed": "Analysis completed",
-    "viewDetails": "View Details",
-    "retry": "Retry",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",
     "riskAssessCount": "{{count}} assessments",
@@ -6034,52 +6210,5 @@
     "settings.tencentFinance": "Tencent Finance",
     "settings.eastmoney": "East Money",
     "settings.sinaFinance": "Sina Finance"
-  },
-  "trade": {
-    "title": "Trading Log",
-    "disabledHint": "Enable to manually record buy/sell trades. Automatically tracks position cost and P&L.",
-    "stockCode": "Code",
-    "stockName": "Name",
-    "buy": "Buy",
-    "sell": "Sell",
-    "price": "Price",
-    "quantity": "Qty",
-    "cost": "Cost",
-    "shares": "Position",
-    "pnl": "P&L",
-    "recorded": "Recorded",
-    "fillRequired": "Please fill in required fields",
-    "toggleFailed": "Toggle failed",
-    "agentRole": {
-      "coordinator": "Coordinator",
-      "researcher": "Researcher",
-      "planner": "Planner",
-      "developer": "Developer",
-      "reviewer": "Reviewer",
-      "browser": "Browser",
-      "synthesizer": "Synthesizer",
-      "executor": "Executor"
-    },
-    "settings": {
-      "title": "Stock Analysis Settings",
-      "dataSources": "Data Sources",
-      "analysis": "Analysis Parameters",
-      "trading": "Trading Settings",
-      "model": "Model Parameters",
-      "debateRounds": "Debate Rounds",
-      "klinePeriod": "K-Line Period",
-      "periodDaily": "Daily",
-      "periodWeekly": "Weekly",
-      "periodMonthly": "Monthly",
-      "klineLimit": "K-Line Count",
-      "newsLimit": "News Count",
-      "tradingEnabled": "Enable Trading",
-      "maxSinglePosition": "Max Single Position",
-      "maxTotalPosition": "Max Total Position",
-      "maxPositions": "Max Positions",
-      "temperature": "Temperature",
-      "maxTokens": "Max Tokens",
-      "resetDefaults": "Reset Defaults"
-    }
   }
 }

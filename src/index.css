@@ -39,6 +39,31 @@ body {
   font-weight: var(--font-weight, 400);
   user-select: auto;
   -webkit-user-select: auto;
+  /* 安卓沉浸式：安全区变量 */
+  --ax-safe-top: env(safe-area-inset-top, 0px);
+  --ax-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ax-safe-left: env(safe-area-inset-left, 0px);
+  --ax-safe-right: env(safe-area-inset-right, 0px);
+}
+
+/*
+ * 安卓沉浸式安全区
+ * env(safe-area-inset-*) 动态响应：
+ *   - 底部导航栏可见（3 按钮模式）→ inset-bottom ≈ 48px
+ *   - 底部导航栏隐藏（手势导航）   → inset-bottom = 0
+ *   - 浏览器实时更新，无需 JS 监听
+ */
+.ax-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.ax-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 浮动元素需要 bottom 值也跟随安全区 */
+.ax-safe-fixed-bottom {
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 }
 
 /* ── Selection: allow globally, disable only on draggable / interactive ── */

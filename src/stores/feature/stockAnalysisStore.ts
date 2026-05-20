@@ -172,6 +172,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       analysisDate: date,
       status: "running",
     });
+
+    // 自动加载行情数据供市场 tab 使用
+    get().getStockQuote(result.stock_code);
+    get().getStockKline(result.stock_code, "daily", 120);
   },
 
   cancelAnalysis: async () => {

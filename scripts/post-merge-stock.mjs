@@ -1,8 +1,12 @@
-// Post-merge script: re-add AxInvest stockAnalysis i18n keys + merge allowlist
+// Post-merge script: ensure AxInvest i18n keys exist in all 11 locale files.
+// Uses MERGE mode (Object.assign) — never replaces existing keys.
+// This is THE single source of truth for ALL AxInvest-specific locale keys.
 import { readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const dir = "src/i18n/locales";
+
+// ── Complete AxInvest i18n key sets ──────────────────────────────────────
 
 const zhCN = {
   actionBuy: "买入",
@@ -23,6 +27,83 @@ const zhCN = {
   riskAssessCount: "{{count}} 项评估",
   offlineMode: "离线模式 (LLM Driver 未连接，占位数据)",
   charCount: "{{count}} 字",
+  // UI
+  title: "股票分析",
+  searchPlaceholder: "输入股票代码或名称",
+  startAnalysis: "开始分析",
+  analyzing: "分析中...",
+  starting: "正在启动分析引擎...",
+  price: "最新价",
+  open: "开",
+  high: "高",
+  low: "低",
+  volume: "量",
+  volumeUnit: "万手",
+  volumeChart: "成交量",
+  klineChart: "K线",
+  emptyHint: "搜索股票代码开始分析",
+  emptyHintDetail: "支持沪深A股，输入代码或名称搜索（如：600519、贵州茅台）",
+  watchlist: "自选股",
+  loadHistory: "点击加载历史分析报告",
+  history: "历史分析",
+  debateHistory: "历史辩论",
+  addToWatchlist: "加入自选",
+  addedToWatchlist: "已加入自选",
+  inWatchlist: "已在自选",
+  addFailed: "操作失败",
+  retry: "重试",
+  completed: "已完成",
+  viewDetails: "查看详情",
+  error: "出错",
+  startFailed: "启动失败",
+  loadingHint: "正在加载股票分析数据...",
+  // Stages
+  "stage.dataLoading": "数据加载",
+  "stage.analysis": "多维度分析",
+  "stage.debate": "多空辩论",
+  "stage.risk": "风险评估",
+  "stage.decision": "投资决策",
+  // Debate
+  debate: "多空辩论",
+  debateRound: "第{{round}}轮",
+  bull: "多方",
+  bear: "空方",
+  // Risk
+  riskAssessment: "风险评估",
+  "risk.aggressive": "激进",
+  "risk.conservative": "保守",
+  "risk.neutral": "中性",
+  // Decision
+  finalDecision: "最终决策",
+  position: "仓位",
+  targetPrice: "目标价",
+  stopLoss: "止损",
+  riskLevel: "风险等级",
+  confidence: "置信度",
+  // Tabs
+  "tab.market": "行情",
+  "tab.analysts": "分析师",
+  "tab.debate": "辩论",
+  "tab.risk": "风险",
+  "tab.decision": "决策",
+  // Compare
+  compare: "多股对比",
+  stockCode1: "股票代码1",
+  stockCode2: "股票代码2",
+  compareBtn: "对比",
+  change: "涨跌幅",
+  // Alerts
+  "alert.title": "价格告警",
+  "alert.code": "代码",
+  "alert.name": "名称",
+  "alert.condition": "条件",
+  "alert.price": "价格",
+  "alert.above": "突破",
+  "alert.below": "跌破",
+  "alert.empty": "暂无告警",
+  "alert.triggered": "价格告警已触发！",
+  // Settings
+  settings: "股票分析设置",
   "settings.saveFailed": "设置保存失败",
   "settings.quoteTag": "行情",
   "settings.financialKlineTag": "财务/K线",
@@ -30,91 +111,317 @@ const zhCN = {
   "settings.tencentFinance": "腾讯财经",
   "settings.eastmoney": "东方财富",
   "settings.sinaFinance": "新浪财经",
+  "settings.dataSources": "数据源",
+  "settings.analysis": "分析参数",
+  "settings.debateRounds": "辩论轮数",
+  "settings.klinePeriod": "K线周期",
+  "settings.periodDaily": "日线",
+  "settings.periodWeekly": "周线",
+  "settings.periodMonthly": "月线",
+  "settings.klineLimit": "K线数量",
+  "settings.newsLimit": "新闻数量",
+  "settings.trading": "交易设置",
+  "settings.tradingEnabled": "启用交易",
+  "settings.maxSinglePosition": "单仓位上限",
+  "settings.maxTotalPosition": "总仓位上限",
+  "settings.maxPositions": "持仓数量上限",
+  "settings.model": "模型参数",
+  "settings.temperature": "创造性",
+  "settings.maxTokens": "最大输出长度",
+  "settings.resetDefaults": "恢复默认",
+  // Progress messages
+  "progress.fetchingData": "正在获取股票数据，请稍候...",
+  "progress.started": "分析已启动，正在加载数据...",
+  "progress.dataLoaded": "数据加载完成: K线{{kline}}条, 新闻{{news}}条",
+  "progress.analystProgress": "[{{name}}] {{status}}",
+  "progress.reportReady": "✅ {{name}}: 报告已生成",
+  "progress.debateRound": "辩论第 {{round}}/{{total}} 轮完成",
+  "progress.riskDone": "✅ {{name}}: 风险评估完成",
+  "progress.investmentPlan": "交易执行方案已制定，正在生成最终决策...",
+  "progress.completed": "✅ 分析完成!",
+  "progress.llmFallback": "⚠️ LLM 未连接，使用占位数据",
+  "progress.error": "❌ 分析出错: {{msg}}",
 };
 
-const langMap = {
-  "zh-CN.json": zhCN,
-  "zh-TW.json": {
-    actionBuy: "買入",
-    actionSell: "賣出",
-    actionIncrease: "增持",
-    actionHold: "持有",
-    actionReduce: "減持",
-    recentAnalysis: "最近分析",
-    targetPriceNote: "目標¥{{price}}",
-    totalMarketValue: "總市值",
-    unrealizedPnl: "浮動盈虧",
-    concentration: "集中度",
-    holdings: "持倉",
-    sharesUnit: "檔",
-    wanUnit: "萬",
-    analystCount: "{{current}}/{{total}} 分析師",
-    debateRounds: "{{current}}/{{total}} 輪辯論",
-    riskAssessCount: "{{count}} 項評估",
-    offlineMode: "離線模式",
-    charCount: "{{count}} 字",
-    "settings.saveFailed": "設定儲存失敗",
-    "settings.quoteTag": "行情",
-    "settings.financialKlineTag": "財務/K線",
-    "settings.newsTag": "新聞",
-    "settings.tencentFinance": "騰訊財經",
-    "settings.eastmoney": "東方財富",
-    "settings.sinaFinance": "新浪財經",
-  },
-  "en-US.json": {
-    actionBuy: "Buy",
-    actionSell: "Sell",
-    actionIncrease: "Increase",
-    actionHold: "Hold",
-    actionReduce: "Reduce",
-    recentAnalysis: "Recent Analysis",
-    targetPriceNote: "Target ¥{{price}}",
-    totalMarketValue: "Total Mkt Value",
-    unrealizedPnl: "Unrealized P&L",
-    concentration: "Concentration",
-    holdings: "Holdings",
-    sharesUnit: "",
-    wanUnit: "0k",
-    analystCount: "{{current}}/{{total}} analysts",
-    debateRounds: "{{current}}/{{total}} rounds",
-    riskAssessCount: "{{count}} assessments",
-    offlineMode: "Offline mode",
-    charCount: "{{count}} chars",
-    "settings.saveFailed": "Failed to save",
-    "settings.quoteTag": "Quotes",
-    "settings.financialKlineTag": "Financial/K-line",
-    "settings.newsTag": "News",
-    "settings.tencentFinance": "Tencent Finance",
-    "settings.eastmoney": "East Money",
-    "settings.sinaFinance": "Sina Finance",
-  },
+const enUS = {
+  actionBuy: "Buy",
+  actionSell: "Sell",
+  actionIncrease: "Increase",
+  actionHold: "Hold",
+  actionReduce: "Reduce",
+  recentAnalysis: "Recent Analysis",
+  targetPriceNote: "Target ¥{{price}}",
+  totalMarketValue: "Total Mkt Value",
+  unrealizedPnl: "Unrealized P&L",
+  concentration: "Concentration",
+  holdings: "Holdings",
+  sharesUnit: "",
+  wanUnit: "0k",
+  analystCount: "{{current}}/{{total}} analysts",
+  debateRounds: "{{current}}/{{total}} rounds",
+  riskAssessCount: "{{count}} assessments",
+  offlineMode: "Offline mode",
+  charCount: "{{count}} chars",
+  title: "Stock Analysis",
+  searchPlaceholder: "Enter stock code or name",
+  startAnalysis: "Start Analysis",
+  analyzing: "Analyzing...",
+  starting: "Starting analysis engine...",
+  price: "Price",
+  open: "Open",
+  high: "High",
+  low: "Low",
+  volume: "Volume",
+  volumeUnit: "10k lots",
+  volumeChart: "Volume",
+  klineChart: "K-line",
+  emptyHint: "Search stock code to start",
+  emptyHintDetail: "Shanghai/Shenzhen A-shares supported",
+  watchlist: "Watchlist",
+  loadHistory: "Click to load history",
+  history: "History",
+  debateHistory: "Debate History",
+  addToWatchlist: "Add to Watchlist",
+  addedToWatchlist: "Added",
+  inWatchlist: "Watching",
+  addFailed: "Add Failed",
+  retry: "Retry",
+  completed: "Completed",
+  viewDetails: "View Details",
+  error: "Error",
+  startFailed: "Start Failed",
+  loadingHint: "Loading stock analysis data...",
+  "stage.dataLoading": "Data Loading",
+  "stage.analysis": "Analysis",
+  "stage.debate": "Debate",
+  "stage.risk": "Risk Assessment",
+  "stage.decision": "Decision",
+  debate: "Debate",
+  debateRound: "Round {{round}}",
+  bull: "Bull",
+  bear: "Bear",
+  riskAssessment: "Risk Assessment",
+  "risk.aggressive": "Aggressive",
+  "risk.conservative": "Conservative",
+  "risk.neutral": "Neutral",
+  finalDecision: "Final Decision",
+  position: "Position",
+  targetPrice: "Target Price",
+  stopLoss: "Stop Loss",
+  riskLevel: "Risk Level",
+  confidence: "Confidence",
+  "tab.market": "Market",
+  "tab.analysts": "Analysts",
+  "tab.debate": "Debate",
+  "tab.risk": "Risk",
+  "tab.decision": "Decision",
+  compare: "Compare",
+  stockCode1: "Stock Code 1",
+  stockCode2: "Stock Code 2",
+  compareBtn: "Compare",
+  change: "Change",
+  "alert.title": "Price Alert",
+  "alert.code": "Code",
+  "alert.name": "Name",
+  "alert.condition": "Condition",
+  "alert.price": "Price",
+  "alert.above": "Above",
+  "alert.below": "Below",
+  "alert.empty": "No Alerts",
+  "alert.triggered": "Alert Triggered!",
+  settings: "Settings",
+  "settings.saveFailed": "Failed to save",
+  "settings.quoteTag": "Quotes",
+  "settings.financialKlineTag": "Financial/K-line",
+  "settings.newsTag": "News",
+  "settings.tencentFinance": "Tencent Finance",
+  "settings.eastmoney": "East Money",
+  "settings.sinaFinance": "Sina Finance",
+  "settings.dataSources": "Data Sources",
+  "settings.analysis": "Analysis Parameters",
+  "settings.debateRounds": "Debate Rounds",
+  "settings.klinePeriod": "K-line Period",
+  "settings.periodDaily": "Daily",
+  "settings.periodWeekly": "Weekly",
+  "settings.periodMonthly": "Monthly",
+  "settings.klineLimit": "K-line Limit",
+  "settings.newsLimit": "News Limit",
+  "settings.trading": "Trading",
+  "settings.tradingEnabled": "Enable Trading",
+  "settings.maxSinglePosition": "Max Single Position",
+  "settings.maxTotalPosition": "Max Total Position",
+  "settings.maxPositions": "Max Positions",
+  "settings.model": "Model Parameters",
+  "settings.temperature": "Temperature",
+  "settings.maxTokens": "Max Tokens",
+  "settings.resetDefaults": "Reset Defaults",
+  "progress.fetchingData": "Fetching stock data...",
+  "progress.started": "Analysis started...",
+  "progress.dataLoaded": "Data: {{kline}} K-lines, {{news}} news",
+  "progress.analystProgress": "[{{name}}] {{status}}",
+  "progress.reportReady": "✅ {{name}}: Report ready",
+  "progress.debateRound": "Debate round {{round}}/{{total}}",
+  "progress.riskDone": "✅ {{name}}: Risk done",
+  "progress.investmentPlan": "Generating final decision...",
+  "progress.completed": "✅ Analysis complete!",
+  "progress.llmFallback": "⚠️ LLM not connected, placeholder",
+  "progress.error": "❌ Error: {{msg}}",
 };
 
-// Generate other languages from en-US (fallback)
-const fallback = langMap["en-US.json"];
-const otherLangs = ["ja.json", "ko.json", "ar.json", "de.json", "es.json", "fr.json", "hi.json", "ru.json"];
-otherLangs.forEach(f => {
-  langMap[f] = { ...fallback };
-});
-
-// Add stockAnalysis keys
-for (const [file, keys] of Object.entries(langMap)) {
-  const filepath = join(dir, file);
-  if (!readdirSync(dir).includes(file)) { continue; }
-  const json = JSON.parse(readFileSync(filepath, "utf8"));
-  // MERGE instead of replace — don't wipe out existing keys
-  if (!json.stockAnalysis) { json.stockAnalysis = {}; }
-  Object.assign(json.stockAnalysis, keys);
-  writeFileSync(filepath, JSON.stringify(json, null, 2) + "\n");
+// zh-TW
+const zhTW = { ...zhCN };
+const tw = {
+  "分析": "分析",
+  "风险": "風險",
+  "辩论": "辯論",
+  "评估": "評估",
+  "决策": "決策",
+  "行情": "行情",
+  "新闻": "新聞",
+  "持仓": "持倉",
+  "市值": "市值",
+  "盈亏": "盈虧",
+  "数据": "資料",
+  "加载": "載入",
+  "完成": "完成",
+  "价格": "價格",
+  "告警": "告警",
+  "对比": "對比",
+  "开始": "開始",
+  "标题": "標題",
+  "代码": "代碼",
+  "名称": "名稱",
+  "条件": "條件",
+  "参数": "參數",
+  "轮数": "輪數",
+  "周期": "週期",
+  "数量": "數量",
+  "设置": "設置",
+  "启用": "啟用",
+  "上限": "上限",
+  "总仓位": "總倉位",
+  "持仓数": "持倉數",
+  "模型": "模型",
+  "创造性": "創造性",
+  "最大输出": "最大輸出",
+  "恢复": "恢復",
+  "默认": "默認",
+  "重试": "重試",
+  "已完成": "已完成",
+  "查看详情": "查看詳情",
+  "启动失败": "啟動失敗",
+  "正在加载": "正在載入",
+  "最新价": "最新價",
+  "万手": "萬手",
+  "成交量": "成交量",
+};
+for (const [k, v] of Object.entries(zhTW)) {
+  if (typeof v === "string") {
+    let result = v;
+    for (const [sc, tc] of Object.entries(tw)) {
+      result = result.split(sc).join(tc);
+    }
+    zhTW[k] = result;
+  }
 }
-console.log("11 locales updated");
 
-// Merge allowlist: upstream base + AxInvest entries
+// ── Trade section ─────────────────────────────────────────────────────
+
+const trade = {};
+
+const tradeCN = {
+  title: "交易日志",
+  disabledHint: "开启后可手动记录买卖交易，自动跟踪持仓成本与盈亏",
+  stockCode: "代码",
+  stockName: "名称",
+  buy: "买",
+  sell: "卖",
+  price: "价格",
+  quantity: "数量",
+  cost: "成本",
+  shares: "持仓",
+  pnl: "盈亏",
+  recorded: "已记录",
+  fillRequired: "请填写必要信息",
+  toggleFailed: "切换失败",
+  "agentRole.coordinator": "协调者",
+  "agentRole.researcher": "研究员",
+  "agentRole.planner": "规划者",
+  "agentRole.developer": "开发者",
+  "agentRole.reviewer": "审查者",
+  "agentRole.browser": "浏览器",
+  "agentRole.synthesizer": "综合者",
+  "agentRole.executor": "执行者",
+};
+
+const tradeEN = {
+  title: "Trading Log",
+  disabledHint: "Enable to record buy/sell trades. Tracks position cost and P&L.",
+  stockCode: "Code",
+  stockName: "Name",
+  buy: "Buy",
+  sell: "Sell",
+  price: "Price",
+  quantity: "Qty",
+  cost: "Cost",
+  shares: "Position",
+  pnl: "P&L",
+  recorded: "Recorded",
+  fillRequired: "Fill required fields",
+  toggleFailed: "Toggle failed",
+  "agentRole.coordinator": "Coordinator",
+  "agentRole.researcher": "Researcher",
+  "agentRole.planner": "Planner",
+  "agentRole.developer": "Developer",
+  "agentRole.reviewer": "Reviewer",
+  "agentRole.browser": "Browser",
+  "agentRole.synthesizer": "Synthesizer",
+  "agentRole.executor": "Executor",
+};
+
+// nav
+const navCN = { stockAnalysis: "股票分析" };
+const navEN = { stockAnalysis: "Stock Analysis" };
+
+// ── Apply to all 11 locales ────────────────────────────────────────────
+
+const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+
+for (const f of files) {
+  const fp = join(dir, f);
+  const j = JSON.parse(readFileSync(fp, "utf8"));
+
+  // stockAnalysis — MERGE mode (never replace)
+  if (!j.stockAnalysis) { j.stockAnalysis = {}; }
+  const saSource = f === "zh-CN.json" ? zhCN : f === "zh-TW.json" ? zhTW : enUS;
+  Object.assign(j.stockAnalysis, saSource);
+
+  // trade — MERGE mode
+  if (!j.trade) { j.trade = {}; }
+  const tSource = f === "zh-CN.json" || f === "zh-TW.json" ? tradeCN : tradeEN;
+  Object.assign(j.trade, tSource);
+
+  // nav.stockAnalysis
+  if (!j.nav) { j.nav = {}; }
+  const nSource = f === "zh-CN.json" || f === "zh-TW.json" ? navCN : navEN;
+  Object.assign(j.nav, nSource);
+
+  writeFileSync(fp, JSON.stringify(j, null, 2) + "\n");
+}
+
+console.log(
+  `post-merge-stock: merged ${Object.keys(zhCN).length} stockAnalysis + ${
+    Object.keys(tradeCN).length
+  } trade + nav keys into ${files.length} locale files`,
+);
+
+// ── Also merge AxInvest allowlist entries ──────────────────────────────
+
 const al = JSON.parse(readFileSync("scripts/.i18n-allowlist.json", "utf8"));
 const existing = {};
-al.entries.forEach(e => {
+al.entries.forEach((e) => {
   if (!existing[e.file]) { existing[e.file] = new Set(); }
-  (e.lines || "").split(",").forEach(l => {
+  (e.lines || "").split(",").forEach((l) => {
     if (l.trim()) { existing[e.file].add(l.trim()); }
   });
 });
@@ -149,7 +456,7 @@ const axInvest = [
 
 for (const [file, lines] of axInvest) {
   if (!existing[file]) { existing[file] = new Set(); }
-  lines.forEach(l => existing[file].add(l));
+  lines.forEach((l) => existing[file].add(l));
 }
 
 al.entries = [];
@@ -165,4 +472,4 @@ al.total_entries = al.entries.length;
 al.total_files = al.entries.length;
 
 writeFileSync("scripts/.i18n-allowlist.json", JSON.stringify(al, null, 2) + "\n");
-console.log("Allowlist:", al.entries.length, "entries");
+console.log(`post-merge-stock: allowlist updated to ${al.entries.length} entries`);

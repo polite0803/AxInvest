@@ -6128,7 +6128,6 @@
     "pasteFromClipboard": "Pegar desde portapapeles"
   },
   "stockAnalysis": {
-    "loadingHint": "Preparando análisis, espere por favor...",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",
@@ -6154,16 +6153,16 @@
     "settings.tencentFinance": "Tencent Finance",
     "settings.eastmoney": "East Money",
     "settings.sinaFinance": "Sina Finance",
-    "progress.fetchingData": "Fetching stock data, please wait...",
-    "progress.started": "Analysis started, loading data...",
-    "progress.dataLoaded": "Data loaded: {{kline}} K-lines, {{news}} news",
+    "progress.fetchingData": "Fetching stock data...",
+    "progress.started": "Analysis started...",
+    "progress.dataLoaded": "Data: {{kline}} K-lines, {{news}} news",
     "progress.analystProgress": "[{{name}}] {{status}}",
     "progress.reportReady": "✅ {{name}}: Report ready",
-    "progress.debateRound": "Debate round {{round}}/{{total}} complete",
-    "progress.riskDone": "✅ {{name}}: Risk assessment complete",
-    "progress.investmentPlan": "Investment plan formulated, generating final decision...",
+    "progress.debateRound": "Debate round {{round}}/{{total}}",
+    "progress.riskDone": "✅ {{name}}: Risk done",
+    "progress.investmentPlan": "Generating final decision...",
     "progress.completed": "✅ Analysis complete!",
-    "progress.llmFallback": "⚠️ LLM not connected, using placeholder data",
-    "progress.error": "❌ Analysis error: {{msg}}"
+    "progress.llmFallback": "⚠️ LLM not connected, placeholder",
+    "progress.error": "❌ Error: {{msg}}"
   }
 }

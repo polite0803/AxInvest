@@ -6128,7 +6128,6 @@
     "pasteFromClipboard": "從剪貼板貼上"
   },
   "stockAnalysis": {
-    "loadingHint": "正在準備分析，請稍候...",
     "actionBuy": "買入",
     "actionSell": "賣出",
     "actionIncrease": "增持",
@@ -6154,16 +6153,16 @@
     "settings.tencentFinance": "騰訊財經",
     "settings.eastmoney": "東方財富",
     "settings.sinaFinance": "新浪財經",
-    "progress.fetchingData": "正在取得股票資料，請稍候...",
-    "progress.started": "分析已啟動，正在載入資料...",
-    "progress.dataLoaded": "資料載入完成: K線{{kline}}條, 新聞{{news}}條",
+    "progress.fetchingData": "正在取得股票資料...",
+    "progress.started": "分析已啟動...",
+    "progress.dataLoaded": "資料: {{kline}} K線, {{news}} 新聞",
     "progress.analystProgress": "[{{name}}] {{status}}",
     "progress.reportReady": "✅ {{name}}: 報告已生成",
-    "progress.debateRound": "辯論第 {{round}}/{{total}} 輪完成",
-    "progress.riskDone": "✅ {{name}}: 風險評估完成",
-    "progress.investmentPlan": "交易執行方案已制定，正在生成最終決策...",
+    "progress.debateRound": "辯論第 {{round}}/{{total}} 輪",
+    "progress.riskDone": "✅ {{name}}: 風險完成",
+    "progress.investmentPlan": "正在生成最終決策...",
     "progress.completed": "✅ 分析完成!",
-    "progress.llmFallback": "⚠️ LLM 未連接，使用佔位資料",
-    "progress.error": "❌ 分析出錯: {{msg}}"
+    "progress.llmFallback": "⚠️ LLM 未連接",
+    "progress.error": "❌ 出錯: {{msg}}"
   }
 }

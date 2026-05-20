@@ -102,7 +102,9 @@ for (const [file, keys] of Object.entries(langMap)) {
   const filepath = join(dir, file);
   if (!readdirSync(dir).includes(file)) { continue; }
   const json = JSON.parse(readFileSync(filepath, "utf8"));
-  json.stockAnalysis = keys;
+  // MERGE instead of replace — don't wipe out existing keys
+  if (!json.stockAnalysis) { json.stockAnalysis = {}; }
+  Object.assign(json.stockAnalysis, keys);
   writeFileSync(filepath, JSON.stringify(json, null, 2) + "\n");
 }
 console.log("11 locales updated");

@@ -9,6 +9,7 @@ import type {
   StockQuote,
   StockSearchResult,
 } from "@/types";
+import { ANALYST_NAMES } from "@/types";
 import { create } from "zustand";
 
 interface StockAnalysisState {
@@ -38,8 +39,16 @@ interface StockAnalysisState {
   // 当前管线阶段 (0=数据加载 1=分析 2=辩论 3=风控 4=决策)
   currentStage: number;
 
+  // 实时进度提示文本（给用户展示当前正在做什么）
+  progressMessage: string;
+  // 整体进度百分比 (0-100)
+  progressPct: number;
+
   // LLM 连接状态
   llmStatus: "live" | "placeholder" | "unknown";
+
+  // Chat 指示器是否已关闭
+  chatIndicatorDismissed: boolean;
 
   // Actions
   searchStock: (keyword: string) => Promise<void>;
@@ -50,6 +59,7 @@ interface StockAnalysisState {
   fetchHistory: (limit?: number, offset?: number) => Promise<void>;
   loadAnalysis: (analysisId: string) => Promise<void>;
   reset: () => void;
+  dismissChatIndicator: () => void;
 
   // Event listeners
   _unlisten: UnlistenFn | null;
@@ -75,7 +85,10 @@ const initialState = {
   error: null,
   history: [],
   currentStage: 0,
+  progressMessage: "",
+  progressPct: 0,
   llmStatus: "unknown" as const,
+  chatIndicatorDismissed: false,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -135,6 +148,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       status: "loading",
       error: null,
       currentStage: 0,
+      progressMessage: "正在获取股票数据，请稍候...",
+      progressPct: 0,
+      chatIndicatorDismissed: false,
       analystReports: {},
       debateRounds: [],
       riskAssessments: {},
@@ -210,6 +226,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
+  dismissChatIndicator: () => {
+    set({ chatIndicatorDismissed: true });
+  },
+
   reset: () => {
     const { _unlisten } = get();
     if (_unlisten) {
@@ -226,14 +246,29 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       const { type, payload } = event.payload;
       switch (type) {
         case "started":
-          set({ status: "running" });
+          set({ status: "running", progressMessage: "分析已启动，正在加载数据...", progressPct: 5 });
           break;
-        case "dataLoaded":
+        case "dataLoaded": {
+          const dlPayload = payload as Record<string, unknown>;
+          set({
+            currentStage: 0,
+            progressMessage: `数据加载完成: K线${dlPayload.klineCount ?? "?"}条, 新闻${dlPayload.newsCount ?? "?"}条`,
+            progressPct: 10,
+          });
           break;
+        }
         case "analystProgress": {
-          const { expertId } = payload as Record<string, string>;
+          const ap = payload as Record<string, unknown>;
+          const expertId = ap.expertId as string;
+          const status = ap.status as string;
+          const pct = ap.progressPct as number;
           const stage = inferStage(expertId);
           if (stage >= 0) { set({ currentStage: stage }); }
+          const name = ANALYST_NAMES[expertId] ?? expertId;
+          set({
+            progressMessage: `[${name}] ${status}`,
+            progressPct: pct > 0 ? Math.max(pct, get().progressPct) : get().progressPct,
+          });
           break;
         }
         case "analystReport": {
@@ -241,6 +276,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           set((s) => ({
             analystReports: { ...s.analystReports, [expertId]: reportText },
           }));
+          const name = ANALYST_NAMES[expertId] ?? expertId;
+          set({ progressMessage: `✅ ${name}: 报告已生成` });
           break;
         }
         case "debateRound": {
@@ -254,6 +291,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
                 bear: bearArgument as string,
               },
             ],
+            progressMessage: `辩论第 ${round as number}/3 轮完成`,
           }));
           break;
         }
@@ -262,19 +300,28 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           set((s) => ({
             riskAssessments: { ...s.riskAssessments, [riskType]: report },
           }));
+          const name = ANALYST_NAMES[riskType] ?? riskType;
+          set({ progressMessage: `✅ ${name}: 风险评估完成` });
           break;
         }
         case "investmentPlan": {
           const { plan } = payload as Record<string, string>;
           set((s) => ({
             analystReports: { ...s.analystReports, "investment-plan": plan },
+            progressMessage: "交易执行方案已制定，正在生成最终决策...",
+            progressPct: 85,
           }));
           break;
         }
         // NOTE: payload 与 StockDecision 的结构由 serde(rename_all="camelCase") 保证一致
         // 若后端修改 Decision 变体字段，此处需同步更新
         case "decision":
-          set({ decision: payload as unknown as StockDecision, status: "completed" });
+          set({
+            decision: payload as unknown as StockDecision,
+            status: "completed",
+            progressMessage: "✅ 分析完成!",
+            progressPct: 100,
+          });
           break;
         case "error": {
           const msg = (payload as Record<string, string>).message;
@@ -282,6 +329,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             error: msg,
             status: msg.includes("LLM") ? "running" : "error",
             llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
+            progressMessage: msg.includes("LLM") ? "⚠️ LLM 未连接，使用占位数据" : `❌ 分析出错: ${msg}`,
           });
           break;
         }

@@ -53,6 +53,12 @@ export function MobileBottomNav() {
       { key: "chat", icon: "fluent:chat-20-filled", label: t("nav.chat"), path: "/" },
       { key: "knowledge", icon: "fluent:book-database-20-filled", label: t("nav.knowledge"), path: "/knowledge" },
       { key: "gateway", icon: "fluent:globe-20-filled", label: t("nav.gateway"), path: "/gateway" },
+      {
+        key: "stock-analysis",
+        icon: "fluent:chart-multiple-20-filled",
+        label: t("nav.stockAnalysis"),
+        path: "/stock-analysis",
+      },
       { key: "files", icon: "fluent:folder-20-filled", label: t("nav.files"), path: "/files" },
       { key: "settings", icon: "fluent:settings-20-filled", label: t("nav.settings"), path: "/settings" },
     ],

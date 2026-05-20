@@ -6125,6 +6125,7 @@
     "pasteFromClipboard": "クリップボードから貼り付け"
   },
   "stockAnalysis": {
+    "loadingHint": "分析を準備しています。お待ちください...",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",

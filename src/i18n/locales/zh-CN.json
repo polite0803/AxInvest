@@ -5915,6 +5915,7 @@
     "searchPlaceholder": "输入股票代码或名称",
     "startAnalysis": "开始分析",
     "analyzing": "分析中...",
+    "loadingHint": "正在准备分析，请稍候...",
     "starting": "正在启动分析引擎...",
     "price": "最新价",
     "open": "开",
@@ -6006,6 +6007,9 @@
       "maxTokens": "最大输出长度",
       "resetDefaults": "恢复默认"
     },
+    "completed": "分析完成",
+    "viewDetails": "查看详情",
+    "retry": "重试",
     "analystCount": "{{current}}/{{total}} 分析师",
     "debateRounds": "{{current}}/{{total}} 轮辩论",
     "riskAssessCount": "{{count}} 项评估",

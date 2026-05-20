@@ -6125,6 +6125,7 @@
     "pasteFromClipboard": "Coller depuis le presse-papiers"
   },
   "stockAnalysis": {
+    "loadingHint": "Préparation de l'analyse, veuillez patienter...",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",

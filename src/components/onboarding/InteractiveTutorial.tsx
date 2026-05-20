@@ -1,5 +1,6 @@
 // 交互式教程 — 轻量步骤覆盖层
 import { useOnboardingStore } from "@/stores";
+import { useUIStore } from "@/stores";
 import { Button, theme } from "antd";
 import { ArrowRight, SkipForward, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +20,10 @@ export function InteractiveTutorial() {
   const { token } = theme.useToken();
   const location = useLocation();
   const navigate = useNavigate();
+  const deviceLayout = useUIStore((s) => s.deviceLayout);
+
+  // 移动端完全跳过教程（避免 performance 开销）
+  if (deviceLayout === "mobile") { return null; }
 
   const steps: TutorialStep[] = useMemo(
     () => [
@@ -198,12 +203,20 @@ export function InteractiveTutorial() {
     return null;
   }
 
-  // 开始按钮（向导完成后显示）
+  // 开始按钮 — 仅桌面端显示
   if (!tutorialActive) {
     return (
       <div className="tutorial-start-bar">
         <Button type="link" size="small" onClick={handleStartTutorial}>
           {t("onboarding.tutorialStart")}
+        </Button>
+        <Button
+          type="link"
+          size="small"
+          style={{ color: "var(--color-text-secondary)", marginLeft: 4 }}
+          onClick={skipTutorial}
+        >
+          {t("common.close")}
         </Button>
       </div>
     );

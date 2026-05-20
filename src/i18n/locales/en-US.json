@@ -5927,6 +5927,7 @@
     "searchPlaceholder": "Enter stock code or name",
     "startAnalysis": "Start Analysis",
     "analyzing": "Analyzing...",
+    "loadingHint": "Preparing analysis, please wait...",
     "starting": "Starting analysis engine...",
     "price": "Price",
     "open": "Open",
@@ -6018,6 +6019,9 @@
       "maxTokens": "Max Tokens",
       "resetDefaults": "Reset Defaults"
     },
+    "completed": "Analysis completed",
+    "viewDetails": "View Details",
+    "retry": "Retry",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",
     "riskAssessCount": "{{count}} assessments",

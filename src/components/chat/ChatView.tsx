@@ -31,6 +31,7 @@ import { useTopicGroupStore } from "@/stores/feature/topicGroupStore";
 
 import { registerHighlight } from "stream-markdown";
 
+import { StockAnalysisChatIndicator } from "@/components/stock-analysis/StockAnalysisChatIndicator";
 import Bubble from "@ant-design/x/es/bubble";
 import { ContextPredictionPanel } from "../proactive/ContextPredictionPanel";
 import { PrefetchIndicator } from "../proactive/PrefetchIndicator";
@@ -755,6 +756,8 @@ function ChatViewInner({
       )}
       <ProactiveSuggestionBar />
       <ProactivePanelsSection context={buildChatContext()} />
+
+      <StockAnalysisChatIndicator />
 
       {activeConversation?.mode === "agent" && activeConversationId && (
         <AgentProgressBar conversationId={activeConversationId} />

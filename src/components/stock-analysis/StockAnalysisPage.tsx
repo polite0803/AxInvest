@@ -121,8 +121,11 @@ export function StockAnalysisPage() {
             <StockSearchBar />
 
             {status === "loading" && (
-              <div className="flex items-center justify-center" style={{ minHeight: 200 }}>
+              <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: 200 }}>
                 <Spin size="large" />
+                <span style={{ color: "var(--color-text-secondary)" }}>
+                  {t("stockAnalysis.loadingHint")}
+                </span>
               </div>
             )}
             {status === "idle" && (

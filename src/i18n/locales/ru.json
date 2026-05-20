@@ -6125,6 +6125,7 @@
     "pasteFromClipboard": "Вставить из буфера обмена"
   },
   "stockAnalysis": {
+    "loadingHint": "Подготовка анализа, пожалуйста, подождите...",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",

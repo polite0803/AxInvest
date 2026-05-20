@@ -6125,6 +6125,7 @@
     "pasteFromClipboard": "لصق من الحافظة"
   },
   "stockAnalysis": {
+    "loadingHint": "جارٍ تحضير التحليل، يرجى الانتظار...",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",

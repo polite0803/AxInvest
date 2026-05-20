@@ -6125,6 +6125,7 @@
     "pasteFromClipboard": "從剪貼板貼上"
   },
   "stockAnalysis": {
+    "loadingHint": "正在準備分析，請稍候...",
     "actionBuy": "買入",
     "actionSell": "賣出",
     "actionIncrease": "增持",

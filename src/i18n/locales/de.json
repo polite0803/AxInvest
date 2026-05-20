@@ -6125,6 +6125,7 @@
     "pasteFromClipboard": "Aus Zwischenablage einfügen"
   },
   "stockAnalysis": {
+    "loadingHint": "Analyse wird vorbereitet, bitte warten...",
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",

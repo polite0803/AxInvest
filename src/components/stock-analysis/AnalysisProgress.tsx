@@ -1,5 +1,5 @@
 import { useProviderStore, useStockAnalysisStore } from "@/stores";
-import { Button, Steps, Tag } from "antd";
+import { Button, Progress, Steps, Tag } from "antd";
 import dayjs from "dayjs";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +24,8 @@ export function AnalysisProgress() {
   const error = useStockAnalysisStore((s) => s.error);
   const llmStatus = useStockAnalysisStore((s) => s.llmStatus);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const progressMessage = useStockAnalysisStore((s) => s.progressMessage);
+  const progressPct = useStockAnalysisStore((s) => s.progressPct);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const defaultProviderId = useProviderStore((s) => s.providers.find((p) => p.enabled)?.id ?? "");
 
@@ -90,6 +92,29 @@ export function AnalysisProgress() {
           ),
         }))}
       />
+
+      {/* 实时进度提示 */}
+      {(status === "running" || status === "loading") && progressMessage && (
+        <div className="mt-2 flex items-center gap-2 text-sm" style={{ color: "var(--color-text-secondary)" }}>
+          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+          <span>{progressMessage}</span>
+        </div>
+      )}
+      {status === "completed" && progressMessage && (
+        <div className="mt-2 text-sm" style={{ color: "var(--color-success-text, #52c41a)" }}>
+          {progressMessage}
+        </div>
+      )}
+      {status === "error" && progressMessage && (
+        <div className="mt-2 text-sm" style={{ color: "#ff4d4f" }}>
+          {progressMessage}
+        </div>
+      )}
+
+      {/* 进度条 */}
+      {(status === "running" || status === "loading") && progressPct > 0 && (
+        <Progress percent={progressPct} size="small" showInfo={false} className="mt-1" strokeColor="#1677ff" />
+      )}
     </div>
   );
 }

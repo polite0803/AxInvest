@@ -38,7 +38,9 @@ export function StockAnalysisPage() {
 
   useEffect(() => {
     setupEventListener();
-    return () => { reset(); };
+    return () => {
+      reset();
+    };
   }, [setupEventListener, reset]);
 
   // 从 URL ?code= 参数自动加载行情（对话页触发时使用）

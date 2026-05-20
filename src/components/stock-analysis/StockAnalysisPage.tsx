@@ -10,7 +10,7 @@ import {
 import { Spin, Tabs } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { CompareView } from "./CompareView";
@@ -34,12 +34,21 @@ export function StockAnalysisPage() {
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
 
+  const [searchParams] = useSearchParams();
+
   useEffect(() => {
     setupEventListener();
-    return () => {
-      reset();
-    };
+    return () => { reset(); };
   }, [setupEventListener, reset]);
+
+  // 从 URL ?code= 参数自动加载行情（对话页触发时使用）
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (code && !useStockAnalysisStore.getState().stockCode) {
+      getStockQuote(code);
+      getStockKline(code, "daily", 120);
+    }
+  }, [searchParams, getStockQuote, getStockKline]);
 
   useEffect(() => {
     if (id) {

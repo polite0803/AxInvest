@@ -33,6 +33,19 @@ pub struct AnalysisConfig {
     pub kline_limit: u32,
     /// 新闻数量
     pub news_limit: u32,
+    /// LLM temperature (0-1)
+    #[serde(default = "default_temperature")]
+    pub temperature: f64,
+    /// LLM max tokens
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+}
+
+fn default_temperature() -> f64 {
+    0.3
+}
+fn default_max_tokens() -> u32 {
+    4096
 }
 
 impl Default for AnalysisConfig {
@@ -42,6 +55,8 @@ impl Default for AnalysisConfig {
             kline_period: "daily".to_string(),
             kline_limit: 120,
             news_limit: 30,
+            temperature: 0.3,
+            max_tokens: 4096,
         }
     }
 }

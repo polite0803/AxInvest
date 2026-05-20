@@ -1,6 +1,14 @@
-//! AxAgent Agent - ClawCode Runtime Integration
+//! AxAgent Agent — 公共 API 通过 `pub use` 重导出定义。
+//! `pub mod` 模块为内部实现，外部调用者应优先使用重导出路径。
+//!
+//! # 公共 API 边界
+//! 下方 `pub mod` 中仅 16 个模块被外部引用（标注 `// external`），
+//! 其余为 crate 内部模块，仅因集成测试需要而保持 `pub`。
+//! 重导出见 `// ── Public API re-exports ──` 区块。
 
-pub mod ab_testing;
+// ── 模块声明 (internal / external as noted) ────────────────────────────
+
+pub mod ab_testing; // external
 pub mod academic_search;
 pub mod action_executor;
 pub mod agent_adapter;
@@ -32,7 +40,6 @@ pub mod insight_generator;
 pub mod interrupt;
 pub mod lint_checker;
 pub mod llm_bridge;
-pub mod loop_detector;
 pub mod metrics;
 pub mod outline_builder;
 pub mod proactive_mode;
@@ -72,6 +79,10 @@ pub mod verification_agent;
 pub mod vision_pipeline;
 pub mod web_search;
 pub mod wiki_compiler;
+
+// ── Public API re-exports ─────────────────────────────────────────────
+// 外部调用者应通过这些重导出访问类型，而非直接引用上方模块路径。
+// 未在此重导出的模块是内部实现，不保证 API 稳定性。
 
 pub use ab_testing::{
     ExperimentConfig, ExperimentGroup, ExperimentMetric, ExperimentResult, ExperimentRunner,
@@ -143,9 +154,6 @@ pub use axagent_tools::{ToolContext, ToolError, ToolExecutionRecorder, ToolResul
 // McpRegistry 已删除 — 直接使用 axagent_tools::registry::UnifiedToolRegistry
 
 pub use llm_bridge::{ProviderLlmBridge, build_llm_bridge_from_db};
-pub use loop_detector::{
-    LoopDetector, LoopDetectorConfig, LoopWarning, LoopWarningLevel, ToolCallStats,
-};
 pub use metrics::{
     MetricType, MetricValue, MetricsCollector, StructuredLogEntry, TimedGuard, TimingStats,
     log_with_fields, record_timing_async,

@@ -1,6 +1,76 @@
 //! 股票分析专家/角色/Profile 自动种子化到 agency_experts/agent_roles/agent_profiles 表。
+//! 使用 include_str! 编译期嵌入 .md 内容，打包后无需文件 I/O。
 
 use axagent_core::repo;
+
+/// 编译期嵌入的专家提示词（include_str 确保打包后可用）
+const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
+    (
+        "market-analyst",
+        include_str!("../../agency_experts/stock-analysis/market-analyst.md"),
+    ),
+    (
+        "sentiment-analyst",
+        include_str!("../../agency_experts/stock-analysis/sentiment-analyst.md"),
+    ),
+    (
+        "news-analyst",
+        include_str!("../../agency_experts/stock-analysis/news-analyst.md"),
+    ),
+    (
+        "fundamentals-analyst",
+        include_str!("../../agency_experts/stock-analysis/fundamentals-analyst.md"),
+    ),
+    (
+        "policy-analyst",
+        include_str!("../../agency_experts/stock-analysis/policy-analyst.md"),
+    ),
+    (
+        "hot-money-tracker",
+        include_str!("../../agency_experts/stock-analysis/hot-money-tracker.md"),
+    ),
+    (
+        "lockup-watcher",
+        include_str!("../../agency_experts/stock-analysis/lockup-watcher.md"),
+    ),
+    (
+        "research-analyst",
+        include_str!("../../agency_experts/stock-analysis/research-analyst.md"),
+    ),
+    (
+        "sector-analyst",
+        include_str!("../../agency_experts/stock-analysis/sector-analyst.md"),
+    ),
+    (
+        "bull-researcher",
+        include_str!("../../agency_experts/stock-analysis/bull-researcher.md"),
+    ),
+    (
+        "bear-researcher",
+        include_str!("../../agency_experts/stock-analysis/bear-researcher.md"),
+    ),
+    (
+        "aggressive-debator",
+        include_str!("../../agency_experts/stock-analysis/aggressive-debator.md"),
+    ),
+    (
+        "conservative-debator",
+        include_str!("../../agency_experts/stock-analysis/conservative-debator.md"),
+    ),
+    (
+        "neutral-debator",
+        include_str!("../../agency_experts/stock-analysis/neutral-debator.md"),
+    ),
+    (
+        "research-manager",
+        include_str!("../../agency_experts/stock-analysis/research-manager.md"),
+    ),
+    ("trader", include_str!("../../agency_experts/stock-analysis/trader.md")),
+    (
+        "portfolio-manager",
+        include_str!("../../agency_experts/stock-analysis/portfolio-manager.md"),
+    ),
+];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("market-analyst", "stock-analyst"),
@@ -87,15 +157,9 @@ async fn seed_agency_experts(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     use axagent_core::entity::agency_experts;
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    let expert_dir = resolve_expert_dir()?;
     let mut count = 0u32;
-    for &(expert_id, _) in EXPERT_ROLE_MAP {
-        let md_path = expert_dir.join(format!("{expert_id}.md"));
-        if !md_path.exists() {
-            continue;
-        }
-        let content = std::fs::read_to_string(&md_path).map_err(|e| e.to_string())?;
-        let (name, desc, body, color) = parse_expert_md(&content, expert_id);
+    for &(expert_id, content) in EMBEDDED_PROMPTS {
+        let (name, desc, body, color) = parse_expert_md(content, expert_id);
         let agency_id = format!("agency-stock-analysis-{expert_id}");
         if agency_experts::Entity::find_by_id(&agency_id)
             .one(db)
@@ -200,22 +264,6 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     }
     tracing::info!("[stock_analysis_setup] 已种子化 {count} 个 agent_profiles");
     Ok(())
-}
-
-fn resolve_expert_dir() -> Result<std::path::PathBuf, String> {
-    for dir in &[
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join("agency_experts")
-            .join("stock-analysis"),
-        std::path::PathBuf::from("agency_experts/stock-analysis"),
-        std::path::PathBuf::from("../agency_experts/stock-analysis"),
-    ] {
-        if dir.exists() && dir.is_dir() {
-            return Ok(dir.clone());
-        }
-    }
-    Err("找不到 agency_experts/stock-analysis/ 目录".into())
 }
 
 fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String, Option<String>) {

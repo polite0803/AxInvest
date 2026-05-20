@@ -32,7 +32,8 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "pricing.toml"
+      "pricing.toml",
+      "agency_experts/stock-analysis/*.md"
     ],
     "icon": [
       "icons/32x32.png",

@@ -118,7 +118,11 @@ pub async fn start_stock_analysis(
     // 4. 创建取消令牌
     let cancel_token = Arc::new(AtomicBool::new(false));
 
-    // 5. 构建带取消令牌的 AgentRunner
+    // 5. 从 DB 加载用户配置（必须在 runner 构建之前，因为温度/令牌数来自设置）
+    let mut config = AnalysisConfig::default();
+    load_analysis_config(&state.sea_db, &mut config).await;
+
+    // 6. 构建带取消令牌的 AgentRunner
     let master_key = state.master_key;
     let db_for_runner = state.sea_db.clone();
     let provider_id_for_runner = provider_id.clone();
@@ -128,6 +132,8 @@ pub async fn start_stock_analysis(
         &master_key,
         &provider_id_for_runner,
         cancel_token.clone(),
+        config.temperature,
+        config.max_tokens,
     )
     .await
     {
@@ -144,10 +150,8 @@ pub async fn start_stock_analysis(
         },
     };
 
-    // 6. 从 DB 加载专家提示词和用户配置
+    // 7. 从 DB 加载专家提示词
     let prompts = load_stock_analysis_prompts(&state.sea_db).await;
-    let mut config = AnalysisConfig::default();
-    load_analysis_config(&state.sea_db, &mut config).await;
 
     // 6b. 注册取消令牌
     {
@@ -225,11 +229,16 @@ pub async fn run_scheduled_analysis(
     let cancel_token = Arc::new(AtomicBool::new(false));
     let master_key = state.master_key;
 
+    let mut config = AnalysisConfig::default();
+    load_analysis_config(&db, &mut config).await;
+
     let runner: Option<Arc<dyn AgentRunner>> = match build_cancel_aware_runner(
         &db,
         &master_key,
         provider_id,
         cancel_token.clone(),
+        config.temperature,
+        config.max_tokens,
     )
     .await
     {
@@ -241,8 +250,6 @@ pub async fn run_scheduled_analysis(
     };
 
     let prompts = load_stock_analysis_prompts(&db).await;
-    let mut config = AnalysisConfig::default();
-    load_analysis_config(&db, &mut config).await;
 
     let cancel_tokens = state.agent_cancel_tokens.clone();
     {
@@ -539,6 +546,8 @@ async fn build_cancel_aware_runner(
     master_key: &[u8; 32],
     provider_id: &str,
     cancel_token: Arc<AtomicBool>,
+    temperature: f64,
+    max_tokens: u32,
 ) -> Result<impl AgentRunner + use<>, String> {
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await
@@ -607,8 +616,8 @@ async fn build_cancel_aware_runner(
         .map(|m| m.model_id.clone())
         .ok_or_else(|| "没有可用的模型".to_string())?;
     let inner = axagent_stock_analysis::runner::SessionManagerRunner::new(adapter, ctx, model_id)
-        .with_temperature(Some(0.3))
-        .with_max_tokens(Some(4096));
+        .with_temperature(Some(temperature))
+        .with_max_tokens(Some(max_tokens));
     Ok(CancelAwareRunner {
         inner,
         token: cancel_token,
@@ -685,6 +694,14 @@ async fn load_analysis_config(db: &sea_orm::DatabaseConnection, config: &mut Ana
                 }
                 if let Some(limit) = a.get("newsLimit").and_then(|v| v.as_u64()) {
                     config.news_limit = limit as u32;
+                }
+            }
+            if let Some(m) = parsed.get("model") {
+                if let Some(t) = m.get("temperature").and_then(|v| v.as_f64()) {
+                    config.temperature = t;
+                }
+                if let Some(t) = m.get("maxTokens").and_then(|v| v.as_u64()) {
+                    config.max_tokens = t as u32;
                 }
             }
         }

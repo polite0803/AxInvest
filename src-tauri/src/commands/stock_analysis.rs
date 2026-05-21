@@ -641,9 +641,15 @@ impl AgentRunner for CancelAwareRunner {
         if self.token.load(Ordering::Relaxed) {
             return Err("已取消".into());
         }
-        self.inner
-            .run_agent(expert_id, sys_prompt, user_prompt)
-            .await
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(300),
+            self.inner.run_agent(expert_id, sys_prompt, user_prompt),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(format!("[{expert_id}] LLM 调用超时 (5分钟)")),
+        }
     }
 }
 

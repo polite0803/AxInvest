@@ -9,15 +9,12 @@ export function KLineChart() {
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
 
-  // Effect 1: 初始化 ECharts 实例（仅在挂载/卸载时执行）
   useEffect(() => {
     if (!chartRef.current) { return; }
     instanceRef.current = echarts.init(chartRef.current);
     const chart = instanceRef.current;
-
     const handleResize = () => chart.resize();
     window.addEventListener("resize", handleResize);
-
     return () => {
       window.removeEventListener("resize", handleResize);
       chart.dispose();
@@ -25,7 +22,6 @@ export function KLineChart() {
     };
   }, []);
 
-  // Effect 2: 更新 K 线数据（在 klineData 变化时执行）
   useEffect(() => {
     const chart = instanceRef.current;
     if (!chart || klineData.length === 0) {
@@ -38,18 +34,36 @@ export function KLineChart() {
     const volumes = klineData.map((k) => k.volume);
 
     chart.setOption({
-      tooltip: { trigger: "axis" },
+      animation: false,
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "cross" },
+      },
+      axisPointer: {
+        link: [{ xAxisIndex: "all" }],
+      },
+      toolbox: {
+        right: 10,
+        feature: {
+          dataZoom: { yAxisIndex: false, title: { zoom: "区域缩放", back: "还原" } },
+          restore: { title: "还原" },
+        },
+      },
+      dataZoom: [
+        { type: "inside", xAxisIndex: [0, 1], start: 60, end: 100 },
+        { type: "slider", xAxisIndex: [0, 1], bottom: 0, height: 20 },
+      ],
       grid: [
-        { left: "8%", right: "2%", top: "2%", height: "65%" },
-        { left: "8%", right: "2%", top: "75%", height: "20%" },
+        { left: "8%", right: "8%", top: 30, height: "60%" },
+        { left: "8%", right: "8%", top: "72%", height: "18%" },
       ],
       xAxis: [
-        { type: "category", data: dates, gridIndex: 0, axisLabel: { show: false } },
-        { type: "category", data: dates, gridIndex: 1 },
+        { type: "category", data: dates, gridIndex: 0, axisLabel: { show: false }, boundaryGap: true },
+        { type: "category", data: dates, gridIndex: 1, axisLabel: { rotate: 45 }, boundaryGap: true },
       ],
       yAxis: [
-        { type: "value", gridIndex: 0, scale: true },
-        { type: "value", gridIndex: 1 },
+        { type: "value", gridIndex: 0, scale: true, splitArea: { show: true } },
+        { type: "value", gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } },
       ],
       series: [
         {
@@ -58,12 +72,7 @@ export function KLineChart() {
           data: ohlc,
           xAxisIndex: 0,
           yAxisIndex: 0,
-          itemStyle: {
-            color: "#ef232a",
-            color0: "#14b143",
-            borderColor: "#ef232a",
-            borderColor0: "#14b143",
-          },
+          itemStyle: { color: "#ef232a", color0: "#14b143", borderColor: "#ef232a", borderColor0: "#14b143" },
         },
         {
           name: t("stockAnalysis.volumeChart"),
@@ -71,10 +80,16 @@ export function KLineChart() {
           data: volumes,
           xAxisIndex: 1,
           yAxisIndex: 1,
+          itemStyle: {
+            color: (params: { dataIndex: number }) => {
+              const k = ohlc[params.dataIndex];
+              return k && k[1] >= k[0] ? "#ef232a" : "#14b143";
+            },
+          },
         },
       ],
     });
   }, [klineData]);
 
-  return <div ref={chartRef} style={{ width: "100%", height: 350 }} />;
+  return <div ref={chartRef} style={{ width: "100%", height: 420 }} />;
 }

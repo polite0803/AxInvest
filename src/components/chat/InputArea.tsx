@@ -164,7 +164,7 @@ function getFileIcon(category: FileTypeCategory) {
 // In-memory draft cache: persists input text per-conversation across component unmounts
 const _draftCache = new Map<string, string>();
 
-/** 检测并处理股票分析触发命令：@600519 或 /analyze 600519 */
+/** @600519 → agent_query(对话) + startAnalysis(分析页) 双通道 */
 async function handleStockAnalysisTrigger(
   trimmed: string,
   navigate: ReturnType<typeof import("react-router-dom").useNavigate>,
@@ -173,16 +173,61 @@ async function handleStockAnalysisTrigger(
 ): Promise<boolean> {
   const stockCodeMatch = trimmed.match(/^@(\d{6})/) || trimmed.match(/^\/analyze\s+(\d{6})/);
   if (!stockCodeMatch) { return false; }
-
   const stockCode = stockCodeMatch[1];
-  const { startAnalysis, setupEventListener } = useStockAnalysisStore.getState();
+
   try {
-    await setupEventListener();
-    const defaultProviderId = useProviderStore.getState().providers.find((p) => p.enabled)?.id ?? "";
-    await startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), defaultProviderId);
+    // 1. 行情数据
+    const quote = await invoke<
+      {
+        name: string;
+        price: number;
+        changePct: number;
+        open: number;
+        high: number;
+        low: number;
+        pe?: number;
+        pb?: number;
+        totalMv?: number;
+      }
+    >("get_stock_quote", { stockCode });
+
+    // 2. Agent 对话：创建/激活 stock-portfolio-manager 对话，走 agent_query
+    const convStore = useConversationStore.getState();
+    let conv = convStore.conversations.find((c) =>
+      c.agent_profile_id === "stock-portfolio-manager" && c.title?.includes(stockCode)
+    );
+    if (!conv) {
+      const prov = useProviderStore.getState().providers.find((p) => p.enabled);
+      const modelId = prov?.models?.find((m) => m.enabled)?.model_id ?? "";
+      if (!modelId || !prov) {
+        messageApi.error(t("chat.noModelsAvailable"));
+        return true;
+      }
+      conv = await convStore.createConversation(
+        `📈 ${quote.name}(${stockCode})`,
+        modelId,
+        prov.id,
+        { agent_profile_id: "stock-portfolio-manager" },
+      );
+    }
+    convStore.setActiveConversation(conv.id);
+
+    const prompt = `分析A股 ${quote.name}(${stockCode})：
+现价 ¥${quote.price} | ${quote.changePct > 0 ? "+" : ""}${quote.changePct.toFixed(2)}%
+今开 ¥${quote.open} 最高 ¥${quote.high} 最低 ¥${quote.low}
+PE:${quote.pe?.toFixed(1) ?? "N/A"} PB:${quote.pb?.toFixed(1) ?? "N/A"} 市值:${
+      quote.totalMv ? (quote.totalMv / 1e8).toFixed(0) + "亿" : "N/A"
+    }
+请从技术面、基本面、消息面、资金面多维度分析，给出买入/增持/持有/减持/卖出建议。`;
+    convStore.sendAgentMessage(prompt); // fire-and-forget
+
+    // 3. 分析页：启动独立管线，填充结构化 tabs
+    const { startAnalysis } = useStockAnalysisStore.getState();
+    const providerId = useProviderStore.getState().providers.find((p) => p.enabled)?.id ?? "";
+    startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), providerId); // fire-and-forget
     navigate(`/stock-analysis?code=${stockCode}`);
   } catch (e) {
-    console.error("[StockAnalysis] Failed to start analysis:", e);
+    console.error("[StockAnalysis]", e);
     messageApi.error(String(t("stockAnalysis.startFailed")));
   }
   return true;

@@ -6222,6 +6222,7 @@
     "inWatchlist": "Watching",
     "addFailed": "Add Failed",
     "settings": {
+      "title": "Stock Analysis Settings",
       "saveFailed": "Failed to save",
       "quoteTag": "Quotes",
       "financialKlineTag": "Financial/K-line",

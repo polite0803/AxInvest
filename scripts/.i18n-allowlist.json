@@ -684,7 +684,7 @@
     },
     {
       "file": "src/components/chat/InputArea.tsx",
-      "lines": "167",
+      "lines": "167,215,216,217,218,219,221",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

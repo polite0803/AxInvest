@@ -642,13 +642,13 @@ impl AgentRunner for CancelAwareRunner {
             return Err("已取消".into());
         }
         match tokio::time::timeout(
-            std::time::Duration::from_secs(300),
+            std::time::Duration::from_secs(120),
             self.inner.run_agent(expert_id, sys_prompt, user_prompt),
         )
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(format!("[{expert_id}] LLM 调用超时 (5分钟)")),
+            Err(_) => Err(format!("[{expert_id}] LLM 调用超时 (2分钟)")),
         }
     }
 }

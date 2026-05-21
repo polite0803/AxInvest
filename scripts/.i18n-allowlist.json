@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 118,
+  "total_entries": 117,
   "total_files": 118,
   "entries": [
     {
@@ -679,12 +679,6 @@
     {
       "file": "src/components/settings/SettingsSidebar.tsx",
       "lines": "73,78,98",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/KLineChart.tsx",
-      "lines": "10",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

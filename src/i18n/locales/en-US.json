@@ -6336,7 +6336,9 @@
     "settings.model": "Model Parameters",
     "settings.temperature": "Temperature",
     "settings.maxTokens": "Max Tokens",
-    "settings.resetDefaults": "Reset Defaults"
+    "settings.resetDefaults": "Reset Defaults",
+    "chart.zoom": "Area Zoom",
+    "chart.restore": "Restore"
   },
   "trade": {
     "title": "Trading Log",

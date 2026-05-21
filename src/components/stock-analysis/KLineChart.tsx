@@ -45,8 +45,11 @@ export function KLineChart() {
       toolbox: {
         right: 10,
         feature: {
-          dataZoom: { yAxisIndex: false, title: { zoom: "区域缩放", back: "还原" } },
-          restore: { title: "还原" },
+          dataZoom: {
+            yAxisIndex: false,
+            title: { zoom: t("stockAnalysis.chart.zoom"), back: t("stockAnalysis.chart.restore") },
+          },
+          restore: { title: t("stockAnalysis.chart.restore") },
         },
       },
       dataZoom: [

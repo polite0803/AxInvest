@@ -6332,7 +6332,9 @@
     "settings.model": "模型参数",
     "settings.temperature": "创造性",
     "settings.maxTokens": "最大输出长度",
-    "settings.resetDefaults": "恢复默认"
+    "settings.resetDefaults": "恢复默认",
+    "chart.zoom": "区域缩放",
+    "chart.restore": "还原"
   },
   "trade": {
     "title": "交易日志",

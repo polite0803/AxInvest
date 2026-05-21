@@ -6279,7 +6279,9 @@
     "settings.model": "Model Parameters",
     "settings.temperature": "Temperature",
     "settings.maxTokens": "Max Tokens",
-    "settings.resetDefaults": "Reset Defaults"
+    "settings.resetDefaults": "Reset Defaults",
+    "chart.zoom": "Area Zoom",
+    "chart.restore": "还原"
   },
   "trade": {
     "title": "交易日志",

@@ -29,7 +29,6 @@ export function StockAnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const setupEventListener = useStockAnalysisStore((s) => s.setupEventListener);
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
-  const reset = useStockAnalysisStore((s) => s.reset);
   const status = useStockAnalysisStore((s) => s.status);
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
@@ -38,10 +37,8 @@ export function StockAnalysisPage() {
 
   useEffect(() => {
     setupEventListener();
-    return () => {
-      reset();
-    };
-  }, [setupEventListener, reset]);
+    // 不 reset: 离开页面再回来时保留分析状态，事件监听器常驻
+  }, [setupEventListener]);
 
   // 从 URL ?code= 参数自动加载行情（对话页触发时使用）
   useEffect(() => {

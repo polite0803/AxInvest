@@ -6604,7 +6604,8 @@
     "progress.llmFallback": "⚠️ LLM not connected, placeholder",
     "progress.error": "❌ Error: {{msg}}",
     "chart.zoom": "Area Zoom",
-    "chart.restore": "Restore"
+    "chart.restore": "Restore",
+    "riskUnknown": "Unknown"
   },
   "trade": {
     "title": "Trading Log",

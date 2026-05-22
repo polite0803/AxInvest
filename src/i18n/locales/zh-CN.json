@@ -6665,7 +6665,8 @@
     "progress.llmFallback": "⚠️ LLM 未连接，使用占位数据",
     "progress.error": "❌ 分析出错: {{msg}}",
     "chart.zoom": "区域缩放",
-    "chart.restore": "还原"
+    "chart.restore": "还原",
+    "riskUnknown": "未知"
   },
   "trade": {
     "title": "交易日志",

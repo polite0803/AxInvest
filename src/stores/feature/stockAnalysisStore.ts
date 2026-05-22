@@ -58,7 +58,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
           targetPrice: null,
           stopLoss: null,
           reasoning: output,
-          riskLevel: "未知",
+          riskLevel: i18n.t("stockAnalysis.riskUnknown"),
           confidence: 0,
         };
       }

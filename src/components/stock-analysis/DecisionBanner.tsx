@@ -64,7 +64,7 @@ export function DecisionBanner() {
             {decision.targetPrice && <Tag>{t("stockAnalysis.targetPrice")}: ¥{decision.targetPrice}</Tag>}
             {decision.stopLoss && <Tag>{t("stockAnalysis.stopLoss")}: ¥{decision.stopLoss}</Tag>}
             <Tag>{t("stockAnalysis.riskLevel")}: {decision.riskLevel}</Tag>
-            <Tag>{t("stockAnalysis.confidence")}: {(decision.confidence * 100).toFixed(0)}%</Tag>
+            <Tag>{t("stockAnalysis.confidence")}: {decision.confidence.toFixed(0)}%</Tag>
             {stockCode && !watchlisted && (
               <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>
                 ⭐ {t("stockAnalysis.addToWatchlist")}

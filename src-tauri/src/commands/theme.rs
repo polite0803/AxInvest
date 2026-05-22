@@ -1,3 +1,5 @@
+use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::skill as skill_err;
 use axagent_runtime::theme_engine::{Theme, ThemeEngine, ThemeMetadata, XTermTheme};
 use std::sync::Arc;
 use tauri::State;
@@ -21,10 +23,9 @@ pub async fn get_theme(
     name: String,
 ) -> Result<Theme, String> {
     let state = state.read().await;
-    state
-        .engine
-        .get_theme(&name)
-        .ok_or_else(|| format!("Theme '{}' not found", name))
+    state.engine.get_theme(&name).ok_or_else(|| {
+        ErrorResponse::err_with_detail(skill_err::NOT_FOUND, format!("Theme '{}' not found", name))
+    })
 }
 
 #[tauri::command]
@@ -33,10 +34,9 @@ pub async fn get_xterm_theme(
     name: String,
 ) -> Result<XTermTheme, String> {
     let state = state.read().await;
-    let theme = state
-        .engine
-        .get_theme(&name)
-        .ok_or_else(|| format!("Theme '{}' not found", name))?;
+    let theme = state.engine.get_theme(&name).ok_or_else(|| {
+        ErrorResponse::err_with_detail(skill_err::NOT_FOUND, format!("Theme '{}' not found", name))
+    })?;
     Ok(theme.to_xterm_theme())
 }
 

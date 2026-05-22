@@ -26,6 +26,8 @@ pub mod dashboard;
 #[cfg(not(mobile))]
 pub mod desktop;
 pub mod dream;
+pub mod error;
+pub mod error_code;
 pub mod evaluator;
 pub mod evolution;
 pub(crate) mod file_cleanup;
@@ -73,6 +75,7 @@ pub mod skills_hub;
 pub mod sources;
 pub mod stock_analysis;
 pub mod stock_analysis_setup;
+pub mod stock_workflow;
 pub mod storage;
 #[cfg(not(mobile))]
 pub mod terminal;

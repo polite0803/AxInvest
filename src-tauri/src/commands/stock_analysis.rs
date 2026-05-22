@@ -654,7 +654,7 @@ impl AgentRunner for CancelAwareRunner {
 }
 
 /// 从 DB 的 agency_experts 表加载股票分析专家系统提示词
-async fn load_stock_analysis_prompts(
+pub(crate) async fn load_stock_analysis_prompts(
     db: &sea_orm::DatabaseConnection,
 ) -> std::collections::HashMap<String, String> {
     use axagent_core::entity::agency_experts;

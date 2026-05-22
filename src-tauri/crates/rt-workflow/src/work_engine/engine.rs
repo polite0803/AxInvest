@@ -4,12 +4,14 @@
 //! 执行通过 NodeDispatcher 分发到对应执行器。
 
 use std::collections::{HashMap, HashSet};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use axagent_core::workflow_types::{WorkflowEdge, WorkflowNode};
@@ -26,13 +28,42 @@ use super::executors::{
 };
 use super::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};
 
-/// 工作流运行选项
+/// 工作流单步进度事件
 #[derive(Debug, Clone)]
+pub struct StepProgressEvent {
+    pub node_id: String,
+    pub status: String, // "running" | "completed" | "failed"
+    pub total_nodes: usize,
+    pub completed_nodes: usize,
+}
+
+/// 工作流进度回调（Arc<WorkEngine> 下安全传递）
+pub type ProgressCallback = Arc<
+    dyn Fn(StepProgressEvent) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// 工作流运行选项
+#[derive(Clone)]
 pub struct RunOptions {
     pub max_concurrent: usize,
     pub step_timeout: Duration,
     /// 调用方指定的模型 ID（来自会话/用户设置），执行器优先使用
     pub model_id: Option<String>,
+    /// 进度回调：每步完成后调用，用于向前端推送进度
+    pub progress_callback: Option<ProgressCallback>,
+}
+
+impl std::fmt::Debug for RunOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunOptions")
+            .field("max_concurrent", &self.max_concurrent)
+            .field("step_timeout", &self.step_timeout)
+            .field("model_id", &self.model_id)
+            .field("progress_callback", &self.progress_callback.is_some())
+            .finish()
+    }
 }
 
 impl Default for RunOptions {
@@ -41,6 +72,7 @@ impl Default for RunOptions {
             max_concurrent: 3,
             step_timeout: Duration::from_secs(300),
             model_id: None,
+            progress_callback: None,
         }
     }
 }
@@ -59,6 +91,10 @@ impl RunOptions {
     }
     pub fn with_model(mut self, model_id: String) -> Self {
         self.model_id = Some(model_id);
+        self
+    }
+    pub fn with_progress_callback(mut self, cb: ProgressCallback) -> Self {
+        self.progress_callback = Some(cb);
         self
     }
 }
@@ -106,6 +142,16 @@ impl NodeCircuitBreaker {
 }
 
 // ── WorkEngine ──
+
+/// JoinSet 中每个节点任务的完成结果
+struct NodeOutcome {
+    node_id: String,
+    status: String,
+    output: Option<serde_json::Value>,
+    elapsed_ms: u64,
+    error: Option<String>,
+    started_at: i64,
+}
 
 pub struct WorkEngine {
     db: Arc<DatabaseConnection>,
@@ -455,7 +501,7 @@ impl WorkEngine {
 
     // ── 核心执行 ──
 
-    /// 运行工作流：按 DAG 拓扑顺序逐节点执行 + 重试 + 断路器 + 超时 + DB 持久化。
+    /// 运行工作流：按 DAG 拓扑顺序并行执行 + 重试 + 断路器 + 超时 + DB 持久化。
     ///
     /// 每个 `WorkflowNode` 通过 `self.dispatcher` 分发到对应执行器。
     /// 执行上下文（`ExecutionState`）包含依赖节点的输出结果，下游节点可直接引用。
@@ -500,7 +546,25 @@ impl WorkEngine {
             }
         }
 
+        let total_nodes = {
+            let workflows = self.workflows.read().await;
+            workflows
+                .get(workflow_id)
+                .map(|w| w.nodes.len())
+                .unwrap_or(0)
+        };
         let mut breakers: HashMap<String, NodeCircuitBreaker> = HashMap::new();
+        let mut running_ids: HashSet<String> = HashSet::new();
+        let mut joinset: JoinSet<NodeOutcome> = JoinSet::new();
+
+        // 克隆内部 Arc，供并行任务使用
+        let wf_arc = Arc::clone(&self.workflows);
+        let disp_arc = Arc::clone(&self.dispatcher);
+        let exec_arc = Arc::clone(&self.executions);
+        let tool_cb_arc = Arc::clone(&self.tool_callback);
+        let sub_cb_arc = Arc::clone(&self.subworkflow_callback);
+        let vr_cb_arc = Arc::clone(&self.vector_retrieve_callback);
+        let progress_cb = options.progress_callback.clone();
 
         loop {
             if cancel_token.is_cancelled() {
@@ -521,271 +585,380 @@ impl WorkEngine {
                 continue;
             }
 
-            // 1. 取一个就绪节点
+            // 1. 获取就绪节点，最多启动 max_concurrent 个
             let ready_nodes = self.get_ready_steps(workflow_id).await?;
-            let Some(node_id) = ready_nodes.into_iter().next() else {
-                break; // 无就绪节点，结束
-            };
+            let schedulable: Vec<String> = ready_nodes
+                .into_iter()
+                .filter(|id| !running_ids.contains(id))
+                .take(options.max_concurrent.saturating_sub(running_ids.len()))
+                .collect();
 
-            let node = {
-                let workflows = self.workflows.read().await;
-                workflows
-                    .get(workflow_id)
-                    .and_then(|wf| wf.nodes.iter().find(|n| n.base_id() == node_id).cloned())
-            };
-            let Some(node) = node else {
-                continue;
-            };
+            for node_id in &schedulable {
+                let node = {
+                    let workflows = wf_arc.read().await;
+                    workflows
+                        .get(workflow_id)
+                        .and_then(|wf| wf.nodes.iter().find(|n| n.base_id() == *node_id).cloned())
+                };
+                let Some(node) = node else {
+                    continue;
+                };
 
-            // 检查断路器
-            let cb_open = breakers
-                .entry(node_id.clone())
-                .or_insert_with(NodeCircuitBreaker::new)
-                .is_open(current_epoch_ms());
-            if cb_open {
-                self.update_node_status(
-                    workflow_id,
-                    &node_id,
-                    NodeStatus::Failed,
-                    None,
-                    Some("Circuit breaker open".to_string()),
-                )
-                .await
-                .ok();
-                continue;
-            }
+                // 检查断路器
+                let cb_open = breakers
+                    .entry(node_id.clone())
+                    .or_insert_with(NodeCircuitBreaker::new)
+                    .is_open(current_epoch_ms());
+                if cb_open {
+                    self.update_node_status(
+                        workflow_id,
+                        node_id,
+                        NodeStatus::Failed,
+                        None,
+                        Some("断路器已断开".to_string()),
+                    )
+                    .await
+                    .ok();
+                    continue;
+                }
 
-            // 2. 构建执行上下文（含依赖结果）
-            let deps_results = {
-                let workflows = self.workflows.read().await;
-                workflows
-                    .get(workflow_id)
-                    .map(|wf| Self::get_node_dependency_results(wf, &node_id))
-                    .unwrap_or_default()
-            };
-            let started_at = Utc::now().timestamp_millis();
+                // 标记为运行中
+                self.update_node_status(workflow_id, node_id, NodeStatus::Running, None, None)
+                    .await
+                    .ok();
 
-            self.update_node_status(workflow_id, &node_id, NodeStatus::Running, None, None)
-                .await
-                .ok();
+                running_ids.insert(node_id.clone());
 
-            // 3. 分发执行
-            let node_timeout = node
-                .base_timeout()
-                .map(Duration::from_secs)
-                .unwrap_or(options.step_timeout);
-            let mut exec_ctx = ExecutionState::new(
-                format!("node_{}", uuid::Uuid::new_v4()),
-                workflow_id.to_string(),
-                serde_json::json!({}),
-            );
-            exec_ctx.variables = deps_results;
+                // 准备并行任务数据
+                let wid = workflow_id.to_string();
+                let nid = node_id.clone();
+                let node_timeout = node
+                    .base_timeout()
+                    .map(Duration::from_secs)
+                    .unwrap_or(options.step_timeout);
+                let wf = Arc::clone(&wf_arc);
+                let disp = Arc::clone(&disp_arc);
+                let _exec = Arc::clone(&exec_arc);
+                let tcb = Arc::clone(&tool_cb_arc);
+                let scb = Arc::clone(&sub_cb_arc);
+                let vcb = Arc::clone(&vr_cb_arc);
+                let ct = cancel_token.clone();
+                let max_retries = node.base_retry().max_retries;
+                let backoff_ms = node.base_retry().base_delay_ms;
 
-            // 注入运行时回调到执行上下文
-            {
-                let tool_cb = self.tool_callback.lock().await.clone();
-                let sub_cb = self.subworkflow_callback.lock().await.clone();
-                let vr_cb = self.vector_retrieve_callback.lock().await.clone();
-                exec_ctx.callbacks = Some(super::execution_state::ExecutionContextCallbacks {
-                    tool: tool_cb,
-                    subworkflow: sub_cb,
-                    vector_retrieve: vr_cb,
+                joinset.spawn(async move {
+                    let started_at = Utc::now().timestamp_millis();
+
+                    // 获取依赖结果
+                    let deps = {
+                        let workflows = wf.read().await;
+                        workflows
+                            .get(&wid)
+                            .map(|wf| {
+                                wf.edges
+                                    .iter()
+                                    .filter(|e| e.target == nid)
+                                    .filter_map(|e| {
+                                        wf.results
+                                            .get(&e.source)
+                                            .cloned()
+                                            .map(|v| (e.source.clone(), v))
+                                    })
+                                    .collect::<HashMap<_, _>>()
+                            })
+                            .unwrap_or_default()
+                    };
+
+                    let mut exec_ctx = ExecutionState::new(
+                        format!("node_{}", uuid::Uuid::new_v4()),
+                        wid.clone(),
+                        serde_json::json!({}),
+                    );
+                    exec_ctx.variables = deps;
+
+                    // 注入回调
+                    {
+                        let t = tcb.lock().await.clone();
+                        let s = scb.lock().await.clone();
+                        let v = vcb.lock().await.clone();
+                        exec_ctx.callbacks =
+                            Some(super::execution_state::ExecutionContextCallbacks {
+                                tool: t,
+                                subworkflow: s,
+                                vector_retrieve: v,
+                            });
+                    }
+
+                    let dispatch_result = tokio::time::timeout(
+                        node_timeout,
+                        disp.read().await.dispatch(&node, &exec_ctx),
+                    )
+                    .await;
+
+                    let elapsed_ms = (Utc::now().timestamp_millis() - started_at) as u64;
+
+                    match dispatch_result {
+                        Ok(Ok(output)) => {
+                            // 记录成功
+                            {
+                                let mut workflows = wf.write().await;
+                                if let Some(wf) = workflows.get_mut(&wid) {
+                                    wf.results.insert(nid.clone(), output.output.clone());
+                                    if let Some(state) = wf.node_states.get_mut(&nid) {
+                                        state.status = NodeStatus::Completed;
+                                    }
+                                }
+                            }
+                            NodeOutcome {
+                                node_id: nid,
+                                status: "completed".to_string(),
+                                output: Some(output.output),
+                                elapsed_ms,
+                                error: None,
+                                started_at,
+                            }
+                        },
+                        Ok(Err(err)) => {
+                            let err_msg = err.to_string();
+                            let attempts = {
+                                let workflows = wf.read().await;
+                                workflows
+                                    .get(&wid)
+                                    .and_then(|w| w.node_states.get(&nid).map(|s| s.attempts))
+                                    .unwrap_or(0)
+                            };
+
+                            if attempts < max_retries {
+                                // 重试：放回 Ready
+                                if !ct.is_cancelled() {
+                                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                    let mut workflows = wf.write().await;
+                                    if let Some(wf) = workflows.get_mut(&wid)
+                                        && let Some(state) = wf.node_states.get_mut(&nid)
+                                    {
+                                        state.status = NodeStatus::Ready;
+                                        state.attempts += 1;
+                                        state.error = Some(err_msg.clone());
+                                    }
+                                }
+                                NodeOutcome {
+                                    node_id: nid,
+                                    status: "retrying".to_string(),
+                                    output: None,
+                                    elapsed_ms,
+                                    error: Some(err_msg),
+                                    started_at,
+                                }
+                            } else {
+                                let mut workflows = wf.write().await;
+                                if let Some(wf) = workflows.get_mut(&wid)
+                                    && let Some(state) = wf.node_states.get_mut(&nid)
+                                {
+                                    state.status = NodeStatus::Failed;
+                                    state.error = Some(err_msg.clone());
+                                }
+                                NodeOutcome {
+                                    node_id: nid,
+                                    status: "failed".to_string(),
+                                    output: None,
+                                    elapsed_ms,
+                                    error: Some(err_msg),
+                                    started_at,
+                                }
+                            }
+                        },
+                        Err(_) => {
+                            let err_msg = "节点执行超时".to_string();
+                            let attempts = {
+                                let workflows = wf.read().await;
+                                workflows
+                                    .get(&wid)
+                                    .and_then(|w| w.node_states.get(&nid).map(|s| s.attempts))
+                                    .unwrap_or(0)
+                            };
+
+                            if attempts < max_retries {
+                                if !ct.is_cancelled() {
+                                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                    let mut workflows = wf.write().await;
+                                    if let Some(wf) = workflows.get_mut(&wid)
+                                        && let Some(state) = wf.node_states.get_mut(&nid)
+                                    {
+                                        state.status = NodeStatus::Ready;
+                                        state.attempts += 1;
+                                        state.error = Some(err_msg.clone());
+                                    }
+                                }
+                                NodeOutcome {
+                                    node_id: nid,
+                                    status: "retrying".to_string(),
+                                    output: None,
+                                    elapsed_ms,
+                                    error: Some(err_msg),
+                                    started_at,
+                                }
+                            } else {
+                                let mut workflows = wf.write().await;
+                                if let Some(wf) = workflows.get_mut(&wid)
+                                    && let Some(state) = wf.node_states.get_mut(&nid)
+                                {
+                                    state.status = NodeStatus::Failed;
+                                    state.error = Some(err_msg.clone());
+                                }
+                                NodeOutcome {
+                                    node_id: nid,
+                                    status: "failed".to_string(),
+                                    output: None,
+                                    elapsed_ms,
+                                    error: Some(err_msg),
+                                    started_at,
+                                }
+                            }
+                        },
+                    }
                 });
             }
 
-            let dispatch_result = tokio::time::timeout(
-                node_timeout,
-                self.dispatcher.read().await.dispatch(&node, &exec_ctx),
-            )
-            .await;
-
-            let elapsed_ms = (Utc::now().timestamp_millis() - started_at) as u64;
-
-            match dispatch_result {
-                Ok(Ok(output)) => {
-                    breakers
-                        .entry(node_id.clone())
-                        .or_insert_with(NodeCircuitBreaker::new)
-                        .record_success();
-
-                    self.update_node_status(
-                        workflow_id,
-                        &node_id,
-                        NodeStatus::Completed,
-                        Some(output.output.clone()),
-                        None,
-                    )
-                    .await
-                    .ok();
-
-                    self.record_node_execution(
-                        &execution_id,
-                        NodeExecutionRecord {
-                            node_id: node_id.clone(),
-                            node_type: "workflow_node".to_string(),
-                            status: "completed".to_string(),
-                            input: None,
-                            output: Some(output.output),
-                            execution_time_ms: Some(elapsed_ms),
-                            error: None,
-                            started_at,
-                            completed_at: Some(Utc::now().timestamp_millis()),
-                        },
-                    )
-                    .await
-                    .ok();
-                },
-                Ok(Err(err)) => {
-                    breakers
-                        .entry(node_id.clone())
-                        .or_insert_with(NodeCircuitBreaker::new)
-                        .record_failure(current_epoch_ms());
-
-                    let err_msg = err.to_string();
-                    let current_attempts = {
-                        let workflows = self.workflows.read().await;
-                        workflows
-                            .get(workflow_id)
-                            .and_then(|wf| wf.node_states.get(&node_id).map(|s| s.attempts))
-                            .unwrap_or(0)
-                    };
-                    let max_retries = node.base_retry().max_retries;
-
-                    if current_attempts < max_retries {
-                        let backoff_ms = node.base_retry().base_delay_ms;
-                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-
-                        if cancel_token.is_cancelled() {
-                            self.finalize_cancelled_workflow(workflow_id).await;
-                            self.cancel(&execution_id).await.ok();
-                            break;
-                        }
-
-                        self.update_node_status(
-                            workflow_id,
-                            &node_id,
-                            NodeStatus::Ready,
-                            None,
-                            Some(err_msg.clone()),
-                        )
-                        .await
-                        .ok();
-                    } else {
-                        self.update_node_status(
-                            workflow_id,
-                            &node_id,
-                            NodeStatus::Failed,
-                            None,
-                            Some(err_msg.clone()),
-                        )
-                        .await
-                        .ok();
-                    }
-
-                    self.record_node_execution(
-                        &execution_id,
-                        NodeExecutionRecord {
-                            node_id: node_id.clone(),
-                            node_type: "workflow_node".to_string(),
-                            status: "failed".to_string(),
-                            input: None,
-                            output: None,
-                            execution_time_ms: Some(elapsed_ms),
-                            error: Some(err_msg),
-                            started_at,
-                            completed_at: Some(Utc::now().timestamp_millis()),
-                        },
-                    )
-                    .await
-                    .ok();
-                },
-                Err(_) => {
-                    // 超时
-                    breakers
-                        .entry(node_id.clone())
-                        .or_insert_with(NodeCircuitBreaker::new)
-                        .record_failure(current_epoch_ms());
-
-                    let err_msg = "Node execution timeout".to_string();
-                    let current_attempts = {
-                        let workflows = self.workflows.read().await;
-                        workflows
-                            .get(workflow_id)
-                            .and_then(|wf| wf.node_states.get(&node_id).map(|s| s.attempts))
-                            .unwrap_or(0)
-                    };
-                    let max_retries = node.base_retry().max_retries;
-
-                    if current_attempts < max_retries {
-                        let backoff_ms = node.base_retry().base_delay_ms;
-                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-
-                        if cancel_token.is_cancelled() {
-                            self.finalize_cancelled_workflow(workflow_id).await;
-                            self.cancel(&execution_id).await.ok();
-                            break;
-                        }
-
-                        self.update_node_status(
-                            workflow_id,
-                            &node_id,
-                            NodeStatus::Ready,
-                            None,
-                            Some(err_msg.clone()),
-                        )
-                        .await
-                        .ok();
-                    } else {
-                        self.update_node_status(
-                            workflow_id,
-                            &node_id,
-                            NodeStatus::Failed,
-                            None,
-                            Some(err_msg.clone()),
-                        )
-                        .await
-                        .ok();
-                    }
-
-                    self.record_node_execution(
-                        &execution_id,
-                        NodeExecutionRecord {
-                            node_id: node_id.clone(),
-                            node_type: "workflow_node".to_string(),
-                            status: "failed".to_string(),
-                            input: None,
-                            output: None,
-                            execution_time_ms: Some(elapsed_ms),
-                            error: Some(err_msg),
-                            started_at,
-                            completed_at: Some(Utc::now().timestamp_millis()),
-                        },
-                    )
-                    .await
-                    .ok();
-                },
+            // 2. 无运行任务且无可调度 → 结束
+            if running_ids.is_empty() && schedulable.is_empty() {
+                break;
             }
 
-            // 4. 检查终端状态
+            // 3. 等待任意一个完成
+            let Some(outcome_result) = joinset.join_next().await else {
+                break;
+            };
+            let outcome = match outcome_result {
+                Ok(o) => {
+                    running_ids.remove(&o.node_id);
+                    o
+                },
+                Err(e) => {
+                    tracing::warn!("工作流步骤 panic: {e}");
+                    continue;
+                },
+            };
+
+            // 4. 处理断路器状态 + 进度回调
+            match outcome.status.as_str() {
+                "completed" => {
+                    breakers
+                        .entry(outcome.node_id.clone())
+                        .or_insert_with(NodeCircuitBreaker::new)
+                        .record_success();
+                },
+                "failed" => {
+                    breakers
+                        .entry(outcome.node_id.clone())
+                        .or_insert_with(NodeCircuitBreaker::new)
+                        .record_failure(current_epoch_ms());
+                },
+                _ => {},
+            }
+
+            // 记录到 DB
+            self.record_node_execution(
+                &execution_id,
+                NodeExecutionRecord {
+                    node_id: outcome.node_id.clone(),
+                    node_type: "workflow_node".to_string(),
+                    status: outcome.status.clone(),
+                    input: None,
+                    output: outcome.output.clone(),
+                    execution_time_ms: Some(outcome.elapsed_ms),
+                    error: outcome.error.clone(),
+                    started_at: outcome.started_at,
+                    completed_at: Some(Utc::now().timestamp_millis()),
+                },
+            )
+            .await
+            .ok();
+
+            // 进度回调
+            if let Some(ref cb) = progress_cb {
+                let completed = {
+                    let workflows = wf_arc.read().await;
+                    workflows
+                        .get(workflow_id)
+                        .map(|w| {
+                            w.node_states
+                                .values()
+                                .filter(|s| {
+                                    matches!(s.status, NodeStatus::Completed | NodeStatus::Failed)
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0)
+                };
+                cb(StepProgressEvent {
+                    node_id: outcome.node_id,
+                    status: outcome.status,
+                    total_nodes,
+                    completed_nodes: completed,
+                })
+                .await;
+            }
+
+            // 5. 更新工作流终端状态
+            {
+                let mut workflows = wf_arc.write().await;
+                if let Some(wf) = workflows.get_mut(workflow_id) {
+                    let all_done = wf.node_states.values().all(|s| {
+                        matches!(
+                            s.status,
+                            NodeStatus::Completed | NodeStatus::Skipped | NodeStatus::Failed
+                        )
+                    });
+                    let all_ok = wf
+                        .node_states
+                        .values()
+                        .all(|s| matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped));
+                    let any_skipped = wf
+                        .node_states
+                        .values()
+                        .any(|s| s.status == NodeStatus::Skipped);
+                    let any_failed = wf
+                        .node_states
+                        .values()
+                        .any(|s| s.status == NodeStatus::Failed);
+
+                    if all_ok && any_skipped {
+                        wf.status = WorkflowStatus::PartiallyCompleted;
+                        wf.completed_at = Some(current_timestamp());
+                    } else if all_ok {
+                        wf.status = WorkflowStatus::Completed;
+                        wf.completed_at = Some(current_timestamp());
+                    } else if all_done && any_failed {
+                        wf.status = WorkflowStatus::Failed;
+                        wf.completed_at = Some(current_timestamp());
+                    }
+                }
+            }
+
+            // 6. 检查终端状态
             if cancel_token.is_cancelled() {
                 self.finalize_cancelled_workflow(workflow_id).await;
                 self.cancel(&execution_id).await.ok();
                 break;
             }
 
-            let status = {
-                let workflows = self.workflows.read().await;
+            let terminal = {
+                let workflows = wf_arc.read().await;
                 workflows
                     .get(workflow_id)
-                    .map(|wf| wf.status)
-                    .unwrap_or(WorkflowStatus::Failed)
+                    .map(|wf| {
+                        matches!(
+                            wf.status,
+                            WorkflowStatus::Completed
+                                | WorkflowStatus::PartiallyCompleted
+                                | WorkflowStatus::Failed
+                                | WorkflowStatus::Cancelled
+                        )
+                    })
+                    .unwrap_or(true)
             };
-            match status {
-                WorkflowStatus::Completed
-                | WorkflowStatus::PartiallyCompleted
-                | WorkflowStatus::Failed
-                | WorkflowStatus::Cancelled => break,
-                _ => {},
+            if terminal {
+                break;
             }
         }
 

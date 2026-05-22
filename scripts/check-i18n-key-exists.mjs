@@ -39,19 +39,39 @@ scanDir("src/stores", re2);
 
 console.log(`Scanned, found ${usedKeys.size} AxInvest i18n keys`);
 
-// ── 2. 检查每个键在 11 种 locale 中 ─────────────────────────────────
+// ── 2. 检查每个键在 11 种 locale 中（支持嵌套路径）────────────────
 const localeFiles = readdirSync(LOCALE_DIR).filter((f) => f.endsWith(".json"));
 let totalMissing = 0;
 
-for (const [fullKey, files] of usedKeys) {
-  const dotIdx = fullKey.indexOf(".");
-  const section = fullKey.substring(0, dotIdx);
-  const subKey = fullKey.substring(dotIdx + 1);
+function deepHas(obj, path) {
+  // First try nested: a.b.c
+  const parts = path.split(".");
+  let cur = obj;
+  let nestedOk = true;
+  for (const p of parts) {
+    if (!cur || typeof cur !== "object") {
+      nestedOk = false;
+      break;
+    }
+    if (!(p in cur)) {
+      nestedOk = false;
+      break;
+    }
+    cur = cur[p];
+  }
+  if (nestedOk) { return true; }
+  // Then try flat key: first section is obj, rest is a flat dot-key
+  const dotIdx = path.indexOf(".");
+  if (dotIdx === -1) { return false; }
+  const sec = path.substring(0, dotIdx);
+  const flatKey = path.substring(dotIdx + 1);
+  return typeof obj[sec] === "object" && obj[sec] !== null && (flatKey in obj[sec]);
+}
 
+for (const [fullKey, files] of usedKeys) {
   for (const lf of localeFiles) {
     const j = JSON.parse(readFileSync(join(LOCALE_DIR, lf), "utf8"));
-    const sec = j[section];
-    if (!sec || !(subKey in sec)) {
+    if (!deepHas(j, fullKey)) {
       totalMissing++;
       const fileList = [...files].slice(0, 2).join(", ");
       console.log(`MISSING: ${lf} → ${fullKey} (${fileList})`);

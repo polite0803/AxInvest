@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 117,
+  "total_entries": 118,
   "total_files": 118,
   "entries": [
     {
@@ -324,7 +324,7 @@
     },
     {
       "file": "src/lib/__tests__/artifactRenderer.test.ts",
-      "lines": "11,15,19,23,27,31,35,39,43,47,59,69,83,99,115,123,131,141,157",
+      "lines": "11,15,19,23,27,31,35,39,43,47,59,69,83,99,115,131,141,157",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -348,7 +348,7 @@
     },
     {
       "file": "src/lib/__tests__/codeExecutor.test.ts",
-      "lines": "37,38,58,77,95,96,110,127,147,160,177,199,225,270,271",
+      "lines": "37,38,58,77,108,125,145,158,175,197,221,266,267",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -703,6 +703,12 @@
     {
       "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
       "lines": "8,10,11,12,13",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/KLineChart.tsx",
+      "lines": "10",
       "reason": "硬编码中文字符串",
       "phase": 3
     }

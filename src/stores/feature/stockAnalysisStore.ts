@@ -1,31 +1,87 @@
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
-import type {
-  AnalysisEvent,
-  AnalysisStatus,
-  AnalysisSummary,
-  KLine,
-  StockDecision,
-  StockQuote,
-  StockSearchResult,
-} from "@/types";
-import { ANALYST_NAMES } from "@/types";
+import type { AnalysisStatus, AnalysisSummary, KLine, StockDecision, StockQuote, StockSearchResult } from "@/types";
 import i18n from "i18next";
 import { create } from "zustand";
 
+// ── 工作流结果解析 ──
+
+/** AgentExecutor 输出的 JSON 结构 */
+interface AgentResult {
+  role?: string;
+  model?: string;
+  content?: string;
+  thinking?: string;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  node_id?: string;
+}
+
+/** 从 AgentExecutor 输出中提取纯文本内容 */
+function extractContent(value: unknown): string {
+  if (typeof value === "string") { return value; }
+  if (value && typeof value === "object") {
+    const r = value as AgentResult;
+    return r.content ?? JSON.stringify(value);
+  }
+  return String(value ?? "");
+}
+
+/** 从工作流 step results 解析结构化状态 */
+function parseWorkflowResults(results: Record<string, unknown>) {
+  const analystReports: Record<string, string> = {};
+  const debateRounds: Array<{ round: number; bull: string; bear: string }> = [];
+  const riskAssessments: Record<string, string> = {};
+  let decision: StockDecision | null = null;
+
+  for (const [stepId, raw] of Object.entries(results)) {
+    const output = extractContent(raw);
+
+    if (stepId.startsWith("a-") && !stepId.includes("bull") && !stepId.includes("bear")) {
+      analystReports[stepId.slice(2)] = output;
+    } else if (stepId.startsWith("bull-r")) {
+      const round = parseInt(stepId.slice(6), 10);
+      const bearKey = `bear-r${round}`;
+      debateRounds.push({ round, bull: output, bear: extractContent(results[bearKey] ?? "") });
+    } else if (stepId.startsWith("bear-r")) {
+      continue; // 已在 bull 处理时配对
+    } else if (stepId.startsWith("risk-") || stepId === "research-mgr") {
+      riskAssessments[stepId] = output;
+    } else if (stepId === "trader") {
+      analystReports["investment-plan"] = output;
+    } else if (stepId === "portfolio-mgr") {
+      try {
+        decision = JSON.parse(output) as StockDecision;
+      } catch {
+        decision = {
+          action: "HOLD",
+          positionPct: 0,
+          targetPrice: null,
+          stopLoss: null,
+          reasoning: output,
+          riskLevel: "未知",
+          confidence: 0,
+        };
+      }
+    }
+  }
+
+  debateRounds.sort((a, b) => a.round - b.round);
+  return { analystReports, debateRounds, riskAssessments, decision };
+}
+
+// ── Store ──
+
 interface StockAnalysisState {
-  // Search
   searchKeyword: string;
   searchResults: StockSearchResult[];
 
-  // Current analysis
   analysisId: string | null;
+  workflowId: string | null;
   stockCode: string;
   stockName: string;
   analysisDate: string;
   status: AnalysisStatus;
 
-  // Data
   quote: StockQuote | null;
   klineData: KLine[];
   analystReports: Record<string, string>;
@@ -34,38 +90,28 @@ interface StockAnalysisState {
   decision: StockDecision | null;
   error: string | null;
 
-  // History
   history: AnalysisSummary[];
 
-  // 当前管线阶段 (0=数据加载 1=分析 2=辩论 3=风控 4=决策)
   currentStage: number;
-
-  // 实时进度提示文本（给用户展示当前正在做什么）
   progressMessage: string;
-  // 整体进度百分比 (0-100)
   progressPct: number;
 
-  // LLM 连接状态
   llmStatus: "live" | "placeholder" | "unknown";
-
-  // Chat 指示器是否已关闭
   chatIndicatorDismissed: boolean;
 
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
   getStockKline: (code: string, period: string, limit: number) => Promise<void>;
-  startAnalysis: (stockCode: string, date: string, providerId: string) => Promise<void>;
+  startAnalysis: (stockCode: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
   fetchHistory: (limit?: number, offset?: number) => Promise<void>;
   loadAnalysis: (analysisId: string) => Promise<void>;
   reset: () => void;
   dismissChatIndicator: () => void;
 
-  // Event listeners
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
-  // 搜索防抖定时器
   _searchTimer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -73,6 +119,7 @@ const initialState = {
   searchKeyword: "",
   searchResults: [],
   analysisId: null,
+  workflowId: null,
   stockCode: "",
   stockName: "",
   analysisDate: "",
@@ -103,7 +150,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       set({ searchResults: [] });
       return;
     }
-    // 防抖 300ms
     const { _searchTimer } = get();
     if (_searchTimer) { clearTimeout(_searchTimer); }
     const timer = setTimeout(async () => {
@@ -139,16 +185,22 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  startAnalysis: async (stockCode: string, date: string, providerId: string) => {
+  startAnalysis: async (stockCode: string) => {
     const { status } = get();
     if (status === "loading" || status === "running") {
       console.warn("[StockAnalysis] Analysis already in progress, ignoring duplicate start");
       return;
     }
+
+    // 重置旧的事件监听器，确保新工作流的事件被正确捕获
+    const { _unlisten } = get();
+    if (_unlisten) { _unlisten(); }
+
     set({
       status: "loading",
       error: null,
       currentStage: 0,
+      workflowId: null,
       progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
       progressPct: 0,
       chatIndicatorDismissed: false,
@@ -156,34 +208,39 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       debateRounds: [],
       riskAssessments: {},
       decision: null,
+      _unlisten: null,
     });
 
     const result = await invoke<{
-      analysis_id: string;
-      stock_code: string;
-      stock_name: string;
-      status: string;
-    }>("start_stock_analysis", { stockCode, date, providerId });
+      analysisId: string;
+      workflowId: string;
+      stockCode: string;
+      stockName: string;
+    }>("run_stock_workflow", { stockCode });
 
     set({
-      analysisId: result.analysis_id,
-      stockCode: result.stock_code,
-      stockName: result.stock_name,
-      analysisDate: date,
+      analysisId: result.analysisId,
+      workflowId: result.workflowId,
+      stockCode: result.stockCode,
+      stockName: result.stockName,
       status: "running",
+      progressMessage: i18n.t("stockAnalysis.progress.started"),
+      progressPct: 5,
     });
 
-    // 自动加载行情数据供市场 tab 使用
-    get().getStockQuote(result.stock_code);
-    get().getStockKline(result.stock_code, "daily", 120);
+    get().getStockQuote(result.stockCode);
+    get().getStockKline(result.stockCode, "daily", 120);
+
+    // 重建事件监听，捕获新工作流的完成/错误事件
+    get().setupEventListener();
   },
 
   cancelAnalysis: async () => {
-    const { analysisId } = get();
-    if (analysisId) {
-      await invoke("cancel_stock_analysis", { analysisId });
+    const { workflowId } = get();
+    if (workflowId) {
+      await invoke("cancel_stock_workflow", { workflowId });
     }
-    set({ status: "idle" });
+    set({ status: "idle", currentStage: 0, progressPct: 0 });
   },
 
   fetchHistory: async (limit = 20, offset = 0) => {
@@ -206,7 +263,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         console.error("[StockAnalysis] Failed to parse decision JSON:", e);
       }
     }
-    // 从 blackboardSnapshot 恢复历史分析报告
     if (record.blackboardSnapshot) {
       try {
         const snap: Record<string, string> = JSON.parse(record.blackboardSnapshot);
@@ -247,133 +303,74 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const existing = get()._unlisten;
     if (existing) { return; }
 
-    const unlisten = await listen<AnalysisEvent>("stock-analysis-event", (event) => {
-      const { type, payload } = event.payload;
-      switch (type) {
-        case "started":
-          set({ status: "running", progressMessage: i18n.t("stockAnalysis.progress.started"), progressPct: 5 });
-          break;
-        case "dataLoaded": {
-          const dlPayload = payload as Record<string, unknown>;
-          set({
-            currentStage: 0,
-            progressMessage: i18n.t("stockAnalysis.progress.dataLoaded", {
-              kline: dlPayload.klineCount ?? "?",
-              news: dlPayload.newsCount ?? "?",
-            }),
-            progressPct: 10,
-          });
-          break;
-        }
-        case "analystProgress": {
-          const ap = payload as Record<string, unknown>;
-          const expertId = ap.expertId as string;
-          const status = ap.status as string;
-          const pct = ap.progressPct as number;
-          const stage = inferStage(expertId);
-          if (stage >= 0) { set({ currentStage: stage }); }
-          const name = ANALYST_NAMES[expertId] ?? expertId;
-          set({
-            progressMessage: i18n.t("stockAnalysis.progress.analystProgress", { name, status }),
-            progressPct: pct > 0 ? Math.max(pct, get().progressPct) : get().progressPct,
-          });
-          break;
-        }
-        case "analystReport": {
-          const { expertId, reportText } = payload as Record<string, string>;
-          set((s) => ({
-            analystReports: { ...s.analystReports, [expertId]: reportText },
-          }));
-          const name = ANALYST_NAMES[expertId] ?? expertId;
-          set({ progressMessage: i18n.t("stockAnalysis.progress.reportReady", { name }) });
-          break;
-        }
-        case "debateRound": {
-          const { round, bullArgument, bearArgument } = payload as Record<string, unknown>;
-          set((s) => ({
-            debateRounds: [
-              ...s.debateRounds,
-              {
-                round: round as number,
-                bull: bullArgument as string,
-                bear: bearArgument as string,
-              },
-            ],
-            progressMessage: i18n.t("stockAnalysis.progress.debateRound", { round: round as number, total: 3 }),
-          }));
-          break;
-        }
-        case "riskAssessment": {
-          const { riskType, report } = payload as Record<string, string>;
-          set((s) => ({
-            riskAssessments: { ...s.riskAssessments, [riskType]: report },
-          }));
-          const name = ANALYST_NAMES[riskType] ?? riskType;
-          set({ progressMessage: i18n.t("stockAnalysis.progress.riskDone", { name }) });
-          break;
-        }
-        case "investmentPlan": {
-          const { plan } = payload as Record<string, string>;
-          set((s) => ({
-            analystReports: { ...s.analystReports, "investment-plan": plan },
-            progressMessage: i18n.t("stockAnalysis.progress.investmentPlan"),
-            progressPct: 85,
-          }));
-          break;
-        }
-        // NOTE: payload 与 StockDecision 的结构由 serde(rename_all="camelCase") 保证一致
-        // 若后端修改 Decision 变体字段，此处需同步更新
-        case "decision":
-          set({
-            decision: payload as unknown as StockDecision,
-            status: "completed",
-            progressMessage: i18n.t("stockAnalysis.progress.completed"),
-            progressPct: 100,
-          });
-          break;
-        case "error": {
-          const msg = (payload as Record<string, string>).message;
-          set({
-            error: msg,
-            status: msg.includes("LLM") ? "running" : "error",
-            llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
-            progressMessage: msg.includes("LLM")
-              ? i18n.t("stockAnalysis.progress.llmFallback")
-              : i18n.t("stockAnalysis.progress.error", { msg }),
-          });
-          break;
-        }
-      }
+    // 中间步骤进度事件
+    const unlistenStep = await listen<{
+      workflowId: string;
+      nodeId: string;
+      status: string;
+      totalNodes: number;
+      completedNodes: number;
+    }>("workflow-step-done", (event) => {
+      const { nodeId, status, totalNodes, completedNodes } = event.payload;
+      const stage = inferStage(nodeId);
+      if (stage >= 0) { set({ currentStage: stage }); }
+      const pct = totalNodes > 0
+        ? Math.round((completedNodes / totalNodes) * 100)
+        : get().progressPct;
+      set({
+        progressPct: Math.max(pct, get().progressPct),
+        progressMessage: status === "completed"
+          ? i18n.t("stockAnalysis.progress.stepDone", { node: nodeId })
+          : i18n.t("stockAnalysis.progress.stepRetrying", { node: nodeId }),
+      });
     });
 
-    set({ _unlisten: unlisten });
+    // 工作流完成事件
+    const unlistenComplete = await listen<{
+      workflowId: string;
+      results: Record<string, unknown>;
+    }>("workflow-completed", (event) => {
+      const { results } = event.payload;
+      const parsed = parseWorkflowResults(results);
+      set({
+        ...parsed,
+        status: "completed",
+        progressMessage: i18n.t("stockAnalysis.progress.completed"),
+        progressPct: 100,
+        currentStage: 4,
+      });
+    });
+
+    const unlistenError = await listen<{
+      workflowId: string;
+      error: string;
+    }>("workflow-error", (event) => {
+      const msg = event.payload.error;
+      set({
+        error: msg,
+        status: msg.includes("LLM") ? "running" : "error",
+        llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
+        progressMessage: msg.includes("LLM")
+          ? i18n.t("stockAnalysis.progress.llmFallback")
+          : i18n.t("stockAnalysis.progress.error", { msg }),
+      });
+    });
+
+    set({
+      _unlisten: () => {
+        unlistenStep();
+        unlistenComplete();
+        unlistenError();
+      },
+    });
   },
 }));
 
-/** 从 expert_id 推断当前管线阶段 */
-function inferStage(expertId: string): number {
-  if (expertId === "indicators") { return 0; }
-  if (ANALYST_STAGE_IDS.has(expertId)) { return 1; }
-  if (expertId === "debate") { return 2; }
-  if (RISK_STAGE_IDS.has(expertId)) { return 3; }
-  if (expertId === "trader" || expertId === "portfolio-manager") { return 4; }
+/** 从节点 ID 推断当前管线阶段 */
+function inferStage(nodeId: string): number {
+  if (nodeId.startsWith("a-")) { return 1; }
+  if (nodeId.startsWith("bull-r") || nodeId.startsWith("bear-r")) { return 2; }
+  if (nodeId.startsWith("risk-") || nodeId === "research-mgr") { return 3; }
+  if (nodeId === "trader" || nodeId === "portfolio-mgr") { return 4; }
   return -1;
 }
-
-const ANALYST_STAGE_IDS = new Set([
-  "market-analyst",
-  "sentiment-analyst",
-  "news-analyst",
-  "fundamentals-analyst",
-  "policy-analyst",
-  "hot-money-tracker",
-  "lockup-watcher",
-  "value-investor",
-]);
-
-const RISK_STAGE_IDS = new Set([
-  "aggressive-debator",
-  "conservative-debator",
-  "neutral-debator",
-  "research-manager",
-]);

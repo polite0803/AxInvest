@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 118,
+  "total_entries": 119,
   "total_files": 118,
   "entries": [
     {
@@ -672,7 +672,7 @@
     },
     {
       "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
-      "lines": "46,83,102,104,161,166,179,183,184,196",
+      "lines": "46,80,83,99,101,102,104,146,147,148,149,150,161,163,166,176,179,180,183,184,196",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -684,7 +684,7 @@
     },
     {
       "file": "src/components/chat/InputArea.tsx",
-      "lines": "167,215,216,217,218,219,221",
+      "lines": "167,214,215,216,217,218,219,220,221",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -702,7 +702,7 @@
     },
     {
       "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
-      "lines": "8,10,11,12,13",
+      "lines": "7,8,10,11,12,13",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -710,6 +710,12 @@
       "file": "src/components/stock-analysis/KLineChart.tsx",
       "lines": "10",
       "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
+      "lines": "14",
+      "reason": "内部常量/测试数据/LLM提示词模板",
       "phase": 3
     }
   ]

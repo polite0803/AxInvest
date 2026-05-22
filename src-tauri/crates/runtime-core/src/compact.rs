@@ -2,9 +2,17 @@ use std::collections::HashSet;
 
 use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 
-const COMPACT_CONTINUATION_PREAMBLE: &str = "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n";
-const COMPACT_RECENT_MESSAGES_NOTE: &str = "Recent messages are preserved verbatim.";
-const COMPACT_DIRECT_RESUME_INSTRUCTION: &str = "Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, and do not preface with continuation text.";
+use axagent_core::prompts::PromptRegistry;
+
+fn compact_continuation_preamble() -> &'static str {
+    PromptRegistry::get("compact.continuation_preamble", axagent_core::prompts::PromptLang::EnUS)
+}
+fn compact_recent_messages_note() -> &'static str {
+    PromptRegistry::get("compact.recent_messages_note", axagent_core::prompts::PromptLang::EnUS)
+}
+fn compact_direct_resume_instruction() -> &'static str {
+    PromptRegistry::get("compact.resume_instruction", axagent_core::prompts::PromptLang::EnUS)
+}
 
 /// Thresholds controlling when and how a session is compacted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,16 +155,16 @@ pub fn get_compact_continuation_message(
     suppress_follow_up_questions: bool,
     recent_messages_preserved: bool,
 ) -> String {
-    let mut base = format!("{COMPACT_CONTINUATION_PREAMBLE}{}", format_compact_summary(summary));
+    let mut base = compact_continuation_preamble().to_string() + &format_compact_summary(summary);
 
     if recent_messages_preserved {
         base.push_str("\n\n");
-        base.push_str(COMPACT_RECENT_MESSAGES_NOTE);
+        base.push_str(compact_recent_messages_note());
     }
 
     if suppress_follow_up_questions {
         base.push('\n');
-        base.push_str(COMPACT_DIRECT_RESUME_INSTRUCTION);
+        base.push_str(compact_direct_resume_instruction());
     }
 
     base
@@ -653,12 +661,12 @@ fn extract_existing_compacted_summary(message: &ConversationMessage) -> Option<S
     }
 
     let text = first_text_block(message)?;
-    let summary = text.strip_prefix(COMPACT_CONTINUATION_PREAMBLE)?;
+    let summary = text.strip_prefix(compact_continuation_preamble())?;
     let summary = summary
-        .split_once(&format!("\n\n{COMPACT_RECENT_MESSAGES_NOTE}"))
+        .split_once(&("\n\n".to_string() + compact_recent_messages_note()))
         .map_or(summary, |(value, _)| value);
     let summary = summary
-        .split_once(&format!("\n{COMPACT_DIRECT_RESUME_INSTRUCTION}"))
+        .split_once(&("\n".to_string() + compact_direct_resume_instruction()))
         .map_or(summary, |(value, _)| value);
     Some(summary.trim().to_string())
 }

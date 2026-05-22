@@ -1,4 +1,6 @@
 use crate::AppState;
+use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::proxy as proxy_err;
 use std::sync::atomic::Ordering;
 use tauri::Manager;
 
@@ -141,7 +143,7 @@ pub async fn test_proxy(
     }
 
     if is_private {
-        return Err("Cannot test proxy with internal/private addresses".into());
+        return Err(ErrorResponse::err(proxy_err::ADDRESS_NOT_ALLOWED));
     }
 
     let addr = format!("{}:{}", proxy_address, proxy_port);

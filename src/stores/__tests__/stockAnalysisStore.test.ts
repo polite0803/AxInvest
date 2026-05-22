@@ -17,11 +17,11 @@ import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 describe("stockAnalysisStore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // 重置 store 状态
     useStockAnalysisStore.setState({
       searchKeyword: "",
       searchResults: [],
       analysisId: null,
+      workflowId: null,
       stockCode: "",
       stockName: "",
       analysisDate: "",
@@ -39,41 +39,38 @@ describe("stockAnalysisStore", () => {
       _unlisten: null,
       _searchTimer: null,
     });
-    // 默认 mock invoke 返回成功
     invokeMock.mockResolvedValue({
-      analysis_id: "test-id",
-      stock_code: "600519",
-      stock_name: "茅台",
-      status: "running",
+      analysisId: "test-id",
+      workflowId: "wf-1",
+      stockCode: "600519",
+      stockName: "茅台",
     });
     listenMock.mockResolvedValue(unlistenMock);
   });
 
   describe("startAnalysis", () => {
     it("starts analysis and sets loading then running status", async () => {
-      await useStockAnalysisStore.getState().startAnalysis("600519", "2025-01-15", "provider-1");
+      await useStockAnalysisStore.getState().startAnalysis("600519");
 
       const state = useStockAnalysisStore.getState();
       expect(state.status).toBe("running");
       expect(state.stockCode).toBe("600519");
       expect(state.analysisId).toBe("test-id");
-      expect(invokeMock).toHaveBeenCalledWith("start_stock_analysis", {
+      expect(invokeMock).toHaveBeenCalledWith("run_stock_workflow", {
         stockCode: "600519",
-        date: "2025-01-15",
-        providerId: "provider-1",
       });
     });
 
     it("ignores duplicate start when status is loading", async () => {
       useStockAnalysisStore.setState({ status: "loading" });
-      await useStockAnalysisStore.getState().startAnalysis("600519", "2025-01-15", "provider-1");
+      await useStockAnalysisStore.getState().startAnalysis("600519");
 
       expect(invokeMock).not.toHaveBeenCalled();
     });
 
     it("ignores duplicate start when status is running", async () => {
       useStockAnalysisStore.setState({ status: "running" });
-      await useStockAnalysisStore.getState().startAnalysis("000001", "2025-01-15", "provider-1");
+      await useStockAnalysisStore.getState().startAnalysis("000001");
 
       expect(invokeMock).not.toHaveBeenCalled();
     });
@@ -85,7 +82,7 @@ describe("stockAnalysisStore", () => {
         error: "previous error",
       });
 
-      await useStockAnalysisStore.getState().startAnalysis("600519", "2025-01-15", "provider-1");
+      await useStockAnalysisStore.getState().startAnalysis("600519");
 
       const state = useStockAnalysisStore.getState();
       expect(state.decision).toBeNull();
@@ -122,133 +119,77 @@ describe("stockAnalysisStore", () => {
   });
 
   describe("setupEventListener", () => {
-    it("registers event listener once", async () => {
+    it("registers event listeners once", async () => {
       await useStockAnalysisStore.getState().setupEventListener();
-      expect(listenMock).toHaveBeenCalledTimes(1);
-      expect(listenMock).toHaveBeenCalledWith("stock-analysis-event", expect.any(Function));
+      expect(listenMock).toHaveBeenCalledTimes(3);
+      expect(listenMock).toHaveBeenCalledWith("workflow-step-done", expect.any(Function));
+      expect(listenMock).toHaveBeenCalledWith("workflow-completed", expect.any(Function));
+      expect(listenMock).toHaveBeenCalledWith("workflow-error", expect.any(Function));
 
-      // 第二次调用不应重复注册
       await useStockAnalysisStore.getState().setupEventListener();
-      expect(listenMock).toHaveBeenCalledTimes(1);
+      expect(listenMock).toHaveBeenCalledTimes(3);
     });
 
-    it("handles started event", async () => {
-      let eventHandler: Function = () => {};
-      listenMock.mockImplementation((_event: string, handler: Function) => {
-        eventHandler = handler;
-        return Promise.resolve(unlistenMock);
-      });
-
-      useStockAnalysisStore.setState({ status: "loading" });
-      await useStockAnalysisStore.getState().setupEventListener();
-
-      eventHandler({ payload: { type: "started", payload: {} } });
-      expect(useStockAnalysisStore.getState().status).toBe("running");
-    });
-
-    it("handles analystReport event", async () => {
-      let eventHandler: Function = () => {};
-      listenMock.mockImplementation((_event: string, handler: Function) => {
-        eventHandler = handler;
+    it("handles workflow-completed event with AgentExecutor JSON results", async () => {
+      let completeHandler: Function = () => {};
+      listenMock.mockImplementation((event: string, handler: Function) => {
+        if (event === "workflow-completed") { completeHandler = handler; }
         return Promise.resolve(unlistenMock);
       });
 
       await useStockAnalysisStore.getState().setupEventListener();
 
-      eventHandler({
+      completeHandler({
         payload: {
-          type: "analystReport",
-          payload: { expertId: "market-analyst", reportText: "市场分析报告内容" },
+          workflowId: "wf-1",
+          results: {
+            "a-market-analyst": { role: "market-analyst", content: "技术面看好" },
+            "bull-r1": { role: "bull-researcher", content: "多方看涨" },
+            "bear-r1": { role: "bear-researcher", content: "空方谨慎" },
+            "risk-agg": { role: "aggressive-debator", content: "高风险" },
+            "trader": { role: "trader", content: "建议轻仓" },
+            "portfolio-mgr": {
+              role: "portfolio-manager",
+              content: JSON.stringify({ action: "BUY", confidence: 85 }),
+            },
+          },
         },
       });
 
       const state = useStockAnalysisStore.getState();
-      expect(state.analystReports["market-analyst"]).toBe("市场分析报告内容");
-    });
-
-    it("handles error event with LLM fallback", async () => {
-      let eventHandler: Function = () => {};
-      listenMock.mockImplementation((_event: string, handler: Function) => {
-        eventHandler = handler;
-        return Promise.resolve(unlistenMock);
-      });
-
-      await useStockAnalysisStore.getState().setupEventListener();
-
-      eventHandler({
-        payload: { type: "error", payload: { message: "LLM 不可用" } },
-      });
-
-      const state = useStockAnalysisStore.getState();
-      expect(state.error).toBe("LLM 不可用");
-      expect(state.status).toBe("running"); // LLM错误时不中断，回退placeholder
-    });
-
-    it("handles decision event", async () => {
-      let eventHandler: Function = () => {};
-      listenMock.mockImplementation((_event: string, handler: Function) => {
-        eventHandler = handler;
-        return Promise.resolve(unlistenMock);
-      });
-
-      await useStockAnalysisStore.getState().setupEventListener();
-
-      const decisionPayload = { action: "买入", confidence: 85 };
-      eventHandler({ payload: { type: "decision", payload: decisionPayload } });
-
-      const state = useStockAnalysisStore.getState();
-      expect(state.decision).toEqual(decisionPayload);
       expect(state.status).toBe("completed");
+      expect(state.analystReports["market-analyst"]).toBe("技术面看好");
+      expect(state.debateRounds).toHaveLength(1);
+      expect(state.debateRounds[0]).toEqual({ round: 1, bull: "多方看涨", bear: "空方谨慎" });
     });
-  });
 
-  describe("inferStage", () => {
-    // inferStage 是模块级私有函数，通过事件路由间接测试
-    it("routes analyst events to stage 1", async () => {
-      let eventHandler: Function = () => {};
-      listenMock.mockImplementation((_event: string, handler: Function) => {
-        eventHandler = handler;
+    it("handles workflow-error event", async () => {
+      let errorHandler: Function = () => {};
+      listenMock.mockImplementation((event: string, handler: Function) => {
+        if (event === "workflow-error") { errorHandler = handler; }
         return Promise.resolve(unlistenMock);
       });
 
       await useStockAnalysisStore.getState().setupEventListener();
-      eventHandler({
-        payload: {
-          type: "analystProgress",
-          payload: { expertId: "market-analyst" },
-        },
+
+      errorHandler({
+        payload: { workflowId: "wf-1", error: "网络超时" },
       });
 
-      expect(useStockAnalysisStore.getState().currentStage).toBe(1);
-    });
-
-    it("routes debate event to stage 2", async () => {
-      let eventHandler: Function = () => {};
-      listenMock.mockImplementation((_event: string, handler: Function) => {
-        eventHandler = handler;
-        return Promise.resolve(unlistenMock);
-      });
-
-      await useStockAnalysisStore.getState().setupEventListener();
-      eventHandler({
-        payload: {
-          type: "analystProgress",
-          payload: { expertId: "debate" },
-        },
-      });
-
-      expect(useStockAnalysisStore.getState().currentStage).toBe(2);
+      const state = useStockAnalysisStore.getState();
+      expect(state.error).toBe("网络超时");
+      expect(state.status).toBe("error");
     });
   });
 
   describe("cancelAnalysis", () => {
     it("cancels and resets status to idle", async () => {
-      useStockAnalysisStore.setState({ analysisId: "test-id", status: "running" });
+      useStockAnalysisStore.setState({ workflowId: "wf-1", status: "running" });
       invokeMock.mockResolvedValue(undefined);
 
       await useStockAnalysisStore.getState().cancelAnalysis();
 
-      expect(invokeMock).toHaveBeenCalledWith("cancel_stock_analysis", { analysisId: "test-id" });
+      expect(invokeMock).toHaveBeenCalledWith("cancel_stock_workflow", { workflowId: "wf-1" });
       expect(useStockAnalysisStore.getState().status).toBe("idle");
     });
   });

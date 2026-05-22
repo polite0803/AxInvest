@@ -35,7 +35,6 @@ import { ModelIcon } from "@lobehub/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { App, Badge, Button, Checkbox, Dropdown, Image, Popover, Radio, Select, Tag, theme, Tooltip } from "antd";
 import type { MenuProps } from "antd";
-import dayjs from "dayjs";
 import {
   ArrowUp,
   Atom,
@@ -223,8 +222,7 @@ PE:${quote.pe?.toFixed(1) ?? "N/A"} PB:${quote.pb?.toFixed(1) ?? "N/A"} 市值:$
 
     // 3. 分析页：启动独立管线，填充结构化 tabs
     const { startAnalysis } = useStockAnalysisStore.getState();
-    const providerId = useProviderStore.getState().providers.find((p) => p.enabled)?.id ?? "";
-    startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), providerId); // fire-and-forget
+    startAnalysis(stockCode); // fire-and-forget
     navigate(`/stock-analysis?code=${stockCode}`);
   } catch (e) {
     console.error("[StockAnalysis]", e);

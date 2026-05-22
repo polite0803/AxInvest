@@ -1,6 +1,5 @@
-import { useProviderStore, useStockAnalysisStore } from "@/stores";
+import { useStockAnalysisStore } from "@/stores";
 import { Button, Progress, Tag, theme } from "antd";
-import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
@@ -39,12 +38,7 @@ export function StockAnalysisChatIndicator() {
   };
 
   const handleRetry = () => {
-    const providerId = useProviderStore.getState().providers.find((p) => p.enabled)?.id ?? "";
-    useStockAnalysisStore.getState().startAnalysis(
-      stockCode,
-      dayjs().format("YYYY-MM-DD"),
-      providerId,
-    );
+    useStockAnalysisStore.getState().startAnalysis(stockCode);
   };
 
   return (
@@ -103,7 +97,7 @@ export function StockAnalysisChatIndicator() {
             </Tag>
             {decision.confidence > 0 && (
               <span style={{ marginLeft: 4, fontSize: 12 }}>
-                {t("stockAnalysis.confidence")} {(decision.confidence * 100).toFixed(0)}%
+                {t("stockAnalysis.confidence")} {decision.confidence.toFixed(0)}%
               </span>
             )}
             {decision.targetPrice && (

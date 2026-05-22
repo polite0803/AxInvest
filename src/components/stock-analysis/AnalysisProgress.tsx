@@ -1,6 +1,5 @@
-import { useProviderStore, useStockAnalysisStore } from "@/stores";
+import { useStockAnalysisStore } from "@/stores";
 import { Button, Progress, Steps, Tag } from "antd";
-import dayjs from "dayjs";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,7 +11,8 @@ const STAGES = [
   "stage.decision",
 ];
 
-const TOTAL_ANALYSTS = 7;
+const TOTAL_ANALYSTS = 9; // 技术/情绪/消息/基本面/政策/资金/解禁/研报/行业
+const TOTAL_DEBATE_ROUNDS = 6; // bull-r1..3 + bear-r1..3
 
 export function AnalysisProgress() {
   const { t } = useTranslation();
@@ -27,7 +27,6 @@ export function AnalysisProgress() {
   const progressMessage = useStockAnalysisStore((s) => s.progressMessage);
   const progressPct = useStockAnalysisStore((s) => s.progressPct);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
-  const defaultProviderId = useProviderStore((s) => s.providers.find((p) => p.enabled)?.id ?? "");
 
   if (status === "idle") { return null; }
 
@@ -44,7 +43,7 @@ export function AnalysisProgress() {
           : null;
       case 2:
         return debateRounds.length > 0
-          ? t("stockAnalysis.debateRounds", { current: debateRounds.length, total: 3 })
+          ? t("stockAnalysis.debateRounds", { current: debateRounds.length, total: TOTAL_DEBATE_ROUNDS })
           : null;
       case 3:
         return Object.keys(riskAssessments).length > 0
@@ -67,7 +66,7 @@ export function AnalysisProgress() {
             <Button
               size="small"
               danger
-              onClick={() => startAnalysis(stockCode, dayjs().format("YYYY-MM-DD"), defaultProviderId)}
+              onClick={() => startAnalysis(stockCode)}
             >
               {t("stockAnalysis.retry")}
             </Button>

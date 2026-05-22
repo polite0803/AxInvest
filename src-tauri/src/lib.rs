@@ -925,6 +925,8 @@ pub fn run() {
             commands::stock_analysis::get_stock_quote,
             commands::stock_analysis::get_stock_kline,
             commands::stock_analysis::start_stock_analysis,
+            commands::stock_workflow::run_stock_workflow,
+            commands::stock_workflow::cancel_stock_workflow,
             commands::stock_analysis::cancel_stock_analysis,
             commands::stock_analysis::list_stock_analyses,
             commands::stock_analysis::get_stock_analysis,
@@ -1357,19 +1359,18 @@ pub fn run() {
                 let lower = error_msg.to_lowercase();
                 if lower.contains("webview2") || lower.contains("webview") || lower.contains("edge")
                 {
+                    const WEBVIEW2_DOWNLOAD_URL: &str = "https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download";
                     let user_ok = windows_utils::show_warning_ok_cancel(
                         "AxAgent",
-                        "æœªæ£€æµ‹åˆ° Microsoft Edge WebView2 Runtimeï¼ŒAxAgent æ— æ³•å¯åŠ¨ã€‚\n\nç‚¹å‡»ã€Œç¡®å®šã€æ‰“å¼€ä¸‹è½½é¡µé¢è¿›è¡Œå®‰è£…ï¼Œå®‰è£…å®ŒæˆåŽé‡æ–°å¯åŠ¨ AxAgentã€‚",
+                        "未检测到 Microsoft Edge WebView2 Runtime，AxAgent 无法启动。\n\n点击「确定」打开下载页面进行安装，安装完成后重新启动 AxAgent。",
                     );
                     if user_ok {
-                        let _ = open::that(
-                            "https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download",
-                        );
+                        let _ = open::that(WEBVIEW2_DOWNLOAD_URL);
                     }
                 } else {
                     windows_utils::show_error_dialog(
                         "AxAgent",
-                        &format!("åº”ç”¨å¯åŠ¨å¤±è´¥ï¼š{}", error_msg),
+                        &format!("应用启动失败：{}", error_msg),
                     );
                 }
             }

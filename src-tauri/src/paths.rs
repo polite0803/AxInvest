@@ -1,11 +1,8 @@
 use std::path::PathBuf;
 
-/// AxAgent 数据目录名
-const AXAGENT_DIR: &str = ".axagent";
-
 /// Android 包名
 #[cfg(target_os = "android")]
-const ANDROID_PKG: &str = "top.axinvest.desktop";
+const ANDROID_PKG: &str = "top.axagent.desktop";
 
 /// Returns the canonical AxAgent home directory and ensures it exists.
 ///
@@ -30,23 +27,23 @@ pub fn axagent_home() -> PathBuf {
                 // 1. 外部 files dir（Android/data/<pkg>/files/）——无需额外权限
                 ("external_files", || {
                     PathBuf::from(
-                        "/storage/emulated/0/Android/data/top.axinvest.desktop/files/.axagent",
+                        "/storage/emulated/0/Android/data/top.axagent.desktop/files/.axagent",
                     )
                 }),
                 ("sdcard_files", || {
-                    PathBuf::from("/sdcard/Android/data/top.axinvest.desktop/files/.axagent")
+                    PathBuf::from("/sdcard/Android/data/top.axagent.desktop/files/.axagent")
                 }),
                 // 2. 内部 data dir（通过 dirs crate）
                 ("data_dir", || {
                     dirs::data_dir()
-                        .unwrap_or_else(|| PathBuf::from("/data/data/top.axinvest.desktop"))
-                        .join(AXAGENT_DIR)
+                        .unwrap_or_else(|| PathBuf::from("/data/data/top.axagent.desktop"))
+                        .join(".axagent")
                 }),
                 // 3. 内部 cache dir
                 ("cache_dir", || {
                     dirs::cache_dir()
-                        .unwrap_or_else(|| PathBuf::from("/data/data/top.axinvest.desktop/cache"))
-                        .join(AXAGENT_DIR)
+                        .unwrap_or_else(|| PathBuf::from("/data/data/top.axagent.desktop/cache"))
+                        .join(".axagent")
                 }),
                 // 4. Download 目录（最低优先级，用户可见）
                 ("download", || PathBuf::from("/storage/emulated/0/Download/.axagent")),
@@ -81,7 +78,7 @@ pub fn axagent_home() -> PathBuf {
                     tracing::warn!("Could not determine home directory, using current dir");
                     PathBuf::from(".")
                 });
-            base.join(AXAGENT_DIR)
+            base.join(".axagent")
         }
     }
     #[cfg(not(mobile))]
@@ -97,6 +94,6 @@ pub fn axagent_home() -> PathBuf {
             String::from(".")
         });
 
-        PathBuf::from(home).join(AXAGENT_DIR)
+        PathBuf::from(home).join(".axagent")
     }
 }

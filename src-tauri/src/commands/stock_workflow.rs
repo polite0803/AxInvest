@@ -51,6 +51,7 @@ async fn load_and_inject_template(
             an.config.system_prompt = an
                 .config
                 .system_prompt
+                .replace("{{goal}}", &an.base.title)
                 .replace("{{data_ctx}}", data_ctx)
                 .replace(&format!("{{{{expert_prompt_{expert_id}}}}}"), &expert_prompt);
         }

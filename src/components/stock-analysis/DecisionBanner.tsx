@@ -17,6 +17,7 @@ export function DecisionBanner() {
   const decision = useStockAnalysisStore((s) => s.decision);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
+  const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const [watchlisted, setWatchlisted] = useState(false);
   const [adding, setAdding] = useState(false);
 
@@ -37,6 +38,7 @@ export function DecisionBanner() {
     try {
       await invoke("add_to_watchlist", { stockCode, stockName });
       setWatchlisted(true);
+      bumpWatchlistVersion();
       message.success(t("stockAnalysis.addedToWatchlist"));
     } catch {
       message.error(t("stockAnalysis.addFailed"));

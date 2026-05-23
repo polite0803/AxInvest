@@ -4570,6 +4570,9 @@ mod tests_conversation {
             )),
             shutdown_token: tokio_util::sync::CancellationToken::new(),
             file_authorizer: Arc::new(axagent_core::file_authorizer::FileAuthorizer::new()),
+            session_share_manager: Arc::new(tokio::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         };
 
         let attachments = vec![AttachmentInput {

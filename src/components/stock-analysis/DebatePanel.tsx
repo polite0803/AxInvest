@@ -14,7 +14,7 @@ export function DebatePanel() {
         size="small"
         items={debateRounds.map((r, i) => ({
           key: i,
-          label: <span>{t("stockAnalysis.debateRound").replace("{round}", String(r.round + 1))}</span>,
+          label: <span>{t("stockAnalysis.debateRound").replace("{round}", String(r.round))}</span>,
           children: (
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid #cf1322" }}>

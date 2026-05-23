@@ -17,7 +17,7 @@ import { CompareView } from "./CompareView";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
 import { KLineChart } from "./KLineChart";
-import { PriceAlertPanel } from "./PriceAlertPanel";
+
 import { RiskMatrix } from "./RiskMatrix";
 import { StockQuoteCard } from "./StockQuoteCard";
 import { StockSearchBar } from "./StockSearchBar";
@@ -117,54 +117,55 @@ export function StockAnalysisPage() {
   return (
     <PageErrorBoundary title={t("error.page")}>
       <div
-        className="flex flex-col h-full p-2 sm:p-3 lg:p-4 gap-3 lg:gap-4 overflow-auto"
+        className="flex flex-col h-full p-1.5 sm:p-2 lg:p-3 gap-2 overflow-auto"
         style={{ maxWidth: 1400, margin: "0 auto" }}
       >
-        <h2 className="text-base sm:text-lg font-semibold">{t("stockAnalysis.title")}</h2>
+        {/* Main layout: search + progress always on top, content + sidebar below */}
+        <StockSearchBar />
 
-        {/* Main layout: stacked on mobile, side-by-side on desktop */}
-        <div className="flex flex-col lg:flex-row gap-3 lg:gap-4" style={{ flex: 1, minHeight: 0 }}>
-          {/* Main content area */}
-          <div className="flex flex-col gap-3 lg:gap-4 flex-1 min-w-0">
-            <StockSearchBar />
-
-            {status === "loading" && (
-              <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: 200 }}>
-                <Spin size="large" />
-                <span style={{ color: "var(--color-text-secondary)" }}>
-                  {t("stockAnalysis.loadingHint")}
-                </span>
-              </div>
-            )}
-            {status === "idle" && (
-              <div
-                className="flex items-center justify-center text-center"
-                style={{ minHeight: 300, color: "var(--color-text-secondary)" }}
-              >
-                <div>
-                  <p className="text-base sm:text-lg mb-2">{t("stockAnalysis.emptyHint")}</p>
-                  <p className="text-xs">{t("stockAnalysis.emptyHintDetail")}</p>
-                </div>
-              </div>
-            )}
-            {status !== "idle" && (
-              <>
-                <AnalysisProgress />
-                <Tabs items={tabItems} defaultActiveKey="market" size="small" />
-              </>
-            )}
+        {status === "loading" && (
+          <div className="flex flex-col items-center justify-center gap-2" style={{ minHeight: 120 }}>
+            <Spin size="default" />
+            <span style={{ color: "var(--color-text-secondary)", fontSize: 13 }}>
+              {t("stockAnalysis.loadingHint")}
+            </span>
           </div>
-
-          {/* Sidebar: hidden on mobile, visible on lg+ */}
-          <div className="hidden lg:flex lg:flex-col gap-2 shrink-0" style={{ width: 260 }}>
-            <TradePanel />
-            <WatchlistPanel />
-            <PriceAlertPanel />
-            <CompareView />
+        )}
+        {status === "idle" && (
+          <div
+            className="flex items-center justify-center text-center"
+            style={{ minHeight: 200, color: "var(--color-text-secondary)" }}
+          >
+            <div>
+              <p className="text-sm mb-1">{t("stockAnalysis.emptyHint")}</p>
+              <p className="text-xs">{t("stockAnalysis.emptyHintDetail")}</p>
+            </div>
           </div>
-        </div>
+        )}
+        {status !== "idle" && (
+          <div className="flex flex-col lg:flex-row gap-2" style={{ flex: 1, minHeight: 0 }}>
+            {/* Main content */}
+            <div className="flex flex-col gap-2 flex-1 min-w-0">
+              <AnalysisProgress />
+              <Tabs
+                items={tabItems}
+                defaultActiveKey="market"
+                size="small"
+                style={{ flex: 1, display: "flex", flexDirection: "column" }}
+                tabBarStyle={{ marginBottom: 8 }}
+              />
+            </div>
 
-        {/* Collapsible panels for tablet (md) */}
+            {/* Sidebar */}
+            <div className="hidden lg:flex lg:flex-col gap-2 shrink-0" style={{ width: 220 }}>
+              <TradePanel />
+              <WatchlistPanel />
+              <CompareView />
+            </div>
+          </div>
+        )}
+
+        {/* Collapsible panels for tablet */}
         <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-2">
           <TradePanel />
           <WatchlistPanel />

@@ -17,6 +17,7 @@ pub mod chart_generator;
 pub mod cloud_workspace;
 #[cfg(not(mobile))]
 pub mod computer_control;
+pub mod context_breakdown;
 pub mod context_sources;
 pub mod conversation_categories;
 pub mod conversations;
@@ -60,6 +61,7 @@ pub mod pty;
 #[cfg(not(mobile))]
 pub mod quickbar;
 pub mod reflection;
+pub mod research;
 pub mod rl;
 pub mod sandbox;
 pub mod scheduled_task;
@@ -67,6 +69,7 @@ pub mod scheduled_task;
 pub mod screen_vision;
 pub mod search;
 pub mod session;
+pub mod session_share;
 pub mod settings;
 pub mod shell;
 pub mod skill_decomposition;

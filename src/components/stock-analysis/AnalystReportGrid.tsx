@@ -9,7 +9,7 @@ export function AnalystReportGrid() {
   return (
     <div
       className="grid gap-2"
-      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(300px, 100%), 1fr))" }}
+      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(240px, 100%), 1fr))" }}
     >
       {Object.entries(analystReports).map(([expertId, report]) => (
         <AnalystReportCard key={expertId} expertId={expertId} report={report} />

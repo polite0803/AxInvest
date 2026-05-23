@@ -630,7 +630,7 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "8,9,10,11,12,27,28,29,30,31",
+      "lines": "8,9,10,11,12,27,28,29,30,31,32",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

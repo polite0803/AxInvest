@@ -414,6 +414,8 @@ jobs:
   build-android:
     name: Build Android (${{ matrix.abi }})
     needs: [resolve-tag, draft-release-notes]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

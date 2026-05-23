@@ -151,49 +151,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   }, [templateId]);
 
   useEffect(() => {
-    if (!isDirty || isSaving || isDecompositionTemplate) {
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      const input = {
-        name: currentTemplate?.name || "Unnamed Workflow",
-        description: currentTemplate?.description,
-        icon: currentTemplate?.icon || "Bot",
-        tags: currentTemplate?.tags || [],
-        trigger_config: currentTemplate?.trigger_config,
-        nodes,
-        edges,
-        input_schema: currentTemplate?.input_schema,
-        output_schema: currentTemplate?.output_schema,
-        variables: currentTemplate?.variables || [],
-        error_config: currentTemplate?.error_config,
-      };
-
-      if (currentTemplate?.id) {
-        await updateTemplate(currentTemplate.id, input);
-      } else {
-        const newId = await createTemplate(input);
-        if (newId) {
-          await loadTemplate(newId);
-        }
-      }
-    }, 5000);
-
-    return () => clearTimeout(timer);
-  }, [
-    isDirty,
-    nodes,
-    edges,
-    currentTemplate,
-    isSaving,
-    isDecompositionTemplate,
-    updateTemplate,
-    createTemplate,
-    loadTemplate,
-  ]);
-
-  useEffect(() => {
     if (currentTemplate) {
       const errorNodeIds = new Set<string>();
       const warningNodeIds = new Set<string>();

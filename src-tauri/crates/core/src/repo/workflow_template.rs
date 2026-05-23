@@ -87,6 +87,47 @@ pub async fn update_workflow_template(
     variables: Vec<Variable>,
     error_config: Option<ErrorConfig>,
 ) -> Result<bool> {
+    // 环检测：Kahn 拓扑排序
+    {
+        let node_ids: std::collections::HashSet<&str> = nodes.iter().map(|n| n.base_id()).collect();
+        let mut in_degree: std::collections::HashMap<&str, usize> =
+            node_ids.iter().map(|id| (*id, 0)).collect();
+        let mut adj: std::collections::HashMap<&str, Vec<&str>> =
+            node_ids.iter().map(|id| (*id, vec![])).collect();
+        for edge in &edges {
+            if node_ids.contains(edge.source.as_str()) && node_ids.contains(edge.target.as_str()) {
+                adj.entry(edge.source.as_str())
+                    .or_default()
+                    .push(edge.target.as_str());
+                *in_degree.entry(edge.target.as_str()).or_insert(0) += 1;
+            }
+        }
+        let mut queue: std::collections::VecDeque<&str> = in_degree
+            .iter()
+            .filter(|&(_, &deg)| deg == 0)
+            .map(|(&id, _)| id)
+            .collect();
+        let mut visited = 0usize;
+        while let Some(node) = queue.pop_front() {
+            visited += 1;
+            if let Some(neighbors) = adj.get(node) {
+                for &neighbor in neighbors {
+                    if let Some(deg) = in_degree.get_mut(neighbor) {
+                        *deg -= 1;
+                        if *deg == 0 {
+                            queue.push_back(neighbor);
+                        }
+                    }
+                }
+            }
+        }
+        if visited != nodes.len() {
+            return Err(crate::error::AxAgentError::Validation(
+                "工作流包含循环依赖，请检查节点的连接关系后重试".into(),
+            ));
+        }
+    }
+
     let template = workflow_template::Entity::find_by_id(id).one(db).await?;
 
     if let Some(t) = template {

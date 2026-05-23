@@ -99,6 +99,22 @@ interface StockAnalysisState {
   llmStatus: "live" | "placeholder" | "unknown";
   chatIndicatorDismissed: boolean;
 
+  // Phase 1: K-line period persistence cross-mount
+  klinePeriod: string;
+  setKlinePeriod: (period: string) => void;
+
+  // Phase 1: Auto-refresh toggle
+  autoRefresh: boolean;
+  setAutoRefresh: (enabled: boolean) => void;
+
+  // Phase 4: K-line indicator line toggles
+  klineIndicators: { ma5: boolean; ma10: boolean; ma20: boolean };
+  toggleIndicator: (key: "ma5" | "ma10" | "ma20") => void;
+
+  // Phase 4: Sidebar panel collapse state (persisted to localStorage)
+  sidebarCollapsed: Record<string, boolean>;
+  toggleSidebarPanel: (key: string) => void;
+
   watchlistVersion: number;
   bumpWatchlistVersion: () => void;
 
@@ -140,6 +156,10 @@ const initialState = {
   progressPct: 0,
   llmStatus: "unknown" as const,
   chatIndicatorDismissed: false,
+  klinePeriod: "6m",
+  autoRefresh: false,
+  klineIndicators: { ma5: true, ma10: true, ma20: true },
+  sidebarCollapsed: {},
   watchlistVersion: 0,
 };
 
@@ -299,6 +319,33 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set((s) => ({ watchlistVersion: s.watchlistVersion + 1 }));
   },
 
+  setKlinePeriod: (period: string) => {
+    set({ klinePeriod: period });
+  },
+
+  setAutoRefresh: (enabled: boolean) => {
+    set({ autoRefresh: enabled });
+  },
+
+  toggleIndicator: (key) => {
+    set((s) => ({
+      klineIndicators: { ...s.klineIndicators, [key]: !s.klineIndicators[key] },
+    }));
+  },
+
+  toggleSidebarPanel: (key) => {
+    set((s) => ({
+      sidebarCollapsed: { ...s.sidebarCollapsed, [key]: !s.sidebarCollapsed[key] },
+    }));
+    // Persist to localStorage
+    if (typeof window !== "undefined") {
+      const next = get().sidebarCollapsed;
+      try {
+        window.localStorage.setItem("ax_sidebar_collapsed", JSON.stringify(next));
+      } catch { /* noop */ }
+    }
+  },
+
   reset: () => {
     const { _unlisten } = get();
     if (_unlisten) {
@@ -310,6 +357,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   setupEventListener: async () => {
     const existing = get()._unlisten;
     if (existing) { return; }
+
+    // Restore sidebar collapse state from localStorage (one-time)
+    if (typeof window !== "undefined") {
+      try {
+        const saved = window.localStorage.getItem("ax_sidebar_collapsed");
+        if (saved) { set({ sidebarCollapsed: JSON.parse(saved) }); }
+      } catch { /* noop */ }
+    }
 
     // 中间步骤进度事件
     const unlistenStep = await listen<{

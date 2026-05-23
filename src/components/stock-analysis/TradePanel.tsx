@@ -136,18 +136,18 @@ export function TradePanel() {
   };
 
   const positionColumns = [
-    { title: t("trade.stockCode"), dataIndex: "stockCode", width: 70 },
-    { title: t("trade.shares"), dataIndex: "totalShares", width: 50 },
+    { title: t("trade.stockCode"), dataIndex: "stockCode", width: 56 },
+    { title: t("trade.shares"), dataIndex: "totalShares", width: 44 },
     {
       title: t("trade.cost"),
       dataIndex: "avgCost",
-      width: 60,
+      width: 50,
       render: (v: number) => v.toFixed(2),
     },
     {
       title: t("trade.pnl"),
       dataIndex: "unrealizedPnl",
-      width: 60,
+      width: 50,
       render: (v: number | null) =>
         v != null
           ? (
@@ -165,25 +165,25 @@ export function TradePanel() {
     {
       title: "",
       dataIndex: "direction",
-      width: 30,
+      width: 24,
       render: (v: string) => (
-        <Tag color={v === "buy" ? "green" : "red"}>
-          {v === "buy" ? t("trade.buy") : t("trade.sell")}
+        <Tag color={v === "buy" ? "green" : "red"} style={{ fontSize: 10, lineHeight: "16px", padding: "0 4px" }}>
+          {v === "buy" ? "买" : "卖"}
         </Tag>
       ),
     },
-    { title: t("trade.stockCode"), dataIndex: "stockCode", width: 60 },
+    { title: t("trade.stockCode"), dataIndex: "stockCode", width: 54 },
     {
       title: t("trade.price"),
       dataIndex: "price",
-      width: 55,
+      width: 50,
       render: (v: number) => v.toFixed(2),
     },
-    { title: t("trade.quantity"), dataIndex: "quantity", width: 50 },
+    { title: t("trade.quantity"), dataIndex: "quantity", width: 44 },
     {
       title: t("trade.pnl"),
       dataIndex: "realizedPnl",
-      width: 60,
+      width: 50,
       render: (v: number | null) =>
         v != null
           ? (
@@ -199,20 +199,13 @@ export function TradePanel() {
 
   if (!enabled) {
     return (
-      <Card size="small" title={t("trade.title")}>
+      <Card size="small" title={t("trade.title")} styles={{ body: { padding: "8px 12px" } }}>
         <div
-          className="text-xs text-center"
-          style={{
-            color: "var(--color-text-secondary)",
-            padding: 12,
-          }}
+          className="flex items-center justify-between gap-2 text-xs"
+          style={{ color: "var(--color-text-secondary)" }}
         >
-          <p>{t("trade.disabledHint")}</p>
-          <Switch
-            checked={enabled}
-            onChange={handleToggle}
-            style={{ marginTop: 8 }}
-          />
+          <span>{t("trade.disabledHint")}</span>
+          <Switch checked={enabled} onChange={handleToggle} />
         </div>
       </Card>
     );
@@ -221,6 +214,7 @@ export function TradePanel() {
   return (
     <Card
       size="small"
+      styles={{ body: { padding: "8px 10px" } }}
       title={
         <div className="flex justify-between items-center">
           <span>{t("trade.title")}</span>
@@ -228,32 +222,32 @@ export function TradePanel() {
         </div>
       }
     >
-      {/* Entry form */}
+      {/* Entry form — 两行紧凑布局，适配侧栏 260px */}
       <div className="flex flex-col gap-1 mb-2">
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           <Input
             size="small"
             placeholder={t("trade.stockCode")}
             value={form.stockCode}
             onChange={(e) => setForm({ ...form, stockCode: e.target.value })}
-            style={{ width: 90 }}
+            style={{ width: 72 }}
           />
           <Input
             size="small"
             placeholder={t("trade.stockName")}
             value={form.stockName}
             onChange={(e) => setForm({ ...form, stockName: e.target.value })}
-            style={{ width: 80 }}
+            style={{ width: 72 }}
           />
           <Select
             size="small"
             value={form.direction}
             onChange={(v) => setForm({ ...form, direction: v })}
             options={[
-              { value: "buy", label: t("trade.buy") },
-              { value: "sell", label: t("trade.sell") },
+              { value: "buy", label: "买" },
+              { value: "sell", label: "卖" },
             ]}
-            style={{ width: 60 }}
+            style={{ width: 50 }}
           />
         </div>
         <div className="flex gap-1">
@@ -262,7 +256,9 @@ export function TradePanel() {
             placeholder={t("trade.price")}
             value={form.price}
             onChange={(v) => setForm({ ...form, price: v || 0 })}
-            style={{ width: 100 }}
+            style={{ width: 82 }}
+            min={0}
+            step={0.01}
           />
           <InputNumber
             size="small"
@@ -270,7 +266,8 @@ export function TradePanel() {
             value={form.quantity}
             onChange={(v) => setForm({ ...form, quantity: v || 100 })}
             step={100}
-            style={{ width: 100 }}
+            min={100}
+            style={{ width: 82 }}
           />
           <Button
             size="small"
@@ -314,7 +311,7 @@ export function TradePanel() {
             const riskColor = maxPct > 50 ? "#f85149" : maxPct > 30 ? "#d29922" : "#3fb950";
             return (
               <div
-                className="text-xs flex justify-between p-1 mt-1 rounded"
+                className="text-xs grid grid-cols-2 gap-x-2 p-1 mt-1 rounded"
                 style={{ background: "var(--color-bg-elevated)" }}
               >
                 <span>

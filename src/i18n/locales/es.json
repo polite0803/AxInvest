@@ -6415,7 +6415,9 @@
     "reminders": "Recordat.",
     "contextPrediction": "Predicción",
     "teammate": "Equipo",
-    "steerInput": "Dirigir"
+    "steerInput": "Dirigir",
+    "showExtras": "Más",
+    "hideExtras": "Menos"
   },
   "knowledgeSettings": {
     "title": "Conocimiento"

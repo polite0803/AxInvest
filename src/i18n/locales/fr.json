@@ -6415,7 +6415,9 @@
     "reminders": "Rappels",
     "contextPrediction": "Prédiction",
     "teammate": "Équipe",
-    "steerInput": "Guider"
+    "steerInput": "Guider",
+    "showExtras": "Plus",
+    "hideExtras": "Moins"
   },
   "knowledgeSettings": {
     "title": "Connaissance"

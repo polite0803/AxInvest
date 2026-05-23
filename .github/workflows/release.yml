@@ -182,7 +182,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: '27.x'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token: ${{ github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -455,7 +455,7 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           version: '27.x'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token: ${{ github.token }}
 
       - name: Install Android NDK
         uses: nttld/setup-ndk@v1

@@ -147,7 +147,7 @@ impl NodeExecutorTrait for AgentExecutor {
             },
         };
 
-        // 4. 构建 prompt：profile 优先，inline role fallback
+        // 4. 构建 prompt：profile 提供领域知识，节点配置提供任务指令
         let (role_desc, mut system_prompt) = if let Some(ref p) = profile {
             let role = an
                 .config
@@ -155,7 +155,14 @@ impl NodeExecutorTrait for AgentExecutor {
                 .as_deref()
                 .or(p.agent_role.as_deref())
                 .unwrap_or("executor");
-            (role.to_string(), p.system_prompt.clone())
+            // profile.system_prompt = 专家领域知识（静态）
+            // an.config.system_prompt = 任务指令 + 上下文数据（动态，由模板注入）
+            let combined = if an.config.system_prompt.is_empty() {
+                p.system_prompt.clone()
+            } else {
+                format!("{}\n\n{}", p.system_prompt, an.config.system_prompt)
+            };
+            (role.to_string(), combined)
         } else {
             let role = an
                 .config

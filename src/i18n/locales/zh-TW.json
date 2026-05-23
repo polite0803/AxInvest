@@ -6603,7 +6603,7 @@
     "progress.completed": "✅ 分析完成!",
     "progress.llmFallback": "⚠️ LLM 未连接，使用占位資料",
     "progress.error": "❌ 分析出错: {{msg}}",
-    "chart.zoom": "區域縮放",
+    "chart.zoom": "区域缩放",
     "chart.restore": "还原",
     "riskUnknown": "未知"
   },

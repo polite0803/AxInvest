@@ -380,6 +380,17 @@ export function InputArea() {
     (s) => s.setSearchProviderId,
   );
   const searchProviders = useSearchStore((s) => s.providers);
+  // 兜底策略（三级）：
+  // 1. 用户明确选择的 → 直接使用
+  // 2. 未选但有启用的 → 自动取第一个
+  // 3. 全未启用/无配置 → 仍传非空值，后端 DuckDuckGo 免费搜索兜底
+  const effectiveSearchProviderId = useMemo(() => {
+    if (searchProviderId) { return searchProviderId; }
+    const enabled = (searchProviders || []).filter((p) => p.enabled);
+    if (enabled.length > 0) { return enabled[0].id; }
+    // 没有任何可用服务商时，传一个非空占位让后端走 DDG 免费搜索
+    return searchEnabled ? "__ddg_fallback__" : null;
+  }, [searchEnabled, searchProviderId, searchProviders]);
   const loadSearchProviders = useSearchStore((s) => s.loadProviders);
 
   // MCP state
@@ -1859,26 +1870,26 @@ export function InputArea() {
         await sendPlanMessage(
           trimmed,
           attachments,
-          searchEnabled ? searchProviderId : null,
+          effectiveSearchProviderId,
         );
       } else if (currentMode === "agent") {
         await sendAgentMessage(
           trimmed,
           attachments,
-          searchEnabled ? searchProviderId : null,
+          effectiveSearchProviderId,
         );
       } else if (companionModels.length > 0) {
         await sendMultiModelMessage(
           trimmed,
           companionModels,
           attachments,
-          searchEnabled ? searchProviderId : null,
+          effectiveSearchProviderId,
         );
       } else {
         await sendMessage(
           trimmed,
           attachments,
-          searchEnabled ? searchProviderId : null,
+          effectiveSearchProviderId,
         );
       }
     } catch (e) {

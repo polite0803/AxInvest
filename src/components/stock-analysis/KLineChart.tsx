@@ -57,8 +57,8 @@ export function KLineChart() {
         { type: "slider", xAxisIndex: [0, 1], bottom: 0, height: 20 },
       ],
       grid: [
-        { left: "8%", right: "8%", top: 30, height: "60%" },
-        { left: "8%", right: "8%", top: "72%", height: "18%" },
+        { left: "3%", right: "3%", top: 30, height: "60%" },
+        { left: "3%", right: "3%", top: "72%", height: "18%" },
       ],
       xAxis: [
         { type: "category", data: dates, gridIndex: 0, axisLabel: { show: false }, boundaryGap: true },

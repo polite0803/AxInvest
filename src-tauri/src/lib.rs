@@ -13,7 +13,6 @@ mod memory_extract;
 mod paths;
 mod semantic_cache;
 mod smart_router;
-mod stock_scheduler;
 
 #[cfg(not(mobile))]
 mod tray;
@@ -61,7 +60,7 @@ pub fn run() {
         let boot_msg = "[BOOT] run() entered\n";
         let boot_paths = [
             "/storage/emulated/0/Download/axagent-crash.log",
-            "/storage/emulated/0/Android/data/top.axinvest.desktop/files/axagent-crash.log",
+            "/storage/emulated/0/Android/data/top.axagent.desktop/files/axagent-crash.log",
         ];
         for bp in &boot_paths {
             // 追加而非覆盖
@@ -175,6 +174,7 @@ pub fn run() {
             commands::conversations::list_message_versions,
             commands::conversations::switch_message_version,
             commands::conversations::send_system_message,
+            commands::context_breakdown::get_context_breakdown,
             commands::messages::list_messages,
             commands::messages::list_messages_page,
             commands::messages::delete_message,
@@ -324,8 +324,6 @@ pub fn run() {
             commands::skills_hub::skills_hub_import,
             commands::settings::get_settings,
             commands::settings::save_settings,
-            commands::settings::get_setting,
-            commands::settings::set_setting,
             commands::backup::list_backups,
             commands::backup::create_backup,
             commands::backup::restore_backup,
@@ -613,6 +611,7 @@ pub fn run() {
             commands::gateway::list_gateway_request_logs,
             commands::gateway::clear_gateway_request_logs,
             commands::gateway::generate_self_signed_cert,
+            commands::gateway::get_active_gateway_platform,
             // Gateway Link commands
             commands::gateway_link::list_gateway_links,
             commands::gateway_link::create_gateway_link,
@@ -772,6 +771,7 @@ pub fn run() {
             commands::rl::rl_train_policy,
             commands::rl::rl_export_model,
             commands::rl::rl_import_model,
+            commands::research::generate_research_report,
             commands::reflection::reflect_on_task,
             commands::reflection::get_reflection_history,
             commands::reflection::clear_reflection_history,
@@ -920,85 +920,12 @@ pub fn run() {
             commands::agent_nudge::proactive_convert_to_nudge,
             #[cfg(not(mobile))]
             crate::tray::set_tray_labels,
-            // Stock analysis
-            commands::stock_analysis::search_stock,
-            commands::stock_analysis::get_stock_quote,
-            commands::stock_analysis::get_stock_kline,
-            commands::stock_analysis::start_stock_analysis,
-            commands::stock_workflow::run_stock_workflow,
-            commands::stock_workflow::cancel_stock_workflow,
-            commands::stock_analysis::cancel_stock_analysis,
-            commands::stock_analysis::list_stock_analyses,
-            commands::stock_analysis::get_stock_analysis,
-            // Watchlist
-            commands::stock_analysis::add_to_watchlist,
-            commands::stock_analysis::remove_from_watchlist,
-            commands::stock_analysis::list_watchlist,
-            // Portfolio
-            commands::stock_analysis::add_portfolio_holding,
-            commands::stock_analysis::update_portfolio_holding,
-            commands::stock_analysis::remove_portfolio_holding,
-            commands::stock_analysis::list_portfolio,
-            // MCP Stock Data Tools
-            commands::stock_analysis::get_stock_mcp_tools,
-            commands::stock_analysis::execute_stock_mcp_tool,
-            // Backtesting
-            commands::stock_analysis::backtest_analysis,
-            commands::stock_analysis::backtest_all_history,
-            commands::stock_analysis::create_analysis_schedule,
-            commands::stock_analysis::list_analysis_schedules,
-            commands::stock_analysis::toggle_analysis_schedule,
-            commands::stock_analysis::delete_analysis_schedule,
-            // Price alerts
-            commands::stock_analysis::create_price_alert,
-            commands::stock_analysis::list_price_alerts,
-            commands::stock_analysis::delete_price_alert,
-            // Custom analysts
-            commands::stock_analysis::list_custom_analysts,
-            // HTML report generation
-            commands::stock_analysis::generate_stock_report,
-            // Manual trading log
-            commands::stock_analysis::record_trade,
-            commands::stock_analysis::list_trades,
-            commands::stock_analysis::get_trade_positions,
-            commands::stock_analysis::toggle_trading_enabled,
-            commands::stock_analysis::validate_trade,
-            commands::stock_analysis::compare_trade_with_analysis,
+            // Session share
+            commands::session_share::create_share_session,
+            commands::session_share::join_share_session,
+            commands::session_share::list_share_participants,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
-            // Monitor commands
-            commands::stock_analysis::start_monitor,
-            commands::stock_analysis::stop_monitor,
-            commands::stock_analysis::add_monitor_config,
-            commands::stock_analysis::list_monitor_configs,
-            // Key levels backtest
-            commands::stock_analysis::backtest_key_levels,
-            // Stock screening
-            commands::stock_analysis::screen_stocks,
-            commands::stock_analysis::discover_stock_candidates,
-            // Trading calendar
-            commands::stock_analysis::get_market_status,
-            commands::stock_analysis::refresh_trading_calendar,
-            // Daily review
-            commands::stock_analysis::generate_daily_review,
-            // Scoring weights optimization
-            commands::stock_analysis::optimize_scoring_weights,
-            // Value investing
-            commands::stock_analysis::get_value_assessment,
-            commands::stock_analysis::compute_value_metrics,
-            // Portfolio risk + position limits
-            commands::stock_analysis::get_portfolio_risk,
-            commands::stock_analysis::get_position_limits,
-            // New data source commands
-            commands::stock_analysis::get_stock_research_reports,
-            commands::stock_analysis::get_stock_consensus_eps,
-            commands::stock_analysis::get_stock_concept_blocks,
-            commands::stock_analysis::get_stock_announcements,
-            commands::stock_analysis::get_hot_stocks,
-            commands::stock_analysis::get_industry_ranking,
-            commands::stock_analysis::get_cls_flash,
-            commands::stock_analysis::get_market_dragon_tiger,
-            commands::stock_analysis::get_north_bound_flow,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");
@@ -1276,18 +1203,6 @@ pub fn run() {
             #[cfg(mobile)]
             let tray_language = "en".to_string();
             init::services::start_background_services(app.handle(), &state, app_dir.clone(), tray_language);
-
-            // 种子化股票分析专家/角色/Profile
-            let seed_db = sea_db.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap_or_else(|_|
-                    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap());
-                rt.block_on(async {
-                    if let Err(e) = commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(&seed_db).await {
-                        tracing::warn!("[stock_analysis_setup] 种子化失败: {e}");
-                    }
-                });
-            });
 
             android_utils::mark_startup_phase("setup_complete");
             Ok(())

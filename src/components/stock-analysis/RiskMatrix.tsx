@@ -27,16 +27,20 @@ export function RiskMatrix() {
   if (Object.keys(riskAssessments).length === 0) { return null; }
 
   return (
-    <Card size="small" title={t("stockAnalysis.riskAssessment")}>
-      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(min(200px, 100%), 1fr))" }}>
+    <Card size="small" title={t("stockAnalysis.riskAssessment")} styles={{ body: { padding: "8px 12px" } }}>
+      <div className="flex flex-col gap-2">
         {Object.entries(riskAssessments).map(([type, report]) => {
           const color = RISK_COLORS[type]
             || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
-          const label = RISK_LABEL_KEYS[type] ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`) : type;
+          const label = RISK_LABEL_KEYS[type]
+            ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`)
+            : type;
           return (
             <div key={type} className="p-2 rounded" style={{ background: "var(--color-bg-elevated)" }}>
-              <Tag color={color}>{label}</Tag>
-              <p className="text-xs mt-1" style={{ whiteSpace: "pre-wrap", maxHeight: 250, overflow: "auto" }}>
+              <div className="text-sm font-medium mb-1">
+                <Tag color={color}>{label}</Tag>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ whiteSpace: "pre-wrap" }}>
                 {report}
               </p>
             </div>

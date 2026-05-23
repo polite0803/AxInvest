@@ -99,6 +99,9 @@ interface StockAnalysisState {
   llmStatus: "live" | "placeholder" | "unknown";
   chatIndicatorDismissed: boolean;
 
+  watchlistVersion: number;
+  bumpWatchlistVersion: () => void;
+
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
@@ -137,6 +140,7 @@ const initialState = {
   progressPct: 0,
   llmStatus: "unknown" as const,
   chatIndicatorDismissed: false,
+  watchlistVersion: 0,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -289,6 +293,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   dismissChatIndicator: () => {
     set({ chatIndicatorDismissed: true });
+  },
+
+  bumpWatchlistVersion: () => {
+    set((s) => ({ watchlistVersion: s.watchlistVersion + 1 }));
   },
 
   reset: () => {

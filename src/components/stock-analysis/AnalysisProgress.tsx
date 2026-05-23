@@ -58,7 +58,7 @@ export function AnalysisProgress() {
     <div>
       {error && (
         <div
-          className="mb-2 p-2 rounded flex justify-between items-center"
+          className="mb-1 p-1.5 rounded flex justify-between items-center text-xs"
           style={{ color: "#ff4d4f", background: "#fff2f0" }}
         >
           <span>{error}</span>
@@ -94,18 +94,18 @@ export function AnalysisProgress() {
 
       {/* 实时进度提示 */}
       {(status === "running" || status === "loading") && progressMessage && (
-        <div className="mt-2 flex items-center gap-2 text-sm" style={{ color: "var(--color-text-secondary)" }}>
+        <div className="mt-1 flex items-center gap-1.5 text-xs" style={{ color: "var(--color-text-secondary)" }}>
           <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
           <span>{progressMessage}</span>
         </div>
       )}
       {status === "completed" && progressMessage && (
-        <div className="mt-2 text-sm" style={{ color: "var(--color-success-text, #52c41a)" }}>
+        <div className="mt-1 text-xs" style={{ color: "var(--color-success-text, #52c41a)" }}>
           {progressMessage}
         </div>
       )}
       {status === "error" && progressMessage && (
-        <div className="mt-2 text-sm" style={{ color: "#ff4d4f" }}>
+        <div className="mt-1 text-xs" style={{ color: "#ff4d4f" }}>
           {progressMessage}
         </div>
       )}

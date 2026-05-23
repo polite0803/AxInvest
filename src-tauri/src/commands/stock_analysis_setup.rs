@@ -168,14 +168,25 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
+    const TEMPLATE_VERSION: i32 = 4;
 
-    if workflow_template::Entity::find_by_id(TEMPLATE_ID)
+    if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
         .await
         .map_err(|e| format!("查询工作流模板失败: {e}"))?
-        .is_some()
     {
-        return Ok(()); // 已存在则跳过
+        if existing.version >= TEMPLATE_VERSION {
+            return Ok(()); // 版本已最新，跳过
+        }
+        // 旧版本 → 删除重建
+        workflow_template::Entity::delete_by_id(TEMPLATE_ID)
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除旧模板失败: {e}"))?;
+        tracing::info!(
+            "[stock_analysis_setup] 更新股票分析工作流模板 v{} → v{TEMPLATE_VERSION}",
+            existing.version
+        );
     }
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -198,7 +209,7 @@ async fn seed_stock_analysis_workflow_template(
             config: AgentNodeConfig {
                 role: None,
                 system_prompt: format!(
-                    "{{{{expert_prompt_{expert_id}}}}}\n\n行情数据:\n{{{{data_ctx}}}}"
+                    "{{{{expert_prompt_{expert_id}}}}}\n\n你的任务: {{{{goal}}}}\n\n行情数据:\n{{{{data_ctx}}}}"
                 ),
                 context_sources: vec![],
                 output_var: id.into(),
@@ -247,15 +258,51 @@ async fn seed_stock_analysis_workflow_template(
 
     // 9 个分析师
     let analysts = [
-        ("a-market-analyst", "市场技术分析师", "market-analyst"),
-        ("a-sentiment", "情绪面分析师", "sentiment-analyst"),
-        ("a-news", "消息面分析师", "news-analyst"),
-        ("a-fundamentals", "基本面分析师", "fundamentals-analyst"),
-        ("a-policy", "政策面分析师", "policy-analyst"),
-        ("a-hot-money", "资金面分析师", "hot-money-tracker"),
-        ("a-lockup", "解禁监控分析师", "lockup-watcher"),
-        ("a-research", "研报分析师", "research-analyst"),
-        ("a-sector", "行业板块分析师", "sector-analyst"),
+        (
+            "a-market-analyst",
+            "基于行情数据对该股票进行技术面分析，覆盖K线形态、均线、MACD/RSI指标、支撑阻力位，输出结构化分析报告",
+            "market-analyst",
+        ),
+        (
+            "a-sentiment",
+            "分析该股票的市场情绪，包括资金流向、散户/机构态度、社交媒体热度，给出情绪面评分",
+            "sentiment-analyst",
+        ),
+        (
+            "a-news",
+            "梳理该股票近期重大新闻和公告，评估每条消息对股价的影响方向和力度",
+            "news-analyst",
+        ),
+        (
+            "a-fundamentals",
+            "基于PE/PB/ROE/营收增长率等财务指标对该股票进行基本面估值分析",
+            "fundamentals-analyst",
+        ),
+        (
+            "a-policy",
+            "分析当前宏观政策和行业政策对该股票的潜在影响，包括货币政策、产业政策、监管动态",
+            "policy-analyst",
+        ),
+        (
+            "a-hot-money",
+            "追踪该股票的游资动向、龙虎榜数据、主力资金进出情况",
+            "hot-money-tracker",
+        ),
+        (
+            "a-lockup",
+            "排查该股票近期解禁计划、大股东减持公告、股权质押风险",
+            "lockup-watcher",
+        ),
+        (
+            "a-research",
+            "汇总该股票的最新券商研报观点，提取目标价、评级变化和核心逻辑",
+            "research-analyst",
+        ),
+        (
+            "a-sector",
+            "分析该股票所属行业的景气度、板块轮动趋势、同业竞争格局",
+            "sector-analyst",
+        ),
     ];
     let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
 
@@ -266,12 +313,48 @@ async fn seed_stock_analysis_workflow_template(
 
     // 辩论 6 轮
     let debate_pairs = [
-        ("bull-r1", "多方第1轮", "bull-researcher", &a_ids[..], "bear-r1"),
-        ("bear-r1", "空方第1轮", "bear-researcher", &["bull-r1"], "bull-r2"),
-        ("bull-r2", "多方第2轮", "bull-researcher", &["bear-r1"], "bear-r2"),
-        ("bear-r2", "空方第2轮", "bear-researcher", &["bull-r2"], "bull-r3"),
-        ("bull-r3", "多方第3轮", "bull-researcher", &["bear-r2"], "bear-r3"),
-        ("bear-r3", "空方第3轮", "bear-researcher", &["bull-r3"], ""),
+        (
+            "bull-r1",
+            "基于9位分析师的报告，构建该股票的完整买入论点。引用分析师数据支撑，明确列出3-5个看涨理由，每个理由需有具体数据",
+            "bull-researcher",
+            &a_ids[..],
+            "bear-r1",
+        ),
+        (
+            "bear-r1",
+            "针对多方论点逐条反驳。结合分析师报告中的风险信号，列出该股票3-5个看跌理由，指出多方论点中的数据漏洞",
+            "bear-researcher",
+            &["bull-r1"],
+            "bull-r2",
+        ),
+        (
+            "bull-r2",
+            "对空方论点进行二次反击。补充新的看涨证据，修正被空方成功攻击的弱论点，强化剩余论点的数据支撑",
+            "bull-researcher",
+            &["bear-r1"],
+            "bear-r2",
+        ),
+        (
+            "bear-r2",
+            "深入挖掘该股票的隐藏风险。不仅反驳多方新论点，还要提出多方未覆盖的风险维度（如流动性风险、汇率风险等）",
+            "bear-researcher",
+            &["bull-r2"],
+            "bull-r3",
+        ),
+        (
+            "bull-r3",
+            "终极多方辩护。综合前两轮交锋，提炼最坚固的3个看涨核心逻辑，对每个逻辑给出置信度评分（0-100）",
+            "bull-researcher",
+            &["bear-r2"],
+            "bear-r3",
+        ),
+        (
+            "bear-r3",
+            "终极空方陈词。给出该股票的风险综合评分（0-100），明确指出如果持仓应在什么条件下止损",
+            "bear-researcher",
+            &["bull-r3"],
+            "",
+        ),
     ];
     for (id, title, expert, deps, _next) in &debate_pairs {
         nodes.push(agent(id, title, expert));
@@ -282,24 +365,40 @@ async fn seed_stock_analysis_workflow_template(
 
     // 风险评估（3 个并行，均依赖 bear-r3）
     for (rid, rtitle, rexpert) in &[
-        ("risk-agg", "激进风险评估", "aggressive-debator"),
-        ("risk-con", "保守风险评估", "conservative-debator"),
-        ("risk-neu", "中性风险评估", "neutral-debator"),
+        (
+            "risk-agg",
+            "以最激进的风险偏好评估该股票：假设最大回撤容忍度30%，给出该股票是否值得重仓的结论",
+            "aggressive-debator",
+        ),
+        (
+            "risk-con",
+            "以最保守的风险偏好评估该股票：本金安全第一，给出该股票是否适合配置的结论",
+            "conservative-debator",
+        ),
+        (
+            "risk-neu",
+            "以中性风险偏好评估该股票：平衡收益与风险，给出该股票的合理仓位建议",
+            "neutral-debator",
+        ),
     ] {
         nodes.push(agent(rid, rtitle, rexpert));
         edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
     }
 
     // research-mgr → trader → portfolio-mgr
-    nodes.push(agent("research-mgr", "综合风险总评", "research-manager"));
+    nodes.push(agent(
+        "research-mgr",
+        "综合三种风险偏好的评估结果，给出该股票的总体风险评级（低/中/高）及主要风险点清单",
+        "research-manager",
+    ));
     for rid in &["risk-agg", "risk-con", "risk-neu"] {
         edges.push(edge(&format!("e-{rid}-research-mgr"), rid, "research-mgr"));
     }
 
-    nodes.push(agent("trader", "A股交易方案", "trader"));
+    nodes.push(agent("trader", "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则", "trader"));
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
 
-    nodes.push(agent("portfolio-mgr", "最终投资决策", "portfolio-manager"));
+    nodes.push(agent("portfolio-mgr", "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。输出JSON格式：{ action: 买入/增持/持有/减持/卖出, positionPct: 仓位百分比, targetPrice: 目标价, stopLoss: 止损价, reasoning: 决策理由(300字以内), riskLevel: 风险等级(低/中/高), confidence: 置信度(0-100) }", "portfolio-manager"));
     edges.push(edge("e-trader-portfolio-mgr", "trader", "portfolio-mgr"));
 
     // 写入 DB
@@ -316,7 +415,7 @@ async fn seed_stock_analysis_workflow_template(
         )),
         icon: Set("chart-bar".to_string()),
         tags: Set(Some(tags)),
-        version: Set(1),
+        version: Set(TEMPLATE_VERSION),
         is_preset: Set(true),
         is_editable: Set(true),
         is_public: Set(true),
@@ -407,18 +506,42 @@ async fn seed_agent_roles(db: &sea_orm::DatabaseConnection) -> Result<(), String
 
 async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     use axagent_core::entity::agent_profiles;
-    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+
+    // 构建 expert_id → 提示词正文 的查找表
+    let expert_prompts: std::collections::HashMap<&str, &str> =
+        EMBEDDED_PROMPTS.iter().copied().collect();
+
     let mut count = 0u32;
     for &(expert_id, role_id) in EXPERT_ROLE_MAP {
         let profile_id = format!("stock-{expert_id}");
-        if agent_profiles::Entity::find_by_id(&profile_id)
+        let expert_body = expert_prompts
+            .get(expert_id)
+            .map(|content| {
+                let (_, _, body, _) = parse_expert_md(content, expert_id);
+                body
+            })
+            .unwrap_or_default();
+
+        if let Some(existing) = agent_profiles::Entity::find_by_id(&profile_id)
             .one(db)
             .await
             .map_err(|e| e.to_string())?
-            .is_some()
         {
+            // 已有 profile 但 system_prompt 为空 → 补填
+            if existing.system_prompt.is_empty() {
+                agent_profiles::Entity::update_many()
+                    .col_expr(agent_profiles::Column::SystemPrompt, Expr::value(expert_body))
+                    .filter(agent_profiles::Column::Id.eq(&profile_id))
+                    .exec(db)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                count += 1;
+            }
             continue;
         }
+
         let now = chrono::Utc::now().timestamp_millis();
         let model = agent_profiles::ActiveModel {
             id: Set(profile_id.clone()),
@@ -426,7 +549,7 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             description: Set(Some(format!("股票分析专家 — {}", role_id_to_display(role_id)))),
             category: Set("stock-analysis".into()),
             icon: Set("📈".into()),
-            system_prompt: Set(String::new()),
+            system_prompt: Set(expert_body),
             agent_role: Set(Some(role_id.into())),
             source: Set("stock-analysis".into()),
             tags: Set(None),
@@ -448,7 +571,7 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
         model.insert(db).await.map_err(|e| e.to_string())?;
         count += 1;
     }
-    tracing::info!("[stock_analysis_setup] 已种子化 {count} 个 agent_profiles");
+    tracing::info!("[stock_analysis_setup] 已种子化/更新 {count} 个 agent_profiles");
     Ok(())
 }
 

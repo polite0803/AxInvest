@@ -18,6 +18,7 @@ export function WatchlistPanel() {
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
+  const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
   const [items, setItems] = useState<WatchlistItem[]>([]);
 
   const loadWatchlist = async () => {
@@ -31,7 +32,7 @@ export function WatchlistPanel() {
 
   useEffect(() => {
     loadWatchlist();
-  }, []);
+  }, [watchlistVersion]);
 
   const addCurrent = async () => {
     if (!stockCode || !stockName) { return; }

@@ -68,7 +68,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
-      metadata: read
     outputs:
       body: ${{ steps.cliff.outputs.content }}
     steps:

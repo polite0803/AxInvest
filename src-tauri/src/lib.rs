@@ -13,6 +13,7 @@ mod memory_extract;
 mod paths;
 mod semantic_cache;
 mod smart_router;
+mod stock_scheduler;
 
 #[cfg(not(mobile))]
 mod tray;

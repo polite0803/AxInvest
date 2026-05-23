@@ -926,6 +926,69 @@ pub fn run() {
             commands::session_share::list_share_participants,
             // Crash diagnostics
             commands::crash_report::get_crash_log,
+            // Settings
+            commands::settings::get_setting,
+            commands::settings::set_setting,
+            // Stock analysis
+            commands::stock_analysis::search_stock,
+            commands::stock_analysis::get_stock_quote,
+            commands::stock_analysis::get_stock_kline,
+            commands::stock_workflow::run_stock_workflow,
+            commands::stock_workflow::cancel_stock_workflow,
+            commands::stock_analysis::cancel_stock_analysis,
+            commands::stock_analysis::list_stock_analyses,
+            commands::stock_analysis::get_stock_analysis,
+            // Watchlist / Portfolio / Trading
+            commands::stock_analysis::add_to_watchlist,
+            commands::stock_analysis::remove_from_watchlist,
+            commands::stock_analysis::list_watchlist,
+            commands::stock_analysis::add_portfolio_holding,
+            commands::stock_analysis::update_portfolio_holding,
+            commands::stock_analysis::remove_portfolio_holding,
+            commands::stock_analysis::list_portfolio,
+            commands::stock_analysis::get_stock_mcp_tools,
+            commands::stock_analysis::execute_stock_mcp_tool,
+            commands::stock_analysis::backtest_analysis,
+            commands::stock_analysis::backtest_all_history,
+            commands::stock_analysis::create_analysis_schedule,
+            commands::stock_analysis::list_analysis_schedules,
+            commands::stock_analysis::toggle_analysis_schedule,
+            commands::stock_analysis::delete_analysis_schedule,
+            commands::stock_analysis::create_price_alert,
+            commands::stock_analysis::list_price_alerts,
+            commands::stock_analysis::delete_price_alert,
+            commands::stock_analysis::list_custom_analysts,
+            commands::stock_analysis::generate_stock_report,
+            commands::stock_analysis::record_trade,
+            commands::stock_analysis::list_trades,
+            commands::stock_analysis::get_trade_positions,
+            commands::stock_analysis::toggle_trading_enabled,
+            commands::stock_analysis::validate_trade,
+            commands::stock_analysis::compare_trade_with_analysis,
+            commands::stock_analysis::start_monitor,
+            commands::stock_analysis::stop_monitor,
+            commands::stock_analysis::add_monitor_config,
+            commands::stock_analysis::list_monitor_configs,
+            commands::stock_analysis::backtest_key_levels,
+            commands::stock_analysis::screen_stocks,
+            commands::stock_analysis::discover_stock_candidates,
+            commands::stock_analysis::get_market_status,
+            commands::stock_analysis::refresh_trading_calendar,
+            commands::stock_analysis::generate_daily_review,
+            commands::stock_analysis::optimize_scoring_weights,
+            commands::stock_analysis::get_value_assessment,
+            commands::stock_analysis::compute_value_metrics,
+            commands::stock_analysis::get_portfolio_risk,
+            commands::stock_analysis::get_position_limits,
+            commands::stock_analysis::get_stock_research_reports,
+            commands::stock_analysis::get_stock_consensus_eps,
+            commands::stock_analysis::get_stock_concept_blocks,
+            commands::stock_analysis::get_stock_announcements,
+            commands::stock_analysis::get_hot_stocks,
+            commands::stock_analysis::get_industry_ranking,
+            commands::stock_analysis::get_cls_flash,
+            commands::stock_analysis::get_market_dragon_tiger,
+            commands::stock_analysis::get_north_bound_flow,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");
@@ -1203,6 +1266,16 @@ pub fn run() {
             #[cfg(mobile)]
             let tray_language = "en".to_string();
             init::services::start_background_services(app.handle(), &state, app_dir.clone(), tray_language);
+
+            // Seed stock analysis experts/roles/profiles
+            {
+                let seed_db = state.sea_db.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(&seed_db).await {
+                        tracing::warn!("[stock_analysis_setup] 种子化失败: {e}");
+                    }
+                });
+            }
 
             android_utils::mark_startup_phase("setup_complete");
             Ok(())

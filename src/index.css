@@ -1560,3 +1560,15 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   color: var(--accent-deco);
   border: 1px solid color-mix(in srgb, var(--accent-deco) 15%, transparent);
 }
+
+/* ── Stock analysis Tabs — fill remaining height ──────────────────── */
+.stock-tabs > .ant-tabs-content-holder {
+  min-height: 0;
+}
+.stock-tabs > .ant-tabs-content-holder > .ant-tabs-content {
+  height: 100%;
+}
+.stock-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+  height: 100%;
+  overflow: auto;
+}

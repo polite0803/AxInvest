@@ -76,30 +76,32 @@ export function PriceAlertPanel() {
     {
       title: t("stockAnalysis.alert.code"),
       dataIndex: "stockCode",
-      width: 80,
-      render: (v: string) => <Tag>{v}</Tag>,
+      width: 60,
+      render: (v: string) => <Tag style={{ fontSize: 10, padding: "0 4px" }}>{v}</Tag>,
     },
     {
       title: t("stockAnalysis.alert.name"),
       dataIndex: "stockName",
-      width: 80,
+      ellipsis: true as const,
+      width: 56,
     },
     {
       title: t("stockAnalysis.alert.condition"),
       dataIndex: "condition",
-      width: 60,
-      render: (v: string) => (v === "above" ? ">" : "<"),
+      width: 36,
+      render: (v: string) => (v === "above" ? "≥" : "≤"),
     },
     {
       title: t("stockAnalysis.alert.price"),
       dataIndex: "targetPrice",
-      width: 70,
+      width: 58,
       align: "right" as const,
+      render: (v: number) => v.toFixed(2),
     },
     {
       title: "",
       key: "action",
-      width: 40,
+      width: 30,
       render: (_: unknown, record: PriceAlert) => (
         <Button
           size="small"
@@ -120,28 +122,39 @@ export function PriceAlertPanel() {
           <BellOutlined /> {t("stockAnalysis.alert.title")}
         </span>
       }
-      extra={<Button size="small" icon={<PlusOutlined />} onClick={() => setAdding(!adding)} />}
+      extra={
+        <div className="flex gap-1 items-center">
+          <Tag color={alerts.length > 0 ? "green" : "default"} style={{ fontSize: 10, lineHeight: "18px" }}>
+            {alerts.length > 0 ? t("stockAnalysis.monitoringActive") : t("stockAnalysis.monitoringPaused")}
+          </Tag>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => setAdding(!adding)} />
+        </div>
+      }
     >
       {adding && (
-        <Form form={form} layout="inline" size="small" onFinish={addAlert} className="mb-2 flex flex-col gap-1">
-          <Form.Item name="stockCode" rules={[{ required: true }]}>
-            <Input placeholder={t("stockAnalysis.alert.code")} style={{ width: 80 }} />
-          </Form.Item>
-          <Form.Item name="stockName" rules={[{ required: true }]}>
-            <Input placeholder={t("stockAnalysis.alert.name")} style={{ width: 80 }} />
-          </Form.Item>
-          <Form.Item name="condition" rules={[{ required: true }]} initialValue="above">
-            <Select style={{ width: 70 }}>
-              <Select.Option value="above">{t("stockAnalysis.alert.above")}</Select.Option>
-              <Select.Option value="below">{t("stockAnalysis.alert.below")}</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="targetPrice" rules={[{ required: true }]}>
-            <Input type="number" placeholder={t("stockAnalysis.alert.price")} style={{ width: 80 }} />
-          </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" size="small">{t("common.confirm")}</Button>
-          </Form.Item>
+        <Form form={form} size="small" onFinish={addAlert} className="mb-2">
+          <div className="flex gap-1 mb-1">
+            <Form.Item name="stockCode" rules={[{ required: true }]} noStyle>
+              <Input placeholder={t("stockAnalysis.alert.code")} style={{ width: 72 }} size="small" />
+            </Form.Item>
+            <Form.Item name="stockName" rules={[{ required: true }]} noStyle>
+              <Input placeholder={t("stockAnalysis.alert.name")} style={{ width: 72 }} size="small" />
+            </Form.Item>
+            <Form.Item name="condition" rules={[{ required: true }]} initialValue="above" noStyle>
+              <Select style={{ width: 60 }} size="small">
+                <Select.Option value="above">≥</Select.Option>
+                <Select.Option value="below">≤</Select.Option>
+              </Select>
+            </Form.Item>
+          </div>
+          <div className="flex gap-1">
+            <Form.Item name="targetPrice" rules={[{ required: true }]} noStyle>
+              <Input type="number" placeholder={t("stockAnalysis.alert.price")} style={{ width: 100 }} size="small" />
+            </Form.Item>
+            <Form.Item noStyle>
+              <Button type="primary" htmlType="submit" size="small">{t("common.confirm")}</Button>
+            </Form.Item>
+          </div>
         </Form>
       )}
       <Table

@@ -1,29 +1,54 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Alert, Button, message, Tag } from "antd";
-import { useState } from "react";
+import { Button, Card, message, Tag } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
-const ACTION_COLORS: Record<string, "success" | "warning" | "error" | "info"> = {
-  "买入": "success",
-  "增持": "success",
-  "持有": "info",
-  "减持": "warning",
-  "卖出": "error",
+const ACTION_STYLES: Record<string, { color: string; bg: string; border: string }> = {
+  "买入": { color: "#cf1322", bg: "#fff1f0", border: "#ffa39e" },
+  "增持": { color: "#cf1322", bg: "#fff1f0", border: "#ffa39e" },
+  "持有": { color: "#1677ff", bg: "#e6f4ff", border: "#91caff" },
+  "减持": { color: "#d48806", bg: "#fffbe6", border: "#ffe58f" },
+  "卖出": { color: "#3f8600", bg: "#f6ffed", border: "#b7eb8f" },
 };
 
 export function DecisionBanner() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const decision = useStockAnalysisStore((s) => s.decision);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
+  const quote = useStockAnalysisStore((s) => s.quote);
+  const analystReports = useStockAnalysisStore((s) => s.analystReports);
+  const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
+  const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
-  const [watchlisted, setWatchlisted] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [watchlisted, setWatchlisted] = useState(false);
 
-  if (!decision) { return null; }
+  // stockCode 变化时同步自选状态
+  useEffect(() => {
+    if (typeof window !== "undefined" && stockCode) {
+      setWatchlisted(window.localStorage.getItem("ax_watchlisted") === stockCode);
+    }
+  }, [stockCode]);
 
-  const color = ACTION_COLORS[decision.action] || "info";
+  const addToWatchlist = useCallback(async () => {
+    if (!stockCode || !stockName) { return; }
+    setAdding(true);
+    try {
+      await invoke("add_to_watchlist", { stockCode, stockName });
+      setWatchlisted(true);
+      if (typeof window !== "undefined") { window.localStorage.setItem("ax_watchlisted", stockCode); }
+      bumpWatchlistVersion();
+      message.success(t("stockAnalysis.addedToWatchlist"));
+    } catch {
+      message.error(t("stockAnalysis.addFailed"));
+    }
+    setAdding(false);
+  }, [stockCode, stockName, t, bumpWatchlistVersion]);
+
   const actionLabel: Record<string, string> = {
     "买入": t("stockAnalysis.actionBuy"),
     "增持": t("stockAnalysis.actionIncrease"),
@@ -32,50 +57,207 @@ export function DecisionBanner() {
     "卖出": t("stockAnalysis.actionSell"),
   };
 
-  const addToWatchlist = async () => {
+  const confidencePct = useMemo(() => Math.round(decision?.confidence ?? 0), [decision]);
+  const meterColor = confidencePct >= 70 ? "#3fb950" : confidencePct >= 40 ? "#d29922" : "#f85149";
+
+  // 从报价和决策计算预期收益
+  const currentPrice = quote?.price ?? 0;
+  const upside = decision?.targetPrice && currentPrice > 0
+    ? ((decision.targetPrice - currentPrice) / currentPrice * 100)
+    : null;
+
+  // 导出报告
+  const handleExport = useCallback(() => {
+    if (!decision || !stockCode || !stockName) { return; }
+    const lines = [
+      `=== AxInvest 投资分析报告 ===`,
+      `股票: ${stockName} (${stockCode})`,
+      `分析日期: ${new Date().toLocaleDateString("zh-CN")}`,
+      `当前价: ¥${currentPrice.toFixed(2)}`,
+      `决策: ${decision.action} | 置信度: ${confidencePct}%`,
+      `目标价: ¥${decision.targetPrice ?? "-"} | 止损: ¥${decision.stopLoss ?? "-"}`,
+      `仓位: ${decision.positionPct}% | 风险等级: ${decision.riskLevel}`,
+      upside != null ? `预期涨幅: ${upside >= 0 ? "+" : ""}${upside.toFixed(1)}%` : "",
+      ``,
+      `推理摘要:`,
+      decision.reasoning,
+      ``,
+      `分析师报告: ${Object.keys(analystReports).length} 篇`,
+      `辩论轮次: ${debateRounds.length} 轮`,
+      `风险评估: ${Object.keys(riskAssessments).length} 项`,
+    ].filter(Boolean).join("\n");
+
+    const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `AxInvest_${stockCode}_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    message.success(t("stockAnalysis.exported"));
+  }, [
+    decision,
+    stockCode,
+    stockName,
+    currentPrice,
+    confidencePct,
+    upside,
+    analystReports,
+    debateRounds,
+    riskAssessments,
+    t,
+  ]);
+
+  // 问 AI：复制股票上下文到剪贴板，跳转到对话页
+  const handleAskAI = useCallback(() => {
     if (!stockCode || !stockName) { return; }
-    setAdding(true);
-    try {
-      await invoke("add_to_watchlist", { stockCode, stockName });
-      setWatchlisted(true);
-      bumpWatchlistVersion();
-      message.success(t("stockAnalysis.addedToWatchlist"));
-    } catch {
-      message.error(t("stockAnalysis.addFailed"));
-    }
-    setAdding(false);
-  };
+    const context = [
+      `请分析 ${stockName} (${stockCode}) 的投资前景。`,
+      decision ? `最新决策: ${decision.action}, 置信度 ${confidencePct}%。` : "",
+      `当前价格: ¥${currentPrice.toFixed(2)}`,
+      upside != null ? `预期涨幅: ${upside >= 0 ? "+" : ""}${upside.toFixed(1)}%` : "",
+      `风险等级: ${decision?.riskLevel ?? "未知"}`,
+    ].filter(Boolean).join("\n");
+
+    navigator.clipboard.writeText(context).then(() => {
+      message.success(t("stockAnalysis.contextCopied"));
+      navigate(`/chat?code=${stockCode}`);
+    }).catch(() => {
+      navigate(`/chat?code=${stockCode}`);
+    });
+  }, [stockCode, stockName, decision, currentPrice, confidencePct, upside, navigate, t]);
+
+  if (!decision) { return null; }
+
+  const style = ACTION_STYLES[decision.action] || ACTION_STYLES["持有"];
 
   return (
-    <Alert
-      type={color as "success" | "warning" | "error" | "info"}
-      showIcon
-      message={
-        <div>
-          <span className="font-semibold">{t("stockAnalysis.finalDecision")}:</span>
-          <Tag color={color === "success" ? "green" : color === "error" ? "red" : "blue"}>
+    <Card
+      size="small"
+      title={
+        <div className="flex items-center gap-2">
+          <span>{t("stockAnalysis.finalDecision")}</span>
+          <Tag
+            color={style.color === "#cf1322"
+              ? "red"
+              : style.color === "#1677ff"
+              ? "blue"
+              : style.color === "#d48806"
+              ? "orange"
+              : "green"}
+          >
             {actionLabel[decision.action] || decision.action}
           </Tag>
-          <span>{t("stockAnalysis.position")}: {decision.positionPct}%</span>
         </div>
       }
-      description={
-        <div className="text-xs">
-          <div style={{ whiteSpace: "pre-wrap", marginBottom: 8 }}>{decision.reasoning}</div>
-          <div className="flex gap-2 flex-wrap items-center">
-            {decision.targetPrice && <Tag>{t("stockAnalysis.targetPrice")}: ¥{decision.targetPrice}</Tag>}
-            {decision.stopLoss && <Tag>{t("stockAnalysis.stopLoss")}: ¥{decision.stopLoss}</Tag>}
-            <Tag>{t("stockAnalysis.riskLevel")}: {decision.riskLevel}</Tag>
-            <Tag>{t("stockAnalysis.confidence")}: {decision.confidence.toFixed(0)}%</Tag>
-            {stockCode && !watchlisted && (
-              <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>
-                ⭐ {t("stockAnalysis.addToWatchlist")}
-              </Button>
-            )}
-            {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
+      styles={{ body: { padding: "12px 16px" } }}
+    >
+      {/* 信心仪表 */}
+      <div className="mb-3">
+        <div className="flex justify-between text-xs mb-1">
+          <span style={{ color: "var(--color-text-secondary)" }}>{t("stockAnalysis.confidence")}</span>
+          <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 15 }}>
+            {confidencePct}%
+          </span>
+        </div>
+        <div
+          className="relative"
+          style={{ height: 10, borderRadius: 5, background: "var(--color-bg-elevated, #f0f0f0)", overflow: "hidden" }}
+        >
+          <div
+            style={{
+              width: `${confidencePct}%`,
+              height: "100%",
+              borderRadius: 5,
+              background: `linear-gradient(to right, ${meterColor}88, ${meterColor})`,
+              transition: "width 0.6s ease",
+            }}
+          />
+        </div>
+      </div>
+
+      {/* 推理摘要 */}
+      <div
+        className="text-xs mb-3 p-2 rounded"
+        style={{ whiteSpace: "pre-wrap", background: "var(--color-bg-elevated, #fafafa)" }}
+      >
+        {decision.reasoning}
+      </div>
+
+      {/* 核心指标网格 — 固定3列、窄屏2列，防止侧栏坍塌 */}
+      <div
+        className="grid gap-2 mb-3"
+        style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+      >
+        {decision.targetPrice && (
+          <div className="text-center p-1.5 rounded" style={{ background: "var(--color-bg-elevated, #fafafa)" }}>
+            <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+              {t("stockAnalysis.targetPrice")}
+            </div>
+            <div className="text-sm font-semibold font-mono" style={{ color: "var(--color-text)" }}>
+              ¥{decision.targetPrice}
+            </div>
+          </div>
+        )}
+        {decision.stopLoss && (
+          <div className="text-center p-1.5 rounded" style={{ background: "var(--color-bg-elevated, #fafafa)" }}>
+            <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+              {t("stockAnalysis.stopLoss")}
+            </div>
+            <div className="text-sm font-semibold font-mono" style={{ color: "#f85149" }}>¥{decision.stopLoss}</div>
+          </div>
+        )}
+        <div className="text-center p-1.5 rounded" style={{ background: "var(--color-bg-elevated, #fafafa)" }}>
+          <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("stockAnalysis.position")}</div>
+          <div className="text-sm font-semibold font-mono">{decision.positionPct}%</div>
+        </div>
+        {upside != null && (
+          <div className="text-center p-1.5 rounded" style={{ background: "var(--color-bg-elevated, #fafafa)" }}>
+            <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+              {t("stockAnalysis.expectedUpside")}
+            </div>
+            <div className="text-sm font-semibold font-mono" style={{ color: upside >= 0 ? "#3fb950" : "#f85149" }}>
+              {upside >= 0 ? "+" : ""}
+              {upside.toFixed(1)}%
+            </div>
+          </div>
+        )}
+        <div className="text-center p-1.5 rounded" style={{ background: "var(--color-bg-elevated, #fafafa)" }}>
+          <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>{t("stockAnalysis.riskLevel")}</div>
+          <div
+            className="text-sm font-semibold"
+            style={{
+              color: decision.riskLevel.includes("高")
+                ? "#f85149"
+                : decision.riskLevel.includes("低")
+                ? "#3fb950"
+                : "#d29922",
+            }}
+          >
+            {decision.riskLevel}
           </div>
         </div>
-      }
-    />
+      </div>
+
+      {/* 操作按钮 */}
+      <div className="flex gap-2 items-center flex-wrap">
+        {stockCode && !watchlisted && (
+          <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>
+            ⭐ {t("stockAnalysis.addToWatchlist")}
+          </Button>
+        )}
+        {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
+        {stockCode && (
+          <>
+            <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
+              {t("stockAnalysis.askAI")}
+            </Button>
+            <Button size="small" icon={<span>📥</span>} onClick={handleExport}>
+              {t("stockAnalysis.exportReport")}
+            </Button>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }

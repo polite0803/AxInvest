@@ -15,9 +15,12 @@ interface WatchlistItem {
 
 export function WatchlistPanel() {
   const { t } = useTranslation();
-  const stockCode = useStockAnalysisStore((s) => s.stockCode);
-  const stockName = useStockAnalysisStore((s) => s.stockName);
-  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
+  const store = useStockAnalysisStore();
+  const stockCode = store.stockCode;
+  const stockName = store.stockName;
+  const getStockQuote = store.getStockQuote;
+  const getStockKline = store.getStockKline;
+  const startAnalysis = store.startAnalysis;
   const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
   const [items, setItems] = useState<WatchlistItem[]>([]);
 
@@ -53,6 +56,15 @@ export function WatchlistPanel() {
     }
   };
 
+  const handleClick = async (item: WatchlistItem) => {
+    // 先加载报价和 K 线，再启动完整分析管线
+    await getStockQuote(item.stockCode);
+    await getStockKline(item.stockCode, "daily", 120);
+    startAnalysis(item.stockCode);
+  };
+
+  if (items.length === 0) { return null; }
+
   return (
     <div>
       <div className="flex justify-between items-center mb-2">
@@ -70,7 +82,7 @@ export function WatchlistPanel() {
         renderItem={(item) => (
           <List.Item
             style={{ cursor: "pointer" }}
-            onClick={() => getStockQuote(item.stockCode)}
+            onClick={() => handleClick(item)}
             actions={[
               <Popconfirm
                 key="del"

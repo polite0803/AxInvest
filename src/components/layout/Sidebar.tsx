@@ -387,7 +387,13 @@ export function Sidebar() {
     sections.push({
       key: "tools",
       labelKey: "sidebar.sectionTools",
-      items: builtinNavItems.filter((n) => n.key === "knowledge" || n.key === "stock-analysis"),
+      items: builtinNavItems.filter((n) => n.key === "knowledge"),
+    });
+
+    sections.push({
+      key: "invest",
+      labelKey: "sidebar.sectionInvest",
+      items: builtinNavItems.filter((n) => n.key === "stock-analysis"),
     });
 
     sections.push({

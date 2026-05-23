@@ -150,6 +150,192 @@ pub async fn ensure_stock_analysis_experts_seeded(
     seed_agency_experts(db).await?;
     seed_agent_roles(db).await?;
     seed_agent_profiles(db).await?;
+    seed_stock_analysis_workflow_template(db).await?;
+    Ok(())
+}
+
+/// 将股票分析 DAG 作为工作流模板持久化到 workflow_templates 表。
+/// 模板中的 system_prompt 使用 {{stock_code}} / {{stock_name}} / {{data_ctx}} 占位符，
+/// 运行时由 run_stock_workflow 替换为实际行情数据。
+async fn seed_stock_analysis_workflow_template(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<(), String> {
+    use axagent_core::entity::workflow_template;
+    use axagent_core::workflow_types::{
+        AgentNode, AgentNodeConfig, EdgeType, OutputMode, Position, RetryConfig, TriggerConfig,
+        TriggerNode, TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+    };
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    const TEMPLATE_ID: &str = "stock-analysis";
+
+    if workflow_template::Entity::find_by_id(TEMPLATE_ID)
+        .one(db)
+        .await
+        .map_err(|e| format!("查询工作流模板失败: {e}"))?
+        .is_some()
+    {
+        return Ok(()); // 已存在则跳过
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
+        WorkflowNode::Agent(AgentNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: title.into(),
+                description: Some(format!("股票分析: {expert_id}")),
+                position: Position { x: 0.0, y: 0.0 },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
+                },
+                timeout: Some(300),
+                enabled: true,
+            },
+            config: AgentNodeConfig {
+                role: None,
+                system_prompt: format!(
+                    "{{{{expert_prompt_{expert_id}}}}}\n\n行情数据:\n{{{{data_ctx}}}}"
+                ),
+                context_sources: vec![],
+                output_var: id.into(),
+                model: None,
+                temperature: Some(0.3),
+                max_tokens: Some(4096),
+                tools: vec![],
+                output_mode: OutputMode::Text,
+                agent_profile_id: Some(format!("stock-{expert_id}")),
+                agent_role_override: None,
+            },
+        })
+    };
+
+    let edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
+        WorkflowEdge {
+            id: id.into(),
+            source: source.into(),
+            source_handle: None,
+            target: target.into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        }
+    };
+
+    let mut nodes: Vec<WorkflowNode> = Vec::new();
+    let mut edges: Vec<WorkflowEdge> = Vec::new();
+
+    // Trigger
+    nodes.push(WorkflowNode::Trigger(TriggerNode {
+        base: WorkflowNodeBase {
+            id: "trigger".into(),
+            title: "开始分析".into(),
+            description: Some("输入股票代码启动分析".into()),
+            position: Position { x: 250.0, y: 0.0 },
+            retry: RetryConfig::default(),
+            timeout: None,
+            enabled: true,
+        },
+        config: TriggerConfig {
+            trigger_type: TriggerType::Manual,
+            config: serde_json::json!({}),
+        },
+    }));
+
+    // 9 个分析师
+    let analysts = [
+        ("a-market-analyst", "市场技术分析师", "market-analyst"),
+        ("a-sentiment", "情绪面分析师", "sentiment-analyst"),
+        ("a-news", "消息面分析师", "news-analyst"),
+        ("a-fundamentals", "基本面分析师", "fundamentals-analyst"),
+        ("a-policy", "政策面分析师", "policy-analyst"),
+        ("a-hot-money", "资金面分析师", "hot-money-tracker"),
+        ("a-lockup", "解禁监控分析师", "lockup-watcher"),
+        ("a-research", "研报分析师", "research-analyst"),
+        ("a-sector", "行业板块分析师", "sector-analyst"),
+    ];
+    let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
+
+    for (id, title, expert) in &analysts {
+        nodes.push(agent(id, title, expert));
+        edges.push(edge(&format!("e-trigger-{id}"), "trigger", id));
+    }
+
+    // 辩论 6 轮
+    let debate_pairs = [
+        ("bull-r1", "多方第1轮", "bull-researcher", &a_ids[..], "bear-r1"),
+        ("bear-r1", "空方第1轮", "bear-researcher", &["bull-r1"], "bull-r2"),
+        ("bull-r2", "多方第2轮", "bull-researcher", &["bear-r1"], "bear-r2"),
+        ("bear-r2", "空方第2轮", "bear-researcher", &["bull-r2"], "bull-r3"),
+        ("bull-r3", "多方第3轮", "bull-researcher", &["bear-r2"], "bear-r3"),
+        ("bear-r3", "空方第3轮", "bear-researcher", &["bull-r3"], ""),
+    ];
+    for (id, title, expert, deps, _next) in &debate_pairs {
+        nodes.push(agent(id, title, expert));
+        for dep in *deps {
+            edges.push(edge(&format!("e-{dep}-{id}"), dep, id));
+        }
+    }
+
+    // 风险评估（3 个并行，均依赖 bear-r3）
+    for (rid, rtitle, rexpert) in &[
+        ("risk-agg", "激进风险评估", "aggressive-debator"),
+        ("risk-con", "保守风险评估", "conservative-debator"),
+        ("risk-neu", "中性风险评估", "neutral-debator"),
+    ] {
+        nodes.push(agent(rid, rtitle, rexpert));
+        edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
+    }
+
+    // research-mgr → trader → portfolio-mgr
+    nodes.push(agent("research-mgr", "综合风险总评", "research-manager"));
+    for rid in &["risk-agg", "risk-con", "risk-neu"] {
+        edges.push(edge(&format!("e-{rid}-research-mgr"), rid, "research-mgr"));
+    }
+
+    nodes.push(agent("trader", "A股交易方案", "trader"));
+    edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
+
+    nodes.push(agent("portfolio-mgr", "最终投资决策", "portfolio-manager"));
+    edges.push(edge("e-trader-portfolio-mgr", "trader", "portfolio-mgr"));
+
+    // 写入 DB
+    let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
+    let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化边失败: {e}"))?;
+    let tags = serde_json::to_string(&["stock", "analysis", "A股"])
+        .map_err(|e| format!("序列化标签失败: {e}"))?;
+
+    workflow_template::ActiveModel {
+        id: Set(TEMPLATE_ID.to_string()),
+        name: Set("A股多维度分析".to_string()),
+        description: Set(Some(
+            "9 维度分析师 → 6 轮多空辩论 → 3 风险维度 → 交易方案 → 投资决策".to_string(),
+        )),
+        icon: Set("chart-bar".to_string()),
+        tags: Set(Some(tags)),
+        version: Set(1),
+        is_preset: Set(true),
+        is_editable: Set(true),
+        is_public: Set(true),
+        trigger_config: Set(None),
+        nodes: Set(nodes_json),
+        edges: Set(edges_json),
+        input_schema: Set(None),
+        output_schema: Set(None),
+        variables: Set(None),
+        error_config: Set(None),
+        composite_source: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| format!("写入工作流模板失败: {e}"))?;
+
+    tracing::info!("[stock_analysis_setup] 股票分析工作流模板已种子化 ({TEMPLATE_ID})");
     Ok(())
 }
 

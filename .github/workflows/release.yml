@@ -524,6 +524,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload APK and AAB to release
+        continue-on-error: true
         run: |
           # Find release APK from gen/android outputs
           APK=$(find src-tauri/gen/android/app/build/outputs/apk/release -name "*.apk" -type f 2>/dev/null | head -1)

@@ -2252,6 +2252,10 @@
     "zhipu": "Zhipu",
     "bocha": "Bocha",
     "themePreset": "Theme Preset",
+    "themePresetDeepDusk": "Deep Dusk",
+    "themePresetLightDawn": "Light Dawn",
+    "themePresetOceanicDark": "Oceanic Dark",
+    "themePresetForestDark": "Forest Dark",
     "imageGen": {
       "defaultProvider": "Default Provider",
       "providerFlux": "Flux (Replicate)",

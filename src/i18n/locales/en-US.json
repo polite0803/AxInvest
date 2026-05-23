@@ -4,6 +4,12 @@
     "title": "Smart Workspace",
     "description": "AI-Powered Work Assistant"
   },
+  "appHeader": {
+    "knowledgeContext": "Knowledge Base Overview",
+    "gatewayContext": "Gateway Running",
+    "filesContext": "File Management",
+    "terminalContext": "Terminal Sessions"
+  },
   "artifact": {
     "copiedToClipboard": "Copied to clipboard",
     "copyFailed": "Failed to copy"
@@ -1444,6 +1450,10 @@
     "themeDark": "Dark",
     "themeSystem": "System",
     "themePreset": "Theme Preset",
+    "themePresetDeepDusk": "Deep Dusk",
+    "themePresetLightDawn": "Light Dawn",
+    "themePresetOceanicDark": "Oceanic Dark",
+    "themePresetForestDark": "Forest Dark",
     "autoStart": "Start on Boot",
     "showOnStart": "Show on Start",
     "minimizeToTray": "Minimize to Tray on Close",

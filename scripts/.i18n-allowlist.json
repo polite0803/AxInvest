@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 119,
+  "total_entries": 121,
   "total_files": 119,
   "entries": [
     {
@@ -630,13 +630,13 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "8,9,10,11,12,27,28,29,30,31,32",
+      "lines": "8,9,10,11,12,13,27,28,29,30,31,32,53,54,55,56,57,73,74,75,76,77,78,79,80,82,85,86,87,115,116,117,118,119,132,230,232",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/TradePanel.tsx",
-      "lines": "9,10",
+      "lines": "9,10,171,247,248",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -696,7 +696,7 @@
     },
     {
       "file": "src/components/stock-analysis/RiskMatrix.tsx",
-      "lines": "5,14",
+      "lines": "5,14,26,27,28,29,30,31,32,33,34,35,36,37,38,40,146",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -708,7 +708,7 @@
     },
     {
       "file": "src/components/stock-analysis/KLineChart.tsx",
-      "lines": "10",
+      "lines": "10,17,18,19,20,21,22,76,126,152,153,160,161,162",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -716,6 +716,18 @@
       "file": "src/components/stock-analysis/AnalysisProgress.tsx",
       "lines": "14",
       "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/AnalystReportGrid.tsx",
+      "lines": "18,20",
+      "reason": "内部常量/内容匹配/导出文本",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/StockQuoteCard.tsx",
+      "lines": "48,96",
+      "reason": "内部常量/内容匹配/导出文本",
       "phase": 3
     }
   ]

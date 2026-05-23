@@ -6415,7 +6415,9 @@
     "reminders": "Напомин.",
     "contextPrediction": "Прогноз",
     "teammate": "Команда",
-    "steerInput": "Руль"
+    "steerInput": "Руль",
+    "showExtras": "Ещё",
+    "hideExtras": "Скрыть"
   },
   "knowledgeSettings": {
     "title": "Знания"

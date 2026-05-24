@@ -1,16 +1,7 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useStockAnalysisStore } from "@/stores";
-import {
-  CaretDownOutlined,
-  LineChartOutlined,
-  SafetyCertificateOutlined,
-  SwapOutlined,
-  TeamOutlined,
-  TrophyOutlined,
-} from "@ant-design/icons";
-import { Button, Spin, Tabs } from "antd";
-import type { CSSProperties, ReactNode } from "react";
-import { useEffect } from "react";
+import { ArrowLeftRight, LineChart, Shield, TrendingUp, Users } from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
@@ -27,7 +18,6 @@ import { StockSearchBar } from "./StockSearchBar";
 import { TradePanel } from "./TradePanel";
 import { WatchlistPanel } from "./WatchlistPanel";
 
-/** K 线周期映射：store key → { period, limit } */
 const PERIOD_MAP: Record<string, { period: string; limit: number }> = {
   "1m": { period: "daily", limit: 22 },
   "3m": { period: "daily", limit: 66 },
@@ -37,43 +27,10 @@ const PERIOD_MAP: Record<string, { period: string; limit: number }> = {
   "monthly": { period: "monthly", limit: 60 },
 };
 
-/** 可折叠侧栏面板包装器 */
-function SidebarPanel({ storeKey, icon, title, children }: {
-  storeKey: string;
-  icon: ReactNode;
-  title: string;
-  children: ReactNode;
-}) {
-  const collapsed = useStockAnalysisStore((s) => s.sidebarCollapsed[storeKey] ?? false);
-  const toggle = useStockAnalysisStore((s) => s.toggleSidebarPanel);
-  const headerStyle: CSSProperties = {
-    cursor: "pointer",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    userSelect: "none",
-    padding: "6px 8px",
-    borderRadius: 6,
-    background: "var(--surface)",
-    fontSize: 12,
-    fontWeight: 600,
-  };
-  const arrowStyle: CSSProperties = {
-    transition: "transform 0.2s",
-    fontSize: 10,
-    transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
-  };
-  return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      <div style={headerStyle} onClick={() => toggle(storeKey)}>
-        <span>
-          {icon} {title}
-        </span>
-        <CaretDownOutlined style={arrowStyle} />
-      </div>
-      {!collapsed && children}
-    </div>
-  );
+interface SheetPanel {
+  key: string;
+  label: string;
+  element: ReactNode;
 }
 
 export function StockAnalysisPage() {
@@ -89,13 +46,14 @@ export function StockAnalysisPage() {
   const klinePeriod = useStockAnalysisStore((s) => s.klinePeriod);
 
   const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState("market");
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState("trade");
 
   useEffect(() => {
     setupEventListener();
-    // 不 reset: 离开页面再回来时保留分析状态，事件监听器常驻
   }, [setupEventListener]);
 
-  // 从 URL ?code= 参数自动加载行情（对话页触发时使用）
   useEffect(() => {
     const code = searchParams.get("code");
     if (code) {
@@ -118,14 +76,11 @@ export function StockAnalysisPage() {
     }
   }, [id, loadAnalysis, getStockQuote, getStockKline]);
 
-  const tabItems = [
+  const tabs = [
     {
       key: "market",
-      label: (
-        <span>
-          <LineChartOutlined /> <span className="hidden sm:inline">{t("stockAnalysis.tab.market")}</span>
-        </span>
-      ),
+      label: t("stockAnalysis.tab.market"),
+      icon: <LineChart size={14} />,
       children: (
         <>
           <StockQuoteCard />
@@ -135,141 +90,140 @@ export function StockAnalysisPage() {
     },
     {
       key: "analysts",
-      label: (
-        <span>
-          <TeamOutlined /> <span className="hidden sm:inline">{t("stockAnalysis.tab.analysts")}</span>
-        </span>
-      ),
+      label: t("stockAnalysis.tab.analysts"),
+      icon: <Users size={14} />,
       children: <AnalystReportGrid />,
     },
     {
       key: "debate",
-      label: (
-        <span>
-          <SwapOutlined /> <span className="hidden sm:inline">{t("stockAnalysis.tab.debate")}</span>
-        </span>
-      ),
+      label: t("stockAnalysis.tab.debate"),
+      icon: <ArrowLeftRight size={14} />,
       children: <DebatePanel />,
     },
-    {
-      key: "risk",
-      label: (
-        <span>
-          <SafetyCertificateOutlined /> <span className="hidden sm:inline">{t("stockAnalysis.tab.risk")}</span>
-        </span>
-      ),
-      children: <RiskMatrix />,
-    },
+    { key: "risk", label: t("stockAnalysis.tab.risk"), icon: <Shield size={14} />, children: <RiskMatrix /> },
     {
       key: "decision",
-      label: (
-        <span>
-          <TrophyOutlined /> <span className="hidden sm:inline">{t("stockAnalysis.tab.decision")}</span>
-        </span>
-      ),
+      label: t("stockAnalysis.tab.decision"),
+      icon: <TrendingUp size={14} />,
       children: <DecisionBanner />,
     },
   ];
 
+  const sheetPanels: SheetPanel[] = [
+    { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
+    { key: "watchlist", label: t("stockAnalysis.watchlist"), element: <WatchlistPanel /> },
+    { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },
+    { key: "alerts", label: t("stockAnalysis.alert.title"), element: <PriceAlertPanel /> },
+    {
+      key: "history",
+      label: t("stockAnalysis.history"),
+      element: <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />,
+    },
+  ];
+
+  const activePanel = sheetPanels.find((p) => p.key === sheetTab);
+  const activeContent = tabs.find((t) => t.key === activeTab);
+
   return (
     <PageErrorBoundary title={t("error.page")}>
-      <div
-        className="set-page flex flex-col h-full gap-3"
-        style={{ maxWidth: 1200, margin: "0 auto" }}
-      >
-        {/* Page header */}
-        <div className="flex items-center gap-3" style={{ paddingTop: 2 }}>
-          <Button
-            size="small"
-            type="text"
-            onClick={() => navigate("/")}
-            style={{ fontSize: 12, padding: "0 8px", height: 28 }}
-          >
+      <div className="sa-layout">
+        <div className="sa-header">
+          <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
             ← {t("nav.chat")}
-          </Button>
-          <div>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, lineHeight: 1.3 }}>
-              {t("stockAnalysis.title")}
-            </h2>
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>AxInvest · 智能驱动 · 多维分析</span>
+          </button>
+          <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
+          <span className="sa-header-meta">AxInvest · 智能驱动 · 多维分析</span>
+        </div>
+
+        <div className="sa-body">
+          <StockSearchBar />
+
+          {status === "loading" && (
+            <div className="sa-loading">
+              <div className="sa-spinner" />
+              <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
+            </div>
+          )}
+
+          {status === "idle" && (
+            <div className="sa-empty">
+              <div>
+                <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
+                <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
+              </div>
+            </div>
+          )}
+
+          {status !== "loading" && status !== "idle" && (
+            <div className="sa-body-inner">
+              <div className="sa-main">
+                <AnalysisProgress />
+
+                <div className="sa-tabs">
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
+                      onClick={() => setActiveTab(tab.key)}
+                    >
+                      {tab.icon}
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {activeContent?.children}
+              </div>
+
+              <div className="sa-sidebar">
+                {sheetPanels.map((p) => (
+                  <div key={p.key} className="sa-panel">
+                    <div className="sa-panel-header">
+                      <span className="sa-panel-title">{p.label}</span>
+                    </div>
+                    <div className="sa-panel-body">{p.element}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 底部滑出面板 — 平板/移动端 */}
+        <div className={`sa-bottom-sheet${sheetOpen ? " open" : ""}`}>
+          <div className="sa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)}>
+            <div className="sa-sheet-handle-bar" />
+          </div>
+
+          <div className="sa-sheet-tabs">
+            {sheetPanels.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className={`sa-sheet-tab${sheetTab === p.key ? " active" : ""}`}
+                onClick={() => {
+                  setSheetTab(p.key);
+                  if (!sheetOpen) { setSheetOpen(true); }
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="sa-sheet-body">
+            {activePanel?.element}
           </div>
         </div>
 
-        {/* Main layout: search + progress always on top, content + sidebar below */}
-        <StockSearchBar />
-
-        {status === "loading" && (
-          <div className="flex flex-col items-center justify-center gap-2" style={{ minHeight: 120 }}>
-            <Spin size="default" />
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>
-              {t("stockAnalysis.loadingHint")}
-            </span>
-          </div>
-        )}
-        {status === "idle" && (
-          <div
-            className="flex items-center justify-center text-center"
-            style={{ minHeight: 200, color: "var(--muted)" }}
-          >
-            <div>
-              <p className="text-sm mb-1">{t("stockAnalysis.emptyHint")}</p>
-              <p className="text-xs">{t("stockAnalysis.emptyHintDetail")}</p>
-            </div>
-          </div>
-        )}
-        {status !== "idle" && (
-          <div className="flex flex-col lg:flex-row gap-3" style={{ flex: 1, minHeight: 0 }}>
-            {/* Main content */}
-            <div className="flex flex-col gap-2 flex-1 min-w-0">
-              <AnalysisProgress />
-              <Tabs
-                items={tabItems}
-                defaultActiveKey="market"
-                size="small"
-                className="stock-tabs"
-                tabBarStyle={{ marginBottom: 8 }}
-              />
-            </div>
-
-            {/* Sidebar — desktop only (<1024px falls through to tablet grid) */}
-            <div className="hidden lg:flex lg:flex-col gap-2 shrink-0" style={{ width: 260 }}>
-              <SidebarPanel storeKey="trade" icon={<span>💹</span>} title={t("stockAnalysis.tradingTitle")}>
-                <TradePanel />
-              </SidebarPanel>
-              <SidebarPanel storeKey="watchlist" icon={<span>⭐</span>} title={t("stockAnalysis.watchlist")}>
-                <WatchlistPanel />
-              </SidebarPanel>
-              <SidebarPanel storeKey="compare" icon={<span>📊</span>} title={t("stockAnalysis.compare")}>
-                <CompareView />
-              </SidebarPanel>
-              <SidebarPanel storeKey="alerts" icon={<span>🔔</span>} title={t("stockAnalysis.alert.title")}>
-                <PriceAlertPanel />
-              </SidebarPanel>
-              <SidebarPanel storeKey="history" icon={<span>📜</span>} title={t("stockAnalysis.history")}>
-                <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />
-              </SidebarPanel>
-            </div>
-          </div>
-        )}
-
-        {/* Panels for tablet (<1024px) — shared data, no double-render */}
-        <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ maxWidth: 800 }}>
-          <SidebarPanel storeKey="trade" icon={<span>💹</span>} title={t("stockAnalysis.tradingTitle")}>
-            <TradePanel />
-          </SidebarPanel>
-          <SidebarPanel storeKey="watchlist" icon={<span>⭐</span>} title={t("stockAnalysis.watchlist")}>
-            <WatchlistPanel />
-          </SidebarPanel>
-          <SidebarPanel storeKey="compare" icon={<span>📊</span>} title={t("stockAnalysis.compare")}>
-            <CompareView />
-          </SidebarPanel>
-          <SidebarPanel storeKey="alerts" icon={<span>🔔</span>} title={t("stockAnalysis.alert.title")}>
-            <PriceAlertPanel />
-          </SidebarPanel>
-          <SidebarPanel storeKey="history" icon={<span>📜</span>} title={t("stockAnalysis.history")}>
-            <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />
-          </SidebarPanel>
-        </div>
+        <button
+          type="button"
+          className="sa-sheet-toggle"
+          onClick={() => setSheetOpen(!sheetOpen)}
+        >
+          {sheetOpen ? "✕" : "+"}
+        </button>
       </div>
     </PageErrorBoundary>
   );

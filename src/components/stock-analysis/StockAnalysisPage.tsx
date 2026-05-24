@@ -54,7 +54,7 @@ function SidebarPanel({ storeKey, icon, title, children }: {
     userSelect: "none",
     padding: "6px 8px",
     borderRadius: 6,
-    background: "var(--color-bg-elevated)",
+    background: "var(--surface)",
     fontSize: 12,
     fontWeight: 600,
   };
@@ -173,7 +173,7 @@ export function StockAnalysisPage() {
   return (
     <PageErrorBoundary title={t("error.page")}>
       <div
-        className="flex flex-col h-full p-1.5 sm:p-2 lg:p-3 gap-2"
+        className="set-page flex flex-col h-full gap-2"
         style={{ maxWidth: 1200, margin: "0 auto" }}
       >
         {/* Main layout: search + progress always on top, content + sidebar below */}
@@ -182,7 +182,7 @@ export function StockAnalysisPage() {
         {status === "loading" && (
           <div className="flex flex-col items-center justify-center gap-2" style={{ minHeight: 120 }}>
             <Spin size="default" />
-            <span style={{ color: "var(--color-text-secondary)", fontSize: 13 }}>
+            <span style={{ color: "var(--muted)", fontSize: 13 }}>
               {t("stockAnalysis.loadingHint")}
             </span>
           </div>
@@ -190,7 +190,7 @@ export function StockAnalysisPage() {
         {status === "idle" && (
           <div
             className="flex items-center justify-center text-center"
-            style={{ minHeight: 200, color: "var(--color-text-secondary)" }}
+            style={{ minHeight: 200, color: "var(--muted)" }}
           >
             <div>
               <p className="text-sm mb-1">{t("stockAnalysis.emptyHint")}</p>

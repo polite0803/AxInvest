@@ -73,13 +73,6 @@ const builtinNavItems: NavItem[] = [
     isPlugin: false,
   },
   {
-    key: "stock-analysis",
-    icon: <LineChart size={18} color={NAV_ICON_COLORS.Router} />,
-    labelKey: "nav.stockAnalysis",
-    path: "/stock-analysis",
-    isPlugin: false,
-  },
-  {
     key: "terminal",
     icon: <Icon icon="fluent:terminal-20-filled" size={17} color={NAV_ICON_COLORS.Database} />,
     labelKey: "nav.terminal",
@@ -91,6 +84,13 @@ const builtinNavItems: NavItem[] = [
     icon: <Icon icon="fluent:folder-20-filled" size={17} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.files",
     path: "/files",
+    isPlugin: false,
+  },
+  {
+    key: "stock-analysis",
+    icon: <LineChart size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.stockAnalysis",
+    path: "/stock-analysis",
     isPlugin: false,
   },
 ];
@@ -370,15 +370,11 @@ export function Sidebar() {
     });
 
     sections.push({
-      key: "invest",
-      labelKey: "sidebar.sectionInvest",
-      items: builtinNavItems.filter((n) => n.key === "stock-analysis"),
-    });
-
-    sections.push({
       key: "infrastructure",
       labelKey: "sidebar.sectionInfrastructure",
-      items: builtinNavItems.filter((n) => n.key === "gateway" || n.key === "terminal" || n.key === "files"),
+      items: builtinNavItems.filter((n) =>
+        n.key === "gateway" || n.key === "terminal" || n.key === "files" || n.key === "stock-analysis"
+      ),
     });
 
     if (bottomPlugins.length > 0) {

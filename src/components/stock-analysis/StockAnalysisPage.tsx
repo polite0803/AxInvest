@@ -8,11 +8,11 @@ import {
   TeamOutlined,
   TrophyOutlined,
 } from "@ant-design/icons";
-import { Spin, Tabs } from "antd";
+import { Button, Spin, Tabs } from "antd";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { CompareView } from "./CompareView";
@@ -78,6 +78,7 @@ function SidebarPanel({ storeKey, icon, title, children }: {
 
 export function StockAnalysisPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const analysisId = useStockAnalysisStore((s) => s.analysisId);
   const setupEventListener = useStockAnalysisStore((s) => s.setupEventListener);
@@ -173,9 +174,27 @@ export function StockAnalysisPage() {
   return (
     <PageErrorBoundary title={t("error.page")}>
       <div
-        className="set-page flex flex-col h-full gap-2"
+        className="set-page flex flex-col h-full gap-3"
         style={{ maxWidth: 1200, margin: "0 auto" }}
       >
+        {/* Page header */}
+        <div className="flex items-center gap-3" style={{ paddingTop: 2 }}>
+          <Button
+            size="small"
+            type="text"
+            onClick={() => navigate("/")}
+            style={{ fontSize: 12, padding: "0 8px", height: 28 }}
+          >
+            ← {t("nav.chat")}
+          </Button>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, lineHeight: 1.3 }}>
+              {t("stockAnalysis.title")}
+            </h2>
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>AxInvest · 智能驱动 · 多维分析</span>
+          </div>
+        </div>
+
         {/* Main layout: search + progress always on top, content + sidebar below */}
         <StockSearchBar />
 
@@ -199,7 +218,7 @@ export function StockAnalysisPage() {
           </div>
         )}
         {status !== "idle" && (
-          <div className="flex flex-col lg:flex-row gap-2" style={{ flex: 1, minHeight: 0 }}>
+          <div className="flex flex-col lg:flex-row gap-3" style={{ flex: 1, minHeight: 0 }}>
             {/* Main content */}
             <div className="flex flex-col gap-2 flex-1 min-w-0">
               <AnalysisProgress />
@@ -234,7 +253,7 @@ export function StockAnalysisPage() {
         )}
 
         {/* Panels for tablet (<1024px) — shared data, no double-render */}
-        <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-2" style={{ maxWidth: 800 }}>
+        <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ maxWidth: 800 }}>
           <SidebarPanel storeKey="trade" icon={<span>💹</span>} title={t("stockAnalysis.tradingTitle")}>
             <TradePanel />
           </SidebarPanel>

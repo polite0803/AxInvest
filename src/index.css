@@ -163,6 +163,15 @@
   --color-status-warning: var(--amber);
   --color-status-info: var(--teal);
   --color-status-error: var(--red);
+  /* 股票分析专用色（A 股：红涨绿跌） */
+  --sa-red: oklch(60% 0.20 30);
+  --sa-red-bg: oklch(60% 0.20 30 / 0.12);
+  --sa-green: oklch(62% 0.18 150);
+  --sa-green-bg: oklch(62% 0.18 150 / 0.12);
+  --sa-amber: oklch(68% 0.16 85);
+  --sa-amber-bg: oklch(68% 0.16 85 / 0.12);
+  --sa-purple: oklch(62% 0.16 290);
+  --sa-purple-bg: oklch(62% 0.16 290 / 0.12);
 }
 
 /* ── Component utility classes ───────────────────────────── */

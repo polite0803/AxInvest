@@ -33,28 +33,30 @@ export function AnalystReportGrid() {
     <div>
       {/* 舆情摘要 bar */}
       {sentiment.total > 0 && (
-        <div className="mb-2 p-2 rounded text-xs" style={{ background: "var(--color-bg-elevated)" }}>
+        <div className="mb-2 p-2 rounded text-xs" style={{ background: "var(--surface)" }}>
           <div className="flex justify-between mb-1">
-            <span style={{ color: "var(--color-text-secondary)" }}>
+            <span style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.tab.analysts")} · {sentiment.total} {t("stockAnalysis.views")}
             </span>
             <span>
-              <span style={{ color: "#cf1322" }}>📈 {sentiment.bullish}</span>
+              <span style={{ color: "var(--sa-red)" }}>📈 {sentiment.bullish}</span>
               {" / "}
-              <span style={{ color: "#3f8600" }}>📉 {sentiment.bearish}</span>
+              <span style={{ color: "var(--sa-green)" }}>📉 {sentiment.bearish}</span>
               {" / "}
-              <span style={{ color: "#999" }}>➖ {sentiment.neutral}</span>
+              <span style={{ color: "var(--muted)" }}>➖ {sentiment.neutral}</span>
             </span>
           </div>
           <div className="flex h-2 rounded overflow-hidden">
             {sentiment.bullish > 0 && (
-              <div style={{ width: `${(sentiment.bullish / sentiment.total) * 100}%`, background: "#cf1322" }} />
+              <div style={{ width: `${(sentiment.bullish / sentiment.total) * 100}%`, background: "var(--sa-red)" }} />
             )}
             {sentiment.neutral > 0 && (
-              <div style={{ width: `${(sentiment.neutral / sentiment.total) * 100}%`, background: "#999" }} />
+              <div style={{ width: `${(sentiment.neutral / sentiment.total) * 100}%`, background: "var(--muted)" }} />
             )}
             {sentiment.bearish > 0 && (
-              <div style={{ width: `${(sentiment.bearish / sentiment.total) * 100}%`, background: "#3f8600" }} />
+              <div
+                style={{ width: `${(sentiment.bearish / sentiment.total) * 100}%`, background: "var(--sa-green)" }}
+              />
             )}
           </div>
         </div>

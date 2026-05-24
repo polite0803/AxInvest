@@ -63,7 +63,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
       {/* 关键论点 */}
       {key_points && key_points.length > 0 && (
-        <ul className="text-xs list-disc pl-4 mb-1" style={{ color: "var(--color-text-secondary)" }}>
+        <ul className="text-xs list-disc pl-4 mb-1" style={{ color: "var(--muted)" }}>
           {key_points.map((p, i) => <li key={i}>{p}</li>)}
         </ul>
       )}
@@ -95,7 +95,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
       {/* 置信度 */}
       {confidence != null && (
-        <div className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>
+        <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
           {t("stockAnalysis.confidence")}: {(confidence * 100).toFixed(0)}%
         </div>
       )}

@@ -59,7 +59,7 @@ export function AnalysisProgress() {
       {error && (
         <div
           className="mb-1 p-1.5 rounded flex justify-between items-center text-xs"
-          style={{ color: "#ff4d4f", background: "#fff2f0" }}
+          style={{ color: "var(--sa-red)", background: "var(--sa-red-bg)" }}
         >
           <span>{error}</span>
           {stockCode && status === "error" && (
@@ -94,25 +94,25 @@ export function AnalysisProgress() {
 
       {/* 实时进度提示 */}
       {(status === "running" || status === "loading") && progressMessage && (
-        <div className="mt-1 flex items-center gap-1.5 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+        <div className="mt-1 flex items-center gap-1.5 text-xs" style={{ color: "var(--muted)" }}>
           <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
           <span>{progressMessage}</span>
         </div>
       )}
       {status === "completed" && progressMessage && (
-        <div className="mt-1 text-xs" style={{ color: "var(--color-success-text, #52c41a)" }}>
+        <div className="mt-1 text-xs" style={{ color: "var(--sa-green)" }}>
           {progressMessage}
         </div>
       )}
       {status === "error" && progressMessage && (
-        <div className="mt-1 text-xs" style={{ color: "#ff4d4f" }}>
+        <div className="mt-1 text-xs" style={{ color: "var(--sa-red)" }}>
           {progressMessage}
         </div>
       )}
 
       {/* 进度条 */}
       {(status === "running" || status === "loading") && progressPct > 0 && (
-        <Progress percent={progressPct} size="small" showInfo={false} className="mt-1" strokeColor="#1677ff" />
+        <Progress percent={progressPct} size="small" showInfo={false} className="mt-1" strokeColor="var(--accent)" />
       )}
     </div>
   );

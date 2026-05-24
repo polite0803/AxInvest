@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { DecisionBanner } from "../DecisionBanner";
 
@@ -28,7 +29,11 @@ vi.mock("@/stores", () => ({
 describe("DecisionBanner", () => {
   it("renders nothing when no decision", () => {
     storeState.decision = null;
-    const { container } = render(<DecisionBanner />);
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
     expect(container.firstChild).toBeNull();
   });
 
@@ -42,7 +47,11 @@ describe("DecisionBanner", () => {
       targetPrice: 1850.0,
       stopLoss: 1580.0,
     };
-    const { container } = render(<DecisionBanner />);
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
     expect(container.firstChild).not.toBeNull();
     expect(container.textContent).toContain("买入");
     expect(container.textContent).toContain("10%");

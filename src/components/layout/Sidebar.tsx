@@ -372,9 +372,13 @@ export function Sidebar() {
     sections.push({
       key: "infrastructure",
       labelKey: "sidebar.sectionInfrastructure",
-      items: builtinNavItems.filter((n) =>
-        n.key === "gateway" || n.key === "terminal" || n.key === "files" || n.key === "stock-analysis"
-      ),
+      items: builtinNavItems.filter((n) => n.key === "gateway" || n.key === "terminal" || n.key === "files"),
+    });
+
+    sections.push({
+      key: "invest",
+      labelKey: "sidebar.sectionInvest",
+      items: builtinNavItems.filter((n) => n.key === "stock-analysis"),
     });
 
     if (bottomPlugins.length > 0) {

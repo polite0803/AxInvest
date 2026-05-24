@@ -4,13 +4,13 @@ import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 风险类型 → 颜色映射（匹配后端 risk_type 字段） */
+/** 风险类型 → 颜色映射（匹配后端 risk_type 字段，OKLch 值与 index.css --sa-* 同步） */
 const RISK_COLORS: Record<string, string> = {
-  "aggressive-debator": "#f85149",
-  "conservative-debator": "#3fb950",
-  "neutral-debator": "#58a6ff",
-  "research-manager": "#d29922",
-  "comprehensive": "#a371f7",
+  "aggressive-debator": "oklch(55% 0.20 28)",
+  "conservative-debator": "oklch(55% 0.18 150)",
+  "neutral-debator": "oklch(55% 0.16 250)",
+  "research-manager": "oklch(60% 0.18 85)",
+  "comprehensive": "oklch(60% 0.16 290)",
 };
 
 /** 风险类型 → i18n key */
@@ -97,7 +97,7 @@ export function RiskMatrix() {
         indicator: dimensions.map((name) => ({ name, max: 100 })),
         center: ["50%", "50%"],
         radius: "60%",
-        axisName: { color: "var(--color-text-secondary, #666)", fontSize: 11 },
+        axisName: { color: "var(--muted)", fontSize: 11 },
         splitArea: {
           areaStyle: {
             color: ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)", "rgba(22,119,255,0.06)"],
@@ -111,9 +111,9 @@ export function RiskMatrix() {
         data: [{ value: scores, name: t("stockAnalysis.riskAssessment") }],
         symbol: "circle",
         symbolSize: 6,
-        areaStyle: { color: "rgba(248,81,73,0.15)" },
-        lineStyle: { color: "#f85149", width: 2 },
-        itemStyle: { color: "#f85149" },
+        areaStyle: { color: "oklch(55% 0.20 28 / 0.15)" },
+        lineStyle: { color: "oklch(55% 0.20 28)", width: 2 },
+        itemStyle: { color: "oklch(55% 0.20 28)" },
       }],
     });
   }, [riskAssessments, t]);
@@ -136,12 +136,12 @@ export function RiskMatrix() {
             : type;
           const score = computeRiskScore(report);
           return (
-            <div key={type} className="p-1.5 rounded" style={{ background: "var(--color-bg-elevated)" }}>
+            <div key={type} className="p-1.5 rounded" style={{ background: "var(--surface)" }}>
               <div className="text-sm font-medium mb-0.5 flex items-center justify-between">
                 <Tag color={color} style={{ marginRight: 4 }}>{label}</Tag>
                 <span
                   className="text-xs font-mono"
-                  style={{ color: score > 70 ? "#f85149" : score > 40 ? "#d29922" : "#3fb950" }}
+                  style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
                 >
                   风险分: {score}
                 </span>

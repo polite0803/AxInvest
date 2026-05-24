@@ -22,6 +22,13 @@ const PERIOD_OPTIONS = [
   { key: "monthly", label: "月", limit: 60, periodType: "monthly" as const },
 ] as const;
 
+/** ECharts 画布用色 — 与 index.css --sa-* 变量保持同步（OKLch 值） */
+const SA_RED = "oklch(60% 0.20 30)";
+const SA_GREEN = "oklch(62% 0.18 150)";
+const MA_ORANGE = "oklch(68% 0.16 50)";
+const MA_BLUE = "oklch(55% 0.14 250)";
+const MA_PURPLE = "oklch(55% 0.14 310)";
+
 export function KLineChart() {
   const { t } = useTranslation();
   const klineData = useStockAnalysisStore((s) => s.klineData);
@@ -78,7 +85,7 @@ export function KLineChart() {
         data: ohlc,
         xAxisIndex: 0,
         yAxisIndex: 0,
-        itemStyle: { color: "#ef232a", color0: "#14b143", borderColor: "#ef232a", borderColor0: "#14b143" },
+        itemStyle: { color: SA_RED, color0: SA_GREEN, borderColor: SA_RED, borderColor0: SA_GREEN },
       },
     ];
 
@@ -91,7 +98,7 @@ export function KLineChart() {
         yAxisIndex: 0,
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 1.5, color: "#f7941e" },
+        lineStyle: { width: 1.5, color: MA_ORANGE },
         z: 1,
       });
     }
@@ -104,7 +111,7 @@ export function KLineChart() {
         yAxisIndex: 0,
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 1.5, color: "#2196f3" },
+        lineStyle: { width: 1.5, color: MA_BLUE },
         z: 1,
       });
     }
@@ -117,7 +124,7 @@ export function KLineChart() {
         yAxisIndex: 0,
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 1.5, color: "#9c27b0" },
+        lineStyle: { width: 1.5, color: MA_PURPLE },
         z: 1,
       });
     }
@@ -131,7 +138,7 @@ export function KLineChart() {
       itemStyle: {
         color: (params: { dataIndex: number }) => {
           const k = ohlc[params.dataIndex];
-          return k && k[1] >= k[0] ? "#ef232a" : "#14b143";
+          return k && k[1] >= k[0] ? SA_RED : SA_GREEN;
         },
       },
     });
@@ -142,10 +149,10 @@ export function KLineChart() {
       tooltip: {
         trigger: "axis",
         axisPointer: { type: "cross" },
-        backgroundColor: "var(--color-bg-elevated, rgba(255,255,255,0.95))",
-        borderColor: "var(--border-color, #d9d9d9)",
+        backgroundColor: "var(--surface)",
+        borderColor: "var(--border)",
         borderWidth: 1,
-        textStyle: { fontSize: 12, color: "#333" },
+        textStyle: { fontSize: 12, color: "var(--fg)" },
         formatter: (params: unknown) => {
           const arr = params as Array<{ seriesName: string; value: number; dataIndex: number }>;
           if (!arr || arr.length === 0) { return ""; }
@@ -162,13 +169,13 @@ export function KLineChart() {
             vol ? `成交量: ${(vol.value / 10000).toFixed(1)}万手` : "",
           ];
           if (indicators.ma5 && ma5[idx] != null) {
-            lines.push(`<span style="color:#f7941e">MA5: ${ma5[idx]}</span>`);
+            lines.push(`<span style="color:${MA_ORANGE}">MA5: ${ma5[idx]}</span>`);
           }
           if (indicators.ma10 && ma10[idx] != null) {
-            lines.push(`<span style="color:#2196f3">MA10: ${ma10[idx]}</span>`);
+            lines.push(`<span style="color:${MA_BLUE}">MA10: ${ma10[idx]}</span>`);
           }
           if (indicators.ma20 && ma20[idx] != null) {
-            lines.push(`<span style="color:#9c27b0">MA20: ${ma20[idx]}</span>`);
+            lines.push(`<span style="color:${MA_PURPLE}">MA20: ${ma20[idx]}</span>`);
           }
           return lines.filter(Boolean).join("<br>");
         },
@@ -186,7 +193,7 @@ export function KLineChart() {
       },
       dataZoom: [
         { type: "inside", xAxisIndex: [0, 1], start: 60, end: 100 },
-        { type: "slider", xAxisIndex: [0, 1], bottom: 0, height: 20, borderColor: "#d9d9d9" },
+        { type: "slider", xAxisIndex: [0, 1], bottom: 0, height: 20, borderColor: "var(--border)" },
       ],
       grid: [
         { left: "3%", right: "3%", top: 30, height: "58%" },
@@ -216,7 +223,7 @@ export function KLineChart() {
     return (
       <div
         className="flex items-center justify-center"
-        style={{ minHeight: 200, color: "var(--color-text-secondary)", fontSize: 13 }}
+        style={{ minHeight: 200, color: "var(--muted)", fontSize: 13 }}
       >
         {t("stockAnalysis.noChartData")}
       </div>
@@ -237,11 +244,9 @@ export function KLineChart() {
               padding: "2px 8px",
               fontSize: 11,
               borderRadius: 4,
-              border: `1px solid ${
-                klinePeriod === opt.key ? "var(--color-primary, #1677ff)" : "var(--border-color, #d9d9d9)"
-              }`,
-              background: klinePeriod === opt.key ? "var(--color-primary-bg, #e6f4ff)" : "transparent",
-              color: klinePeriod === opt.key ? "var(--color-primary, #1677ff)" : "var(--color-text-secondary, #666)",
+              border: `1px solid ${klinePeriod === opt.key ? "var(--accent)" : "var(--border)"}`,
+              background: klinePeriod === opt.key ? "var(--accent-dim)" : "transparent",
+              color: klinePeriod === opt.key ? "var(--accent)" : "var(--muted)",
               cursor: "pointer",
               whiteSpace: "nowrap",
             }}
@@ -253,7 +258,7 @@ export function KLineChart() {
       {/* 第二行：MA 图例 + 开关 */}
       <div
         className="flex gap-3 mb-1 flex-wrap items-center text-xs"
-        style={{ color: "var(--color-text-tertiary, #999)" }}
+        style={{ color: "var(--muted)" }}
       >
         <label className="flex items-center gap-1 cursor-pointer select-none" onClick={() => toggleIndicator("ma5")}>
           <input
@@ -262,7 +267,7 @@ export function KLineChart() {
             onChange={() => toggleIndicator("ma5")}
             style={{ width: 12, height: 12 }}
           />
-          <span style={{ color: "#f7941e" }}>━</span> MA5
+          <span style={{ color: MA_ORANGE }}>━</span> MA5
         </label>
         <label className="flex items-center gap-1 cursor-pointer select-none" onClick={() => toggleIndicator("ma10")}>
           <input
@@ -271,7 +276,7 @@ export function KLineChart() {
             onChange={() => toggleIndicator("ma10")}
             style={{ width: 12, height: 12 }}
           />
-          <span style={{ color: "#2196f3" }}>━</span> MA10
+          <span style={{ color: MA_BLUE }}>━</span> MA10
         </label>
         <label className="flex items-center gap-1 cursor-pointer select-none" onClick={() => toggleIndicator("ma20")}>
           <input
@@ -280,7 +285,7 @@ export function KLineChart() {
             onChange={() => toggleIndicator("ma20")}
             style={{ width: 12, height: 12 }}
           />
-          <span style={{ color: "#9c27b0" }}>━</span> MA20
+          <span style={{ color: MA_PURPLE }}>━</span> MA20
         </label>
       </div>
       {!chartReady && <div className="ax-skeleton" style={{ width: "100%", height: chartHeight, borderRadius: 6 }} />}

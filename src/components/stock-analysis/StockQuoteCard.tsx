@@ -31,7 +31,7 @@ export function StockQuoteCard() {
   if (!quote) { return null; }
 
   const isUp = quote.changePct >= 0;
-  const color = isUp ? "#cf1322" : "#3f8600";
+  const color = isUp ? "var(--sa-red)" : "var(--sa-green)";
   const changeAmount = quote.price - quote.open;
 
   return (
@@ -53,7 +53,7 @@ export function StockQuoteCard() {
       <div className="flex items-end gap-4 flex-wrap">
         {/* 当前价 + 涨跌额 + 涨跌幅 */}
         <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold font-mono" style={{ color }}>
+          <span className="text-[28px] font-semibold font-mono" style={{ color }}>
             {quote.price.toFixed(2)}
           </span>
           <Tag color={isUp ? "red" : "green"}>
@@ -67,7 +67,7 @@ export function StockQuoteCard() {
         </div>
 
         {/* 核心数据：4 列紧凑网格 */}
-        <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 text-xs" style={{ color: "var(--color-text-secondary)" }}>
+        <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 text-xs" style={{ color: "var(--muted)" }}>
           <span>
             {t("stockAnalysis.open")}: <b className="font-mono">{quote.open}</b>
           </span>

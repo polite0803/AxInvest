@@ -151,7 +151,7 @@ export function TradePanel() {
       render: (v: number | null) =>
         v != null
           ? (
-            <span style={{ color: v >= 0 ? "#3fb950" : "#f85149" }}>
+            <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
               {v.toFixed(0)}
             </span>
           )
@@ -187,7 +187,7 @@ export function TradePanel() {
       render: (v: number | null) =>
         v != null
           ? (
-            <span style={{ color: v >= 0 ? "#3fb950" : "#f85149" }}>
+            <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
               {v.toFixed(0)}
             </span>
           )
@@ -202,7 +202,7 @@ export function TradePanel() {
       <Card size="small" title={t("trade.title")} styles={{ body: { padding: "8px 12px" } }}>
         <div
           className="flex items-center justify-between gap-2 text-xs"
-          style={{ color: "var(--color-text-secondary)" }}
+          style={{ color: "var(--muted)" }}
         >
           <span>{t("trade.disabledHint")}</span>
           <Switch checked={enabled} onChange={handleToggle} />
@@ -281,8 +281,8 @@ export function TradePanel() {
 
       {/* Analysis consistency hint */}
       {lastAnalysis && (
-        <div className="text-xs p-1 rounded" style={{ background: "var(--color-bg-elevated)", marginTop: 4 }}>
-          <span style={{ color: "var(--color-text-secondary)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
+        <div className="text-xs p-1 rounded" style={{ background: "var(--surface)", marginTop: 4 }}>
+          <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
           <Tag color={lastAnalysis.action === A.BUY ? "green" : lastAnalysis.action === A.SELL ? "red" : "blue"}>
             {lastAnalysis.action}
           </Tag>
@@ -308,17 +308,17 @@ export function TradePanel() {
             const maxPct = positions.length > 0 && totalMv > 0
               ? Math.max(...positions.map(p => ((p.marketValue ?? 0) / totalMv) * 100))
               : 0;
-            const riskColor = maxPct > 50 ? "#f85149" : maxPct > 30 ? "#d29922" : "#3fb950";
+            const riskColor = maxPct > 50 ? "var(--sa-red)" : maxPct > 30 ? "var(--sa-amber)" : "var(--sa-green)";
             return (
               <div
                 className="text-xs grid grid-cols-2 gap-x-2 p-1 mt-1 rounded"
-                style={{ background: "var(--color-bg-elevated)" }}
+                style={{ background: "var(--surface)" }}
               >
                 <span>
                   {t("stockAnalysis.totalMarketValue")}:{" "}
                   <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
                 </span>
-                <span style={{ color: totalPnl >= 0 ? "#3fb950" : "#f85149" }}>
+                <span style={{ color: totalPnl >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
                   {t("stockAnalysis.unrealizedPnl")}: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
                 </span>
                 <span style={{ color: riskColor }}>

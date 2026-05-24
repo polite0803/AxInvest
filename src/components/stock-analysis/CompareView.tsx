@@ -16,9 +16,9 @@ function CompareRow({ label, v1, v2, color1, color2 }: {
   return (
     <div
       className="flex items-center text-xs"
-      style={{ borderBottom: "1px solid var(--border-color, #f0f0f0)", padding: "4px 0" }}
+      style={{ borderBottom: "1px solid var(--border)", padding: "4px 0" }}
     >
-      <span className="shrink-0" style={{ width: 48, color: "var(--color-text-secondary)" }}>{label}</span>
+      <span className="shrink-0" style={{ width: 48, color: "var(--muted)" }}>{label}</span>
       <span className="flex-1 text-right font-mono" style={{ color: color1 }}>{v1}</span>
       <span className="flex-1 text-right font-mono" style={{ color: color2 }}>{v2}</span>
     </div>
@@ -94,7 +94,7 @@ export function CompareView() {
         indicator: labels.map((name, i) => ({ name, max: maxes[i] })),
         center: ["50%", "55%"],
         radius: "52%",
-        axisName: { color: "var(--color-text-secondary, #666)", fontSize: 10 },
+        axisName: { color: "var(--muted)", fontSize: 10 },
         splitArea: { areaStyle: { color: ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)"] } },
       },
       series: [{
@@ -103,16 +103,16 @@ export function CompareView() {
           {
             value: raw1,
             name: quote1.code,
-            areaStyle: { color: "rgba(207,19,34,0.1)" },
-            lineStyle: { color: "#cf1322" },
-            itemStyle: { color: "#cf1322" },
+            areaStyle: { color: "oklch(60% 0.20 30 / 0.1)" },
+            lineStyle: { color: "oklch(60% 0.20 30)" },
+            itemStyle: { color: "oklch(60% 0.20 30)" },
           },
           {
             value: raw2,
             name: quote2.code,
-            areaStyle: { color: "rgba(63,134,0,0.1)" },
-            lineStyle: { color: "#3f8600" },
-            itemStyle: { color: "#3f8600" },
+            areaStyle: { color: "oklch(62% 0.18 150 / 0.1)" },
+            lineStyle: { color: "oklch(62% 0.18 150)" },
+            itemStyle: { color: "oklch(62% 0.18 150)" },
           },
         ],
         symbol: "circle",
@@ -179,8 +179,8 @@ export function CompareView() {
             label={t("stockAnalysis.change")}
             v1={`${quote1.changePct.toFixed(2)}%`}
             v2={`${quote2.changePct.toFixed(2)}%`}
-            color1={quote1.changePct >= 0 ? "#cf1322" : "#3f8600"}
-            color2={quote2.changePct >= 0 ? "#cf1322" : "#3f8600"}
+            color1={quote1.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)"}
+            color2={quote2.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)"}
           />
           <CompareRow label="PE" v1={quote1.pe ?? "-"} v2={quote2.pe ?? "-"} />
           <CompareRow label="PB" v1={quote1.pb ?? "-"} v2={quote2.pb ?? "-"} />

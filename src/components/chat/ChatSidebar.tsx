@@ -23,7 +23,6 @@ import {
 } from "@/stores";
 import { isSidebarAutoSelectSuppressed, resetSidebarAutoSelectSuppression } from "@/stores/domain/conversationStore";
 import type { Conversation, Message } from "@/types";
-import Conversations from "@ant-design/x/es/conversations";
 import type { ConversationItemType } from "@ant-design/x/es/conversations/interface";
 import { ModelIcon } from "@lobehub/icons";
 import {
@@ -2196,16 +2195,6 @@ export function ChatSidebar({
               >
                 <style>
                   {`
-                .ant-conversations .ant-conversations-item-active {
-                  background-color: ${token.colorPrimaryBg} !important;
-                }
-                .ant-conversations .ant-conversations-item-active .ant-conversations-label {
-                  color: ${token.colorPrimary} !important;
-                }
-                .ant-conversations .ant-conversations-group-label {
-                  flex: 1;
-                  overflow: hidden;
-                }
                 @keyframes spin {
                   from { transform: rotate(0deg); }
                   to { transform: rotate(360deg); }
@@ -2231,20 +2220,82 @@ export function ChatSidebar({
                   )
                   : conversationItems.length > 0
                   ? (
-                    <Conversations
-                      items={conversationItems}
-                      activeKey={multiSelectMode
-                        ? undefined
-                        : (activeConversationId ?? undefined)}
-                      onActiveChange={handleConversationClick}
-                      groupable={{
-                        label: (group: string) => renderGroupLabel(group),
-                        collapsible: (group: string) => group.startsWith("ws:"),
-                        expandedKeys: expandedKeys,
-                        onExpand: handleGroupExpand,
-                      }}
-                      menu={menuConfig}
-                    />
+                    <div className="conv-list">
+                      {(() => {
+                        const entries: Array<{ group: string; items: typeof conversationItems }> = [];
+                        const seen = new Map<string, typeof conversationItems>();
+                        conversationItems.forEach((item) => {
+                          const g = item.group ?? "__nogroup__";
+                          if (!seen.has(g)) {
+                            const arr: typeof conversationItems = [];
+                            seen.set(g, arr);
+                            entries.push({ group: g, items: arr });
+                          }
+                          seen.get(g)!.push(item);
+                        });
+                        return entries.map(({ group, items }) => {
+                          const isWsGroup = group.startsWith("ws:");
+                          const isExpanded = !isWsGroup || expandedKeys.includes(group);
+                          return (
+                            <div key={group} className="conv-group">
+                              {group !== "__nogroup__" && (
+                                <div
+                                  className="conv-group-header"
+                                  onClick={() => {
+                                    if (isWsGroup) {
+                                      handleGroupExpand(
+                                        isExpanded
+                                          ? expandedKeys.filter((k) => k !== group)
+                                          : [...expandedKeys, group],
+                                      );
+                                    }
+                                  }}
+                                >
+                                  {isWsGroup && (
+                                    <span className={"conv-group-chevron" + (isExpanded ? " expanded" : "")}>
+                                      <ChevronRight size={12} />
+                                    </span>
+                                  )}
+                                  {renderGroupLabel(group)}
+                                </div>
+                              )}
+                              {isExpanded && items.map((item) => (
+                                <div
+                                  key={item.key}
+                                  className={"conv-item" + (activeConversationId === item.key ? " active" : "")}
+                                  data-conv-id={item["data-conv-id"]}
+                                  style={item.style}
+                                  onClick={() => handleConversationClick(item.key)}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      handleConversationClick(item.key);
+                                    }
+                                  }}
+                                >
+                                  <span className="conv-item-icon">{item.icon}</span>
+                                  <span className="conv-item-label">{item.label}</span>
+                                  {!multiSelectMode && (
+                                    <Dropdown menu={menuConfig(item)} trigger={["click"]} placement="bottomRight">
+                                      <button
+                                        className="conv-item-menu-btn"
+                                        onClick={(e) =>
+                                          e.stopPropagation()}
+                                        aria-label="Menu"
+                                      >
+                                        <Pencil size={12} />
+                                      </button>
+                                    </Dropdown>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
                   )
                   : (
                     <div className="flex items-center justify-center h-full">

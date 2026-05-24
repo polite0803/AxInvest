@@ -5,8 +5,7 @@ import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
 import { useBackupStore, useSettingsStore, useUIStore } from "@/stores";
 import type { PageKey } from "@/types";
-import { App, Divider, Dropdown, Popover, Space, Spin, theme, Tooltip, Typography } from "antd";
-import type { MenuProps } from "antd";
+import { App, Divider, Popover, Space, Spin, theme, Typography } from "antd";
 import {
   ArrowDownCircle,
   Bug,
@@ -99,6 +98,8 @@ const THEME_OPTIONS = [
   },
 ] as const;
 
+import { type DropdownItem, DropdownMenu } from "@/components/layout/DropdownMenu";
+import { Tooltip } from "@/components/layout/Tooltip";
 import { LANG_OPTIONS } from "@/lib/constants";
 
 export function TitleBar() {
@@ -113,7 +114,7 @@ export function TitleBar() {
     : location.pathname === "/"
     ? "chat"
     : (location.pathname.slice(1) as PageKey);
-  const themeMode = useSettingsStore((s) => s.settings.theme_mode);
+
   const alwaysOnTop = useSettingsStore((s) => s.settings.always_on_top);
   const saveSettings = useSettingsStore((s) => s.saveSettings);
   const settings = useSettingsStore((s) => s.settings);
@@ -142,13 +143,13 @@ export function TitleBar() {
     await checkForUpdate();
   }, [checkForUpdate]);
 
-  const themeMenuItems: MenuProps["items"] = THEME_OPTIONS.map((opt) => ({
+  const themeMenuItems: DropdownItem[] = THEME_OPTIONS.map((opt) => ({
     key: opt.key,
     icon: opt.icon,
     label: t(opt.labelKey),
   }));
 
-  const langMenuItems: MenuProps["items"] = LANG_OPTIONS.map((opt) => ({
+  const langMenuItems: DropdownItem[] = LANG_OPTIONS.map((opt) => ({
     key: opt.key,
     icon: <span>{opt.icon}</span>,
     label: opt.label,
@@ -402,7 +403,7 @@ export function TitleBar() {
   );
 
   const GITHUB_REPO = "https://github.com/polite0803/AxAgent";
-  const githubMenuItems: MenuProps["items"] = [
+  const githubMenuItems: DropdownItem[] = [
     {
       key: "feature",
       icon: (
@@ -418,7 +419,7 @@ export function TitleBar() {
       icon: <Bug size={14} color={TITLEBAR_ICON_COLORS.Bug} />,
       label: t("titlebar.submitBug"),
     },
-    { type: "divider" },
+    { divider: true, key: "sep" },
     {
       key: "star",
       icon: <Star size={14} color={TITLEBAR_ICON_COLORS.Star} />,
@@ -497,36 +498,23 @@ export function TitleBar() {
 
   return (
     <div
-      className="title-bar-drag ax-titlebar-compact"
+      className="titlebar"
       role="toolbar"
       tabIndex={-1}
       {...(!IS_WINDOWS ? { "data-tauri-drag-region": true } : {})}
       onMouseDown={handleDragMouseDown}
       onDoubleClick={IS_WINDOWS ? handleTitleBarDoubleClick : undefined}
       style={{
-        height: 28,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
         paddingLeft: IS_WINDOWS ? 12 : 72,
         paddingRight: IS_WINDOWS ? 0 : 12,
-        backgroundColor: "transparent",
-        flexShrink: 0,
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-        position: "relative",
       }}
     >
       {/* Left: App icon + name (Windows only) */}
       {IS_WINDOWS
         ? (
           <div
-            className="title-bar-nodrag"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              marginRight: 8,
-            }}
+            className="titlebar-actions"
+            style={{ marginRight: 8 }}
           >
             <img
               src={appLogo}
@@ -570,15 +558,12 @@ export function TitleBar() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {!IS_ANDROID && (
-          <div
-            className="title-bar-nodrag"
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
-          >
+          <div className="titlebar-actions">
             {/* Pin Toggle — 移动端隐藏，从设置中访问 */}
             {deviceLayout !== "mobile" && (
               <Tooltip title={t("desktop.alwaysOnTop")}>
                 <button
-                  className="ax-titlebar-btn"
+                  className="titlebar-btn"
                   onClick={handlePinToggle}
                   style={{
                     color: pinned ? token.colorPrimary : token.colorTextSecondary,
@@ -602,38 +587,37 @@ export function TitleBar() {
             )}
 
             {/* Appearance: theme + language combined */}
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    type: "group",
-                    label: t("settings.groupTheme"),
-                    children: themeMenuItems,
-                  },
-                  { type: "divider" },
-                  ...langMenuItems,
-                ],
-                onClick: ({ key }) => {
-                  if (THEME_OPTIONS.some((o) => o.key === key)) {
-                    saveSettings({ theme_mode: key });
-                  } else {
-                    i18n.changeLanguage(key);
-                    saveSettings({ language: key });
-                  }
+            <DropdownMenu
+              items={[
+                {
+                  key: "theme-group",
+                  type: "group" as const,
+                  label: t("settings.groupTheme"),
+                  children: themeMenuItems.map((item) => ({
+                    ...item,
+                    onClick: () => {
+                      saveSettings({ theme_mode: item.key });
+                    },
+                  })),
                 },
-                selectedKeys: [themeMode, i18n.language],
-              }}
+                { key: "theme-lang-divider", divider: true },
+                ...langMenuItems.map((item) => ({
+                  ...item,
+                  onClick: () => {
+                    i18n.changeLanguage(item.key);
+                    saveSettings({ language: item.key });
+                  },
+                })),
+              ]}
               trigger={["click"]}
-              placement="bottomRight"
-              destroyOnHidden
             >
               <button
-                className="ax-titlebar-btn"
+                className="titlebar-btn"
                 style={{ color: token.colorTextSecondary }}
               >
                 <Globe size={12} color={TITLEBAR_ICON_COLORS.Globe} />
               </button>
-            </Dropdown>
+            </DropdownMenu>
 
             {/* Quick Backup — 移动端隐藏，从设置中访问 */}
             {deviceLayout !== "mobile" && (
@@ -761,7 +745,7 @@ export function TitleBar() {
               >
                 <Tooltip title={t("titlebar.quickBackup")}>
                   <button
-                    className="ax-titlebar-btn"
+                    className="titlebar-btn"
                     style={{
                       color: countdownText
                         ? token.colorPrimary
@@ -784,57 +768,49 @@ export function TitleBar() {
 
             {/* More: GitHub, check update, reload — 移动端隐藏 */}
             {deviceLayout !== "mobile" && (
-              <Dropdown
-                menu={{
-                  items: [
-                    ...githubMenuItems,
-                    { type: "divider" },
-                    ...(isTauri()
-                      ? [
-                        {
-                          key: "checkUpdate",
-                          icon: (
-                            <ArrowDownCircle
-                              size={12}
-                              color={TITLEBAR_ICON_COLORS.ArrowDownCircle}
-                            />
-                          ),
-                          label: t("settings.checkUpdate"),
-                        },
-                      ]
-                      : []),
-                    {
-                      key: "reload",
-                      icon: (
-                        <RotateCcw
-                          size={12}
-                          color={TITLEBAR_ICON_COLORS.RotateCcw}
-                        />
-                      ),
-                      label: t("desktop.reloadPage"),
-                    },
-                  ] as MenuProps["items"],
-                  onClick: ({ key }) => {
-                    if (key === "reload") {
-                      handleReload();
-                    } else if (key === "checkUpdate") {
-                      handleCheckUpdate();
-                    } else {
-                      handleGithubClick({ key });
-                    }
+              <DropdownMenu
+                items={[
+                  ...githubMenuItems.map((item) => ({
+                    ...item,
+                    onClick: () => handleGithubClick({ key: item.key }),
+                  })),
+                  { key: "more-divider", divider: true },
+                  ...(isTauri()
+                    ? [
+                      {
+                        key: "checkUpdate",
+                        icon: (
+                          <ArrowDownCircle
+                            size={12}
+                            color={TITLEBAR_ICON_COLORS.ArrowDownCircle}
+                          />
+                        ),
+                        label: t("settings.checkUpdate"),
+                        onClick: handleCheckUpdate,
+                      },
+                    ]
+                    : []),
+                  {
+                    key: "reload",
+                    icon: (
+                      <RotateCcw
+                        size={12}
+                        color={TITLEBAR_ICON_COLORS.RotateCcw}
+                      />
+                    ),
+                    label: t("desktop.reloadPage"),
+                    onClick: handleReload,
                   },
-                }}
+                ]}
                 trigger={["click"]}
-                placement="bottomRight"
-                destroyOnHidden
               >
                 <button
-                  className="ax-titlebar-btn"
+                  className="titlebar-btn"
                   style={{ color: token.colorTextSecondary }}
                 >
                   <Ellipsis size={12} color={TITLEBAR_ICON_COLORS.GitFork} />
                 </button>
-              </Dropdown>
+              </DropdownMenu>
             )}
 
             {/* Notification Bell */}
@@ -849,7 +825,7 @@ export function TitleBar() {
               })`}
             >
               <button
-                className="ax-titlebar-btn"
+                className="titlebar-btn"
                 data-testid="settings-nav-btn"
                 onClick={(e) => {
                   handleSettingsToggle();
@@ -882,8 +858,8 @@ export function TitleBar() {
         {/* Windows window controls */}
         {IS_WINDOWS && isTauri() && (
           <div
-            className="title-bar-nodrag"
-            style={{ display: "flex", alignItems: "center", marginLeft: 4 }}
+            className="titlebar-actions"
+            style={{ marginLeft: 4 }}
           >
             {/* Minimize */}
             <button

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>AxAgent — 布局方案 v3</title>
+<title>AxInvest — 布局方案 v4（含股票分析）</title>
 <style>
 /* ═══ RESET ═══ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -663,6 +663,382 @@ svg{flex-shrink:0;overflow:visible}
   .fl-date{display:none}
   .fl-pagination{flex-direction:column;gap:8px;align-items:stretch}
 }
+/* ═══ STOCK ANALYSIS PAGE ═══ */
+.sa-layout{display:flex;flex:1;min-height:0;overflow:hidden}
+.sa-body{flex:1;overflow-y:auto;padding:14px 18px 18px;min-width:0}
+.sa-search-row{display:flex;gap:8px;margin-bottom:12px;position:relative}
+.sa-search-box{flex:1;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface);transition:border-color .15s}
+.sa-search-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sa-search-box input{flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--fg)}
+.sa-search-box input::placeholder{color:var(--muted)}
+.sa-search-box svg{width:15px;height:15px;color:var(--muted);flex-shrink:0}
+.sa-search-dropdown{position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.3);max-height:240px;overflow-y:auto;display:none}
+.sa-search-dropdown.open{display:block}
+.sa-search-option{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:all .1s;font-size:12.5px}
+.sa-search-option:hover{background:var(--accent-dim)}
+.sa-search-option .sa-s-code{font-family:var(--font-mono);font-size:11px;color:var(--accent);font-weight:500}
+.sa-search-option .sa-s-name{color:var(--fg);flex:1}
+.sa-search-option .sa-s-market{font-size:10px;color:var(--muted);padding:1px 5px;border-radius:4px;border:1px solid var(--border)}
+
+.sa-progress{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:14px}
+.sa-progress-bar{height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:10px}
+.sa-progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:2px;transition:width .4s ease}
+.sa-progress-msg{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.sa-progress-msg .sa-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.3}}
+/* ── Ant Design Steps 风格进度指示 ── */
+.sa-steps{display:flex;margin-bottom:14px;width:100%}
+.sa-step-wrap{flex:1;display:flex;align-items:flex-start;position:relative}
+.sa-step-wrap:last-child{flex:0 0 auto}
+.sa-step-wrap:last-child .sa-step-line{display:none}
+.sa-step-line{position:absolute;top:12px;left:calc(50% + 14px);right:calc(-50% + 14px);height:1px;background:var(--border);transition:background .3s}
+.sa-step-wrap.done .sa-step-line{background:var(--green)}
+.sa-step-wrap.active .sa-step-line{background:linear-gradient(90deg,var(--accent),var(--border))}
+.sa-step-btn{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:default;position:relative;z-index:1;width:100%}
+.sa-step-circle{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;transition:all .3s;flex-shrink:0;border:2px solid var(--border);background:var(--surface);color:var(--muted)}
+.sa-step-wrap.done .sa-step-circle{background:var(--green);border-color:var(--green);color:#fff}
+.sa-step-wrap.active .sa-step-circle{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 0 0 3px var(--accent-soft)}
+.sa-step-wrap.error .sa-step-circle{background:#ff4d4f;border-color:#ff4d4f;color:#fff}
+.sa-step-label{font-size:10px;color:var(--muted);text-align:center;white-space:nowrap;line-height:1.2;padding:0 2px}
+.sa-step-wrap.done .sa-step-label{color:var(--green)}
+.sa-step-wrap.active .sa-step-label{color:var(--accent);font-weight:500}
+.sa-step-tag{font-size:9px;padding:0 5px;border-radius:4px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);display:none;margin-top:1px;font-weight:500}
+.sa-step-wrap.active .sa-step-tag{display:inline-block}
+
+/* Error banner */
+.sa-error-banner{display:none;font-size:11px;padding:6px 10px;border-radius:6px;margin-bottom:8px;align-items:center;justify-content:space-between;background:#fff2f0;border:1px solid #ffccc7;color:#ff4d4f}
+.sa-error-banner.show{display:flex}
+.sa-error-retry{padding:2px 10px;border-radius:4px;border:1px solid #ff4d4f;background:transparent;color:#ff4d4f;font-size:10.5px;cursor:pointer;font-weight:500}
+
+/* LLM badge states */
+.sa-llm-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:10px;font-size:9.5px;font-weight:500;letter-spacing:.02em}
+.sa-llm-badge.offline{background:#fff7e6;color:#d48806;border:1px solid #ffe58f}
+.sa-llm-badge.live{background:#e6f7ff;color:#1677ff;border:1px solid #91d5ff;animation:pulse 1.5s ease-in-out infinite}
+.sa-llm-badge.done{background:#f6ffed;color:#52c41a;border:1px solid #b7eb8f}
+.sa-llm-badge.error{background:#fff2f0;color:#ff4d4f;border:1px solid #ffccc7}
+
+/* Completed message */
+.sa-progress-msg.done{color:var(--green)}
+.sa-progress-msg.error{color:#ff4d4f}
+
+/* Historical analysis panel */
+.sa-history-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.sa-history-header{padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;font-weight:500;color:var(--fg);border-bottom:1px solid var(--border);transition:background .15s}
+.sa-history-header:hover{background:var(--accent-dim)}
+.sa-history-header .hh-arrow{width:10px;height:10px;transition:transform .2s;color:var(--muted)}
+.sa-history-header.collapsed .hh-arrow{transform:rotate(-90deg)}
+.sa-history-body{padding:8px 10px;font-size:10.5px;color:var(--muted);line-height:1.6}
+.sa-history-body.collapsed{display:none}
+.sa-history-item{border:1px solid var(--border);border-radius:4px;margin-bottom:6px;overflow:hidden}
+.sa-history-item-header{padding:4px 8px;font-size:10px;font-weight:500;cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:var(--accent-dim)}
+.sa-history-item-header:hover{background:var(--border)}
+.sa-history-item-body{padding:6px 8px;font-size:10px;white-space:pre-wrap;max-height:120px;overflow-y:auto;color:var(--muted);border-top:1px solid var(--border)}
+.sa-history-item-body.collapsed{display:none}
+
+.sa-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:14px;overflow-x:auto}
+.sa-tabs::-webkit-scrollbar{display:none}
+.sa-tab{padding:7px 14px;font-size:12.5px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .12s;white-space:nowrap;display:flex;align-items:center;gap:5px}
+.sa-tab:hover{color:var(--fg)}
+.sa-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
+.sa-tab svg{width:14px;height:14px}
+.sa-tab-content{display:none}
+.sa-tab-content.active{display:block}
+
+.sa-quote{display:grid;grid-template-columns:auto 1fr;gap:12px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;margin-bottom:14px}
+.sa-quote-name{font-size:17px;font-weight:600;color:var(--fg);grid-column:1}
+.sa-quote-code{font-size:11px;color:var(--muted);font-family:var(--font-mono)}
+.sa-quote-price{grid-column:2;grid-row:1/3;text-align:right}
+.sa-quote-price .qp-main{font-size:28px;font-weight:600;letter-spacing:-.02em;line-height:1}
+.sa-quote-price .qp-change{font-size:13px;margin-top:2px}
+.sa-quote-price .qp-change.up{color:var(--red)}
+.sa-quote-price .qp-change.down{color:var(--green)}
+.sa-quote-details{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;padding-top:8px;border-top:1px solid var(--border-light)}
+.sa-quote-detail{text-align:center}
+.sa-quote-detail .qd-label{font-size:10px;color:var(--muted);text-transform:uppercase}
+.sa-quote-detail .qd-value{font-size:12.5px;font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums}
+
+.sa-kline-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;margin-bottom:14px;overflow:hidden}
+.sa-kline-wrap canvas{display:block;width:100%;height:360px}
+
+.sa-report-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:14px}
+.sa-report-card{padding:14px;border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface);transition:all .12s}
+.sa-report-card:hover{border-color:var(--accent)}
+.sa-report-card .rc-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.sa-report-card .rc-icon{width:32px;height:32px;border-radius:var(--radius);display:grid;place-items:center;font-size:14px;flex-shrink:0}
+.sa-report-card .rc-icon.blue{background:var(--accent-bg);color:var(--accent)}
+.sa-report-card .rc-icon.purple{background:var(--purple-bg);color:var(--purple)}
+.sa-report-card .rc-icon.green{background:var(--green-bg);color:var(--green)}
+.sa-report-card .rc-icon.amber{background:var(--amber-bg);color:var(--amber)}
+.sa-report-card .rc-name{font-size:13px;font-weight:600;color:var(--fg);flex:1}
+.sa-report-card .rc-body{font-size:12px;color:var(--fg-2);line-height:1.55;white-space:pre-wrap;max-height:200px;overflow-y:auto}
+
+.sa-debate-round{border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;overflow:hidden}
+.sa-debate-header{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--fg);cursor:pointer}
+.sa-debate-header .dh-arrow{width:12px;height:12px;transition:transform .2s;color:var(--muted)}
+.sa-debate-header.collapsed .dh-arrow{transform:rotate(-90deg)}
+.sa-debate-body{display:grid;grid-template-columns:1fr 1fr;gap:0}
+@media(max-width:600px){.sa-debate-body{grid-template-columns:1fr}}
+.sa-debate-col{padding:12px 14px}
+.sa-debate-col.bull{border-right:1px solid var(--border-light);background:var(--red-bg)}
+.sa-debate-col.bear{background:var(--green-bg)}
+.sa-debate-col .dc-tag{font-size:10px;padding:1px 7px;border-radius:4px;font-weight:600;display:inline-block;margin-bottom:6px}
+.sa-debate-col .dc-tag.bull{background:var(--red);color:#fff}
+.sa-debate-col .dc-tag.bear{background:var(--green);color:#fff}
+.sa-debate-col .dc-text{font-size:12px;line-height:1.5;white-space:pre-wrap;max-height:260px;overflow-y:auto;color:var(--fg-2)}
+@media(max-width:600px){.sa-debate-col.bull{border-right:none;border-bottom:1px solid var(--border-light)}}
+
+.sa-risk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:14px}
+.sa-risk-item{padding:14px;border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface)}
+.sa-risk-item .ri-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.sa-risk-item .ri-tag{font-size:10px;padding:1px 7px;border-radius:4px;font-weight:500}
+.sa-risk-item .ri-title{font-size:13px;font-weight:600;color:var(--fg);flex:1}
+.sa-risk-item .ri-body{font-size:12px;color:var(--fg-2);line-height:1.5;white-space:pre-wrap;max-height:150px;overflow-y:auto}
+
+.sa-decision{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 18px;margin-bottom:14px;border-left:4px solid var(--accent)}
+.sa-decision .dc-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.sa-decision .dc-action{font-size:14px;font-weight:600}
+.sa-decision .dc-position{font-size:12px;color:var(--muted)}
+.sa-decision .dc-action.buy{color:var(--red)}.sa-decision .dc-action.sell{color:var(--green)}.sa-decision .dc-action.hold{color:var(--accent)}
+.sa-decision .dc-reason{font-size:12px;color:var(--fg-2);line-height:1.5;white-space:pre-wrap;margin-bottom:10px}
+.sa-decision .dc-tags{display:flex;gap:6px;flex-wrap:wrap}
+.sa-decision .dc-tag-item{font-size:10.5px;padding:2px 8px;border-radius:4px;background:var(--accent-dim);border:1px solid var(--border);color:var(--fg-2)}
+
+.sa-sidebar{display:flex;flex-direction:column;gap:10px}
+.sa-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.sa-panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--fg)}
+.sa-panel-body{padding:10px 14px 14px}
+
+.sa-trade-form{display:flex;flex-direction:column;gap:8px}
+.sa-trade-form .tf-row{display:flex;align-items:center;gap:8px}
+.sa-trade-form .tf-row label{font-size:11.5px;color:var(--muted);width:56px;flex-shrink:0}
+.sa-trade-form .tf-input{flex:1;height:28px;padding:0 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg);font-size:12px;color:var(--fg);outline:none;transition:border-color .15s}
+.sa-trade-form .tf-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sa-trade-form .tf-input::placeholder{color:var(--muted)}
+.sa-trade-form .tf-select{height:28px;padding:0 22px 0 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg);font-size:12px;color:var(--fg);outline:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 6px center;flex:1}
+.sa-trade-form .tf-select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sa-trade-form .tf-btn{height:28px;padding:0 12px;border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer;border:none;transition:all .12s}
+.sa-trade-form .tf-btn.buy{background:var(--red);color:#fff}
+.sa-trade-form .tf-btn.buy:hover{filter:brightness(1.1)}
+.sa-trade-form .tf-btn.sell{background:var(--green);color:#fff}
+.sa-trade-form .tf-btn.sell:hover{filter:brightness(1.1)}
+
+.sa-wl-list{display:flex;flex-direction:column;gap:4px}
+.sa-wl-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--radius);cursor:pointer;transition:all .1s}
+.sa-wl-item:hover{background:var(--accent-dim)}
+.sa-wl-item .wl-code{font-family:var(--font-mono);font-size:11px;color:var(--accent);font-weight:500}
+.sa-wl-item .wl-name{font-size:12px;color:var(--fg);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sa-wl-item .wl-del{width:20px;height:20px;display:grid;place-items:center;border-radius:4px;color:var(--muted);opacity:0;transition:all .1s}
+.sa-wl-item:hover .wl-del{opacity:1}
+.sa-wl-item .wl-del:hover{background:var(--red-bg);color:var(--red)}
+.sa-wl-add{display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:11.5px;color:var(--muted);cursor:pointer;border-radius:var(--radius);transition:all .1s}
+.sa-wl-add:hover{background:var(--accent-dim);color:var(--accent)}
+
+.sa-cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sa-cmp-input{height:28px;padding:0 8px;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg);font-size:12px;color:var(--fg);outline:none}
+.sa-cmp-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sa-cmp-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.sa-cmp-table th{text-align:left;padding:6px 8px;font-weight:500;color:var(--muted);border-bottom:1px solid var(--border);font-size:10.5px}
+.sa-cmp-table td{padding:5px 8px;border-bottom:1px solid var(--border-light);color:var(--fg-2)}
+
+.sa-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;color:var(--muted);gap:10px}
+.sa-empty svg{width:36px;height:36px;opacity:.25}
+.sa-empty-text{font-size:13px}
+.sa-empty-sub{font-size:11.5px;color:var(--muted)}
+
+.sa-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:1px 6px;border-radius:4px;height:18px;font-weight:500}
+.sa-badge.red{background:var(--red-bg);color:var(--red);border:1px solid var(--red)}
+.sa-badge.green{background:var(--green-bg);color:var(--green);border:1px solid var(--green)}
+.sa-badge.blue{background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent)}
+.sa-badge.amber{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+
+.sa-llm-status{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;padding:2px 8px;border-radius:4px}
+.sa-llm-status.live{background:var(--green-bg);color:var(--green)}
+.sa-llm-status.placeholder{background:var(--amber-bg);color:var(--amber)}
+
+/* 平板 + 移动：底部可折叠面板模式 */
+@media(max-width:1024px){
+  .sa-quote{grid-template-columns:1fr;gap:8px}
+  .sa-quote-price{grid-column:1;grid-row:auto;text-align:left}
+  .sa-quote-price .qp-main{font-size:24px}
+  .sa-report-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+  .sa-risk-grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+  .sa-layout{flex-direction:column}
+
+  /* 底部可折叠面板 */
+  .sa-sidebar-toggle{display:flex!important}
+  .sa-sidebar{position:fixed!important;bottom:0;left:0;right:0;width:100%!important;min-width:0!important;max-height:380px!important;border-left:none!important;border-top:1px solid var(--border);border-radius:12px 12px 0 0;padding:8px 14px!important;z-index:100;transform:translateY(calc(100% - 36px));transition:transform .3s cubic-bezier(.4,0,.2,1);box-shadow:0 -4px 24px rgba(0,0,0,.25)}
+  .sa-sidebar.open{transform:translateY(0)}
+  .sa-sidebar .sa-sidebar-handle{display:flex!important}
+  .sa-sidebar{overflow-y:auto}
+  .sa-sidebar-tabs{display:flex!important;margin-bottom:8px;position:sticky;top:0;background:var(--surface);z-index:1}
+  .sa-sidebar .sa-panel{display:none;margin-bottom:8px}
+  .sa-sidebar .sa-panel.active{display:flex;flex-direction:column}
+  .sa-sidebar .sa-panel:last-child{margin-bottom:0}
+  .sa-sidebar .sa-panel-header{cursor:default}
+  .sa-sidebar .sa-panel-header .collapse-icon{display:none}
+  .sa-kline-wrap canvas{height:280px!important}
+  .sa-kline-wrap,.sa-decision,.sa-radar-wrap,.sa-sentiment-wrap,.sa-confidence-wrap{margin-bottom:10px}
+  .sa-radar-wrap canvas,.sa-confidence-wrap{height:240px!important}
+}
+@media(min-width:601px) and (max-width:1024px){
+  .sa-body{padding:12px 16px}
+  .sa-quote{padding:14px 16px}
+  .sa-kline-wrap{padding:12px}
+  .sa-report-grid{grid-template-columns:repeat(2,1fr)}
+  .sa-risk-grid{grid-template-columns:repeat(2,1fr)}
+  .sa-quote-details{grid-template-columns:repeat(4,1fr)}
+}
+@media(max-width:600px){
+  .sa-body{padding:8px 10px}
+  .sa-search-row{margin-bottom:8px}
+  .sa-search-box{height:30px;font-size:12px}
+  .sa-progress{padding:10px 12px;margin-bottom:10px}
+  .sa-progress-msg{font-size:10.5px}
+  .sa-steps{gap:3px;margin-bottom:10px}
+  .sa-step{padding:3px 8px;font-size:10px}
+  .sa-tabs{margin-bottom:10px}
+  .sa-tab{padding:5px 8px;font-size:11px}
+  .sa-quote{padding:10px 12px;margin-bottom:10px;grid-template-columns:1fr;gap:4px}
+  .sa-quote-name{font-size:14px}
+  .sa-quote-code{font-size:10px}
+  .sa-quote-price{grid-column:1;grid-row:auto;text-align:left;display:flex;align-items:baseline;gap:8px;padding-top:4px}
+  .sa-quote-price .qp-main{font-size:22px}
+  .sa-quote-details{grid-template-columns:repeat(2,1fr);padding-top:6px;gap:4px}
+  .sa-quote-detail .qd-value{font-size:11.5px}
+  .sa-kline-wrap{padding:8px}
+  .sa-kline-wrap .kl-title{font-size:11px;margin-bottom:4px}
+  .sa-kline-wrap canvas{height:200px!important}
+  .sa-radar-wrap canvas{height:180px!important}
+  .sa-radar-wrap{padding:10px;margin-bottom:10px}
+  .sa-sentiment-wrap,.sa-confidence-wrap{padding:10px;margin-bottom:10px}
+  .sa-sentiment-stat .ss-value{font-size:14px}
+  #saKlineTooltip{font-size:10px;padding:6px 8px;min-width:100px}
+  .sa-report-grid{grid-template-columns:1fr;gap:8px;margin-bottom:10px}
+  .sa-report-card{padding:10px 12px}
+  .sa-report-card .rc-body{font-size:11px;max-height:140px}
+  .sa-debate-round{margin-bottom:8px}
+  .sa-debate-col{padding:8px 10px}
+  .sa-debate-col .dc-text{font-size:11px;max-height:180px}
+  .sa-risk-grid{grid-template-columns:1fr;gap:8px;margin-bottom:10px}
+  .sa-risk-item{padding:10px 12px}
+  .sa-risk-item .ri-title{font-size:12px}
+  .sa-risk-item .ri-body{font-size:11px}
+  .sa-decision{padding:10px 12px}
+  .sa-decision .dc-top{gap:4px}
+  .sa-cmp-grid{grid-template-columns:1fr}
+  .sa-sidebar{max-height:70vh!important;padding:8px 10px!important}
+}
+
+/* ── 移动端侧栏附加元素（始终可见，非 @media 内） ── */
+.sa-sidebar .sa-sidebar-handle{display:none;align-items:center;justify-content:center;padding:4px 0 6px;cursor:pointer}
+.sa-sidebar .sa-sidebar-handle span{width:32px;height:3px;border-radius:2px;background:var(--border);transition:background .15s}
+.sa-sidebar .sa-sidebar-handle:hover span{background:var(--muted)}
+.sa-sidebar-tabs{display:none;gap:2px;margin-bottom:6px;overflow-x:auto}
+.sa-sidebar-tabs::-webkit-scrollbar{display:none}
+.sa-sidebar-tab{padding:4px 10px;font-size:11px;border-radius:4px;color:var(--muted);cursor:pointer;white-space:nowrap;transition:all .1s;border:none;background:none}
+.sa-sidebar-tab.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.sa-sidebar-toggle{display:none;position:fixed;bottom:8px;right:8px;z-index:99;width:40px;height:40px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);align-items:center;justify-content:center;transition:transform .15s}
+.sa-sidebar-toggle:active{transform:scale(.92)}
+
+/* ══ 增强 K 线 - 十字光标 + Tooltip ══ */
+.kl-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px}
+.kl-title{font-size:13px;font-weight:600}
+.kl-timespan{display:flex;gap:2px;background:var(--bg);border-radius:4px;padding:2px}
+.kl-timespan button{padding:2px 10px;font-size:10.5px;border-radius:3px;color:var(--muted);cursor:pointer;border:none;background:none;transition:all .1s}
+.kl-timespan button.active{background:var(--accent-soft);color:var(--accent);font-weight:500}
+.kl-timespan button:hover:not(.active){color:var(--fg)}
+.kl-legend{display:flex;gap:10px;flex-wrap:wrap;padding:4px 0}
+.kl-legend span{font-size:10px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.kl-legend span i{display:inline-block;width:14px;height:2px;border-radius:1px}
+#saKlineWrap{position:relative}
+#saKlineTooltip{display:none;position:absolute;pointer-events:none;z-index:10;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;line-height:1.5;min-width:120px;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+#saKlineTooltip .kt-date{font-size:10px;color:var(--muted);margin-bottom:2px}
+#saKlineTooltip .kt-row{display:flex;justify-content:space-between;gap:12px;color:var(--fg-2)}
+#saKlineTooltip .kt-row .kt-val{font-weight:500;font-variant-numeric:tabular-nums;text-align:right;min-width:44px}
+#saKlineTooltip .kt-row .kt-up{color:var(--red)}
+#saKlineTooltip .kt-row .kt-dn{color:var(--green)}
+/* ══ 风险雷达图 ══ */
+.sa-radar-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;margin-bottom:14px;overflow:hidden}
+.sa-radar-wrap canvas{display:block;width:100%;height:280px}
+.sa-radar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sa-radar-title{font-size:13px;font-weight:600;color:var(--fg)}
+.sa-radar-score{font-size:11px;color:var(--muted)}
+/* ══ 辩论情绪仪表 ══ */
+.sa-sentiment-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;margin-bottom:14px}
+.sa-sentiment-bar{position:relative;height:32px;border-radius:6px;background:linear-gradient(to right,var(--green),var(--amber),var(--red));margin:8px 0;overflow:hidden}
+.sa-sentiment-bar .sb-indicator{position:absolute;top:-3px;width:4px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 4px rgba(0,0,0,.3);transition:left 0.5s ease}
+.sa-sentiment-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}
+.sa-sentiment-stats{display:flex;justify-content:space-around;text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-light)}
+.sa-sentiment-stat .ss-label{font-size:10px;color:var(--muted)}
+.sa-sentiment-stat .ss-value{font-size:16px;font-weight:600}
+.sa-sentiment-stat .ss-value.bull{color:var(--red)}
+.sa-sentiment-stat .ss-value.bear{color:var(--green)}
+.sa-sentiment-stat .ss-value.neutral{color:var(--muted)}
+/* ══ 决策信心仪表 ══ */
+.sa-confidence-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;margin-bottom:14px}
+.sa-confidence-gauge{position:relative;height:8px;border-radius:4px;background:var(--border);margin:10px 0;overflow:hidden}
+.sa-confidence-gauge .cg-fill{height:100%;border-radius:4px;transition:width 0.6s ease;background:linear-gradient(90deg,var(--green),var(--amber) 50%,var(--red))}
+.sa-confidence-gauge .cg-marker{position:absolute;top:-5px;width:3px;height:18px;background:#fff;border-radius:1px;box-shadow:0 0 4px rgba(0,0,0,.3)}
+.sa-confidence-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px}
+.sa-stoploss-warning{font-size:11px;padding:8px 10px;border-radius:var(--radius);background:var(--red-bg);color:var(--red);margin-top:8px;line-height:1.4}
+.sa-profit-opportunity{font-size:11px;padding:8px 10px;border-radius:var(--radius);background:var(--green-bg);color:var(--green);margin-top:6px;line-height:1.4}
+
+/* ══ 价格提醒面板 ══ */
+.sa-alert-table{width:100%;border-collapse:collapse;font-size:11px}
+.sa-alert-table th{text-align:left;padding:4px 6px;font-weight:500;color:var(--muted);border-bottom:1px solid var(--border);font-size:10px}
+.sa-alert-table td{padding:3px 6px;border-bottom:1px solid var(--border-light);color:var(--fg-2)}
+.sa-alert-table .at-code{font-family:var(--font-mono);font-size:10px;color:var(--accent);font-weight:500}
+.sa-alert-table .at-action{width:20px;text-align:center}
+.sa-alert-table .at-action button{width:18px;height:18px;display:grid;place-items:center;border-radius:3px;color:var(--muted);opacity:0;transition:all .1s;border:none;background:none;cursor:pointer}
+.sa-alert-table tr:hover .at-action button{opacity:1}
+.sa-alert-table .at-action button:hover{background:var(--red-bg);color:var(--red)}
+.sa-alert-form{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--accent-dim);margin-bottom:6px}
+.sa-alert-form .af-row{display:flex;gap:4px;align-items:center}
+.sa-alert-form .af-input{flex:1;height:26px;padding:0 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);font-size:11px;color:var(--fg);outline:none}
+.sa-alert-form .af-input:focus{border-color:var(--accent)}
+.sa-alert-form .af-select{height:26px;padding:0 20px 0 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);font-size:11px;color:var(--fg);outline:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 4px center}
+.sa-alert-form .af-select:focus{border-color:var(--accent)}
+.sa-alert-form .af-btn{height:26px;padding:0 8px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:none;transition:all .1s}
+.sa-alert-form .af-btn.primary{background:var(--accent);color:#fff}
+.sa-alert-form .af-btn.primary:hover{filter:brightness(1.1)}
+.sa-alert-empty{text-align:center;padding:16px;font-size:11px;color:var(--muted)}
+.sa-alert-triggered{display:inline-flex;align-items:center;gap:2px;font-size:9px;padding:1px 4px;border-radius:3px;background:var(--green-bg);color:var(--green)}
+
+/* ══ 增强分析师卡片 ══ */
+.rc-signals{display:flex;gap:3px;flex-wrap:wrap;margin-top:6px}
+.rc-signal-tag{font-size:9.5px;padding:1px 5px;border-radius:3px;font-weight:500}
+.rc-signal-tag.bull{background:var(--red-bg);color:var(--red);border:1px solid var(--red)}
+.rc-signal-tag.bear{background:var(--green-bg);color:var(--green);border:1px solid var(--green)}
+.rc-signal-tag.neutral{background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent)}
+.rc-risk-flags{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
+.rc-risk-flag{font-size:9px;padding:1px 4px;border-radius:3px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+.rc-confidence{font-size:10px;margin-top:6px;color:var(--muted)}
+.rc-keypoints{list-style:disc;padding-left:14px;margin-top:6px;font-size:11px;color:var(--fg-2);line-height:1.5}
+.rc-keypoints li{margin-bottom:2px}
+
+/* ══ 增强决策横幅 ══ */
+.dc-watchlist-btn{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:4px;font-size:10.5px;cursor:pointer;border:1px solid var(--border);background:var(--accent-dim);color:var(--accent);transition:all .1s}
+.dc-watchlist-btn:hover{background:var(--accent-soft);border-color:var(--accent)}
+.dc-watchlist-btn.added{background:var(--amber-bg);color:var(--amber);border-color:var(--amber);pointer-events:none}
+.dc-meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:6px;margin-top:8px}
+.dc-meta-item{text-align:center;padding:4px 6px;border-radius:var(--radius);background:var(--accent-dim)}
+.dc-meta-item .dm-label{font-size:9px;color:var(--muted)}
+.dc-meta-item .dm-value{font-size:13px;font-weight:600;color:var(--fg)}
+.dc-meta-item .dm-value.green{color:var(--green)}
+.dc-meta-item .dm-value.red{color:var(--red)}
+.dc-meta-item .dm-value.amber{color:var(--amber)}
+
+/* ══ 进度指示器增强 ══ */
+.sa-llm-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 6px;border-radius:4px}
+.sa-llm-badge.live{background:var(--green-bg);color:var(--green);border:1px solid var(--green)}
+.sa-llm-badge.offline{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+.sa-llm-badge.error{background:var(--red-bg);color:var(--red);border:1px solid var(--red)}
+.sa-sub-progress{font-size:10px;color:var(--muted);margin-left:4px}
+.sa-step-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.sa-step-dot.pending{background:var(--border)}
+.sa-step-dot.active{background:var(--accent);animation:pulse 1.2s infinite}
+.sa-step-dot.done{background:var(--green)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 </style>
 </head>
 <body>
@@ -686,7 +1062,7 @@ svg{flex-shrink:0;overflow:visible}
         <circle cx="22" cy="6.5" r="4" stroke="var(--accent)" stroke-width=".6" opacity=".25"/>
       </svg>
       <span class="logo-text">
-        <span class="logo-ax">Ax</span><span class="logo-agent">Agent</span>
+        <span class="logo-ax">Ax</span><span class="logo-agent">Invest</span>
       </span>
     </div>
     <div class="titlebar-drag"></div>
@@ -809,14 +1185,21 @@ svg{flex-shrink:0;overflow:visible}
           <path d="M6 13h12M6 17h8" stroke-width="1.3"/>
         </svg>
       </button>
-      <div class="nav-spacer"></div>
-      <div class="nav-divider"></div>
+      <button class="nav-item" title="股票分析" onclick="switchPage('stock')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12V7H5a2 2 0 00-2 2v10a2 2 0 002 2h16v-5" fill="currentColor" fill-opacity=".08"/>
+          <path d="M3 10l6 5 4-4 5 5 4-4"/>
+          <path d="M21 12V7" stroke-width="1.2"/>
+        </svg>
+      </button>
       <button class="nav-item" title="设置" onclick="switchPage('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
           <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" fill="currentColor" fill-opacity=".08"/>
         </svg>
       </button>
+      <div class="nav-spacer"></div>
+      <div class="nav-divider"></div>
       <button class="nav-item" title="插件" onclick="">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="currentColor" fill-opacity=".08"/>
@@ -1042,7 +1425,7 @@ svg{flex-shrink:0;overflow:visible}
               返回对话
             </span>
             <h2>设置</h2>
-            <span class="ph-meta">配置你的 AxAgent</span>
+            <span class="ph-meta">配置 AxInvest</span>
           </div>
           <div class="settings-layout">
             <!-- Settings sidebar -->
@@ -2204,6 +2587,420 @@ svg{flex-shrink:0;overflow:visible}
           </div>
         </div><!-- /page-terminal -->
 
+        <!-- ═══ STOCK ANALYSIS PAGE ═══ -->
+        <div class="page" id="page-stock">
+          <div class="page-header">
+            <span class="ph-back" onclick="switchPage('chat')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>
+              返回对话
+            </span>
+            <h2>股票分析</h2>
+            <span class="ph-meta" id="saMeta">AxInvest · 智能驱动 · 多维分析</span>
+          </div>
+          <div class="sa-layout">
+            <div class="sa-body">
+
+              <!-- Search Bar -->
+              <div class="sa-search-row">
+                <div class="sa-search-box">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input type="text" id="saSearchInput" placeholder="输入股票代码或名称搜索…" oninput="saSearch(this.value)">
+                </div>
+                <button class="gw-btn gw-btn-primary" onclick="saStartAnalysis()" id="saStartBtn" disabled>分析</button>
+              </div>
+              <div class="sa-search-dropdown" id="saSearchDropdown"></div>
+
+              <!-- Progress (hidden by default) -->
+              <div class="sa-progress" id="saProgress" style="display:none">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                  <span class="sa-llm-badge offline" id="saLlmBadge">⚠ 离线模拟</span>
+                  <span style="font-size:10px;color:var(--muted);letter-spacing:.04em;opacity:.5">AxInvest</span>
+                  <span class="sa-sub-progress" id="saSubProgress"></span>
+                </div>
+                <!-- Error banner (hidden by default) -->
+                <div class="sa-error-banner" id="saErrorBanner">
+                  <span id="saErrorMsg"></span>
+                  <button class="sa-error-retry" onclick="saRetryAnalysis()">重试</button>
+                </div>
+                <div class="sa-progress-bar"><div class="sa-progress-fill" id="saProgressFill" style="width:0%"></div></div>
+                <!-- Steps: 编号圆点 + 连接线 (Ant Design Steps 风格) -->
+                <div class="sa-steps" id="saSteps">
+                  <div class="sa-step-wrap" data-sa-step="0">
+                    <div class="sa-step-line"></div>
+                    <div class="sa-step-btn"><div class="sa-step-circle">1</div><div class="sa-step-label">数据获取</div><div class="sa-step-tag" id="saTag0"></div></div>
+                  </div>
+                  <div class="sa-step-wrap" data-sa-step="1">
+                    <div class="sa-step-line"></div>
+                    <div class="sa-step-btn"><div class="sa-step-circle">2</div><div class="sa-step-label">分析师</div><div class="sa-step-tag" id="saTag1"></div></div>
+                  </div>
+                  <div class="sa-step-wrap" data-sa-step="2">
+                    <div class="sa-step-line"></div>
+                    <div class="sa-step-btn"><div class="sa-step-circle">3</div><div class="sa-step-label">辩论</div><div class="sa-step-tag" id="saTag2"></div></div>
+                  </div>
+                  <div class="sa-step-wrap" data-sa-step="3">
+                    <div class="sa-step-line"></div>
+                    <div class="sa-step-btn"><div class="sa-step-circle">4</div><div class="sa-step-label">风险</div><div class="sa-step-tag" id="saTag3"></div></div>
+                  </div>
+                  <div class="sa-step-wrap" data-sa-step="4">
+                    <div class="sa-step-line"></div>
+                    <div class="sa-step-btn"><div class="sa-step-circle">5</div><div class="sa-step-label">决策</div><div class="sa-step-tag" id="saTag4"></div></div>
+                  </div>
+                </div>
+                <div class="sa-progress-msg" id="saProgressMsg"><span class="sa-dot"></span> 准备就绪</div>
+              </div>
+
+              <!-- Tabs -->
+              <div class="sa-tabs" id="saTabs">
+                <div class="sa-tab active" data-sa-tab="quote" onclick="saSwitchTab('quote')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12V7H5a2 2 0 00-2 2v10a2 2 0 002 2h16v-5"/><path d="M3 10l6 5 4-4 5 5 4-4"/></svg>
+                  行情
+                </div>
+                <div class="sa-tab" data-sa-tab="analyst" onclick="saSwitchTab('analyst')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                  分析师
+                </div>
+                <div class="sa-tab" data-sa-tab="debate" onclick="saSwitchTab('debate')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                  辩论
+                </div>
+                <div class="sa-tab" data-sa-tab="risk" onclick="saSwitchTab('risk')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  风险
+                </div>
+                <div class="sa-tab" data-sa-tab="decision" onclick="saSwitchTab('decision')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  决策
+                </div>
+              </div>
+
+              <!-- Tab: 行情 -->
+              <div class="sa-tab-content active" id="sa-tab-quote">
+                <div id="saQuoteArea">
+                  <div class="sa-quote" id="saQuoteCard">
+                    <div class="sa-quote-name">贵州茅台</div>
+                    <div class="sa-quote-code">600519 · SH</div>
+                    <div class="sa-quote-price">
+                      <div class="qp-main" style="color:var(--red)">14.56</div>
+                      <div class="qp-change up">+0.32 (2.25%)</div>
+                    </div>
+                    <div class="sa-quote-details">
+                      <div class="sa-quote-detail"><div class="qd-label">今开</div><div class="qd-value">14.28</div></div>
+                      <div class="sa-quote-detail"><div class="qd-label">最高</div><div class="qd-value">14.68</div></div>
+                      <div class="sa-quote-detail"><div class="qd-label">最低</div><div class="qd-value">14.20</div></div>
+                      <div class="sa-quote-detail"><div class="qd-label">昨收</div><div class="qd-value">14.24</div></div>
+                      <div class="sa-quote-detail"><div class="qd-label">换手率</div><div class="qd-value">1.84%</div></div>
+                      <div class="sa-quote-detail"><div class="qd-label">市盈率</div><div class="qd-value">12.35</div></div>
+                    </div>
+                  </div>
+                  <div class="sa-kline-wrap" id="saKlineWrap">
+                    <div class="kl-header">
+                      <span class="kl-title">📈 K线走势</span>
+                      <div class="kl-timespan" id="klTimespan">
+                        <button class="active" data-range="30">1月</button>
+                        <button data-range="60">3月</button>
+                        <button data-range="120">6月</button>
+                        <button data-range="240">1年</button>
+                      </div>
+                    </div>
+                    <div class="kl-legend" id="klLegend">
+                      <span class="kl-legend-item"><span style="background:#f39c12;width:16px;height:2px;display:inline-block;vertical-align:middle;margin-right:3px"></span>MA5</span>
+                      <span class="kl-legend-item"><span style="background:#3498db;width:16px;height:2px;display:inline-block;vertical-align:middle;margin-right:3px"></span>MA10</span>
+                      <span class="kl-legend-item"><span style="background:#9b59b6;width:16px;height:2px;display:inline-block;vertical-align:middle;margin-right:3px"></span>MA20</span>
+                    </div>
+                    <canvas id="saKlineCanvas" height="360"></canvas>
+                    <div id="saKlineTooltip"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab: 分析师 -->
+              <div class="sa-tab-content" id="sa-tab-analyst"><div id="saAnalystArea">
+                <div class="sa-report-grid">
+                  <div class="sa-report-card">
+                    <div class="rc-header"><div class="rc-icon blue"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="rc-name">技术分析组</span></div>
+                    <div class="rc-body">贵州茅台近期走势呈现震荡上行格局。MACD指标在零轴上方形成金叉，RSI处于50-60中性偏强区间，短期均线系统呈多头排列。成交量方面，近5个交易日量能温和放大，显示资金关注度提升。</div>
+                    <ul class="rc-keypoints"><li>MACD零轴上方金叉，中期偏多</li><li>RSI 55 中性偏强</li><li>均线多头排列</li></ul>
+                    <div class="rc-signals"><span class="rc-signal-tag bull">买入信号</span><span class="rc-signal-tag neutral">温和看多</span></div>
+                    <div class="rc-risk-flags"><span class="rc-risk-flag">⚠ 量价背离隐忧</span></div>
+                    <div class="rc-confidence">信心指数: 82%</div>
+                  </div>
+                  <div class="sa-report-card">
+                    <div class="rc-header"><div class="rc-icon purple"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="rc-name">基本面组</span></div>
+                    <div class="rc-body">最新财报显示营收同比增长12.3%，净利润增长8.7%。ROE为15.2%，处于行业领先水平。资产负债率54.6%，财务结构稳健。当前PE(TTM)约12倍，处于近5年估值中枢下方。</div>
+                    <ul class="rc-keypoints"><li>营收增长12.3%，净利润增长8.7%</li><li>ROE 15.2% 行业领先</li><li>PE 12x 低于历史中枢</li></ul>
+                    <div class="rc-signals"><span class="rc-signal-tag bull">业绩超预期</span><span class="rc-signal-tag bull">估值偏低</span></div>
+                    <div class="rc-risk-flags"><span class="rc-risk-flag">⚠ 毛利率下降趋势</span></div>
+                    <div class="rc-confidence">信心指数: 87%</div>
+                  </div>
+                  <div class="sa-report-card">
+                    <div class="rc-header"><div class="rc-icon green"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="rc-name">宏观策略组</span></div>
+                    <div class="rc-body">货币政策维持宽松基调，LPR仍有下调空间。经济复苏趋势确认，PMI连续3个月位于荣枯线上方。白酒行业龙头在经济复苏周期中具备较强业绩弹性。</div>
+                    <ul class="rc-keypoints"><li>货币宽松延续</li><li>PMI连续3月站上50</li><li>龙头受益经济复苏</li></ul>
+                    <div class="rc-signals"><span class="rc-signal-tag bull">顺周期受益</span><span class="rc-signal-tag neutral">政策利好</span></div>
+                    <div class="rc-risk-flags"><span class="rc-risk-flag">⚠ 海外加息尾部风险</span></div>
+                    <div class="rc-confidence">信心指数: 72%</div>
+                  </div>
+                  <div class="sa-report-card">
+                    <div class="rc-header"><div class="rc-icon amber"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="rc-name">量化研究组</span></div>
+                    <div class="rc-body">综合评分7.8/10。估值因子8.2，盈利因子7.5，成长因子7.0，动量因子8.5。量化模型给出增持信号。目标价基于DCF模型为16.80元。</div>
+                    <ul class="rc-keypoints"><li>综合评分7.8/10</li><li>估值因子8.2最高</li><li>DCF目标价16.80元</li></ul>
+                    <div class="rc-signals"><span class="rc-signal-tag bull">增持信号</span><span class="rc-signal-tag neutral">DCF估值偏低</span></div>
+                    <div class="rc-risk-flags"><span class="rc-risk-flag">⚠ 波动率因子不佳</span></div>
+                    <div class="rc-confidence">信心指数: 78%</div>
+                  </div>
+                  <div class="sa-report-card">
+                    <div class="rc-header"><div class="rc-icon blue"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="rc-name">行业比较组</span></div>
+                    <div class="rc-body">市占率18.5%，排名第二。研发投入占比7.2%，高于行业均值4.5%。毛利率42.3%领先同业。行业处于成长期后期，预计未来3年CAGR约8%。</div>
+                    <ul class="rc-keypoints"><li>市占率18.5% 行业第二</li><li>研发投入7.2% 领先行业</li><li>毛利率42.3% 领先同业</li></ul>
+                    <div class="rc-signals"><span class="rc-signal-tag neutral">行业标配</span><span class="rc-signal-tag neutral">研发驱动</span></div>
+                    <div class="rc-risk-flags"><span class="rc-risk-flag">⚠ 成长后期增速放缓</span></div>
+                    <div class="rc-confidence">信心指数: 75%</div>
+                  </div>
+                </div>
+              </div></div>
+
+              <!-- Tab: 辩论 -->
+              <div class="sa-tab-content" id="sa-tab-debate">
+                <div id="saDebateArea">
+                  <div id="saSentimentArea" style="margin-bottom:12px"></div>
+                  <div class="sa-debate-round">
+                    <div class="sa-debate-header" onclick="this.classList.toggle('collapsed')">
+                      <svg class="dh-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      第 1 轮辩论
+                    </div>
+                    <div class="sa-debate-body">
+                      <div class="sa-debate-col bull"><span class="dc-tag bull">看多</span><div class="dc-text">贵州茅台品牌护城河深厚，作为高端白酒绝对龙头，在消费升级趋势下具有确定性增长。公司2025年营收突破2000亿元大关，盈利能力持续提升。当前估值处于近5年低位，PE仅12倍，安全边际充足。建议现价买入。</div></div>
+                      <div class="sa-debate-col bear"><span class="dc-tag bear">看空</span><div class="dc-text">白酒行业整体增速放缓，2025年行业产量同比下降3.2%。贵州茅台面临库存积压问题，部分经销商库存超过3个月。年轻消费群体对白酒偏好度下降，长期消费基础面临挑战。估值虽然不高，但增长预期也在下修。</div></div>
+                    </div>
+                  </div>
+                  <div class="sa-debate-round">
+                    <div class="sa-debate-header" onclick="this.classList.toggle('collapsed')">
+                      <svg class="dh-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      第 2 轮辩论
+                    </div>
+                    <div class="sa-debate-body">
+                      <div class="sa-debate-col bull"><span class="dc-tag bull">看多</span><div class="dc-text">茅台直销比例持续提升，从2020年的14%提升至2025年的45%以上，渠道改革带来显著的利润弹性。i茅台数字平台贡献增量收入，未来提价空间仍然存在。国际化战略加速，海外营收同比增长25%。</div></div>
+                      <div class="sa-debate-col bear"><span class="dc-tag bear">看空</span><div class="dc-text">茅台提价空间受限，飞天茅台批发价从2024年的2700元回落至2025年的2300元，反映终端需求疲软。经济下行压力增大，高端消费承压。房地产财富效应消退对高端白酒消费产生负面影响。</div></div>
+                    </div>
+                  </div>
+                  <div class="sa-debate-round">
+                    <div class="sa-debate-header" onclick="this.classList.toggle('collapsed')">
+                      <svg class="dh-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      第 3 轮辩论
+                    </div>
+                    <div class="sa-debate-body">
+                      <div class="sa-debate-col bull"><span class="dc-tag bull">看多</span><div class="dc-text">茅台分红率持续提升，2025年分红比例达75%，股息率超过3.5%。公司账上现金超过千亿，具备强大的抗风险能力。机构持仓比例仍在提升，北向资金近期持续净买入。</div></div>
+                      <div class="sa-debate-col bear"><span class="dc-tag bear">看空</span><div class="dc-text">茅台市值已超2万亿，缺乏足够的成长空间来支撑当前估值。政策面上，消费税改革可能对高端白酒加税，这将直接侵蚀利润。此外，房地产相关消费场景减少，商务宴请需求萎缩。</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab: 风险 -->
+              <div class="sa-tab-content" id="sa-tab-risk">
+                <div id="saRiskArea">
+                  <div class="sa-radar-wrap">
+                    <div class="sa-radar-header"><span class="sa-radar-title">🎯 风险评估</span><span class="sa-radar-score">5 维度 · 综合评分</span></div>
+                    <canvas id="saRadarCanvas" height="280"></canvas>
+                  </div>
+                  <div class="sa-risk-grid">
+                    <div class="sa-risk-item">
+                      <div class="ri-header"><span class="ri-tag" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green)">低</span><span class="ri-title">政策监管风险</span></div>
+                      <div class="ri-body">行业监管政策趋于明朗，短期内出台更严格政策的可能性较低。但需关注数据安全和反垄断领域的长期政策变化。消费税改革是中长期变量，需持续跟踪。</div>
+                    </div>
+                    <div class="sa-risk-item">
+                      <div class="ri-header"><span class="ri-tag" style="background:var(--green-bg);color:var(--green);border:1px solid var(--green)">低</span><span class="ri-title">技术替代风险</span></div>
+                      <div class="ri-body">公司在技术研发方面积累深厚，专利数量行业前三。新技术替代现有产品的周期较长，短期影响有限。数字化和智能化转型处于行业领先地位。</div>
+                    </div>
+                    <div class="sa-risk-item">
+                      <div class="ri-header"><span class="ri-tag" style="background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)">中</span><span class="ri-title">宏观经济风险</span></div>
+                      <div class="ri-body">经济复苏节奏不及预期，消费复苏动力不足。若GDP增速低于5%，将对行业整体需求产生负面影响。需关注后续PMI数据和社融数据变化。</div>
+                    </div>
+                    <div class="sa-risk-item">
+                      <div class="ri-header"><span class="ri-tag" style="background:#e67e2222;color:#e67e22;border:1px solid #e67e22">中高</span><span class="ri-title">行业竞争风险</span></div>
+                      <div class="ri-body">行业进入者增多，竞争格局恶化。公司核心产品面临价格战压力，近三个季度ASP下降5%。需持续跟踪市场份额变化和价格走势。</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab: 决策 -->
+              <div class="sa-tab-content" id="sa-tab-decision">
+                <div id="saDecisionArea">
+                  <div id="saConfidenceArea"></div>
+                  <div class="sa-decision">
+                    <div class="dc-top">
+                      <span class="dc-action buy">买入</span>
+                      <span class="dc-position">建议仓位: 15%</span>
+                      <span class="sa-badge blue">信心 82%</span>
+                      <span class="sa-badge amber">风险 中等</span>
+                      <button class="dc-watchlist-btn" onclick="saAddWatchlist()">⭐ 加自选</button>
+                    </div>
+                    <div class="dc-reason">贵州茅台当前估值处于历史低位区间（PE 12x vs 行业18x），技术面出现底部结构，基本面稳健且机构增持明显。建议在当前位置分批建仓，目标价16.80元，止损价13.50元，仓位控制在总资产的15%。</div>
+                    <div class="dc-meta-grid">
+                      <div class="dc-meta-item"><div class="dm-label">目标价</div><div class="dm-value green">¥16.80</div></div>
+                      <div class="dc-meta-item"><div class="dm-label">止损价</div><div class="dm-value red">¥13.50</div></div>
+                      <div class="dc-meta-item"><div class="dm-label">预期收益</div><div class="dm-value green">+15.9%</div></div>
+                      <div class="dc-meta-item"><div class="dm-label">最大回撤</div><div class="dm-value red">-7.3%</div></div>
+                      <div class="dc-meta-item"><div class="dm-label">建议仓位</div><div class="dm-value amber">15%</div></div>
+                      <div class="dc-meta-item"><div class="dm-label">持仓周期</div><div class="dm-value" style="font-size:12px">3-6月</div></div>
+                    </div>
+                    <div class="dc-tags">
+                      <span class="dc-tag-item">目标价 ¥16.80</span>
+                      <span class="dc-tag-item">止损价 ¥13.50</span>
+                      <span class="dc-tag-item">盈亏比 2.18</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div><!-- /sa-body -->
+            <!-- SA Sidebar -->
+            <div class="sa-sidebar" id="saSidebar" style="width:260px;min-width:260px;border-left:1px solid var(--border);overflow-y:auto;padding:10px 12px;background:var(--surface)">
+              <!-- 移动端拖拽手柄 -->
+              <div class="sa-sidebar-handle" onclick="saToggleMobileSidebar()"><span></span></div>
+              <!-- 移动端 Tab 切换（桌面可见） -->
+              <div class="sa-sidebar-tabs">
+                <button class="sa-sidebar-tab active" data-st="trade" onclick="saSwitchSidebarTab('trade')">📊 交易</button>
+                <button class="sa-sidebar-tab" data-st="watchlist" onclick="saSwitchSidebarTab('watchlist')">⭐ 自选</button>
+                <button class="sa-sidebar-tab" data-st="compare" onclick="saSwitchSidebarTab('compare')">📈 对比</button>
+                <button class="sa-sidebar-tab" data-st="alert" onclick="saSwitchSidebarTab('alert')">🔔 提醒</button>
+                <button class="sa-sidebar-tab" data-st="history" onclick="saSwitchSidebarTab('history')">📜 历史</button>
+              </div>
+              <!-- 交易面板 -->
+              <div class="sa-panel active" data-st-panel="trade">
+                <div class="sa-panel-header" onclick="saTogglePanelCollapse(this)">
+                  <span style="display:flex;align-items:center;gap:6px"><span class="collapse-icon">▼</span> 📊 快速交易</span>
+                  <span class="sa-llm-status placeholder" id="saTradeStatus">⚠ 模拟</span>
+                </div>
+                <div class="sa-panel-body">
+                  <div class="sa-trade-form">
+                    <div class="tf-row">
+                      <label>操作</label>
+                      <select class="tf-select" id="saTradeAction"><option value="buy">买入</option><option value="sell">卖出</option></select>
+                    </div>
+                    <div class="tf-row">
+                      <label>数量</label>
+                      <input class="tf-input" type="number" id="saTradeQty" placeholder="100" value="100">
+                    </div>
+                    <div class="tf-row">
+                      <label>价格</label>
+                      <input class="tf-input" type="number" id="saTradePrice" placeholder="0.00" step="0.01">
+                    </div>
+                    <div class="tf-row" style="gap:4px">
+                      <button class="tf-btn buy" onclick="saExecuteTrade('buy')" style="flex:1">买入</button>
+                      <button class="tf-btn sell" onclick="saExecuteTrade('sell')" style="flex:1">卖出</button>
+                    </div>
+                    <div style="font-size:10.5px;color:var(--muted);text-align:center;margin-top:4px" id="saTradeResult"></div>
+                  </div>
+                  <!-- 最近分析决策提示 -->
+                  <div id="saTradeAnalysisHint" style="display:none;font-size:10px;padding:4px 6px;border-radius:4px;background:var(--accent-dim);margin-top:6px;color:var(--muted)"></div>
+                  <!-- 持仓汇总 -->
+                  <div id="saPositionSummary" style="display:none;margin-top:8px">
+                    <div style="font-size:10.5px;font-weight:600;color:var(--fg);margin-bottom:4px">💼 持仓</div>
+                    <table class="sa-alert-table"><thead><tr><th>代码</th><th>数量</th><th>成本</th><th>盈亏</th><th>市值</th></tr></thead><tbody id="saPositionBody"></tbody></table>
+                    <div id="saPositionStats" style="display:flex;justify-content:space-between;font-size:9.5px;padding:4px 6px;margin-top:4px;border-radius:4px;background:var(--accent-dim);color:var(--muted)"></div>
+                  </div>
+                  <!-- 交易历史 -->
+                  <div id="saTradeHistory" style="display:none;margin-top:8px">
+                    <div style="font-size:10.5px;font-weight:600;color:var(--fg);margin-bottom:4px">📋 历史交易</div>
+                    <table class="sa-alert-table"><thead><tr><th>方向</th><th>代码</th><th>价格</th><th>数量</th><th>盈亏</th></tr></thead><tbody id="saTradeHistoryBody"></tbody></table>
+                  </div>
+                </div>
+              </div>
+              <!-- 自选股 -->
+              <div class="sa-panel" data-st-panel="watchlist">
+                <div class="sa-panel-header" onclick="saTogglePanelCollapse(this)">
+                  <span style="display:flex;align-items:center;gap:6px"><span class="collapse-icon">▼</span> ⭐ 自选股</span>
+                  <span class="sa-badge blue" id="saWlCount">0</span>
+                </div>
+                <div class="sa-panel-body" id="saWlBody">
+                  <div class="sa-wl-list" id="saWlList"></div>
+                  <div class="sa-wl-add" onclick="saShowAddWl()">+ 添加自选</div>
+                </div>
+              </div>
+              <!-- 对比分析 -->
+              <div class="sa-panel" data-st-panel="compare">
+                <div class="sa-panel-header" onclick="saTogglePanelCollapse(this)"><span style="display:flex;align-items:center;gap:6px"><span class="collapse-icon">▼</span> 📈 对比分析</span></div>
+                <div class="sa-panel-body">
+                  <div class="sa-cmp-grid">
+                    <input class="sa-cmp-input" id="saCmp1" placeholder="股票A" value="" readonly>
+                    <input class="sa-cmp-input" id="saCmp2" placeholder="股票B" onchange="saCmpUpdate()">
+                  </div>
+                  <table class="sa-cmp-table">
+                    <thead><tr><th>指标</th><th id="cmpH1">A</th><th id="cmpH2">B</th></tr></thead>
+                    <tbody id="saCmpBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <!-- 价格提醒 -->
+              <div class="sa-panel" data-st-panel="alert">
+                <div class="sa-panel-header" onclick="saTogglePanelCollapse(this)">
+                  <span style="display:flex;align-items:center;gap:6px"><span class="collapse-icon">▼</span> 🔔 价格提醒</span>
+                  <span class="sa-badge blue" id="saAlertCount">0</span>
+                </div>
+                <div class="sa-panel-body" id="saAlertBody">
+                  <div class="sa-alert-form" id="saAlertForm" style="display:none">
+                    <div class="af-row">
+                      <input class="af-input" id="saAlertCode" placeholder="代码" style="flex:0.6">
+                      <input class="af-input" id="saAlertName" placeholder="名称" style="flex:1">
+                    </div>
+                    <div class="af-row">
+                      <select class="af-select" id="saAlertCond" style="flex:0.8"><option value="above">突破 ↑</option><option value="below">跌破 ↓</option></select>
+                      <input class="af-input" type="number" id="saAlertTarget" placeholder="目标价" step="0.01" style="flex:1">
+                      <button class="af-btn primary" onclick="saAddAlert()">添加</button>
+                    </div>
+                  </div>
+                  <div style="margin-bottom:6px;font-size:10.5px;color:var(--muted);cursor:pointer" onclick="saToggleAlertForm()">+ 新建提醒</div>
+                  <table class="sa-alert-table"><thead><tr><th>代码</th><th>条件</th><th>目标价</th><th>状态</th><th></th></tr></thead><tbody id="saAlertList"></tbody></table>
+                </div>
+              </div>
+              <!-- 历史分析快照 -->
+              <div class="sa-panel" data-st-panel="history">
+                <div class="sa-panel-header" onclick="saTogglePanelCollapse(this)">
+                  <span style="display:flex;align-items:center;gap:6px"><span class="collapse-icon">▼</span> 📜 历史分析</span>
+                  <span class="sa-badge blue">上次</span>
+                </div>
+                <div class="sa-panel-body">
+                  <div class="sa-history-card" id="saHistoryCard">
+                    <div class="sa-history-header collapsed" onclick="this.classList.toggle('collapsed');document.getElementById('saHistoryBody').classList.toggle('collapsed')">
+                      <span>📋 贵州茅台 · 2026-05-20 分析快照</span>
+                      <svg class="hh-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </div>
+                    <div class="sa-history-body collapsed" id="saHistoryBody">
+                      <div class="sa-history-item">
+                        <div class="sa-history-item-header" onclick="this.nextElementSibling.classList.toggle('collapsed')">
+                          <span>📊 技术分析组 · 3.2k 字符</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        </div>
+                        <div class="sa-history-item-body collapsed">MACD零轴上方金叉，多头信号明确。RSI 58中性偏强，短期有望延续反弹。布林带开口向上，股价沿上轨运行。KDJ指标J值103处于超买区，注意回调风险。</div>
+                      </div>
+                      <div class="sa-history-item">
+                        <div class="sa-history-item-header" onclick="this.nextElementSibling.classList.toggle('collapsed')">
+                          <span>📊 基本面组 · 2.8k 字符</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        </div>
+                        <div class="sa-history-item-body collapsed">营收同比+10.5%，净利润+9.2%，毛利率42.8%环比提升0.3pct。ROE 14.8%处于行业前15%。资产负债率53.2%保持稳健。经营性现金流充裕，现金含量比1.2。</div>
+                      </div>
+                      <div class="sa-history-item">
+                        <div class="sa-history-item-header" onclick="this.nextElementSibling.classList.toggle('collapsed')">
+                          <span>💬 第 1 轮辩论 · 看多 vs 看空</span>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        </div>
+                        <div class="sa-history-item-body collapsed"><strong>看多:</strong> 品牌护城河深厚，消费升级受益。<strong>看空:</strong> 行业增速放缓，库存压力增加。</div>
+                      </div>
+                      <div style="font-size:10px;color:var(--muted);text-align:center;padding:4px 0;cursor:pointer;text-decoration:underline">加载更多历史记录…</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div><!-- /sa-sidebar -->
+          </div>
+        </div><!-- /page-stock -->
+
+        <!-- 移动端侧栏浮动按钮 -->
+        <button class="sa-sidebar-toggle" id="saMobileToggle" onclick="saToggleMobileSidebar()">📊</button>
+
         <!-- ═══ CREATE MODAL ═══ -->
         <div class="kb-modal-overlay" id="kbCreateModal">
           <div class="kb-modal">
@@ -2361,11 +3158,13 @@ function switchPage(name){
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   // Toggle page-mode: hide tabbar & statusbar for non-chat pages
   document.querySelector('.app-shell').classList.toggle('page-mode', name !== 'chat');
-  const pageMap = {chat:'对话', settings:'设置', knowledge:'知识库', files:'文件', gateway:'网关', terminal:'终端'};
+  const pageMap = {chat:'对话', settings:'设置', knowledge:'知识库', files:'文件', gateway:'网关', terminal:'终端', stock:'股票分析'};
   const nav = document.querySelector(`.nav-item[title="${pageMap[name] || ''}"]`);
   if(nav) nav.classList.add('active');
   // Close right panel on mobile when switching pages
   if(window.innerWidth <= 900) closeRightPanel();
+  // Init stock sidebar
+  if(name === 'stock' && typeof saInitSidebar === 'function') setTimeout(saInitSidebar, 50);
 }
 
 // ── Knowledge base tab switching ──
@@ -2659,6 +3458,1115 @@ function flChangePageSize(size){
 
 // Init files page
 flRenderTable();
+
+// ═══ STOCK ANALYSIS ═══
+const SA_MOCK_STOCKS = [
+  {code:'000001',name:'平安银行',market:'SZ'},
+  {code:'600519',name:'贵州茅台',market:'SH'},
+  {code:'000858',name:'五粮液',market:'SZ'},
+  {code:'600036',name:'招商银行',market:'SH'},
+  {code:'300750',name:'宁德时代',market:'SZ'},
+  {code:'601318',name:'中国平安',market:'SH'},
+  {code:'000333',name:'美的集团',market:'SZ'},
+  {code:'600276',name:'恒瑞医药',market:'SH'},
+  {code:'002415',name:'海康威视',market:'SZ'},
+  {code:'601166',name:'兴业银行',market:'SH'},
+  {code:'000002',name:'万科A',market:'SZ'},
+  {code:'600030',name:'中信证券',market:'SH'},
+  {code:'002594',name:'比亚迪',market:'SZ'},
+  {code:'601012',name:'隆基绿能',market:'SH'},
+  {code:'688981',name:'中芯国际',market:'SH'}
+];
+let saSelectedStock = { code:'600519', name:'贵州茅台', market:'SH' };
+let saWatchlist = JSON.parse(localStorage.getItem('saWatchlist') || '[]');
+let saAnalysisRunning = false;
+
+function saSearch(q){
+  const dd = document.getElementById('saSearchDropdown');
+  const ql = q.trim().toLowerCase();
+  if(ql.length < 1){ dd.classList.remove('open'); return; }
+  const results = SA_MOCK_STOCKS.filter(s => s.code.includes(ql) || s.name.includes(q));
+  if(!results.length){ dd.classList.remove('open'); return; }
+  dd.innerHTML = results.map(s => `<div class="sa-search-option" onclick="saSelect('${s.code}','${s.name}','${s.market}')">
+    <span class="sa-s-code">${s.code}</span>
+    <span class="sa-s-name">${s.name}</span>
+    <span class="sa-s-market">${s.market}</span>
+  </div>`).join('');
+  dd.classList.add('open');
+}
+
+function saSelect(code,name,market){
+  document.getElementById('saSearchInput').value = `${code} ${name}`;
+  document.getElementById('saSearchDropdown').classList.remove('open');
+  saSelectedStock = {code,name,market};
+  document.getElementById('saStartBtn').disabled = false;
+}
+
+function saSwitchTab(tabId){
+  document.querySelectorAll('.sa-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sa-tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.sa-tab[data-sa-tab="${tabId}"]`).classList.add('active');
+  document.getElementById('sa-tab-'+tabId).classList.add('active');
+}
+
+// K-line chart rendering
+function saRenderKline(canvasId, data){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const wrap = document.getElementById('saKlineWrap');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  const pad = {top:24, right:16, bottom:44, left:56};
+  const cw = w - pad.left - pad.right;
+  const ch = h - pad.top - pad.bottom;
+
+  // Compute price range & MA
+  let maxP = -Infinity, minP = Infinity;
+  data.forEach(d => { maxP = Math.max(maxP, d.high); minP = Math.min(minP, d.low); });
+  const range = maxP - minP || 1;
+  const padding = range * 0.08;
+  maxP += padding; minP -= padding;
+
+  const calcMA = (period) => {
+    return data.map((_,i) => {
+      if(i < period-1) return null;
+      let sum = 0;
+      for(let j=i-period+1;j<=i;j++) sum += (data[j].open + data[j].close) / 2;
+      return sum / period;
+    });
+  };
+  const ma5 = calcMA(5), ma10 = calcMA(10), ma20 = calcMA(20);
+
+  const toY = p => pad.top + ch * (1 - (p - minP) / (maxP - minP));
+  const toX = i => pad.left + (i / (data.length - 1)) * cw;
+  const candleW = Math.max(1.5, cw / data.length * 0.55);
+
+  ctx.clearRect(0,0,w,h);
+
+  const style = getComputedStyle(document.documentElement);
+  const cMuted = style.getPropertyValue('--muted').trim() || '#888';
+  const cBorder = style.getPropertyValue('--border-light').trim() || 'rgba(255,255,255,.06)';
+  const cAccent = style.getPropertyValue('--accent').trim() || '#5699ff';
+  const cAccentS = style.getPropertyValue('--accent-soft').trim() || 'rgba(86,153,255,.18)';
+
+  // Grid
+  ctx.strokeStyle = cBorder;
+  ctx.lineWidth = 1;
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = cMuted;
+  for(let i=0;i<=5;i++){
+    const y = pad.top + (ch/5)*i;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w-pad.right, y); ctx.stroke();
+    const val = maxP - (maxP-minP)*(i/5);
+    ctx.fillText(val.toFixed(2), pad.left-4, y+3);
+  }
+
+  // MA lines
+  const drawMA = (arr, color, width) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    arr.forEach((v,i) => {
+      if(v === null) return;
+      const x = toX(i);
+      const y = toY(v);
+      i === 0 || arr[i-1] === null ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  };
+  drawMA(ma5, '#f39c12', 1.2);
+  drawMA(ma10, '#3498db', 1.2);
+  drawMA(ma20, '#9b59b6', 1.2);
+
+  // Update legend
+  document.getElementById('klLegend').innerHTML =
+    '<span><i style="background:#f39c12"></i>MA5</span>' +
+    '<span><i style="background:#3498db"></i>MA10</span>' +
+    '<span><i style="background:#9b59b6"></i>MA20</span>';
+
+  // Candles
+  data.forEach((d,i) => {
+    const x = toX(i) - candleW/2;
+    const isUp = d.close >= d.open;
+    ctx.fillStyle = isUp ? '#e74c3c' : '#27ae60';
+    ctx.strokeStyle = isUp ? '#e74c3c' : '#27ae60';
+    ctx.lineWidth = 0.5;
+    const wx = toX(i);
+    ctx.beginPath(); ctx.moveTo(wx, toY(d.high)); ctx.lineTo(wx, toY(d.low)); ctx.stroke();
+    const bodyTop = toY(Math.max(d.open, d.close));
+    const bodyBot = toY(Math.min(d.open, d.close));
+    ctx.fillRect(x, bodyTop, candleW, Math.max(1, bodyBot-bodyTop));
+  });
+
+  // Volume
+  const volH = 36;
+  let maxVol = 0;
+  data.forEach(d => { maxVol = Math.max(maxVol, d.volume); });
+  const volY = h - pad.bottom;
+  data.forEach((d,i) => {
+    const isUp = d.close >= d.open;
+    const x = toX(i) - candleW/2;
+    const ww = Math.max(1, candleW * 0.85);
+    const bh = (d.volume / maxVol) * volH;
+    const grad = ctx.createLinearGradient(0, volY-bh, 0, volY);
+    if(isUp) { grad.addColorStop(0,'rgba(231,76,60,0.5)'); grad.addColorStop(1,'rgba(231,76,60,0.1)'); }
+    else { grad.addColorStop(0,'rgba(39,174,96,0.5)'); grad.addColorStop(1,'rgba(39,174,96,0.1)'); }
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, volY - bh, ww, bh);
+    ctx.strokeStyle = isUp ? 'rgba(231,76,60,0.3)' : 'rgba(39,174,96,0.3)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, volY - bh, ww, bh);
+  });
+
+  // X labels
+  ctx.fillStyle = cMuted;
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(data.length / 10));
+  for(let i=0;i<data.length;i+=step){
+    ctx.fillText(data[i].date, toX(i), h-8);
+  }
+
+  // ── Crosshair interactivity ──
+  const tooltip = document.getElementById('saKlineTooltip');
+  let hoverIdx = -1;
+
+  canvas.onmousemove = function(e){
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+    if(mx < pad.left || mx > w-pad.right || my < pad.top || my > h-pad.bottom){
+      canvas.style.cursor = 'default';
+      tooltip.style.display = 'none';
+      // Redraw without crosshair
+      hoverIdx = -1;
+      saDrawKlineCore(ctx, data, w, h, pad, minP, maxP, cMuted, cBorder);
+      drawMA(ma5, '#f39c12', 1.2);
+      drawMA(ma10, '#3498db', 1.2);
+      drawMA(ma20, '#9b59b6', 1.2);
+      return;
+    }
+    canvas.style.cursor = 'crosshair';
+    hoverIdx = Math.round((mx - pad.left) / cw * (data.length-1));
+    hoverIdx = Math.max(0, Math.min(data.length-1, hoverIdx));
+
+    // Redraw
+    saDrawKlineCore(ctx, data, w, h, pad, minP, maxP, cMuted, cBorder);
+    drawMA(ma5, '#f39c12', 1.2);
+    drawMA(ma10, '#3498db', 1.2);
+    drawMA(ma20, '#9b59b6', 1.2);
+
+    // Crosshair
+    const chx = toX(hoverIdx);
+    const chy = toY(data[hoverIdx].close);
+    ctx.save();
+    ctx.setLineDash([3,3]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(chx, pad.top); ctx.lineTo(chx, h-pad.bottom); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad.left, chy); ctx.lineTo(w-pad.right, chy); ctx.stroke();
+    ctx.restore();
+
+    // Highlight candle
+    const isUp = data[hoverIdx].close >= data[hoverIdx].open;
+    ctx.fillStyle = isUp ? 'rgba(231,76,60,0.12)' : 'rgba(39,174,96,0.12)';
+    const hlx = toX(hoverIdx) - cw/data.length*0.35;
+    const hlw = cw/data.length*0.7;
+    ctx.fillRect(hlx, pad.top, hlw, ch);
+
+    // Tooltip
+    const d = data[hoverIdx];
+    const dUp = d.close >= d.open;
+    const ma5v = ma5[hoverIdx] !== null ? ma5[hoverIdx].toFixed(2) : '—';
+    const ma10v = ma10[hoverIdx] !== null ? ma10[hoverIdx].toFixed(2) : '—';
+    const ma20v = ma20[hoverIdx] !== null ? ma20[hoverIdx].toFixed(2) : '—';
+    const volText = d.volume >= 1e8 ? (d.volume/1e8).toFixed(2)+'亿' : (d.volume/1e4).toFixed(0)+'万';
+    const cls = dUp ? 'kt-up' : 'kt-dn';
+    tooltip.innerHTML =
+      `<div class="kt-date">${d.date}</div>` +
+      `<div class="kt-row">开 <span class="kt-val ${cls}">${d.open.toFixed(2)}</span></div>` +
+      `<div class="kt-row">收 <span class="kt-val ${cls}">${d.close.toFixed(2)}</span></div>` +
+      `<div class="kt-row">高 <span class="kt-val ${cls}">${d.high.toFixed(2)}</span></div>` +
+      `<div class="kt-row">低 <span class="kt-val ${cls}">${d.low.toFixed(2)}</span></div>` +
+      `<div class="kt-row" style="border-top:1px solid var(--border-light);padding-top:2px;margin-top:2px">量 <span class="kt-val">${volText}</span></div>` +
+      `<div class="kt-row">MA5 <span class="kt-val">${ma5v}</span></div>` +
+      `<div class="kt-row">MA10 <span class="kt-val">${ma10v}</span></div>` +
+      `<div class="kt-row">MA20 <span class="kt-val">${ma20v}</span></div>`;
+    tooltip.style.display = 'block';
+    const ttW = 130, ttH = tooltip.offsetHeight || 180;
+    let ttX = chx + 12, ttY = my - ttH/2;
+    if(ttX + ttW > w) ttX = chx - ttW - 12;
+    if(ttY < 4) ttY = 4;
+    if(ttY + ttH > h) ttY = h - ttH - 4;
+    tooltip.style.left = ttX + 'px';
+    tooltip.style.top = ttY + 'px';
+  };
+  canvas.onmouseleave = function(){
+    tooltip.style.display = 'none';
+    hoverIdx = -1;
+    saDrawKlineCore(ctx, data, w, h, pad, minP, maxP, cMuted, cBorder);
+    drawMA(ma5, '#f39c12', 1.2);
+    drawMA(ma10, '#3498db', 1.2);
+    drawMA(ma20, '#9b59b6', 1.2);
+  };
+  canvas.onclick = function(e){
+    // Keep crosshair on click (no change needed)
+  };
+}
+
+function saDrawKlineCore(ctx, data, w, h, pad, minP, maxP, cMuted, cBorder){
+  ctx.clearRect(0,0,w,h);
+  const cw = w - pad.left - pad.right;
+  const ch = h - pad.top - pad.bottom;
+  const toY = p => pad.top + ch * (1 - (p - minP) / (maxP - minP));
+  const toX = i => pad.left + (i / (data.length - 1)) * cw;
+  const candleW = Math.max(1.5, cw / data.length * 0.55);
+  // Grid
+  ctx.strokeStyle = cBorder;
+  ctx.lineWidth = 1;
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = cMuted;
+  for(let i=0;i<=5;i++){
+    const y = pad.top + (ch/5)*i;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w-pad.right, y); ctx.stroke();
+    ctx.fillText((maxP-(maxP-minP)*(i/5)).toFixed(2), pad.left-4, y+3);
+  }
+  // Candles
+  data.forEach((d,i) => {
+    const x = toX(i) - candleW/2;
+    const isUp = d.close >= d.open;
+    ctx.fillStyle = isUp ? '#e74c3c' : '#27ae60';
+    ctx.strokeStyle = isUp ? '#e74c3c' : '#27ae60';
+    ctx.lineWidth = 0.5;
+    const wx = toX(i);
+    ctx.beginPath(); ctx.moveTo(wx, toY(d.high)); ctx.lineTo(wx, toY(d.low)); ctx.stroke();
+    const bt = toY(Math.max(d.open, d.close));
+    const bb = toY(Math.min(d.open, d.close));
+    ctx.fillRect(x, bt, candleW, Math.max(1, bb-bt));
+  });
+  // Volume
+  const volH = 36;
+  let maxVol = 0;
+  data.forEach(d => { maxVol = Math.max(maxVol, d.volume); });
+  const volY = h - pad.bottom;
+  data.forEach((d,i) => {
+    const isUp = d.close >= d.open;
+    const x = toX(i) - candleW/2;
+    const bh = (d.volume / maxVol) * volH;
+    const grad = ctx.createLinearGradient(0, volY-bh, 0, volY);
+    if(isUp) { grad.addColorStop(0,'rgba(231,76,60,0.5)'); grad.addColorStop(1,'rgba(231,76,60,0.1)'); }
+    else { grad.addColorStop(0,'rgba(39,174,96,0.5)'); grad.addColorStop(1,'rgba(39,174,96,0.1)'); }
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, volY-bh, Math.max(1, candleW*0.85), bh);
+    ctx.strokeStyle = isUp ? 'rgba(231,76,60,0.3)' : 'rgba(39,174,96,0.3)';
+    ctx.lineWidth = 0.5;
+    ctx.strokeRect(x, volY-bh, Math.max(1, candleW*0.85), bh);
+  });
+  // X labels
+  ctx.fillStyle = cMuted;
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(data.length / 10));
+  for(let i=0;i<data.length;i+=step){
+    ctx.fillText(data[i].date, toX(i), h-8);
+  }
+}
+
+function saGenerateKlineData(range){
+  const count = range || 60;
+  const data = [];
+  let price = 12.5;
+  const start = new Date('2026-01-03');
+  for(let i=0;i<count;i++){
+    const chg = (Math.random()-0.5)*1.2;
+    const open = price;
+    const close = +(price + chg).toFixed(2);
+    const high = +(Math.max(open,close) + Math.random()*0.8).toFixed(2);
+    const low = +(Math.min(open,close) - Math.random()*0.8).toFixed(2);
+    const volume = Math.round(Math.random()*80000000+10000000);
+    data.push({date:`${start.getMonth()+1}/${start.getDate()}`,open,close,high,low,volume});
+    price = close;
+    start.setDate(start.getDate()+1);
+  }
+  return data;
+}
+
+// Mock data generators
+function saGenAnalystReports(stock){
+  const analysts = [
+    { name:'技术分析组', icon:'blue', idx:0 },
+    { name:'基本面组', icon:'purple', idx:1 },
+    { name:'宏观策略组', icon:'green', idx:2 },
+    { name:'量化研究组', icon:'amber', idx:3 },
+    { name:'行业比较组', icon:'blue', idx:4 }
+  ];
+  const reportData = [
+    { report:`【技术面分析】${stock.name}近期走势呈现震荡上行格局。MACD指标在零轴上方形成金叉，RSI处于50-60中性偏强区间，短期均线系统呈多头排列。成交量方面，近5个交易日量能温和放大，显示资金关注度提升。关键支撑位14.20元，压力位15.80元。若能放量突破15.50元关口，则上行空间打开。`, key_points:['MACD零轴上方金叉，中期偏多','RSI 55 中性偏强，无超买风险','均线多头排列，趋势向上','支撑14.20元，压力15.50-15.80元'], signals:['买入信号','温和看多'], risk_flags:['量价背离隐忧'], confidence:0.82 },
+    { report:`【基本面评估】${stock.name}最新财报显示营收同比增长12.3%，净利润增长8.7%，略超市场预期。ROE为15.2%，处于行业领先水平。资产负债率54.6%，财务结构稳健。现金流充裕，经营活动现金流净额同比增长18.5%。当前PE(TTM)约12倍，处于近5年估值中枢下方，安全边际充足。`, key_points:['营收增长12.3%，净利润增长8.7%','ROE 15.2% 行业领先','PE 12x 低于历史中枢','现金流充裕增长18.5%'], signals:['业绩超预期','估值偏低'], risk_flags:['毛利率下降趋势'], confidence:0.87 },
+    { report:`【宏观视角】当前货币政策维持宽松基调，LPR仍有下调空间，有利于降低企业融资成本。经济复苏趋势确认，PMI连续3个月位于荣枯线上方。${stock.name}作为行业龙头，在经济复苏周期中具备较强业绩弹性。但需关注海外加息周期的尾部风险和地缘政治不确定性。建议配置比例为投资组合的5%-8%。`, key_points:['货币宽松延续，LPR有望下调','PMI连续3月站上50','龙头受益经济复苏','建议配置5%-8%'], signals:['顺周期受益','政策利好'], risk_flags:['海外加息尾部风险'], confidence:0.72 },
+    { report:`【量化评分】综合评分7.8/10。其中：估值因子8.2，盈利因子7.5，成长因子7.0，动量因子8.5，波动率因子6.8。量化模型给出"增持"信号。目标价基于DCF模型为16.80元，基于相对估值法为15.60元。Alpha系数0.52，Beta系数0.85，信息比率1.24。`, key_points:['综合评分7.8/10','估值因子8.2最高','DCF目标价16.80元','Alpha 0.52 超额收益'], signals:['增持信号','DCF估值偏低'], risk_flags:['波动率因子不佳'], confidence:0.78 },
+    { report:`【行业比较】在所属行业中，${stock.name}市占率18.5%，排名第二。研发投入占比7.2%，高于行业均值4.5%。毛利率42.3%领先同业。相比主要竞争对手，公司在产品线和渠道布局上具有明显优势。行业整体处于成长期后期，预计未来3年CAGR约8%。建议作为行业标配配置。`, key_points:['市占率18.5% 行业第二','研发投入7.2% 领先行业','毛利率42.3% 领先同业','未来3年CAGR约8%'], signals:['行业标配','研发驱动'], risk_flags:['成长后期增速放缓'], confidence:0.75 }
+  ];
+  return analysts.map((a,i) => ({...a, ...reportData[i]}));
+}
+
+function saGenDebate(stock){
+  const rounds = [
+    { round:1, bull:`【看多观点】${stock.name}估值处于历史低位，PE仅12倍，远低于行业平均18倍。公司现金流充裕，股息率3.2%具备吸引力。技术面[支撑位14.20]元形成双重底，反弹信号明确。`, bear:`【看空观点】行业竞争加剧，${stock.name}市占率从21%下滑至18.5%。毛利率连续3个季度下降，费用率上升侵蚀利润。技术面[阻力位15.50]元多次上攻未果，量价背离明显。` },
+    { round:2, bull:`政策面利好密集出台，行业监管趋于稳定。公司新产品线布局初见成效，海外营收同比增长35%。股东增持和回购计划为股价提供安全垫。`, bear:`宏观经济下行压力仍存，消费复苏不及预期。公司存货周转天数从68天上升至82天，运营效率下降。大股东减持公告带来短期抛压。` },
+    { round:3, bull:`机构持仓比例持续提升，北向资金近一月净买入2.3亿元。管理层在业绩说明会上给出超预期的全年指引。分红率提升至50%，回报股东意愿强烈。`, bear:`技术面出现顶背离信号，RSI超买区回落。期权隐含波动率上升，市场分歧加大。行业库存周期可能进入被动补库阶段。` }
+  ];
+  return rounds;
+}
+
+function saGenRisk(stock){
+  return [
+    { title:'宏观经济风险', level:'中', color:'var(--amber)', detail:'经济复苏节奏不及预期，消费复苏动力不足。若GDP增速低于5%，将对行业整体需求产生负面影响。需关注后续PMI数据和社融数据变化。' },
+    { title:'行业竞争风险', level:'中高', color:'#e67e22', detail:'行业进入者增多，竞争格局恶化。公司核心产品面临价格战压力，近三个季度ASP下降5%。需持续跟踪市场份额变化和价格走势。' },
+    { title:'政策监管风险', level:'低', color:'var(--green)', detail:'行业监管政策趋于明朗，短期内出台更严格政策的可能性较低。但需关注数据安全和反垄断领域的长期政策变化。' },
+    { title:'技术替代风险', level:'低', color:'var(--green)', detail:'公司在技术研发方面积累深厚，专利数量行业前三。新技术替代现有产品的周期较长，短期影响有限。' }
+  ];
+}
+
+function saGenDecision(stock){
+  const actions = [{ action:'买入', color:'#e74c3c', cls:'buy', posPct:15, tp:16.80, sl:13.50, conf:82, risk:'中等', reason:`${stock.name}当前估值处于历史低位区间（PE 12x vs 行业18x），技术面出现底部结构，基本面稳健且机构增持明显。建议在当前位置分批建仓，目标价16.80元，止损价13.50元，仓位控制在总资产的15%。` }];
+  return actions[0];
+}
+
+function saRetryAnalysis(){
+  document.getElementById('saErrorBanner').classList.remove('show');
+  saStartAnalysis();
+}
+
+function saStartAnalysis(){
+  if(!saSelectedStock || saAnalysisRunning) return;
+  const stock = saSelectedStock;
+  saAnalysisRunning = true;
+  document.getElementById('saStartBtn').disabled = true;
+  document.getElementById('saStartBtn').textContent = '分析中…';
+  document.getElementById('saMeta').textContent = `${stock.name} (${stock.code}) · 分析中`;
+  document.getElementById('saProgress').style.display = 'block';
+  document.getElementById('saTabs').style.display = 'flex';
+
+  // Reset
+  document.getElementById('saProgressFill').style.width = '0%';
+  // Reset steps
+  document.querySelectorAll('.sa-step-wrap').forEach(s => { s.classList.remove('active','done','error'); });
+  document.querySelectorAll('.sa-step-circle').forEach(c => {
+    const idx = c.closest('.sa-step-wrap').dataset.saStep;
+    c.textContent = String(parseInt(idx)+1);
+  });
+  document.getElementById('saProgressMsg').innerHTML = '<span class="sa-dot"></span> 正在获取数据…';
+
+  // Render stock quote immediately
+  saRenderQuote(stock);
+
+  const stages = [
+    { msg:'数据获取完成', delay:1200 },
+    { msg:'分析师报告生成中…', delay:2500 },
+    { msg:'多空辩论进行中…', delay:2500 },
+    { msg:'风险评估中…', delay:2000 },
+    { msg:'生成最终投资决策…', delay:2000 }
+  ];
+
+  let totalDelay = 500;
+  stages.forEach((stage,i) => {
+    totalDelay += stage.delay;
+    setTimeout(() => {
+      // Update steps: done=完全体勾号, active=当前编号, pending=空心编号
+      document.querySelectorAll('.sa-step-wrap').forEach(s => {
+        const step = parseInt(s.dataset.saStep);
+        s.classList.toggle('done', step < i);
+        s.classList.toggle('active', step === i);
+      });
+      // Update circle content: done→✓, active→编号, pending→编号
+      document.querySelectorAll('.sa-step-wrap.done .sa-step-circle').forEach(c => { c.textContent = '✓'; });
+      document.querySelectorAll('.sa-step-wrap.active .sa-step-circle').forEach(c => {
+        c.textContent = String(parseInt(c.closest('.sa-step-wrap').dataset.saStep) + 1);
+      });
+      document.getElementById('saProgressFill').style.width = ((i+1)/stages.length*95)+'%';
+      document.getElementById('saProgressMsg').innerHTML = `<span class="sa-dot"></span> ${stage.msg}`;
+      document.getElementById('saProgressMsg').className = 'sa-progress-msg';
+      // Update LLM badge
+      const badge = document.getElementById('saLlmBadge');
+      if(badge) { badge.className = 'sa-llm-badge live'; badge.textContent = '● 模拟引擎运行中'; }
+      // Sub-progress — show as tag on active step
+      const subTexts = ['K线 60日', '分析师 5/9', '辩论 2/6', '风险 3项', '贝叶斯优化'];
+      document.querySelectorAll('.sa-step-tag').forEach(t => t.textContent = '');
+      const tag = document.getElementById('saTag'+i);
+      if(tag) tag.textContent = subTexts[i] || '';
+
+      if(i === 0){
+        // Render k-line
+        document.getElementById('saQuoteArea').innerHTML = '<div class="sa-quote" id="saQuoteCard"></div><div class="sa-kline-wrap" id="saKlineWrap"><div class="kl-header"><span class="kl-title">📈 K线走势</span><div class="kl-timespan" id="klTimespan"><button class="active" data-range="30">1月</button><button data-range="60">3月</button><button data-range="120">6月</button><button data-range="240">1年</button></div></div><div class="kl-legend" id="klLegend"></div><canvas id="saKlineCanvas" height="360"></canvas><div id="saKlineTooltip"></div></div>';
+        saRenderQuote(stock);
+        setTimeout(() => saRenderKline('saKlineCanvas', saGenerateKlineData()), 100);
+      }
+      if(i === 1){
+        const reports = saGenAnalystReports(stock);
+        document.getElementById('saAnalystArea').innerHTML = `<div class="sa-report-grid">${reports.map(r => {
+          const sigHtml = r.signals?.length ? '<div class="rc-signals">'+r.signals.map(s => `<span class="rc-signal-tag ${s.includes('买入')||s.includes('看多')||s.includes('利好')?'bull':s.includes('卖出')||s.includes('看空')?'bear':'neutral'}">${s}</span>`).join('')+'</div>' : '';
+          const riskHtml = r.risk_flags?.length ? '<div class="rc-risk-flags">'+r.risk_flags.map(s => `<span class="rc-risk-flag">⚠ ${s}</span>`).join('')+'</div>' : '';
+          const kpHtml = r.key_points?.length ? '<ul class="rc-keypoints">'+r.key_points.map(p => `<li>${p}</li>`).join('')+'</ul>' : '';
+          const confHtml = r.confidence ? `<div class="rc-confidence">信心指数: ${(r.confidence*100).toFixed(0)}%</div>` : '';
+          return `<div class="sa-report-card">
+            <div class="rc-header">
+              <div class="rc-icon ${r.icon}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>
+              <span class="rc-name">${r.name}</span>
+            </div>
+            <div class="rc-body">${r.report}</div>
+            ${kpHtml}${sigHtml}${riskHtml}${confHtml}
+          </div>`;
+        }).join('')}</div>`;
+      }
+      if(i === 2){
+        const debates = saGenDebate(stock);
+        document.getElementById('saDebateArea').innerHTML =
+          `<div id="saSentimentArea"></div>` +
+          debates.map(d => `
+          <div class="sa-debate-round">
+            <div class="sa-debate-header" onclick="this.classList.toggle('collapsed')">
+              <svg class="dh-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+              第 ${d.round} 轮辩论
+            </div>
+            <div class="sa-debate-body">
+              <div class="sa-debate-col bull"><span class="dc-tag bull">看多</span><div class="dc-text">${d.bull}</div></div>
+              <div class="sa-debate-col bear"><span class="dc-tag bear">看空</span><div class="dc-text">${d.bear}</div></div>
+            </div>
+          </div>`).join('');
+        setTimeout(() => saDrawSentiment('saSentimentArea', debates), 50);
+      }
+      if(i === 3){
+        const risks = saGenRisk(stock);
+        document.getElementById('saRiskArea').innerHTML =
+          `<div class="sa-radar-wrap"><div class="sa-radar-header"><span class="sa-radar-title">🎯 风险评估</span><span class="sa-radar-score">5 维度 · 综合评分</span></div><canvas id="saRadarCanvas" height="280"></canvas></div>` +
+          `<div class="sa-risk-grid">${risks.map(r => `
+          <div class="sa-risk-item">
+            <div class="ri-header">
+              <span class="ri-tag" style="background:${r.color}22;color:${r.color};border:1px solid ${r.color}">${r.level}</span>
+              <span class="ri-title">${r.title}</span>
+            </div>
+            <div class="ri-body">${r.detail}</div>
+          </div>`).join('')}</div>`;
+        setTimeout(() => saDrawRadar('saRadarCanvas', risks), 100);
+      }
+      if(i === 4){
+        const dec = saGenDecision(stock);
+        window.lastDecision = dec;
+        const isInWl = saWatchlist.some(w => w.code === stock.code);
+        document.getElementById('saDecisionArea').innerHTML =
+          `<div id="saConfidenceArea"></div>
+          <div class="sa-decision">
+            <div class="dc-top">
+              <span class="dc-action ${dec.cls}">${dec.action}</span>
+              <span class="dc-position">建议仓位: ${dec.posPct}%</span>
+              <span class="sa-badge blue">信心 ${dec.conf}%</span>
+              <span class="sa-badge amber">风险 ${dec.risk}</span>
+              <button class="dc-watchlist-btn ${isInWl?'added':''}" onclick="saAddWatchlist()">${isInWl?'⭐ 已自选':'⭐ 加自选'}</button>
+            </div>
+            <div class="dc-reason">${dec.reason}</div>
+            <div class="dc-meta-grid">
+              <div class="dc-meta-item"><div class="dm-label">目标价</div><div class="dm-value green">¥${dec.tp}</div></div>
+              <div class="dc-meta-item"><div class="dm-label">止损价</div><div class="dm-value red">¥${dec.sl}</div></div>
+              <div class="dc-meta-item"><div class="dm-label">预期收益</div><div class="dm-value green">+${((dec.tp/14.5-1)*100).toFixed(1)}%</div></div>
+              <div class="dc-meta-item"><div class="dm-label">最大回撤</div><div class="dm-value red">-${((1-dec.sl/14.5)*100).toFixed(1)}%</div></div>
+              <div class="dc-meta-item"><div class="dm-label">建议仓位</div><div class="dm-value amber">${dec.posPct}%</div></div>
+              <div class="dc-meta-item"><div class="dm-label">持仓周期</div><div class="dm-value" style="font-size:12px">3-6月</div></div>
+            </div>
+            <div class="dc-tags">
+              <span class="dc-tag-item">目标价 ¥${dec.tp}</span>
+              <span class="dc-tag-item">止损价 ¥${dec.sl}</span>
+              <span class="dc-tag-item">盈亏比 ${((dec.tp/14.5-1)/(1-dec.sl/14.5)).toFixed(2)}</span>
+            </div>
+          </div>`;
+        setTimeout(() => saDrawConfidence('saConfidenceArea', dec), 100);
+        document.getElementById('saProgressFill').style.width = '100%';
+        document.getElementById('saProgressMsg').className = 'sa-progress-msg done';
+        document.getElementById('saProgressMsg').innerHTML = '✅ 分析完成';
+        // All steps done
+        document.querySelectorAll('.sa-step-wrap').forEach(s => { s.classList.remove('active'); s.classList.add('done'); });
+        document.querySelectorAll('.sa-step-wrap.done .sa-step-circle').forEach(c => { c.textContent = '✓'; });
+        document.querySelectorAll('.sa-step-tag').forEach(t => t.textContent = '');
+        const badge2 = document.getElementById('saLlmBadge');
+        if(badge2) { badge2.className = 'sa-llm-badge done'; badge2.textContent = '✅ 分析完成'; }
+        const sub2 = document.getElementById('saSubProgress');
+        if(sub2) sub2.textContent = '';
+        document.getElementById('saMeta').textContent = `${stock.name} (${stock.code}) · 分析完成`;
+        saAnalysisRunning = false;
+        document.getElementById('saStartBtn').disabled = false;
+        document.getElementById('saStartBtn').textContent = '重新分析';
+      }
+    }, totalDelay);
+  });
+}
+
+function saRenderQuote(stock){
+  const price = (11.8 + Math.random()*2).toFixed(2);
+  const chg = (Math.random()*4-2).toFixed(2);
+  const chgPct = (parseFloat(chg)/parseFloat(price)*100).toFixed(2);
+  const isUp = parseFloat(chg) >= 0;
+  const card = document.getElementById('saQuoteCard');
+  if(!card) return;
+  card.innerHTML = `
+    <div class="sa-quote-name">${stock.name}</div>
+    <div class="sa-quote-code">${stock.code} · ${stock.market}</div>
+    <div class="sa-quote-price">
+      <div class="qp-main" style="color:${isUp?'var(--red)':'var(--green)'}">${price}</div>
+      <div class="qp-change ${isUp?'up':'down'}">${isUp?'+':''}${chg} (${isUp?'+':''}${chgPct}%)</div>
+    </div>
+    <div class="sa-quote-details">
+      <div class="sa-quote-detail"><div class="qd-label">今开</div><div class="qd-value">${(parseFloat(price)-Math.random()).toFixed(2)}</div></div>
+      <div class="sa-quote-detail"><div class="qd-label">最高</div><div class="qd-value">${(parseFloat(price)+Math.random()*0.5).toFixed(2)}</div></div>
+      <div class="sa-quote-detail"><div class="qd-label">最低</div><div class="qd-value">${(parseFloat(price)-Math.random()*0.5).toFixed(2)}</div></div>
+      <div class="sa-quote-detail"><div class="qd-label">昨收</div><div class="qd-value">${(parseFloat(price)-parseFloat(chg)).toFixed(2)}</div></div>
+      <div class="sa-quote-detail"><div class="qd-label">换手率</div><div class="qd-value">${(Math.random()*3+0.5).toFixed(2)}%</div></div>
+      <div class="sa-quote-detail"><div class="qd-label">市盈率</div><div class="qd-value">${(10+Math.random()*8).toFixed(2)}</div></div>
+    </div>`;
+  // Switch to quote tab
+  saSwitchTab('quote');
+}
+
+function saAddWatchlist(){
+  if(!saSelectedStock) return;
+  if(saWatchlist.some(w => w.code === saSelectedStock.code)) return;
+  saWatchlist.push({code:saSelectedStock.code, name:saSelectedStock.name, added:new Date().toLocaleDateString()});
+  localStorage.setItem('saWatchlist', JSON.stringify(saWatchlist));
+  saRenderWatchlist();
+}
+
+function saRenderWatchlist(){
+  const list = document.getElementById('saWlList');
+  const count = document.getElementById('saWlCount');
+  if(!list) return;
+  if(!saWatchlist.length){
+    list.innerHTML = '<div style="font-size:11.5px;color:var(--muted);padding:6px 8px">暂无自选股</div>';
+    if(count) count.textContent = '0';
+    return;
+  }
+  if(count) count.textContent = saWatchlist.length;
+  list.innerHTML = saWatchlist.map(w => `
+    <div class="sa-wl-item" onclick="saSelectWatchlist('${w.code}')">
+      <span class="wl-code">${w.code}</span>
+      <span class="wl-name">${w.name}</span>
+      <span class="wl-del" onclick="event.stopPropagation();saRemoveWl('${w.code}')">✕</span>
+    </div>`).join('');
+}
+
+function saRemoveWl(code){
+  saWatchlist = saWatchlist.filter(w => w.code !== code);
+  localStorage.setItem('saWatchlist', JSON.stringify(saWatchlist));
+  saRenderWatchlist();
+}
+
+function saSelectWatchlist(code){
+  const stock = SA_MOCK_STOCKS.find(s => s.code === code);
+  if(!stock) return;
+  saSelect(stock.code, stock.name, stock.market);
+  saStartAnalysis();
+}
+
+function saShowAddWl(){
+  const stocks = SA_MOCK_STOCKS.filter(s => !saWatchlist.some(w => w.code === s.code));
+  if(!stocks.length){ alert('所有股票已在自选列表中'); return; }
+  const names = stocks.map((s,i) => `${i+1}. ${s.code} ${s.name}`).join('\n');
+  const choice = prompt(`选择要添加的股票（输入编号）:\n${names}`);
+  if(!choice) return;
+  const idx = parseInt(choice)-1;
+  if(isNaN(idx) || idx<0 || idx>=stocks.length) return;
+  const s = stocks[idx];
+  saWatchlist.push({code:s.code, name:s.name, added:new Date().toLocaleDateString()});
+  localStorage.setItem('saWatchlist', JSON.stringify(saWatchlist));
+  saRenderWatchlist();
+}
+
+function saExecuteTrade(type){
+  const action = type || document.getElementById('saTradeAction').value;
+  const qty = parseInt(document.getElementById('saTradeQty').value);
+  const price = parseFloat(document.getElementById('saTradePrice').value);
+  const result = document.getElementById('saTradeResult');
+  if(!saSelectedStock){ result.textContent = '请先选择股票'; return; }
+  if(!qty || qty<1){ result.textContent = '请输入有效数量'; return; }
+  if(!price || price<=0){ result.textContent = '请输入有效价格'; return; }
+  const total = (qty * price).toFixed(2);
+  const label = action === 'buy' ? '买入' : '卖出';
+  result.innerHTML = `✅ ${label} ${saSelectedStock.name} ${qty}股 × ¥${price} = ¥${total}`;
+  setTimeout(() => { result.innerHTML = ''; }, 4000);
+
+  // 模拟持仓更新
+  if(!window.saPositions) window.saPositions = [];
+  if(!window.saTradeHistory) window.saTradeHistory = [];
+  const now = new Date();
+  const code = saSelectedStock.code;
+  const name = saSelectedStock.name;
+  const trade = { stockCode:code, stockName:name, direction:action, price, quantity:qty, tradeDate:now.toLocaleDateString(), tradeTime:now.toLocaleTimeString(), realizedPnl:null, id:'t'+Date.now() };
+  window.saTradeHistory.unshift(trade);
+
+  if(action === 'buy'){
+    const pos = window.saPositions.find(p => p.stockCode === code);
+    if(pos){
+      const totalCost = pos.avgCost * pos.totalShares + price * qty;
+      pos.totalShares += qty;
+      pos.avgCost = totalCost / pos.totalShares;
+    } else {
+      window.saPositions.push({ stockCode:code, stockName:name, totalShares:qty, avgCost:price, currentPrice:price, unrealizedPnl:0, unrealizedPnlPct:0, totalRealizedPnl:0, marketValue:price*qty });
+    }
+  } else {
+    const pos = window.saPositions.find(p => p.stockCode === code);
+    if(pos){
+      pos.totalShares -= qty;
+      const pnl = (price - pos.avgCost) * qty;
+      trade.realizedPnl = pnl;
+      pos.totalRealizedPnl += pnl;
+      if(pos.totalShares <= 0){
+        window.saPositions = window.saPositions.filter(p => p.stockCode !== code);
+      }
+    }
+  }
+  saRenderTradePanel();
+}
+
+function saRenderTradePanel(){
+  const posDiv = document.getElementById('saPositionSummary');
+  const posBody = document.getElementById('saPositionBody');
+  const posStats = document.getElementById('saPositionStats');
+  const histDiv = document.getElementById('saTradeHistory');
+  const histBody = document.getElementById('saTradeHistoryBody');
+  const hintDiv = document.getElementById('saTradeAnalysisHint');
+
+  // Analysis hint
+  if(saSelectedStock && window.lastDecision){
+    const d = window.lastDecision;
+    hintDiv.style.display = 'block';
+    hintDiv.innerHTML = `📋 最近分析: <b>${d.action}</b> · 目标价 ¥${d.tp} · 信心 ${d.conf}%`;
+  } else {
+    hintDiv.style.display = 'none';
+  }
+
+  // Positions
+  const positions = window.saPositions || [];
+  if(positions.length){
+    posDiv.style.display = 'block';
+    posBody.innerHTML = positions.map(p => {
+      const pnl = p.unrealizedPnl || 0;
+      return `<tr>
+        <td><span style="font-family:var(--font-mono);font-size:10px;color:var(--accent)">${p.stockCode}</span></td>
+        <td>${p.totalShares}</td>
+        <td>${p.avgCost.toFixed(2)}</td>
+        <td style="color:${pnl>=0?'var(--green)':'var(--red)'}">${pnl>=0?'+':''}${pnl.toFixed(0)}</td>
+        <td>${((p.avgCost*p.totalShares)/10000).toFixed(1)}万</td>
+      </tr>`;
+    }).join('');
+    const totalMv = positions.reduce((s,p)=>s+(p.avgCost*p.totalShares),0);
+    const totalPnl = positions.reduce((s,p)=>s+(p.unrealizedPnl||0),0);
+    posStats.innerHTML = `
+      <span>总市值 <b>${(totalMv/10000).toFixed(1)}万</b></span>
+      <span style="color:${totalPnl>=0?'var(--green)':'var(--red)'}">浮动盈亏 <b>${totalPnl>=0?'+':''}${totalPnl.toFixed(0)}</b></span>
+      <span>持仓 <b>${positions.length}</b> 只</span>`;
+  } else {
+    posDiv.style.display = 'none';
+  }
+
+  // Trade history
+  const history = window.saTradeHistory || [];
+  if(history.length){
+    histDiv.style.display = 'block';
+    histBody.innerHTML = history.slice(0,10).map(t => `
+      <tr>
+        <td><span style="font-size:10px;padding:1px 4px;border-radius:3px;background:${t.direction==='buy'?'var(--red-bg)':'var(--green-bg)'};color:${t.direction==='buy'?'var(--red)':'var(--green)'}">${t.direction==='buy'?'买':'卖'}</span></td>
+        <td><span style="font-family:var(--font-mono);font-size:10px;color:var(--muted)">${t.stockCode}</span></td>
+        <td>${t.price.toFixed(2)}</td>
+        <td>${t.quantity}</td>
+        <td style="color:${t.realizedPnl>=0?'var(--green)':t.realizedPnl<0?'var(--red)':'var(--muted)'}">${t.realizedPnl!=null ? (t.realizedPnl>=0?'+':'')+t.realizedPnl.toFixed(0) : '—'}</td>
+      </tr>`).join('');
+  } else {
+    histDiv.style.display = 'none';
+  }
+}
+
+// ═══ 价格提醒 ═══
+let saAlerts = JSON.parse(localStorage.getItem('saAlerts') || '[]');
+
+function saToggleAlertForm(){
+  const form = document.getElementById('saAlertForm');
+  form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+}
+
+function saAddAlert(){
+  const code = document.getElementById('saAlertCode').value.trim();
+  const name = document.getElementById('saAlertName').value.trim();
+  const cond = document.getElementById('saAlertCond').value;
+  const target = parseFloat(document.getElementById('saAlertTarget').value);
+  if(!code || !name || !target){ alert('请填写完整信息'); return; }
+  saAlerts.push({ id:'a'+Date.now(), stockCode:code, stockName:name, condition:cond, targetPrice:target, isTriggered:false, createdAt:Date.now() });
+  localStorage.setItem('saAlerts', JSON.stringify(saAlerts));
+  document.getElementById('saAlertForm').style.display = 'none';
+  document.getElementById('saAlertCode').value = '';
+  document.getElementById('saAlertName').value = '';
+  document.getElementById('saAlertTarget').value = '';
+  saRenderAlerts();
+}
+
+function saDeleteAlert(id){
+  saAlerts = saAlerts.filter(a => a.id !== id);
+  localStorage.setItem('saAlerts', JSON.stringify(saAlerts));
+  saRenderAlerts();
+}
+
+function saRenderAlerts(){
+  const list = document.getElementById('saAlertList');
+  const count = document.getElementById('saAlertCount');
+  if(!list) return;
+  if(count) count.textContent = saAlerts.length;
+  if(!saAlerts.length){
+    list.innerHTML = '<tr><td colspan="5" class="sa-alert-empty">暂无价格提醒</td></tr>';
+    return;
+  }
+  list.innerHTML = saAlerts.map(a => `
+    <tr>
+      <td><span class="at-code">${a.stockCode}</span></td>
+      <td>${a.condition === 'above' ? '↑ 突破' : '↓ 跌破'}</td>
+      <td style="font-weight:500">${a.targetPrice.toFixed(2)}</td>
+      <td>${a.isTriggered ? '<span class="sa-alert-triggered">已触发</span>' : '<span style="font-size:10px;color:var(--muted)">监控中</span>'}</td>
+      <td class="at-action"><button onclick="saDeleteAlert('${a.id}')">✕</button></td>
+    </tr>`).join('');
+}
+
+// Init alerts
+saRenderAlerts();
+
+function saCmpUpdate(){
+  const c2 = document.getElementById('saCmp2').value.trim();
+  const h1 = document.getElementById('cmpH1');
+  const h2 = document.getElementById('cmpH2');
+  const body = document.getElementById('saCmpBody');
+  const s1 = saSelectedStock;
+  if(!s1){ body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted)">请先选择股票</td></tr>'; return; }
+  h1.textContent = s1.code;
+  const s2 = SA_MOCK_STOCKS.find(s => s.code === c2 || s.name.includes(c2));
+  h2.textContent = s2 ? s2.code : '—';
+  if(!s2){
+    body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted)">输入股票代码比较</td></tr>';
+    document.getElementById('saCmp2').placeholder = '输入股票代码';
+    return;
+  }
+  body.innerHTML = `
+    <tr><td>市盈率(PE)</td><td>${(10+Math.random()*8).toFixed(2)}</td><td>${(10+Math.random()*8).toFixed(2)}</td></tr>
+    <tr><td>市净率(PB)</td><td>${(1+Math.random()*3).toFixed(2)}</td><td>${(1+Math.random()*3).toFixed(2)}</td></tr>
+    <tr><td>ROE</td><td>${(12+Math.random()*8).toFixed(1)}%</td><td>${(12+Math.random()*8).toFixed(1)}%</td></tr>
+    <tr><td>营收增长</td><td>${(5+Math.random()*15).toFixed(1)}%</td><td>${(5+Math.random()*15).toFixed(1)}%</td></tr>
+    <tr><td>毛利率</td><td>${(30+Math.random()*20).toFixed(1)}%</td><td>${(30+Math.random()*20).toFixed(1)}%</td></tr>`;
+}
+
+// Auto-load & init stock page on first visit
+let saInitDone = false;
+function saInitStockPage(){
+  if(saInitDone) return;
+  saInitDone = true;
+  // Load watchlist & alerts from localStorage
+  const savedWl = localStorage.getItem('saWatchlist');
+  if(savedWl) { try { saWatchlist = JSON.parse(savedWl); } catch(e){} }
+  saRenderWatchlist();
+  const savedAl = localStorage.getItem('saAlerts');
+  if(savedAl) { try { saAlerts = JSON.parse(savedAl); } catch(e){} }
+  saRenderAlerts();
+  // Set search input + enable button
+  document.getElementById('saSearchInput').value = '600519 贵州茅台';
+  document.getElementById('saStartBtn').disabled = false;
+  document.getElementById('saStartBtn').textContent = '重新分析';
+  document.getElementById('saMeta').textContent = '贵州茅台 (600519) · 已就绪';
+  // Set default trade price
+  document.getElementById('saTradePrice').value = '14.56';
+  // Initialise trade panel data
+  saRenderTradePanel();
+  // Show progress with all steps completed (data is pre-filled)
+  document.getElementById('saProgress').style.display = 'block';
+  document.getElementById('saProgress').style.opacity = '1';
+  document.getElementById('saTabs').style.display = 'flex';
+  document.getElementById('saProgressFill').style.width = '100%';
+  document.getElementById('saProgressMsg').className = 'sa-progress-msg done';
+  document.getElementById('saProgressMsg').innerHTML = '✅ 分析完成（点击"重新分析"更新）';
+  // All steps done
+  document.querySelectorAll('.sa-step-wrap').forEach(s => { s.classList.remove('active'); s.classList.add('done'); });
+  document.querySelectorAll('.sa-step-wrap.done .sa-step-circle').forEach(c => { c.textContent = '✓'; });
+  document.querySelectorAll('.sa-step-tag').forEach(t => t.textContent = '');
+  const badge = document.getElementById('saLlmBadge');
+  if(badge) { badge.className = 'sa-llm-badge done'; badge.textContent = '✅ 已完成'; }
+  // Draw K-line after a brief pause for canvas layout
+  setTimeout(() => {
+    saRenderKline('saKlineCanvas', saGenerateKlineData(60));
+  }, 100);
+  // Draw sentiment gauge
+  const debates = [
+    { round:1, bull:'品牌护城河深厚，直销比例提升利润弹性，看多信号明确', bear:'行业增速放缓，库存积压超3月，看空风险加大' },
+    { round:2, bull:'i茅台贡献增量，国际化战略加速，利好持续', bear:'批发价回落显示需求疲软，看空风险增大' },
+    { round:3, bull:'分红率75%股息超3.5%，机构持续增持，利好', bear:'消费税改革风险，成长空间有限，看空' }
+  ];
+  setTimeout(() => saDrawSentiment('saSentimentArea', debates), 150);
+  // Draw radar
+  const risks = [
+    { title:'宏观经济风险', level:'中', color:'var(--amber)', detail:'' },
+    { title:'行业竞争风险', level:'中高', color:'#e67e22', detail:'' },
+    { title:'政策监管风险', level:'低', color:'var(--green)', detail:'' },
+    { title:'技术替代风险', level:'低', color:'var(--green)', detail:'' }
+  ];
+  setTimeout(() => saDrawRadar('saRadarCanvas', risks), 200);
+  // Draw confidence meter
+  setTimeout(() => saDrawConfidence('saConfidenceArea', { action:'买入', conf:82, posPct:15, tp:16.80, sl:13.50 }), 250);
+}
+
+// Patch switchPage to trigger init on stock page
+(function(){
+  const _origSwitch = switchPage;
+  switchPage = function(name){
+    _origSwitch(name);
+    if(name === 'stock') saInitStockPage();
+  };
+})();
+
+// Close search dropdown on outside click
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.sa-search-row')){
+    document.getElementById('saSearchDropdown').classList.remove('open');
+  }
+});
+
+// Keyboard shortcut: Enter to start analysis
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Enter' && document.activeElement === document.getElementById('saSearchInput')){
+    if(saSelectedStock) saStartAnalysis();
+  }
+});
+// ── K线时间周期切换 ──
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('#klTimespan button');
+  if(!btn) return;
+  document.querySelectorAll('#klTimespan button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const range = parseInt(btn.dataset.range);
+  const data = saGenerateKlineData(range);
+  setTimeout(() => saRenderKline('saKlineCanvas', data), 50);
+});
+
+// ── 风险雷达图 ──
+function saDrawRadar(canvasId, risks){
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const w = rect.width, h = rect.height;
+  const cx = w/2, cy = h/2;
+  const r = Math.min(w, h) * 0.35;
+  const n = risks.length;
+  const levels = 5;
+  const style = getComputedStyle(document.documentElement);
+  const cMuted = style.getPropertyValue('--muted').trim() || '#888';
+  const cBorder = style.getPropertyValue('--border-light').trim() || 'rgba(255,255,255,.08)';
+  const cFg = style.getPropertyValue('--fg-2').trim() || '#bbb';
+
+  // Map risk level to score
+  const levelMap = {'低':20, '中低':35, '中':50, '中高':65, '高':80, '极高':95};
+  const scores = risks.map(r => levelMap[r.level] || 50);
+
+  const angleStep = (2 * Math.PI) / n;
+  const rot = -Math.PI/2;
+
+  // Level circles
+  for(let lv=1;lv<=levels;lv++){
+    const lr = (r / levels) * lv;
+    ctx.beginPath();
+    for(let i=0;i<=n;i++){
+      const idx = i % n;
+      const a = rot + idx * angleStep;
+      const x = cx + lr * Math.cos(a);
+      const y = cy + lr * Math.sin(a);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = cBorder;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    // Level label
+    if(lv === 1 || lv === 3 || lv === 5){
+      ctx.fillStyle = cMuted;
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(Math.round((100/levels)*lv)+'%', cx - r - 6, cy + lv*(r/levels));
+    }
+  }
+
+  // Spokes
+  for(let i=0;i<n;i++){
+    const a = rot + i * angleStep;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    ctx.strokeStyle = cBorder; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  // Data polygon
+  ctx.beginPath();
+  for(let i=0;i<n;i++){
+    const a = rot + i * angleStep;
+    const val = (scores[i] / 100) * r;
+    const x = cx + val * Math.cos(a);
+    const y = cy + val * Math.sin(a);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(86,153,255,0.12)';
+  ctx.fill();
+  ctx.strokeStyle = style.getPropertyValue('--accent').trim() || '#5699ff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Data points + labels
+  for(let i=0;i<n;i++){
+    const a = rot + i * angleStep;
+    const val = (scores[i] / 100) * r;
+    const px = cx + val * Math.cos(a);
+    const py = cy + val * Math.sin(a);
+    const lx = cx + (r + 20) * Math.cos(a);
+    const ly = cy + (r + 20) * Math.sin(a);
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, 2*Math.PI);
+    ctx.fillStyle = style.getPropertyValue('--accent').trim() || '#5699ff';
+    ctx.fill();
+    ctx.fillStyle = cFg;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = a > Math.PI/2 && a < 3*Math.PI/2 ? 'right' : 'left';
+    ctx.fillText(risks[i].title, lx, ly+3);
+  }
+
+  // Center score
+  const avgScore = scores.reduce((a,b)=>a+b,0)/n;
+  ctx.fillStyle = cFg;
+  ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(Math.round(avgScore)+'%', cx, cy+6);
+  ctx.fillStyle = cMuted;
+  ctx.font = '9px sans-serif';
+  ctx.fillText('风险指数', cx, cy-14);
+}
+
+// ── 辩论情绪仪表 ──
+function saDrawSentiment(containerId, debates){
+  const container = document.getElementById(containerId);
+  if(!container) return;
+  // Count bull/bear arguments
+  let bullCount = 0, bearCount = 0;
+  debates.forEach(d => {
+    bullCount += (d.bull.match(/看多/g)||[]).length + (d.bull.match(/利好/g)||[]).length;
+    bearCount += (d.bear.match(/看空/g)||[]).length + (d.bear.match(/风险/g)||[]).length;
+  });
+  const total = bullCount + bearCount || 1;
+  const ratio = total > 0 ? bullCount / total : 0.5;
+  const pct = Math.round(ratio * 100);
+  const sentiment = pct > 55 ? '偏多' : pct < 45 ? '偏空' : '中性';
+
+  container.innerHTML =
+    `<div class="sa-sentiment-wrap">
+      <div style="font-size:12px;font-weight:600;color:var(--fg);margin-bottom:4px">📊 多空情绪</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:6px">观点倾向 · 当前市场情绪 ${sentiment}</div>
+      <div class="sa-sentiment-bar">
+        <div class="sb-indicator" style="left:${pct}%"></div>
+      </div>
+      <div class="sa-sentiment-labels">
+        <span style="color:var(--green)">看空</span>
+        <span style="color:var(--amber)">中性</span>
+        <span style="color:var(--red)">看多</span>
+      </div>
+      <div class="sa-sentiment-stats">
+        <div class="sa-sentiment-stat"><div class="ss-label">看多观点</div><div class="ss-value bull">${bullCount}</div></div>
+        <div class="sa-sentiment-stat"><div class="ss-label">看空观点</div><div class="ss-value bear">${bearCount}</div></div>
+        <div class="sa-sentiment-stat"><div class="ss-label">多空比</div><div class="ss-value neutral">${bullCount}:${bearCount}</div></div>
+        <div class="sa-sentiment-stat"><div class="ss-label">情绪结论</div><div class="ss-value" style="font-size:14px;font-weight:600;color:${pct>55?'var(--red)':pct<45?'var(--green)':'var(--muted)'}">${sentiment}</div></div>
+      </div>
+    </div>`;
+}
+
+// ── 决策信心仪表 ──
+function saDrawConfidence(containerId, dec){
+  const container = document.getElementById(containerId);
+  if(!container) return;
+  const conf = dec.conf || 75;
+  const tp = dec.tp || 16.80;
+  const sl = dec.sl || 13.50;
+  const currentPrice = parseFloat(document.querySelector('.qp-main')) || 14.50;
+  const upside = ((tp / currentPrice - 1) * 100).toFixed(1);
+  const downside = ((1 - sl / currentPrice) * 100).toFixed(1);
+  const rr = (upside / downside).toFixed(2);
+
+  container.innerHTML =
+    `<div class="sa-confidence-wrap">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:12px;font-weight:600;color:var(--fg)">🎯 决策信心</span>
+        <span style="font-size:20px;font-weight:600;color:${conf>75?'var(--green)':conf>60?'var(--amber)':'var(--red)'}">${conf}%</span>
+      </div>
+      <div class="sa-confidence-gauge">
+        <div class="cg-fill" style="width:${conf}%"></div>
+        <div class="cg-marker" style="left:${conf}%"></div>
+      </div>
+      <div class="sa-confidence-labels">
+        <span>低信心</span>
+        <span>高信心</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <div style="padding:6px 8px;border-radius:var(--radius);background:var(--green-bg)">
+          <div style="font-size:10px;color:var(--muted)">预期上行</div>
+          <div style="font-size:14px;font-weight:600;color:var(--green)">+${upside}%</div>
+        </div>
+        <div style="padding:6px 8px;border-radius:var(--radius);background:var(--red-bg)">
+          <div style="font-size:10px;color:var(--muted)">最大回撤</div>
+          <div style="font-size:14px;font-weight:600;color:var(--red)">-${downside}%</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10.5px;color:var(--muted)">
+        <span>目标价 <b style="color:var(--green)">¥${tp}</b></span>
+        <span>止损价 <b style="color:var(--red)">¥${sl}</b></span>
+        <span>盈亏比 <b style="color:var(--fg)">${rr}</b></span>
+      </div>
+    </div>`;
+}
+
+// ── 移动端侧栏 ──
+function saTogglePanelCollapse(header){
+  const panel = header.closest('.sa-panel');
+  panel.classList.toggle('collapsed');
+}
+function saToggleMobileSidebar(){
+  const sb = document.getElementById('saSidebar');
+  const btn = document.getElementById('saMobileToggle');
+  const open = sb.classList.toggle('open');
+  btn.textContent = open ? '✕' : '📊';
+  btn.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
+  if(!open) sb.querySelectorAll('.sa-panel.collapsed').forEach(p => p.classList.remove('collapsed'));
+}
+function saSwitchSidebarTab(tab){
+  document.querySelectorAll('.sa-sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.st === tab));
+  document.querySelectorAll('#saSidebar .sa-panel').forEach(p => p.classList.toggle('active', p.dataset.stPanel === tab));
+  // Desktop - hide mobile sidebar tabs, show all panels
+  if(window.innerWidth > 1024){
+    document.querySelectorAll('#saSidebar .sa-panel').forEach(p => p.style.display = '');
+  }
+}
+
+// Init - call after page load
+function saInitSidebar(){
+  // Desktop (>1024px): show all panels, hide sidebar tabs
+  if(window.innerWidth > 1024){
+    document.querySelectorAll('.sa-sidebar-tabs').forEach(t => t.style.display = 'none');
+    document.querySelectorAll('#saSidebar .sa-panel').forEach(p => { p.style.display = ''; });
+  }
+}
+// Call on page switch & init
+document.addEventListener('DOMContentLoaded', saInitSidebar);
+saInitSidebar();
 
 </script>
 </body>

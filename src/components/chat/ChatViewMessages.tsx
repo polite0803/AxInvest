@@ -1,8 +1,72 @@
-import Actions from "@ant-design/x/es/actions";
-import { BubbleItemType, type BubbleListRef, type RoleType } from "@ant-design/x/es/bubble/interface";
+// Local message types (replacing @ant-design/x Bubble)
+import { type CSSProperties, type ReactNode } from "react";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface BubbleItemType {
+  key: string;
+  role?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  content?: any;
+  variant?: "filled" | "outlined" | "shadow" | "borderless";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RoleType = Record<
+  string,
+  (item: any) => {
+    placement?: "start" | "end";
+    className?: string;
+    variant?: string;
+    style?: CSSProperties;
+    avatar?: ReactNode;
+    loading?: boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    contentRender?: (content: any, item: any) => ReactNode;
+    header?: ReactNode;
+    footer?: ReactNode;
+  }
+>;
+
+interface BubbleListRef {
+  scrollBoxNativeElement: HTMLElement | null;
+}
+
+// Local replacement for @ant-design/x Actions
+interface ActionItem {
+  key: string;
+  icon?: ReactNode;
+  label?: string;
+  onItemClick?: () => void;
+  actionRender?: () => ReactNode;
+}
+function Actions({ items, onActionClick }: { items: ActionItem[]; onActionClick?: (item: ActionItem) => void }) {
+  return (
+    <div className="msg-actions">
+      {items.map((action) => {
+        if (action.actionRender) {
+          return <div key={action.key} className="msg-action-custom">{action.actionRender()}</div>;
+        }
+        return (
+          <button
+            key={action.key}
+            className="msg-action-btn"
+            title={action.label}
+            onClick={() => {
+              action.onItemClick?.();
+              onActionClick?.(action);
+            }}
+          >
+            {action.icon}
+            {action.label && <span className="msg-action-label">{action.label}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 import { ModelIcon } from "@lobehub/icons";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Alert, App, Avatar, Input, Modal, Popconfirm, Spin, Tag, theme, Tooltip, Typography } from "antd";
+import { Alert, App, Avatar, Input, Modal, Popconfirm, Spin, Tag, theme, Typography } from "antd";
 import {
   ArrowDown,
   ArrowLeftRight,
@@ -46,6 +110,7 @@ import {
 import { useContinuationStore } from "@/stores/feature/continuationStore";
 import type { Message } from "@/types";
 
+import { Tooltip } from "@/components/layout/Tooltip";
 import { formatDuration, formatSpeed, formatTokenCount } from "../gateway/tokenFormat";
 import { AskUserCard } from "./AskUserCard";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -1073,6 +1138,7 @@ export function useChatViewMessages({
       const attachments = msg?.attachments ?? [];
       return {
         placement: "end" as const,
+        className: "msg-row",
         ...getBubbleVariant(true),
         avatar: userAvatar,
         contentRender: attachments.length > 0
@@ -1347,6 +1413,7 @@ export function useChatViewMessages({
 
       return {
         placement: "start" as const,
+        className: "msg-row",
         ...getBubbleVariant(false),
         avatar: isNonTabsMultiModel
           ? undefined

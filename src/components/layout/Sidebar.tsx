@@ -1,4 +1,5 @@
 import { Icon } from "@/components/common/Icon";
+import { Tooltip } from "@/components/layout/Tooltip";
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
 import { NAV_ICON_COLORS } from "@/lib/iconColors";
 import { invoke } from "@/lib/invoke";
@@ -8,13 +9,12 @@ import { resolveIconComponent } from "@/lib/skillIcons";
 import { useHelpStore, useSettingsStore, useSkillExtensionStore, useUIStore, useUserProfileStore } from "@/stores";
 import type { AppSettings, PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
-import { Avatar, theme, Tooltip } from "antd";
+import { Avatar } from "antd";
 import { Globe, LineChart, Moon, Pin, PinOff, RotateCcw, Settings, Sun, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { UserProfileModal } from "./UserProfileModal";
-
 const pageKeyToPath: Record<PageKey, string> = {
   chat: "/",
   knowledge: "/knowledge",
@@ -102,7 +102,7 @@ interface SidebarSection {
 }
 
 const SIDEBAR_WIDTH = 240;
-const SIDEBAR_COLLAPSED_WIDTH = 40;
+const SIDEBAR_COLLAPSED_WIDTH = 48;
 
 const NAV_SHORTCUT_MAP: Partial<Record<string, ShortcutAction>> = {
   gateway: "toggleGateway",
@@ -126,7 +126,6 @@ function NavItemButton({
   onNavigate: (path: string) => void;
 }) {
   const { t } = useTranslation();
-  const { token } = theme.useToken();
   const location = useLocation();
 
   const isActive = item.isPlugin
@@ -145,39 +144,22 @@ function NavItemButton({
     ? `${tooltipText} (${shortcutLabel})`
     : tooltipText;
 
+  const navClass = sidebarCollapsed
+    ? `nav-item${isActive ? " active" : ""}`
+    : `nav-item-expanded${isActive ? " active" : ""}`;
+
   return (
     <button
       type="button"
       onClick={() => onNavigate(item.path)}
-      className={`ax-nav-item${isActive ? " ax-nav-item-active" : ""}`}
+      className={navClass}
       data-tutorial={item.key === "knowledge" ? "knowledge-nav" : undefined}
       aria-label={title}
       aria-current={isActive ? "page" : undefined}
-      style={{
-        backgroundColor: isActive ? token.colorPrimaryBg : undefined,
-      }}
     >
-      <div className="ax-nav-indicator" />
-      <span
-        style={{
-          display: "flex",
-          alignItems: "center",
-          flexShrink: 0,
-          width: 18,
-          justifyContent: "center",
-        }}
-      >
-        {item.icon}
-      </span>
+      {item.icon}
       {!sidebarCollapsed && (
-        <span
-          className="ax-nav-label"
-          style={{
-            fontSize: 13,
-            fontWeight: isActive ? 500 : 400,
-            color: isActive ? token.colorPrimary : token.colorText,
-          }}
-        >
+        <span className="nav-label">
           {label}
         </span>
       )}
@@ -186,7 +168,7 @@ function NavItemButton({
           style={{
             marginLeft: "auto",
             fontSize: 10,
-            color: token.colorTextQuaternary,
+            color: "var(--color-text-secondary)",
             flexShrink: 0,
           }}
         >
@@ -208,7 +190,6 @@ function UserAvatarButton({
   profile: { avatarType?: string; avatarValue?: string; name?: string };
   resolvedAvatarSrc: string | undefined;
 }) {
-  const { token } = theme.useToken();
   const size = 28;
 
   if (profile.avatarType === "emoji" && profile.avatarValue) {
@@ -218,7 +199,7 @@ function UserAvatarButton({
           width: size,
           height: size,
           borderRadius: "50%",
-          backgroundColor: token.colorFillSecondary,
+          backgroundColor: "var(--color-fill-secondary)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -241,7 +222,7 @@ function UserAvatarButton({
     <Avatar
       size={size}
       icon={<User size={14} />}
-      style={{ cursor: "pointer", backgroundColor: token.colorPrimary }}
+      style={{ cursor: "pointer", backgroundColor: "var(--color-primary)" }}
     />
   );
 }
@@ -249,7 +230,6 @@ function UserAvatarButton({
 /** Mobile action buttons — mirrors TitleBar actions on Android where they get clipped */
 function MobileActions() {
   const { t } = useTranslation();
-  const { token } = theme.useToken();
   const navigate = useNavigate();
   const settings = useSettingsStore((s) => s.settings);
   const saveSettings = useSettingsStore((s) => s.saveSettings);
@@ -285,7 +265,7 @@ function MobileActions() {
     border: "none",
     backgroundColor: "transparent",
     cursor: "pointer",
-    color: token.colorTextSecondary,
+    color: "var(--color-text-secondary)",
     transition: "color 0.15s",
   };
 
@@ -297,7 +277,7 @@ function MobileActions() {
         gap: 2,
         justifyContent: "center",
         padding: "4px 0",
-        borderTop: `1px solid ${token.colorBorderSecondary}`,
+        borderTop: `1px solid ${"var(--color-border-secondary)"}`,
       }}
     >
       <Tooltip title={t("desktop.alwaysOnTop")} placement="right">
@@ -326,7 +306,6 @@ function MobileActions() {
 
 export function Sidebar() {
   const { t } = useTranslation();
-  const { token } = theme.useToken();
   const navigate = useNavigate();
   const location = useLocation();
   const activePage = pathToPageKey(location.pathname);
@@ -399,7 +378,7 @@ export function Sidebar() {
     sections.push({
       key: "infrastructure",
       labelKey: "sidebar.sectionInfrastructure",
-      items: builtinNavItems.filter((n) => n.key === "gateway"),
+      items: builtinNavItems.filter((n) => n.key === "gateway" || n.key === "terminal" || n.key === "files"),
     });
 
     if (bottomPlugins.length > 0) {
@@ -434,7 +413,7 @@ export function Sidebar() {
         onClick={toggleSidebar}
         aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
         aria-expanded={!sidebarCollapsed}
-        style={{ color: token.colorTextSecondary }}
+        style={{ color: "var(--color-text-secondary)" }}
       >
         {sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
       </button>
@@ -481,6 +460,18 @@ export function Sidebar() {
 
       <div className="flex-1" />
 
+      {/* Settings — lower group, above plugins in prototype */}
+      <Tooltip title={sidebarCollapsed ? t("settings.openSettings") : ""} placement="right">
+        <button
+          type="button"
+          className={`nav-item${activePage === "settings" ? " active" : ""}`}
+          onClick={() => navigate("/settings")}
+          aria-label={t("settings.openSettings")}
+        >
+          <Icon icon="fluent:settings-20-filled" size={17} color={"var(--color-text-quaternary)"} />
+        </button>
+      </Tooltip>
+
       {/* Mobile action buttons (TitleBar actions on Android) */}
       <MobileActions />
 
@@ -493,7 +484,7 @@ export function Sidebar() {
           aria-label={t("help.title")}
           style={{ justifyContent: "center" }}
         >
-          <Icon icon="fluent:question-circle-20-filled" size={17} color={token.colorTextQuaternary} />
+          <Icon icon="fluent:question-circle-20-filled" size={17} color={"var(--color-text-quaternary)"} />
         </button>
       </Tooltip>
 
@@ -513,10 +504,10 @@ export function Sidebar() {
           />
           {!sidebarCollapsed && (
             <span
-              className="ax-sidebar-user-name"
+              className="sidebar-user-name"
               style={{
                 fontSize: 13,
-                color: token.colorTextSecondary,
+                color: "var(--color-text-secondary)",
               }}
             >
               {profile.name || t("userProfile.title")}

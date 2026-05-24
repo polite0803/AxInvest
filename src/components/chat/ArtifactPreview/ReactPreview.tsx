@@ -40,7 +40,10 @@ window.onerror = function(msg, src, line, col, err) {
   window.parent.postMessage({ type: 'react-preview-error', message: String(msg) }, window.location.origin);
 };
 try {
-  var transformed = Babel.transform(${JSON.stringify(code)}, {
+  var _code = ${JSON.stringify(code)};
+  // auto-fix common mistake: const { X } from "module" → import { X } from "module"
+  _code = _code.replace(/\\bconst\\s*(\\{[^}]*\\})\\s+from\\s/g, 'import $1 from ');
+  var transformed = Babel.transform(_code, {
     presets: ['react'],
     filename: 'component.tsx'
   });

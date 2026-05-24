@@ -1,5 +1,6 @@
+import { Tooltip } from "@/components/layout/Tooltip";
 import { useHelpStore } from "@/stores/feature/helpStore";
-import { theme, Tooltip } from "antd";
+import { theme } from "antd";
 import { ArrowLeft, HelpCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -83,7 +84,7 @@ export function AppHeader() {
           <button
             type="button"
             onClick={() => navigate("/")}
-            className="ax-titlebar-btn"
+            className="titlebar-btn"
             aria-label={t("common.back")}
             style={{ color: token.colorTextQuaternary, flexShrink: 0 }}
           >
@@ -124,7 +125,7 @@ export function AppHeader() {
         <button
           type="button"
           onClick={toggleHelp}
-          className="ax-titlebar-btn"
+          className="titlebar-btn"
           aria-label={t("help.title")}
           style={{ color: token.colorTextQuaternary, flexShrink: 0 }}
         >

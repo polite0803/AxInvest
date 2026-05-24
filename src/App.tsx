@@ -1,4 +1,5 @@
 import { BuddyWidget } from "@/components/chat/BuddyWidget";
+import { TabBar } from "@/components/chat/TabBar";
 import { HelpPanel } from "@/components/help/HelpPanel";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ContentArea } from "@/components/layout/ContentArea";
@@ -30,7 +31,7 @@ import {
 } from "@/stores";
 import { useShadcnTheme } from "@/theme/shadcnTheme";
 import type { ThemePreset } from "@/theme/shadcnTheme";
-import { App as AntdApp, ConfigProvider, Layout, theme } from "antd";
+import { App as AntdApp, ConfigProvider, theme } from "antd";
 import { enableD2, setDefaultI18nMap } from "markstream-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -51,7 +52,6 @@ import antdZhTW from "antd/locale/zh_TW";
 
 const LazyQuickBarPage = lazy(() => import("@/pages/QuickBarPage").then((m) => ({ default: m.QuickBarPage })));
 
-const { Content } = Layout;
 const { useToken } = theme;
 
 /** Show the main window (it starts hidden to avoid white flash). */
@@ -64,11 +64,23 @@ async function showWindow() {
   }
 }
 
-/** 全局底部状态栏 */
-function ConditionalGlobalStatusBar() {
+/** 全局底部状态栏 — 所有页面可见（设置页除外） */
+function GlobalStatusBarWrapper() {
   return (
     <ModuleErrorBoundary moduleName="GlobalStatusBar">
       <GlobalStatusBar />
+    </ModuleErrorBoundary>
+  );
+}
+
+/** 对话标签页 — 全局层级，仅对话页渲染 */
+function GlobalTabBar() {
+  const location = useLocation();
+  const isChatPage = location.pathname === "/" || location.pathname === "";
+  if (!isChatPage) { return null; }
+  return (
+    <ModuleErrorBoundary moduleName="TabBar">
+      <TabBar />
     </ModuleErrorBoundary>
   );
 }
@@ -220,12 +232,16 @@ function AppInner() {
     };
   }, [updateCheckInterval, checkForUpdate]);
 
+  const shellClass = [
+    "app-shell",
+    "ax-safe-top",
+    "ax-safe-bottom",
+    isInSettings ? "page-mode" : "",
+  ].filter(Boolean).join(" ");
+
   return (
     <>
-      <div
-        className="flex flex-col h-screen ax-safe-top ax-safe-bottom"
-        style={{ backgroundColor: token.colorBgContainer }}
-      >
+      <div className={shellClass}>
         {isQuickBar
           ? (
             isQuickBarWindow && location.pathname !== "/quickbar"
@@ -257,36 +273,26 @@ function AppInner() {
               </ModuleErrorBoundary>
               <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
               <GlobalCopyMenu />
-              {/* 所有屏幕尺寸统一使用左侧侧栏导航，移动端不再显示滑出式 Drawer */}
-              <Layout
-                hasSider={!isInSettings}
-                className="flex-1 overflow-hidden"
-                style={{ backgroundColor: "transparent" }}
-              >
-                {!isInSettings && (
-                  <div
-                    style={{
-                      backgroundColor: "transparent",
-                      borderRight: "1px solid var(--border-color)",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <ModuleErrorBoundary moduleName="Sidebar">
-                      <Sidebar />
-                    </ModuleErrorBoundary>
+              <div className="main-area">
+                <nav className="nav-sidebar">
+                  <ModuleErrorBoundary moduleName="Sidebar">
+                    <Sidebar />
+                  </ModuleErrorBoundary>
+                </nav>
+                <div className="content-col">
+                  <GlobalTabBar />
+                  <div className="page-area">
+                    <div
+                      className="ax-page-transition"
+                      style={{ flex: 1, display: "flex", overflow: "hidden" }}
+                      key={location.pathname}
+                    >
+                      <ContentArea />
+                    </div>
                   </div>
-                )}
-                <Content className="overflow-hidden">
-                  <div
-                    className="ax-page-transition"
-                    style={{ height: "100%" }}
-                    key={location.pathname}
-                  >
-                    <ContentArea />
-                  </div>
-                </Content>
-              </Layout>
-              <ConditionalGlobalStatusBar />
+                  <GlobalStatusBarWrapper />
+                </div>
+              </div>
             </>
           )}
       </div>

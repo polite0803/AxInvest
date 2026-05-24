@@ -1,8 +1,9 @@
 import { CopyButton } from "@/components/common/CopyButton";
+import { Tooltip } from "@/components/layout/Tooltip";
 import { stripAxAgentTags } from "@/lib/chatMarkdown";
 import type { Message } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
-import { Alert, Button, Popconfirm, Tag, theme, Tooltip, Typography } from "antd";
+import { Alert, Button, Popconfirm, Tag, theme, Typography } from "antd";
 import { Check, Columns2, LayoutList, Rows3, Trash2 } from "lucide-react";
 import { OverlayScrollbars } from "overlayscrollbars";
 import React, { useEffect, useLayoutEffect, useMemo, useRef } from "react";
@@ -135,15 +136,15 @@ function MultiModelDisplayInner({
     let cur: HTMLElement | null = el;
     while (cur) {
       const classList = cur.classList;
-      if (classList.contains("ant-bubble")) {
+      if (classList.contains("msg-row")) {
         modified.push({ el: cur, prev: cur.style.cssText });
         cur.style.width = "100%";
         cur.style.boxSizing = "border-box";
         break;
       }
       if (
-        classList.contains("ant-bubble-body")
-        || classList.contains("ant-bubble-content")
+        classList.contains("msg-body")
+        || classList.contains("msg-content")
       ) {
         modified.push({ el: cur, prev: cur.style.cssText });
         cur.style.overflow = "hidden";

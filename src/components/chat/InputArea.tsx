@@ -1,4 +1,7 @@
 import { ContextHelp } from "@/components/help/ContextHelp";
+import { DropdownMenu } from "@/components/layout/DropdownMenu";
+import type { DropdownItem } from "@/components/layout/DropdownMenu";
+import { Tooltip } from "@/components/layout/Tooltip";
 import { KnowledgeBaseIcon } from "@/components/shared/KnowledgeBaseIcon";
 import { McpServerIcon } from "@/components/shared/McpServerIcon";
 import { NamespaceIcon } from "@/components/shared/NamespaceIcon";
@@ -33,8 +36,7 @@ import type { PromptTemplate } from "@/types";
 import type { AttachmentInput, Model, ProviderConfig, RealtimeConfig } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
 import { open } from "@tauri-apps/plugin-dialog";
-import { App, Badge, Button, Checkbox, Dropdown, Image, Popover, Radio, Select, Tag, theme, Tooltip } from "antd";
-import type { MenuProps } from "antd";
+import { App, Badge, Button, Checkbox, Image, Popover, Radio, Select, Tag, theme } from "antd";
 import {
   ArrowUp,
   Atom,
@@ -620,7 +622,7 @@ export function InputArea() {
   }, [pendingPromptText]);
 
   // Search dropdown menu items
-  const searchMenuItems = useMemo(() => {
+  const searchMenuItems = useMemo((): DropdownItem[] => {
     const available = searchProviders;
     if (available.length === 0) {
       return [
@@ -660,19 +662,12 @@ export function InputArea() {
           {searchEnabled && searchProviderId === p.id && <Check size={14} style={{ color: token.colorPrimary }} />}
         </div>
       ),
+      onClick: () => {
+        setSearchEnabled(true);
+        setSearchProviderId(p.id);
+      },
     }));
   }, [searchProviders, searchEnabled, searchProviderId, token, t]);
-
-  const handleSearchMenuClick = useCallback(
-    ({ key }: { key: string }) => {
-      if (key === "__empty") {
-        return;
-      }
-      setSearchEnabled(true);
-      setSearchProviderId(key);
-    },
-    [setSearchEnabled, setSearchProviderId],
-  );
 
   // MCP popover content — mode selector + checkboxes with alias/description
   const mcpPopoverContent = useMemo(() => {
@@ -890,45 +885,40 @@ export function InputArea() {
     }
   }, [selectedThinkingOption.key]);
 
-  const thinkingMenuItems = useMemo<MenuProps["items"]>(
-    () =>
-      thinkingOptions.map((opt) => ({
-        key: opt.key,
-        label: opt.label,
-        icon: (() => {
-          switch (opt.key) {
-            case "none":
-              return <CircleOff size={14} />;
-            case "default":
-              return <Atom size={14} />;
-            case "low":
-              return <SignalLow size={14} />;
-            case "medium":
-              return <SignalMedium size={14} />;
-            case "high":
-              return <SignalHigh size={14} />;
-            case "xhigh":
-              return <Signal size={14} />;
-            default:
-              return <Atom size={14} />;
-          }
-        })(),
-      })),
-    [thinkingOptions],
-  );
+  const thinkingMenuItems = useMemo((): DropdownItem[] =>
+    thinkingOptions.map((opt) => ({
+      key: opt.key,
+      label: opt.label,
+      icon: (() => {
+        switch (opt.key) {
+          case "none":
+            return <CircleOff size={14} />;
+          case "default":
+            return <Atom size={14} />;
+          case "low":
+            return <SignalLow size={14} />;
+          case "medium":
+            return <SignalMedium size={14} />;
+          case "high":
+            return <SignalHigh size={14} />;
+          case "xhigh":
+            return <Signal size={14} />;
+          default:
+            return <Atom size={14} />;
+        }
+      })(),
+      onClick: () => handleThinkingSelect(opt.key),
+    })), [thinkingOptions]);
 
-  const handleThinkingMenuClick = useCallback<
-    NonNullable<MenuProps["onClick"]>
-  >(
-    ({ key }) => {
+  const handleThinkingSelect = useCallback(
+    (key: string) => {
       const selected = thinkingOptions.find((opt) => opt.key === key);
-      if (!selected) {
-        return;
+      if (selected) {
+        setThinkingBudget(selected.value);
+        setThinkingDropdownOpen(false);
       }
-      setThinkingBudget(selected.value);
-      setThinkingDropdownOpen(false);
     },
-    [setThinkingBudget, thinkingOptions],
+    [setThinkingBudget, thinkingOptions, setThinkingDropdownOpen],
   );
 
   // Expert menu items — 专家角色选择（所有模式通用）
@@ -936,13 +926,13 @@ export function InputArea() {
   const expertBuiltinRoles = useExpertStore((s) => s.builtinRoles);
   const agencyRoles = useExpertStore((s) => s.agencyRoles);
   const customRoles = useExpertStore((s) => s.customRoles);
-  const expertMenuItems = useMemo<MenuProps["items"]>(() => {
+  const expertMenuItems = useMemo((): DropdownItem[] => {
     const grouped = useExpertStore.getState().getRolesByCategory();
-    const items: MenuProps["items"] = [];
+    const items: DropdownItem[] = [];
 
     for (const [category, categoryRoles] of Object.entries(grouped)) {
       if (items.length > 0) {
-        items.push({ type: "divider" as const });
+        items.push({ key: "div-1", divider: true });
       }
       items.push({
         key: `category-${category}`,
@@ -960,6 +950,7 @@ export function InputArea() {
               <span>{role.name}</span>
             </span>
           ),
+          onClick: () => handleExpertSelect(role.id),
         });
       }
     }
@@ -967,18 +958,24 @@ export function InputArea() {
   }, [expertBuiltinRoles, agencyRoles, customRoles, t]);
 
   // Mode menu items (Q&A, Agent, Gateway options)
-  const modeMenuItems = useMemo<MenuProps["items"]>(() => {
-    const items: MenuProps["items"] = [
+  const modeMenuItems = useMemo((): DropdownItem[] => {
+    const items: DropdownItem[] = [
       {
         key: "chat",
         icon: <MessageSquare size={14} />,
-        label: t("common.chatMode"),
+        label: (
+          <span className="flex items-center gap-2">
+            {t("common.chatMode")}
+            {currentMode === "chat" && <Check size={14} style={{ color: token.colorPrimary }} />}
+          </span>
+        ),
+        onClick: () => handleModeSwitch("chat"),
       },
       {
         key: "agent",
         icon: <Bot size={14} />,
         label: (
-          <>
+          <span className="flex items-center gap-2">
             {t("common.agentMode")}{" "}
             <Tag
               color="blue"
@@ -991,7 +988,7 @@ export function InputArea() {
             >
               Beta
             </Tag>
-          </>
+          </span>
         ),
       },
     ];
@@ -999,26 +996,22 @@ export function InputArea() {
       (l) => l.enabled && l.status === "connected",
     );
     if (connectedGateways.length > 0) {
-      items.push({ type: "divider" as const });
+      items.push({ key: "div-2", divider: true });
       connectedGateways.forEach((gateway) => {
         items.push({
           key: `gateway:${gateway.id}`,
           icon: <Globe size={14} />,
           label: gateway.name,
+          onClick: () => setSelectedGatewayId(gateway.id),
         });
       });
     }
     return items;
-  }, [t, gatewayLinks]);
+  }, [t, gatewayLinks, currentMode, selectedGatewayId, token.colorPrimary]);
 
   // Handle expert selection
-  const handleScenarioClick = useCallback<NonNullable<MenuProps["onClick"]>>(
-    async ({ key }) => {
-      const expertPrefix = "expert-";
-      if (!key.startsWith(expertPrefix)) {
-        return;
-      }
-      const roleId = key.replace(expertPrefix, "");
+  const handleExpertSelect = useCallback(
+    async (roleId: string) => {
       const role = useExpertStore.getState().getRoleById(roleId);
       if (!role) {
         return;
@@ -1053,26 +1046,41 @@ export function InputArea() {
   );
 
   // Agent permission mode menu items
-  const permissionModeItems = useMemo<MenuProps["items"]>(
-    () => [
-      {
-        key: "default",
-        label: t("common.permissionDefault"),
-        icon: <Shield size={14} />,
-      },
-      {
-        key: "accept_edits",
-        label: t("common.permissionAcceptEdits"),
-        icon: <ShieldCheck size={14} style={{ color: "#1890ff" }} />,
-      },
-      {
-        key: "full_access",
-        label: t("common.permissionFullAccess"),
-        icon: <ShieldAlert size={14} style={{ color: "#ff4d4f" }} />,
-      },
-    ],
-    [t],
-  );
+  const permissionModeItems = useMemo((): DropdownItem[] => [
+    {
+      key: "default",
+      label: (
+        <span className="flex items-center gap-2">
+          {t("common.permissionDefault")}
+          {agentPermissionMode === "default" && <Check size={14} style={{ color: token.colorPrimary }} />}
+        </span>
+      ),
+      icon: <Shield size={14} />,
+      onClick: () => handlePermissionModeChange("default"),
+    },
+    {
+      key: "accept_edits",
+      label: (
+        <span className="flex items-center gap-2">
+          {t("common.permissionAcceptEdits")}
+          {agentPermissionMode === "accept_edits" && <Check size={14} style={{ color: "#1890ff" }} />}
+        </span>
+      ),
+      icon: <ShieldCheck size={14} style={{ color: "#1890ff" }} />,
+      onClick: () => handlePermissionModeChange("accept_edits"),
+    },
+    {
+      key: "full_access",
+      label: (
+        <span className="flex items-center gap-2">
+          {t("common.permissionFullAccess")}
+          {agentPermissionMode === "full_access" && <Check size={14} style={{ color: "#ff4d4f" }} />}
+        </span>
+      ),
+      icon: <ShieldAlert size={14} style={{ color: "#ff4d4f" }} />,
+      onClick: () => handlePermissionModeChange("full_access"),
+    },
+  ], [t, agentPermissionMode, token.colorPrimary]);
 
   const handlePermissionModeChange = useCallback(
     async (mode: string) => {
@@ -1781,18 +1789,6 @@ export function InputArea() {
     ],
   );
 
-  const handleModeMenuClick = useCallback<NonNullable<MenuProps["onClick"]>>(
-    ({ key }) => {
-      if (key === "chat" || key === "agent") {
-        handleModeSwitch(key);
-      } else if (key.startsWith("gateway:")) {
-        const gatewayId = key.replace("gateway:", "");
-        setSelectedGatewayId(gatewayId);
-      }
-    },
-    [handleModeSwitch],
-  );
-
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed || streaming) {
@@ -2304,7 +2300,7 @@ export function InputArea() {
   }, [currentMode, handleModeSwitch]);
 
   return (
-    <div className="px-4 pb-3 pt-1" data-tutorial="chat-input">
+    <div className="chat-input-area" data-tutorial="chat-input">
       <input
         ref={fileInputRef}
         type="file"
@@ -2545,7 +2541,7 @@ export function InputArea() {
         )}
 
         {/* Textarea with command suggest */}
-        <div className="relative">
+        <div className="chat-input-box">
           <CommandSuggest
             value={value}
             cursorPosition={cursorPosition}
@@ -2575,7 +2571,7 @@ export function InputArea() {
             visible={showSuggest}
           />
           <textarea
-            className="axagent-input-textarea outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+            className=""
             ref={textareaRef}
             data-testid="message-input"
             value={value}
@@ -2585,18 +2581,9 @@ export function InputArea() {
             placeholder={t("chat.inputPlaceholder")}
             rows={1}
             style={{
-              width: "100%",
-              border: "none",
-              resize: "none",
-              padding: "4px 16px 8px",
-              fontSize: token.fontSize,
-              lineHeight: 1.6,
-              backgroundColor: "transparent",
               color: token.colorText,
-              fontFamily: "inherit",
               minHeight: userMinHeight,
               maxHeight: ABSOLUTE_MAX_HEIGHT,
-              overflowY: "auto",
             }}
             onKeyUp={() => {
               if (textareaRef.current) {
@@ -2622,7 +2609,7 @@ export function InputArea() {
         </div>
 
         {/* Bottom action bar */}
-        <div className="flex items-center justify-between px-2 pb-2">
+        <div className="chat-input-tools">
           <div className="flex items-center gap-0.5">
             <SkillToolbar position="left" />
             {searchEnabled
@@ -2641,109 +2628,74 @@ export function InputArea() {
                 </Tooltip>
               )
               : (
-                <Dropdown
-                  trigger={["click"]}
-                  placement="topLeft"
-                  menu={{
-                    items: searchMenuItems,
-                    onClick: handleSearchMenuClick,
-                  }}
+                <DropdownMenu
+                  items={searchMenuItems}
                   open={searchDropdownOpen}
                   onOpenChange={setSearchDropdownOpen}
                 >
-                  <Tooltip
-                    title={t("chat.search.title")}
-                    open={searchDropdownOpen ? false : undefined}
-                  >
-                    <Button type="text" size="small" icon={<Globe size={14} />} />
-                  </Tooltip>
-                </Dropdown>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<Globe size={14} />}
+                    style={searchEnabled ? { color: token.colorPrimary } : undefined}
+                    onClick={() => setSearchDropdownOpen((p) => !p)}
+                  />
+                </DropdownMenu>
               )}
             {!activeConversationId && (
-              <Dropdown
-                trigger={["click"]}
-                placement="topLeft"
-                menu={{
-                  items: expertMenuItems,
-                  onClick: handleScenarioClick,
-                }}
-              >
-                <Tooltip title={t("chat.selectExpert")} open={undefined}>
-                  <Button type="text" size="small" icon={<Bot size={14} />} />
-                </Tooltip>
-              </Dropdown>
+              <DropdownMenu items={expertMenuItems}>
+                <Button type="text" size="small" icon={<Bot size={14} />} />
+              </DropdownMenu>
             )}
             {hasReasoning && (
-              <Dropdown
-                trigger={["click"]}
-                placement="topLeft"
-                menu={{
-                  items: thinkingMenuItems,
-                  onClick: handleThinkingMenuClick,
-                  selectable: true,
-                  selectedKeys: [selectedThinkingOption.key],
-                }}
+              <DropdownMenu
+                items={thinkingMenuItems}
                 open={thinkingDropdownOpen}
                 onOpenChange={setThinkingDropdownOpen}
               >
-                <Tooltip
-                  title={`${t("chat.thinkingIntensity")}: ${selectedThinkingOption.label}`}
-                  open={thinkingDropdownOpen ? false : undefined}
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={thinkingIcon}
-                    style={thinkingBudget === 0
-                      ? { color: token.colorError }
-                      : thinkingBudget !== null
-                      ? { color: token.colorPrimary }
-                      : undefined}
-                  />
-                </Tooltip>
-              </Dropdown>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={thinkingIcon}
+                  style={thinkingBudget === 0
+                    ? { color: token.colorError }
+                    : thinkingBudget !== null
+                    ? { color: token.colorPrimary }
+                    : undefined}
+                />
+              </DropdownMenu>
             )}
             {hasVision && (
-              <Dropdown
-                trigger={["click"]}
-                placement="topLeft"
-                menu={{
-                  items: [
-                    {
-                      key: "file",
-                      icon: <Paperclip size={14} />,
-                      label: t("chat.attachFile"),
-                      onClick: handleFileSelect,
-                    },
-                    {
-                      key: "photo",
-                      icon: <ImageIcon size={14} />,
-                      label: t("chat.takePhoto"),
-                      onClick: handlePhotoSelect,
-                    },
-                    {
-                      key: "audio",
-                      icon: <Mic size={14} />,
-                      label: t("chat.recordAudio"),
-                      onClick: handleAudioSelect,
-                    },
-                    {
-                      key: "video",
-                      icon: <Film size={14} />,
-                      label: t("chat.recordVideo"),
-                      onClick: handleVideoSelect,
-                    },
-                  ],
-                }}
+              <DropdownMenu
+                items={[
+                  {
+                    key: "file",
+                    icon: <Paperclip size={14} />,
+                    label: t("chat.attachFile"),
+                    onClick: handleFileSelect,
+                  },
+                  {
+                    key: "photo",
+                    icon: <ImageIcon size={14} />,
+                    label: t("chat.takePhoto"),
+                    onClick: handlePhotoSelect,
+                  },
+                  {
+                    key: "audio",
+                    icon: <Mic size={14} />,
+                    label: t("chat.recordAudio"),
+                    onClick: handleAudioSelect,
+                  },
+                  {
+                    key: "video",
+                    icon: <Film size={14} />,
+                    label: t("chat.recordVideo"),
+                    onClick: handleVideoSelect,
+                  },
+                ]}
               >
-                <Tooltip title={t("chat.attachFile")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Paperclip size={14} />}
-                  />
-                </Tooltip>
-              </Dropdown>
+                <Button type="text" size="small" icon={<Paperclip size={14} />} />
+              </DropdownMenu>
             )}
             <Popover
               trigger="click"
@@ -2843,62 +2795,56 @@ export function InputArea() {
                 />
               </Tooltip>
             )}
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: "auto",
-                    icon: activeConversation?.context_compression ? <ZapOff size={14} /> : <Zap size={14} />,
-                    label: activeConversation?.context_compression
-                      ? t("chat.disableAutoCompression")
-                      : t("chat.enableAutoCompression"),
-                    onClick: () => {
-                      if (!activeConversationId || !activeConversation) {
-                        return;
-                      }
-                      updateConversation(activeConversationId, {
-                        context_compression: !activeConversation.context_compression,
-                      });
-                    },
+            <DropdownMenu
+              items={[
+                {
+                  key: "auto",
+                  icon: activeConversation?.context_compression ? <ZapOff size={14} /> : <Zap size={14} />,
+                  label: activeConversation?.context_compression
+                    ? t("chat.disableAutoCompression")
+                    : t("chat.enableAutoCompression"),
+                  onClick: () => {
+                    if (!activeConversationId || !activeConversation) {
+                      return;
+                    }
+                    updateConversation(activeConversationId, {
+                      context_compression: !activeConversation.context_compression,
+                    });
                   },
-                  {
-                    key: "manual",
-                    icon: <Shrink size={14} />,
-                    label: t("chat.manualCompress"),
-                    disabled: !activeConversationId
-                      || streaming
-                      || compressing
-                      || messagesLength === 0,
-                    onClick: async () => {
-                      if (!activeConversationId) {
-                        return;
-                      }
-                      try {
-                        await compressContext();
-                        messageApi.success(t("chat.compressSuccess"));
-                      } catch {
-                        messageApi.error(t("chat.compressFailed"));
-                      }
-                    },
+                },
+                {
+                  key: "manual",
+                  icon: <Shrink size={14} />,
+                  label: t("chat.manualCompress"),
+                  disabled: !activeConversationId
+                    || streaming
+                    || compressing
+                    || messagesLength === 0,
+                  onClick: async () => {
+                    if (!activeConversationId) {
+                      return;
+                    }
+                    try {
+                      await compressContext();
+                      messageApi.success(t("chat.compressSuccess"));
+                    } catch {
+                      messageApi.error(t("chat.compressFailed"));
+                    }
                   },
-                ],
-              }}
-              trigger={["click"]}
-              placement="topLeft"
+                },
+              ]}
             >
-              <Tooltip title={t("chat.contextCompression")}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<Zap size={14} />}
-                  loading={compressing}
-                  disabled={!activeConversationId}
-                  style={activeConversation?.context_compression
-                    ? { color: token.colorPrimary }
-                    : undefined}
-                />
-              </Tooltip>
-            </Dropdown>
+              <Button
+                type="text"
+                size="small"
+                icon={<Zap size={14} />}
+                loading={compressing}
+                disabled={!activeConversationId}
+                style={activeConversation?.context_compression
+                  ? { color: token.colorPrimary }
+                  : undefined}
+              />
+            </DropdownMenu>
             <Tooltip
               title={shortcutHint(t("chat.clearContext"), "clearContext")}
             >
@@ -2950,93 +2896,69 @@ export function InputArea() {
                 onClick={() => setSettingsOpen(true)}
               />
             </Tooltip>
-            <Dropdown
-              menu={{
-                items: modeMenuItems,
-                onClick: handleModeMenuClick,
-                selectedKeys: currentMode === "gateway" && selectedGatewayId
-                  ? [`gateway:${selectedGatewayId}`]
-                  : [currentMode],
-              }}
-              trigger={["click"]}
-              placement="topLeft"
-            >
-              <Tooltip
-                title={currentMode === "gateway" && selectedGatewayId
-                  ? gatewayLinks.find((l) => l.id === selectedGatewayId)
-                    ?.name || t("common.chatMode")
-                  : currentMode === "agent"
-                  ? t("common.agentMode")
-                  : t("common.chatMode")}
+            <DropdownMenu items={modeMenuItems}>
+              <Button
+                type="text"
+                size="small"
+                data-tutorial="agent-mode"
+                icon={currentMode === "agent"
+                  ? <Bot size={14} />
+                  : currentMode === "gateway"
+                  ? <Globe size={14} />
+                  : <MessageSquare size={14} />}
+                style={{ display: "flex", alignItems: "center", gap: 4 }}
+              />
+            </DropdownMenu>
+            <ContextHelp helpKey="agent" section="agent" />
+            {currentMode === "agent" && (
+              <DropdownMenu
+                items={[
+                  {
+                    key: "direct",
+                    icon: <Play size={14} />,
+                    label: (
+                      <span className="flex items-center gap-2">
+                        {t("plan.strategyDirect")}
+                        {workStrategy === "direct" && <Check size={14} style={{ color: token.colorPrimary }} />}
+                      </span>
+                    ),
+                    onClick: () => handleWorkStrategyChange("direct"),
+                  },
+                  {
+                    key: "plan",
+                    icon: <ClipboardList size={14} />,
+                    label: (
+                      <span className="flex items-center gap-2">
+                        {t("plan.strategyPlan")}{" "}
+                        <Tag
+                          color="purple"
+                          style={{
+                            fontSize: 10,
+                            lineHeight: "16px",
+                            padding: "0 3px",
+                            marginLeft: 2,
+                          }}
+                        >
+                          New
+                        </Tag>
+                      </span>
+                    ),
+                    onClick: () => handleWorkStrategyChange("plan"),
+                  },
+                ]}
               >
                 <Button
                   type="text"
                   size="small"
-                  data-tutorial="agent-mode"
-                  icon={currentMode === "agent"
-                    ? <Bot size={14} />
-                    : currentMode === "gateway"
-                    ? <Globe size={14} />
-                    : <MessageSquare size={14} />}
-                  style={{ display: "flex", alignItems: "center", gap: 4 }}
+                  icon={workStrategy === "plan" ? <ClipboardList size={14} /> : <Play size={14} />}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    color: workStrategy === "plan" ? "#722ed1" : undefined,
+                  }}
                 />
-              </Tooltip>
-            </Dropdown>
-            <ContextHelp helpKey="agent" section="agent" />
-            {currentMode === "agent" && (
-              <Dropdown
-                menu={{
-                  items: [
-                    {
-                      key: "direct",
-                      icon: <Play size={14} />,
-                      label: t("plan.strategyDirect"),
-                    },
-                    {
-                      key: "plan",
-                      icon: <ClipboardList size={14} />,
-                      label: (
-                        <>
-                          {t("plan.strategyPlan")}{" "}
-                          <Tag
-                            color="purple"
-                            style={{
-                              fontSize: 10,
-                              lineHeight: "16px",
-                              padding: "0 3px",
-                              marginLeft: 2,
-                            }}
-                          >
-                            New
-                          </Tag>
-                        </>
-                      ),
-                    },
-                  ],
-                  onClick: ({ key }) => handleWorkStrategyChange(key as "direct" | "plan"),
-                  selectedKeys: [workStrategy],
-                }}
-                trigger={["click"]}
-                placement="topLeft"
-              >
-                <Tooltip
-                  title={workStrategy === "plan"
-                    ? t("plan.strategyPlan")
-                    : t("plan.strategyDirect")}
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={workStrategy === "plan" ? <ClipboardList size={14} /> : <Play size={14} />}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 4,
-                      color: workStrategy === "plan" ? "#722ed1" : undefined,
-                    }}
-                  />
-                </Tooltip>
-              </Dropdown>
+              </DropdownMenu>
             )}
             {currentMode === "agent" && activeConversationId && (
               <PlanHistoryPanel conversationId={activeConversationId} />
@@ -3168,15 +3090,7 @@ export function InputArea() {
         </div>
         <div className="flex items-center gap-2 ml-auto">
           {currentMode === "agent" && (
-            <Dropdown
-              menu={{
-                items: permissionModeItems,
-                selectedKeys: [agentPermissionMode],
-                onClick: ({ key }) => handlePermissionModeChange(key),
-              }}
-              trigger={["click"]}
-              placement="topRight"
-            >
+            <DropdownMenu items={permissionModeItems}>
               <Button
                 type="text"
                 size="small"
@@ -3193,7 +3107,7 @@ export function InputArea() {
               >
                 {permissionModeLabel}
               </Button>
-            </Dropdown>
+            </DropdownMenu>
           )}
           {contextCount > 0 && (
             <span style={{ fontSize: 12, color: token.colorTextSecondary }}>

@@ -31,8 +31,6 @@ import { useTopicGroupStore } from "@/stores/feature/topicGroupStore";
 
 import { registerHighlight } from "stream-markdown";
 
-import { StockAnalysisChatIndicator } from "@/components/stock-analysis/StockAnalysisChatIndicator";
-import Bubble from "@ant-design/x/es/bubble";
 import { ContextPredictionPanel } from "../proactive/ContextPredictionPanel";
 import { PrefetchIndicator } from "../proactive/PrefetchIndicator";
 import { ProactiveSuggestionBar } from "../proactive/ProactiveSuggestionBar";
@@ -66,7 +64,7 @@ import { WorkflowProgressPanel } from "./WorkflowProgressPanel";
 import { WorkflowSuggestionCard } from "./WorkflowSuggestionCard";
 
 import { useChatViewMessages } from "./ChatViewMessages";
-import { BubbleStyleOverrides, StreamingStyles } from "./ChatViewStreaming";
+import { StreamingStyles } from "./ChatViewStreaming";
 import { ChatViewToolbar } from "./ChatViewToolbar";
 import { ChatViewWelcome } from "./ChatViewWelcome";
 import { FilePermissionDialog } from "./FilePermissionDialog";
@@ -277,36 +275,21 @@ function ChatViewInner({
     if (messages.length > 0) {
       recent_actions.push("UserMessaged");
     }
-    if (
-      content.includes("error")
-      || content.includes("Error")
-      || content.includes("bug")
-      || content.includes("修复")
-      || content.includes("报错")
-    ) {
+    const errorKeywords = ["error", "Error", "bug", "修复", "报错"];
+    const refactorKeywords = ["refactor", "优化", "重构", "improve"];
+    const testKeywords = ["test", "测试", "spec"];
+    const docKeywords = ["document", "文档", "readme", "doc"];
+
+    if (errorKeywords.some((kw) => content.includes(kw))) {
       recent_actions.push("ErrorDetected");
     }
-    if (
-      content.includes("refactor")
-      || content.includes("优化")
-      || content.includes("重构")
-      || content.includes("improve")
-    ) {
+    if (refactorKeywords.some((kw) => content.includes(kw))) {
       recent_actions.push("RefactorKeyword");
     }
-    if (
-      content.includes("test")
-      || content.includes("测试")
-      || content.includes("spec")
-    ) {
+    if (testKeywords.some((kw) => content.includes(kw))) {
       recent_actions.push("TestKeyword");
     }
-    if (
-      content.includes("document")
-      || content.includes("文档")
-      || content.includes("readme")
-      || content.includes("doc")
-    ) {
+    if (docKeywords.some((kw) => content.includes(kw))) {
       recent_actions.push("DocKeyword");
     }
     if (fileMatches.length > 0) {
@@ -536,7 +519,7 @@ function ChatViewInner({
   return (
     <div className="ax-cyber-grid flex flex-col h-full min-h-0">
       <StreamingStyles />
-      <BubbleStyleOverrides />
+      {/* BubbleStyleOverrides removed — using native CSS */}
 
       <ChatViewToolbar
         activeConversation={activeConversation}
@@ -619,7 +602,6 @@ function ChatViewInner({
               loading={loading}
               activeConversationId={activeConversationId}
               onPromptClick={actions.handlePromptClick}
-              token={token}
             />
           )
           : (
@@ -669,13 +651,10 @@ function ChatViewInner({
                     </Button>
                   </div>
                 )}
-              <Bubble.List
-                key={bubbleListThemeKey}
+              <div
                 ref={bubbleListRef}
-                items={msgState.visibleBubbleItems}
-                autoScroll={false}
+                className="msg-list-scroll-box"
                 onScroll={scroll.handleBubbleListScroll}
-                role={msgState.roles}
                 style={{
                   height: "100%",
                   padding: settings.chat_minimap_enabled
@@ -683,8 +662,37 @@ function ChatViewInner({
                     ? "50px 24px 16px 24px"
                     : "16px 24px",
                   overflowX: "hidden",
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column-reverse",
                 }}
-              />
+              >
+                {msgState.visibleBubbleItems.map((item) => {
+                  const roleFn = msgState.roles[item.role as keyof typeof msgState.roles];
+                  if (!roleFn) { return null; }
+                  const rendered = roleFn(item);
+                  return (
+                    <div
+                      key={item.key}
+                      className={rendered.className || `msg-row ${rendered.placement === "end" ? "user" : "assistant"}`}
+                      style={rendered.style}
+                    >
+                      {rendered.avatar && <div className="msg-avatar">{rendered.avatar}</div>}
+                      <div className="msg-body">
+                        {rendered.header && <div className="msg-header">{rendered.header}</div>}
+                        <div className="msg-content">
+                          {rendered.loading
+                            ? <Spin />
+                            : rendered.contentRender
+                            ? rendered.contentRender(item.content, item)
+                            : item.content}
+                        </div>
+                        {rendered.footer && <div className="msg-footer">{rendered.footer}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
               {activeConversation?.session_type === "workflow"
                 && activeConversation?.workflow_status === "completed" && (
                 <WorkflowEndMarker
@@ -756,8 +764,6 @@ function ChatViewInner({
       )}
       <ProactiveSuggestionBar />
       <ProactivePanelsSection context={buildChatContext()} />
-
-      <StockAnalysisChatIndicator />
 
       {activeConversation?.mode === "agent" && activeConversationId && (
         <AgentProgressBar conversationId={activeConversationId} />

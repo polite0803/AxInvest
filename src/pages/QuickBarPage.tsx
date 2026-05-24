@@ -1,9 +1,10 @@
+import { Tooltip } from "@/components/layout/Tooltip";
 import { invoke, isTauri, listen, type UnlistenFn } from "@/lib/invoke";
 import { useProviderStore, useSettingsStore } from "@/stores";
 import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import type { Model } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
-import { Input, theme, Tooltip, Typography } from "antd";
+import { Input, theme, Typography } from "antd";
 import {
   ArrowDownCircle,
   ArrowRight,
@@ -1498,7 +1499,7 @@ export function QuickBarPage() {
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div
-        className="ax-titlebar-compact title-bar-drag"
+        className="titlebar title-bar-drag"
         style={{
           display: "flex",
           alignItems: "center",
@@ -1524,14 +1525,9 @@ export function QuickBarPage() {
           {activeModelId && (
             <Tooltip title={activeModelId}>
               <button
-                className="title-bar-nodrag"
+                className="titlebar-btn"
                 onClick={() => setShowModelList((v) => !v)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: 2,
-                }}
+                style={{ padding: 2 }}
               >
                 <ModelIcon model={activeModelId} size={16} type="avatar" />
               </button>
@@ -1541,7 +1537,7 @@ export function QuickBarPage() {
             title={commandMode ? t("quickbar.cmdTile") : t("quickbar.cmdLine")}
           >
             <button
-              className="title-bar-nodrag"
+              className="titlebar-btn"
               onClick={() => {
                 setCommandMode(!commandMode);
                 setInput("");
@@ -1549,9 +1545,6 @@ export function QuickBarPage() {
                 setShowCommands(false);
               }}
               style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
                 padding: 4,
                 opacity: commandMode ? 0.8 : 0.4,
                 color: token.colorTextSecondary,
@@ -1561,16 +1554,9 @@ export function QuickBarPage() {
             </button>
           </Tooltip>
           <button
-            className="title-bar-nodrag"
+            className="titlebar-btn"
             onClick={handleHide}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 4,
-              opacity: 0.4,
-              color: token.colorTextSecondary,
-            }}
+            style={{ padding: 4, opacity: 0.4, color: token.colorTextSecondary }}
           >
             <X size={14} />
           </button>

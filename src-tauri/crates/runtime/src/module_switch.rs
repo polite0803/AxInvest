@@ -184,7 +184,7 @@ impl ModuleRegistry {
         entries
             .iter()
             .find(|e| e.module.module_id() == module_id)
-            .map(|e| e.state)
+            .map(|e| e.module.state())
     }
 
     /// List all registered modules.
@@ -221,11 +221,12 @@ impl ModuleRegistry {
     ///
     /// `essential_ids` lists the module IDs to keep active. All others are disabled.
     pub async fn enter_speed_mode(&self, essential_ids: &[&str]) -> Result<usize, String> {
-        let entries = self.entries.read().await;
+        let mut entries = self.entries.write().await;
         let mut disabled = 0;
-        for entry in entries.iter() {
+        for entry in entries.iter_mut() {
             if !essential_ids.contains(&entry.module.module_id()) {
                 entry.module.disable().await?;
+                entry.state = entry.module.state();
                 disabled += 1;
             }
         }

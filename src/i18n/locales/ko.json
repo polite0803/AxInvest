@@ -6637,21 +6637,21 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "checkHealth": "Check Health",
+      "check": "Check",
+      "loadFailed": "Failed to load config",
+      "saveSuccess": "Config saved",
+      "saveConfig": "Save Config",
+      "general": "General",
       "group": {
-        "vendor": "数据源",
-        "agent": "Agent 节点配置",
-        "tool": "Tool 节点配置",
-        "scoring": "评分权重",
-        "rule": "规则阈值",
-        "pos": "仓位限制",
-        "value": "估值参数",
-        "monitor": "监控参数"
-      },
-      "saveSuccess": "配置保存成功",
-      "saveConfig": "保存配置",
-      "loadFailed": "加载配置失败",
-      "general": "基础参数",
-      "check": "检测"
+        "vendor": "Data Sources",
+        "agent": "Analysts",
+        "tool": "Tools",
+        "scoring": "Scoring",
+        "rule": "Rules",
+        "pos": "Position",
+        "value": "Valuation",
+        "monitor": "Monitor"
+      }
     },
     "progress.fetchingData": "Fetching stock data...",
     "progress.started": "Analysis started...",
@@ -6705,7 +6705,17 @@
       "inProgress": "진행 중",
       "currentPhase": "현재",
       "initializing": "초기화",
-      "analyst": "분석가",
+      "analyst": {
+        "market-analyst": "기술적 분석가",
+        "sentiment-analyst": "심리 분석가",
+        "news-analyst": "뉴스 분석가",
+        "fundamentals-analyst": "기본적 분석가",
+        "policy-analyst": "정책 분석가",
+        "hot-money-tracker": "자금 흐름 추적자",
+        "lockup-watcher": "락업 감시자",
+        "research-analyst": "리서치 분석가",
+        "sector-analyst": "섹터 분석가"
+      },
       "analystComplete": "분석 완료, 분석 페이지에서 확인",
       "decisionTitle": "최종 결정",
       "positionPct": "포지션",
@@ -6751,20 +6761,13 @@
         "research-mgr": "리서치 종합",
         "trader": "거래 계획",
         "portfolio-mgr": "최종 의사 결정"
-      },
-      "analyst": {
-        "market-analyst": "기술적 분석가",
-        "sentiment-analyst": "심리 분석가",
-        "news-analyst": "뉴스 분석가",
-        "fundamentals-analyst": "기본적 분석가",
-        "policy-analyst": "정책 분석가",
-        "hot-money-tracker": "자금 흐름 추적자",
-        "lockup-watcher": "락업 감시자",
-        "research-analyst": "리서치 분석가",
-        "sector-analyst": "섹터 분석가"
       }
     },
-    "risk": { "high": "높음", "medium": "중간", "low": "낮음" }
+    "risk": {
+      "high": "높음",
+      "medium": "중간",
+      "low": "낮음"
+    }
   },
   "trade": {
     "title": "Trading Log",

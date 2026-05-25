@@ -6637,21 +6637,21 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "checkHealth": "Check Health",
+      "check": "Check",
+      "loadFailed": "Failed to load config",
+      "saveSuccess": "Config saved",
+      "saveConfig": "Save Config",
+      "general": "General",
       "group": {
-        "vendor": "数据源",
-        "agent": "Agent 节点配置",
-        "tool": "Tool 节点配置",
-        "scoring": "评分权重",
-        "rule": "规则阈值",
-        "pos": "仓位限制",
-        "value": "估值参数",
-        "monitor": "监控参数"
-      },
-      "saveSuccess": "配置保存成功",
-      "saveConfig": "保存配置",
-      "loadFailed": "加载配置失败",
-      "general": "基础参数",
-      "check": "检测"
+        "vendor": "Data Sources",
+        "agent": "Analysts",
+        "tool": "Tools",
+        "scoring": "Scoring",
+        "rule": "Rules",
+        "pos": "Position",
+        "value": "Valuation",
+        "monitor": "Monitor"
+      }
     },
     "progress.fetchingData": "Fetching stock data...",
     "progress.started": "Analysis started...",
@@ -6705,7 +6705,17 @@
       "inProgress": "قيد التقدم",
       "currentPhase": "حالي",
       "initializing": "تهيئة",
-      "analyst": "محلل",
+      "analyst": {
+        "market-analyst": "محلل فني",
+        "sentiment-analyst": "محلل المعنويات",
+        "news-analyst": "محلل الأخبار",
+        "fundamentals-analyst": "محلل أساسي",
+        "policy-analyst": "محلل السياسات",
+        "hot-money-tracker": "متتبع تدفق رأس المال",
+        "lockup-watcher": "مراقب الحظر",
+        "research-analyst": "محلل البحث",
+        "sector-analyst": "محلل القطاع"
+      },
       "analystComplete": "اكتمل التحليل",
       "decisionTitle": "القرار النهائي",
       "positionPct": "المركز",
@@ -6751,20 +6761,13 @@
         "research-mgr": "توليف البحث",
         "trader": "خطة التداول",
         "portfolio-mgr": "القرار النهائي"
-      },
-      "analyst": {
-        "market-analyst": "محلل فني",
-        "sentiment-analyst": "محلل المعنويات",
-        "news-analyst": "محلل الأخبار",
-        "fundamentals-analyst": "محلل أساسي",
-        "policy-analyst": "محلل السياسات",
-        "hot-money-tracker": "متتبع تدفق رأس المال",
-        "lockup-watcher": "مراقب الحظر",
-        "research-analyst": "محلل البحث",
-        "sector-analyst": "محلل القطاع"
       }
     },
-    "risk": { "high": "مرتفع", "medium": "متوسط", "low": "منخفض" }
+    "risk": {
+      "high": "مرتفع",
+      "medium": "متوسط",
+      "low": "منخفض"
+    }
   },
   "trade": {
     "title": "Trading Log",

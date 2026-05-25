@@ -126,6 +126,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { buildAssistantDisplayContent, shouldHideAssistantBubble } from "./toolCallDisplay";
 import { TopicGroupDivider } from "./TopicGroupDivider";
 import { VersionPagination } from "./VersionPagination";
+import { parseWorkflowCard, WorkflowAgentCard } from "./WorkflowAgentCard";
 
 function AssistantFooter({
   msg,
@@ -771,6 +772,11 @@ export function useChatViewMessages({
   const bubbleItemCacheRef = useRef<
     Map<string, { signature: string; item: BubbleItemType }>
   >(new Map());
+  /** 内联解析 workflow-* 消息内容（避免额外 import 路径） */
+  function parseWorkflowCardInline(content: string) {
+    return parseWorkflowCard(content);
+  }
+
   const bubbleItems: BubbleItemType[] = useMemo(() => {
     const cache = bubbleItemCacheRef.current;
     const nextCache = new Map<
@@ -814,6 +820,18 @@ export function useChatViewMessages({
             content: msg.id,
             variant: "borderless" as const,
           };
+        nextCache.set(msg.id, { signature, item });
+        nextItems.push(item);
+        continue;
+      }
+
+      if (msg.role === "system" && msg.content.startsWith("<!-- workflow-")) {
+        const data = parseWorkflowCardInline(msg.content);
+        const signature = `workflow:${data?.type ?? "unknown"}:${msg.id}`;
+        const cached = cache.get(msg.id);
+        const item = cached?.signature === signature
+          ? cached.item
+          : { key: msg.id, role: "workflow-card", content: msg.content, data, variant: "borderless" as const };
         nextCache.set(msg.id, { signature, item });
         nextItems.push(item);
         continue;
@@ -2074,6 +2092,21 @@ export function useChatViewMessages({
     [activeConversationId],
   );
 
+  const workflowCardRole = useCallback(
+    (bubbleData: BubbleItemType) => {
+      const data = bubbleData.content as ReturnType<typeof parseWorkflowCard>;
+      if (!data) {
+        return { placement: "start" as const, variant: "borderless" as const, contentRender: () => null };
+      }
+      return {
+        placement: "start" as const,
+        variant: "borderless" as const,
+        contentRender: () => <WorkflowAgentCard data={data} />,
+      };
+    },
+    [],
+  );
+
   const roles: RoleType = useMemo(
     () => ({
       user: userRole,
@@ -2083,6 +2116,7 @@ export function useChatViewMessages({
       "context-compressing": contextCompressingRole,
       "expert-switch": expertSwitchRole,
       "topic-group": topicGroupRole,
+      "workflow-card": workflowCardRole,
     }),
     [
       aiRole,

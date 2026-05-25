@@ -1334,10 +1334,7 @@ pub async fn get_north_bound_flow(
 
 /// 检查指定数据源的连接可用性
 #[tauri::command]
-pub async fn check_vendor_health(
-    state: State<'_, AppState>,
-    vendor: String,
-) -> Result<(), String> {
+pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
     state
         .astock_client
         .check_vendor_health(&vendor)

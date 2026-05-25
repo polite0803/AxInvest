@@ -1,5 +1,8 @@
 [advisories]
 unmaintained = "workspace"
+ignore = [
+    "RUSTSEC-2025-0012", # backoff unmaintained — axagent-agent upstream dependency
+]
 
 [licenses]
 private = { ignore = true }
@@ -20,6 +23,7 @@ allow = [
     "BSL-1.0",
     "NCSA",
     "CDLA-Permissive-2.0",
+    "MIT-0",
 ]
 
 [[licenses.clarify]]

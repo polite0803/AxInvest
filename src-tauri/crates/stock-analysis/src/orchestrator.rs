@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_astock_data::{AStockClient, MarketRawData, StockRawData};
 
-use crate::decision::{AgentRunner, AnalysisConfig, AnalysisEvent, StockDecision};
+use crate::decision::{AgentRunner, AnalysisConfig, AnalysisEvent, RuleConfig, StockDecision};
 use crate::pipeline;
 use crate::prompts;
 use crate::rules;
@@ -53,6 +53,7 @@ impl StockAnalysisOrchestrator {
         stock_name: String,
         date: String,
         config: AnalysisConfig,
+        rule_config: RuleConfig,
         events: tokio::sync::broadcast::Sender<AnalysisEvent>,
         runner: Option<Arc<dyn AgentRunner>>,
         prompts: HashMap<String, String>,
@@ -314,6 +315,7 @@ impl StockAnalysisOrchestrator {
                 &trader_action,
                 trader_stop_loss,
                 trader_entry_price,
+                &rule_config,
             );
 
             let mut bb = blackboard.write().await;

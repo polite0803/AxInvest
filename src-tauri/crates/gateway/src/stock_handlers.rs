@@ -158,6 +158,7 @@ pub async fn start_analysis(
         decision_reasoning: Set(None),
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
+        config_id: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     };

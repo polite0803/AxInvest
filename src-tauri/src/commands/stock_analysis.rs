@@ -1,14 +1,17 @@
 use crate::AppState;
 use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_core::entity::{
-    analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
+    analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, stock_analysis_configs,
+    trades, watchlist_items,
 };
 use axagent_core::types::ProviderProxyConfig;
 use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
-use axagent_stock_analysis::decision::{AgentRunner, AnalysisConfig, AnalysisEvent};
+use axagent_stock_analysis::decision::{
+    AgentRunner, AnalysisConfig, AnalysisEvent, RuleConfig, StockAnalysisFullConfig,
+};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::monitor::MonitorConfig;
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
@@ -96,6 +99,7 @@ pub async fn run_scheduled_analysis(
         decision_reasoning: Set(None),
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
+        config_id: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -188,6 +192,7 @@ fn launch_analysis_worker(
             name,
             date,
             config,
+            RuleConfig::default(),
             event_tx,
             runner,
             prompts,
@@ -560,36 +565,146 @@ pub(crate) async fn load_stock_analysis_prompts(
     prompts
 }
 
-/// 从 settings 表加载用户配置并合并到 AnalysisConfig
-async fn load_analysis_config(db: &sea_orm::DatabaseConnection, config: &mut AnalysisConfig) {
+/// 从 settings 表加载完整分析配置，合并默认值
+async fn load_full_config(db: &sea_orm::DatabaseConnection) -> StockAnalysisFullConfig {
+    let mut cfg = StockAnalysisFullConfig::default();
     if let Ok(Some(v)) =
         axagent_core::repo::settings::get_setting(db, "stock_analysis_config").await
     {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&v) {
-            if let Some(a) = parsed.get("analysis") {
-                if let Some(rounds) = a.get("maxDebateRounds").and_then(|v| v.as_u64()) {
-                    config.max_debate_rounds = rounds as u32;
-                }
-                if let Some(period) = a.get("klinePeriod").and_then(|v| v.as_str()) {
-                    config.kline_period = period.to_string();
-                }
-                if let Some(limit) = a.get("klineLimit").and_then(|v| v.as_u64()) {
-                    config.kline_limit = limit as u32;
-                }
-                if let Some(limit) = a.get("newsLimit").and_then(|v| v.as_u64()) {
-                    config.news_limit = limit as u32;
-                }
-            }
-            if let Some(m) = parsed.get("model") {
-                if let Some(t) = m.get("temperature").and_then(|v| v.as_f64()) {
-                    config.temperature = t;
-                }
-                if let Some(t) = m.get("maxTokens").and_then(|v| v.as_u64()) {
-                    config.max_tokens = t as u32;
-                }
+            if let Ok(c) = serde_json::from_value::<StockAnalysisFullConfig>(parsed) {
+                cfg = c;
             }
         }
     }
+    cfg
+}
+
+/// 从 settings 表加载用户配置并合并到 AnalysisConfig（兼容旧接口）
+async fn load_analysis_config(db: &sea_orm::DatabaseConnection, config: &mut AnalysisConfig) {
+    let full = load_full_config(db).await;
+    *config = full.analysis;
+}
+
+// ── 配置版本管理 ──
+
+/// 列出所有保存的配置版本
+#[tauri::command]
+pub async fn list_stock_analysis_configs(
+    state: State<'_, AppState>,
+) -> Result<Vec<stock_analysis_configs::Model>, String> {
+    stock_analysis_configs::Entity::find()
+        .order_by_desc(stock_analysis_configs::Column::UpdatedAt)
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 获取当前活跃配置
+#[tauri::command]
+pub async fn get_active_stock_config(
+    state: State<'_, AppState>,
+) -> Result<Option<stock_analysis_configs::Model>, String> {
+    stock_analysis_configs::Entity::find()
+        .filter(stock_analysis_configs::Column::IsActive.eq(1))
+        .one(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 保存（创建或更新）配置版本
+#[tauri::command]
+pub async fn save_stock_analysis_config(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+    config_json: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // 验证 JSON
+    let _: StockAnalysisFullConfig =
+        serde_json::from_str(&config_json).map_err(|e| format!("配置 JSON 无效: {e}"))?;
+
+    let existing = stock_analysis_configs::Entity::find_by_id(&id)
+        .one(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if existing.is_some() {
+        let mut active: stock_analysis_configs::ActiveModel = existing.unwrap().into();
+        active.name = Set(name);
+        active.config_json = Set(config_json);
+        active.notes = Set(notes);
+        active.updated_at = Set(now);
+        active
+            .update(&state.sea_db)
+            .await
+            .map_err(|e| e.to_string())?;
+    } else {
+        stock_analysis_configs::ActiveModel {
+            id: Set(id),
+            name: Set(name),
+            config_json: Set(config_json),
+            is_active: Set(1),
+            notes: Set(notes),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 激活指定配置版本
+#[tauri::command]
+pub async fn activate_stock_config(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    use sea_orm::{EntityTrait, Set};
+    // 全部取消激活
+    let all: Vec<_> = stock_analysis_configs::Entity::find()
+        .all(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|m| {
+            let mut a: stock_analysis_configs::ActiveModel = m.into();
+            a.is_active = Set(0);
+            a
+        })
+        .collect();
+    for a in all {
+        stock_analysis_configs::Entity::update(a)
+            .exec(&state.sea_db)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    // 激活目标
+    let target = stock_analysis_configs::Entity::find_by_id(&id)
+        .one(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("配置不存在")?;
+    let mut a: stock_analysis_configs::ActiveModel = target.into();
+    a.is_active = Set(1);
+    stock_analysis_configs::Entity::update(a)
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 删除配置版本
+#[tauri::command]
+pub async fn delete_stock_config(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    stock_analysis_configs::Entity::delete_by_id(&id)
+        .exec(&state.sea_db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ── MCP Stock Data Tools ──

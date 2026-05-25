@@ -14,12 +14,12 @@ function calcMA(data: number[], window: number): (number | null)[] {
 }
 
 const PERIOD_OPTIONS = [
-  { key: "1m", label: "1月", limit: 22, periodType: "daily" as const },
-  { key: "3m", label: "3月", limit: 66, periodType: "daily" as const },
-  { key: "6m", label: "6月", limit: 120, periodType: "daily" as const },
-  { key: "1y", label: "1年", limit: 250, periodType: "daily" as const },
-  { key: "weekly", label: "周", limit: 104, periodType: "weekly" as const },
-  { key: "monthly", label: "月", limit: 60, periodType: "monthly" as const },
+  { key: "1m", limit: 22, periodType: "daily" as const },
+  { key: "3m", limit: 66, periodType: "daily" as const },
+  { key: "6m", limit: 120, periodType: "daily" as const },
+  { key: "1y", limit: 250, periodType: "daily" as const },
+  { key: "weekly", limit: 104, periodType: "weekly" as const },
+  { key: "monthly", limit: 60, periodType: "monthly" as const },
 ] as const;
 
 /** ECharts 画布用色 — 与 index.css --sa-* 变量保持同步（OKLch 值） */
@@ -263,7 +263,7 @@ export function KLineChart() {
               whiteSpace: "nowrap",
             }}
           >
-            {opt.label}
+            {t(`stockAnalysis.period.${opt.key}`)}
           </button>
         ))}
       </div>

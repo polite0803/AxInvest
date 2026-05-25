@@ -168,7 +168,7 @@ export function TradePanel() {
       width: 24,
       render: (v: string) => (
         <Tag color={v === "buy" ? "green" : "red"} style={{ fontSize: 10, lineHeight: "16px", padding: "0 4px" }}>
-          {v === "buy" ? "买" : "卖"}
+          {v === "buy" ? t("stockAnalysis.buyShort") : t("stockAnalysis.sellShort")}
         </Tag>
       ),
     },
@@ -244,8 +244,8 @@ export function TradePanel() {
             value={form.direction}
             onChange={(v) => setForm({ ...form, direction: v })}
             options={[
-              { value: "buy", label: "买" },
-              { value: "sell", label: "卖" },
+              { value: "buy", label: t("stockAnalysis.buyShort") },
+              { value: "sell", label: t("stockAnalysis.sellShort") },
             ]}
             style={{ width: 50 }}
           />

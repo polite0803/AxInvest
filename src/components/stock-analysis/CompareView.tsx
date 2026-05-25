@@ -120,9 +120,14 @@ export function CompareView() {
       }],
     });
 
-    const handleResize = () => chart.resize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    const onResize = () => chart.resize();
+    const ro = new ResizeObserver(onResize);
+    ro.observe(radarRef.current!);
+    window.addEventListener("resize", onResize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
   }, [quote1, quote2, t]);
 
   return (

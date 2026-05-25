@@ -143,7 +143,7 @@ export function StockAnalysisPage() {
             type="button"
             className="sa-header-back"
             onClick={() => setSettingsOpen(!settingsOpen)}
-            title="分析设置"
+            title={t("stockAnalysis.settings.title")}
             style={settingsOpen && !isMobile ? { background: "var(--accent-bg)", color: "var(--accent)" } : undefined}
           >
             {settingsOpen && !isMobile ? <X size={16} /> : <Settings size={16} />}

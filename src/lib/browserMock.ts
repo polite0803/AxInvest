@@ -2581,7 +2581,7 @@ export async function handleCommand<T>(
           name: "A股多维度分析",
           description: "9 维度分析师 → 6 轮多空辩论 → 3 风险维度 → 交易方案 → 投资决策",
           icon: "chart-bar",
-          tags: ["stock", "analysis", "A股"],
+          tags: ["stock", "analysis"],
           version: 1,
           is_preset: true,
           is_editable: true,

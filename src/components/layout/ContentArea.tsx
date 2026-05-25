@@ -129,6 +129,8 @@ function NotFoundRoute() {
 
 export const ContentArea = memo(function ContentArea() {
   const skillPages = useSkillExtensionStore((s) => s.pages);
+  const location = useLocation();
+  const isStockAnalysis = location.pathname === "/stock-analysis";
 
   const pluginRoutes = useMemo(() => {
     return skillPages.map((page) => (
@@ -142,7 +144,7 @@ export const ContentArea = memo(function ContentArea() {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-      <AppHeader />
+      {!isStockAnalysis && <AppHeader />}
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
         <Routes>
           <Route path="/" element={<SafeLazyPage Page={LazyChatPage} />} />

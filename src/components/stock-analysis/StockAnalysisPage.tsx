@@ -138,56 +138,58 @@ export function StockAnalysisPage() {
         <div className="sa-body">
           <StockSearchBar />
 
-          {status === "loading" && (
-            <div className="sa-loading">
-              <div className="sa-spinner" />
-              <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
-            </div>
-          )}
-
-          {status === "idle" && (
-            <div className="sa-empty">
-              <div>
-                <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
-                <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
-              </div>
-            </div>
-          )}
-
-          {status !== "loading" && status !== "idle" && (
-            <div className="sa-body-inner">
-              <div className="sa-main">
-                <AnalysisProgress />
-
-                <div className="sa-tabs">
-                  {tabs.map((tab) => (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
-                      onClick={() => setActiveTab(tab.key)}
-                    >
-                      {tab.icon}
-                      {tab.label}
-                    </button>
-                  ))}
+          <div className="sa-body-inner">
+            <div className="sa-main">
+              {status === "loading" && (
+                <div className="sa-loading">
+                  <div className="sa-spinner" />
+                  <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
                 </div>
+              )}
 
-                {activeContent?.children}
-              </div>
-
-              <div className="sa-sidebar">
-                {sheetPanels.map((p) => (
-                  <div key={p.key} className="sa-panel">
-                    <div className="sa-panel-header">
-                      <span className="sa-panel-title">{p.label}</span>
-                    </div>
-                    <div className="sa-panel-body">{p.element}</div>
+              {status === "idle" && (
+                <div className="sa-empty">
+                  <div>
+                    <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
+                    <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
+
+              {status !== "loading" && status !== "idle" && (
+                <>
+                  <AnalysisProgress />
+
+                  <div className="sa-tabs">
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
+                        onClick={() => setActiveTab(tab.key)}
+                      >
+                        {tab.icon}
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeContent?.children}
+                </>
+              )}
             </div>
-          )}
+
+            <div className="sa-sidebar">
+              {sheetPanels.map((p) => (
+                <div key={p.key} className="sa-panel">
+                  <div className="sa-panel-header">
+                    <span className="sa-panel-title">{p.label}</span>
+                  </div>
+                  <div className="sa-panel-body">{p.element}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* 底部滑出面板 — 平板/移动端 */}

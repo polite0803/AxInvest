@@ -25,7 +25,13 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
       .finally(() => setLoading(false));
   }, [analysisId]);
 
-  if (!analysisId || (!loading && !snapshot)) { return null; }
+  if (!analysisId || (!loading && !snapshot)) {
+    return (
+      <div className="text-xs" style={{ color: "var(--muted)", padding: "4px 0" }}>
+        {t("stockAnalysis.historyEmpty")}
+      </div>
+    );
+  }
 
   if (loading) {
     return (

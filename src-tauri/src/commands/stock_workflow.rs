@@ -263,6 +263,242 @@ fn adjust_prices_inner(args: &serde_json::Value) -> Result<serde_json::Value, St
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
+// ── 新增：9 个数据 API tool handler（封装 AStockClient 已有方法）──
+
+async fn get_research_reports_inner(
+    client: &axagent_astock_data::AStockClient,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let code = args
+        .get("stock_code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("000001");
+    match client.get_research_reports(code).await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_consensus_eps_inner(
+    client: &axagent_astock_data::AStockClient,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let code = args
+        .get("stock_code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("000001");
+    match client.get_consensus_eps(code).await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_concept_blocks_inner(
+    client: &axagent_astock_data::AStockClient,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let code = args
+        .get("stock_code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("000001");
+    match client.get_concept_blocks(code).await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_announcements_inner(
+    client: &axagent_astock_data::AStockClient,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let code = args
+        .get("stock_code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("000001");
+    match client.get_announcements(code).await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+// ── 市场级数据工具（无需 stock_code）──
+
+async fn get_market_dragon_tiger_inner(
+    client: &axagent_astock_data::AStockClient,
+) -> Result<serde_json::Value, String> {
+    match client.get_market_dragon_tiger().await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_hot_stocks_inner(
+    client: &axagent_astock_data::AStockClient,
+) -> Result<serde_json::Value, String> {
+    match client.get_hot_stocks().await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_industry_ranking_inner(
+    client: &axagent_astock_data::AStockClient,
+) -> Result<serde_json::Value, String> {
+    match client.get_industry_ranking().await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_cls_flash_inner(
+    client: &axagent_astock_data::AStockClient,
+) -> Result<serde_json::Value, String> {
+    match client.get_cls_flash().await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+async fn get_north_bound_flow_inner(
+    client: &axagent_astock_data::AStockClient,
+    _args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match client.get_north_bound_flow().await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+        Err(e) => Ok(json!({"error": e.to_string()})),
+    }
+}
+
+// ── P1: 4 个技术指标补充 ──
+
+fn compute_atr_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Raw { high: f64, low: f64, close: f64 }
+    let klines: Vec<Raw> = args
+        .get("klines_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let period = args.get("period").and_then(|v| v.as_u64()).unwrap_or(14) as usize;
+    let n = klines.len();
+    if n < 2 || period == 0 {
+        return Ok(json!({"atr": 0.0, "period": period}));
+    }
+    let mut trs = Vec::with_capacity(n - 1);
+    for i in 1..n {
+        let prev = &klines[i - 1];
+        let cur = &klines[i];
+        let tr = (cur.high - cur.low)
+            .max((cur.high - prev.close).abs())
+            .max((cur.low - prev.close).abs());
+        trs.push(tr);
+    }
+    let atr = if trs.len() <= period {
+        trs.iter().sum::<f64>() / trs.len() as f64
+    } else {
+        let mut atr_val = trs[..period].iter().sum::<f64>() / period as f64;
+        for &tr in &trs[period..] {
+            atr_val = (atr_val * (period - 1) as f64 + tr) / period as f64;
+        }
+        atr_val
+    };
+    let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
+    Ok(json!({"atr": (atr * 100.0).round() / 100.0, "atr_pct": (atr / latest_price * 10000.0).round() / 100.0, "period": period}))
+}
+
+fn compute_kdj_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Raw { high: f64, low: f64, close: f64 }
+    let klines: Vec<Raw> = args
+        .get("klines_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let n = args.get("n").and_then(|v| v.as_u64()).unwrap_or(9) as usize;
+    if klines.len() < n {
+        return Ok(json!({"k": 50.0, "d": 50.0, "j": 50.0, "signal": "中性"}));
+    }
+    let mut k = 50.0_f64;
+    let mut d = 50.0_f64;
+    for i in (n - 1)..klines.len() {
+        let window = &klines[i + 1 - n..=i];
+        let low_min = window.iter().map(|x| x.low).fold(f64::MAX, f64::min);
+        let high_max = window.iter().map(|x| x.high).fold(f64::MIN, f64::max);
+        let close = window.last().unwrap().close;
+        let rsv = if (high_max - low_min).abs() > 1e-10 {
+            (close - low_min) / (high_max - low_min) * 100.0
+        } else {
+            50.0
+        };
+        k = 2.0 / 3.0 * k + 1.0 / 3.0 * rsv;
+        d = 2.0 / 3.0 * d + 1.0 / 3.0 * k;
+    }
+    let j = 3.0 * k - 2.0 * d;
+    let signal = if j > 100.0 { "严重超买" } else if j > 80.0 { "超买" } else if j < 0.0 { "严重超卖" } else if j < 20.0 { "超卖" } else if k > d { "多头" } else { "空头" };
+    Ok(json!({"k": (k * 100.0).round() / 100.0, "d": (d * 100.0).round() / 100.0, "j": (j * 100.0).round() / 100.0, "signal": signal}))
+}
+
+fn compute_obv_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Raw { close: f64, volume: f64 }
+    let klines: Vec<Raw> = args
+        .get("klines_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    if klines.is_empty() {
+        return Ok(json!({"obv": 0.0, "trend": "无数据"}));
+    }
+    let mut obv = 0.0_f64;
+    for i in 1..klines.len() {
+        if klines[i].close > klines[i - 1].close {
+            obv += klines[i].volume;
+        } else if klines[i].close < klines[i - 1].close {
+            obv -= klines[i].volume;
+        }
+    }
+    let obv_ma5 = if klines.len() >= 6 {
+        let obvs: Vec<f64> = (1..klines.len()).scan(0.0, |acc, i| {
+            if klines[i].close > klines[i - 1].close { *acc += klines[i].volume; }
+            else if klines[i].close < klines[i - 1].close { *acc -= klines[i].volume; }
+            Some(*acc)
+        }).collect();
+        let n = obvs.len();
+        if n >= 5 { obvs[n - 5..].iter().sum::<f64>() / 5.0 } else { obv }
+    } else { obv };
+    let trend = if obv > obv_ma5 * 1.1 { "量价齐升" } else if obv < obv_ma5 * 0.9 { "量价背离" } else { "量价平稳" };
+    Ok(json!({"obv": (obv / 1e8 * 100.0).round() / 100.0, "obv_ma5": (obv_ma5 / 1e8 * 100.0).round() / 100.0, "trend": trend, "unit": "亿"}))
+}
+
+fn calc_beta_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let returns_stock: Vec<f64> = args
+        .get("stock_returns_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let returns_market: Vec<f64> = args
+        .get("market_returns_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let n = returns_stock.len().min(returns_market.len());
+    if n < 2 {
+        return Ok(json!({"beta": 1.0, "r_squared": 0.0, "interpretation": "数据不足"}));
+    }
+    let s = &returns_stock[..n];
+    let m = &returns_market[..n];
+    let mean_s: f64 = s.iter().sum::<f64>() / n as f64;
+    let mean_m: f64 = m.iter().sum::<f64>() / n as f64;
+    let cov: f64 = s.iter().zip(m.iter()).map(|(&si, &mi)| (si - mean_s) * (mi - mean_m)).sum::<f64>() / (n - 1) as f64;
+    let var_m: f64 = m.iter().map(|&mi| (mi - mean_m).powi(2)).sum::<f64>() / (n - 1) as f64;
+    let beta = if var_m > 1e-10 { cov / var_m } else { 1.0 };
+    // R²
+    let var_s: f64 = s.iter().map(|&si| (si - mean_s).powi(2)).sum::<f64>() / (n - 1) as f64;
+    let r_sq = if var_s > 1e-10 && var_m > 1e-10 { (cov / (var_s.sqrt() * var_m.sqrt())).powi(2) } else { 0.0 };
+    let interp = if beta > 1.5 { "高波动" } else if beta > 1.1 { "略高于市场" } else if beta > 0.9 { "与市场同步" } else if beta > 0.5 { "防御型" } else { "低波动" };
+    Ok(json!({"beta": (beta * 1000.0).round() / 1000.0, "r_squared": (r_sq * 1000.0).round() / 1000.0, "interpretation": interp}))
+}
+
 /// 从 DB 加载工作流模板，仅注入 stock_code 到 Trigger 节点。
 /// 专家 prompt 由 AgentExecutor 从 agent_profile 自动加载，
 /// 行情数据通过 ToolNode 的 context_sources 由上游工具节点输出注入，
@@ -465,6 +701,133 @@ pub async fn run_stock_workflow(
                         Err(e) => Ok(json!({"error": e.to_string()})),
                     }
                 })
+            }),
+        )
+        .await;
+
+    // 新增 4 个技术指标工具 (P1)
+    engine
+        .register_tool_handler(
+            "compute_atr",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { compute_atr_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "compute_kdj",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { compute_kdj_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "compute_obv",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { compute_obv_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_beta",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_beta_inner(&args) })
+            }),
+        )
+        .await;
+
+    // 新增 9 个数据 API 工具
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_research_reports",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_research_reports_inner(&client, &args).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_consensus_eps",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_consensus_eps_inner(&client, &args).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_concept_blocks",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_concept_blocks_inner(&client, &args).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_announcements",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_announcements_inner(&client, &args).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_north_bound_flow",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_north_bound_flow_inner(&client, &args).await })
+            }),
+        )
+        .await;
+    // 市场级工具（无需 stock_code）
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_market_dragon_tiger",
+            Arc::new(move |_name: String, _args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_market_dragon_tiger_inner(&client).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_hot_stocks",
+            Arc::new(move |_name: String, _args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_hot_stocks_inner(&client).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_industry_ranking",
+            Arc::new(move |_name: String, _args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_industry_ranking_inner(&client).await })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    engine
+        .register_tool_handler(
+            "get_cls_flash",
+            Arc::new(move |_name: String, _args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                Box::pin(async move { get_cls_flash_inner(&client).await })
             }),
         )
         .await;

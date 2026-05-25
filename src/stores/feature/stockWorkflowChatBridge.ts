@@ -8,6 +8,7 @@
 import { makeWorkflowContent } from "@/components/chat/WorkflowAgentCard";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import i18next from "i18next";
 
 const activeBridges = new Map<string, UnlistenFn[]>();
 
@@ -39,7 +40,11 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   try {
     const m = await invoke<{ id: string }>("send_system_message", {
       conversationId,
-      content: wf("progress", { phase: "trigger", completed: 0, total: 30 }, "🔍 正在启动 A 股多维度分析..."),
+      content: wf(
+        "progress",
+        { phase: "trigger", completed: 0, total: 30 },
+        i18next.t("stockAnalysis.workflow.title") + "...",
+      ),
     });
     progressMsgId = m.id;
   } catch { /* 静默 */ }
@@ -62,7 +67,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         content: wf(
           "progress",
           { phase: nodeId, completed: count, total: totalNodes },
-          `🔍 分析进行中 (${count}/${totalNodes})`,
+          `${i18next.t("stockAnalysis.workflow.inProgress")} (${count}/${totalNodes})`,
         ),
       }).catch(() => {});
     }
@@ -71,7 +76,11 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
       invoke("send_system_message", {
         conversationId,
-        content: wf("analyst", { analystName, analystReport: "" }, `📊 分析完成`),
+        content: wf(
+          "analyst",
+          { analystName, analystReport: "" },
+          "📊 " + i18next.t("stockAnalysis.workflow.analystComplete"),
+        ),
       }).catch(() => {});
     }
   });
@@ -91,7 +100,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         content: wf(
           "progress",
           { phase: "done", completed: completedNodes.size, total: completedNodes.size },
-          "✅ 分析完成",
+          `✅ ${i18next.t("stockAnalysis.workflow.phase.done")}`,
         ),
       }).catch(() => {});
     }
@@ -99,15 +108,21 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     if (output && typeof output === "object") {
       invoke("send_system_message", {
         conversationId,
-        content: wf("decision", {
-          action: String(output.action ?? "N/A"),
-          positionPct: Number(output.positionPct ?? 0),
-          targetPrice: Number(output.targetPrice ?? 0),
-          stopLoss: Number(output.stopLoss ?? 0),
-          reasoning: String(output.reasoning ?? ""),
-          riskLevel: String(output.riskLevel ?? "N/A"),
-          confidence: Number(output.confidence ?? 0),
-        }, `最终决策：${output.action} | 仓位${output.positionPct}%`),
+        content: wf(
+          "decision",
+          {
+            action: String(output.action ?? "N/A"),
+            positionPct: Number(output.positionPct ?? 0),
+            targetPrice: Number(output.targetPrice ?? 0),
+            stopLoss: Number(output.stopLoss ?? 0),
+            reasoning: String(output.reasoning ?? ""),
+            riskLevel: String(output.riskLevel ?? "N/A"),
+            confidence: Number(output.confidence ?? 0),
+          },
+          `${i18next.t("stockAnalysis.workflow.decisionTitle")}: ${output.action} | ${
+            i18next.t("stockAnalysis.workflow.positionPct")
+          }${output.positionPct}%`,
+        ),
       }).catch(() => {});
     }
 
@@ -125,7 +140,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
           content: wf(
             "progress",
             { phase: "error", completed: completedNodes.size, total: completedNodes.size },
-            `❌ ${event.payload.error}`,
+            `❌ ${i18next.t("stockAnalysis.workflow.phase.error")}: ${event.payload.error}`,
           ),
         }).catch(() => {});
       }

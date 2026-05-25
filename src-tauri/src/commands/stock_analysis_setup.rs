@@ -169,7 +169,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 9;
+    const TEMPLATE_VERSION: i32 = 11;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -320,6 +320,57 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("前复权价格调整".into()),
         parameters: None,
     };
+    // ── 新增 9 个数据 API ToolDef ──
+    let td_research = ToolDef {
+        name: "get_research_reports".into(),
+        description: Some("获取券商研报".into()),
+        parameters: None,
+    };
+    let td_consensus = ToolDef {
+        name: "get_consensus_eps".into(),
+        description: Some("获取一致性预期EPS".into()),
+        parameters: None,
+    };
+    let td_concepts = ToolDef {
+        name: "get_concept_blocks".into(),
+        description: Some("获取概念板块归属".into()),
+        parameters: None,
+    };
+    let td_announce = ToolDef {
+        name: "get_announcements".into(),
+        description: Some("获取公司公告".into()),
+        parameters: None,
+    };
+    let td_north = ToolDef {
+        name: "get_north_bound_flow".into(),
+        description: Some("获取北向资金流向".into()),
+        parameters: None,
+    };
+    let td_dragon = ToolDef {
+        name: "get_market_dragon_tiger".into(),
+        description: Some("获取龙虎榜数据".into()),
+        parameters: None,
+    };
+    let td_hot = ToolDef {
+        name: "get_hot_stocks".into(),
+        description: Some("获取市场热门股".into()),
+        parameters: None,
+    };
+    let td_industry = ToolDef {
+        name: "get_industry_ranking".into(),
+        description: Some("获取行业涨跌排名".into()),
+        parameters: None,
+    };
+    let td_cls = ToolDef {
+        name: "get_cls_flash".into(),
+        description: Some("获取财联社实时快讯".into()),
+        parameters: None,
+    };
+    // ── P1: 4 个技术指标 ToolDef ──
+    let td_atr = ToolDef { name: "compute_atr".into(), description: Some("计算 ATR 平均真实波幅".into()), parameters: None };
+    let td_kdj = ToolDef { name: "compute_kdj".into(), description: Some("计算 KDJ 随机指标".into()), parameters: None };
+    let td_obv = ToolDef { name: "compute_obv".into(), description: Some("计算 OBV 能量潮".into()), parameters: None };
+    let td_beta = ToolDef { name: "calc_beta".into(), description: Some("计算 Beta 系数".into()), parameters: None };
 
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
@@ -559,6 +610,21 @@ async fn seed_stock_analysis_workflow_template(
         ("t-clean-outl", "异常值剔除", "clean_outliers", "prices_json"),
         ("t-clean-fill", "缺失值填充", "clean_fill_missing", "prices_json"),
         ("t-adjust-px", "复权调整", "adjust_prices", "klines_json"),
+        // 新增 9 个数据 API 工具
+        ("t-research", "券商研报", "get_research_reports", "stock_code"),
+        ("t-consensus", "一致性预期", "get_consensus_eps", "stock_code"),
+        ("t-concepts", "概念板块", "get_concept_blocks", "stock_code"),
+        ("t-announce", "公司公告", "get_announcements", "stock_code"),
+        ("t-north-flow", "北向资金", "get_north_bound_flow", "stock_code"),
+        ("t-dragon", "龙虎榜", "get_market_dragon_tiger", "market"),
+        ("t-hot", "热门股", "get_hot_stocks", "market"),
+        ("t-industry", "行业排名", "get_industry_ranking", "market"),
+        ("t-cls-flash", "财联社快讯", "get_cls_flash", "market"),
+        // P1: 4 个技术指标
+        ("t-atr", "ATR 真实波幅", "compute_atr", "klines_json"),
+        ("t-kdj", "KDJ 指标", "compute_kdj", "klines_json"),
+        ("t-obv", "OBV 能量潮", "compute_obv", "klines_json"),
+        ("t-beta", "Beta 系数", "calc_beta", "stock_returns_json"),
     ];
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
@@ -584,6 +650,15 @@ async fn seed_stock_analysis_workflow_template(
         "t-clean-outl",
         "t-clean-fill",
         "t-adjust-px",
+        "t-research",
+        "t-consensus",
+        "t-concepts",
+        "t-announce",
+        "t-north-flow",
+        "t-dragon",
+        "t-hot",
+        "t-industry", "t-cls-flash",
+        "t-atr", "t-kdj", "t-obv", "t-beta",
     ];
     edges.push(edge("e-t-quality-t-calc-maxdd", "t-quality", "t-calc-maxdd"));
     for w in algo_chain.windows(2) {
@@ -614,6 +689,16 @@ async fn seed_stock_analysis_workflow_template(
             "t-clean-outl".into(),
             "t-clean-fill".into(),
             "t-adjust-px".into(),
+            "t-research".into(),
+            "t-consensus".into(),
+            "t-concepts".into(),
+            "t-announce".into(),
+            "t-north-flow".into(),
+            "t-dragon".into(),
+            "t-hot".into(),
+            "t-industry".into(),
+            "t-cls-flash".into(), "t-atr".into(),
+            "t-kdj".into(), "t-obv".into(), "t-beta".into(),
         ];
         a.config.tools = vec![
             td_score.clone(),
@@ -633,11 +718,21 @@ async fn seed_stock_analysis_workflow_template(
             td_outliers.clone(),
             td_fill.clone(),
             td_adjust.clone(),
+            td_research.clone(),
+            td_consensus.clone(),
+            td_concepts.clone(),
+            td_announce.clone(),
+            td_north.clone(),
+            td_dragon.clone(),
+            td_hot.clone(),
+            td_industry.clone(),
+            td_cls.clone(), td_atr.clone(), td_kdj.clone(),
+            td_obv.clone(), td_beta.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(rm);
-    edges.push(edge("e-t-adjust-px-research-mgr", "t-adjust-px", "research-mgr"));
+    edges.push(edge("e-t-beta-research-mgr", "t-beta", "research-mgr"));
 
     let mut trader = agent(
         "trader",

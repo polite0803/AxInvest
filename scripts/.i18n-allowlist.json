@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-25",
-  "total_entries": 121,
-  "total_files": 121,
+  "total_entries": 123,
+  "total_files": 123,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -727,6 +727,18 @@
     {
       "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
       "lines": "7",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/lib/browserMock.ts",
+      "lines": "2581,2582,2593,2608,2609,2614,2616,2617,2618,2619,2620,2621,2622,2631,2638,2645,2652,2659,2666,2673,2680,2687,2694,2701,2708,2715,2722,2729,2736,2743,2750,2757,2760,2765,2772,2779,2786,2793,2796,2801,2808,2815,2822,2829,2836,2843,2850,2857,2864,2871,2878,2885,2892,2899,2906,2913,2920,2927,2934",
+      "reason": "浏览器模式 mock 数据",
+      "phase": 3
+    },
+    {
+      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
+      "lines": "52,76",
       "reason": "硬编码中文字符串",
       "phase": 3
     }

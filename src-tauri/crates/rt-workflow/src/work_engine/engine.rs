@@ -784,7 +784,9 @@ impl WorkEngine {
                     {
                         let mut executions = self.executions.lock().await;
                         if let Some(state) = executions.get_mut(&execution_id) {
-                            state.variables.insert(node_id.clone(), output.output.clone());
+                            state
+                                .variables
+                                .insert(node_id.clone(), output.output.clone());
                         }
                     }
 

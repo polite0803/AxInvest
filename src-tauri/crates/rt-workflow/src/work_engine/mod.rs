@@ -11,7 +11,7 @@ pub use cache_layer::{CacheError, CacheLayer, InMemoryCache};
 pub use dispatcher::NodeDispatcher;
 pub use engine::{ProgressCallback, RunOptions, StepProgressEvent, WorkEngine, WorkEngineError};
 pub use execution_state::{ExecutionState, ExecutionStatus, NodeExecutionRecord};
-pub use node_executor::NodeExecutor;
 pub use executors::ToolCallback;
+pub use node_executor::NodeExecutor;
 pub use node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};
 pub use prompt_template::{CompiledPrompt, TemplateRenderError, compile_prompt, render_prompt};

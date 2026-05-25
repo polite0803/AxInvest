@@ -260,18 +260,66 @@ async fn seed_stock_analysis_workflow_template(
         parameters: None,
     };
     // ── 新增 12 个金融模型 ToolDef ──
-    let td_maxdd = ToolDef { name: "calc_max_drawdown".into(), description: Some("计算最大回撤比例".into()), parameters: None };
-    let td_sharpe = ToolDef { name: "calc_sharpe_ratio".into(), description: Some("计算夏普比率".into()), parameters: None };
-    let td_var = ToolDef { name: "calc_var".into(), description: Some("历史模拟法 VaR 计算".into()), parameters: None };
-    let td_pe_pct = ToolDef { name: "calc_pe_percentile".into(), description: Some("PE 历史分位数".into()), parameters: None };
-    let td_peg = ToolDef { name: "calc_peg".into(), description: Some("PEG 估值指标".into()), parameters: None };
-    let td_ma_cross = ToolDef { name: "detect_ma_cross".into(), description: Some("MA 金叉死叉检测".into()), parameters: None };
-    let td_breakout = ToolDef { name: "detect_breakout".into(), description: Some("支撑阻力突破检测".into()), parameters: None };
-    let td_kelly = ToolDef { name: "calc_kelly".into(), description: Some("凯利公式仓位计算".into()), parameters: None };
-    let td_rp = ToolDef { name: "calc_risk_parity".into(), description: Some("风险平价权重计算".into()), parameters: None };
-    let td_outliers = ToolDef { name: "clean_outliers".into(), description: Some("异常值剔除 (zscore/iqr)".into()), parameters: None };
-    let td_fill = ToolDef { name: "clean_fill_missing".into(), description: Some("缺失值填充 (forward/linear)".into()), parameters: None };
-    let td_adjust = ToolDef { name: "adjust_prices".into(), description: Some("前复权价格调整".into()), parameters: None };
+    let td_maxdd = ToolDef {
+        name: "calc_max_drawdown".into(),
+        description: Some("计算最大回撤比例".into()),
+        parameters: None,
+    };
+    let td_sharpe = ToolDef {
+        name: "calc_sharpe_ratio".into(),
+        description: Some("计算夏普比率".into()),
+        parameters: None,
+    };
+    let td_var = ToolDef {
+        name: "calc_var".into(),
+        description: Some("历史模拟法 VaR 计算".into()),
+        parameters: None,
+    };
+    let td_pe_pct = ToolDef {
+        name: "calc_pe_percentile".into(),
+        description: Some("PE 历史分位数".into()),
+        parameters: None,
+    };
+    let td_peg = ToolDef {
+        name: "calc_peg".into(),
+        description: Some("PEG 估值指标".into()),
+        parameters: None,
+    };
+    let td_ma_cross = ToolDef {
+        name: "detect_ma_cross".into(),
+        description: Some("MA 金叉死叉检测".into()),
+        parameters: None,
+    };
+    let td_breakout = ToolDef {
+        name: "detect_breakout".into(),
+        description: Some("支撑阻力突破检测".into()),
+        parameters: None,
+    };
+    let td_kelly = ToolDef {
+        name: "calc_kelly".into(),
+        description: Some("凯利公式仓位计算".into()),
+        parameters: None,
+    };
+    let td_rp = ToolDef {
+        name: "calc_risk_parity".into(),
+        description: Some("风险平价权重计算".into()),
+        parameters: None,
+    };
+    let td_outliers = ToolDef {
+        name: "clean_outliers".into(),
+        description: Some("异常值剔除 (zscore/iqr)".into()),
+        parameters: None,
+    };
+    let td_fill = ToolDef {
+        name: "clean_fill_missing".into(),
+        description: Some("缺失值填充 (forward/linear)".into()),
+        parameters: None,
+    };
+    let td_adjust = ToolDef {
+        name: "adjust_prices".into(),
+        description: Some("前复权价格调整".into()),
+        parameters: None,
+    };
 
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
@@ -524,9 +572,18 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
     edges.push(edge("e-t-risk-t-quality", "t-risk", "t-quality"));
     let algo_chain = [
-        "t-calc-maxdd", "t-calc-sharpe", "t-calc-var", "t-calc-pe-pct",
-        "t-calc-peg", "t-signal-cross", "t-signal-brk", "t-calc-kelly",
-        "t-calc-rp", "t-clean-outl", "t-clean-fill", "t-adjust-px",
+        "t-calc-maxdd",
+        "t-calc-sharpe",
+        "t-calc-var",
+        "t-calc-pe-pct",
+        "t-calc-peg",
+        "t-signal-cross",
+        "t-signal-brk",
+        "t-calc-kelly",
+        "t-calc-rp",
+        "t-clean-outl",
+        "t-clean-fill",
+        "t-adjust-px",
     ];
     edges.push(edge("e-t-quality-t-calc-maxdd", "t-quality", "t-calc-maxdd"));
     for w in algo_chain.windows(2) {
@@ -541,18 +598,40 @@ async fn seed_stock_analysis_workflow_template(
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
         a.config.context_sources = vec![
-            "t-scoring".into(), "t-valuation".into(), "t-risk".into(), "t-quality".into(),
-            "t-calc-maxdd".into(), "t-calc-sharpe".into(), "t-calc-var".into(),
-            "t-calc-pe-pct".into(), "t-calc-peg".into(),
-            "t-signal-cross".into(), "t-signal-brk".into(),
-            "t-calc-kelly".into(), "t-calc-rp".into(),
-            "t-clean-outl".into(), "t-clean-fill".into(), "t-adjust-px".into(),
+            "t-scoring".into(),
+            "t-valuation".into(),
+            "t-risk".into(),
+            "t-quality".into(),
+            "t-calc-maxdd".into(),
+            "t-calc-sharpe".into(),
+            "t-calc-var".into(),
+            "t-calc-pe-pct".into(),
+            "t-calc-peg".into(),
+            "t-signal-cross".into(),
+            "t-signal-brk".into(),
+            "t-calc-kelly".into(),
+            "t-calc-rp".into(),
+            "t-clean-outl".into(),
+            "t-clean-fill".into(),
+            "t-adjust-px".into(),
         ];
         a.config.tools = vec![
-            td_score.clone(), td_val.clone(), td_risk.clone(), td_quality.clone(),
-            td_fin.clone(), td_maxdd.clone(), td_sharpe.clone(), td_var.clone(),
-            td_pe_pct.clone(), td_peg.clone(), td_ma_cross.clone(), td_breakout.clone(),
-            td_kelly.clone(), td_rp.clone(), td_outliers.clone(), td_fill.clone(),
+            td_score.clone(),
+            td_val.clone(),
+            td_risk.clone(),
+            td_quality.clone(),
+            td_fin.clone(),
+            td_maxdd.clone(),
+            td_sharpe.clone(),
+            td_var.clone(),
+            td_pe_pct.clone(),
+            td_peg.clone(),
+            td_ma_cross.clone(),
+            td_breakout.clone(),
+            td_kelly.clone(),
+            td_rp.clone(),
+            td_outliers.clone(),
+            td_fill.clone(),
             td_adjust.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
@@ -586,11 +665,21 @@ async fn seed_stock_analysis_workflow_template(
     if let WorkflowNode::Agent(ref mut a) = pm {
         a.config.context_sources = vec!["trader".into(), "research-mgr".into()];
         a.config.tools = vec![
-            td_quote.clone(), td_kline.clone(), td_fin.clone(),
-            td_score.clone(), td_val.clone(), td_risk.clone(),
-            td_maxdd.clone(), td_sharpe.clone(), td_var.clone(),
-            td_pe_pct.clone(), td_peg.clone(), td_ma_cross.clone(),
-            td_breakout.clone(), td_kelly.clone(), td_rp.clone(),
+            td_quote.clone(),
+            td_kline.clone(),
+            td_fin.clone(),
+            td_score.clone(),
+            td_val.clone(),
+            td_risk.clone(),
+            td_maxdd.clone(),
+            td_sharpe.clone(),
+            td_var.clone(),
+            td_pe_pct.clone(),
+            td_peg.clone(),
+            td_ma_cross.clone(),
+            td_breakout.clone(),
+            td_kelly.clone(),
+            td_rp.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }

@@ -53,7 +53,7 @@ describe("DecisionBanner", () => {
       </MemoryRouter>,
     );
     expect(container.firstChild).not.toBeNull();
-    expect(container.textContent).toContain("买入");
+    expect(container.textContent).toContain("stockAnalysis.actionBuy");
     expect(container.textContent).toContain("10%");
   });
 });

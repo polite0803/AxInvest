@@ -1221,6 +1221,7 @@ version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axagent-astock-data",
  "axagent-core",
  "axagent-plugins",
  "axagent-runtime-core",

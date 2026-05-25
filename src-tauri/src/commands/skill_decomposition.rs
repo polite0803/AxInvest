@@ -229,6 +229,7 @@ fn find_similar_local_tools(
             axagent_tools::ToolCategory::Knowledge => "builtin-knowledge",
             axagent_tools::ToolCategory::Browser => "builtin-browser",
             axagent_tools::ToolCategory::Desktop => "builtin-desktop",
+            axagent_tools::ToolCategory::Finance => "finance",
         };
 
         if final_score >= min_similarity {

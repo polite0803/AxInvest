@@ -44,3 +44,24 @@ pub fn get_sea_db() -> Option<Arc<DatabaseConnection>> {
         .unwrap_or_else(|e| e.into_inner())
         .clone()
 }
+
+// ── AStockClient ─────────────────────────────────────────────────────────
+
+use axagent_astock_data::AStockClient;
+
+static GLOBAL_ASTOCK_CLIENT: LazyLock<RwLock<Option<Arc<AStockClient>>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+pub fn set_astock_client(client: Arc<AStockClient>) {
+    let mut c = GLOBAL_ASTOCK_CLIENT
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    *c = Some(client);
+}
+
+pub fn get_astock_client() -> Option<Arc<AStockClient>> {
+    GLOBAL_ASTOCK_CLIENT
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}

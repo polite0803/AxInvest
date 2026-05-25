@@ -148,6 +148,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
 
     // 共享 AStockClient：astock_client 和 stock_monitor 共用同一实例（共享缓存）
     let astock_client = Arc::new(axagent_astock_data::AStockClient::new());
+    axagent_tools::global_state::set_astock_client(astock_client.clone());
     let stock_monitor = Some(Arc::new(axagent_stock_analysis::monitor::RealtimeMonitor::new(
         astock_client.clone(),
     )));

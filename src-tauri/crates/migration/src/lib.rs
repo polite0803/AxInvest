@@ -645,10 +645,6 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             decision_reasoning TEXT, decision_json TEXT, blackboard_snapshot TEXT, \
             config_id TEXT, \
             created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
-        "CREATE TABLE IF NOT EXISTS stock_analysis_configs (\
-            id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, config_json TEXT NOT NULL, \
-            is_active INTEGER NOT NULL DEFAULT 0, notes TEXT, \
-            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
         "CREATE TABLE IF NOT EXISTS watchlist_items (\
             id TEXT NOT NULL PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
             notes TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
@@ -741,7 +737,6 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "CREATE INDEX IF NOT EXISTS idx_traj_learned_type ON trajectory_learned_patterns(pattern_type)",
         "CREATE INDEX IF NOT EXISTS idx_traj_prefs_key ON trajectory_preferences(key)",
         // AxInvest: Stock analysis indexes
-        "CREATE INDEX IF NOT EXISTS idx_stock_analyses_config ON stock_analyses(config_id)",
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_code ON stock_analyses(stock_code)",
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_date ON stock_analyses(analysis_date)",
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_code_created ON stock_analyses(stock_code, created_at)",

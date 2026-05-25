@@ -1,6 +1,6 @@
 // 验证 AxInvest 分支特有代码在上游合并后是否完整保留
 // 用于 post-merge hook 和 pre-push CI
-import { existsSync, readFileSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
 const ROOT = join(import.meta.dirname, "..");

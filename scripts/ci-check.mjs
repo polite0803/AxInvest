@@ -94,6 +94,8 @@ if (canRunFrontend) {
 
   step("i18n 键完整性检查", "node scripts/check-i18n-key-exists.mjs");
 
+  step("AxInvest 完整性检查", "node scripts/verify-axinvest-integrity.mjs");
+
   if (!quick && !frontendOnly) {
     step("Vitest 单元测试", "npx vitest run");
   }

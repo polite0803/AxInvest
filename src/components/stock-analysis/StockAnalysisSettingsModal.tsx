@@ -1,7 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Drawer, InputNumber, message, Select, Slider, Switch, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
 
 interface DataSourcesConfig {
   tencent: boolean;
@@ -118,7 +117,111 @@ const DEFAULTS: FullConfig = {
   monitor: { pollIntervalSecs: 30, changePctThreshold: 5, turnoverThreshold: 10 },
 };
 
-const SETTINGS_KEY = "stock_analysis_config";
+const TEMPLATE_ID = "stock-analysis";
+
+interface WorkflowVariable {
+  name: string;
+  var_type: string;
+  value: unknown;
+  description?: string;
+  is_secret: boolean;
+}
+
+/** 将 Variable 数组还原为 FullConfig */
+function variablesToConfig(vars: WorkflowVariable[]): FullConfig {
+  const flat: Record<string, unknown> = {};
+  for (const v of vars) {
+    flat[v.name] = v.value;
+  }
+  const get = (prefix: string, keys: string[]) => {
+    const obj: Record<string, unknown> = {};
+    for (const k of keys) {
+      obj[k] = flat[`${prefix}.${k}`] ?? undefined;
+    }
+    return obj;
+  };
+  const ds0 = DEFAULTS.dataSources;
+  return {
+    dataSources: {
+      tencent: (flat["dataSources.tencent"] as boolean) ?? ds0.tencent,
+      eastmoney: (flat["dataSources.eastmoney"] as boolean) ?? ds0.eastmoney,
+      sina: (flat["dataSources.sina"] as boolean) ?? ds0.sina,
+      akshare: (flat["dataSources.akshare"] as boolean) ?? ds0.akshare,
+      baiduStock: (flat["dataSources.baiduStock"] as boolean) ?? ds0.baiduStock,
+      cninfo: (flat["dataSources.cninfo"] as boolean) ?? ds0.cninfo,
+      iwencai: (flat["dataSources.iwencai"] as boolean) ?? ds0.iwencai,
+      mootdx: (flat["dataSources.mootdx"] as boolean) ?? ds0.mootdx,
+      ths: (flat["dataSources.ths"] as boolean) ?? ds0.ths,
+    },
+    analysis: {
+      ...DEFAULTS.analysis,
+      ...get("analysis", [
+        "maxDebateRounds",
+        "klinePeriod",
+        "klineLimit",
+        "newsLimit",
+        "maxConcurrent",
+        "temperature",
+        "maxTokens",
+        "timeoutSecs",
+      ]),
+    },
+    scoring: { ...DEFAULTS.scoring, ...get("scoring", ["trend", "deviation", "macd", "volume", "rsi", "support"]) },
+    rules: {
+      ...DEFAULTS.rules,
+      ...get("rules", [
+        "rsiOverbought",
+        "biasLimit",
+        "volumeSignalBlock",
+        "bearLowScore",
+        "rsiOversold",
+        "autoStopLossPct",
+      ]),
+    },
+    position: {
+      ...DEFAULTS.position,
+      ...get("position", ["maxSingleStockPct", "maxTotalPositions", "maxSectorExposurePct"]),
+    },
+    value: {
+      ...DEFAULTS.value,
+      ...get("value", [
+        "dcfGrowthRate",
+        "dcfPerpetualRate",
+        "dcfDiscountRate",
+        "moatThreshold",
+        "fScoreBuyThreshold",
+        "safetyMarginMin",
+      ]),
+    },
+    monitor: {
+      ...DEFAULTS.monitor,
+      ...get("monitor", ["pollIntervalSecs", "changePctThreshold", "turnoverThreshold"]),
+    },
+  };
+}
+
+/** 将 FullConfig 展平为 Variable 数组 */
+function configToVariables(config: FullConfig): WorkflowVariable[] {
+  const vars: WorkflowVariable[] = [];
+  const add = (prefix: string, obj: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(obj)) {
+      vars.push({
+        name: `${prefix}.${k}`,
+        var_type: typeof v === "boolean" ? "boolean" : typeof v === "string" ? "string" : "number",
+        value: v,
+        is_secret: false,
+      });
+    }
+  };
+  add("dataSources", config.dataSources as unknown as Record<string, unknown>);
+  add("analysis", config.analysis as unknown as Record<string, unknown>);
+  add("scoring", config.scoring as unknown as Record<string, unknown>);
+  add("rules", config.rules as unknown as Record<string, unknown>);
+  add("position", config.position as unknown as Record<string, unknown>);
+  add("value", config.value as unknown as Record<string, unknown>);
+  add("monitor", config.monitor as unknown as Record<string, unknown>);
+  return vars;
+}
 
 function Row({ label, desc, children }: { label: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -133,38 +236,99 @@ function Row({ label, desc, children }: { label: string; desc?: string; children
 }
 
 export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { t } = useTranslation();
   const [config, setConfig] = useState<FullConfig>(DEFAULTS);
   const [loading, setLoading] = useState(true);
 
+  // 从工作流模板加载配置
+  const loadFromTemplate = async () => {
+    setLoading(true);
+    try {
+      const tmpl = await invoke<{
+        id: string;
+        name: string;
+        nodes: unknown[];
+        edges: unknown[];
+        variables: WorkflowVariable[];
+        version: number;
+        trigger_config?: unknown;
+        input_schema?: unknown;
+        output_schema?: unknown;
+        error_config?: unknown;
+        description?: string;
+        icon: string;
+        tags: string[];
+        is_preset: boolean;
+        is_editable: boolean;
+        is_public: boolean;
+        created_at: number;
+        updated_at: number;
+      }>("get_workflow_template", { id: TEMPLATE_ID });
+      if (tmpl && tmpl.variables?.length) {
+        setConfig({ ...DEFAULTS, ...variablesToConfig(tmpl.variables) });
+      }
+    } catch {
+      // 模板不存在时使用默认值
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!open) { return; }
-    setLoading(true);
-    invoke<string | null>("get_setting", { key: SETTINGS_KEY })
-      .then((v) => {
-        if (v) {
-          try {
-            setConfig({ ...DEFAULTS, ...JSON.parse(v) });
-          } catch { /* keep defaults */ }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    loadFromTemplate();
   }, [open]);
 
+  // 即时保存到 state（不触发模板更新）
   const save = async (patch: Partial<FullConfig>) => {
     const merged = { ...config, ...patch };
     setConfig(merged);
+  };
+
+  // 持久化到工作流模板（版本号自动+1）
+  const persistToTemplate = async () => {
     try {
-      await invoke("set_setting", { key: SETTINGS_KEY, value: JSON.stringify(merged) });
-    } catch {
-      message.error(t("common.saveFailed"));
+      const tmpl = await invoke<{
+        id: string;
+        name: string;
+        description?: string;
+        icon: string;
+        tags: string[];
+        trigger_config?: unknown;
+        nodes: unknown[];
+        edges: unknown[];
+        input_schema?: unknown;
+        output_schema?: unknown;
+        error_config?: unknown;
+        is_preset: boolean;
+        is_editable: boolean;
+        is_public: boolean;
+      }>("get_workflow_template", { id: TEMPLATE_ID });
+      if (!tmpl) { return message.error("模板不存在"); }
+      const variables = configToVariables(config);
+      await invoke("update_workflow_template", {
+        id: TEMPLATE_ID,
+        input: {
+          name: tmpl.name,
+          description: tmpl.description ?? null,
+          icon: tmpl.icon,
+          tags: tmpl.tags ?? [],
+          trigger_config: tmpl.trigger_config ?? null,
+          nodes: tmpl.nodes,
+          edges: tmpl.edges,
+          input_schema: tmpl.input_schema ?? null,
+          output_schema: tmpl.output_schema ?? null,
+          variables,
+          error_config: tmpl.error_config ?? null,
+        },
+      });
+      message.success("设置已保存，工作流版本已更新");
+    } catch (e) {
+      message.error(`保存失败: ${e}`);
     }
   };
 
   const resetDefaults = () => {
     setConfig(DEFAULTS);
-    invoke("set_setting", { key: SETTINGS_KEY, value: JSON.stringify(DEFAULTS) }).catch(() => {});
   };
 
   const sc = config.scoring;
@@ -551,7 +715,7 @@ export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; o
       footer={
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <Button onClick={resetDefaults}>恢复默认</Button>
-          <Button type="primary" onClick={onClose}>关闭</Button>
+          <Button type="primary" onClick={() => persistToTemplate().then(onClose)}>保存到工作流</Button>
         </div>
       }
     >

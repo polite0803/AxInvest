@@ -188,6 +188,10 @@ pub async fn run_stock_workflow(
         .output_schema
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
+    let template_vars: Option<Vec<axagent_core::workflow_types::Variable>> = template
+        .variables
+        .as_ref()
+        .and_then(|v| serde_json::from_str(v).ok());
 
     // ── 3. 注册工具 handler（数据获取 + 算法计算）──
     let engine = Arc::clone(&state.work_engine);
@@ -384,6 +388,9 @@ pub async fn run_stock_workflow(
         }
         if let Some(s) = output_schema {
             opts = opts.with_output_schema(s);
+        }
+        if let Some(v) = template_vars {
+            opts = opts.with_variables(v);
         }
 
         match engine.run_workflow(&wf_id, opts).await {

@@ -47,7 +47,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       ),
     });
     progressMsgId = m.id;
-  } catch { /* 静默 */ }
+  } catch { /* silent */ }
 
   // 监听工作流步骤完成
   const u1 = await listen<{
@@ -159,7 +159,7 @@ export function stopStockWorkflowChatBridge(conversationId: string): void {
     for (const u of unlisteners) {
       try {
         u();
-      } catch { /* 静默 */ }
+      } catch { /* silent */ }
     }
     activeBridges.delete(conversationId);
   }

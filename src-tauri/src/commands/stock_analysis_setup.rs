@@ -1369,6 +1369,42 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("Mootdx — 本地行情接口".into()),
             is_secret: false,
         },
+        // ── 金融模型参数（通过 prompt 模板 {{var}} 传入 agent）──
+        Variable {
+            name: "risk_free_rate".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.03),
+            description: Some("无风险利率".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "var_confidence".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.95),
+            description: Some("VaR 置信度 (0-1)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "outlier_method".into(),
+            var_type: "enum".into(),
+            value: serde_json::json!("zscore"),
+            description: Some("异常值检测方法: zscore / iqr".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "outlier_threshold".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2.0),
+            description: Some("异常值 Z-score 阈值".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "kelly_fraction".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.5),
+            description: Some("凯利仓位系数 (建议仓位 = half_kelly × 此系数)".into()),
+            is_secret: false,
+        },
     ];
     let variables_val =
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;

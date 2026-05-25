@@ -67,14 +67,14 @@ const builtinNavItems: NavItem[] = [
   },
   {
     key: "gateway",
-    icon: <Icon icon="fluent:server-20-filled" size={17} />,
+    icon: <Icon icon="fluent:globe-20-filled" size={17} />,
     labelKey: "nav.gateway",
     path: "/gateway",
     isPlugin: false,
   },
   {
     key: "terminal",
-    icon: <Icon icon="fluent:terminal-20-filled" size={17} />,
+    icon: <Icon icon="fluent:prompt-20-filled" size={17} />,
     labelKey: "nav.terminal",
     path: "/terminal",
     isPlugin: false,

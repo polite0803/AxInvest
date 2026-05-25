@@ -20,7 +20,6 @@ interface IntegratedTerminalProps {
 export function IntegratedTerminal({
   defaultCwd,
   defaultShell,
-  height = 400,
   onOutput,
   onError,
 }: IntegratedTerminalProps) {
@@ -242,14 +241,13 @@ export function IntegratedTerminal({
     }, 100);
   };
 
-  const containerHeight = isMaximized ? "calc(100vh - 48px)" : height;
-
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        height: containerHeight,
+        flex: 1,
+        width: "100%",
         border: "1px solid #333",
         borderRadius: 8,
         overflow: "hidden",

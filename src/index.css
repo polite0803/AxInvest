@@ -973,7 +973,7 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   color: var(--color-primary);
 }
 
-/* ── Responsive: sidebar auto-collapse on small screens ──────── */
+/* ── 小屏/平板：侧栏默认折叠 + 展开时 overlay ──────── */
 @media (max-width: 600px) {
   .nav-sidebar {
     width: 44px !important;
@@ -985,9 +985,32 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   .sidebar-user-name {
     display: none;
   }
+  /* 展开时 overlay 模式 */
+  .nav-sidebar.expanded {
+    position: absolute !important;
+    top: 0; left: 0; bottom: 0;
+    z-index: 200;
+    width: 220px !important;
+    min-width: 220px !important;
+    padding: 8px 6px !important;
+    align-items: stretch;
+    box-shadow: 4px 0 24px rgba(0,0,0,.3);
+  }
+  .nav-sidebar.expanded .nav-label,
+  .nav-sidebar.expanded .ax-sidebar-section-header,
+  .nav-sidebar.expanded .sidebar-user-name {
+    display: block;
+  }
+  /* overlay 背景遮罩 */
+  .nav-sidebar.expanded::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.35);
+    z-index: -1;
+  }
 }
 
-/* ── Tablet range sidebar: collapsed by default ────────────── */
 @media (min-width: 601px) and (max-width: 899px) {
   .nav-sidebar {
     width: 44px !important;
@@ -998,6 +1021,29 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   .ax-sidebar-section-header,
   .sidebar-user-name {
     display: none;
+  }
+  /* 展开时 overlay 模式 */
+  .nav-sidebar.expanded {
+    position: absolute !important;
+    top: 0; left: 0; bottom: 0;
+    z-index: 200;
+    width: 220px !important;
+    min-width: 220px !important;
+    padding: 8px 6px !important;
+    align-items: stretch;
+    box-shadow: 4px 0 24px rgba(0,0,0,.3);
+  }
+  .nav-sidebar.expanded .nav-label,
+  .nav-sidebar.expanded .ax-sidebar-section-header,
+  .nav-sidebar.expanded .sidebar-user-name {
+    display: block;
+  }
+  .nav-sidebar.expanded::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.35);
+    z-index: -1;
   }
 }
 
@@ -1611,9 +1657,10 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
-/* ── 导航侧栏 (窄图标模式) ── */
+/* ── 导航侧栏 ── */
 .nav-sidebar {
   width: var(--nav-w);
   min-width: var(--nav-w);
@@ -1625,6 +1672,14 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   padding: 4px 0;
   gap: 1px;
   overflow: hidden;
+  transition: width 0.2s var(--ease), min-width 0.2s var(--ease);
+}
+/* 展开模式：宽侧栏，左对齐（图标+标签） */
+.nav-sidebar.expanded {
+  width: 200px;
+  min-width: 200px;
+  align-items: stretch;
+  padding: 4px 6px;
 }
 .nav-item {
   width: 30px;
@@ -2745,12 +2800,12 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 /* ═══════════════════════════════════════════════════════════════
    ── Terminal 页面 (term-layout / term-*) ──────────────────────
    ═══════════════════════════════════════════════════════════════ */
-.term-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.term-layout { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .term-topbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; flex-wrap: wrap; }
 .term-backend-select { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 12px; color: var(--fg); cursor: pointer; background: var(--bg); height: 28px; }
 .term-backend-select:hover { border-color: var(--accent); }
 .term-backend-select svg { width: 14px; height: 14px; color: var(--accent); }
-.term-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #0d0d0d; position: relative; }
+.term-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: #0d0d0d; position: relative; }
 .term-toolbar { display: flex; align-items: center; padding: 6px 10px; background: oklch(14% 0.006 55); border-bottom: 1px solid oklch(22% 0.008 55); gap: 4px; flex-shrink: 0; }
 .term-toolbar .term-title { font-size: 11.5px; color: oklch(65% 0.005 70); margin-right: auto; display: flex; align-items: center; gap: 6px; }
 .term-toolbar .term-title svg { width: 14px; height: 14px; }

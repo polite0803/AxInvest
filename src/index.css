@@ -3508,8 +3508,8 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   .sa-sheet-toggle {
     display: flex;
     position: fixed;
-    bottom: 12px;
-    right: 12px;
+    bottom: 24px;
+    right: 72px;
     z-index: 99;
     width: 40px;
     height: 40px;

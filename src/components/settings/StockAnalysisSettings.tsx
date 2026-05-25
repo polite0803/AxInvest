@@ -36,9 +36,15 @@ interface StockAnalysisConfig {
 
 const DEFAULTS: StockAnalysisConfig = {
   dataSources: {
-    tencent: true, eastmoney: true, sina: true,
-    akshare: false, baiduStock: false, cninfo: false,
-    iwencai: false, mootdx: false, ths: false,
+    tencent: true,
+    eastmoney: true,
+    sina: true,
+    akshare: false,
+    baiduStock: false,
+    cninfo: false,
+    iwencai: false,
+    mootdx: false,
+    ths: false,
   },
   analysis: { maxDebateRounds: 3, klinePeriod: "daily", klineLimit: 120, newsLimit: 30 },
   trading: { enabled: false, maxSinglePositionPct: 30, maxTotalPositionPct: 80, maxPositions: 10 },
@@ -91,15 +97,55 @@ export function StockAnalysisSettings() {
     tagKey: string;
     tagColor: string;
   }> = [
-    { key: "tencent", nameKey: "stockAnalysis.settings.tencentFinance", tagKey: "stockAnalysis.settings.quoteTag", tagColor: "blue" },
-    { key: "eastmoney", nameKey: "stockAnalysis.settings.eastmoney", tagKey: "stockAnalysis.settings.financialKlineTag", tagColor: "green" },
-    { key: "sina", nameKey: "stockAnalysis.settings.sinaFinance", tagKey: "stockAnalysis.settings.newsTag", tagColor: "orange" },
+    {
+      key: "tencent",
+      nameKey: "stockAnalysis.settings.tencentFinance",
+      tagKey: "stockAnalysis.settings.quoteTag",
+      tagColor: "blue",
+    },
+    {
+      key: "eastmoney",
+      nameKey: "stockAnalysis.settings.eastmoney",
+      tagKey: "stockAnalysis.settings.financialKlineTag",
+      tagColor: "green",
+    },
+    {
+      key: "sina",
+      nameKey: "stockAnalysis.settings.sinaFinance",
+      tagKey: "stockAnalysis.settings.newsTag",
+      tagColor: "orange",
+    },
     { key: "ths", nameKey: "stockAnalysis.settings.ths", tagKey: "stockAnalysis.settings.dataTag", tagColor: "purple" },
-    { key: "cninfo", nameKey: "stockAnalysis.settings.cninfo", tagKey: "stockAnalysis.settings.disclosureTag", tagColor: "geekblue" },
-    { key: "baiduStock", nameKey: "stockAnalysis.settings.baiduStock", tagKey: "stockAnalysis.settings.dataTag", tagColor: "cyan" },
-    { key: "iwencai", nameKey: "stockAnalysis.settings.iwencai", tagKey: "stockAnalysis.settings.screenTag", tagColor: "magenta" },
-    { key: "akshare", nameKey: "stockAnalysis.settings.akshare", tagKey: "stockAnalysis.settings.dataTag", tagColor: "gold" },
-    { key: "mootdx", nameKey: "stockAnalysis.settings.mootdx", tagKey: "stockAnalysis.settings.localTag", tagColor: "lime" },
+    {
+      key: "cninfo",
+      nameKey: "stockAnalysis.settings.cninfo",
+      tagKey: "stockAnalysis.settings.disclosureTag",
+      tagColor: "geekblue",
+    },
+    {
+      key: "baiduStock",
+      nameKey: "stockAnalysis.settings.baiduStock",
+      tagKey: "stockAnalysis.settings.dataTag",
+      tagColor: "cyan",
+    },
+    {
+      key: "iwencai",
+      nameKey: "stockAnalysis.settings.iwencai",
+      tagKey: "stockAnalysis.settings.screenTag",
+      tagColor: "magenta",
+    },
+    {
+      key: "akshare",
+      nameKey: "stockAnalysis.settings.akshare",
+      tagKey: "stockAnalysis.settings.dataTag",
+      tagColor: "gold",
+    },
+    {
+      key: "mootdx",
+      nameKey: "stockAnalysis.settings.mootdx",
+      tagKey: "stockAnalysis.settings.localTag",
+      tagColor: "lime",
+    },
   ];
 
   const checkHealth = async () => {
@@ -125,8 +171,8 @@ export function StockAnalysisSettings() {
 
   const statusBadge = (key: string) => {
     const s = health[key];
-    if (!s) return null;
-    if (s === "pending") return <Tag>{t("stockAnalysis.settings.skipped")}</Tag>;
+    if (!s) { return null; }
+    if (s === "pending") { return <Tag>{t("stockAnalysis.settings.skipped")}</Tag>; }
     return (
       <Tag color={s === "ok" ? "success" : "error"}>
         {s === "ok" ? t("stockAnalysis.settings.connected") : t("stockAnalysis.settings.disconnected")}

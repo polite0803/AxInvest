@@ -103,6 +103,7 @@ pub async fn run_stock_workflow(
         decision_reasoning: Set(None),
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
+        config_id: Set(None),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }

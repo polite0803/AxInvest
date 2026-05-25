@@ -711,6 +711,90 @@
       "lines": "79",
       "reason": "硬编码中文字符串",
       "phase": 3
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "lines": "216,217,218,219,220,222",
+      "reason": "分析 prompt 模板 — AI prompt 动态拼接内容",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
+      "lines": "14",
+      "reason": "代码注释 — 分析师数量说明",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/AnalystReportGrid.tsx",
+      "lines": "18,20",
+      "reason": "AI 输出情感分析匹配 — 非 UI 文本",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "45,46,47,48,49",
+      "reason": "actionLabel 映射 — AI 输出值到 i18n key 的数据桥接",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "69,70,71,72,73,74,75,76,78,81,82,83",
+      "reason": "分析报告导出文本 — 数据生成，非 UI",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "111,112,113,114,115",
+      "reason": "对话上下文拼接 — 发送给 AI 的动态内容",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "135,137,139",
+      "reason": "决策动作值匹配 — 颜色逻辑判断",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "230,232",
+      "reason": "风险等级字符串匹配 — 颜色逻辑判断",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/RiskMatrix.tsx",
+      "lines": "28,29,30,31,32,33,34,35,36,37,38",
+      "reason": "高风险关键词数组 — 文本分析数据，非 UI",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/RiskMatrix.tsx",
+      "lines": "40",
+      "reason": "中风险关键词数组 — 文本分析数据，非 UI",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
+      "lines": "7",
+      "reason": "动作常量映射 — AI 输出值到 UI label 的数据桥接",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/DecisionBanner.test.tsx",
+      "lines": "42,44,45",
+      "reason": "测试用例数据 — 中文字符串 fixture",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/TradePanel.test.tsx",
+      "lines": "40,49,51",
+      "reason": "测试用例数据 — 中文字符串 fixture",
+      "phase": 3
+    },
+    {
+      "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
+      "lines": "80,99,101,146,147,148,149,150,163,176,180",
+      "reason": "测试用例数据 — 中文字符串 fixture",
+      "phase": 3
     }
   ]
 }

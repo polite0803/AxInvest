@@ -26,13 +26,20 @@ pub struct StockDecision {
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisConfig {
     /// 最大辩论轮数
+    #[serde(default = "default_debate_rounds")]
     pub max_debate_rounds: u32,
     /// K线周期
+    #[serde(default = "default_kline_period")]
     pub kline_period: String,
     /// K线数量
+    #[serde(default = "default_kline_limit")]
     pub kline_limit: u32,
     /// 新闻数量
+    #[serde(default = "default_news_limit")]
     pub news_limit: u32,
+    /// 并行分析数
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: u32,
     /// LLM temperature (0-1)
     #[serde(default = "default_temperature")]
     pub temperature: f64,
@@ -41,12 +48,13 @@ pub struct AnalysisConfig {
     pub max_tokens: u32,
 }
 
-fn default_temperature() -> f64 {
-    0.3
-}
-fn default_max_tokens() -> u32 {
-    4096
-}
+fn default_debate_rounds() -> u32 { 3 }
+fn default_kline_period() -> String { "daily".into() }
+fn default_kline_limit() -> u32 { 120 }
+fn default_news_limit() -> u32 { 30 }
+fn default_max_concurrent() -> u32 { 9 }
+fn default_temperature() -> f64 { 0.3 }
+fn default_max_tokens() -> u32 { 4096 }
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
@@ -55,6 +63,7 @@ impl Default for AnalysisConfig {
             kline_period: "daily".to_string(),
             kline_limit: 120,
             news_limit: 30,
+            max_concurrent: 9,
             temperature: 0.3,
             max_tokens: 4096,
         }
@@ -163,6 +172,170 @@ impl Default for ScoringWeights {
             volume: 15.0,
             rsi: 10.0,
             support: 10.0,
+        }
+    }
+}
+
+// ── 规则引擎可调阈值 ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleConfig {
+    #[serde(default = "default_rsi_overbought")]
+    pub rsi_overbought: f64,
+    #[serde(default = "default_bias_limit")]
+    pub bias_limit: f64,
+    #[serde(default = "default_volume_block")]
+    pub volume_signal_block: bool,
+    #[serde(default = "default_bear_low_score")]
+    pub bear_low_score: u32,
+    #[serde(default = "default_rsi_oversold")]
+    pub rsi_oversold: f64,
+    #[serde(default = "default_auto_stop_loss_pct")]
+    pub auto_stop_loss_pct: f64,
+}
+
+fn default_rsi_overbought() -> f64 { 80.0 }
+fn default_bias_limit() -> f64 { 5.0 }
+fn default_volume_block() -> bool { true }
+fn default_bear_low_score() -> u32 { 30 }
+fn default_rsi_oversold() -> f64 { 20.0 }
+fn default_auto_stop_loss_pct() -> f64 { 5.0 }
+
+impl Default for RuleConfig {
+    fn default() -> Self {
+        Self {
+            rsi_overbought: 80.0,
+            bias_limit: 5.0,
+            volume_signal_block: true,
+            bear_low_score: 30,
+            rsi_oversold: 20.0,
+            auto_stop_loss_pct: 5.0,
+        }
+    }
+}
+
+// ── 仓位限制 ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionLimitsConfig {
+    #[serde(default = "default_max_single_stock")]
+    pub max_single_stock_pct: f64,
+    #[serde(default = "default_max_total_pos")]
+    pub max_total_positions: u32,
+    #[serde(default = "default_max_sector")]
+    pub max_sector_exposure_pct: f64,
+}
+
+fn default_max_single_stock() -> f64 { 20.0 }
+fn default_max_total_pos() -> u32 { 10 }
+fn default_max_sector() -> f64 { 40.0 }
+
+impl Default for PositionLimitsConfig {
+    fn default() -> Self {
+        Self {
+            max_single_stock_pct: 20.0,
+            max_total_positions: 10,
+            max_sector_exposure_pct: 40.0,
+        }
+    }
+}
+
+// ── 估值参数 ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueConfig {
+    #[serde(default = "default_dcf_growth")]
+    pub dcf_growth_rate: f64,
+    #[serde(default = "default_dcf_perpetual")]
+    pub dcf_perpetual_rate: f64,
+    #[serde(default = "default_dcf_discount")]
+    pub dcf_discount_rate: f64,
+    #[serde(default = "default_moat_threshold")]
+    pub moat_threshold: u32,
+    #[serde(default = "default_fscore_buy")]
+    pub f_score_buy_threshold: u32,
+    #[serde(default = "default_safety_margin")]
+    pub safety_margin_min: f64,
+}
+
+fn default_dcf_growth() -> f64 { 8.0 }
+fn default_dcf_perpetual() -> f64 { 3.0 }
+fn default_dcf_discount() -> f64 { 10.0 }
+fn default_moat_threshold() -> u32 { 60 }
+fn default_fscore_buy() -> u32 { 7 }
+fn default_safety_margin() -> f64 { 20.0 }
+
+impl Default for ValueConfig {
+    fn default() -> Self {
+        Self {
+            dcf_growth_rate: 8.0,
+            dcf_perpetual_rate: 3.0,
+            dcf_discount_rate: 10.0,
+            moat_threshold: 60,
+            f_score_buy_threshold: 7,
+            safety_margin_min: 20.0,
+        }
+    }
+}
+
+// ── 监控参数 ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitorConfig {
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_secs: u32,
+    #[serde(default = "default_change_pct")]
+    pub change_pct_threshold: f64,
+    #[serde(default = "default_turnover")]
+    pub turnover_threshold: f64,
+}
+
+fn default_poll_interval() -> u32 { 30 }
+fn default_change_pct() -> f64 { 5.0 }
+fn default_turnover() -> f64 { 10.0 }
+
+impl Default for MonitorConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_secs: 30,
+            change_pct_threshold: 5.0,
+            turnover_threshold: 10.0,
+        }
+    }
+}
+
+// ── 完整配置（版本化持久化）──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockAnalysisFullConfig {
+    #[serde(default)]
+    pub analysis: AnalysisConfig,
+    #[serde(default)]
+    pub scoring: ScoringWeights,
+    #[serde(default)]
+    pub rules: RuleConfig,
+    #[serde(default)]
+    pub position: PositionLimitsConfig,
+    #[serde(default)]
+    pub value: ValueConfig,
+    #[serde(default)]
+    pub monitor: MonitorConfig,
+}
+
+impl Default for StockAnalysisFullConfig {
+    fn default() -> Self {
+        Self {
+            analysis: AnalysisConfig::default(),
+            scoring: ScoringWeights::default(),
+            rules: RuleConfig::default(),
+            position: PositionLimitsConfig::default(),
+            value: ValueConfig::default(),
+            monitor: MonitorConfig::default(),
         }
     }
 }

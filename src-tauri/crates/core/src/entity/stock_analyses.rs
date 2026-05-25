@@ -18,6 +18,7 @@ pub struct Model {
     pub decision_reasoning: Option<String>,
     pub decision_json: Option<String>,
     pub blackboard_snapshot: Option<String>,
+    pub config_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

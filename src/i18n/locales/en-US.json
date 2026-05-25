@@ -6657,7 +6657,20 @@
     "exportReport": "Export Report",
     "monitoringActive": "Monitoring Active",
     "monitoringPaused": "Monitoring Paused",
-    "noChartData": "No Chart Data"
+    "noChartData": "No Chart Data",
+    "period.1m": "1M",
+    "period.3m": "3M",
+    "period.6m": "6M",
+    "period.1y": "1Y",
+    "period.weekly": "W",
+    "period.monthly": "M",
+    "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
+    "riskScore": "Risk Score: {{score}}",
+    "buyShort": "Buy",
+    "sellShort": "Sell",
+    "autoRefresh": "Auto",
+    "refreshing": "Refreshing",
+    "yiUnit": "B"
   },
   "trade": {
     "title": "Trading Log",

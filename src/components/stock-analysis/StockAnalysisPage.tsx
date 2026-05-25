@@ -1,6 +1,6 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useStockAnalysisStore } from "@/stores";
-import { ArrowLeftRight, LineChart, Shield, TrendingUp, Users } from "lucide-react";
+import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -13,6 +13,7 @@ import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
 import { KLineChart } from "./KLineChart";
 import { PriceAlertPanel } from "./PriceAlertPanel";
 import { RiskMatrix } from "./RiskMatrix";
+import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
 import { StockQuoteCard } from "./StockQuoteCard";
 import { StockSearchBar } from "./StockSearchBar";
 import { TradePanel } from "./TradePanel";
@@ -49,6 +50,7 @@ export function StockAnalysisPage() {
   const [activeTab, setActiveTab] = useState("market");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState("trade");
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     setupEventListener();
@@ -132,7 +134,10 @@ export function StockAnalysisPage() {
             ← {t("nav.chat")}
           </button>
           <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
-          <span className="sa-header-meta">AxInvest · 智能驱动 · 多维分析</span>
+          <span className="sa-header-meta">{t("stockAnalysis.subtitle")}</span>
+          <button type="button" className="sa-header-back" onClick={() => setSettingsOpen(true)} title="分析设置">
+            <Settings size={16} />
+          </button>
         </div>
 
         <div className="sa-body">
@@ -227,6 +232,7 @@ export function StockAnalysisPage() {
           {sheetOpen ? "✕" : "+"}
         </button>
       </div>
+      <StockAnalysisSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </PageErrorBoundary>
   );
 }

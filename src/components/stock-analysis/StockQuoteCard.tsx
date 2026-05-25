@@ -45,7 +45,9 @@ export function StockQuoteCard() {
           onClick={() => setAutoRefresh(!autoRefresh)}
           style={{ fontSize: 11, padding: "0 6px", height: 22 }}
         >
-          {autoRefresh ? "● 刷新中" : "○ 自动"}
+          {autoRefresh
+            ? `● ${t("stockAnalysis.refreshing")}`
+            : `○ ${t("stockAnalysis.autoRefresh")}`}
         </Button>
       }
       styles={{ body: { padding: "8px 12px" } }}
@@ -93,7 +95,8 @@ export function StockQuoteCard() {
           )}
           {quote.totalMv != null && (
             <span>
-              {t("stockAnalysis.marketCap")}: <b className="font-mono">{(quote.totalMv / 1e8).toFixed(1)}亿</b>
+              {t("stockAnalysis.marketCap")}:{" "}
+              <b className="font-mono">{(quote.totalMv / 1e8).toFixed(1)}{t("stockAnalysis.yiUnit")}</b>
             </span>
           )}
           {quote.turnoverRate != null && (

@@ -6726,7 +6726,20 @@
     "progress.stepRetrying": "🔄 {{name}} 重试中",
     "ep": "市盈率",
     "risk.comprehensive": "综合评估",
-    "loadHistory": "点击加载历史分析报告"
+    "loadHistory": "点击加载历史分析报告",
+    "period.1m": "1月",
+    "period.3m": "3月",
+    "period.6m": "6月",
+    "period.1y": "1年",
+    "period.weekly": "周",
+    "period.monthly": "月",
+    "subtitle": "AxInvest · 智能驱动 · 多维分析",
+    "riskScore": "风险分: {{score}}",
+    "buyShort": "买",
+    "sellShort": "卖",
+    "autoRefresh": "自动",
+    "refreshing": "刷新中",
+    "yiUnit": "亿"
   },
   "trade": {
     "title": "交易日志",

@@ -143,7 +143,7 @@ export function RiskMatrix() {
                   className="text-xs font-mono"
                   style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
                 >
-                  风险分: {score}
+                  {t("stockAnalysis.riskScore", { score })}
                 </span>
               </div>
               <p

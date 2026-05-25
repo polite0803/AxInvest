@@ -6655,7 +6655,20 @@
     "exportReport": "匯出報告",
     "monitoringActive": "監控中",
     "monitoringPaused": "監控已暫停",
-    "noChartData": "無圖表數據"
+    "noChartData": "無圖表數據",
+    "period.1m": "1月",
+    "period.3m": "3月",
+    "period.6m": "6月",
+    "period.1y": "1年",
+    "period.weekly": "周",
+    "period.monthly": "月",
+    "subtitle": "AxInvest · 智能驱动 · 多维分析",
+    "riskScore": "風險分: {{score}}",
+    "buyShort": "买",
+    "sellShort": "卖",
+    "autoRefresh": "自动",
+    "refreshing": "刷新中",
+    "yiUnit": "亿"
   },
   "trade": {
     "title": "交易日志",

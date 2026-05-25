@@ -27,7 +27,7 @@ export function WatchlistPanel() {
   const loadWatchlist = async () => {
     try {
       const list = await invoke<WatchlistItem[]>("list_watchlist");
-      if (Array.isArray(list)) setItems(list);
+      if (Array.isArray(list)) { setItems(list); }
     } catch {
       // 后端未运行或无数据时静默
     }

@@ -990,6 +990,7 @@ pub fn run() {
             commands::stock_analysis::get_cls_flash,
             commands::stock_analysis::get_market_dragon_tiger,
             commands::stock_analysis::get_north_bound_flow,
+            commands::stock_analysis::check_vendor_health,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");

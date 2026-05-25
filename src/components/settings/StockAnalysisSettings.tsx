@@ -9,6 +9,12 @@ interface StockAnalysisConfig {
     tencent: boolean;
     eastmoney: boolean;
     sina: boolean;
+    akshare: boolean;
+    baiduStock: boolean;
+    cninfo: boolean;
+    iwencai: boolean;
+    mootdx: boolean;
+    ths: boolean;
   };
   analysis: {
     maxDebateRounds: number;
@@ -29,7 +35,11 @@ interface StockAnalysisConfig {
 }
 
 const DEFAULTS: StockAnalysisConfig = {
-  dataSources: { tencent: true, eastmoney: true, sina: true },
+  dataSources: {
+    tencent: true, eastmoney: true, sina: true,
+    akshare: false, baiduStock: false, cninfo: false,
+    iwencai: false, mootdx: false, ths: false,
+  },
   analysis: { maxDebateRounds: 3, klinePeriod: "daily", klineLimit: 120, newsLimit: 30 },
   trading: { enabled: false, maxSinglePositionPct: 30, maxTotalPositionPct: 80, maxPositions: 10 },
   model: { temperature: 0.3, maxTokens: 4096 },
@@ -71,42 +81,82 @@ function useStockAnalysisConfig() {
 export function StockAnalysisSettings() {
   const { t } = useTranslation();
   const { config, save, loading } = useStockAnalysisConfig();
+  const [checking, setChecking] = useState(false);
+  const [health, setHealth] = useState<Record<string, "ok" | "fail" | "pending">>({});
   const rowStyle = { padding: "4px 0" };
 
+  const VENDORS: Array<{
+    key: keyof StockAnalysisConfig["dataSources"];
+    nameKey: string;
+    tagKey: string;
+    tagColor: string;
+  }> = [
+    { key: "tencent", nameKey: "stockAnalysis.settings.tencentFinance", tagKey: "stockAnalysis.settings.quoteTag", tagColor: "blue" },
+    { key: "eastmoney", nameKey: "stockAnalysis.settings.eastmoney", tagKey: "stockAnalysis.settings.financialKlineTag", tagColor: "green" },
+    { key: "sina", nameKey: "stockAnalysis.settings.sinaFinance", tagKey: "stockAnalysis.settings.newsTag", tagColor: "orange" },
+    { key: "ths", nameKey: "stockAnalysis.settings.ths", tagKey: "stockAnalysis.settings.dataTag", tagColor: "purple" },
+    { key: "cninfo", nameKey: "stockAnalysis.settings.cninfo", tagKey: "stockAnalysis.settings.disclosureTag", tagColor: "geekblue" },
+    { key: "baiduStock", nameKey: "stockAnalysis.settings.baiduStock", tagKey: "stockAnalysis.settings.dataTag", tagColor: "cyan" },
+    { key: "iwencai", nameKey: "stockAnalysis.settings.iwencai", tagKey: "stockAnalysis.settings.screenTag", tagColor: "magenta" },
+    { key: "akshare", nameKey: "stockAnalysis.settings.akshare", tagKey: "stockAnalysis.settings.dataTag", tagColor: "gold" },
+    { key: "mootdx", nameKey: "stockAnalysis.settings.mootdx", tagKey: "stockAnalysis.settings.localTag", tagColor: "lime" },
+  ];
+
+  const checkHealth = async () => {
+    setChecking(true);
+    const results: Record<string, "ok" | "fail" | "pending"> = {};
+    for (const v of VENDORS) {
+      if (!config.dataSources[v.key]) {
+        results[v.key] = "pending";
+        continue;
+      }
+      try {
+        await invoke("check_vendor_health", { vendor: v.key });
+        results[v.key] = "ok";
+      } catch {
+        results[v.key] = "fail";
+      }
+    }
+    setHealth(results);
+    setChecking(false);
+  };
+
   if (loading) { return <div className="p-6">{t("common.loading")}</div>; }
+
+  const statusBadge = (key: string) => {
+    const s = health[key];
+    if (!s) return null;
+    if (s === "pending") return <Tag>{t("stockAnalysis.settings.skipped")}</Tag>;
+    return (
+      <Tag color={s === "ok" ? "success" : "error"}>
+        {s === "ok" ? t("stockAnalysis.settings.connected") : t("stockAnalysis.settings.disconnected")}
+      </Tag>
+    );
+  };
 
   return (
     <div className="p-6 pb-12">
       {/* Data sources */}
-      <SettingsGroup title={t("stockAnalysis.settings.dataSources")}>
-        <div style={rowStyle} className="flex items-center justify-between">
-          <span>
-            {t("stockAnalysis.settings.tencentFinance")} <Tag color="blue">{t("stockAnalysis.settings.quoteTag")}</Tag>
-          </span>
-          <Switch
-            checked={config.dataSources.tencent}
-            onChange={(v) => save({ dataSources: { ...config.dataSources, tencent: v } })}
-          />
-        </div>
-        <div style={rowStyle} className="flex items-center justify-between">
-          <span>
-            {t("stockAnalysis.settings.eastmoney")}{" "}
-            <Tag color="green">{t("stockAnalysis.settings.financialKlineTag")}</Tag>
-          </span>
-          <Switch
-            checked={config.dataSources.eastmoney}
-            onChange={(v) => save({ dataSources: { ...config.dataSources, eastmoney: v } })}
-          />
-        </div>
-        <div style={rowStyle} className="flex items-center justify-between">
-          <span>
-            {t("stockAnalysis.settings.sinaFinance")} <Tag color="orange">{t("stockAnalysis.settings.newsTag")}</Tag>
-          </span>
-          <Switch
-            checked={config.dataSources.sina}
-            onChange={(v) => save({ dataSources: { ...config.dataSources, sina: v } })}
-          />
-        </div>
+      <SettingsGroup
+        title={t("stockAnalysis.settings.dataSources")}
+        extra={
+          <Button size="small" loading={checking} onClick={checkHealth}>
+            {t("stockAnalysis.settings.checkHealth")}
+          </Button>
+        }
+      >
+        {VENDORS.map((v) => (
+          <div key={v.key} style={rowStyle} className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              {t(v.nameKey)} <Tag color={v.tagColor}>{t(v.tagKey)}</Tag>
+              {statusBadge(v.key)}
+            </span>
+            <Switch
+              checked={config.dataSources[v.key]}
+              onChange={(checked) => save({ dataSources: { ...config.dataSources, [v.key]: checked } })}
+            />
+          </div>
+        ))}
       </SettingsGroup>
 
       {/* 分析参数 */}

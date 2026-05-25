@@ -175,6 +175,19 @@ impl AStockClient {
             .map(|(_, v)| v.as_ref())
     }
 
+    /// 检查指定 vendor 的连接可用性（用平安银行 000001 做探针）
+    pub async fn check_vendor_health(&self, vendor_name: &str) -> Result<(), DataError> {
+        let vendor = self
+            .find_vendor(vendor_name)
+            .ok_or_else(|| DataError::VendorError {
+                vendor: vendor_name.into(),
+                message: "vendor not registered".into(),
+            })?;
+        // 用常见股票代码做连通性探针，只检查 HTTP 可达性
+        vendor.get_quote("000001").await?;
+        Ok(())
+    }
+
     pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let cache_key = format!("quote:{stock_code}");
         if let Some(cached) = self.cache_get(&cache_key).await {

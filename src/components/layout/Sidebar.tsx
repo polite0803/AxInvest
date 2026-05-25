@@ -24,6 +24,7 @@ const pageKeyToPath: Record<PageKey, string> = {
   files: "/files",
   terminal: "/terminal",
   workflow: "/workflow",
+  "stock-analysis": "/stock-analysis",
   settings: "/settings",
 };
 

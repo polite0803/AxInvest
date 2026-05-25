@@ -695,7 +695,9 @@ export type BuiltinPageKey =
   | "terminal"
   | "settings"
   | "marketplace"
-  | "wiki";
+  | "wiki"
+  | "workflow"
+  | "stock-analysis";
 export type PageKey = BuiltinPageKey | string;
 export type SettingsSection =
   | "providers"
@@ -729,6 +731,9 @@ export type SettingsSection =
   | "imageGen"
   | "theme"
   | "cron"
+  | "stockAnalysis"
+  | "workflow"
+  | "knowledgeSettings"
   | string;
 
 // === Generated Tool ===

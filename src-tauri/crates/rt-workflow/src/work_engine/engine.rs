@@ -780,6 +780,14 @@ impl WorkEngine {
                     .await
                     .ok();
 
+                    // 将节点输出写入变量区，供下游节点通过 {{node_id}} 模板变量引用
+                    {
+                        let mut executions = self.executions.lock().await;
+                        if let Some(state) = executions.get_mut(&execution_id) {
+                            state.variables.insert(node_id.clone(), output.output.clone());
+                        }
+                    }
+
                     self.record_node_execution(
                         &execution_id,
                         NodeExecutionRecord {

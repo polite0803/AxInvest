@@ -6514,6 +6514,7 @@
     "open": "Open",
     "high": "High",
     "low": "Low",
+    "close": "종가",
     "volume": "Volume",
     "volumeUnit": "10k lots",
     "volumeChart": "Volume",

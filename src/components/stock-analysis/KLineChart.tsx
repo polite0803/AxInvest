@@ -81,9 +81,12 @@ export function KLineChart() {
     const ma10 = indicators.ma10 ? calcMA(closes, 10) : [];
     const ma20 = indicators.ma20 ? calcMA(closes, 20) : [];
 
+    const candleName = t("stockAnalysis.klineChart");
+    const volumeName = t("stockAnalysis.volumeChart");
+
     const seriesArr: echarts.SeriesOption[] = [
       {
-        name: "K线",
+        name: candleName,
         type: "candlestick",
         data: ohlc,
         xAxisIndex: 0,
@@ -133,7 +136,7 @@ export function KLineChart() {
     }
 
     seriesArr.push({
-      name: "成交量",
+      name: volumeName,
       type: "bar",
       data: volumes,
       xAxisIndex: 1,
@@ -159,17 +162,23 @@ export function KLineChart() {
         formatter: (params: unknown) => {
           const arr = params as Array<{ seriesName: string; value: number; dataIndex: number }>;
           if (!arr || arr.length === 0) { return ""; }
-          const candle = arr.find((p) => p.seriesName === "K线");
-          const vol = arr.find((p) => p.seriesName === "成交量");
+          const candle = arr.find((p) => p.seriesName === candleName);
+          const vol = arr.find((p) => p.seriesName === volumeName);
           const idx = candle?.dataIndex ?? 0;
           const k = ohlc[idx];
           if (!k) { return ""; }
           const dateStr = dates[idx] || "";
+          const openLabel = t("stockAnalysis.open");
+          const closeLabel = t("stockAnalysis.close");
+          const highLabel = t("stockAnalysis.high");
+          const lowLabel = t("stockAnalysis.low");
+          const volLabel = t("stockAnalysis.volumeChart");
+          const volUnit = t("stockAnalysis.volumeUnit");
           const lines = [
             `<div style="font-weight:600;margin-bottom:4px">${dateStr}</div>`,
-            `开: ${k[0].toFixed(2)} &nbsp; 收: ${k[1].toFixed(2)}`,
-            `高: ${k[2].toFixed(2)} &nbsp; 低: ${k[3].toFixed(2)}`,
-            vol ? `成交量: ${(vol.value / 10000).toFixed(1)}万手` : "",
+            `${openLabel}: ${k[0].toFixed(2)} &nbsp; ${closeLabel}: ${k[1].toFixed(2)}`,
+            `${highLabel}: ${k[2].toFixed(2)} &nbsp; ${lowLabel}: ${k[3].toFixed(2)}`,
+            vol ? `${volLabel}: ${(vol.value / 10000).toFixed(1)}${volUnit}` : "",
           ];
           if (indicators.ma5 && ma5[idx] != null) {
             lines.push(`<span style="color:${MA_ORANGE}">MA5: ${ma5[idx]}</span>`);

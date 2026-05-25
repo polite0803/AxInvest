@@ -6514,6 +6514,7 @@
     "open": "Open",
     "high": "High",
     "low": "Low",
+    "close": "終値",
     "volume": "Volume",
     "volumeUnit": "10k lots",
     "volumeChart": "Volume",

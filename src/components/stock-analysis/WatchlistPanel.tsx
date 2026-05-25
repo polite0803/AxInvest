@@ -63,7 +63,13 @@ export function WatchlistPanel() {
     startAnalysis(item.stockCode);
   };
 
-  if (items.length === 0) { return null; }
+  if (items.length === 0) {
+    return (
+      <div className="text-xs" style={{ color: "var(--muted)", padding: "4px 0" }}>
+        {t("stockAnalysis.watchlistEmpty")}
+      </div>
+    );
+  }
 
   return (
     <div>

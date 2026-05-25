@@ -98,6 +98,9 @@ const LazyThemeManager = lazy(() =>
 const LazyCronManager = lazy(() =>
   import("@/components/settings/CronManager").then((m) => ({ default: m.CronManager }))
 );
+const LazyStockAnalysisSettings = lazy(() =>
+  import("@/components/settings/StockAnalysisSettings").then((m) => ({ default: m.StockAnalysisSettings }))
+);
 // 工作流设置 — 上游使用 WorkflowEditor 作为设置页入口
 const LazyWorkflowEditor = lazy(() => import("@/components/workflow").then((m) => ({ default: m.WorkflowEditor })));
 const LazyReactFlowProvider = lazy(() => import("reactflow").then((m) => ({ default: m.ReactFlowProvider })));
@@ -268,6 +271,11 @@ const SECTION_COMPONENTS: Record<SettingsSection, React.ComponentType<any>> = {
   theme: () => (
     <Suspense fallback={<SectionFallback />}>
       <LazyThemeManager />
+    </Suspense>
+  ),
+  stockAnalysis: () => (
+    <Suspense fallback={<SectionFallback />}>
+      <LazyStockAnalysisSettings />
     </Suspense>
   ),
   cron: () => (

@@ -8,9 +8,7 @@ use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_ur
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
-use axagent_stock_analysis::decision::{
-    AgentRunner, AnalysisEvent, StockAnalysisFullConfig,
-};
+use axagent_stock_analysis::decision::{AgentRunner, AnalysisEvent, StockAnalysisFullConfig};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::monitor::MonitorConfig;
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;

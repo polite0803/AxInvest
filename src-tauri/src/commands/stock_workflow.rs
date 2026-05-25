@@ -118,7 +118,10 @@ fn calc_sharpe_ratio_inner(args: &serde_json::Value) -> Result<serde_json::Value
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
-    let rf = args.get("risk_free").and_then(|v| v.as_f64()).unwrap_or(0.03);
+    let rf = args
+        .get("risk_free")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.03);
     let r = axagent_stock_analysis::risk::sharpe_ratio(&returns, rf);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
@@ -129,13 +132,19 @@ fn calc_var_inner(args: &serde_json::Value) -> Result<serde_json::Value, String>
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
-    let conf = args.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.95);
+    let conf = args
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.95);
     let r = axagent_stock_analysis::risk::value_at_risk(&returns, conf);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
 fn calc_pe_percentile_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let current_pe = args.get("current_pe").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let current_pe = args
+        .get("current_pe")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let hist: Vec<f64> = args
         .get("historical_pes_json")
         .and_then(|v| v.as_str())
@@ -147,23 +156,41 @@ fn calc_pe_percentile_inner(args: &serde_json::Value) -> Result<serde_json::Valu
 
 fn calc_peg_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let pe = args.get("pe").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let growth = args.get("growth_rate").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let growth = args
+        .get("growth_rate")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let r = axagent_stock_analysis::risk::peg_ratio(pe, growth);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
 fn detect_ma_cross_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let klines_json = args.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
-    let fast = args.get("fast_period").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
-    let slow = args.get("slow_period").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let klines_json = args
+        .get("klines_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+    let fast = args
+        .get("fast_period")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5) as usize;
+    let slow = args
+        .get("slow_period")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20) as usize;
     let r = axagent_stock_analysis::signals::detect_ma_cross(klines_json, fast, slow);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
 fn detect_breakout_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let klines_json = args.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let klines_json = args
+        .get("klines_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
     let support = args.get("support").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let resistance = args.get("resistance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let resistance = args
+        .get("resistance")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let r = axagent_stock_analysis::signals::detect_breakout(klines_json, support, resistance);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
@@ -171,7 +198,10 @@ fn detect_breakout_inner(args: &serde_json::Value) -> Result<serde_json::Value, 
 fn calc_kelly_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let win_rate = args.get("win_rate").and_then(|v| v.as_f64()).unwrap_or(0.5);
     let avg_win = args.get("avg_win").and_then(|v| v.as_f64()).unwrap_or(0.05);
-    let avg_loss = args.get("avg_loss").and_then(|v| v.as_f64()).unwrap_or(0.05);
+    let avg_loss = args
+        .get("avg_loss")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.05);
     let r = axagent_stock_analysis::risk::kelly_criterion(win_rate, avg_win, avg_loss);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
@@ -182,29 +212,53 @@ fn calc_risk_parity_inner(args: &serde_json::Value) -> Result<serde_json::Value,
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
-    let corr = args.get("correlations_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let corr = args
+        .get("correlations_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
     let r = axagent_stock_analysis::risk::risk_parity_weights(&vols, corr);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
 fn clean_outliers_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let prices_json = args.get("prices_json").and_then(|v| v.as_str()).unwrap_or("[]");
-    let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("zscore");
-    let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(2.0);
+    let prices_json = args
+        .get("prices_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+    let method = args
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("zscore");
+    let threshold = args
+        .get("threshold")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(2.0);
     let r = axagent_stock_analysis::data_clean::remove_outliers(prices_json, method, threshold);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
 fn clean_fill_missing_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let prices_json = args.get("prices_json").and_then(|v| v.as_str()).unwrap_or("[]");
-    let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("forward");
+    let prices_json = args
+        .get("prices_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+    let method = args
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("forward");
     let r = axagent_stock_analysis::data_clean::fill_missing(prices_json, method);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }
 
 fn adjust_prices_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let klines_json = args.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
-    let dividends_json = args.get("dividends_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let klines_json = args
+        .get("klines_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+    let dividends_json = args
+        .get("dividends_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
     let r = axagent_stock_analysis::data_clean::adjust_prices(klines_json, dividends_json);
     Ok(serde_json::to_value(&r).unwrap_or_default())
 }

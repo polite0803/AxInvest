@@ -581,7 +581,15 @@ async fn seed_stock_analysis_workflow_template(
                 td_hot.clone(),
             ],
         ),
-        ("news-analyst", vec![td_news.clone(), td_announce.clone(), td_research.clone(), td_cls.clone()]),
+        (
+            "news-analyst",
+            vec![
+                td_news.clone(),
+                td_announce.clone(),
+                td_research.clone(),
+                td_cls.clone(),
+            ],
+        ),
         (
             "fundamentals-analyst",
             vec![
@@ -692,18 +700,33 @@ async fn seed_stock_analysis_workflow_template(
         ),
     ];
     let bull_tools = vec![
-        td_quote.clone(), td_kline.clone(), td_fin.clone(), td_news.clone(),
-        td_score.clone(), td_earnings.clone(), td_ma_cross.clone(),
+        td_quote.clone(),
+        td_kline.clone(),
+        td_fin.clone(),
+        td_news.clone(),
+        td_score.clone(),
+        td_earnings.clone(),
+        td_ma_cross.clone(),
     ];
     let bear_tools = vec![
-        td_quote.clone(), td_kline.clone(), td_fin.clone(), td_news.clone(),
-        td_var.clone(), td_maxdd.clone(), td_pledge.clone(), td_corr.clone(),
+        td_quote.clone(),
+        td_kline.clone(),
+        td_fin.clone(),
+        td_news.clone(),
+        td_var.clone(),
+        td_maxdd.clone(),
+        td_pledge.clone(),
+        td_corr.clone(),
     ];
     for (id, title, expert, deps, _next) in &debate_pairs {
         let mut an = agent(id, title, expert);
         let is_bull = expert.contains("bull");
         if let WorkflowNode::Agent(ref mut a) = an {
-            a.config.tools = if is_bull { bull_tools.clone() } else { bear_tools.clone() };
+            a.config.tools = if is_bull {
+                bull_tools.clone()
+            } else {
+                bear_tools.clone()
+            };
             a.config.max_tool_rounds = Some(2);
         }
         nodes.push(an);
@@ -824,7 +847,8 @@ async fn seed_stock_analysis_workflow_template(
             td_dragon.clone(),
             td_hot.clone(),
             td_industry.clone(),
-            td_news.clone(), td_cls.clone(),
+            td_news.clone(),
+            td_cls.clone(),
             td_atr.clone(),
             td_kdj.clone(),
             td_obv.clone(),

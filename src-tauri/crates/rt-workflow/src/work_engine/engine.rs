@@ -134,11 +134,11 @@ impl RunOptions {
     }
     pub fn with_output_schema(mut self, schema: JsonSchema) -> Self {
         self.output_schema = Some(schema);
+        self
     }
     /// 注入模板级变量列表，运行时写入 ExecutionState.variables
     pub fn with_variables(mut self, variables: Vec<Variable>) -> Self {
         self.variables = Some(variables);
-    }
         self
     }
 }

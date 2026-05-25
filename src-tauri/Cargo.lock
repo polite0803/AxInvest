@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "axagent"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "android_logger",
  "async-trait",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-agent"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "async-trait",
  "axagent-core",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-core"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-gateway"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "async-trait",
  "axagent-astock-data",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-migration"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "sea-orm",
  "sea-orm-migration",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-npm"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "flate2",
  "reqwest 0.13.3",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-plugins"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "axagent-npm",
  "axagent-runtime-core",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-prompt-guard"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "regex",
  "serde",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-providers"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-dashboard"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "async-trait",
  "serde",
@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-messaging"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1056,7 +1056,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-theme"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1066,7 +1066,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-webhook"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "async-trait",
  "axagent-rt-messaging",
@@ -1085,13 +1085,15 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-workflow"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "async-trait",
  "axagent-core",
  "axagent-providers",
  "chrono",
+ "futures",
  "itertools 0.14.0",
+ "jsonschema",
  "sea-orm",
  "serde",
  "serde_json",
@@ -1104,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1156,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime-core"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1197,7 +1199,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-telemetry"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "axagent-core",
  "chrono",
@@ -1215,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-tools"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1260,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-trajectory"
-version = "2.1.1"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1602,6 +1604,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "borrow-or-share"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
+
+[[package]]
 name = "borsh"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1688,6 +1696,12 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
+
+[[package]]
+name = "bytecount"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175812e0be2bccb6abe50bb8d566126198344f707e304f45c648fd8f2cc0365e"
 
 [[package]]
 name = "bytemuck"
@@ -1829,7 +1843,7 @@ dependencies = [
  "byteorder",
  "candle-core",
  "candle-nn",
- "fancy-regex",
+ "fancy-regex 0.13.0",
  "num-traits",
  "rand 0.9.4",
  "rayon",
@@ -2976,6 +2990,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "email_address"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "embed-resource"
 version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3228,6 +3251,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3307,6 +3341,17 @@ name = "float-ord"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ce81f49ae8a0482e4c55ea62ebbd7e5a686af544c00b9d090bba3ff9be97b3d"
+
+[[package]]
+name = "fluent-uri"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1918b65d96df47d3591bed19c5cca17e3fa5d0707318e4b5ef2eae01764df7e5"
+dependencies = [
+ "borrow-or-share",
+ "ref-cast",
+ "serde",
+]
 
 [[package]]
 name = "flume"
@@ -3411,6 +3456,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fraction"
+version = "0.15.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e076045bb43dac435333ed5f04caf35c7463631d0dae2deb2638d94dd0a5b872"
+dependencies = [
+ "lazy_static",
+ "num",
 ]
 
 [[package]]
@@ -5096,6 +5151,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonschema"
+version = "0.28.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b8f66fe41fa46a5c83ed1c717b7e0b4635988f427083108c8cf0a882cc13441"
+dependencies = [
+ "ahash 0.8.12",
+ "base64 0.22.1",
+ "bytecount",
+ "email_address",
+ "fancy-regex 0.14.0",
+ "fraction",
+ "idna",
+ "itoa",
+ "num-cmp",
+ "once_cell",
+ "percent-encoding",
+ "referencing",
+ "regex-syntax",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "uuid-simd",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5981,6 +6061,12 @@ dependencies = [
  "smallvec",
  "zeroize",
 ]
+
+[[package]]
+name = "num-cmp"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63335b2e2c34fae2fb0aa2cecfd9f0832a1e24b3b32ecec612c3426d46dc8aaa"
 
 [[package]]
 name = "num-complex"
@@ -6904,6 +6990,12 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
+
+[[package]]
+name = "outref"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "pango"
@@ -8158,6 +8250,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "referencing"
+version = "0.28.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0dcb5ab28989ad7c91eb1b9531a37a1a137cc69a0499aee4117cae4a107c464"
+dependencies = [
+ "ahash 0.8.12",
+ "fluent-uri",
+ "once_cell",
+ "percent-encoding",
+ "serde_json",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8210,6 +8315,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -11423,6 +11529,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "uuid-simd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b082222b4f6619906941c17eb2297fff4c2fb96cb60164170522942a200bd8"
+dependencies = [
+ "outref",
+ "uuid",
+ "vsimd",
+]
+
+[[package]]
 name = "v_frame"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11456,6 +11573,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vsimd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
 
 [[package]]
 name = "vswhom"

@@ -340,6 +340,8 @@
       "dagHint": "以有向無環圖方式查看工作流執行",
       "listView": "列表檢視",
       "dagView": "DAG 檢視",
+      "viewOutput": "最終輸出",
+      "outputCopied": "輸出已複製到剪貼板",
       "stepStatus": "步驟狀態",
       "dependsOn": "依賴",
       "retries": "重試次數",
@@ -2470,7 +2472,10 @@
       "statusRunning": "運行中",
       "toolsLabel": "工具",
       "typeLabel": "類型",
-      "workspaceWrite": "工作區寫入"
+      "workspaceWrite": "工作區寫入",
+      "features": "Features",
+      "agents": "Agents",
+      "hooks": "Hooks"
     },
     "activeProfile": "當前配置",
     "createProfile": "創建配置",
@@ -3518,6 +3523,8 @@
       "outputVarDefault": "智能體輸出",
       "toolsCount": "{{count}} 個工具",
       "selectTools": "選擇工具",
+      "maxToolRounds": "最大工具調用輪數",
+      "maxToolRoundsHint": "Agent 與 LLM 多輪互動的上限，防止無限迴圈",
       "contextSourcesCount": "{{count}} 個來源",
       "selectContextSources": "選擇上下文來源",
       "prompt": "提示詞",
@@ -3841,7 +3848,15 @@
       "tagDataProcessing": "數據處理",
       "tagWorkflow": "工作流",
       "tags": "標籤",
-      "unsupportedNodeType": "不支援的節點類型"
+      "inputSchema": "輸入 Schema",
+      "outputSchema": "輸出 Schema",
+      "editSchema": "編輯 JSON Schema (取消保留)",
+      "edit": "編輯",
+      "add": "添加",
+      "invalidJson": "JSON 格式無效",
+      "unsupportedNodeType": "不支援的節點類型",
+      "llmRouting": "LLM 動態路由",
+      "llmRoutingHint": "讓 AI 根據上下文決定走哪條分支"
     },
     "statusBar": {
       "unsaved": "未儲存",

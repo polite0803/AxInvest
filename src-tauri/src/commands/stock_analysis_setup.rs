@@ -162,13 +162,14 @@ async fn seed_stock_analysis_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
-        AgentNode, AgentNodeConfig, EdgeType, OutputMode, Position, RetryConfig, TriggerConfig,
-        TriggerNode, TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, EdgeType, OutputMode, Position, RetryConfig, ToolNode,
+        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 4;
+    const TEMPLATE_VERSION: i32 = 5;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -190,6 +191,32 @@ async fn seed_stock_analysis_workflow_template(
     }
 
     let now = chrono::Utc::now().timestamp_millis();
+
+    let tool_node =
+        |id: &str, title: &str, tool_name: &str, output_var: &str, arg_key: &str| -> WorkflowNode {
+            let mut input_mapping = std::collections::HashMap::new();
+            input_mapping.insert(arg_key.to_string(), "trigger.config.stock_code".to_string());
+            WorkflowNode::Tool(ToolNode {
+                base: WorkflowNodeBase {
+                    id: id.into(),
+                    title: title.into(),
+                    description: Some(format!("获取数据: {tool_name}")),
+                    position: Position { x: 0.0, y: 0.0 },
+                    retry: RetryConfig {
+                        enabled: true,
+                        max_retries: 2,
+                        ..Default::default()
+                    },
+                    timeout: Some(30),
+                    enabled: true,
+                },
+                config: ToolNodeConfig {
+                    tool_name: tool_name.into(),
+                    input_mapping,
+                    output_var: output_var.into(),
+                },
+            })
+        };
 
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
@@ -252,7 +279,7 @@ async fn seed_stock_analysis_workflow_template(
         },
         config: TriggerConfig {
             trigger_type: TriggerType::Manual,
-            config: serde_json::json!({}),
+            config: serde_json::json!({"stock_code": "{{stock_code}}"}),
         },
     }));
 
@@ -306,9 +333,33 @@ async fn seed_stock_analysis_workflow_template(
     ];
     let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
 
-    for (id, title, expert) in &analysts {
-        nodes.push(agent(id, title, expert));
-        edges.push(edge(&format!("e-trigger-{id}"), "trigger", id));
+    // 为每个分析师插入对应的数据获取 Tool 节点
+    let tool_assignments: &[(&str, &str, &str, &str)] = &[
+        ("t-market-data", "获取K线", "get_stock_kline", "stock_code"),
+        ("t-sentiment-data", "获取新闻", "get_stock_news", "stock_code"),
+        ("t-news-data", "获取新闻", "get_stock_news", "stock_code"),
+        ("t-fundamentals-data", "获取财务", "get_stock_financials", "stock_code"),
+        ("t-policy-data", "获取新闻", "get_stock_news", "stock_code"),
+        ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
+        ("t-lockup-data", "获取财务", "get_stock_financials", "stock_code"),
+        ("t-research-data", "获取新闻", "get_stock_news", "stock_code"),
+        ("t-sector-data", "获取行情", "get_stock_quote", "stock_code"),
+    ];
+
+    for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {
+        let analyst_id = a_ids[i];
+        nodes.push(tool_node(tool_id, tool_title, tool_name, tool_id, arg_key));
+        edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
+        edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
+    }
+
+    for (i, (id, title, expert)) in analysts.iter().enumerate() {
+        let tool_id = tool_assignments[i].0;
+        let mut an = agent(id, title, expert);
+        if let WorkflowNode::Agent(ref mut a) = an {
+            a.config.context_sources = vec![tool_id.to_string()];
+        }
+        nodes.push(an);
     }
 
     // 辩论 6 轮

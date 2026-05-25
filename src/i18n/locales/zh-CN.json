@@ -6679,20 +6679,6 @@
       "tencentFinance": "腾讯财经",
       "eastmoney": "东方财富",
       "sinaFinance": "新浪财经",
-      "ths": "同花顺",
-      "cninfo": "巨潮资讯",
-      "baiduStock": "百度股票",
-      "iwencai": "问财",
-      "akshare": "AKShare",
-      "mootdx": "Mootdx",
-      "dataTag": "数据",
-      "disclosureTag": "披露",
-      "screenTag": "选股",
-      "localTag": "本地",
-      "checkHealth": "检测连接",
-      "connected": "已连接",
-      "disconnected": "断开",
-      "skipped": "已跳过",
       "dataSources": "数据源",
       "analysis": "分析参数",
       "debateRounds": "辩论轮数",
@@ -6710,7 +6696,11 @@
       "model": "模型参数",
       "temperature": "创造性",
       "maxTokens": "最大输出长度",
-      "resetDefaults": "恢复默认"
+      "resetDefaults": "恢复默认",
+      "skipped": "已跳过",
+      "connected": "已连接",
+      "disconnected": "未连接",
+      "checkHealth": "检测连接"
     },
     "progress.fetchingData": "正在获取股票数据，请稍候...",
     "progress.started": "分析已启动，正在加载数据...",
@@ -6735,7 +6725,8 @@
     "progress.stepDone": "✅ {{name}} 完成",
     "progress.stepRetrying": "🔄 {{name}} 重试中",
     "ep": "市盈率",
-    "risk.comprehensive": "综合评估"
+    "risk.comprehensive": "综合评估",
+    "loadHistory": "点击加载历史分析报告"
   },
   "trade": {
     "title": "交易日志",

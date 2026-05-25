@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-18",
-  "total_entries": 105,
-  "total_files": 104,
+  "total_entries": 118,
+  "total_files": 118,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -25,7 +25,7 @@
     {
       "file": "src/components/chat/ArtifactPanel.tsx",
       "lines": "62,65",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -73,7 +73,7 @@
     {
       "file": "src/components/chat/UserProfilePanel.tsx",
       "lines": "232,239",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -91,13 +91,13 @@
     {
       "file": "src/components/fine-tune/DatasetManager.tsx",
       "lines": "38,46,61",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/fine-tune/LoRAConfig.tsx",
       "lines": "47,51",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -121,7 +121,7 @@
     {
       "file": "src/components/link/AddGatewayLinkModal.tsx",
       "lines": "112",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -133,7 +133,7 @@
     {
       "file": "src/components/settings/AcpSettings.tsx",
       "lines": "142",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -151,13 +151,13 @@
     {
       "file": "src/components/settings/CloudWorkspaceSelector.tsx",
       "lines": "770,807,851",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/CronManager.tsx",
       "lines": "49,63,201",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -175,7 +175,7 @@
     {
       "file": "src/components/settings/McpServerSettings.tsx",
       "lines": "462,497,969,989",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -187,31 +187,31 @@
     {
       "file": "src/components/settings/ProviderDetail.tsx",
       "lines": "2178,2214",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/ProviderList.tsx",
       "lines": "330",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/SchedulerSettings.tsx",
       "lines": "574",
-      "reason": "硬编码英文 UI 消息",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/WebDavSync.tsx",
       "lines": "421",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/WebhookSettings.tsx",
       "lines": "358",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -247,19 +247,19 @@
     {
       "file": "src/components/terminal/DockerConfigModal.tsx",
       "lines": "41",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/terminal/SshConfigModal.tsx",
       "lines": "78",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/wiki/IngestPanel.tsx",
       "lines": "183",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -283,19 +283,19 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/SubWorkflowPropertyPanel.tsx",
       "lines": "203",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/ToolPropertyPanel.tsx",
       "lines": "195",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/TriggerPropertyPanel.tsx",
       "lines": "145",
-      "reason": "硬编码英文占位符",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
@@ -492,7 +492,7 @@
     },
     {
       "file": "src/pages/SettingsPage.tsx",
-      "lines": "79",
+      "lines": "79,81",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -631,6 +631,84 @@
     {
       "file": "src/components/settings/ProviderSettings.tsx",
       "lines": "23",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "8,9,10,11,12,27,28,29,30,31",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/TradePanel.tsx",
+      "lines": "9,10",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/types/stock-analysis.ts",
+      "lines": "82,83,84,85,86,87,88,89,90,91,92,93,94,95",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/stores/feature/stockAnalysisStore.ts",
+      "lines": "295",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/DecisionBanner.test.tsx",
+      "lines": "37,39,40,47",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/__tests__/TradePanel.test.tsx",
+      "lines": "40,49,51",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
+      "lines": "46,83,102,104,161,166,179,183,184,196",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/AnalystReportCard.tsx",
+      "lines": "77,79",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/RiskMatrix.tsx",
+      "lines": "5,14",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/chat/InputArea.tsx",
+      "lines": "167",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/KLineChart.tsx",
+      "lines": "10",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/settings/SettingsSidebar.tsx",
+      "lines": "78",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/settings/StockAnalysisSettings.tsx",
+      "lines": "79",
       "reason": "硬编码中文字符串",
       "phase": 3
     }

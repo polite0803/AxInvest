@@ -53,10 +53,13 @@ export function KLineChart() {
     instanceRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
     setChartReady(true);
     const chart = instanceRef.current;
-    const handleResize = () => chart.resize();
-    window.addEventListener("resize", handleResize);
+    const onResize = () => chart.resize();
+    const ro = new ResizeObserver(onResize);
+    ro.observe(chartRef.current);
+    window.addEventListener("resize", onResize);
     return () => {
-      window.removeEventListener("resize", handleResize);
+      ro.disconnect();
+      window.removeEventListener("resize", onResize);
       chart.dispose();
       instanceRef.current = null;
     };

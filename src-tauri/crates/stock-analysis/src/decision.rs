@@ -48,13 +48,27 @@ pub struct AnalysisConfig {
     pub max_tokens: u32,
 }
 
-fn default_debate_rounds() -> u32 { 3 }
-fn default_kline_period() -> String { "daily".into() }
-fn default_kline_limit() -> u32 { 120 }
-fn default_news_limit() -> u32 { 30 }
-fn default_max_concurrent() -> u32 { 9 }
-fn default_temperature() -> f64 { 0.3 }
-fn default_max_tokens() -> u32 { 4096 }
+fn default_debate_rounds() -> u32 {
+    3
+}
+fn default_kline_period() -> String {
+    "daily".into()
+}
+fn default_kline_limit() -> u32 {
+    120
+}
+fn default_news_limit() -> u32 {
+    30
+}
+fn default_max_concurrent() -> u32 {
+    9
+}
+fn default_temperature() -> f64 {
+    0.3
+}
+fn default_max_tokens() -> u32 {
+    4096
+}
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
@@ -195,12 +209,24 @@ pub struct RuleConfig {
     pub auto_stop_loss_pct: f64,
 }
 
-fn default_rsi_overbought() -> f64 { 80.0 }
-fn default_bias_limit() -> f64 { 5.0 }
-fn default_volume_block() -> bool { true }
-fn default_bear_low_score() -> u32 { 30 }
-fn default_rsi_oversold() -> f64 { 20.0 }
-fn default_auto_stop_loss_pct() -> f64 { 5.0 }
+fn default_rsi_overbought() -> f64 {
+    80.0
+}
+fn default_bias_limit() -> f64 {
+    5.0
+}
+fn default_volume_block() -> bool {
+    true
+}
+fn default_bear_low_score() -> u32 {
+    30
+}
+fn default_rsi_oversold() -> f64 {
+    20.0
+}
+fn default_auto_stop_loss_pct() -> f64 {
+    5.0
+}
 
 impl Default for RuleConfig {
     fn default() -> Self {
@@ -228,9 +254,15 @@ pub struct PositionLimitsConfig {
     pub max_sector_exposure_pct: f64,
 }
 
-fn default_max_single_stock() -> f64 { 20.0 }
-fn default_max_total_pos() -> u32 { 10 }
-fn default_max_sector() -> f64 { 40.0 }
+fn default_max_single_stock() -> f64 {
+    20.0
+}
+fn default_max_total_pos() -> u32 {
+    10
+}
+fn default_max_sector() -> f64 {
+    40.0
+}
 
 impl Default for PositionLimitsConfig {
     fn default() -> Self {
@@ -261,12 +293,24 @@ pub struct ValueConfig {
     pub safety_margin_min: f64,
 }
 
-fn default_dcf_growth() -> f64 { 8.0 }
-fn default_dcf_perpetual() -> f64 { 3.0 }
-fn default_dcf_discount() -> f64 { 10.0 }
-fn default_moat_threshold() -> u32 { 60 }
-fn default_fscore_buy() -> u32 { 7 }
-fn default_safety_margin() -> f64 { 20.0 }
+fn default_dcf_growth() -> f64 {
+    8.0
+}
+fn default_dcf_perpetual() -> f64 {
+    3.0
+}
+fn default_dcf_discount() -> f64 {
+    10.0
+}
+fn default_moat_threshold() -> u32 {
+    60
+}
+fn default_fscore_buy() -> u32 {
+    7
+}
+fn default_safety_margin() -> f64 {
+    20.0
+}
 
 impl Default for ValueConfig {
     fn default() -> Self {
@@ -294,9 +338,15 @@ pub struct MonitorConfig {
     pub turnover_threshold: f64,
 }
 
-fn default_poll_interval() -> u32 { 30 }
-fn default_change_pct() -> f64 { 5.0 }
-fn default_turnover() -> f64 { 10.0 }
+fn default_poll_interval() -> u32 {
+    30
+}
+fn default_change_pct() -> f64 {
+    5.0
+}
+fn default_turnover() -> f64 {
+    10.0
+}
 
 impl Default for MonitorConfig {
     fn default() -> Self {

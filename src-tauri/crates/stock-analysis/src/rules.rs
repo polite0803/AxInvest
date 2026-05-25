@@ -55,7 +55,11 @@ impl RuleEngine {
             let auto_stop = if let Some(entry) = proposed_entry_price {
                 let ma20_stop = indicators.ma20;
                 let pct_stop = entry * (1.0 - config.auto_stop_loss_pct / 100.0);
-                if ma20_stop > pct_stop { ma20_stop } else { pct_stop }
+                if ma20_stop > pct_stop {
+                    ma20_stop
+                } else {
+                    pct_stop
+                }
             } else {
                 indicators.ma20
             };
@@ -75,7 +79,8 @@ impl RuleEngine {
         }
 
         // 规则5: 空头排列且评分过低 -> 强制卖出/观望
-        if is_buy && indicators.ma_alignment == "空头排列" && score.total < config.bear_low_score {
+        if is_buy && indicators.ma_alignment == "空头排列" && score.total < config.bear_low_score
+        {
             violations.push(format!(
                 "空头排列+评分{}<{}，绝不适合买入。",
                 score.total, config.bear_low_score

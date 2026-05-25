@@ -169,7 +169,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 11;
+    const TEMPLATE_VERSION: i32 = 13;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -367,10 +367,46 @@ async fn seed_stock_analysis_workflow_template(
         parameters: None,
     };
     // ── P1: 4 个技术指标 ToolDef ──
-    let td_atr = ToolDef { name: "compute_atr".into(), description: Some("计算 ATR 平均真实波幅".into()), parameters: None };
-    let td_kdj = ToolDef { name: "compute_kdj".into(), description: Some("计算 KDJ 随机指标".into()), parameters: None };
-    let td_obv = ToolDef { name: "compute_obv".into(), description: Some("计算 OBV 能量潮".into()), parameters: None };
-    let td_beta = ToolDef { name: "calc_beta".into(), description: Some("计算 Beta 系数".into()), parameters: None };
+    let td_atr = ToolDef {
+        name: "compute_atr".into(),
+        description: Some("计算 ATR 平均真实波幅".into()),
+        parameters: None,
+    };
+    let td_kdj = ToolDef {
+        name: "compute_kdj".into(),
+        description: Some("计算 KDJ 随机指标".into()),
+        parameters: None,
+    };
+    let td_obv = ToolDef {
+        name: "compute_obv".into(),
+        description: Some("计算 OBV 能量潮".into()),
+        parameters: None,
+    };
+    let td_beta = ToolDef {
+        name: "calc_beta".into(),
+        description: Some("计算 Beta 系数".into()),
+        parameters: None,
+    };
+    // ── P2: 事件检测 + 组合分析 ToolDef ──
+    let td_earnings = ToolDef {
+        name: "detect_earnings_surprise".into(),
+        description: Some("检测业绩超预期/低于预期".into()),
+        parameters: None,
+    };
+    let td_pledge = ToolDef {
+        name: "detect_pledge_risk".into(),
+        description: Some("检测大股东质押风险".into()),
+        parameters: None,
+    };
+    let td_corr = ToolDef {
+        name: "calc_correlation_matrix".into(),
+        description: Some("计算收益率相关系数矩阵".into()),
+        parameters: None,
+    };
+    // ── P3: 独立新能力 ToolDef ──
+    let td_mc = ToolDef { name: "run_monte_carlo".into(), description: Some("蒙特卡洛模拟价格路径".into()), parameters: None };
+    let td_ind = ToolDef { name: "analyze_industry_position".into(), description: Some("行业内估值/增长对比分析".into()), parameters: None };
+    let td_lup = ToolDef { name: "detect_limit_up_potential".into(), description: Some("涨停潜力评估".into()), parameters: None };
 
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
@@ -625,6 +661,14 @@ async fn seed_stock_analysis_workflow_template(
         ("t-kdj", "KDJ 指标", "compute_kdj", "klines_json"),
         ("t-obv", "OBV 能量潮", "compute_obv", "klines_json"),
         ("t-beta", "Beta 系数", "calc_beta", "stock_returns_json"),
+        // P2: 事件检测 + 组合分析
+        ("t-earnings", "业绩检测", "detect_earnings_surprise", "actual_eps"),
+        ("t-pledge", "质押风险", "detect_pledge_risk", "pledge_pct"),
+        ("t-corr", "相关系数矩阵", "calc_correlation_matrix", "returns_matrix_json"),
+        // P3: 独立新能力
+        ("t-mc", "蒙特卡洛模拟", "run_monte_carlo", "current_price"),
+        ("t-industry-pos", "行业定位", "analyze_industry_position", "stock_pe"),
+        ("t-limit-up", "涨停评估", "detect_limit_up_potential", "klines_json"),
     ];
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
@@ -657,8 +701,15 @@ async fn seed_stock_analysis_workflow_template(
         "t-north-flow",
         "t-dragon",
         "t-hot",
-        "t-industry", "t-cls-flash",
-        "t-atr", "t-kdj", "t-obv", "t-beta",
+        "t-industry",
+        "t-cls-flash",
+        "t-atr",
+        "t-kdj",
+        "t-obv",
+        "t-beta",
+        "t-earnings",
+        "t-pledge",
+        "t-corr", "t-mc", "t-industry-pos", "t-limit-up",
     ];
     edges.push(edge("e-t-quality-t-calc-maxdd", "t-quality", "t-calc-maxdd"));
     for w in algo_chain.windows(2) {
@@ -697,8 +748,15 @@ async fn seed_stock_analysis_workflow_template(
             "t-dragon".into(),
             "t-hot".into(),
             "t-industry".into(),
-            "t-cls-flash".into(), "t-atr".into(),
-            "t-kdj".into(), "t-obv".into(), "t-beta".into(),
+            "t-cls-flash".into(),
+            "t-atr".into(),
+            "t-kdj".into(),
+            "t-obv".into(),
+            "t-beta".into(),
+            "t-earnings".into(),
+            "t-pledge".into(),
+            "t-corr".into(), "t-mc".into(),
+            "t-industry-pos".into(), "t-limit-up".into(),
         ];
         a.config.tools = vec![
             td_score.clone(),
@@ -726,13 +784,19 @@ async fn seed_stock_analysis_workflow_template(
             td_dragon.clone(),
             td_hot.clone(),
             td_industry.clone(),
-            td_cls.clone(), td_atr.clone(), td_kdj.clone(),
-            td_obv.clone(), td_beta.clone(),
+            td_cls.clone(),
+            td_atr.clone(),
+            td_kdj.clone(),
+            td_obv.clone(),
+            td_beta.clone(),
+            td_earnings.clone(),
+            td_pledge.clone(),
+            td_corr.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(rm);
-    edges.push(edge("e-t-beta-research-mgr", "t-beta", "research-mgr"));
+    edges.push(edge("e-t-corr-research-mgr", "t-corr", "research-mgr"));
 
     let mut trader = agent(
         "trader",

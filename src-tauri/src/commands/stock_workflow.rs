@@ -373,7 +373,11 @@ async fn get_north_bound_flow_inner(
 
 fn compute_atr_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[derive(serde::Deserialize)]
-    struct Raw { high: f64, low: f64, close: f64 }
+    struct Raw {
+        high: f64,
+        low: f64,
+        close: f64,
+    }
     let klines: Vec<Raw> = args
         .get("klines_json")
         .and_then(|v| v.as_str())
@@ -403,12 +407,18 @@ fn compute_atr_inner(args: &serde_json::Value) -> Result<serde_json::Value, Stri
         atr_val
     };
     let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
-    Ok(json!({"atr": (atr * 100.0).round() / 100.0, "atr_pct": (atr / latest_price * 10000.0).round() / 100.0, "period": period}))
+    Ok(
+        json!({"atr": (atr * 100.0).round() / 100.0, "atr_pct": (atr / latest_price * 10000.0).round() / 100.0, "period": period}),
+    )
 }
 
 fn compute_kdj_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[derive(serde::Deserialize)]
-    struct Raw { high: f64, low: f64, close: f64 }
+    struct Raw {
+        high: f64,
+        low: f64,
+        close: f64,
+    }
     let klines: Vec<Raw> = args
         .get("klines_json")
         .and_then(|v| v.as_str())
@@ -434,13 +444,30 @@ fn compute_kdj_inner(args: &serde_json::Value) -> Result<serde_json::Value, Stri
         d = 2.0 / 3.0 * d + 1.0 / 3.0 * k;
     }
     let j = 3.0 * k - 2.0 * d;
-    let signal = if j > 100.0 { "严重超买" } else if j > 80.0 { "超买" } else if j < 0.0 { "严重超卖" } else if j < 20.0 { "超卖" } else if k > d { "多头" } else { "空头" };
-    Ok(json!({"k": (k * 100.0).round() / 100.0, "d": (d * 100.0).round() / 100.0, "j": (j * 100.0).round() / 100.0, "signal": signal}))
+    let signal = if j > 100.0 {
+        "严重超买"
+    } else if j > 80.0 {
+        "超买"
+    } else if j < 0.0 {
+        "严重超卖"
+    } else if j < 20.0 {
+        "超卖"
+    } else if k > d {
+        "多头"
+    } else {
+        "空头"
+    };
+    Ok(
+        json!({"k": (k * 100.0).round() / 100.0, "d": (d * 100.0).round() / 100.0, "j": (j * 100.0).round() / 100.0, "signal": signal}),
+    )
 }
 
 fn compute_obv_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     #[derive(serde::Deserialize)]
-    struct Raw { close: f64, volume: f64 }
+    struct Raw {
+        close: f64,
+        volume: f64,
+    }
     let klines: Vec<Raw> = args
         .get("klines_json")
         .and_then(|v| v.as_str())
@@ -458,16 +485,35 @@ fn compute_obv_inner(args: &serde_json::Value) -> Result<serde_json::Value, Stri
         }
     }
     let obv_ma5 = if klines.len() >= 6 {
-        let obvs: Vec<f64> = (1..klines.len()).scan(0.0, |acc, i| {
-            if klines[i].close > klines[i - 1].close { *acc += klines[i].volume; }
-            else if klines[i].close < klines[i - 1].close { *acc -= klines[i].volume; }
-            Some(*acc)
-        }).collect();
+        let obvs: Vec<f64> = (1..klines.len())
+            .scan(0.0, |acc, i| {
+                if klines[i].close > klines[i - 1].close {
+                    *acc += klines[i].volume;
+                } else if klines[i].close < klines[i - 1].close {
+                    *acc -= klines[i].volume;
+                }
+                Some(*acc)
+            })
+            .collect();
         let n = obvs.len();
-        if n >= 5 { obvs[n - 5..].iter().sum::<f64>() / 5.0 } else { obv }
-    } else { obv };
-    let trend = if obv > obv_ma5 * 1.1 { "量价齐升" } else if obv < obv_ma5 * 0.9 { "量价背离" } else { "量价平稳" };
-    Ok(json!({"obv": (obv / 1e8 * 100.0).round() / 100.0, "obv_ma5": (obv_ma5 / 1e8 * 100.0).round() / 100.0, "trend": trend, "unit": "亿"}))
+        if n >= 5 {
+            obvs[n - 5..].iter().sum::<f64>() / 5.0
+        } else {
+            obv
+        }
+    } else {
+        obv
+    };
+    let trend = if obv > obv_ma5 * 1.1 {
+        "量价齐升"
+    } else if obv < obv_ma5 * 0.9 {
+        "量价背离"
+    } else {
+        "量价平稳"
+    };
+    Ok(
+        json!({"obv": (obv / 1e8 * 100.0).round() / 100.0, "obv_ma5": (obv_ma5 / 1e8 * 100.0).round() / 100.0, "trend": trend, "unit": "亿"}),
+    )
 }
 
 fn calc_beta_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -489,14 +535,298 @@ fn calc_beta_inner(args: &serde_json::Value) -> Result<serde_json::Value, String
     let m = &returns_market[..n];
     let mean_s: f64 = s.iter().sum::<f64>() / n as f64;
     let mean_m: f64 = m.iter().sum::<f64>() / n as f64;
-    let cov: f64 = s.iter().zip(m.iter()).map(|(&si, &mi)| (si - mean_s) * (mi - mean_m)).sum::<f64>() / (n - 1) as f64;
+    let cov: f64 = s
+        .iter()
+        .zip(m.iter())
+        .map(|(&si, &mi)| (si - mean_s) * (mi - mean_m))
+        .sum::<f64>()
+        / (n - 1) as f64;
     let var_m: f64 = m.iter().map(|&mi| (mi - mean_m).powi(2)).sum::<f64>() / (n - 1) as f64;
     let beta = if var_m > 1e-10 { cov / var_m } else { 1.0 };
     // R²
     let var_s: f64 = s.iter().map(|&si| (si - mean_s).powi(2)).sum::<f64>() / (n - 1) as f64;
-    let r_sq = if var_s > 1e-10 && var_m > 1e-10 { (cov / (var_s.sqrt() * var_m.sqrt())).powi(2) } else { 0.0 };
-    let interp = if beta > 1.5 { "高波动" } else if beta > 1.1 { "略高于市场" } else if beta > 0.9 { "与市场同步" } else if beta > 0.5 { "防御型" } else { "低波动" };
-    Ok(json!({"beta": (beta * 1000.0).round() / 1000.0, "r_squared": (r_sq * 1000.0).round() / 1000.0, "interpretation": interp}))
+    let r_sq = if var_s > 1e-10 && var_m > 1e-10 {
+        (cov / (var_s.sqrt() * var_m.sqrt())).powi(2)
+    } else {
+        0.0
+    };
+    let interp = if beta > 1.5 {
+        "高波动"
+    } else if beta > 1.1 {
+        "略高于市场"
+    } else if beta > 0.9 {
+        "与市场同步"
+    } else if beta > 0.5 {
+        "防御型"
+    } else {
+        "低波动"
+    };
+    Ok(
+        json!({"beta": (beta * 1000.0).round() / 1000.0, "r_squared": (r_sq * 1000.0).round() / 1000.0, "interpretation": interp}),
+    )
+}
+
+// ── P2: 事件检测 + 组合分析 ──
+
+fn detect_earnings_surprise_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let actual_eps = args
+        .get("actual_eps")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let consensus_eps = args
+        .get("consensus_eps")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    if consensus_eps.abs() < 1e-10 {
+        return Ok(json!({"surprise_pct": 0.0, "level": "无预期", "signal": "N/A"}));
+    }
+    let surprise_pct = (actual_eps - consensus_eps) / consensus_eps.abs() * 100.0;
+    let (level, signal) = if surprise_pct > 50.0 {
+        ("大幅超预期", "🚀 强烈利好")
+    } else if surprise_pct > 20.0 {
+        ("超预期", "📈 利好")
+    } else if surprise_pct > 5.0 {
+        ("略超预期", "📊 偏正面")
+    } else if surprise_pct > -5.0 {
+        ("符合预期", "➡️ 中性")
+    } else if surprise_pct > -20.0 {
+        ("略低于预期", "📉 偏负面")
+    } else if surprise_pct > -50.0 {
+        ("低于预期", "⚠️ 利空")
+    } else {
+        ("大幅低于预期", "🔴 强烈利空")
+    };
+    Ok(json!({
+        "actual_eps": actual_eps, "consensus_eps": consensus_eps,
+        "surprise_pct": (surprise_pct * 100.0).round() / 100.0,
+        "level": level, "signal": signal,
+    }))
+}
+
+fn detect_pledge_risk_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let pledge_pct = args
+        .get("pledge_pct")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let warning = args
+        .get("warning_line")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(50.0);
+    let liquidation = args
+        .get("liquidation_line")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(70.0);
+    let risk = if pledge_pct >= liquidation {
+        ("极高风险", "🔴 大股东质押濒临平仓线")
+    } else if pledge_pct >= warning {
+        ("高风险", "🟠 质押比例超过预警线")
+    } else if pledge_pct >= 30.0 {
+        ("中风险", "🟡 质押比例偏高")
+    } else if pledge_pct > 10.0 {
+        ("低风险", "🟢 质押比例正常")
+    } else {
+        ("安全", "✅ 质押比例低")
+    };
+    Ok(json!({
+        "pledge_pct": pledge_pct, "warning_line": warning, "liquidation_line": liquidation,
+        "risk_level": risk.0, "warning": risk.1,
+        "distance_to_warning": ((pledge_pct / warning * 1000.0).round() / 1000.0 - 1.0) * 100.0,
+        "distance_to_liquidation": ((pledge_pct / liquidation * 1000.0).round() / 1000.0 - 1.0) * 100.0,
+    }))
+}
+
+fn calc_correlation_matrix_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let matrix: Vec<Vec<f64>> = args
+        .get("returns_matrix_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let n = matrix.len();
+    if n < 2 {
+        return Ok(
+            json!({"correlations": [[]], "avg_correlation": 1.0, "diversification": "数据不足"}),
+        );
+    }
+    let m = matrix[0].len();
+    if m < 2 {
+        return Ok(
+            json!({"correlations": matrix.iter().map(|_| vec![0.0_f64; 0]).collect::<Vec<Vec<f64>>>(), "avg_correlation": 0.0, "diversification": "数据不足"}),
+        );
+    }
+    let means: Vec<f64> = matrix
+        .iter()
+        .map(|r| r.iter().sum::<f64>() / m as f64)
+        .collect();
+    let stddevs: Vec<f64> = matrix
+        .iter()
+        .map(|r| {
+            let mean = r.iter().sum::<f64>() / m as f64;
+            (r.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (m - 1) as f64).sqrt()
+        })
+        .collect();
+    let mut corr = vec![vec![0.0_f64; n]; n];
+    let mut total = 0.0_f64;
+    let mut count = 0u32;
+    for i in 0..n {
+        corr[i][i] = 1.0;
+        for j in i + 1..n {
+            let cov: f64 = matrix[i]
+                .iter()
+                .zip(matrix[j].iter())
+                .map(|(&a, &b)| (a - means[i]) * (b - means[j]))
+                .sum::<f64>()
+                / (m - 1) as f64;
+            let r = if stddevs[i] > 1e-10 && stddevs[j] > 1e-10 {
+                cov / (stddevs[i] * stddevs[j])
+            } else {
+                0.0
+            };
+            corr[i][j] = (r * 1000.0).round() / 1000.0;
+            corr[j][i] = corr[i][j];
+            total += corr[i][j];
+            count += 1;
+        }
+    }
+    let avg = if count > 0 {
+        (total / count as f64 * 1000.0).round() / 1000.0
+    } else {
+        0.0
+    };
+    let divers = if avg > 0.7 {
+        "高度相关，分散化差"
+    } else if avg > 0.4 {
+        "中度相关，分散化一般"
+    } else if avg > 0.2 {
+        "低相关，分散化较好"
+    } else {
+        "极低相关，分散化优"
+    };
+    Ok(
+        json!({"correlations": corr, "avg_correlation": avg, "diversification": divers, "asset_count": n}),
+    )
+}
+
+// ── P3: 独立新能力 ──
+
+fn run_monte_carlo_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let price = args.get("current_price").and_then(|v| v.as_f64()).unwrap_or(10.0);
+    let annual_ret = args.get("annual_return").and_then(|v| v.as_f64()).unwrap_or(0.08);
+    let annual_vol = args.get("annual_volatility").and_then(|v| v.as_f64()).unwrap_or(0.3);
+    let days = args.get("days").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
+    let sims = args.get("simulations").and_then(|v| v.as_u64()).unwrap_or(1000) as usize;
+    let target = args.get("target_price").and_then(|v| v.as_f64());
+    let stop = args.get("stop_loss").and_then(|v| v.as_f64());
+
+    let daily_ret = annual_ret / 252.0;
+    let daily_vol = annual_vol / (252.0_f64).sqrt();
+    let mut outcomes = Vec::with_capacity(sims);
+    let mut hit_target = 0u32;
+    let mut hit_stop = 0u32;
+
+    let mut rng_state = 42u64;
+    for _ in 0..sims {
+        let mut p = price;
+        for _ in 0..days {
+            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let z = (rng_state as f64 % 1e9) / 1e9 * 2.0 - 1.0; // pseudo Box-Muller
+            let z2 = (rng_state.wrapping_mul(2) as f64 % 1e9) / 1e9 * 2.0 - 1.0;
+            let normal = (-2.0 * (1.0 - z2.abs()).ln()).sqrt() * z.signum();
+            p *= 1.0 + daily_ret + daily_vol * normal;
+            if let Some(s) = stop && p <= s { hit_stop += 1; break; }
+            if let Some(t) = target && p >= t { hit_target += 1; break; }
+        }
+        outcomes.push((p * 100.0).round() / 100.0);
+    }
+    outcomes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = outcomes.len();
+    let percentile = |pct: f64| outcomes[((pct * n as f64) as usize).min(n - 1)];
+    Ok(json!({
+        "current_price": price, "days": days, "simulations": sims,
+        "p10": percentile(0.10), "p25": percentile(0.25), "p50": percentile(0.50),
+        "p75": percentile(0.75), "p90": percentile(0.90),
+        "mean_price": (outcomes.iter().sum::<f64>() / n as f64 * 100.0).round() / 100.0,
+        "hit_target_pct": (hit_target as f64 / sims as f64 * 10000.0).round() / 100.0,
+        "hit_stop_pct": (hit_stop as f64 / sims as f64 * 10000.0).round() / 100.0,
+    }))
+}
+
+fn analyze_industry_position_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let stock_pe = args.get("stock_pe").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let stock_growth = args.get("stock_growth").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let stock_roe = args.get("stock_roe").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let ind_pe = args.get("industry_avg_pe").and_then(|v| v.as_f64()).unwrap_or(stock_pe);
+    let ind_growth = args.get("industry_avg_growth").and_then(|v| v.as_f64()).unwrap_or(stock_growth);
+    let ind_roe = args.get("industry_avg_roe").and_then(|v| v.as_f64()).unwrap_or(stock_roe);
+    let eps = args.get("stock_eps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+    if ind_pe <= 0.0 || ind_growth <= 0.0 {
+        return Ok(json!({"position": "数据无效", "score_pe": "N/A", "score_growth": "N/A", "score_roe": "N/A"}));
+    }
+
+    let pe_ratio = stock_pe / ind_pe;
+    let growth_ratio = stock_growth / ind_growth;
+    let roe_ratio = stock_roe / ind_roe;
+    let peg = if stock_growth > 0.0 { stock_pe / stock_growth } else { f64::INFINITY };
+    let ind_peg = if ind_growth > 0.0 { ind_pe / ind_growth } else { f64::INFINITY };
+
+    let score_pe = if pe_ratio < 0.5 { "远低于行业均值" } else if pe_ratio < 0.8 { "低于行业均值" } else if pe_ratio < 1.2 { "接近行业均值" } else if pe_ratio < 2.0 { "高于行业均值" } else { "远高于行业均值" };
+    let score_growth = if growth_ratio > 1.5 { "增速显著领先" } else if growth_ratio > 1.1 { "增速略高" } else if growth_ratio > 0.9 { "增速与行业持平" } else if growth_ratio > 0.5 { "增速低于行业" } else { "增速远低于行业" };
+    let score_roe = if roe_ratio > 1.5 { "盈利能力显著领先" } else if roe_ratio > 1.1 { "盈利能力略高" } else if roe_ratio > 0.9 { "盈利能力接近行业" } else { "盈利能力低于行业" };
+
+    let overall = if pe_ratio < 1.0 && growth_ratio > 1.0 && roe_ratio > 1.0 { "质优价廉" }
+    else if pe_ratio < 1.0 && growth_ratio < 1.0 { "低估值低增长" }
+    else if pe_ratio > 1.5 && growth_ratio > 1.2 { "高估值高增长" }
+    else if pe_ratio > 1.5 { "相对高估" }
+    else { "相对合理" };
+
+    Ok(json!({
+        "stock_pe": stock_pe, "industry_avg_pe": ind_pe, "pe_ratio": (pe_ratio * 100.0).round() / 100.0,
+        "stock_growth": stock_growth, "industry_avg_growth": ind_growth, "growth_ratio": (growth_ratio * 100.0).round() / 100.0,
+        "stock_roe": stock_roe, "industry_avg_roe": ind_roe, "roe_ratio": (roe_ratio * 100.0).round() / 100.0,
+        "stock_peg": if peg.is_finite() { (peg * 100.0).round() / 100.0 } else { f64::INFINITY },
+        "industry_peg": if ind_peg.is_finite() { (ind_peg * 100.0).round() / 100.0 } else { f64::INFINITY },
+        "score_pe": score_pe, "score_growth": score_growth, "score_roe": score_roe,
+        "overall": overall, "eps": eps,
+    }))
+}
+
+fn detect_limit_up_potential_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Raw { close: f64, high: f64, low: f64, volume: f64 }
+    let klines: Vec<Raw> = args.get("klines_json").and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let market_type = args.get("market_type").and_then(|v| v.as_str()).unwrap_or("main");
+    let limit_pct = match market_type { "star" | "chinext" => 20.0, "bj" => 30.0, _ => 10.0 };
+
+    if klines.len() < 10 {
+        return Ok(json!({"limit_up_pct": limit_pct, "potential": "数据不足", "confidence": 0.0, "recent_hits": 0}));
+    }
+
+    let n = klines.len();
+    let close = klines[n - 1].close;
+    let limit_up_price = (close * (1.0 + limit_pct / 100.0) * 100.0).round() / 100.0;
+    let recent_hits = klines[n - 10..].iter().filter(|k| {
+        let daily_limit = k.close * (1.0 + limit_pct / 100.0);
+        (k.high - daily_limit).abs() < daily_limit * 0.005
+    }).count();
+    let avg_vol_10 = klines[n - 10..].iter().map(|k| k.volume).sum::<f64>() / 10.0;
+    let latest_vol = klines[n - 1].volume;
+    let vol_ratio = if avg_vol_10 > 0.0 { latest_vol / avg_vol_10 } else { 1.0 };
+    let up_days = klines[n - 10..].iter().filter(|k| k.close > k.high * 0.99).count();
+    let trend_strength = (up_days as f64 / 10.0 - 0.5) * 2.0;
+
+    let score = trend_strength * 40.0 + (vol_ratio.min(3.0) - 1.0) * 20.0 + (recent_hits as f64) * 15.0;
+    let (potential, confidence) = if score > 60.0 { ("高", (score / 100.0).min(0.95)) }
+    else if score > 30.0 { ("中", (score / 100.0).min(0.7)) }
+    else if score > 10.0 { ("低", (score / 100.0).min(0.4)) }
+    else { ("极低", 0.1) };
+
+    Ok(json!({
+        "market_type": market_type, "limit_pct": limit_pct, "limit_up_price": limit_up_price,
+        "potential": potential, "confidence": (confidence * 100.0).round() / 100.0,
+        "recent_hits": recent_hits, "volume_ratio": (vol_ratio * 100.0).round() / 100.0,
+        "trend_strength": (trend_strength * 100.0).round() / 100.0, "score": (score * 100.0).round() / 100.0,
+    }))
 }
 
 /// 从 DB 加载工作流模板，仅注入 stock_code 到 Trigger 节点。
@@ -735,6 +1065,58 @@ pub async fn run_stock_workflow(
             "calc_beta",
             Arc::new(|_name: String, args: serde_json::Value| {
                 Box::pin(async move { calc_beta_inner(&args) })
+            }),
+        )
+        .await;
+
+    // P2: 事件检测 + 组合分析
+    engine
+        .register_tool_handler(
+            "detect_earnings_surprise",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { detect_earnings_surprise_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "detect_pledge_risk",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { detect_pledge_risk_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_correlation_matrix",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_correlation_matrix_inner(&args) })
+            }),
+        )
+        .await;
+
+    // P3: 独立新能力
+    engine
+        .register_tool_handler(
+            "run_monte_carlo",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { run_monte_carlo_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "analyze_industry_position",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { analyze_industry_position_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "detect_limit_up_potential",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { detect_limit_up_potential_inner(&args) })
             }),
         )
         .await;

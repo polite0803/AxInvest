@@ -438,6 +438,39 @@ const BUILT_IN_PROVIDERS = [
     created_at: 1700000000000,
     updated_at: 1700000000000,
   },
+  {
+    id: "builtin-nvidia",
+    name: "NVIDIA",
+    provider_type: "openai",
+    api_host: "https://integrate.api.nvidia.com/v1",
+    api_path: null,
+    enabled: true,
+    models: [
+      {
+        provider_id: "builtin-nvidia",
+        model_id: "meta/llama-4-maverick-17b-128e-instruct",
+        name: "Llama 4 Maverick",
+        capabilities: ["TextGeneration", "FunctionCalling"],
+        max_tokens: 128000,
+        enabled: true,
+        param_overrides: null,
+      },
+      {
+        provider_id: "builtin-nvidia",
+        model_id: "deepseek-ai/deepseek-v3",
+        name: "DeepSeek V3",
+        capabilities: ["TextGeneration", "Reasoning"],
+        max_tokens: 128000,
+        enabled: true,
+        param_overrides: null,
+      },
+    ],
+    keys: [],
+    proxy_config: null,
+    sort_order: 8,
+    created_at: 1700000000000,
+    updated_at: 1700000000000,
+  },
 ];
 
 function initProviders(): Record<string, unknown>[] {
@@ -2832,6 +2865,31 @@ export async function handleCommand<T>(
         install_path: "",
       } as T;
     }
+
+    // ── Agent Profiles (mock) ──────────────────────────────────────
+    case "list_agent_profiles":
+    case "list_agent_roles":
+    case "list_agency_experts":
+      return [] as T;
+
+    // ── Dashboard Plugins (mock) ────────────────────────────────────
+    case "dashboard_list_plugins":
+      return [] as T;
+
+    // ── Prompt Templates (mock) ─────────────────────────────────────
+    case "list_prompt_templates":
+      return [] as T;
+
+    // ── PTY Terminal (mock) ──────────────────────────────────────────
+    case "pty_create_session":
+      return `pty-mock-${Date.now()}` as T;
+    case "pty_write":
+    case "pty_resize":
+    case "pty_kill_session":
+    case "pty_remove_session":
+    case "pty_analyze_output":
+    case "pty_clear_output":
+      return null as T;
 
     default:
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);

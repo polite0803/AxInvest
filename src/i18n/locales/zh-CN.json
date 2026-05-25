@@ -21,13 +21,13 @@
     "gateway": "网关",
     "terminal": "终端",
     "files": "文件",
+    "workflow": "工作流",
     "settings": "设置",
     "skills": "技能",
     "marketplace": "市场",
     "prompts": "提示词",
     "link": "连接",
     "devTools": "开发工具",
-    "workflow": "工作流",
     "wiki": "知识库",
     "app": "AxAgent",
     "stockAnalysis": "股票分析"
@@ -874,7 +874,8 @@
         "joinSession": "加入会话",
         "copyFailed": "复制失败",
         "joinFailed": "加入失败",
-        "maxParticipants": "最大参与者数"
+        "maxParticipants": "最大参与者数",
+        "joinSuccess": "加入成功"
       }
     },
     "conversationNotFound": "对话未找到",
@@ -1884,6 +1885,7 @@
       "fileCount": "个文件",
       "images": "图片",
       "files": "文件",
+      "workflow": "工作流",
       "backups": "备份",
       "documentsRoot": "存储位置",
       "changeDir": "更改目录",
@@ -2854,6 +2856,7 @@
   "files": {
     "images": "图片",
     "files": "文件",
+    "workflow": "工作流",
     "backups": "备份",
     "columnName": "文件名",
     "columnSize": "大小",
@@ -2980,7 +2983,8 @@
     "popular": "热门",
     "proposals": "提案",
     "save": "保存",
-    "sort": "排序"
+    "sort": "排序",
+    "stats": "统计"
   },
   "agent": {
     "askUserPlaceholder": "输入您的回答...",
@@ -3264,7 +3268,12 @@
     "docker": "Docker",
     "ssh": "SSH",
     "sessions": "{{count}} 个会话",
-    "configureBackends": "配置后端..."
+    "configureBackends": "配置后端...",
+    "noSessions": "暂无终端会话",
+    "errorsCount": "{{count}} 个错误",
+    "ok": "正常",
+    "dockerConnectPending": "Docker 连接功能开发中",
+    "sshConnectPending": "SSH 连接功能开发中"
   },
   "search": {
     "resultPrefix": "以下是联网搜索结果，回答问题前请参考：\n\n",
@@ -4429,7 +4438,11 @@
       "paste": "粘贴",
       "delete": "删除",
       "save": "保存"
-    }
+    },
+    "collapseLeftPanel": "折叠左侧面板",
+    "expandLeftPanel": "展开左侧面板",
+    "collapseRightPanel": "折叠右侧面板",
+    "expandRightPanel": "展开右侧面板"
   },
   "atomicSkill": {
     "entryType": "入口类型",
@@ -4973,7 +4986,8 @@
     "loadError": "加载 Skill 失败",
     "analyzeFrontend": "AI 分析生成",
     "analyzeSuccess": "智能分析完成",
-    "analyzeError": "智能分析失败: {{error}}"
+    "analyzeError": "智能分析失败: {{error}}",
+    "generateAgent": "生成智能体"
   },
   "task": {
     "title": "后台任务",

@@ -22,9 +22,11 @@ use crate::workflow_engine::{
 use super::dispatcher::NodeDispatcher;
 use super::execution_state::{ExecutionState, ExecutionStatus, NodeExecutionRecord};
 use super::executors::{
-    AgentExecutor, LlmExecutor, SubWorkflowCallback, ToolCallback, VectorRetrieveCallback,
+    AgentExecutor, LlmExecutor, ProfileCache, ProviderCache, SubWorkflowCallback, ToolCallback,
+    VectorRetrieveCallback,
 };
 use super::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};
+use super::prompt_template::{CompiledPrompt, compile_prompt};
 
 /// 工作流运行选项
 #[derive(Clone)]
@@ -145,11 +147,16 @@ pub struct WorkEngine {
     db: Arc<DatabaseConnection>,
     executions: Arc<Mutex<HashMap<String, ExecutionState>>>,
     workflows: Arc<tokio::sync::RwLock<HashMap<String, Workflow>>>,
+    /// 编译后的 prompt 模板：workflow_id -> (node_id -> CompiledPrompt)
+    compiled_prompts: Arc<tokio::sync::RwLock<HashMap<String, HashMap<String, CompiledPrompt>>>>,
     cancel_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     dispatcher: Arc<tokio::sync::RwLock<NodeDispatcher>>,
     tool_callback: Arc<Mutex<Option<ToolCallback>>>,
     subworkflow_callback: Arc<Mutex<Option<SubWorkflowCallback>>>,
     vector_retrieve_callback: Arc<Mutex<Option<VectorRetrieveCallback>>>,
+    /// Agent executor 共享缓存（跨节点复用，每次 run_workflow 开始时清空）
+    agent_provider_cache: Arc<tokio::sync::Mutex<ProviderCache>>,
+    agent_profile_cache: Arc<tokio::sync::Mutex<ProfileCache>>,
 }
 
 impl WorkEngine {
@@ -186,18 +193,29 @@ impl WorkEngine {
 
 impl WorkEngine {
     pub fn new(db: Arc<DatabaseConnection>, master_key: [u8; 32]) -> Self {
+        let agent_provider_cache = Arc::new(tokio::sync::Mutex::new(None));
+        let agent_profile_cache = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
         let mut dispatcher = NodeDispatcher::new();
         dispatcher.register(LlmExecutor::new(db.clone(), master_key));
-        dispatcher.register(AgentExecutor::new(db.clone(), master_key));
+        dispatcher.register(AgentExecutor::with_shared_caches(
+            db.clone(),
+            master_key,
+            agent_provider_cache.clone(),
+            agent_profile_cache.clone(),
+        ));
         Self {
             db,
             executions: Arc::new(Mutex::new(HashMap::new())),
             workflows: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            compiled_prompts: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             dispatcher: Arc::new(tokio::sync::RwLock::new(dispatcher)),
             tool_callback: Arc::new(Mutex::new(None)),
             subworkflow_callback: Arc::new(Mutex::new(None)),
             vector_retrieve_callback: Arc::new(Mutex::new(None)),
+            agent_provider_cache,
+            agent_profile_cache,
         }
     }
 
@@ -277,6 +295,18 @@ impl WorkEngine {
             .iter()
             .map(|n| (n.base_id().to_string(), NodeRuntimeState::default()))
             .collect();
+
+        // 编译 Agent 节点的 prompt 模板（阶段一）
+        let mut compiled_map: HashMap<String, CompiledPrompt> = HashMap::new();
+        for node in &nodes {
+            if let WorkflowNode::Agent(an) = node {
+                compiled_map.insert(an.base.id.clone(), compile_prompt(&an.config.system_prompt));
+            }
+        }
+        self.compiled_prompts
+            .write()
+            .await
+            .insert(workflow_id.clone(), compiled_map);
 
         let workflow = Workflow {
             id: workflow_id.clone(),
@@ -534,6 +564,36 @@ impl WorkEngine {
             }
         }
 
+        // 清空 Agent executor 缓存（每次执行使用最新数据）
+        {
+            *self.agent_provider_cache.lock().await = None;
+            self.agent_profile_cache.lock().await.clear();
+        }
+
+        // 懒编译兜底：若工作流从 DB 加载（非 create_workflow 新建），编译模板
+        {
+            let compiled = self.compiled_prompts.read().await;
+            if !compiled.contains_key(workflow_id) {
+                drop(compiled);
+                let workflows = self.workflows.read().await;
+                if let Some(wf) = workflows.get(workflow_id) {
+                    let mut compiled_map: HashMap<String, CompiledPrompt> = HashMap::new();
+                    for node in &wf.nodes {
+                        if let WorkflowNode::Agent(an) = node {
+                            compiled_map.insert(
+                                an.base.id.clone(),
+                                compile_prompt(&an.config.system_prompt),
+                            );
+                        }
+                    }
+                    self.compiled_prompts
+                        .write()
+                        .await
+                        .insert(workflow_id.to_string(), compiled_map);
+                }
+            }
+        }
+
         let total_nodes = {
             let workflows = self.workflows.read().await;
             workflows
@@ -676,6 +736,12 @@ impl WorkEngine {
                 serde_json::json!({}),
             );
             exec_ctx.variables = deps_results;
+
+            // 注入编译后的 prompt 模板
+            {
+                let compiled = self.compiled_prompts.read().await;
+                exec_ctx.compiled_prompts = compiled.get(workflow_id).cloned();
+            }
 
             // 注入运行时回调到执行上下文
             {

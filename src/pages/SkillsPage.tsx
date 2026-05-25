@@ -11,7 +11,7 @@ import { SkillDependencyCheck } from "@/components/skill/SkillDependencyCheck";
 import { SkillStatsPanel } from "@/components/skill/SkillStatsPanel";
 import { CHAT_ICON_COLORS } from "@/lib/iconColors";
 import { invoke } from "@/lib/invoke";
-import { useSkillStore } from "@/stores";
+import { useSkillStore, useUIStore } from "@/stores";
 import type { MarketplaceSkill, Skill } from "@/types";
 import { Claude } from "@lobehub/icons";
 import {
@@ -180,20 +180,21 @@ function SkillCard({
       style={{ marginBottom: 8 }}
       styles={{ body: { padding: "12px 16px" } }}
     >
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
           <div
             style={{
               display: "flex",
               alignItems: "center",
               gap: 8,
               marginBottom: 4,
+              flexWrap: "wrap",
             }}
           >
             <Text
               strong
               className="skill-card-title"
-              style={{ cursor: "pointer" }}
+              style={{ cursor: "pointer", whiteSpace: "nowrap" }}
               onClick={() => onDetail(skill.name)}
             >
               {skill.name}
@@ -236,8 +237,9 @@ function SkillCard({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 4,
             flexShrink: 0,
+            flexWrap: "wrap",
           }}
         >
           <Switch
@@ -428,6 +430,8 @@ function MarketplaceCard({
 export function SkillsPage() {
   const { t } = useTranslation("translation");
   const { token } = theme.useToken();
+  const deviceLayout = useUIStore((s) => s.deviceLayout);
+  const isSmall = deviceLayout === "mobile" || deviceLayout === "tablet";
   const [messageApi, contextHolder] = message.useMessage();
   const {
     skills,
@@ -645,16 +649,14 @@ export function SkillsPage() {
           setMarketplaceDetailContent({
             name: skill.name,
             repo: skill.repo,
-            content: `(${
-              result.error || t("skills.marketplace.skillsMdNotFound") || "Skill definition file not found"
-            })`,
+            content: `(${result.error || t("skills.marketplace.skillsMdNotFound")})`,
           });
         }
       } catch {
         setMarketplaceDetailContent({
           name: skill.name,
           repo: skill.repo,
-          content: `(${t("skills.marketplace.skillsMdFetchFailed") || "Failed to fetch skill content"})`,
+          content: `(${t("skills.marketplace.skillsMdFetchFailed")})`,
         });
       } finally {
         setMarketplaceDetailLoading(false);
@@ -758,7 +760,15 @@ export function SkillsPage() {
   const mySkillsContent = (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "0 4px", flexShrink: 0 }}>
-        <Space.Compact style={{ width: "100%", marginBottom: 8 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: isSmall ? 4 : 0,
+            marginBottom: 8,
+            flexWrap: isSmall ? "wrap" : "nowrap",
+            width: "100%",
+          }}
+        >
           <Input
             id="skills-page-input-132"
             placeholder={t("skills.installUrlPlaceholder")}
@@ -804,7 +814,7 @@ export function SkillsPage() {
             onClick={() => setProposalPanelOpen(true)}
             title={t("skill.proposal.title")}
           />
-        </Space.Compact>
+        </div>
         <SkillDependencyCheck />
         <Tabs
           size="small"
@@ -1129,9 +1139,9 @@ export function SkillsPage() {
             onChange={(v) => setSortOrder(v)}
             style={{ width: 100, flexShrink: 0 }}
             options={[
-              { value: "popular", label: t("skills.sortPopular") || "Popular" },
-              { value: "latest", label: t("skills.sortLatest") || "Latest" },
-              { value: "stars", label: t("skills.sortStars") || "Stars" },
+              { value: "popular", label: t("skills.sortPopular") },
+              { value: "latest", label: t("skills.sortLatest") },
+              { value: "stars", label: t("skills.sortStars") },
             ]}
           />
           <Input.Search
@@ -1265,7 +1275,7 @@ export function SkillsPage() {
                   }}
                 >
                   <BarChart3 size={14} color={CHAT_ICON_COLORS.Chart} />
-                  {t("skills.stats") || "Stats"}
+                  {t("skills.stats")}
                 </span>
               ),
               children: (

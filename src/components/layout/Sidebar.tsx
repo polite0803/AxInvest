@@ -10,7 +10,7 @@ import { useHelpStore, useSettingsStore, useSkillExtensionStore, useUIStore, use
 import type { AppSettings, PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar } from "antd";
-import { Globe, LineChart, Moon, Pin, PinOff, RotateCcw, Settings, Sun, User } from "lucide-react";
+import { Globe, Moon, Pin, PinOff, RotateCcw, Settings, Sun, User } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -23,8 +23,8 @@ const pageKeyToPath: Record<PageKey, string> = {
   gateway: "/gateway",
   files: "/files",
   terminal: "/terminal",
+  workflow: "/workflow",
   settings: "/settings",
-  "stock-analysis": "/stock-analysis",
 };
 
 function pathToPageKey(path: string): PageKey {
@@ -87,10 +87,10 @@ const builtinNavItems: NavItem[] = [
     isPlugin: false,
   },
   {
-    key: "stock-analysis",
-    icon: <LineChart size={18} color={NAV_ICON_COLORS.Router} />,
-    labelKey: "nav.stockAnalysis",
-    path: "/stock-analysis",
+    key: "workflow",
+    icon: <Icon icon="fluent:flow-20-filled" size={17} />,
+    labelKey: "nav.workflow",
+    path: "/workflow",
     isPlugin: false,
   },
 ];
@@ -369,13 +369,9 @@ export function Sidebar() {
     sections.push({
       key: "infrastructure",
       labelKey: "sidebar.sectionInfrastructure",
-      items: builtinNavItems.filter((n) => n.key === "gateway" || n.key === "terminal" || n.key === "files"),
-    });
-
-    sections.push({
-      key: "invest",
-      labelKey: "sidebar.sectionInvest",
-      items: builtinNavItems.filter((n) => n.key === "stock-analysis"),
+      items: builtinNavItems.filter((n) =>
+        n.key === "gateway" || n.key === "terminal" || n.key === "files" || n.key === "workflow"
+      ),
     });
 
     if (bottomPlugins.length > 0) {

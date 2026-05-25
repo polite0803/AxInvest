@@ -14,14 +14,14 @@
     "memory": "Memoria",
     "gateway": "Pasarela",
     "terminal": "Terminal",
-    "files": "Archivos",
+    "files": "Files",
+    "workflow": "Flujo de trabajo",
     "settings": "Configuración",
     "skills": "Habilidades",
     "marketplace": "Mercado",
     "prompts": "Plantillas",
     "link": "Enlace",
     "devTools": "Herramientas de desarrollo",
-    "workflow": "Flujo de trabajo",
     "wiki": "Wiki",
     "app": "AxAgent",
     "stockAnalysis": "Stock Analysis"
@@ -865,7 +865,8 @@
         "codePlaceholder": "XXXX-XXXX",
         "copyFailed": "Copia fallida",
         "joinFailed": "Unión fallida",
-        "maxParticipants": "Máx. participantes"
+        "maxParticipants": "Máx. participantes",
+        "joinSuccess": "Joined successfully"
       },
       "sharedResources": "Shared Resources",
       "title": "Collaboration"
@@ -1832,7 +1833,8 @@
       "totalUsage": "Uso total",
       "fileCount": "archivos",
       "images": "Imágenes",
-      "files": "Archivos",
+      "files": "Files",
+      "workflow": "Workflow",
       "backups": "Copias de seguridad",
       "documentsRoot": "Ubicación de almacenamiento",
       "changeDir": "Cambiar Directorio",
@@ -2884,7 +2886,8 @@
   },
   "files": {
     "images": "Imágenes",
-    "files": "Archivos",
+    "files": "Files",
+    "workflow": "Workflow",
     "backups": "Copias de seguridad",
     "columnName": "Nombre",
     "columnSize": "Tamaño",
@@ -3011,7 +3014,8 @@
     "proposals": "Proposals",
     "dismiss": "Dismiss",
     "atomic": "Atomic",
-    "extractAtomic": "Extract Atomic Skills"
+    "extractAtomic": "Extract Atomic Skills",
+    "stats": "Stats"
   },
   "agent": {
     "askUserPlaceholder": "Escriba su respuesta...",
@@ -3258,6 +3262,11 @@
     "ssh": "SSH",
     "sessions": "{{count}} sessions",
     "configureBackends": "Configure Backends...",
+    "noSessions": "No terminal sessions",
+    "errorsCount": "{{count}} error(s)",
+    "ok": "OK",
+    "dockerConnectPending": "Docker connect pending",
+    "sshConnectPending": "SSH connect pending",
     "newTerminal": "New Terminal",
     "analyzeOutput": "Analyze Output",
     "clear": "Clear",
@@ -3671,7 +3680,8 @@
       "wikiDesc": "Store info in the knowledge base",
       "memory": "Search Memory",
       "memoryDesc": "Search conversation memory",
-      "files": "Search Files",
+      "files": "Files",
+      "workflow": "Workflow",
       "filesDesc": "Search attachments",
       "url": "Fetch URL",
       "urlDesc": "Read web page content",
@@ -4356,7 +4366,11 @@
       "paste": "Paste Node",
       "delete": "Delete Selected Node",
       "save": "Save"
-    }
+    },
+    "collapseLeftPanel": "Collapse Left Panel",
+    "expandLeftPanel": "Expand Left Panel",
+    "collapseRightPanel": "Collapse Right Panel",
+    "expandRightPanel": "Expand Right Panel"
   },
   "atomicSkill": {
     "entryType": "Entry Type",
@@ -4900,7 +4914,8 @@
     "loadError": "Failed to load skill",
     "analyzeFrontend": "AI Generate",
     "analyzeSuccess": "AI analysis complete",
-    "analyzeError": "AI analysis failed: {{error}}"
+    "analyzeError": "AI analysis failed: {{error}}",
+    "generateAgent": "Generate Agent"
   },
   "task": {
     "title": "Tareas en segundo plano",

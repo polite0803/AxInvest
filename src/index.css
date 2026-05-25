@@ -2201,16 +2201,21 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 10px 14px 8px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--muted);
+  color: var(--fg-2);
   cursor: pointer;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   transition: all 0.12s;
+  user-select: none;
+  background: color-mix(in srgb, var(--surface-2, var(--color-bg-container)) 60%, transparent);
+  border-left: 2px solid transparent;
+  margin-left: 4px;
+  padding-left: 10px;
 }
-.st-group-header:hover { color: var(--fg); }
+.st-group-header:hover { color: var(--fg); background: var(--accent-dim); border-left-color: var(--accent-soft); }
 .st-group-header svg { width: 14px; height: 14px; flex-shrink: 0; }
 .st-group-header .arrow {
   width: 12px;
@@ -2221,7 +2226,7 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 }
 .st-group.collapsed .st-items { display: none; }
 .st-group.collapsed .arrow { transform: rotate(-90deg); }
-.st-items { padding: 0 4px 6px; }
+.st-items { padding: 0 4px 6px 8px; }
 .st-item {
   display: flex;
   align-items: center;
@@ -2823,6 +2828,11 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 .term-statusbar { display: flex; align-items: center; padding: 4px 10px; background: oklch(14% 0.006 55); border-top: 1px solid oklch(22% 0.008 55); font-size: 10.5px; color: oklch(55% 0.005 70); gap: 12px; flex-shrink: 0; }
 .term-statusbar .ts-left { display: flex; align-items: center; gap: 10px; flex: 1; }
 .term-statusbar .ts-right { display: flex; align-items: center; gap: 10px; }
+.term-maximized {
+  position: fixed !important;
+  inset: 0;
+  z-index: 500;
+}
 .ts-item { display: flex; align-items: center; gap: 4px; }
 .ts-item svg { width: 12px; height: 12px; }
 .ts-item .ts-dot { width: 5px; height: 5px; border-radius: 50%; }

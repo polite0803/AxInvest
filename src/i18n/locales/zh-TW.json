@@ -6514,6 +6514,7 @@
     "open": "开",
     "high": "高",
     "low": "低",
+    "close": "收",
     "volume": "量",
     "volumeUnit": "萬手",
     "volumeChart": "成交量",

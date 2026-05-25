@@ -6516,6 +6516,7 @@
     "open": "Open",
     "high": "High",
     "low": "Low",
+    "close": "Close",
     "volume": "Volume",
     "volumeUnit": "10k lots",
     "volumeChart": "Volume",

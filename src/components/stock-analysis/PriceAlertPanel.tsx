@@ -25,7 +25,7 @@ export function PriceAlertPanel() {
   const loadAlerts = async () => {
     try {
       const list = await invoke<PriceAlert[]>("list_price_alerts");
-      if (Array.isArray(list)) setAlerts(list);
+      if (Array.isArray(list)) { setAlerts(list); }
     } catch {
       // 后端未运行或无数据时静默
     }

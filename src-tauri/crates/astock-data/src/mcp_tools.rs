@@ -232,6 +232,53 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "properties": {}
             }
         }),
+        // ── 算法工具 ──
+        json!({
+            "name": "compute_scoring",
+            "description": "六维度技术评分（趋势/乖离/MACD/量能/RSI/支撑）+ 基本面修正 + 价值修正，返回100分制评分及买入信号",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" },
+                    "kline_json": { "type": "string", "description": "上游K线节点输出的JSON" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "compute_valuation",
+            "description": "DCF两阶段估值 + 格雷厄姆公式 + Piotroski F-Score(0-9) + 护城河量化(0-100)，返回内在价值和安全边际",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" },
+                    "financials_json": { "type": "string", "description": "上游财务节点输出的JSON" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "compute_portfolio_risk",
+            "description": "组合风险指标：集中度、分散度评分、行业暴露、风险等级",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "positions_json": { "type": "string", "description": "持仓数据JSON数组" }
+                },
+                "required": ["positions_json"]
+            }
+        }),
+        json!({
+            "name": "run_quality_gate",
+            "description": "LLM报告质量门控：占位检测、失败标记检测、必采项覆盖率检查，返回A-F质量评级",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reports_json": { "type": "string", "description": "分析师报告JSON，格式: {expert_id: report_text}" }
+                },
+                "required": ["reports_json"]
+            }
+        }),
     ]
 }
 

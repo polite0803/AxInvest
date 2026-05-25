@@ -169,7 +169,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 5;
+    const TEMPLATE_VERSION: i32 = 6;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -247,6 +247,7 @@ async fn seed_stock_analysis_workflow_template(
                 output_mode: OutputMode::Text,
                 agent_profile_id: Some(format!("stock-{expert_id}")),
                 agent_role_override: None,
+                max_tool_rounds: None,
             },
         })
     };
@@ -436,15 +437,40 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
     }
 
+    // ── 算法 Tool 节点：内置算法作为工具嵌入工作流 ──
+    let algo_tools: &[(&str, &str, &str, &str)] = &[
+        ("t-scoring", "技术评分", "compute_scoring", "stock_code"),
+        ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
+        ("t-risk", "风险评估", "compute_portfolio_risk", "positions_json"),
+        ("t-quality", "质量门控", "run_quality_gate", "reports_json"),
+    ];
+    for (tool_id, title, tool_name, arg_key) in algo_tools {
+        nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
+    }
+    // 风险节点 → 第一个算法工具（评分）
+    for rid in &["risk-agg", "risk-con", "risk-neu"] {
+        edges.push(edge(&format!("e-{rid}-t-scoring"), rid, "t-scoring"));
+    }
+    edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
+    edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
+    edges.push(edge("e-t-risk-t-quality", "t-risk", "t-quality"));
+
     // research-mgr → trader → portfolio-mgr
-    nodes.push(agent(
+    let mut rm = agent(
         "research-mgr",
         "综合三种风险偏好的评估结果，给出该股票的总体风险评级（低/中/高）及主要风险点清单",
         "research-manager",
-    ));
-    for rid in &["risk-agg", "risk-con", "risk-neu"] {
-        edges.push(edge(&format!("e-{rid}-research-mgr"), rid, "research-mgr"));
+    );
+    if let WorkflowNode::Agent(ref mut a) = rm {
+        a.config.context_sources = vec![
+            "t-scoring".into(),
+            "t-valuation".into(),
+            "t-risk".into(),
+            "t-quality".into(),
+        ];
     }
+    nodes.push(rm);
+    edges.push(edge("e-t-quality-research-mgr", "t-quality", "research-mgr"));
 
     nodes.push(agent("trader", "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则", "trader"));
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));

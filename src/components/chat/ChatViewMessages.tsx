@@ -126,7 +126,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { buildAssistantDisplayContent, shouldHideAssistantBubble } from "./toolCallDisplay";
 import { TopicGroupDivider } from "./TopicGroupDivider";
 import { VersionPagination } from "./VersionPagination";
-import { parseWorkflowCard, WorkflowAgentCard } from "./WorkflowAgentCard";
+import { parseWorkflowCard, WorkflowAgentCard, type WorkflowCardData } from "./WorkflowAgentCard";
 
 function AssistantFooter({
   msg,
@@ -831,7 +831,7 @@ export function useChatViewMessages({
         const cached = cache.get(msg.id);
         const item = cached?.signature === signature
           ? cached.item
-          : { key: msg.id, role: "workflow-card", content: msg.content, data, variant: "borderless" as const };
+          : { key: msg.id, role: "workflow-card", content: data ?? msg.content, variant: "borderless" as const };
         nextCache.set(msg.id, { signature, item });
         nextItems.push(item);
         continue;
@@ -2094,7 +2094,10 @@ export function useChatViewMessages({
 
   const workflowCardRole = useCallback(
     (bubbleData: BubbleItemType) => {
-      const data = bubbleData.content as ReturnType<typeof parseWorkflowCard>;
+      const c = bubbleData.content;
+      const data = (c && typeof c === "object" && "type" in c)
+        ? c as WorkflowCardData
+        : parseWorkflowCard(String(c ?? ""));
       if (!data) {
         return { placement: "start" as const, variant: "borderless" as const, contentRender: () => null };
       }
@@ -2126,6 +2129,7 @@ export function useChatViewMessages({
       expertSwitchRole,
       userRole,
       topicGroupRole,
+      workflowCardRole,
     ],
   );
 

@@ -5,13 +5,26 @@
  * - 对话页：通过本模块将事件转换为 system 消息（标记为 workflow-* 卡片）
  * - 分析页：stockAnalysisStore 独立监听同一事件（现有逻辑）
  */
+import { makeWorkflowContent } from "@/components/chat/WorkflowAgentCard";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 
 const activeBridges = new Map<string, UnlistenFn[]>();
 
-function makeMarkdown(type: string, data: Record<string, unknown>, fallback: string): string {
-  return `<!-- workflow-${type}:${JSON.stringify(data)} -->${fallback}`;
+const ANALYST_NODE_TO_NAME: Record<string, string> = {
+  "a-market-analyst": "market-analyst",
+  "a-sentiment": "sentiment-analyst",
+  "a-news": "news-analyst",
+  "a-fundamentals": "fundamentals-analyst",
+  "a-policy": "policy-analyst",
+  "a-hot-money": "hot-money-tracker",
+  "a-lockup": "lockup-watcher",
+  "a-research": "research-analyst",
+  "a-sector": "sector-analyst",
+};
+
+function wf(type: string, data: Record<string, unknown>, fallback: string): string {
+  return makeWorkflowContent(type, data, fallback);
 }
 
 /** 启动桥接 */
@@ -26,11 +39,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   try {
     const m = await invoke<{ id: string }>("send_system_message", {
       conversationId,
-      content: makeMarkdown("progress", {
-        phase: "trigger",
-        completed: 0,
-        total: 30,
-      }, "🔍 正在启动 A 股多维度分析..."),
+      content: wf("progress", { phase: "trigger", completed: 0, total: 30 }, "🔍 正在启动 A 股多维度分析..."),
     });
     progressMsgId = m.id;
   } catch { /* 静默 */ }
@@ -50,19 +59,19 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     if (progressMsgId) {
       invoke("update_message_content", {
         id: progressMsgId,
-        content: makeMarkdown("progress", {
-          phase: nodeId,
-          completed: count,
-          total: totalNodes,
-        }, `🔍 分析进行中 (${count}/${totalNodes})`),
+        content: wf(
+          "progress",
+          { phase: nodeId, completed: count, total: totalNodes },
+          `🔍 分析进行中 (${count}/${totalNodes})`,
+        ),
       }).catch(() => {});
     }
 
     if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
-      const name = nodeId.replace("a-", "");
+      const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
       invoke("send_system_message", {
         conversationId,
-        content: makeMarkdown("analyst", { analystName: name, analystReport: "" }, `📊 ${name} 分析完成`),
+        content: wf("analyst", { analystName, analystReport: "" }, `📊 分析完成`),
       }).catch(() => {});
     }
   });
@@ -79,18 +88,18 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     if (progressMsgId) {
       invoke("update_message_content", {
         id: progressMsgId,
-        content: makeMarkdown("progress", {
-          phase: "done",
-          completed: completedNodes.size,
-          total: completedNodes.size,
-        }, "✅ 分析完成"),
+        content: wf(
+          "progress",
+          { phase: "done", completed: completedNodes.size, total: completedNodes.size },
+          "✅ 分析完成",
+        ),
       }).catch(() => {});
     }
 
     if (output && typeof output === "object") {
       invoke("send_system_message", {
         conversationId,
-        content: makeMarkdown("decision", {
+        content: wf("decision", {
           action: String(output.action ?? "N/A"),
           positionPct: Number(output.positionPct ?? 0),
           targetPrice: Number(output.targetPrice ?? 0),
@@ -113,7 +122,11 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       if (progressMsgId) {
         invoke("update_message_content", {
           id: progressMsgId,
-          content: `## ❌ 分析失败\n\n> ${event.payload.error}`,
+          content: wf(
+            "progress",
+            { phase: "error", completed: completedNodes.size, total: completedNodes.size },
+            `❌ ${event.payload.error}`,
+          ),
         }).catch(() => {});
       }
       stopStockWorkflowChatBridge(conversationId);

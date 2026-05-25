@@ -169,7 +169,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 8;
+    const TEMPLATE_VERSION: i32 = 9;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -259,6 +259,19 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("运行质量门控：检查各分析报告的一致性和完整性".into()),
         parameters: None,
     };
+    // ── 新增 12 个金融模型 ToolDef ──
+    let td_maxdd = ToolDef { name: "calc_max_drawdown".into(), description: Some("计算最大回撤比例".into()), parameters: None };
+    let td_sharpe = ToolDef { name: "calc_sharpe_ratio".into(), description: Some("计算夏普比率".into()), parameters: None };
+    let td_var = ToolDef { name: "calc_var".into(), description: Some("历史模拟法 VaR 计算".into()), parameters: None };
+    let td_pe_pct = ToolDef { name: "calc_pe_percentile".into(), description: Some("PE 历史分位数".into()), parameters: None };
+    let td_peg = ToolDef { name: "calc_peg".into(), description: Some("PEG 估值指标".into()), parameters: None };
+    let td_ma_cross = ToolDef { name: "detect_ma_cross".into(), description: Some("MA 金叉死叉检测".into()), parameters: None };
+    let td_breakout = ToolDef { name: "detect_breakout".into(), description: Some("支撑阻力突破检测".into()), parameters: None };
+    let td_kelly = ToolDef { name: "calc_kelly".into(), description: Some("凯利公式仓位计算".into()), parameters: None };
+    let td_rp = ToolDef { name: "calc_risk_parity".into(), description: Some("风险平价权重计算".into()), parameters: None };
+    let td_outliers = ToolDef { name: "clean_outliers".into(), description: Some("异常值剔除 (zscore/iqr)".into()), parameters: None };
+    let td_fill = ToolDef { name: "clean_fill_missing".into(), description: Some("缺失值填充 (forward/linear)".into()), parameters: None };
+    let td_adjust = ToolDef { name: "adjust_prices".into(), description: Some("前复权价格调整".into()), parameters: None };
 
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
@@ -485,6 +498,19 @@ async fn seed_stock_analysis_workflow_template(
         ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
         ("t-risk", "风险评估", "compute_portfolio_risk", "positions_json"),
         ("t-quality", "质量门控", "run_quality_gate", "reports_json"),
+        // 新增 12 个金融模型工具
+        ("t-calc-maxdd", "最大回撤", "calc_max_drawdown", "prices_json"),
+        ("t-calc-sharpe", "夏普比率", "calc_sharpe_ratio", "returns_json"),
+        ("t-calc-var", "VaR 风险价值", "calc_var", "returns_json"),
+        ("t-calc-pe-pct", "PE 分位数", "calc_pe_percentile", "current_pe"),
+        ("t-calc-peg", "PEG 估值", "calc_peg", "pe"),
+        ("t-signal-cross", "MA 交叉检测", "detect_ma_cross", "klines_json"),
+        ("t-signal-brk", "突破检测", "detect_breakout", "klines_json"),
+        ("t-calc-kelly", "凯利仓位", "calc_kelly", "win_rate"),
+        ("t-calc-rp", "风险平价", "calc_risk_parity", "volatilities_json"),
+        ("t-clean-outl", "异常值剔除", "clean_outliers", "prices_json"),
+        ("t-clean-fill", "缺失值填充", "clean_fill_missing", "prices_json"),
+        ("t-adjust-px", "复权调整", "adjust_prices", "klines_json"),
     ];
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
@@ -493,9 +519,19 @@ async fn seed_stock_analysis_workflow_template(
     for rid in &["risk-agg", "risk-con", "risk-neu"] {
         edges.push(edge(&format!("e-{rid}-t-scoring"), rid, "t-scoring"));
     }
+    // 链式连接所有算法工具：scoring → valuation → risk → quality → 12 new tools
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
     edges.push(edge("e-t-risk-t-quality", "t-risk", "t-quality"));
+    let algo_chain = [
+        "t-calc-maxdd", "t-calc-sharpe", "t-calc-var", "t-calc-pe-pct",
+        "t-calc-peg", "t-signal-cross", "t-signal-brk", "t-calc-kelly",
+        "t-calc-rp", "t-clean-outl", "t-clean-fill", "t-adjust-px",
+    ];
+    edges.push(edge("e-t-quality-t-calc-maxdd", "t-quality", "t-calc-maxdd"));
+    for w in algo_chain.windows(2) {
+        edges.push(edge(&format!("e-{}-{}", w[0], w[1]), w[0], w[1]));
+    }
 
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(
@@ -505,22 +541,24 @@ async fn seed_stock_analysis_workflow_template(
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
         a.config.context_sources = vec![
-            "t-scoring".into(),
-            "t-valuation".into(),
-            "t-risk".into(),
-            "t-quality".into(),
+            "t-scoring".into(), "t-valuation".into(), "t-risk".into(), "t-quality".into(),
+            "t-calc-maxdd".into(), "t-calc-sharpe".into(), "t-calc-var".into(),
+            "t-calc-pe-pct".into(), "t-calc-peg".into(),
+            "t-signal-cross".into(), "t-signal-brk".into(),
+            "t-calc-kelly".into(), "t-calc-rp".into(),
+            "t-clean-outl".into(), "t-clean-fill".into(), "t-adjust-px".into(),
         ];
         a.config.tools = vec![
-            td_score.clone(),
-            td_val.clone(),
-            td_risk.clone(),
-            td_quality.clone(),
-            td_fin.clone(),
+            td_score.clone(), td_val.clone(), td_risk.clone(), td_quality.clone(),
+            td_fin.clone(), td_maxdd.clone(), td_sharpe.clone(), td_var.clone(),
+            td_pe_pct.clone(), td_peg.clone(), td_ma_cross.clone(), td_breakout.clone(),
+            td_kelly.clone(), td_rp.clone(), td_outliers.clone(), td_fill.clone(),
+            td_adjust.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(rm);
-    edges.push(edge("e-t-quality-research-mgr", "t-quality", "research-mgr"));
+    edges.push(edge("e-t-adjust-px-research-mgr", "t-adjust-px", "research-mgr"));
 
     let mut trader = agent(
         "trader",
@@ -548,12 +586,11 @@ async fn seed_stock_analysis_workflow_template(
     if let WorkflowNode::Agent(ref mut a) = pm {
         a.config.context_sources = vec!["trader".into(), "research-mgr".into()];
         a.config.tools = vec![
-            td_quote.clone(),
-            td_kline.clone(),
-            td_fin.clone(),
-            td_score.clone(),
-            td_val.clone(),
-            td_risk.clone(),
+            td_quote.clone(), td_kline.clone(), td_fin.clone(),
+            td_score.clone(), td_val.clone(), td_risk.clone(),
+            td_maxdd.clone(), td_sharpe.clone(), td_var.clone(),
+            td_pe_pct.clone(), td_peg.clone(), td_ma_cross.clone(),
+            td_breakout.clone(), td_kelly.clone(), td_rp.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
@@ -1000,6 +1037,42 @@ async fn seed_stock_analysis_workflow_template(
             var_type: "boolean".into(),
             value: serde_json::json!(false),
             description: Some("Mootdx — 本地行情接口".into()),
+            is_secret: false,
+        },
+        // ── 新增：金融模型参数 ──
+        Variable {
+            name: "risk_free_rate".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(3.0),
+            description: Some("无风险利率 (%)，用于夏普比率和 DCF".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "var_confidence".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.95),
+            description: Some("VaR 置信度 (0-1)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "outlier_method".into(),
+            var_type: "enum".into(),
+            value: serde_json::json!("zscore"),
+            description: Some("异常值检测方法: zscore / iqr".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "outlier_threshold".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2.0),
+            description: Some("异常值 Z-score 阈值".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "kelly_fraction".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.5),
+            description: Some("凯利比例系数 (0-1) — 建议仓位 = half_kelly × 此系数".into()),
             is_secret: false,
         },
     ];

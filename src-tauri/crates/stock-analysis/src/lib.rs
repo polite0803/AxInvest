@@ -1,4 +1,5 @@
 pub mod backtest;
+pub mod data_clean;
 pub mod decision;
 pub mod key_levels;
 pub mod monitor;
@@ -11,9 +12,11 @@ pub mod prompts;
 pub mod quality;
 pub mod report;
 pub mod review;
+pub mod risk;
 pub mod rules;
 pub mod runner;
 pub mod scoring;
+pub mod signals;
 pub mod screener;
 pub mod trading;
 pub mod value;

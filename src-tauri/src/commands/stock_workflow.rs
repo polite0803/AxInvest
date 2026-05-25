@@ -100,6 +100,115 @@ fn run_quality_gate_inner(args: &serde_json::Value) -> serde_json::Value {
     })
 }
 
+// ── 新增：12 个金融模型 tool handler 内联函数 ──
+
+fn calc_max_drawdown_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let prices: Vec<f64> = args
+        .get("prices_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let dd = axagent_stock_analysis::risk::max_drawdown(&prices);
+    Ok(json!({"max_drawdown_pct": (dd * 10000.0).round() / 100.0}))
+}
+
+fn calc_sharpe_ratio_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let returns: Vec<f64> = args
+        .get("returns_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let rf = args.get("risk_free").and_then(|v| v.as_f64()).unwrap_or(0.03);
+    let r = axagent_stock_analysis::risk::sharpe_ratio(&returns, rf);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn calc_var_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let returns: Vec<f64> = args
+        .get("returns_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let conf = args.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.95);
+    let r = axagent_stock_analysis::risk::value_at_risk(&returns, conf);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn calc_pe_percentile_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let current_pe = args.get("current_pe").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let hist: Vec<f64> = args
+        .get("historical_pes_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let r = axagent_stock_analysis::risk::pe_percentile(current_pe, &hist);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn calc_peg_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let pe = args.get("pe").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let growth = args.get("growth_rate").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let r = axagent_stock_analysis::risk::peg_ratio(pe, growth);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn detect_ma_cross_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let klines_json = args.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let fast = args.get("fast_period").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+    let slow = args.get("slow_period").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+    let r = axagent_stock_analysis::signals::detect_ma_cross(klines_json, fast, slow);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn detect_breakout_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let klines_json = args.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let support = args.get("support").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let resistance = args.get("resistance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let r = axagent_stock_analysis::signals::detect_breakout(klines_json, support, resistance);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn calc_kelly_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let win_rate = args.get("win_rate").and_then(|v| v.as_f64()).unwrap_or(0.5);
+    let avg_win = args.get("avg_win").and_then(|v| v.as_f64()).unwrap_or(0.05);
+    let avg_loss = args.get("avg_loss").and_then(|v| v.as_f64()).unwrap_or(0.05);
+    let r = axagent_stock_analysis::risk::kelly_criterion(win_rate, avg_win, avg_loss);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn calc_risk_parity_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let vols: Vec<f64> = args
+        .get("volatilities_json")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let corr = args.get("correlations_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let r = axagent_stock_analysis::risk::risk_parity_weights(&vols, corr);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn clean_outliers_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let prices_json = args.get("prices_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("zscore");
+    let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(2.0);
+    let r = axagent_stock_analysis::data_clean::remove_outliers(prices_json, method, threshold);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn clean_fill_missing_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let prices_json = args.get("prices_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("forward");
+    let r = axagent_stock_analysis::data_clean::fill_missing(prices_json, method);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
+fn adjust_prices_inner(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let klines_json = args.get("klines_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let dividends_json = args.get("dividends_json").and_then(|v| v.as_str()).unwrap_or("[]");
+    let r = axagent_stock_analysis::data_clean::adjust_prices(klines_json, dividends_json);
+    Ok(serde_json::to_value(&r).unwrap_or_default())
+}
+
 /// 从 DB 加载工作流模板，仅注入 stock_code 到 Trigger 节点。
 /// 专家 prompt 由 AgentExecutor 从 agent_profile 自动加载，
 /// 行情数据通过 ToolNode 的 context_sources 由上游工具节点输出注入，
@@ -336,6 +445,104 @@ pub async fn run_stock_workflow(
             "run_quality_gate",
             Arc::new(|_name: String, args: serde_json::Value| {
                 Box::pin(async move { Ok(run_quality_gate_inner(&args)) })
+            }),
+        )
+        .await;
+
+    // 新增 12 个金融模型工具
+    engine
+        .register_tool_handler(
+            "calc_max_drawdown",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_max_drawdown_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_sharpe_ratio",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_sharpe_ratio_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_var",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_var_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_pe_percentile",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_pe_percentile_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_peg",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_peg_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "detect_ma_cross",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { detect_ma_cross_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "detect_breakout",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { detect_breakout_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_kelly",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_kelly_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "calc_risk_parity",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { calc_risk_parity_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "clean_outliers",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { clean_outliers_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "clean_fill_missing",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { clean_fill_missing_inner(&args) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "adjust_prices",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { adjust_prices_inner(&args) })
             }),
         )
         .await;

@@ -23,6 +23,7 @@ import {
   ShoppingBag,
   SlidersHorizontal,
   Timer,
+  TrendingUp,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -65,6 +66,7 @@ const MENU_ICONS: Partial<Record<SettingsSection, React.ReactNode>> = {
   theme: <PaintBucket size={14} />,
   imageGen: <Image size={14} />,
   cron: <Timer size={14} />,
+  stockAnalysis: <TrendingUp size={14} />,
 };
 
 const TAB_GROUPS: Record<string, SettingsSection[]> = {
@@ -91,6 +93,7 @@ const TAB_GROUPS: Record<string, SettingsSection[]> = {
     "cloudWorkspace",
     "backup",
     "scheduler",
+    "stockAnalysis",
     "cron",
     "notificationCenter",
   ],

@@ -6,14 +6,11 @@
 use crate::AppState;
 use axagent_core::entity::stock_analyses;
 use axagent_core::workflow_types::{WorkflowEdge, WorkflowNode};
-use axagent_rt_workflow::work_engine::{
-    ProgressCallback, RunOptions, StepProgressEvent, ToolCallback,
-};
+use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -103,12 +100,13 @@ fn run_quality_gate_inner(args: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// 从 DB 加载工作流模板，注入 stock_code 到 Trigger + 替换静态占位符。
-/// 运行时变量（如 {{t-market-data}}）由 prompt_template 两阶段渲染处理。
+/// 从 DB 加载工作流模板，仅注入 stock_code 到 Trigger 节点。
+/// 专家 prompt 由 AgentExecutor 从 agent_profile 自动加载，
+/// 行情数据通过 ToolNode 的 context_sources 由上游工具节点输出注入，
+/// 运行时变量由 prompt_template 两阶段渲染处理。
 async fn load_and_inject_template(
     db: &sea_orm::DatabaseConnection,
     stock_code: &str,
-    data_ctx: &str,
 ) -> Result<(Vec<WorkflowNode>, Vec<WorkflowEdge>), String> {
     use axagent_core::entity::workflow_template;
 
@@ -123,38 +121,12 @@ async fn load_and_inject_template(
     let edges: Vec<WorkflowEdge> =
         serde_json::from_str(&template.edges).map_err(|e| format!("解析模板边失败: {e}"))?;
 
-    let prompts = super::stock_analysis::load_stock_analysis_prompts(db).await;
-
-    // 注入占位符（静态部分由 load 阶段处理，{{tool_id}} 运行时由 prompt_template 渲染）
+    // 仅注入 stock_code 到 trigger 节点，prompt 不再手动替换
     for node in &mut nodes {
-        match node {
-            WorkflowNode::Trigger(tn) => {
-                // 注入实际股票代码到 trigger config
-                if let Some(sc) = tn.config.config.get_mut("stock_code") {
-                    *sc = serde_json::Value::String(stock_code.to_string());
-                }
-            },
-            WorkflowNode::Agent(an) => {
-                let expert_id = an
-                    .config
-                    .agent_profile_id
-                    .as_deref()
-                    .and_then(|s| s.strip_prefix("stock-"))
-                    .unwrap_or("unknown");
-
-                let expert_prompt = prompts
-                    .get(expert_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("你是{expert_id}，基于数据分析给出专业判断。"));
-
-                an.config.system_prompt = an
-                    .config
-                    .system_prompt
-                    .replace("{{goal}}", &an.base.title)
-                    .replace("{{data_ctx}}", data_ctx)
-                    .replace(&format!("{{{{expert_prompt_{expert_id}}}}}"), &expert_prompt);
-            },
-            _ => {},
+        if let WorkflowNode::Trigger(tn) = node {
+            if let Some(sc) = tn.config.config.get_mut("stock_code") {
+                *sc = serde_json::Value::String(stock_code.to_string());
+            }
         }
     }
 
@@ -167,7 +139,7 @@ pub async fn run_stock_workflow(
     state: State<'_, AppState>,
     stock_code: String,
 ) -> Result<serde_json::Value, String> {
-    // ── 1. 行情数据 ──
+    // ── 1. 获取行情基本信息（用于写入分析记录）──
     let quote = state
         .astock_client
         .get_quote(&stock_code)
@@ -198,161 +170,177 @@ pub async fn run_stock_workflow(
     .await
     .map_err(|e| format!("DB 写入失败: {e}"))?;
 
-    // ── 2. 多源行情上下文（报价 + K线摘要 + 财务 + 新闻 + 资金流向）──
-    let sc = stock_code.clone();
-    let (klines, financials, news, money_flow) = tokio::join!(
-        state.astock_client.get_klines(&sc, "daily", 60),
-        state.astock_client.get_financials(&sc),
-        state.astock_client.get_news(&sc, 10),
-        state.astock_client.get_money_flow(&sc),
-    );
+    // ── 2. 从模板加载 DAG 并注入 stock_code ──
+    let (nodes, edges) = load_and_inject_template(&state.sea_db, &stock_code).await?;
 
-    let kline_summary = match &klines {
-        Ok(k) if !k.is_empty() => {
-            let _last = k.last().unwrap();
-            let ma5: f64 = k.iter().rev().take(5).map(|x| x.close).sum::<f64>() / 5.0;
-            let ma20: f64 = k.iter().rev().take(20).map(|x| x.close).sum::<f64>() / 20.0;
-            let max60 = k.iter().map(|x| x.high).fold(f64::MIN, f64::max);
-            let min60 = k.iter().map(|x| x.low).fold(f64::MAX, f64::min);
-            format!(
-                "最近60日K线：最高¥{:.2} 最低¥{:.2} MA5=¥{:.2} MA20=¥{:.2}",
-                max60, min60, ma5, ma20
-            )
-        },
-        _ => "K线数据暂不可用".into(),
-    };
+    // 加载模板的 schema 和 variables
+    use axagent_core::entity::workflow_template;
+    use axagent_core::workflow_types::JsonSchema;
+    let template = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(&state.sea_db)
+        .await
+        .map_err(|e| format!("查询工作流模板失败: {e}"))?
+        .ok_or("股票分析工作流模板未种子化，请重启应用")?;
+    let input_schema: Option<JsonSchema> = template
+        .input_schema
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let output_schema: Option<JsonSchema> = template
+        .output_schema
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
 
-    let fin_summary = match &financials {
-        Ok(f) if !f.is_empty() => {
-            let last = &f[0];
-            format!(
-                "最新财报：营收{} 净利润{} EPS={} ROE={}% 毛利率={}%",
-                last.revenue
-                    .map_or("N/A".into(), |v| format!("{:.1}亿", v / 1e8)),
-                last.net_profit
-                    .map_or("N/A".into(), |v| format!("{:.1}亿", v / 1e8)),
-                last.eps.map_or("N/A".into(), |v| format!("{:.2}", v)),
-                last.roe.map_or("N/A".into(), |v| format!("{:.1}", v)),
-                last.gross_margin
-                    .map_or("N/A".into(), |v| format!("{:.1}", v)),
-            )
-        },
-        _ => "财务数据暂不可用".into(),
-    };
-
-    let news_summary = match &news {
-        Ok(n) if !n.is_empty() => {
-            let titles: Vec<&str> = n.iter().take(5).map(|x| x.title.as_str()).collect();
-            format!("最近{}条新闻：{}", n.len(), titles.join("；"))
-        },
-        _ => "新闻数据暂不可用".into(),
-    };
-
-    let mf_summary = match &money_flow {
-        Ok(Some(mf)) => format!(
-            "资金流向：主力净流入{:.1}亿 超大单{:.1}亿 大单{:.1}亿 中单{:.1}亿 小单{:.1}亿",
-            mf.main_net_inflow / 1e8,
-            mf.super_large_net / 1e8,
-            mf.large_net / 1e8,
-            mf.medium_net / 1e8,
-            mf.small_net / 1e8,
-        ),
-        _ => "资金流向数据暂不可用".into(),
-    };
-
-    let data_ctx = format!(
-        "{name} ({code})\n现价:¥{price:.2} 涨跌:{pct:.2}% PE:{pe} PB:{pb} 市值:{mv}\n\n{kline_summary}\n\n{fin_summary}\n\n{news_summary}\n\n{mf_summary}",
-        name = quote.name,
-        code = stock_code,
-        price = quote.price,
-        pct = quote.change_pct,
-        pe = quote.pe.map_or("N/A".into(), |v| format!("{:.1}", v)),
-        pb = quote.pb.map_or("N/A".into(), |v| format!("{:.1}", v)),
-        mv = quote
-            .total_mv
-            .map_or("N/A".into(), |v| format!("{:.0}亿", v / 1e8)),
-    );
-
-    // ── 3. 从模板加载 DAG 并注入数据 ──
-    let (nodes, edges) = load_and_inject_template(&state.sea_db, &stock_code, &data_ctx).await?;
-
-    // ── 4. 注入 ToolCallback：将 MCP 工具调用桥接到 AStockClient ──
+    // ── 3. 注册工具 handler（数据获取 + 算法计算）──
     let engine = Arc::clone(&state.work_engine);
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc_tool = stock_code.clone();
-    let tool_cb: ToolCallback = Arc::new(
-        move |tool_name: String,
-              args: serde_json::Value|
-              -> Pin<
-            Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>,
-        > {
-            let client = Arc::clone(&tool_client);
-            let code = sc_tool.clone();
-            Box::pin(async move {
-                let result: serde_json::Value = match tool_name.as_str() {
-                    "search_stock" => {
-                        let kw = args["keyword"].as_str().unwrap_or(&code);
-                        match client.search_stock(kw).await {
-                            Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                            Err(e) => json!({"error": e.to_string()}),
-                        }
-                    },
-                    "get_stock_quote" => {
-                        let c = args["stock_code"].as_str().unwrap_or(&code);
-                        match client.get_quote(c).await {
-                            Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                            Err(e) => json!({"error": e.to_string()}),
-                        }
-                    },
-                    "get_stock_kline" => {
-                        let c = args["stock_code"].as_str().unwrap_or(&code);
-                        let period = args["period"].as_str().unwrap_or("daily");
-                        let limit = args["limit"].as_u64().unwrap_or(120) as u32;
-                        match client.get_klines(c, period, limit).await {
-                            Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                            Err(e) => json!({"error": e.to_string()}),
-                        }
-                    },
-                    "get_stock_financials" => {
-                        let c = args["stock_code"].as_str().unwrap_or(&code);
-                        match client.get_financials(c).await {
-                            Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                            Err(e) => json!({"error": e.to_string()}),
-                        }
-                    },
-                    "get_stock_news" => {
-                        let c = args["stock_code"].as_str().unwrap_or(&code);
-                        let limit = args["limit"].as_u64().unwrap_or(30) as u32;
-                        match client.get_news(c, limit).await {
-                            Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                            Err(e) => json!({"error": e.to_string()}),
-                        }
-                    },
-                    "get_stock_money_flow" => {
-                        let c = args["stock_code"].as_str().unwrap_or(&code);
-                        match client.get_money_flow(c).await {
-                            Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                            Err(e) => json!({"error": e.to_string()}),
-                        }
-                    },
-                    // ── 算法工具 ──
-                    "compute_scoring" => {
-                        compute_scoring_inner(&args).unwrap_or_else(|e| json!({"error": e}))
-                    },
-                    "compute_valuation" => {
-                        compute_valuation_inner(&args).unwrap_or_else(|e| json!({"error": e}))
-                    },
-                    "compute_portfolio_risk" => compute_portfolio_risk_inner(&args),
-                    "run_quality_gate" => run_quality_gate_inner(&args),
-                    _ => json!({"error": format!("未知工具: {tool_name}")}),
-                };
-                Ok(result)
-            })
-        },
-    );
-    engine.set_tool_callback(tool_cb).await;
 
-    // ── 5. 创建并执行工作流 ──
+    // 数据工具
+    let tool_client = Arc::clone(&state.astock_client);
+    let sc = stock_code.clone();
+    engine
+        .register_tool_handler(
+            "search_stock",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                let code = sc.clone();
+                Box::pin(async move {
+                    let kw = args["keyword"].as_str().unwrap_or(&code);
+                    match client.search_stock(kw).await {
+                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+                        Err(e) => Ok(json!({"error": e.to_string()})),
+                    }
+                })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    let sc = stock_code.clone();
+    engine
+        .register_tool_handler(
+            "get_stock_quote",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                let code = sc.clone();
+                Box::pin(async move {
+                    let c = args["stock_code"].as_str().unwrap_or(&code);
+                    match client.get_quote(c).await {
+                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+                        Err(e) => Ok(json!({"error": e.to_string()})),
+                    }
+                })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    let sc = stock_code.clone();
+    engine
+        .register_tool_handler(
+            "get_stock_kline",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                let code = sc.clone();
+                Box::pin(async move {
+                    let c = args["stock_code"].as_str().unwrap_or(&code);
+                    let period = args["period"].as_str().unwrap_or("daily");
+                    let limit = args["limit"].as_u64().unwrap_or(120) as u32;
+                    match client.get_klines(c, period, limit).await {
+                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+                        Err(e) => Ok(json!({"error": e.to_string()})),
+                    }
+                })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    let sc = stock_code.clone();
+    engine
+        .register_tool_handler(
+            "get_stock_financials",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                let code = sc.clone();
+                Box::pin(async move {
+                    let c = args["stock_code"].as_str().unwrap_or(&code);
+                    match client.get_financials(c).await {
+                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+                        Err(e) => Ok(json!({"error": e.to_string()})),
+                    }
+                })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    let sc = stock_code.clone();
+    engine
+        .register_tool_handler(
+            "get_stock_news",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                let code = sc.clone();
+                Box::pin(async move {
+                    let c = args["stock_code"].as_str().unwrap_or(&code);
+                    let limit = args["limit"].as_u64().unwrap_or(30) as u32;
+                    match client.get_news(c, limit).await {
+                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+                        Err(e) => Ok(json!({"error": e.to_string()})),
+                    }
+                })
+            }),
+        )
+        .await;
+    let tool_client = Arc::clone(&state.astock_client);
+    let sc = stock_code.clone();
+    engine
+        .register_tool_handler(
+            "get_stock_money_flow",
+            Arc::new(move |_name: String, args: serde_json::Value| {
+                let client = Arc::clone(&tool_client);
+                let code = sc.clone();
+                Box::pin(async move {
+                    let c = args["stock_code"].as_str().unwrap_or(&code);
+                    match client.get_money_flow(c).await {
+                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
+                        Err(e) => Ok(json!({"error": e.to_string()})),
+                    }
+                })
+            }),
+        )
+        .await;
+
+    // 算法工具
+    engine
+        .register_tool_handler(
+            "compute_scoring",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { compute_scoring_inner(&args).map_err(|e| e.to_string()) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "compute_valuation",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { compute_valuation_inner(&args).map_err(|e| e.to_string()) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "compute_portfolio_risk",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { Ok(compute_portfolio_risk_inner(&args)) })
+            }),
+        )
+        .await;
+    engine
+        .register_tool_handler(
+            "run_quality_gate",
+            Arc::new(|_name: String, args: serde_json::Value| {
+                Box::pin(async move { Ok(run_quality_gate_inner(&args)) })
+            }),
+        )
+        .await;
+
+    // ── 4. 创建并执行工作流 ──
     let wf_name = format!("stock-analysis-{stock_code}");
     let workflow = engine
         .create_workflow(&wf_name, nodes, edges)
@@ -384,11 +372,20 @@ pub async fn run_stock_workflow(
         })
     });
 
+    let sc_for_ret = stock_code.clone();
+    let sc_name = quote.name.clone();
     tokio::spawn(async move {
-        let opts = RunOptions::default()
+        let mut opts = RunOptions::default()
             .with_max_concurrent(9)
             .with_step_timeout(std::time::Duration::from_secs(300))
-            .with_progress_callback(progress_cb);
+            .with_progress_callback(progress_cb)
+            .with_input(json!({"stock_code": &stock_code}));
+        if let Some(s) = input_schema {
+            opts = opts.with_input_schema(s);
+        }
+        if let Some(s) = output_schema {
+            opts = opts.with_output_schema(s);
+        }
 
         match engine.run_workflow(&wf_id, opts).await {
             Ok(result) => {
@@ -427,12 +424,23 @@ pub async fn run_stock_workflow(
                     _ => {
                         let _ = app_h.emit(
                             "workflow-completed",
-                            serde_json::json!({ "workflowId": wf_id, "results": result.results }),
+                            serde_json::json!({
+                                "workflowId": wf_id,
+                                "results": result.results,
+                                "output": result.output,
+                            }),
                         );
+                        // 优先用 output（EndNode 聚合 + output_schema 过滤），
+                        // 回退到 results["portfolio-mgr"] 兼容旧模板
                         let decision_json = result
-                            .results
-                            .get("portfolio-mgr")
-                            .and_then(|v| serde_json::to_string(v).ok());
+                            .output
+                            .and_then(|v| serde_json::to_string(&v).ok())
+                            .or_else(|| {
+                                result
+                                    .results
+                                    .get("portfolio-mgr")
+                                    .and_then(|v| serde_json::to_string(v).ok())
+                            });
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(
@@ -470,8 +478,8 @@ pub async fn run_stock_workflow(
     Ok(serde_json::json!({
         "analysisId": analysis_id,
         "workflowId": wf_id_ret,
-        "stockCode": stock_code,
-        "stockName": quote.name,
+        "stockCode": sc_for_ret,
+        "stockName": sc_name,
     }))
 }
 

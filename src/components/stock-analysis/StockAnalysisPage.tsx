@@ -1,6 +1,7 @@
+import { StockAnalysisConfigPanel } from "@/components/settings/StockAnalysisConfigPanel";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { useStockAnalysisStore } from "@/stores";
-import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users } from "lucide-react";
+import { useStockAnalysisStore, useUIStore } from "@/stores";
+import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -45,6 +46,9 @@ export function StockAnalysisPage() {
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const klinePeriod = useStockAnalysisStore((s) => s.klinePeriod);
+
+  const deviceLayout = useUIStore((s) => s.deviceLayout);
+  const isMobile = deviceLayout === "mobile";
 
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("market");
@@ -135,8 +139,14 @@ export function StockAnalysisPage() {
           </button>
           <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
           <span className="sa-header-meta">{t("stockAnalysis.subtitle")}</span>
-          <button type="button" className="sa-header-back" onClick={() => setSettingsOpen(true)} title="分析设置">
-            <Settings size={16} />
+          <button
+            type="button"
+            className="sa-header-back"
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            title="分析设置"
+            style={settingsOpen && !isMobile ? { background: "var(--accent-bg)", color: "var(--accent)" } : undefined}
+          >
+            {settingsOpen && !isMobile ? <X size={16} /> : <Settings size={16} />}
           </button>
         </div>
 
@@ -145,43 +155,61 @@ export function StockAnalysisPage() {
 
           <div className="sa-body-inner">
             <div className="sa-main">
-              {status === "loading" && (
-                <div className="sa-loading">
-                  <div className="sa-spinner" />
-                  <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
-                </div>
-              )}
-
-              {status === "idle" && (
-                <div className="sa-empty">
-                  <div>
-                    <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
-                    <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
-                  </div>
-                </div>
-              )}
-
-              {status !== "loading" && status !== "idle" && (
-                <>
-                  <AnalysisProgress />
-
-                  <div className="sa-tabs">
-                    {tabs.map((tab) => (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
-                        onClick={() => setActiveTab(tab.key)}
-                      >
-                        {tab.icon}
-                        {tab.label}
+              {settingsOpen && !isMobile
+                ? (
+                  <div className="sa-settings-inline">
+                    <div className="sa-settings-header">
+                      <span className="sa-settings-title">{t("stockAnalysis.settings.title")}</span>
+                      <button type="button" className="sa-header-back" onClick={() => setSettingsOpen(false)}>
+                        <X size={14} /> {t("common.close")}
                       </button>
-                    ))}
+                    </div>
+                    <div className="sa-settings-body">
+                      <StockAnalysisConfigPanel showVendorHealth />
+                    </div>
                   </div>
+                )
+                : (
+                  <>
+                    {status === "loading" && (
+                      <div className="sa-loading">
+                        <div className="sa-spinner" />
+                        <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
+                      </div>
+                    )}
 
-                  {activeContent?.children}
-                </>
-              )}
+                    {status === "idle" && (
+                      <div className="sa-empty">
+                        <div>
+                          <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
+                          <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {status !== "loading" && status !== "idle" && (
+                      <>
+                        <AnalysisProgress />
+
+                        <div className="sa-tabs">
+                          {tabs.map((tab) => (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
+                              onClick={() => setActiveTab(tab.key)}
+                            >
+                              {tab.icon}
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {activeContent?.children}
+                      </>
+                    )}
+                  </>
+                )}
             </div>
 
             <div className="sa-sidebar">
@@ -232,7 +260,7 @@ export function StockAnalysisPage() {
           {sheetOpen ? "✕" : "+"}
         </button>
       </div>
-      <StockAnalysisSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {isMobile && <StockAnalysisSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
     </PageErrorBoundary>
   );
 }

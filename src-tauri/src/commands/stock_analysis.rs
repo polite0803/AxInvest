@@ -9,7 +9,7 @@ use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
 use axagent_stock_analysis::decision::{
-    AgentRunner, AnalysisConfig, AnalysisEvent, RuleConfig, StockAnalysisFullConfig,
+    AgentRunner, AnalysisEvent, StockAnalysisFullConfig,
 };
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::monitor::MonitorConfig;
@@ -579,12 +579,6 @@ async fn load_full_config(db: &sea_orm::DatabaseConnection) -> StockAnalysisFull
         }
     }
     cfg
-}
-
-/// 从 settings 表加载用户配置并合并到 AnalysisConfig（兼容旧接口）
-async fn load_analysis_config(db: &sea_orm::DatabaseConnection, config: &mut AnalysisConfig) {
-    let full = load_full_config(db).await;
-    *config = full.analysis;
 }
 
 // ── MCP Stock Data Tools ──

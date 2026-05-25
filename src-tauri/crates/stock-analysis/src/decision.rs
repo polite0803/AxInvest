@@ -367,7 +367,7 @@ impl Default for MonitorConfig {
 
 // ── 完整配置（版本化持久化）──
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StockAnalysisFullConfig {
     #[serde(default)]
@@ -382,17 +382,4 @@ pub struct StockAnalysisFullConfig {
     pub value: ValueConfig,
     #[serde(default)]
     pub monitor: MonitorConfig,
-}
-
-impl Default for StockAnalysisFullConfig {
-    fn default() -> Self {
-        Self {
-            analysis: AnalysisConfig::default(),
-            scoring: ScoringWeights::default(),
-            rules: RuleConfig::default(),
-            position: PositionLimitsConfig::default(),
-            value: ValueConfig::default(),
-            monitor: MonitorConfig::default(),
-        }
-    }
 }

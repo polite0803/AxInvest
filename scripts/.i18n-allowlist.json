@@ -492,7 +492,7 @@
     },
     {
       "file": "src/pages/SettingsPage.tsx",
-      "lines": "79,81",
+      "lines": "11,79,81",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

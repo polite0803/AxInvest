@@ -160,7 +160,7 @@ function NavItemButton({
           {label}
         </span>
       )}
-      {shortcutLabel && (
+      {!sidebarCollapsed && shortcutLabel && (
         <span
           style={{
             marginLeft: "auto",

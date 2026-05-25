@@ -71,6 +71,8 @@ pub enum ToolCategory {
     Browser,
     /// 桌面控制
     Desktop,
+    /// 金融分析（股票、估值、风控）
+    Finance,
 }
 
 impl ToolCategory {
@@ -91,6 +93,7 @@ impl ToolCategory {
             ToolCategory::Knowledge => "knowledge",
             ToolCategory::Browser => "browser",
             ToolCategory::Desktop => "desktop",
+            ToolCategory::Finance => "finance",
         }
     }
 

@@ -234,6 +234,11 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
         parameters: None,
     };
+    let td_news = ToolDef {
+        name: "get_stock_news".into(),
+        description: Some("获取近期新闻公告".into()),
+        parameters: None,
+    };
     let td_mf = ToolDef {
         name: "get_stock_money_flow".into(),
         description: Some("获取资金流向：主力/超大单/大单/中单/小单净流入".into()),
@@ -404,9 +409,21 @@ async fn seed_stock_analysis_workflow_template(
         parameters: None,
     };
     // ── P3: 独立新能力 ToolDef ──
-    let td_mc = ToolDef { name: "run_monte_carlo".into(), description: Some("蒙特卡洛模拟价格路径".into()), parameters: None };
-    let td_ind = ToolDef { name: "analyze_industry_position".into(), description: Some("行业内估值/增长对比分析".into()), parameters: None };
-    let td_lup = ToolDef { name: "detect_limit_up_potential".into(), description: Some("涨停潜力评估".into()), parameters: None };
+    let td_mc = ToolDef {
+        name: "run_monte_carlo".into(),
+        description: Some("蒙特卡洛模拟价格路径".into()),
+        parameters: None,
+    };
+    let td_ind = ToolDef {
+        name: "analyze_industry_position".into(),
+        description: Some("行业内估值/增长对比分析".into()),
+        parameters: None,
+    };
+    let td_lup = ToolDef {
+        name: "detect_limit_up_potential".into(),
+        description: Some("涨停潜力评估".into()),
+        parameters: None,
+    };
 
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
@@ -544,11 +561,87 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
     }
 
+    let analyst_tools: std::collections::HashMap<&str, Vec<ToolDef>> = [
+        (
+            "market-analyst",
+            vec![
+                td_quote.clone(),
+                td_atr.clone(),
+                td_ma_cross.clone(),
+                td_breakout.clone(),
+            ],
+        ),
+        (
+            "sentiment-analyst",
+            vec![
+                td_news.clone(),
+                td_mf.clone(),
+                td_cls.clone(),
+                td_dragon.clone(),
+                td_hot.clone(),
+            ],
+        ),
+        ("news-analyst", vec![td_news.clone(), td_announce.clone(), td_research.clone(), td_cls.clone()]),
+        (
+            "fundamentals-analyst",
+            vec![
+                td_fin.clone(),
+                td_val.clone(),
+                td_pe_pct.clone(),
+                td_peg.clone(),
+            ],
+        ),
+        (
+            "policy-analyst",
+            vec![
+                td_news.clone(),
+                td_research.clone(),
+                td_announce.clone(),
+                td_cls.clone(),
+                td_north.clone(),
+            ],
+        ),
+        (
+            "hot-money-tracker",
+            vec![
+                td_mf.clone(),
+                td_dragon.clone(),
+                td_hot.clone(),
+                td_breakout.clone(),
+            ],
+        ),
+        ("lockup-watcher", vec![td_fin.clone(), td_pledge.clone(), td_announce.clone()]),
+        (
+            "research-analyst",
+            vec![
+                td_research.clone(),
+                td_consensus.clone(),
+                td_earnings.clone(),
+                td_fin.clone(),
+            ],
+        ),
+        (
+            "sector-analyst",
+            vec![
+                td_concepts.clone(),
+                td_ind.clone(),
+                td_industry.clone(),
+                td_quote.clone(),
+            ],
+        ),
+    ]
+    .into_iter()
+    .collect();
+
     for (i, (id, title, expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
         let mut an = agent(id, title, expert);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
+            if let Some(tools) = analyst_tools.get(expert) {
+                a.config.tools = tools.clone();
+                a.config.max_tool_rounds = Some(2);
+            }
         }
         nodes.push(an);
     }
@@ -598,123 +691,95 @@ async fn seed_stock_analysis_workflow_template(
             "",
         ),
     ];
+    let bull_tools = vec![
+        td_quote.clone(), td_kline.clone(), td_fin.clone(), td_news.clone(),
+        td_score.clone(), td_earnings.clone(), td_ma_cross.clone(),
+    ];
+    let bear_tools = vec![
+        td_quote.clone(), td_kline.clone(), td_fin.clone(), td_news.clone(),
+        td_var.clone(), td_maxdd.clone(), td_pledge.clone(), td_corr.clone(),
+    ];
     for (id, title, expert, deps, _next) in &debate_pairs {
-        nodes.push(agent(id, title, expert));
+        let mut an = agent(id, title, expert);
+        let is_bull = expert.contains("bull");
+        if let WorkflowNode::Agent(ref mut a) = an {
+            a.config.tools = if is_bull { bull_tools.clone() } else { bear_tools.clone() };
+            a.config.max_tool_rounds = Some(2);
+        }
+        nodes.push(an);
         for dep in *deps {
             edges.push(edge(&format!("e-{dep}-{id}"), dep, id));
         }
     }
 
     // 风险评估（3 个并行，均依赖 bear-r3）
-    for (rid, rtitle, rexpert) in &[
+    for (rid, rtitle, rexpert, rtools) in &[
         (
             "risk-agg",
-            "以最激进的风险偏好评估该股票：假设最大回撤容忍度30%，给出该股票是否值得重仓的结论",
+            "以最激进的风险偏好评估该股票",
             "aggressive-debator",
+            vec![
+                td_score.clone(),
+                td_risk.clone(),
+                td_maxdd.clone(),
+                td_var.clone(),
+                td_kelly.clone(),
+                td_mc.clone(),
+            ],
         ),
         (
             "risk-con",
-            "以最保守的风险偏好评估该股票：本金安全第一，给出该股票是否适合配置的结论",
+            "以最保守的风险偏好评估该股票",
             "conservative-debator",
+            vec![
+                td_score.clone(),
+                td_risk.clone(),
+                td_sharpe.clone(),
+                td_maxdd.clone(),
+                td_pledge.clone(),
+                td_corr.clone(),
+            ],
         ),
         (
             "risk-neu",
-            "以中性风险偏好评估该股票：平衡收益与风险，给出该股票的合理仓位建议",
+            "以中性风险偏好评估该股票",
             "neutral-debator",
+            vec![
+                td_score.clone(),
+                td_risk.clone(),
+                td_val.clone(),
+                td_pe_pct.clone(),
+                td_peg.clone(),
+                td_rp.clone(),
+                td_ind.clone(),
+            ],
         ),
     ] {
-        nodes.push(agent(rid, rtitle, rexpert));
+        let mut an = agent(rid, rtitle, rexpert);
+        if let WorkflowNode::Agent(ref mut a) = an {
+            a.config.tools = rtools.clone();
+            a.config.max_tool_rounds = Some(2);
+        }
+        nodes.push(an);
         edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
     }
 
-    // ── 算法 Tool 节点：内置算法作为工具嵌入工作流 ──
+    // ── 算法 Tool 节点：仅 4 个核心评分/估值/风控/质量 ——
     let algo_tools: &[(&str, &str, &str, &str)] = &[
         ("t-scoring", "技术评分", "compute_scoring", "stock_code"),
         ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
         ("t-risk", "风险评估", "compute_portfolio_risk", "positions_json"),
         ("t-quality", "质量门控", "run_quality_gate", "reports_json"),
-        // 新增 12 个金融模型工具
-        ("t-calc-maxdd", "最大回撤", "calc_max_drawdown", "prices_json"),
-        ("t-calc-sharpe", "夏普比率", "calc_sharpe_ratio", "returns_json"),
-        ("t-calc-var", "VaR 风险价值", "calc_var", "returns_json"),
-        ("t-calc-pe-pct", "PE 分位数", "calc_pe_percentile", "current_pe"),
-        ("t-calc-peg", "PEG 估值", "calc_peg", "pe"),
-        ("t-signal-cross", "MA 交叉检测", "detect_ma_cross", "klines_json"),
-        ("t-signal-brk", "突破检测", "detect_breakout", "klines_json"),
-        ("t-calc-kelly", "凯利仓位", "calc_kelly", "win_rate"),
-        ("t-calc-rp", "风险平价", "calc_risk_parity", "volatilities_json"),
-        ("t-clean-outl", "异常值剔除", "clean_outliers", "prices_json"),
-        ("t-clean-fill", "缺失值填充", "clean_fill_missing", "prices_json"),
-        ("t-adjust-px", "复权调整", "adjust_prices", "klines_json"),
-        // 新增 9 个数据 API 工具
-        ("t-research", "券商研报", "get_research_reports", "stock_code"),
-        ("t-consensus", "一致性预期", "get_consensus_eps", "stock_code"),
-        ("t-concepts", "概念板块", "get_concept_blocks", "stock_code"),
-        ("t-announce", "公司公告", "get_announcements", "stock_code"),
-        ("t-north-flow", "北向资金", "get_north_bound_flow", "stock_code"),
-        ("t-dragon", "龙虎榜", "get_market_dragon_tiger", "market"),
-        ("t-hot", "热门股", "get_hot_stocks", "market"),
-        ("t-industry", "行业排名", "get_industry_ranking", "market"),
-        ("t-cls-flash", "财联社快讯", "get_cls_flash", "market"),
-        // P1: 4 个技术指标
-        ("t-atr", "ATR 真实波幅", "compute_atr", "klines_json"),
-        ("t-kdj", "KDJ 指标", "compute_kdj", "klines_json"),
-        ("t-obv", "OBV 能量潮", "compute_obv", "klines_json"),
-        ("t-beta", "Beta 系数", "calc_beta", "stock_returns_json"),
-        // P2: 事件检测 + 组合分析
-        ("t-earnings", "业绩检测", "detect_earnings_surprise", "actual_eps"),
-        ("t-pledge", "质押风险", "detect_pledge_risk", "pledge_pct"),
-        ("t-corr", "相关系数矩阵", "calc_correlation_matrix", "returns_matrix_json"),
-        // P3: 独立新能力
-        ("t-mc", "蒙特卡洛模拟", "run_monte_carlo", "current_price"),
-        ("t-industry-pos", "行业定位", "analyze_industry_position", "stock_pe"),
-        ("t-limit-up", "涨停评估", "detect_limit_up_potential", "klines_json"),
     ];
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
     }
-    // 风险节点 → 第一个算法工具（评分）
     for rid in &["risk-agg", "risk-con", "risk-neu"] {
         edges.push(edge(&format!("e-{rid}-t-scoring"), rid, "t-scoring"));
     }
-    // 链式连接所有算法工具：scoring → valuation → risk → quality → 12 new tools
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
     edges.push(edge("e-t-risk-t-quality", "t-risk", "t-quality"));
-    let algo_chain = [
-        "t-calc-maxdd",
-        "t-calc-sharpe",
-        "t-calc-var",
-        "t-calc-pe-pct",
-        "t-calc-peg",
-        "t-signal-cross",
-        "t-signal-brk",
-        "t-calc-kelly",
-        "t-calc-rp",
-        "t-clean-outl",
-        "t-clean-fill",
-        "t-adjust-px",
-        "t-research",
-        "t-consensus",
-        "t-concepts",
-        "t-announce",
-        "t-north-flow",
-        "t-dragon",
-        "t-hot",
-        "t-industry",
-        "t-cls-flash",
-        "t-atr",
-        "t-kdj",
-        "t-obv",
-        "t-beta",
-        "t-earnings",
-        "t-pledge",
-        "t-corr", "t-mc", "t-industry-pos", "t-limit-up",
-    ];
-    edges.push(edge("e-t-quality-t-calc-maxdd", "t-quality", "t-calc-maxdd"));
-    for w in algo_chain.windows(2) {
-        edges.push(edge(&format!("e-{}-{}", w[0], w[1]), w[0], w[1]));
-    }
 
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(
@@ -728,35 +793,6 @@ async fn seed_stock_analysis_workflow_template(
             "t-valuation".into(),
             "t-risk".into(),
             "t-quality".into(),
-            "t-calc-maxdd".into(),
-            "t-calc-sharpe".into(),
-            "t-calc-var".into(),
-            "t-calc-pe-pct".into(),
-            "t-calc-peg".into(),
-            "t-signal-cross".into(),
-            "t-signal-brk".into(),
-            "t-calc-kelly".into(),
-            "t-calc-rp".into(),
-            "t-clean-outl".into(),
-            "t-clean-fill".into(),
-            "t-adjust-px".into(),
-            "t-research".into(),
-            "t-consensus".into(),
-            "t-concepts".into(),
-            "t-announce".into(),
-            "t-north-flow".into(),
-            "t-dragon".into(),
-            "t-hot".into(),
-            "t-industry".into(),
-            "t-cls-flash".into(),
-            "t-atr".into(),
-            "t-kdj".into(),
-            "t-obv".into(),
-            "t-beta".into(),
-            "t-earnings".into(),
-            "t-pledge".into(),
-            "t-corr".into(), "t-mc".into(),
-            "t-industry-pos".into(), "t-limit-up".into(),
         ];
         a.config.tools = vec![
             td_score.clone(),
@@ -764,6 +800,9 @@ async fn seed_stock_analysis_workflow_template(
             td_risk.clone(),
             td_quality.clone(),
             td_fin.clone(),
+            td_quote.clone(),
+            td_kline.clone(),
+            td_mf.clone(),
             td_maxdd.clone(),
             td_sharpe.clone(),
             td_var.clone(),
@@ -773,6 +812,7 @@ async fn seed_stock_analysis_workflow_template(
             td_breakout.clone(),
             td_kelly.clone(),
             td_rp.clone(),
+            td_beta.clone(),
             td_outliers.clone(),
             td_fill.clone(),
             td_adjust.clone(),
@@ -784,20 +824,23 @@ async fn seed_stock_analysis_workflow_template(
             td_dragon.clone(),
             td_hot.clone(),
             td_industry.clone(),
-            td_cls.clone(),
+            td_news.clone(), td_cls.clone(),
             td_atr.clone(),
             td_kdj.clone(),
             td_obv.clone(),
-            td_beta.clone(),
             td_earnings.clone(),
             td_pledge.clone(),
             td_corr.clone(),
+            td_mc.clone(),
+            td_ind.clone(),
+            td_lup.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(rm);
-    edges.push(edge("e-t-corr-research-mgr", "t-corr", "research-mgr"));
+    edges.push(edge("e-t-quality-research-mgr", "t-quality", "research-mgr"));
 
+    // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
     let mut trader = agent(
         "trader",
         "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则",
@@ -810,12 +853,19 @@ async fn seed_stock_analysis_workflow_template(
             td_kline.clone(),
             td_mf.clone(),
             td_score.clone(),
+            td_atr.clone(),
+            td_ma_cross.clone(),
+            td_breakout.clone(),
+            td_kelly.clone(),
+            td_mc.clone(),
+            td_lup.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(trader);
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
 
+    // portfolio-mgr: 最终决策 — 全量工具验证
     let mut pm = agent(
         "portfolio-mgr",
         "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。输出JSON格式：{ action: 买入/增持/持有/减持/卖出, positionPct: 仓位百分比, targetPrice: 目标价, stopLoss: 止损价, reasoning: 决策理由(300字以内), riskLevel: 风险等级(低/中/高), confidence: 置信度(0-100) }",
@@ -830,6 +880,7 @@ async fn seed_stock_analysis_workflow_template(
             td_score.clone(),
             td_val.clone(),
             td_risk.clone(),
+            td_quality.clone(),
             td_maxdd.clone(),
             td_sharpe.clone(),
             td_var.clone(),
@@ -839,6 +890,13 @@ async fn seed_stock_analysis_workflow_template(
             td_breakout.clone(),
             td_kelly.clone(),
             td_rp.clone(),
+            td_beta.clone(),
+            td_earnings.clone(),
+            td_pledge.clone(),
+            td_corr.clone(),
+            td_mc.clone(),
+            td_ind.clone(),
+            td_lup.clone(),
         ];
         a.config.max_tool_rounds = Some(3);
     }
@@ -1285,42 +1343,6 @@ async fn seed_stock_analysis_workflow_template(
             var_type: "boolean".into(),
             value: serde_json::json!(false),
             description: Some("Mootdx — 本地行情接口".into()),
-            is_secret: false,
-        },
-        // ── 新增：金融模型参数 ──
-        Variable {
-            name: "risk_free_rate".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(3.0),
-            description: Some("无风险利率 (%)，用于夏普比率和 DCF".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "var_confidence".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.95),
-            description: Some("VaR 置信度 (0-1)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "outlier_method".into(),
-            var_type: "enum".into(),
-            value: serde_json::json!("zscore"),
-            description: Some("异常值检测方法: zscore / iqr".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "outlier_threshold".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(2.0),
-            description: Some("异常值 Z-score 阈值".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "kelly_fraction".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.5),
-            description: Some("凯利比例系数 (0-1) — 建议仓位 = half_kelly × 此系数".into()),
             is_secret: false,
         },
     ];

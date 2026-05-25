@@ -574,6 +574,7 @@ impl UnifiedToolRegistry {
                 ToolCategory::Knowledge => "builtin-knowledge",
                 ToolCategory::Browser => "builtin-browser",
                 ToolCategory::Desktop => "builtin-desktop",
+                ToolCategory::Finance => "finance",
             };
             let entry = groups_map.entry(gid.to_string()).or_insert_with(|| {
                 let name = self
@@ -705,6 +706,7 @@ impl UnifiedToolRegistry {
                     ToolCategory::Knowledge => "builtin-knowledge",
                     ToolCategory::Browser => "builtin-browser",
                     ToolCategory::Desktop => "builtin-desktop",
+                    ToolCategory::Finance => "finance",
                 };
                 self.group_enabled.get(gid).copied().unwrap_or(true)
             })

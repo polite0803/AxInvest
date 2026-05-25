@@ -2571,7 +2571,7 @@ export function InputArea() {
             visible={showSuggest}
           />
           <textarea
-            className=""
+            className="axagent-input-textarea"
             ref={textareaRef}
             data-testid="message-input"
             value={value}

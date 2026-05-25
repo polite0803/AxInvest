@@ -3505,6 +3505,7 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   .sa-sheet-tab { white-space: nowrap; border-radius: var(--radius); font-size: 11px; border: none; cursor: pointer; transition: all 0.12s; padding: 5px 10px; background: transparent; color: var(--muted); }
   .sa-sheet-tab.active { color: var(--accent); background: var(--accent-dim); font-weight: 500; }
   .sa-sheet-body { flex: 1; overflow-y: auto; padding: 0 10px 10px; }
+.sa-alert-table .ant-table { width: 100% !important; }
   .sa-sheet-toggle {
     display: flex;
     position: fixed;

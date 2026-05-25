@@ -83,12 +83,11 @@ export function PriceAlertPanel() {
       title: t("stockAnalysis.alert.name"),
       dataIndex: "stockName",
       ellipsis: true as const,
-      width: 56,
     },
     {
       title: t("stockAnalysis.alert.condition"),
       dataIndex: "condition",
-      width: 36,
+      width: 44,
       render: (v: string) => (v === "above" ? "≥" : "≤"),
     },
     {
@@ -117,6 +116,7 @@ export function PriceAlertPanel() {
   return (
     <Card
       size="small"
+      bodyStyle={{ padding: "8px 8px" }}
       title={
         <span>
           <BellOutlined /> {t("stockAnalysis.alert.title")}
@@ -163,6 +163,7 @@ export function PriceAlertPanel() {
         rowKey="id"
         size="small"
         pagination={false}
+        className="sa-alert-table"
         locale={{ emptyText: t("stockAnalysis.alert.empty") }}
       />
     </Card>

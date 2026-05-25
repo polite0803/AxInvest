@@ -46,29 +46,19 @@ pub struct AnalysisConfig {
     /// LLM max tokens
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    /// LLM 调用超时 (秒)
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u32,
 }
 
-fn default_debate_rounds() -> u32 {
-    3
-}
-fn default_kline_period() -> String {
-    "daily".into()
-}
-fn default_kline_limit() -> u32 {
-    120
-}
-fn default_news_limit() -> u32 {
-    30
-}
-fn default_max_concurrent() -> u32 {
-    9
-}
-fn default_temperature() -> f64 {
-    0.3
-}
-fn default_max_tokens() -> u32 {
-    4096
-}
+fn default_debate_rounds() -> u32 { 3 }
+fn default_kline_period() -> String { "daily".into() }
+fn default_kline_limit() -> u32 { 120 }
+fn default_news_limit() -> u32 { 30 }
+fn default_max_concurrent() -> u32 { 9 }
+fn default_temperature() -> f64 { 0.3 }
+fn default_max_tokens() -> u32 { 4096 }
+fn default_timeout_secs() -> u32 { 300 }
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
@@ -80,6 +70,7 @@ impl Default for AnalysisConfig {
             max_concurrent: 9,
             temperature: 0.3,
             max_tokens: 4096,
+            timeout_secs: 300,
         }
     }
 }

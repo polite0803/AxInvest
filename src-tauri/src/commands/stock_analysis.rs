@@ -111,8 +111,8 @@ pub async fn run_scheduled_analysis(
     let cancel_token = Arc::new(AtomicBool::new(false));
     let master_key = state.master_key;
 
-    let mut config = AnalysisConfig::default();
-    load_analysis_config(&db, &mut config).await;
+    let full_config = load_full_config(&db).await;
+    let config = &full_config.analysis;
 
     let runner: Option<Arc<dyn AgentRunner>> = match build_cancel_aware_runner(
         &db,
@@ -121,6 +121,7 @@ pub async fn run_scheduled_analysis(
         cancel_token.clone(),
         config.temperature,
         config.max_tokens,
+        config.timeout_secs as u64,
     )
     .await
     {
@@ -146,7 +147,7 @@ pub async fn run_scheduled_analysis(
         stock_code.to_string(),
         stock_name.to_string(),
         date.to_string(),
-        config,
+        full_config,
         runner,
         prompts,
         cancel_token,
@@ -165,7 +166,7 @@ fn launch_analysis_worker(
     code: String,
     name: String,
     date: String,
-    config: AnalysisConfig,
+    full_config: StockAnalysisFullConfig,
     runner: Option<Arc<dyn AgentRunner>>,
     prompts: std::collections::HashMap<String, String>,
     cancel_token: Arc<AtomicBool>,
@@ -191,8 +192,8 @@ fn launch_analysis_worker(
             code,
             name,
             date,
-            config,
-            RuleConfig::default(),
+            full_config.analysis,
+            full_config.rules,
             event_tx,
             runner,
             prompts,
@@ -431,6 +432,7 @@ async fn build_cancel_aware_runner(
     cancel_token: Arc<AtomicBool>,
     temperature: f64,
     max_tokens: u32,
+    _timeout_secs: u64,
 ) -> Result<impl AgentRunner + use<>, String> {
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await

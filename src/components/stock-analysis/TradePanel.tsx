@@ -61,8 +61,8 @@ export function TradePanel() {
         invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 50 }),
         invoke<PositionSummary[]>("get_trade_positions"),
       ]);
-      setTrades(t);
-      setPositions(p);
+      if (Array.isArray(t)) setTrades(t);
+      if (Array.isArray(p)) setPositions(p);
     } catch {
       // 静默处理
     } finally {

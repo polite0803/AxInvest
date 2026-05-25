@@ -46,7 +46,7 @@ async fn load_and_inject_template(
                 if let Some(sc) = tn.config.config.get_mut("stock_code") {
                     *sc = serde_json::Value::String(stock_code.to_string());
                 }
-            }
+            },
             WorkflowNode::Agent(an) => {
                 let expert_id = an
                     .config
@@ -66,8 +66,8 @@ async fn load_and_inject_template(
                     .replace("{{goal}}", &an.base.title)
                     .replace("{{data_ctx}}", data_ctx)
                     .replace(&format!("{{{{expert_prompt_{expert_id}}}}}"), &expert_prompt);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -130,7 +130,7 @@ pub async fn run_stock_workflow(
                 "最近60日K线：最高¥{:.2} 最低¥{:.2} MA5=¥{:.2} MA20=¥{:.2}",
                 max60, min60, ma5, ma20
             )
-        }
+        },
         _ => "K线数据暂不可用".into(),
     };
 
@@ -139,13 +139,16 @@ pub async fn run_stock_workflow(
             let last = &f[0];
             format!(
                 "最新财报：营收{} 净利润{} EPS={} ROE={}% 毛利率={}%",
-                last.revenue.map_or("N/A".into(), |v| format!("{:.1}亿", v / 1e8)),
-                last.net_profit.map_or("N/A".into(), |v| format!("{:.1}亿", v / 1e8)),
+                last.revenue
+                    .map_or("N/A".into(), |v| format!("{:.1}亿", v / 1e8)),
+                last.net_profit
+                    .map_or("N/A".into(), |v| format!("{:.1}亿", v / 1e8)),
                 last.eps.map_or("N/A".into(), |v| format!("{:.2}", v)),
                 last.roe.map_or("N/A".into(), |v| format!("{:.1}", v)),
-                last.gross_margin.map_or("N/A".into(), |v| format!("{:.1}", v)),
+                last.gross_margin
+                    .map_or("N/A".into(), |v| format!("{:.1}", v)),
             )
-        }
+        },
         _ => "财务数据暂不可用".into(),
     };
 
@@ -153,7 +156,7 @@ pub async fn run_stock_workflow(
         Ok(n) if !n.is_empty() => {
             let titles: Vec<&str> = n.iter().take(5).map(|x| x.title.as_str()).collect();
             format!("最近{}条新闻：{}", n.len(), titles.join("；"))
-        }
+        },
         _ => "新闻数据暂不可用".into(),
     };
 
@@ -177,19 +180,24 @@ pub async fn run_stock_workflow(
         pct = quote.change_pct,
         pe = quote.pe.map_or("N/A".into(), |v| format!("{:.1}", v)),
         pb = quote.pb.map_or("N/A".into(), |v| format!("{:.1}", v)),
-        mv = quote.total_mv.map_or("N/A".into(), |v| format!("{:.0}亿", v / 1e8)),
+        mv = quote
+            .total_mv
+            .map_or("N/A".into(), |v| format!("{:.0}亿", v / 1e8)),
     );
 
     // ── 3. 从模板加载 DAG 并注入数据 ──
-    let (nodes, edges) =
-        load_and_inject_template(&state.sea_db, &stock_code, &data_ctx).await?;
+    let (nodes, edges) = load_and_inject_template(&state.sea_db, &stock_code, &data_ctx).await?;
 
     // ── 4. 注入 ToolCallback：将 MCP 工具调用桥接到 AStockClient ──
     let engine = Arc::clone(&state.work_engine);
     let tool_client = Arc::clone(&state.astock_client);
     let sc_tool = stock_code.clone();
     let tool_cb: ToolCallback = Arc::new(
-        move |tool_name: String, args: serde_json::Value| -> Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>> {
+        move |tool_name: String,
+              args: serde_json::Value|
+              -> Pin<
+            Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>,
+        > {
             let client = Arc::clone(&tool_client);
             let code = sc_tool.clone();
             Box::pin(async move {
@@ -200,14 +208,14 @@ pub async fn run_stock_workflow(
                             Ok(v) => serde_json::to_value(v).unwrap_or_default(),
                             Err(e) => json!({"error": e.to_string()}),
                         }
-                    }
+                    },
                     "get_stock_quote" => {
                         let c = args["stock_code"].as_str().unwrap_or(&code);
                         match client.get_quote(c).await {
                             Ok(v) => serde_json::to_value(v).unwrap_or_default(),
                             Err(e) => json!({"error": e.to_string()}),
                         }
-                    }
+                    },
                     "get_stock_kline" => {
                         let c = args["stock_code"].as_str().unwrap_or(&code);
                         let period = args["period"].as_str().unwrap_or("daily");
@@ -216,14 +224,14 @@ pub async fn run_stock_workflow(
                             Ok(v) => serde_json::to_value(v).unwrap_or_default(),
                             Err(e) => json!({"error": e.to_string()}),
                         }
-                    }
+                    },
                     "get_stock_financials" => {
                         let c = args["stock_code"].as_str().unwrap_or(&code);
                         match client.get_financials(c).await {
                             Ok(v) => serde_json::to_value(v).unwrap_or_default(),
                             Err(e) => json!({"error": e.to_string()}),
                         }
-                    }
+                    },
                     "get_stock_news" => {
                         let c = args["stock_code"].as_str().unwrap_or(&code);
                         let limit = args["limit"].as_u64().unwrap_or(30) as u32;
@@ -231,14 +239,14 @@ pub async fn run_stock_workflow(
                             Ok(v) => serde_json::to_value(v).unwrap_or_default(),
                             Err(e) => json!({"error": e.to_string()}),
                         }
-                    }
+                    },
                     "get_stock_money_flow" => {
                         let c = args["stock_code"].as_str().unwrap_or(&code);
                         match client.get_money_flow(c).await {
                             Ok(v) => serde_json::to_value(v).unwrap_or_default(),
                             Err(e) => json!({"error": e.to_string()}),
                         }
-                    }
+                    },
                     _ => json!({"error": format!("未知工具: {tool_name}")}),
                 };
                 Ok(result)

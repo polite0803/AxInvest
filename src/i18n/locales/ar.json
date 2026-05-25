@@ -14,14 +14,14 @@
     "memory": "الذاكرة",
     "gateway": "البوابة",
     "terminal": "الطرفية",
-    "files": "الملفات",
+    "files": "Files",
+    "workflow": "سير العمل",
     "settings": "الإعدادات",
     "skills": "المهارات",
     "marketplace": "السوق",
     "prompts": "القوالب",
     "link": "الرابط",
     "devTools": "أدوات المطور",
-    "workflow": "سير العمل",
     "wiki": "Wiki",
     "app": "AxAgent",
     "stockAnalysis": "Stock Analysis"
@@ -865,7 +865,8 @@
         "codePlaceholder": "XXXX-XXXX",
         "copyFailed": "فشل النسخ",
         "joinFailed": "فشل الانضمام",
-        "maxParticipants": "الحد الأقصى للمشاركين"
+        "maxParticipants": "الحد الأقصى للمشاركين",
+        "joinSuccess": "Joined successfully"
       },
       "sharedResources": "Shared Resources",
       "title": "Collaboration"
@@ -1873,7 +1874,8 @@
       "totalUsage": "الاستخدام الإجمالي",
       "fileCount": "ملف",
       "images": "صور",
-      "files": "ملفات",
+      "files": "Files",
+      "workflow": "Workflow",
       "backups": "نسخ احتياطية",
       "documentsRoot": "موقع التخزين",
       "changeDir": "تغيير الدليل",
@@ -2851,7 +2853,8 @@
   },
   "files": {
     "images": "صور",
-    "files": "ملفات",
+    "files": "Files",
+    "workflow": "Workflow",
     "backups": "نسخ احتياطية",
     "columnName": "الاسم",
     "columnSize": "الحجم",
@@ -2978,7 +2981,8 @@
     "popular": "Beliebt",
     "proposals": "Vorschläge",
     "save": "Speichern",
-    "sort": "Sortieren"
+    "sort": "Sortieren",
+    "stats": "Stats"
   },
   "agent": {
     "askUserPlaceholder": "اكتب إجابتك...",
@@ -3258,6 +3262,11 @@
     "ssh": "SSH",
     "sessions": "{{count}} sessions",
     "configureBackends": "Configure Backends...",
+    "noSessions": "No terminal sessions",
+    "errorsCount": "{{count}} error(s)",
+    "ok": "OK",
+    "dockerConnectPending": "Docker connect pending",
+    "sshConnectPending": "SSH connect pending",
     "newTerminal": "New Terminal",
     "analyzeOutput": "Analyze Output",
     "clear": "Clear",
@@ -3671,7 +3680,8 @@
       "wikiDesc": "تخزين معلومات في قاعدة المعرفة",
       "memory": "البحث في الذاكرة",
       "memoryDesc": "البحث في ذاكرة المحادثات",
-      "files": "البحث في الملفات",
+      "files": "Files",
+      "workflow": "Workflow",
       "filesDesc": "البحث في المرفقات",
       "url": "جلب عنوان URL",
       "urlDesc": "قراءة محتوى صفحة الويب",
@@ -4356,7 +4366,11 @@
       "paste": "Paste Node",
       "delete": "Delete Selected Node",
       "save": "Save"
-    }
+    },
+    "collapseLeftPanel": "Collapse Left Panel",
+    "expandLeftPanel": "Expand Left Panel",
+    "collapseRightPanel": "Collapse Right Panel",
+    "expandRightPanel": "Expand Right Panel"
   },
   "atomicSkill": {
     "entryType": "Entry Type",
@@ -4900,7 +4914,8 @@
     "loadError": "Failed to load skill",
     "analyzeFrontend": "AI Generate",
     "analyzeSuccess": "AI analysis complete",
-    "analyzeError": "AI analysis failed: {{error}}"
+    "analyzeError": "AI analysis failed: {{error}}",
+    "generateAgent": "Generate Agent"
   },
   "task": {
     "title": "مهام الخلفية",

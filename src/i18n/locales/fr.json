@@ -14,14 +14,14 @@
     "memory": "Mémoire",
     "gateway": "Passerelle",
     "terminal": "Terminal",
-    "files": "Fichiers",
+    "files": "Files",
+    "workflow": "Workflow",
     "settings": "Paramètres",
     "skills": "Compétences",
     "marketplace": "Marché",
     "prompts": "Modèles",
     "link": "Lien",
     "devTools": "Outils de développement",
-    "workflow": "Workflow",
     "wiki": "Wiki",
     "app": "AxAgent",
     "stockAnalysis": "Stock Analysis"
@@ -865,7 +865,8 @@
         "codePlaceholder": "XXXX-XXXX",
         "copyFailed": "Échec de la copie",
         "joinFailed": "Échec de l'adhésion",
-        "maxParticipants": "Max participants"
+        "maxParticipants": "Max participants",
+        "joinSuccess": "Joined successfully"
       },
       "sharedResources": "Shared Resources",
       "title": "Collaboration"
@@ -1875,7 +1876,8 @@
       "totalUsage": "Utilisation totale",
       "fileCount": "fichiers",
       "images": "Images",
-      "files": "Fichiers",
+      "files": "Files",
+      "workflow": "Workflow",
       "backups": "Sauvegardes",
       "documentsRoot": "Emplacement de stockage",
       "changeDir": "Changer le Répertoire",
@@ -2884,7 +2886,8 @@
   },
   "files": {
     "images": "Images",
-    "files": "Fichiers",
+    "files": "Files",
+    "workflow": "Workflow",
     "backups": "Sauvegardes",
     "columnName": "Nom",
     "columnSize": "Taille",
@@ -3011,7 +3014,8 @@
     "proposals": "Propositions",
     "dismiss": "Ignorer",
     "atomic": "Atomique",
-    "extractAtomic": "Extraire les compétences atomiques"
+    "extractAtomic": "Extraire les compétences atomiques",
+    "stats": "Stats"
   },
   "agent": {
     "askUserPlaceholder": "Saisissez votre réponse...",
@@ -3258,6 +3262,11 @@
     "ssh": "SSH",
     "sessions": "{{count}} sessions",
     "configureBackends": "Configure Backends...",
+    "noSessions": "No terminal sessions",
+    "errorsCount": "{{count}} error(s)",
+    "ok": "OK",
+    "dockerConnectPending": "Docker connect pending",
+    "sshConnectPending": "SSH connect pending",
     "newTerminal": "New Terminal",
     "analyzeOutput": "Analyze Output",
     "clear": "Clear",
@@ -3671,7 +3680,8 @@
       "wikiDesc": "Stocker des informations dans la base de connaissances",
       "memory": "Rechercher dans la mémoire",
       "memoryDesc": "Rechercher dans la mémoire des conversations",
-      "files": "Rechercher des fichiers",
+      "files": "Files",
+      "workflow": "Workflow",
       "filesDesc": "Rechercher dans les pièces jointes",
       "url": "Récupérer URL",
       "urlDesc": "Lire le contenu d'une page web",
@@ -4356,7 +4366,11 @@
       "paste": "Paste Node",
       "delete": "Delete Selected Node",
       "save": "Save"
-    }
+    },
+    "collapseLeftPanel": "Collapse Left Panel",
+    "expandLeftPanel": "Expand Left Panel",
+    "collapseRightPanel": "Collapse Right Panel",
+    "expandRightPanel": "Expand Right Panel"
   },
   "atomicSkill": {
     "entryType": "Entry Type",
@@ -4900,7 +4914,8 @@
     "loadError": "Failed to load skill",
     "analyzeFrontend": "AI Generate",
     "analyzeSuccess": "AI analysis complete",
-    "analyzeError": "AI analysis failed: {{error}}"
+    "analyzeError": "AI analysis failed: {{error}}",
+    "generateAgent": "Generate Agent"
   },
   "task": {
     "title": "Tâches de fond",

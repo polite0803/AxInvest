@@ -14,14 +14,14 @@
     "memory": "Память",
     "gateway": "Шлюз",
     "terminal": "Терминал",
-    "files": "Файлы",
+    "files": "Files",
+    "workflow": "Рабочий процесс",
     "settings": "Настройки",
     "skills": "Навыки",
     "marketplace": "Маркетплейс",
     "prompts": "Шаблоны",
     "link": "Связь",
     "devTools": "Инструменты разработчика",
-    "workflow": "Рабочий процесс",
     "wiki": "Wiki",
     "app": "AxAgent",
     "stockAnalysis": "Stock Analysis"
@@ -865,7 +865,8 @@
         "codePlaceholder": "XXXX-XXXX",
         "copyFailed": "Ошибка копирования",
         "joinFailed": "Ошибка присоединения",
-        "maxParticipants": "Макс. участников"
+        "maxParticipants": "Макс. участников",
+        "joinSuccess": "Joined successfully"
       },
       "sharedResources": "Shared Resources",
       "title": "Collaboration"
@@ -1873,7 +1874,8 @@
       "totalUsage": "Общее использование",
       "fileCount": "файлов",
       "images": "Изображения",
-      "files": "Файлы",
+      "files": "Files",
+      "workflow": "Workflow",
       "backups": "Резервные копии",
       "documentsRoot": "Место хранения",
       "changeDir": "Изменить каталог",
@@ -2851,7 +2853,8 @@
   },
   "files": {
     "images": "Изображения",
-    "files": "Файлы",
+    "files": "Files",
+    "workflow": "Workflow",
     "backups": "Резервные копии",
     "columnName": "Имя",
     "columnSize": "Размер",
@@ -2978,7 +2981,8 @@
     "popular": "Beliebt",
     "proposals": "Vorschläge",
     "save": "Speichern",
-    "sort": "Sortieren"
+    "sort": "Sortieren",
+    "stats": "Stats"
   },
   "agent": {
     "askUserPlaceholder": "Введите ваш ответ...",
@@ -3277,7 +3281,8 @@
       "wikiDesc": "Store info in the knowledge base",
       "memory": "Search Memory",
       "memoryDesc": "Search conversation memory",
-      "files": "Search Files",
+      "files": "Files",
+      "workflow": "Workflow",
       "filesDesc": "Search attachments",
       "url": "Fetch URL",
       "urlDesc": "Read web page content",
@@ -3962,7 +3967,11 @@
       "paste": "Paste Node",
       "delete": "Delete Selected Node",
       "save": "Save"
-    }
+    },
+    "collapseLeftPanel": "Collapse Left Panel",
+    "expandLeftPanel": "Expand Left Panel",
+    "collapseRightPanel": "Collapse Right Panel",
+    "expandRightPanel": "Expand Right Panel"
   },
   "atomicSkill": {
     "entryType": "Entry Type",
@@ -4369,6 +4378,11 @@
     "ssh": "SSH",
     "sessions": "{{count}} sessions",
     "configureBackends": "Configure Backends...",
+    "noSessions": "No terminal sessions",
+    "errorsCount": "{{count}} error(s)",
+    "ok": "OK",
+    "dockerConnectPending": "Docker connect pending",
+    "sshConnectPending": "SSH connect pending",
     "newTerminal": "New Terminal",
     "analyzeOutput": "Analyze Output",
     "clear": "Clear",
@@ -4900,7 +4914,8 @@
     "loadError": "Failed to load skill",
     "analyzeFrontend": "AI Generate",
     "analyzeSuccess": "AI analysis complete",
-    "analyzeError": "AI analysis failed: {{error}}"
+    "analyzeError": "AI analysis failed: {{error}}",
+    "generateAgent": "Generate Agent"
   },
   "task": {
     "title": "Фоновые задачи",

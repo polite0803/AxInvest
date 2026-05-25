@@ -143,9 +143,9 @@ export const ContentArea = memo(function ContentArea() {
   }, [skillPages]);
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
       {!isStockAnalysis && <AppHeader />}
-      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Routes>
           <Route path="/" element={<SafeLazyPage Page={LazyChatPage} />} />
           <Route

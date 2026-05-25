@@ -121,7 +121,7 @@ pub async fn run_stock_workflow(
 
     let kline_summary = match &klines {
         Ok(k) if !k.is_empty() => {
-            let last = k.last().unwrap();
+            let _last = k.last().unwrap();
             let ma5: f64 = k.iter().rev().take(5).map(|x| x.close).sum::<f64>() / 5.0;
             let ma20: f64 = k.iter().rev().take(20).map(|x| x.close).sum::<f64>() / 20.0;
             let max60 = k.iter().map(|x| x.high).fold(f64::MIN, f64::max);

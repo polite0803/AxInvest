@@ -120,6 +120,18 @@ impl RunOptions {
         self.progress_callback = Some(cb);
         self
     }
+    pub fn with_input(mut self, input: serde_json::Value) -> Self {
+        self.input = Some(input);
+        self
+    }
+    pub fn with_input_schema(mut self, schema: JsonSchema) -> Self {
+        self.input_schema = Some(schema);
+        self
+    }
+    pub fn with_output_schema(mut self, schema: JsonSchema) -> Self {
+        self.output_schema = Some(schema);
+        self
+    }
 }
 
 // ── 内部追踪类型 ──

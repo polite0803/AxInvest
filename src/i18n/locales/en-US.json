@@ -6637,7 +6637,22 @@
       "skipped": "Skipped",
       "connected": "Connected",
       "disconnected": "Disconnected",
-      "checkHealth": "Check Health"
+      "checkHealth": "Check Health",
+      "group": {
+        "vendor": "数据源",
+        "agent": "Agent 节点配置",
+        "tool": "Tool 节点配置",
+        "scoring": "评分权重",
+        "rule": "规则阈值",
+        "pos": "仓位限制",
+        "value": "估值参数",
+        "monitor": "监控参数"
+      },
+      "saveSuccess": "配置保存成功",
+      "saveConfig": "保存配置",
+      "loadFailed": "加载配置失败",
+      "general": "基础参数",
+      "check": "检测"
     },
     "progress.fetchingData": "Fetching stock data...",
     "progress.started": "Analysis started...",

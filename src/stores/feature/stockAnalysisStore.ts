@@ -392,11 +392,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const unlistenComplete = await listen<{
       workflowId: string;
       results: Record<string, unknown>;
+      output?: StockDecision | null;
     }>("workflow-completed", (event) => {
-      const { results } = event.payload;
+      const { results, output } = event.payload;
       const parsed = parseWorkflowResults(results);
+      // 优先用 Workflow.output（经 output_schema 过滤 + EndNode 聚合）
+      const decision = output ?? parsed.decision;
       set({
         ...parsed,
+        decision,
         status: "completed",
         progressMessage: i18n.t("stockAnalysis.progress.completed"),
         progressPct: 100,

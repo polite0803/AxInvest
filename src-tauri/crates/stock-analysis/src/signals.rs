@@ -41,8 +41,12 @@ pub fn detect_ma_cross(klines_json: &str, fast: usize, slow: usize) -> MACrossRe
     let klines: Vec<KLineRaw> = serde_json::from_str(klines_json).unwrap_or_default();
     if klines.len() < slow + 1 {
         return MACrossResult {
-            signal: "none".into(), fast_ma: 0.0, slow_ma: 0.0,
-            prev_fast_ma: 0.0, prev_slow_ma: 0.0, latest_price: 0.0,
+            signal: "none".into(),
+            fast_ma: 0.0,
+            slow_ma: 0.0,
+            prev_fast_ma: 0.0,
+            prev_slow_ma: 0.0,
+            latest_price: 0.0,
         };
     }
     let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
@@ -89,8 +93,12 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
     let klines: Vec<KLineRaw> = serde_json::from_str(klines_json).unwrap_or_default();
     if klines.is_empty() {
         return BreakoutResult {
-            breakout_type: "none".into(), current_price: 0.0,
-            support, resistance, volume_ratio: None, confidence: "low".into(),
+            breakout_type: "none".into(),
+            current_price: 0.0,
+            support,
+            resistance,
+            volume_ratio: None,
+            confidence: "low".into(),
         };
     }
     let last = klines.last().unwrap();
@@ -98,17 +106,33 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
 
     // 计算量比
     let avg_vol: f64 = if klines.len() >= 5 {
-        klines[klines.len() - 6..klines.len() - 1].iter().map(|k| k.volume).sum::<f64>() / 5.0
+        klines[klines.len() - 6..klines.len() - 1]
+            .iter()
+            .map(|k| k.volume)
+            .sum::<f64>()
+            / 5.0
     } else {
         klines.iter().map(|k| k.volume).sum::<f64>() / klines.len() as f64
     };
-    let vol_ratio = if avg_vol > 0.0 { Some(last.volume / avg_vol) } else { None };
+    let vol_ratio = if avg_vol > 0.0 {
+        Some(last.volume / avg_vol)
+    } else {
+        None
+    };
 
     let (breakout_type, confidence) = if price > resistance {
-        let conf = if vol_ratio.unwrap_or(1.0) > 1.5 { "high" } else { "medium" };
+        let conf = if vol_ratio.unwrap_or(1.0) > 1.5 {
+            "high"
+        } else {
+            "medium"
+        };
         ("resistance_break", conf)
     } else if price < support {
-        let conf = if vol_ratio.unwrap_or(1.0) > 1.5 { "high" } else { "medium" };
+        let conf = if vol_ratio.unwrap_or(1.0) > 1.5 {
+            "high"
+        } else {
+            "medium"
+        };
         ("support_break", conf)
     } else {
         ("none", "low")
@@ -142,7 +166,8 @@ mod tests {
             serde_json::json!({"close": 10.9, "high": 11.2, "low": 10.5, "volume": 1300.0}),
             serde_json::json!({"close": 11.2, "high": 11.6, "low": 10.8, "volume": 1800.0}),
             serde_json::json!({"close": 11.5, "high": 12.0, "low": 11.3, "volume": 3000.0}),
-        ]).unwrap()
+        ])
+        .unwrap()
     }
 
     #[test]

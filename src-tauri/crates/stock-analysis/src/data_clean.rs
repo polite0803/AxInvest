@@ -20,7 +20,12 @@ pub struct OutlierResult {
 pub fn remove_outliers(prices_json: &str, method: &str, threshold: f64) -> OutlierResult {
     let prices: Vec<f64> = serde_json::from_str(prices_json).unwrap_or_default();
     if prices.len() < 4 {
-        return OutlierResult { cleaned: prices, removed_count: 0, removed_indices: vec![], method: method.into() };
+        return OutlierResult {
+            cleaned: prices,
+            removed_count: 0,
+            removed_indices: vec![],
+            method: method.into(),
+        };
     }
     match method {
         "iqr" => remove_outliers_iqr(&prices, threshold),
@@ -34,7 +39,12 @@ fn remove_outliers_zscore(prices: &[f64], threshold: f64) -> OutlierResult {
     let variance: f64 = prices.iter().map(|p| (p - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
     let stddev = variance.sqrt();
     if stddev < 1e-10 {
-        return OutlierResult { cleaned: prices.to_vec(), removed_count: 0, removed_indices: vec![], method: "zscore".into() };
+        return OutlierResult {
+            cleaned: prices.to_vec(),
+            removed_count: 0,
+            removed_indices: vec![],
+            method: "zscore".into(),
+        };
     }
     let mut cleaned = Vec::new();
     let mut removed = Vec::new();
@@ -46,7 +56,12 @@ fn remove_outliers_zscore(prices: &[f64], threshold: f64) -> OutlierResult {
             cleaned.push(p);
         }
     }
-    OutlierResult { cleaned, removed_count: removed.len(), removed_indices: removed, method: "zscore".into() }
+    OutlierResult {
+        cleaned,
+        removed_count: removed.len(),
+        removed_indices: removed,
+        method: "zscore".into(),
+    }
 }
 
 fn remove_outliers_iqr(prices: &[f64], multiplier: f64) -> OutlierResult {
@@ -58,7 +73,12 @@ fn remove_outliers_iqr(prices: &[f64], multiplier: f64) -> OutlierResult {
     let q3 = sorted[q3_idx];
     let iqr = q3 - q1;
     if iqr < 1e-10 {
-        return OutlierResult { cleaned: prices.to_vec(), removed_count: 0, removed_indices: vec![], method: "iqr".into() };
+        return OutlierResult {
+            cleaned: prices.to_vec(),
+            removed_count: 0,
+            removed_indices: vec![],
+            method: "iqr".into(),
+        };
     }
     let lower = q1 - multiplier * iqr;
     let upper = q3 + multiplier * iqr;
@@ -71,7 +91,12 @@ fn remove_outliers_iqr(prices: &[f64], multiplier: f64) -> OutlierResult {
             cleaned.push(p);
         }
     }
-    OutlierResult { cleaned, removed_count: removed.len(), removed_indices: removed, method: "iqr".into() }
+    OutlierResult {
+        cleaned,
+        removed_count: removed.len(),
+        removed_indices: removed,
+        method: "iqr".into(),
+    }
 }
 
 // ── 缺失值填充 ──
@@ -88,7 +113,11 @@ pub struct FillResult {
 pub fn fill_missing(prices_json: &str, method: &str) -> FillResult {
     let prices: Vec<Option<f64>> = serde_json::from_str(prices_json).unwrap_or_default();
     if prices.is_empty() {
-        return FillResult { filled: vec![], filled_count: 0, method: method.into() };
+        return FillResult {
+            filled: vec![],
+            filled_count: 0,
+            method: method.into(),
+        };
     }
     match method {
         "linear" => fill_linear(&prices),
@@ -108,7 +137,11 @@ fn fill_forward(prices: &[Option<f64>]) -> FillResult {
             count += 1;
         }
     }
-    FillResult { filled: result, filled_count: count, method: "forward".into() }
+    FillResult {
+        filled: result,
+        filled_count: count,
+        method: "forward".into(),
+    }
 }
 
 fn fill_linear(prices: &[Option<f64>]) -> FillResult {
@@ -118,7 +151,11 @@ fn fill_linear(prices: &[Option<f64>]) -> FillResult {
     // 找第一个有效值
     let first_valid = result.iter().position(|v| v.is_some());
     if first_valid.is_none() {
-        return FillResult { filled: result, filled_count: 0, method: "linear".into() };
+        return FillResult {
+            filled: result,
+            filled_count: 0,
+            method: "linear".into(),
+        };
     }
     let first = first_valid.unwrap();
     // 前向填充头部
@@ -157,7 +194,11 @@ fn fill_linear(prices: &[Option<f64>]) -> FillResult {
             }
         }
     }
-    FillResult { filled: result, filled_count: count, method: "linear".into() }
+    FillResult {
+        filled: result,
+        filled_count: count,
+        method: "linear".into(),
+    }
 }
 
 // ── 复权计算 ──
@@ -205,7 +246,10 @@ pub fn adjust_prices(klines_json: &str, dividends_json: &str) -> AdjustResult {
     let dividends: Vec<Dividend> = serde_json::from_str(dividends_json).unwrap_or_default();
 
     if klines.is_empty() {
-        return AdjustResult { adjusted_klines: vec![], adjustment_factor: 1.0 };
+        return AdjustResult {
+            adjusted_klines: vec![],
+            adjustment_factor: 1.0,
+        };
     }
 
     // 按日期排序（最新在前）
@@ -231,10 +275,20 @@ pub fn adjust_prices(klines_json: &str, dividends_json: &str) -> AdjustResult {
 
     let adjusted: Vec<AdjustedKLine> = klines
         .into_iter()
-        .map(|k| AdjustedKLine { date: k.date, open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume })
+        .map(|k| AdjustedKLine {
+            date: k.date,
+            open: k.open,
+            high: k.high,
+            low: k.low,
+            close: k.close,
+            volume: k.volume,
+        })
         .collect();
 
-    AdjustResult { adjusted_klines: adjusted, adjustment_factor: (factor * 10000.0).round() / 10000.0 }
+    AdjustResult {
+        adjusted_klines: adjusted,
+        adjustment_factor: (factor * 10000.0).round() / 10000.0,
+    }
 }
 
 // ── 测试 ──

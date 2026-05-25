@@ -32,7 +32,12 @@ pub fn max_drawdown(prices: &[f64]) -> f64 {
 pub fn sharpe_ratio(returns: &[f64], risk_free: f64) -> SharpeResult {
     let n = returns.len();
     if n < 2 {
-        return SharpeResult { sharpe: 0.0, annualized: 0.0, mean_return: 0.0, stddev: 0.0 };
+        return SharpeResult {
+            sharpe: 0.0,
+            annualized: 0.0,
+            mean_return: 0.0,
+            stddev: 0.0,
+        };
     }
     let mean: f64 = returns.iter().sum::<f64>() / n as f64;
     let variance: f64 = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
@@ -62,7 +67,11 @@ pub struct SharpeResult {
 pub fn value_at_risk(returns: &[f64], confidence: f64) -> VarResult {
     let n = returns.len();
     if n < 5 {
-        return VarResult { var_pct: 0.0, confidence, cvar_pct: 0.0 };
+        return VarResult {
+            var_pct: 0.0,
+            confidence,
+            cvar_pct: 0.0,
+        };
     }
     let mut sorted = returns.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -71,7 +80,11 @@ pub fn value_at_risk(returns: &[f64], confidence: f64) -> VarResult {
     // CVaR: 尾部平均
     let tail: f64 = sorted[..=idx.min(n - 1)].iter().map(|r| -r).sum::<f64>();
     let cvar = tail / (idx + 1) as f64 * 100.0;
-    VarResult { var_pct: (var_val * 100.0).round() / 100.0, confidence, cvar_pct: (cvar * 100.0).round() / 100.0 }
+    VarResult {
+        var_pct: (var_val * 100.0).round() / 100.0,
+        confidence,
+        cvar_pct: (cvar * 100.0).round() / 100.0,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,9 +101,31 @@ pub fn pe_percentile(current_pe: f64, historical_pes: &[f64]) -> PEPercentileRes
     let mut sorted = historical_pes.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let below = sorted.iter().filter(|&&pe| pe <= current_pe).count();
-    let pct = if sorted.is_empty() { 50.0 } else { below as f64 / sorted.len() as f64 * 100.0 };
-    let level = if pct < 20.0 { "极低" } else if pct < 40.0 { "偏低" } else if pct < 60.0 { "合理" } else if pct < 80.0 { "偏高" } else { "极高" };
-    PEPercentileResult { percentile: (pct * 10.0).round() / 10.0, level: level.into(), median: if !sorted.is_empty() { sorted[sorted.len() / 2] } else { current_pe } }
+    let pct = if sorted.is_empty() {
+        50.0
+    } else {
+        below as f64 / sorted.len() as f64 * 100.0
+    };
+    let level = if pct < 20.0 {
+        "极低"
+    } else if pct < 40.0 {
+        "偏低"
+    } else if pct < 60.0 {
+        "合理"
+    } else if pct < 80.0 {
+        "偏高"
+    } else {
+        "极高"
+    };
+    PEPercentileResult {
+        percentile: (pct * 10.0).round() / 10.0,
+        level: level.into(),
+        median: if !sorted.is_empty() {
+            sorted[sorted.len() / 2]
+        } else {
+            current_pe
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -105,11 +140,29 @@ pub struct PEPercentileResult {
 /// PEG = PE / 增长率。增长率以 % 表示（如 25 表示 25%）。
 pub fn peg_ratio(pe: f64, growth_rate: f64) -> PEGResult {
     if growth_rate <= 0.0 {
-        return PEGResult { peg: f64::INFINITY, level: "无意义".into(), pe, growth_rate };
+        return PEGResult {
+            peg: f64::INFINITY,
+            level: "无意义".into(),
+            pe,
+            growth_rate,
+        };
     }
     let peg = pe / growth_rate;
-    let level = if peg < 0.5 { "严重低估" } else if peg < 1.0 { "低估" } else if peg < 2.0 { "合理" } else { "高估" };
-    PEGResult { peg: (peg * 100.0).round() / 100.0, level: level.into(), pe, growth_rate }
+    let level = if peg < 0.5 {
+        "严重低估"
+    } else if peg < 1.0 {
+        "低估"
+    } else if peg < 2.0 {
+        "合理"
+    } else {
+        "高估"
+    };
+    PEGResult {
+        peg: (peg * 100.0).round() / 100.0,
+        level: level.into(),
+        pe,
+        growth_rate,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -126,13 +179,31 @@ pub struct PEGResult {
 /// 返回建议仓位比例。
 pub fn kelly_criterion(win_rate: f64, avg_win: f64, avg_loss: f64) -> KellyResult {
     if avg_loss <= 0.0 || avg_win <= 0.0 || win_rate <= 0.0 {
-        return KellyResult { kelly_fraction: 0.0, half_kelly: 0.0, position_pct: 0.0, signal: "不适用".into() };
+        return KellyResult {
+            kelly_fraction: 0.0,
+            half_kelly: 0.0,
+            position_pct: 0.0,
+            signal: "不适用".into(),
+        };
     }
     let odds = avg_win / avg_loss;
     let kelly = ((win_rate * (odds + 1.0) - 1.0) / odds).max(0.0);
     let half = kelly / 2.0;
-    let signal = if kelly > 0.25 { "重仓" } else if kelly > 0.1 { "中等" } else if kelly > 0.0 { "轻仓" } else { "不建议" };
-    KellyResult { kelly_fraction: (kelly * 1000.0).round() / 1000.0, half_kelly: (half * 1000.0).round() / 1000.0, position_pct: (half * 10000.0).round() / 100.0, signal: signal.into() }
+    let signal = if kelly > 0.25 {
+        "重仓"
+    } else if kelly > 0.1 {
+        "中等"
+    } else if kelly > 0.0 {
+        "轻仓"
+    } else {
+        "不建议"
+    };
+    KellyResult {
+        kelly_fraction: (kelly * 1000.0).round() / 1000.0,
+        half_kelly: (half * 1000.0).round() / 1000.0,
+        position_pct: (half * 10000.0).round() / 100.0,
+        signal: signal.into(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -149,20 +220,36 @@ pub struct KellyResult {
 pub fn risk_parity_weights(volatilities: &[f64], _correlations_json: &str) -> RiskParityResult {
     let n = volatilities.len();
     if n == 0 {
-        return RiskParityResult { weights: vec![], divers_ratio: 0.0 };
+        return RiskParityResult {
+            weights: vec![],
+            divers_ratio: 0.0,
+        };
     }
     // 简化版：逆波动率加权（Naive Risk Parity / ERC 近似）
-    let inv_vols: Vec<f64> = volatilities.iter().map(|&v| if v > 0.0 { 1.0 / v } else { 0.0 }).collect();
+    let inv_vols: Vec<f64> = volatilities
+        .iter()
+        .map(|&v| if v > 0.0 { 1.0 / v } else { 0.0 })
+        .collect();
     let total: f64 = inv_vols.iter().sum();
     let weights: Vec<f64> = if total > 0.0 {
-        inv_vols.iter().map(|&w| (w / total * 10000.0).round() / 10000.0).collect()
+        inv_vols
+            .iter()
+            .map(|&w| (w / total * 10000.0).round() / 10000.0)
+            .collect()
     } else {
         vec![1.0 / n as f64; n]
     };
     // 分散化比率
     let hhi: f64 = weights.iter().map(|w| w * w).sum();
-    let divers_ratio = if hhi > 0.0 { (1.0 / (hhi * n as f64)).min(1.0) } else { 1.0 };
-    RiskParityResult { weights, divers_ratio: (divers_ratio * 100.0).round() / 100.0 }
+    let divers_ratio = if hhi > 0.0 {
+        (1.0 / (hhi * n as f64)).min(1.0)
+    } else {
+        1.0
+    };
+    RiskParityResult {
+        weights,
+        divers_ratio: (divers_ratio * 100.0).round() / 100.0,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -198,7 +285,9 @@ mod tests {
 
     #[test]
     fn test_var() {
-        let returns = vec![0.01, -0.02, 0.03, -0.01, -0.03, 0.02, -0.01, 0.01, -0.05, 0.02];
+        let returns = vec![
+            0.01, -0.02, 0.03, -0.01, -0.03, 0.02, -0.01, 0.01, -0.05, 0.02,
+        ];
         let r = value_at_risk(&returns, 0.95);
         assert!(r.var_pct > 0.0);
         assert!(r.cvar_pct >= r.var_pct);

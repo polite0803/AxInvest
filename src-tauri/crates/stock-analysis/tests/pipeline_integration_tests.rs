@@ -1,4 +1,5 @@
 use axagent_astock_data::indicators::*;
+use axagent_stock_analysis::decision::RuleConfig;
 use axagent_stock_analysis::decision::*;
 use axagent_stock_analysis::quality::*;
 use axagent_stock_analysis::rules::RuleEngine;
@@ -41,7 +42,14 @@ fn test_rules_override_strong_buy() {
     let klines = generate_test_klines(60, 10.0, 28.0);
     let indicators = compute_indicators("TEST", &klines);
     let score = ScoringEngine::score(&indicators, 27.0, None);
-    let result = RuleEngine::check(&indicators, &score, "买入", Some(25.0), Some(27.0));
+    let result = RuleEngine::check(
+        &indicators,
+        &score,
+        "买入",
+        Some(25.0),
+        Some(27.0),
+        &RuleConfig::default(),
+    );
     if indicators.rsi6 > 80.0 || indicators.bias_ma5 > 5.0 {
         assert!(!result.passed);
         assert!(result.force_signal.is_some());

@@ -21,11 +21,9 @@ interface AnalysisParams {
   klineLimit: number;
   newsLimit: number;
   maxConcurrent: number;
-}
-
-interface ModelParams {
   temperature: number;
   maxTokens: number;
+  timeoutSecs: number;
 }
 
 interface ScoringWeights {
@@ -70,7 +68,6 @@ interface MonitorParams {
 interface FullConfig {
   dataSources: DataSourcesConfig;
   analysis: AnalysisParams;
-  model: ModelParams;
   scoring: ScoringWeights;
   rules: RuleParams;
   position: PositionParams;
@@ -90,8 +87,16 @@ const DEFAULTS: FullConfig = {
     mootdx: false,
     ths: false,
   },
-  analysis: { maxDebateRounds: 3, klinePeriod: "daily", klineLimit: 120, newsLimit: 30, maxConcurrent: 9 },
-  model: { temperature: 0.3, maxTokens: 4096 },
+  analysis: {
+    maxDebateRounds: 3,
+    klinePeriod: "daily",
+    klineLimit: 120,
+    newsLimit: 30,
+    maxConcurrent: 9,
+    temperature: 0.3,
+    maxTokens: 4096,
+    timeoutSecs: 300,
+  },
   scoring: { trend: 30, deviation: 20, macd: 15, volume: 15, rsi: 10, support: 10 },
   rules: {
     rsiOverbought: 80,
@@ -254,6 +259,37 @@ export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; o
               style={{ width: 72 }}
               value={config.analysis.maxConcurrent}
               onChange={(v) => v !== null && save({ analysis: { ...config.analysis, maxConcurrent: v } })}
+            />
+          </Row>
+          <Row label="Temperature" desc="0-1，越高越随机">
+            <Slider
+              style={{ width: 120, margin: 0 }}
+              min={0}
+              max={1}
+              step={0.05}
+              value={config.analysis.temperature}
+              onChange={(v) => save({ analysis: { ...config.analysis, temperature: v } })}
+            />
+          </Row>
+          <Row label="Max Tokens" desc="256-16384">
+            <InputNumber
+              min={256}
+              max={16384}
+              step={256}
+              size="small"
+              style={{ width: 80 }}
+              value={config.analysis.maxTokens}
+              onChange={(v) => v !== null && save({ analysis: { ...config.analysis, maxTokens: v } })}
+            />
+          </Row>
+          <Row label="LLM 超时 (秒)" desc="60-600">
+            <InputNumber
+              min={60}
+              max={600}
+              size="small"
+              style={{ width: 72 }}
+              value={config.analysis.timeoutSecs}
+              onChange={(v) => v !== null && save({ analysis: { ...config.analysis, timeoutSecs: v } })}
             />
           </Row>
         </div>
@@ -498,35 +534,6 @@ export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; o
               style={{ width: 72 }}
               value={config.monitor.turnoverThreshold}
               onChange={(v) => v !== null && save({ monitor: { ...config.monitor, turnoverThreshold: v } })}
-            />
-          </Row>
-        </div>
-      ),
-    },
-    {
-      key: "llm",
-      label: "LLM",
-      children: (
-        <div>
-          <Row label="Temperature" desc="0-1，越高越随机">
-            <Slider
-              style={{ width: 120, margin: 0 }}
-              min={0}
-              max={1}
-              step={0.05}
-              value={config.model.temperature}
-              onChange={(v) => save({ model: { ...config.model, temperature: v } })}
-            />
-          </Row>
-          <Row label="Max Tokens" desc="256-16384">
-            <InputNumber
-              min={256}
-              max={16384}
-              step={256}
-              size="small"
-              style={{ width: 80 }}
-              value={config.model.maxTokens}
-              onChange={(v) => v !== null && save({ model: { ...config.model, maxTokens: v } })}
             />
           </Row>
         </div>

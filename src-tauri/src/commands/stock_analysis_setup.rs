@@ -222,207 +222,447 @@ async fn seed_stock_analysis_workflow_template(
     let td_quote = ToolDef {
         name: "get_stock_quote".into(),
         description: Some("获取股票实时行情：现价、涨跌幅、PE、PB、市值".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_kline = ToolDef {
         name: "get_stock_kline".into(),
         description: Some("获取K线数据：OHLCV，可指定周期和数量".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_fin = ToolDef {
         name: "get_stock_financials".into(),
         description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_news = ToolDef {
         name: "get_stock_news".into(),
         description: Some("获取近期新闻公告".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_mf = ToolDef {
         name: "get_stock_money_flow".into(),
         description: Some("获取资金流向：主力/超大单/大单/中单/小单净流入".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_score = ToolDef {
         name: "compute_scoring".into(),
         description: Some("计算技术评分：基于趋势、偏离度、MACD、成交量、RSI、支撑阻力".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_val = ToolDef {
         name: "compute_valuation".into(),
         description: Some("计算估值指标：DCF、F-Score、护城河量化、安全边际".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_risk = ToolDef {
         name: "compute_portfolio_risk".into(),
         description: Some("计算组合风险：总市值、集中度、风险等级".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_quality = ToolDef {
         name: "run_quality_gate".into(),
         description: Some("运行质量门控：检查各分析报告的一致性和完整性".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     // ── 新增 12 个金融模型 ToolDef ──
     let td_maxdd = ToolDef {
         name: "calc_max_drawdown".into(),
         description: Some("计算最大回撤比例".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_sharpe = ToolDef {
         name: "calc_sharpe_ratio".into(),
         description: Some("计算夏普比率".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_var = ToolDef {
         name: "calc_var".into(),
         description: Some("历史模拟法 VaR 计算".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_pe_pct = ToolDef {
         name: "calc_pe_percentile".into(),
         description: Some("PE 历史分位数".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_peg = ToolDef {
         name: "calc_peg".into(),
         description: Some("PEG 估值指标".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_ma_cross = ToolDef {
         name: "detect_ma_cross".into(),
         description: Some("MA 金叉死叉检测".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_breakout = ToolDef {
         name: "detect_breakout".into(),
         description: Some("支撑阻力突破检测".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_kelly = ToolDef {
         name: "calc_kelly".into(),
         description: Some("凯利公式仓位计算".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_rp = ToolDef {
         name: "calc_risk_parity".into(),
         description: Some("风险平价权重计算".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_outliers = ToolDef {
         name: "clean_outliers".into(),
         description: Some("异常值剔除 (zscore/iqr)".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_fill = ToolDef {
         name: "clean_fill_missing".into(),
         description: Some("缺失值填充 (forward/linear)".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_adjust = ToolDef {
         name: "adjust_prices".into(),
         description: Some("前复权价格调整".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     // ── 新增 9 个数据 API ToolDef ──
     let td_research = ToolDef {
         name: "get_research_reports".into(),
         description: Some("获取券商研报".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_consensus = ToolDef {
         name: "get_consensus_eps".into(),
         description: Some("获取一致性预期EPS".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_concepts = ToolDef {
         name: "get_concept_blocks".into(),
         description: Some("获取概念板块归属".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_announce = ToolDef {
         name: "get_announcements".into(),
         description: Some("获取公司公告".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_north = ToolDef {
         name: "get_north_bound_flow".into(),
         description: Some("获取北向资金流向".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_dragon = ToolDef {
         name: "get_market_dragon_tiger".into(),
         description: Some("获取龙虎榜数据".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_hot = ToolDef {
         name: "get_hot_stocks".into(),
         description: Some("获取市场热门股".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_industry = ToolDef {
         name: "get_industry_ranking".into(),
         description: Some("获取行业涨跌排名".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_cls = ToolDef {
         name: "get_cls_flash".into(),
         description: Some("获取财联社实时快讯".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     // ── P1: 4 个技术指标 ToolDef ──
     let td_atr = ToolDef {
         name: "compute_atr".into(),
         description: Some("计算 ATR 平均真实波幅".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_kdj = ToolDef {
         name: "compute_kdj".into(),
         description: Some("计算 KDJ 随机指标".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_obv = ToolDef {
         name: "compute_obv".into(),
         description: Some("计算 OBV 能量潮".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_beta = ToolDef {
         name: "calc_beta".into(),
         description: Some("计算 Beta 系数".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     // ── P2: 事件检测 + 组合分析 ToolDef ──
     let td_earnings = ToolDef {
         name: "detect_earnings_surprise".into(),
         description: Some("检测业绩超预期/低于预期".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_pledge = ToolDef {
         name: "detect_pledge_risk".into(),
         description: Some("检测大股东质押风险".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_corr = ToolDef {
         name: "calc_correlation_matrix".into(),
         description: Some("计算收益率相关系数矩阵".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     // ── P3: 独立新能力 ToolDef ──
     let td_mc = ToolDef {
         name: "run_monte_carlo".into(),
         description: Some("蒙特卡洛模拟价格路径".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_ind = ToolDef {
         name: "analyze_industry_position".into(),
         description: Some("行业内估值/增长对比分析".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
     let td_lup = ToolDef {
         name: "detect_limit_up_potential".into(),
         description: Some("涨停潜力评估".into()),
-        parameters: None,
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
     };
 
     // 从 ToolDef 列表生成 "可用工具" prompt 片段

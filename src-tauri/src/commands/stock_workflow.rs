@@ -201,24 +201,6 @@ pub async fn run_stock_workflow(
     let sc = stock_code.clone();
     engine
         .register_tool_handler(
-            "search_stock",
-            Arc::new(move |_name: String, args: serde_json::Value| {
-                let client = Arc::clone(&tool_client);
-                let code = sc.clone();
-                Box::pin(async move {
-                    let kw = args["keyword"].as_str().unwrap_or(&code);
-                    match client.search_stock(kw).await {
-                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
-                        Err(e) => Ok(json!({"error": e.to_string()})),
-                    }
-                })
-            }),
-        )
-        .await;
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc = stock_code.clone();
-    engine
-        .register_tool_handler(
             "get_stock_quote",
             Arc::new(move |_name: String, args: serde_json::Value| {
                 let client = Arc::clone(&tool_client);

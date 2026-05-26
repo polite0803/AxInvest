@@ -693,7 +693,6 @@ async fn seed_stock_analysis_workflow_template(
                 enabled: true,
             },
             config: AgentNodeConfig {
-                role: None,
                 // inline system_prompt 只放任务指令，专家 prompt 由 agent_profile 自动加载，
                 // 行情数据通过 context_sources 由上游 Tool 节点输出自动注入
                 system_prompt: format!("你的任务: {title}"),
@@ -705,7 +704,6 @@ async fn seed_stock_analysis_workflow_template(
                 tools: vec![],
                 output_mode: OutputMode::Text,
                 agent_profile_id: Some(format!("stock-{expert_id}")),
-                agent_role_override: None,
                 max_tool_rounds: None,
             },
         })
@@ -1795,22 +1793,13 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             })
             .unwrap_or_default();
 
-        if let Some(existing) = agent_profiles::Entity::find_by_id(&profile_id)
+        if agent_profiles::Entity::find_by_id(&profile_id)
             .one(db)
             .await
             .map_err(|e| e.to_string())?
+            .is_some()
         {
-            // 已有 profile 但 system_prompt 为空 → 补填
-            if existing.system_prompt.is_empty() {
-                agent_profiles::Entity::update_many()
-                    .col_expr(agent_profiles::Column::SystemPrompt, Expr::value(expert_body))
-                    .filter(agent_profiles::Column::Id.eq(&profile_id))
-                    .exec(db)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                count += 1;
-            }
-            continue;
+            continue; // 已有 profile，跳过
         }
 
         let now = chrono::Utc::now().timestamp_millis();
@@ -1820,7 +1809,6 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             description: Set(Some(format!("股票分析专家 — {}", role_id_to_display(role_id)))),
             category: Set("stock-analysis".into()),
             icon: Set("📈".into()),
-            system_prompt: Set(expert_body),
             agent_role: Set(Some(role_id.into())),
             source: Set("stock-analysis".into()),
             tags: Set(None),

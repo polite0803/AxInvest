@@ -29,15 +29,15 @@
     "autostart:default",
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.axagent/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.axinvest/**" }]
     },
     {
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.axagent/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.axinvest/**" }]
     },
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.axagent/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.axinvest/**" }]
     },
     "updater:default",
     "clipboard-manager:allow-write-text",

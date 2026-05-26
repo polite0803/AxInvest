@@ -76,7 +76,7 @@ pub fn default_db_path() -> String {
         PathBuf::from(".")
     });
 
-    let path = home.join(".axagent").join("data").join("axagent.db");
+    let path = home.join(".axinvest").join("data").join("axinvest.db");
     path.to_string_lossy().to_string()
 }
 
@@ -101,11 +101,11 @@ pub fn profile_db_path(profile_name: &str) -> String {
     });
 
     let path = home
-        .join(".axagent")
+        .join(".axinvest")
         .join("profiles")
         .join(profile_name)
         .join("data")
-        .join("axagent.db");
+        .join("axinvest.db");
     path.to_string_lossy().to_string()
 }
 

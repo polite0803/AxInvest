@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::skill as skill_err;
 use crate::commands::error_code::skill_op_err;
-use crate::paths::axagent_home;
+use crate::paths::axinvest_home;
 use axagent_core::crypto::decrypt_key;
 use axagent_core::types::*;
 use axagent_plugins::PluginManager;
@@ -22,7 +22,7 @@ fn home_dir() -> PathBuf {
 }
 
 fn skills_dir() -> PathBuf {
-    axagent_home().join("skills")
+    axinvest_home().join("skills")
 }
 
 fn all_skills_dirs() -> Vec<PathBuf> {
@@ -833,7 +833,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 pub async fn uninstall_skill(name: String) -> Result<(), String> {
     let home = home_dir();
     let search_dirs = [
-        home.join(".axagent").join("skills"),
+        home.join(".axinvest").join("skills"),
         home.join(".claude").join("skills"),
         home.join(".agents").join("skills"),
         home.join(".trae").join("skills"),
@@ -857,7 +857,7 @@ pub async fn uninstall_skill_group(group: String) -> Result<(), String> {
     // Search all skill roots for a directory matching the group name
     let home = home_dir();
     let search_dirs = [
-        home.join(".axagent").join("skills"),
+        home.join(".axinvest").join("skills"),
         home.join(".claude").join("skills"),
         home.join(".agents").join("skills"),
     ];
@@ -903,7 +903,7 @@ pub async fn open_skill_dir(path: String) -> Result<(), String> {
 fn installed_source_refs() -> std::collections::HashSet<String> {
     let home = home_dir();
     let dirs = [
-        home.join(".axagent").join("skills"),
+        home.join(".axinvest").join("skills"),
         home.join(".claude").join("skills"),
         home.join(".agents").join("skills"),
     ];

@@ -87,7 +87,7 @@ impl McpOAuthStore {
 
     fn default_store_path() -> PathBuf {
         let home = dirs::home_dir().unwrap_or_default();
-        home.join(".axagent").join("mcp_oauth_credentials.json")
+        home.join(".axinvest").join("mcp_oauth_credentials.json")
     }
 
     fn load_from_disk(path: &PathBuf) -> HashMap<String, McpOAuthCredentials> {

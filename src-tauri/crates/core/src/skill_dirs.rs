@@ -15,7 +15,7 @@ pub fn skill_dirs() -> Vec<(&'static str, PathBuf)> {
         .iter()
         .map(|name| {
             let dir = if *name == "axagent" {
-                home.join(".axagent").join("skills")
+                home.join(".axinvest").join("skills")
             } else {
                 home.join(format!(".{}", name)).join("skills")
             };

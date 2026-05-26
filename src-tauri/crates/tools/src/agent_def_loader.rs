@@ -296,7 +296,7 @@ pub fn load_agents_from_dir(dir: &Path) -> Vec<AgentDefinition> {
 pub fn user_agents_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
-        .join(".axagent")
+        .join(".axinvest")
         .join("agents")
 }
 
@@ -329,7 +329,7 @@ pub fn agent_memory_path(
     match scope {
         crate::agent_def_types::MemoryScope::User => dirs::home_dir()
             .unwrap_or_default()
-            .join(".axagent")
+            .join(".axinvest")
             .join("agent-memory")
             .join(agent_type)
             .join("MEMORY.md"),

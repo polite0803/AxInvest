@@ -162,7 +162,7 @@ fn discover_config_paths() -> Vec<PathBuf> {
     let home = dirs::home_dir().unwrap_or_default();
 
     // 用户级配置
-    paths.push(home.join(".axagent").join("settings.json"));
+    paths.push(home.join(".axinvest").join("settings.json"));
 
     // 项目级配置
     if let Ok(cwd) = std::env::current_dir() {

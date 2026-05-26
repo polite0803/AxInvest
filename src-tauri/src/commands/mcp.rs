@@ -399,7 +399,7 @@ fn discover_mcp_config_paths() -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
     let home = dirs::home_dir().unwrap_or_default();
 
-    paths.push(home.join(".axagent").join("settings.json"));
+    paths.push(home.join(".axinvest").join("settings.json"));
 
     if let Ok(cwd) = std::env::current_dir() {
         paths.push(cwd.join(".axagent").join("settings.json"));

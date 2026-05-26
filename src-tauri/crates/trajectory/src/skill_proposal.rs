@@ -29,7 +29,7 @@ impl SkillProposalService {
     pub fn new(storage: Arc<TrajectoryStorage>) -> Self {
         let persist_path = dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".axagent")
+            .join(".axinvest")
             .join("skill_proposals.json");
         let recent_proposals = Self::load_from_disk(&persist_path).unwrap_or_default();
         Self {

@@ -209,7 +209,7 @@ fn config_paths(tool: CliTool) -> Result<Vec<PathBuf>> {
 
 fn backup_dir() -> Result<PathBuf> {
     let home = home_dir()?;
-    Ok(home.join(".axagent").join("backups"))
+    Ok(home.join(".axinvest").join("backups"))
 }
 
 fn backup_path(tool: CliTool, filename: &str) -> Result<PathBuf> {

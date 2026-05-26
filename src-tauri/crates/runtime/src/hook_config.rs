@@ -57,7 +57,7 @@ impl ShellHooksConfig {
     pub fn default_hooks_dir() -> PathBuf {
         dirs::home_dir()
             .expect("Could not determine home directory")
-            .join(".axagent")
+            .join(".axinvest")
             .join("hooks")
     }
 

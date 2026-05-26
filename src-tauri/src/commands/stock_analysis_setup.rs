@@ -425,6 +425,18 @@ async fn seed_stock_analysis_workflow_template(
         parameters: None,
     };
 
+    // 从 ToolDef 列表生成 "可用工具" prompt 片段
+    fn tool_prompt(tools: &[ToolDef]) -> String {
+        if tools.is_empty() {
+            return String::new();
+        }
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        format!(
+            "\n\n你可以调用以下工具获取最新数据或计算指标：{}。请先调用相关工具获取数据，再基于返回结果进行分析。",
+            names.join("、")
+        )
+    }
+
     let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
             base: WorkflowNodeBase {
@@ -649,6 +661,8 @@ async fn seed_stock_analysis_workflow_template(
             if let Some(tools) = analyst_tools.get(expert) {
                 a.config.tools = tools.clone();
                 a.config.max_tool_rounds = Some(2);
+                a.config.system_prompt =
+                    format!("{}{}", a.config.system_prompt, tool_prompt(&tools));
             }
         }
         nodes.push(an);
@@ -728,6 +742,8 @@ async fn seed_stock_analysis_workflow_template(
                 bear_tools.clone()
             };
             a.config.max_tool_rounds = Some(2);
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         }
         nodes.push(an);
         for dep in *deps {
@@ -782,6 +798,7 @@ async fn seed_stock_analysis_workflow_template(
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.tools = rtools.clone();
             a.config.max_tool_rounds = Some(2);
+            a.config.system_prompt = format!("{}{}", a.config.system_prompt, tool_prompt(rtools));
         }
         nodes.push(an);
         edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
@@ -859,6 +876,8 @@ async fn seed_stock_analysis_workflow_template(
             td_ind.clone(),
             td_lup.clone(),
         ];
+        a.config.system_prompt =
+            format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(rm);
@@ -884,6 +903,8 @@ async fn seed_stock_analysis_workflow_template(
             td_mc.clone(),
             td_lup.clone(),
         ];
+        a.config.system_prompt =
+            format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(trader);
@@ -922,6 +943,8 @@ async fn seed_stock_analysis_workflow_template(
             td_ind.clone(),
             td_lup.clone(),
         ];
+        a.config.system_prompt =
+            format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(pm);

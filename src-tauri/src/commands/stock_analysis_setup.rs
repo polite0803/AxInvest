@@ -1775,23 +1775,11 @@ async fn seed_agent_roles(db: &sea_orm::DatabaseConnection) -> Result<(), String
 
 async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     use axagent_core::entity::agent_profiles;
-    use sea_orm::sea_query::Expr;
-    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
-
-    // 构建 expert_id → 提示词正文 的查找表
-    let expert_prompts: std::collections::HashMap<&str, &str> =
-        EMBEDDED_PROMPTS.iter().copied().collect();
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     let mut count = 0u32;
     for &(expert_id, role_id) in EXPERT_ROLE_MAP {
         let profile_id = format!("stock-{expert_id}");
-        let expert_body = expert_prompts
-            .get(expert_id)
-            .map(|content| {
-                let (_, _, body, _) = parse_expert_md(content, expert_id);
-                body
-            })
-            .unwrap_or_default();
 
         if agent_profiles::Entity::find_by_id(&profile_id)
             .one(db)

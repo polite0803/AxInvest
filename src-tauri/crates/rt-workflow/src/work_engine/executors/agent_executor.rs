@@ -123,13 +123,22 @@ impl NodeExecutorTrait for AgentExecutor {
             None
         };
 
-        // 2. 解析默认 provider + key + model（带缓存）
+        // 2. 解析 provider + key + model（带缓存）
+        // 优先级：context.__workflow_provider_id__ > profile.suggested_provider_id > 系统默认
+        // 优先级：context.__workflow_model__ > profile 默认 model > 系统默认
         let session_model = context
             .variables
             .get("__workflow_model__")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let (prov, key, default_model) = self.resolve_provider(profile.as_ref()).await?;
+        let session_provider_id = context
+            .variables
+            .get("__workflow_provider_id__")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let (prov, key, default_model) = self
+            .resolve_provider(profile.as_ref(), session_provider_id.as_deref())
+            .await?;
         let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, &self.master_key)
             .map_err(|e| {
                 NodeError::exec_failed(
@@ -159,19 +168,36 @@ impl NodeExecutorTrait for AgentExecutor {
             },
         };
 
-        // 4. 构建 prompt：profile 为基础 + 行内追加（合并模式）
+        // 4. 构建 prompt：Role + Expert + 行内追加（运行时拼接，不预缓存）
         let role_desc = resolve_role(&an.config, profile.as_ref());
         let mut all_segments: Vec<TemplateSegment> = Vec::new();
 
         // 4a. 角色前缀
         all_segments.push(TemplateSegment::Static(format!("你是 {role_desc}。\n")));
 
-        // 4b. Profile system_prompt 作为基础
-        if let Some(ref p) = profile
-            && !p.system_prompt.is_empty()
-        {
-            let profile_compiled = compile_prompt(&p.system_prompt);
-            all_segments.extend(profile_compiled.segments);
+        // 4b. AgentRole system_prompt（岗位）+ Expert system_prompt（技能）
+        if let Some(ref p) = profile {
+            // 解析 Role 的提示词
+            if let Some(ref role_name) = p.agent_role {
+                if let Some(resolved) = crate::AgentRole::resolve(self.db.as_ref(), role_name).await
+                {
+                    if !resolved.system_prompt.is_empty() {
+                        all_segments.extend(compile_prompt(&resolved.system_prompt).segments);
+                    }
+                }
+            }
+            // 解析 Expert 的提示词
+            if let Some(ref expert_id) = p.expert_id {
+                if let Ok(Some(expert)) =
+                    axagent_core::entity::agency_experts::Entity::find_by_id(expert_id)
+                        .one(self.db.as_ref())
+                        .await
+                {
+                    if !expert.system_prompt.is_empty() {
+                        all_segments.extend(compile_prompt(&expert.system_prompt).segments);
+                    }
+                }
+            }
         }
 
         // 4c. 行内 system_prompt 追加（从 pre-compiled 缓存取或现场编译）
@@ -468,22 +494,28 @@ impl AgentExecutor {
     async fn resolve_provider(
         &self,
         profile: Option<&axagent_core::entity::agent_profiles::Model>,
+        context_provider_id: Option<&str>,
     ) -> Result<
         (axagent_core::types::ProviderConfig, axagent_core::types::ProviderKey, String),
         NodeError,
     > {
-        // 仅当无 profile 指定 provider 时使用缓存
-        let has_profile_override = profile
+        // 仅当无 profile 指定 provider 且无上下文 provider 时使用缓存
+        let has_override = profile
             .and_then(|p| p.suggested_provider_id.as_ref())
-            .is_some();
-        if !has_profile_override {
+            .is_some()
+            || context_provider_id.is_some();
+        if !has_override {
             let cache = self.default_provider_cache.lock().await;
             if let Some(ref cached) = *cache {
                 return Ok(cached.clone());
             }
         }
 
-        let result = if let Some(p) = profile {
+        // 优先级：上下文 provider_id > profile.suggested_provider_id > 系统默认
+        let target_provider_id = context_provider_id
+            .or_else(|| profile.and_then(|p| p.suggested_provider_id.as_deref()));
+
+        let result = if let Some(target_id) = target_provider_id {
             let all = axagent_core::repo::provider::list_providers(&self.db)
                 .await
                 .map_err(|e| {
@@ -492,34 +524,25 @@ impl AgentExecutor {
                         format!("Provider query failed: {e}"),
                     )
                 })?;
-            if let Some(ref suggested_id) = p.suggested_provider_id {
-                if let Some(sp) = all
-                    .into_iter()
-                    .find(|pr| pr.id == *suggested_id && pr.enabled)
-                {
-                    let key = sp.keys.iter().find(|k| k.enabled).cloned().ok_or_else(|| {
-                        NodeError::exec_failed(
-                            error_code::AGENT_PROFILE_NOT_FOUND,
-                            "建议的 provider 无可用 key".to_string(),
-                        )
-                    })?;
-                    let model = sp
-                        .models
-                        .iter()
-                        .find(|m| m.enabled)
-                        .map(|m| m.model_id.clone())
-                        .ok_or_else(|| {
-                            NodeError::exec_failed(
-                                error_code::AGENT_PROFILE_NOT_FOUND,
-                                "建议的 provider 无可用模型".to_string(),
-                            )
-                        })?;
-                    Ok::<_, NodeError>((sp, key, model))
-                } else {
-                    axagent_core::repo::provider::resolve_default_provider(&self.db)
-                        .await
-                        .map_err(|e| NodeError::exec_failed(error_code::PROVIDER_QUERY_FAILED, e))
-                }
+            if let Some(sp) = all.into_iter().find(|pr| pr.id == target_id && pr.enabled) {
+                let key = sp.keys.iter().find(|k| k.enabled).cloned().ok_or_else(|| {
+                    NodeError::exec_failed(
+                        error_code::AGENT_PROFILE_NOT_FOUND,
+                        "指定的 provider 无可用 key".to_string(),
+                    )
+                })?;
+                let sm = sp
+                    .models
+                    .iter()
+                    .find(|m| m.enabled)
+                    .map(|m| m.model_id.clone());
+                let model = sm.ok_or_else(|| {
+                    NodeError::exec_failed(
+                        error_code::AGENT_PROFILE_NOT_FOUND,
+                        "指定的 provider 无可用模型".to_string(),
+                    )
+                })?;
+                Ok::<_, NodeError>((sp, key, model))
             } else {
                 axagent_core::repo::provider::resolve_default_provider(&self.db)
                     .await
@@ -531,8 +554,8 @@ impl AgentExecutor {
                 .map_err(|e| NodeError::exec_failed(error_code::PROVIDER_QUERY_FAILED, e))
         }?;
 
-        // 仅将"默认 provider"结果写入缓存（profile 指定的 provider 不缓存）
-        if !has_profile_override {
+        // 仅将"默认 provider"结果写入缓存（有指定 provider 时不缓存）
+        if !has_override {
             let mut cache = self.default_provider_cache.lock().await;
             *cache = Some(result.clone());
         }
@@ -543,21 +566,15 @@ impl AgentExecutor {
 
 // ── 自由函数 ──
 
-/// 解析角色描述：优先 agent_role_override → profile.agent_role → config.role → "executor"
+/// 解析角色描述：从 AgentProfile 获取，无 Profile 时默认 "executor"
 fn resolve_role(
-    config: &axagent_core::workflow_types::AgentNodeConfig,
+    _config: &axagent_core::workflow_types::AgentNodeConfig,
     profile: Option<&axagent_core::entity::agent_profiles::Model>,
 ) -> String {
-    if let Some(ref ov) = config.agent_role_override {
-        return ov.clone();
-    }
     if let Some(p) = profile
         && let Some(ref role) = p.agent_role
     {
         return role.clone();
-    }
-    if let Some(ref role) = config.role {
-        return format!("{:?}", role);
     }
     "executor".to_string()
 }

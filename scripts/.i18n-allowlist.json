@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-25",
-  "total_entries": 122,
-  "total_files": 122,
+  "total_entries": 118,
+  "total_files": 118,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -486,7 +486,7 @@
     },
     {
       "file": "src/pages/QuickBarPage.tsx",
-      "lines": "1485",
+      "lines": "1485,1489",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -636,7 +636,7 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "8,9,10,11,12,27,28,29,30,31,45,46,47,48,49,69,70,71,72,73,74,75,76,78,81,82,83,111,112,113,114,115,135,137,139,230,232",
+      "lines": "8,9,10,11,12,27,28,29,30,31",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -660,7 +660,7 @@
     },
     {
       "file": "src/components/stock-analysis/__tests__/DecisionBanner.test.tsx",
-      "lines": "37,39,40,42,44,45,47",
+      "lines": "37,39,40,47",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -672,7 +672,7 @@
     },
     {
       "file": "src/stores/__tests__/stockAnalysisStore.test.ts",
-      "lines": "46,80,83,99,101,102,104,146,147,148,149,150,161,163,166,176,179,180,183,184,196",
+      "lines": "46,83,102,104,161,166,179,183,184,196",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -684,13 +684,13 @@
     },
     {
       "file": "src/components/stock-analysis/RiskMatrix.tsx",
-      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,40",
+      "lines": "5,14",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/chat/InputArea.tsx",
-      "lines": "167,216,217,218,219,220,222",
+      "lines": "167",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -709,30 +709,6 @@
     {
       "file": "src/components/settings/StockAnalysisSettings.tsx",
       "lines": "79",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/AnalysisProgress.tsx",
-      "lines": "14",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/AnalystReportGrid.tsx",
-      "lines": "18,20",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
-      "lines": "7",
-      "reason": "硬编码中文字符串",
-      "phase": 3
-    },
-    {
-      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
-      "lines": "52,76",
       "reason": "硬编码中文字符串",
       "phase": 3
     }

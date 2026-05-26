@@ -97,9 +97,3 @@ pub fn axinvest_home() -> PathBuf {
         PathBuf::from(home).join(".axinvest")
     }
 }
-
-/// 兼容旧调用方，与上游 AxAgent 保持 API 兼容
-#[deprecated(note = "use axinvest_home() instead")]
-pub fn axagent_home() -> PathBuf {
-    axinvest_home()
-}

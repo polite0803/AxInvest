@@ -2423,7 +2423,7 @@ async fn load_enabled_skill_contents(
     let config_home = home.join(".claw");
     let mut config = axagent_plugins::PluginManagerConfig::new(config_home);
     config.external_dirs = vec![
-        home.join(".axagent").join("skills"),
+        home.join(".axinvest").join("skills"),
         home.join(".claude").join("skills"),
         home.join(".agents").join("skills"),
     ];
@@ -3651,7 +3651,7 @@ pub async fn agent_ensure_workspace(
             let cache_base = dirs::cache_dir()
                 .or_else(dirs::home_dir)
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".axagent")
+                .join(".axinvest")
                 .join("cloud-cache");
 
             let device_id = std::env::var("HOSTNAME")

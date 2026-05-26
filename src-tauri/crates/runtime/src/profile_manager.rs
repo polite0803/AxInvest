@@ -96,7 +96,7 @@ impl ProfileManager {
         let dir = if name == "default" {
             dirs::home_dir()
                 .expect("Could not determine home directory")
-                .join(".axagent")
+                .join(".axinvest")
         } else {
             profile::profile_dir(name)
         };

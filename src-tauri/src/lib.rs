@@ -60,8 +60,8 @@ pub fn run() {
         // 注意：使用 append 而非 overwrite，防止跨启动丢失日志
         let boot_msg = "[BOOT] run() entered\n";
         let boot_paths = [
-            "/storage/emulated/0/Download/axagent-crash.log",
-            "/storage/emulated/0/Android/data/top.axagent.desktop/files/axagent-crash.log",
+            "/storage/emulated/0/Download/axinvest-crash.log",
+            "/storage/emulated/0/Android/data/top.axinvest.desktop/files/axinvest-crash.log",
         ];
         for bp in &boot_paths {
             // 追加而非覆盖
@@ -1010,20 +1010,20 @@ pub fn run() {
                 }
             }
 
-            // ── 在主线程解析并创建 axagent_home ──
+            // ── 在主线程解析并创建 axinvest_home ──
             // Android 子线程中 dirs::data_dir() 因缺少 JNI 上下文返回 None，
             // 回退到 / 导致 Permission denied。必须在主线程完成目录创建。
             let app_dir = {
-                let dir = crate::paths::axagent_home();
+                let dir = crate::paths::axinvest_home();
                 if let Err(e) = std::fs::create_dir_all(&dir) {
-                    tracing::error!("Failed to create AxAgent home dir: {}", e);
+                    tracing::error!("Failed to create AxInvest home dir: {}", e);
                     android_utils::report_fatal_error(&format!(
-                        "Failed to create AxAgent home dir: {}",
+                        "Failed to create AxInvest home dir: {}",
                         e
                     ));
                     std::process::exit(1);
                 }
-                tracing::info!("axagent_home ready: {}", dir.display());
+                tracing::info!("axinvest_home ready: {}", dir.display());
                 dir
             };
 
@@ -1102,7 +1102,7 @@ pub fn run() {
             commands::agent::init_pricing_config(app.handle());
 
             if let Some(home) = dirs::home_dir() {
-                let user_md_path = home.join(".axagent").join("USER.md");
+                let user_md_path = home.join(".axinvest").join("USER.md");
                 if user_md_path.exists() {
                     if let Ok(content) = std::fs::read_to_string(&user_md_path) {
                         if let Some(profile) = axagent_trajectory::UserProfile::from_user_md(&content) {

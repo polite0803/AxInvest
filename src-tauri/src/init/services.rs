@@ -612,7 +612,7 @@ fn start_user_profile_persistence(state: &AppState) {
                     dirs::home_dir()
                 }
             } {
-                let user_md_path = home.join(".axagent").join("USER.md");
+                let user_md_path = home.join(".axinvest").join("USER.md");
                 if let Some(parent) = user_md_path.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
@@ -780,7 +780,7 @@ fn start_skill_watcher(app: &tauri::AppHandle, state: &AppState) {
         }
     };
     let skill_dirs: Vec<std::path::PathBuf> = vec![
-        home.join(".axagent").join("skills"),
+        home.join(".axinvest").join("skills"),
         home.join(".claude").join("skills"),
         home.join(".trae").join("skills"),
         home.join(".codebuddy").join("skills"),

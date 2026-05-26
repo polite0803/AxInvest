@@ -302,7 +302,7 @@ fn create_plugin_manager() -> Result<PluginManager, String> {
     let config_home = home.join(".claw");
     let mut config = PluginManagerConfig::new(config_home);
     config.external_dirs = vec![
-        home.join(".axagent").join("skills"),
+        home.join(".axinvest").join("skills"),
         home.join(".claude").join("skills"),
         home.join(".agents").join("skills"),
     ];

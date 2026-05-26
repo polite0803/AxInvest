@@ -1,5 +1,5 @@
 use crate::AppState;
-use crate::paths::axagent_home;
+use crate::paths::axinvest_home;
 use axagent_trajectory::{
     Skill, SkillsHubAdapter, SkillsHubClient, SkillsHubConfig, SkillsHubSearchResult,
 };
@@ -98,7 +98,7 @@ pub struct SkillExportResult {
 pub async fn skills_hub_export(skill_name: String) -> Result<SkillExportResult, String> {
     let home = dirs::home_dir().ok_or("无法确定 home 目录")?;
     let skill_dirs = vec![
-        axagent_home().join("skills"),
+        axinvest_home().join("skills"),
         home.join(".claude").join("skills"),
         home.join(".agents").join("skills"),
     ];

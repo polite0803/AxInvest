@@ -83,7 +83,7 @@ pub fn validate_profile_name(name: &str) -> Result<(), ProfileError> {
 pub fn profiles_root() -> PathBuf {
     dirs::home_dir()
         .expect("Could not determine home directory")
-        .join(".axagent")
+        .join(".axinvest")
         .join("profiles")
 }
 

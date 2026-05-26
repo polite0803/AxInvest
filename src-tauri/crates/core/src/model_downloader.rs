@@ -42,7 +42,7 @@ impl ModelDownloader {
     pub fn new() -> Self {
         let cache_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".axagent")
+            .join(".axinvest")
             .join("models");
         Self { cache_dir }
     }

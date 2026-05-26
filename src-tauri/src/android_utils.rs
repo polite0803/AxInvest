@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "android")]
 fn crash_log_path() -> Option<PathBuf> {
-    let dir = crate::paths::axagent_home();
+    let dir = crate::paths::axinvest_home();
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join("crash.log"))
 }
@@ -76,7 +76,7 @@ pub fn report_fatal_error(message: &str) {
 pub fn consume_crash_log() -> Option<String> {
     #[cfg(target_os = "android")]
     if let Some(crash_path) = crash_log_path() {
-        let phase_path = crate::paths::axagent_home().join(".startup_phase");
+        let phase_path = crate::paths::axinvest_home().join(".startup_phase");
 
         let crash_contents = if crash_path.exists() {
             std::fs::read_to_string(&crash_path).ok()
@@ -112,7 +112,7 @@ pub fn mark_startup_phase(phase: &str) {
     #[cfg(target_os = "android")]
     {
         // 写入内部存储
-        let path = crate::paths::axagent_home().join(".startup_phase");
+        let path = crate::paths::axinvest_home().join(".startup_phase");
         let _ = std::fs::write(&path, phase);
 
         // 写入外部可访问路径

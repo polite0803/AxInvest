@@ -662,7 +662,7 @@ async fn seed_stock_analysis_workflow_template(
                 a.config.tools = tools.clone();
                 a.config.max_tool_rounds = Some(2);
                 a.config.system_prompt =
-                    format!("{}{}", a.config.system_prompt, tool_prompt(&tools));
+                    format!("{}{}", a.config.system_prompt, tool_prompt(tools));
             }
         }
         nodes.push(an);

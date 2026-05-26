@@ -165,14 +165,14 @@ function getFileIcon(category: FileTypeCategory) {
 // In-memory draft cache: persists input text per-conversation across component unmounts
 const _draftCache = new Map<string, string>();
 
-/** @600519 → agent_query(对话) + startAnalysis(分析页) 双通道 */
+/** $600519 → agent_query(对话) + startAnalysis(分析页) 双通道 */
 async function handleStockAnalysisTrigger(
   trimmed: string,
   navigate: ReturnType<typeof import("react-router-dom").useNavigate>,
   messageApi: ReturnType<typeof import("antd").App.useApp>["message"],
   t: ReturnType<typeof import("react-i18next").useTranslation>["t"],
 ): Promise<boolean> {
-  const stockCodeMatch = trimmed.match(/^@(\d{6})/) || trimmed.match(/^\/analyze\s+(\d{6})/);
+  const stockCodeMatch = trimmed.match(/^\$(\d{6})/) || trimmed.match(/^\/analyze\s+(\d{6})/);
   if (!stockCodeMatch) { return false; }
   const stockCode = stockCodeMatch[1];
 

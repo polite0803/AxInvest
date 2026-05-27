@@ -130,11 +130,11 @@ export function StockAnalysisPage() {
   ];
 
   const allSheetPanels: SheetPanel[] = [
-    { key: "screener", label: "荐股", element: <StockScreenerPanel /> },
-    { key: "limitup", label: "涨停", element: <LimitUpPanel /> },
-    { key: "dragontiger", label: "龙虎", element: <DragonTigerPanel /> },
-    { key: "sectors", label: "板块", element: <SectorHeatmapPanel /> },
-    { key: "north", label: "北向", element: <NorthBoundPanel /> },
+    { key: "screener", label: t("stockAnalysis.settings.sheet.screener"), element: <StockScreenerPanel /> },
+    { key: "limitup", label: t("stockAnalysis.settings.sheet.limitUp"), element: <LimitUpPanel /> },
+    { key: "dragontiger", label: t("stockAnalysis.settings.sheet.dragonTiger"), element: <DragonTigerPanel /> },
+    { key: "sectors", label: t("stockAnalysis.settings.sheet.sectors"), element: <SectorHeatmapPanel /> },
+    { key: "north", label: t("stockAnalysis.settings.sheet.north"), element: <NorthBoundPanel /> },
     { key: "watchlist", label: t("stockAnalysis.watchlist"), element: <WatchlistPanel /> },
     { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
     { key: "alerts", label: t("stockAnalysis.alert.title"), element: <PriceAlertPanel /> },
@@ -144,8 +144,8 @@ export function StockAnalysisPage() {
       label: t("stockAnalysis.history"),
       element: <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />,
     },
-    { key: "review", label: "复盘", element: <DailyReviewPanel /> },
-    { key: "events", label: "日历", element: <EventCalendarPanel /> },
+    { key: "review", label: t("stockAnalysis.settings.sheet.review"), element: <DailyReviewPanel /> },
+    { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
   ];
   // 桌面全部显示，移动端前7个核心面板 + 其余通过 tag 切换
   const mobileCoreKeys = ["screener", "limitup", "dragontiger", "sectors", "north", "watchlist", "trade"];
@@ -285,7 +285,7 @@ export function StockAnalysisPage() {
                 }}
                 trigger={["click"]}
               >
-                <button type="button" className="sa-sheet-tab">更多 ▾</button>
+                <button type="button" className="sa-sheet-tab">{t("stockAnalysis.settings.sheet.more")} ▾</button>
               </Dropdown>
             )}
           </div>

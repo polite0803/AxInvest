@@ -207,7 +207,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       },
       {
         tool: "compute_valuation",
-        label: "估值计算",
+        label: t("stockAnalysis.settings.group.value"),
         vars: resolve([
           "value_dcfGrowthRate",
           "value_dcfPerpetualRate",
@@ -219,12 +219,12 @@ export function StockAnalysisConfigPanel(_props: Props) {
       },
       {
         tool: "compute_portfolio_risk",
-        label: "组合风险",
+        label: t("stockAnalysis.settings.group.pos"),
         vars: resolve(["pos_maxSingleStockPct", "pos_maxTotalPositions", "pos_maxSectorExposurePct"]),
       },
       {
         tool: "calcs",
-        label: "风险模型",
+        label: t("stockAnalysis.settings.group.riskModel"),
         vars: resolve([
           "var_confidence",
           "kelly_fraction",
@@ -236,7 +236,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       },
       {
         tool: "rules",
-        label: "规则引擎",
+        label: t("stockAnalysis.settings.group.rule"),
         vars: resolve([
           "rule_rsiOverbought",
           "rule_rsiOversold",
@@ -248,7 +248,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       },
       {
         tool: "agent_executor",
-        label: "Agent 运行时",
+        label: t("stockAnalysis.settings.group.agentRuntime"),
         vars: resolve([
           "analysis_temperature",
           "analysis_maxTokens",
@@ -259,7 +259,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       },
       {
         tool: "tool_executor",
-        label: "Tool 运行时",
+        label: t("stockAnalysis.settings.group.toolRuntime"),
         vars: resolve([
           "tool_timeoutSecs",
           "tool_retryMax",
@@ -270,7 +270,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       },
       {
         tool: "monitor",
-        label: "监控告警",
+        label: t("stockAnalysis.settings.group.monitor"),
         vars: resolve(["monitor_pollIntervalSecs", "monitor_changePctThreshold", "monitor_turnoverThreshold"]),
       },
     ].filter((g) => g.vars.length > 0);
@@ -329,10 +329,10 @@ export function StockAnalysisConfigPanel(_props: Props) {
           scoring_support: weights.supportWeight,
         };
         setValues((prev) => ({ ...prev, ...map }));
-        message.success("评分权重已优化");
+        message.success(t("stockAnalysis.settings.optimize.success"));
       }
     } catch {
-      message.error("优化失败");
+      message.error(t("stockAnalysis.settings.optimize.failed"));
     } finally {
       setSaving(false);
     }
@@ -341,7 +341,9 @@ export function StockAnalysisConfigPanel(_props: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <Button size="small" loading={saving} onClick={handleOptimize}>🎯 基于回测优化评分权重</Button>
+        <Button size="small" loading={saving} onClick={handleOptimize}>
+          {t("stockAnalysis.settings.optimize.btn")}
+        </Button>
       </div>
       {toolGroups.map((g) => (
         <SettingsGroup

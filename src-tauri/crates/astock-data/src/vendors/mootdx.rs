@@ -54,6 +54,8 @@ impl MootdxVendor {
     fn market_code(stock_code: &str) -> u8 {
         if stock_code.starts_with('6') || stock_code.starts_with('9') {
             1
+        } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+            2
         } else {
             0
         }

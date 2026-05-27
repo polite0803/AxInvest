@@ -12,6 +12,8 @@ impl StockVendor for SinaVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let prefix = if stock_code.starts_with('6') {
             "sh"
+        } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+            "bj"
         } else {
             "sz"
         };

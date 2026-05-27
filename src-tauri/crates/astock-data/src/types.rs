@@ -19,6 +19,8 @@ pub struct StockQuote {
     pub pe: Option<f64>,
     pub pb: Option<f64>,
     pub total_mv: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub circulating_mv: Option<f64>,
     /// 涨停价
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit_up: Option<f64>,
@@ -108,6 +110,14 @@ pub struct FinancialReport {
     pub total_assets: Option<f64>,
     #[serde(default)]
     pub operating_cash_flow: Option<f64>,
+    #[serde(default)]
+    pub capital_expenditure: Option<f64>,
+    #[serde(default)]
+    pub free_cash_flow: Option<f64>,
+    #[serde(default)]
+    pub current_ratio: Option<f64>,
+    #[serde(default)]
+    pub quick_ratio: Option<f64>,
 }
 
 /// 新闻/公告条目

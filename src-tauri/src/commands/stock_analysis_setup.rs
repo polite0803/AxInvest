@@ -169,7 +169,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 13;
+    const TEMPLATE_VERSION: i32 = 14;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -793,15 +793,15 @@ async fn seed_stock_analysis_workflow_template(
 
     // 为每个分析师插入对应的数据获取 Tool 节点
     let tool_assignments: &[(&str, &str, &str, &str)] = &[
-        ("t-market-data", "获取K线", "get_stock_kline", "stock_code"),
-        ("t-sentiment-data", "获取新闻", "get_stock_news", "stock_code"),
-        ("t-news-data", "获取新闻", "get_stock_news", "stock_code"),
-        ("t-fundamentals-data", "获取财务", "get_stock_financials", "stock_code"),
-        ("t-policy-data", "获取新闻", "get_stock_news", "stock_code"),
+        ("t-market-data", "获取K线+行情", "get_stock_kline", "stock_code"),
+        ("t-sentiment-data", "获取新闻+热门", "get_hot_stocks", "stock_code"),
+        ("t-news-data", "获取新闻+公告", "get_announcements", "stock_code"),
+        ("t-fundamentals-data", "获取财务+一致预期", "get_consensus_eps", "stock_code"),
+        ("t-policy-data", "获取新闻+公告", "get_announcements", "stock_code"),
         ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
-        ("t-lockup-data", "获取财务", "get_stock_financials", "stock_code"),
-        ("t-research-data", "获取新闻", "get_stock_news", "stock_code"),
-        ("t-sector-data", "获取行情", "get_stock_quote", "stock_code"),
+        ("t-lockup-data", "获取财务+公告", "get_announcements", "stock_code"),
+        ("t-research-data", "获取新闻+一致预期", "get_consensus_eps", "stock_code"),
+        ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
     for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {

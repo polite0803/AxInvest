@@ -93,6 +93,7 @@ pub struct AStockClient {
     routing: VendorRouting,
     http: reqwest::Client,
     cache: RwLock<HashMap<String, (i64, String)>>,
+    pub iwencai_key: RwLock<String>,
 }
 
 impl AStockClient {
@@ -107,6 +108,7 @@ impl AStockClient {
             routing: VendorRouting::default_routing(),
             http: http.clone(),
             cache: RwLock::new(HashMap::new()),
+            iwencai_key: RwLock::new(String::new()),
         };
 
         client.register_vendor("tencent", Box::new(TencentVendor { http: http.clone() }));

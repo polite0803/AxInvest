@@ -35,6 +35,7 @@ pub mod plan;
 pub mod push_notification;
 pub mod repl;
 pub mod skill;
+pub mod stock_data;
 pub mod storage;
 pub mod system_info;
 pub mod task_system;

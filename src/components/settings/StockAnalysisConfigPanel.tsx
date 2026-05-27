@@ -58,6 +58,7 @@ function getDefaultVariables(): Variable[] {
   b("vendor_cninfo", false, "巨潮资讯 — 信息披露", "boolean");
   b("vendor_baidu_stock", false, "百度股票 — 数据", "boolean");
   b("vendor_iwencai", false, "问财 — 选股数据", "boolean");
+  b("vendor_iwencai_key", "", "问财 API Key（openapi.iwencai.com）", "string");
   b("vendor_akshare", false, "AKShare — 开源数据", "boolean");
   b("vendor_mootdx", false, "Mootdx — 本地行情接口", "boolean");
   return vars;

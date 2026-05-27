@@ -1069,6 +1069,18 @@ fn start_cron_scheduler(state: &AppState) {
 
     // 设置工具解析器（从全局 registry 按需自动注册工作流中引用的工具）
     {
+        let rt = tokio::runtime::Runtime::new()
+            .expect("Failed to create tokio runtime for tool resolver");
+
+        // 先注册股票数据工具到全局注册表
+        {
+            let mut reg = rt.block_on(state.local_tool_registry.lock());
+            axagent_tools::tools::stock_data::register_stock_tools(
+                &mut reg.tools,
+                state.astock_client.clone(),
+            );
+        }
+
         let registry = state.local_tool_registry.clone();
         let resolver: axagent_runtime::work_engine::ToolResolver =
             std::sync::Arc::new(move |tool_name: String| {
@@ -1100,8 +1112,6 @@ fn start_cron_scheduler(state: &AppState) {
                     }
                 })
             });
-        let rt = tokio::runtime::Runtime::new()
-            .expect("Failed to create tokio runtime for tool resolver");
         rt.block_on(state.work_engine.set_tool_resolver(resolver));
     }
 

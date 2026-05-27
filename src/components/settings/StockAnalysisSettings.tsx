@@ -1,11 +1,13 @@
 import { invoke } from "@/lib/invoke";
 import { Tabs } from "antd";
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ExpertPromptList } from "./ExpertPromptList";
 import { RolePromptList } from "./RolePromptList";
 import { StockAnalysisConfigPanel } from "./StockAnalysisConfigPanel";
 
 export function StockAnalysisSettings() {
+  const { t } = useTranslation();
   const [vendorHealth, setVendorHealth] = useState<Record<string, "ok" | "fail" | "pending">>({});
   const [checkingVendors, setCheckingVendors] = useState(false);
 

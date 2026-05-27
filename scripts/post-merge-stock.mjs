@@ -111,6 +111,8 @@ const zhCN = {
   settings: {
     title: "股票分析设置",
     saveFailed: "设置保存失败",
+    noExperts: "暂无专家数据",
+    noRoles: "暂无角色数据",
     quoteTag: "行情",
     financialKlineTag: "财务/K线",
     newsTag: "新闻",
@@ -277,6 +279,8 @@ const enUS = {
   settings: {
     title: "Stock Analysis Settings",
     saveFailed: "Failed to save",
+    noExperts: "No expert data. Restart the app to seed.",
+    noRoles: "No role data. Restart the app to seed.",
     quoteTag: "Quotes",
     financialKlineTag: "Financial/K-line",
     newsTag: "News",

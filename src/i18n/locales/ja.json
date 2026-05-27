@@ -6608,6 +6608,8 @@
     "settings": {
       "title": "Stock Analysis Settings",
       "saveFailed": "Failed to save",
+      "noExperts": "エキスパートデータがありません。アプリを再起動してください",
+      "noRoles": "ロールデータがありません。アプリを再起動してください",
       "quoteTag": "Quotes",
       "financialKlineTag": "Financial/K-line",
       "newsTag": "News",

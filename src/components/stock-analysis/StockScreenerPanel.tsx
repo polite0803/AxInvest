@@ -1,8 +1,9 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, InputNumber, List, Spin, Tag } from "antd";
+import { Button, Card, Checkbox, Empty, InputNumber, List, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
+
 interface ScreenResult {
   stockCode: string;
   stockName: string;
@@ -11,6 +12,22 @@ interface ScreenResult {
   reasons: string[];
   score: number;
 }
+
+interface CriteriaState {
+  minChangePct?: number;
+  maxChangePct?: number;
+  turnoverRateMin?: number;
+  dragonTigerNetMin?: number;
+  mainInflowMin?: number;
+  northboundRatioMin?: number;
+  rsiOversold: boolean;
+  rsiOverbought: boolean;
+}
+
+const defaultCriteria: CriteriaState = {
+  rsiOversold: false,
+  rsiOverbought: false,
+};
 
 export function StockScreenerPanel() {
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -21,11 +38,7 @@ export function StockScreenerPanel() {
   const [results, setResults] = useState<ScreenResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"discover" | "screen">("discover");
-  const [criteria, setCriteria] = useState({
-    minChange: undefined as number | undefined,
-    mainInflowMin: undefined as number | undefined,
-    peMax: undefined as number | undefined,
-  });
+  const [criteria, setCriteria] = useState<CriteriaState>(defaultCriteria);
 
   const discover = async () => {
     setLoading(true);
@@ -55,6 +68,8 @@ export function StockScreenerPanel() {
     startAnalysis(code);
   };
 
+  const nf = (v: number | null | undefined): number | undefined => v ?? undefined;
+
   return (
     <Card
       size="small"
@@ -80,41 +95,96 @@ export function StockScreenerPanel() {
     >
       {mode === "screen" && (
         <div className="flex flex-col gap-1 mb-2">
+          {/* 基础条件 */}
           <div className="flex gap-1 flex-wrap items-center text-xs">
-            <span className="text-gray-400">涨跌幅≥</span>
+            <span className="text-gray-400">涨跌</span>
             <InputNumber
               size="small"
-              style={{ width: 70 }}
+              style={{ width: 62 }}
               min={-10}
               max={10}
               step={0.5}
-              value={criteria.minChange}
-              onChange={(v) => setCriteria({ ...criteria, minChange: v ?? undefined })}
+              value={criteria.minChangePct}
+              onChange={(v) => setCriteria({ ...criteria, minChangePct: nf(v) })}
+              placeholder="≥ %"
+            />
+            <span className="text-gray-400">~</span>
+            <InputNumber
+              size="small"
+              style={{ width: 62 }}
+              min={-10}
+              max={10}
+              step={0.5}
+              value={criteria.maxChangePct}
+              onChange={(v) => setCriteria({ ...criteria, maxChangePct: nf(v) })}
+              placeholder="≤ %"
+            />
+            <span className="text-gray-400 ml-1">换手率≥</span>
+            <InputNumber
+              size="small"
+              style={{ width: 60 }}
+              min={0}
+              max={50}
+              step={0.5}
+              value={criteria.turnoverRateMin}
+              onChange={(v) => setCriteria({ ...criteria, turnoverRateMin: nf(v) })}
               placeholder="%"
             />
+          </div>
+
+          {/* 资金面 */}
+          <div className="flex gap-1 flex-wrap items-center text-xs">
             <span className="text-gray-400">主力净流入≥</span>
             <InputNumber
               size="small"
-              style={{ width: 70 }}
+              style={{ width: 72 }}
               min={0}
               step={100}
               value={criteria.mainInflowMin}
-              onChange={(v) => setCriteria({ ...criteria, mainInflowMin: v ?? undefined })}
+              onChange={(v) => setCriteria({ ...criteria, mainInflowMin: nf(v) })}
               placeholder="万元"
             />
-            <span className="text-gray-400">PE≤</span>
+            <span className="text-gray-400 ml-1">龙虎榜≥</span>
             <InputNumber
               size="small"
-              style={{ width: 70 }}
+              style={{ width: 72 }}
               min={0}
-              step={5}
-              value={criteria.peMax}
-              onChange={(v) => setCriteria({ ...criteria, peMax: v ?? undefined })}
-              placeholder="倍"
+              step={100}
+              value={criteria.dragonTigerNetMin}
+              onChange={(v) => setCriteria({ ...criteria, dragonTigerNetMin: nf(v) })}
+              placeholder="万元"
             />
-            <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading}>
+            <span className="text-gray-400 ml-1">北向持仓≥</span>
+            <InputNumber
+              size="small"
+              style={{ width: 60 }}
+              min={0}
+              max={100}
+              step={0.5}
+              value={criteria.northboundRatioMin}
+              onChange={(v) => setCriteria({ ...criteria, northboundRatioMin: nf(v) })}
+              placeholder="%"
+            />
+          </div>
+
+          {/* 技术指标 + 操作按钮 */}
+          <div className="flex gap-1 flex-wrap items-center text-xs">
+            <Checkbox
+              checked={criteria.rsiOversold}
+              onChange={(e) => setCriteria({ ...criteria, rsiOversold: e.target.checked })}
+            >
+              RSI超卖
+            </Checkbox>
+            <Checkbox
+              checked={criteria.rsiOverbought}
+              onChange={(e) => setCriteria({ ...criteria, rsiOverbought: e.target.checked })}
+            >
+              RSI超买
+            </Checkbox>
+            <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
               筛选
             </Button>
+            <Button size="small" onClick={() => setCriteria(defaultCriteria)}>重置</Button>
           </div>
         </div>
       )}
@@ -125,7 +195,7 @@ export function StockScreenerPanel() {
         ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={mode === "discover" ? "点击'全市场'发现候选" : "设置筛选条件"}
+            description={mode === "discover" ? "点击'全市场'发现候选" : "设置筛选条件后点击筛选"}
           />
         )
         : (
@@ -136,9 +206,7 @@ export function StockScreenerPanel() {
               <List.Item
                 style={{ cursor: "pointer", padding: "4px 0" }}
                 onClick={() => handleAnalyze(r.stockCode)}
-                actions={[
-                  <Tag key="score" color="blue" className="text-xs m-0">得分 {r.score}</Tag>,
-                ]}
+                actions={[<Tag key="score" color="blue" className="text-xs m-0">得分 {r.score}</Tag>]}
               >
                 <div className="flex items-center gap-2 text-xs w-full">
                   <Tag className="m-0 text-xs">{r.stockCode}</Tag>

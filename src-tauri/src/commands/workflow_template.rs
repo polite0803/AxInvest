@@ -2043,7 +2043,7 @@ pub async fn update_workflow_template_node(
                         an.config.max_tool_rounds = *mr;
                     }
                 },
-                other => {
+                _other => {
                     tracing::warn!("[template] 节点 {nid} 不是 Agent 类型");
                 },
             }

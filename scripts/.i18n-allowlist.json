@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-27",
-  "total_entries": 125,
-  "total_files": 125,
+  "total_entries": 130,
+  "total_files": 130,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -763,6 +763,72 @@
       "file": "src/components/chat/StructuredThinking.tsx",
       "lines": "53,84,112,141",
       "reason": "LLM 响应分析关键词，非 UI 字符串"
+    },
+    {
+      "file": "src/components/settings/ScheduledAnalysisTab.tsx",
+      "lines": "18,19,20,21,37,55,57,65,72,83,91,98,114,126,131,135,142,145,148,151,158",
+      "reason": "定时分析 Tab 组件",
+      "phase": 3
+    },
+    {
+      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
+      "lines": "326,329,338",
+      "reason": "评分优化按钮",
+      "phase": 3
+    },
+    {
+      "file": "src/components/settings/StockAnalysisSettings.tsx",
+      "lines": "49",
+      "reason": "定时 Tab 标签",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/CompareView.tsx",
+      "lines": "67,222,230,236,242,248,265,266",
+      "reason": "财务对比标签",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DailyReviewPanel.tsx",
+      "lines": "23,30,32,37,44,56,70,76",
+      "reason": "每日复盘面板",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
+      "lines": "69,80,149,151,153,158,167,172,177,185,190,199,206,212,219,237,254",
+      "reason": "回测面板",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/PriceAlertPanel.tsx",
+      "lines": "34,49,67,74,121,142,159,160,161,162,163,190,204,212",
+      "reason": "价格告警面板增强",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
+      "lines": "65,128,138",
+      "reason": "荐股/复盘标签+市场状态",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/StockScreenerPanel.tsx",
+      "lines": "22,23,24,25,26,27,28,48,65,98,110,113,120,153,160,169,182,193",
+      "reason": "智能荐股面板",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/TradePanel.tsx",
+      "lines": "65,87,92,95,148,214,215,217,280,282,288",
+      "reason": "交易面板增强",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/WatchlistPanel.tsx",
+      "lines": "79,142,149,159,174,176,199,220,236,246,247,248,253,279,285",
+      "reason": "自选股面板增强",
+      "phase": 3
     }
   ]
 }

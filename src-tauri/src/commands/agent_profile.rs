@@ -217,3 +217,18 @@ pub async fn ensure_agent_profile(
 
     Ok(id)
 }
+
+/// 列出股票分析可用工具名（Finance 类别 + stock_data 工具）
+#[tauri::command]
+pub async fn list_stock_tools(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let reg = app_state.local_tool_registry.lock().await;
+    let tools = reg.tools.by_category(axagent_tools::ToolCategory::Finance);
+    let mut names: Vec<String> = tools
+        .into_iter()
+        .map(|t| t.name().to_string())
+        .collect();
+    names.sort();
+    Ok(names)
+}

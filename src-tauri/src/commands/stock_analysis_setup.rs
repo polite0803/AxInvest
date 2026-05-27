@@ -144,6 +144,27 @@ const STOCK_ROLES: &[StockRoleDef] = &[
     },
 ];
 
+/// Profile → 工具映射（模块级，模板 seed 和 agent_profiles seed 共用）
+static PROFILE_TOOLS: &[(&str, &[&str])] = &[
+    ("market-analyst", &["get_stock_kline","get_stock_quote","compute_scoring","compute_kdj","compute_obv","search_stock"]),
+    ("sentiment-analyst", &["get_stock_news","get_stock_money_flow","get_hot_stocks","search_stock"]),
+    ("news-analyst", &["get_stock_news","get_announcements","get_cls_flash","search_stock"]),
+    ("fundamentals-analyst", &["get_stock_financials","compute_valuation","get_consensus_eps","get_institutional_visits","search_stock"]),
+    ("policy-analyst", &["get_stock_news","get_announcements","search_stock"]),
+    ("hot-money-tracker", &["get_stock_money_flow","get_hot_stocks","get_north_bound_flow","get_market_dragon_tiger","get_block_trades","search_stock"]),
+    ("lockup-watcher", &["get_stock_financials","get_announcements","search_stock"]),
+    ("research-analyst", &["get_consensus_eps","get_stock_financials","get_stock_news","get_research_reports","get_institutional_visits","search_stock"]),
+    ("sector-analyst", &["get_industry_ranking","get_hot_stocks","get_stock_quote","get_concept_blocks","search_stock"]),
+    ("bull-researcher", &["compute_scoring","compute_valuation","search_stock"]),
+    ("bear-researcher", &["compute_scoring","compute_valuation","search_stock"]),
+    ("aggressive-debator", &["compute_portfolio_risk","search_stock"]),
+    ("conservative-debator", &["compute_portfolio_risk","search_stock"]),
+    ("neutral-debator", &["compute_portfolio_risk","search_stock"]),
+    ("research-manager", &["compute_scoring","compute_valuation","compute_portfolio_risk","search_stock"]),
+    ("trader", &["get_stock_quote","compute_scoring","search_stock"]),
+    ("portfolio-manager", &["compute_scoring","compute_valuation","compute_portfolio_risk","search_stock"]),
+];
+
 pub async fn ensure_stock_analysis_experts_seeded(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), String> {
@@ -169,7 +190,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 14;
+    const TEMPLATE_VERSION: i32 = 17;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -299,17 +320,6 @@ async fn seed_stock_analysis_workflow_template(
     let td_risk = ToolDef {
         name: "compute_portfolio_risk".into(),
         description: Some("计算组合风险：总市值、集中度、风险等级".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
-    };
-    let td_quality = ToolDef {
-        name: "run_quality_gate".into(),
-        description: Some("运行质量门控：检查各分析报告的一致性和完整性".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
@@ -664,6 +674,54 @@ async fn seed_stock_analysis_workflow_template(
             items: None,
         }),
     };
+    let td_block = ToolDef {
+        name: "get_block_trades".into(),
+        description: Some("获取大宗交易记录：成交价、成交量、买卖方营业部、折价率".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
+    };
+    let td_visit = ToolDef {
+        name: "get_institutional_visits".into(),
+        description: Some("获取机构调研记录：调研日期、机构数量、调研内容".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
+    };
+
+    // 工具名 → ToolDef 映射（用于按名查找，给节点填充 config.tools）
+    let tool_def_map: std::collections::HashMap<&str, ToolDef> = [
+        ("get_stock_quote", td_quote.clone()),
+        ("get_stock_kline", td_kline.clone()),
+        ("get_stock_financials", td_fin.clone()),
+        ("get_stock_news", td_news.clone()),
+        ("get_stock_money_flow", td_mf.clone()),
+        ("compute_scoring", td_score.clone()),
+        ("compute_valuation", td_val.clone()),
+        ("compute_portfolio_risk", td_risk.clone()),
+        ("search_stock", ToolDef { name: "search_stock".into(), description: Some("按代码或名称模糊搜索A股".into()), parameters: None }),
+        ("get_hot_stocks", td_hot.clone()),
+        ("get_industry_ranking", td_industry.clone()),
+        ("get_announcements", td_announce.clone()),
+        ("get_consensus_eps", td_consensus.clone()),
+        ("compute_kdj", td_kdj.clone()),
+        ("compute_obv", td_obv.clone()),
+        ("get_cls_flash", td_cls.clone()),
+        ("get_north_bound_flow", td_north.clone()),
+        ("get_market_dragon_tiger", td_dragon.clone()),
+        ("get_research_reports", td_research.clone()),
+        ("get_concept_blocks", td_concepts.clone()),
+        ("get_block_trades", td_block.clone()),
+        ("get_institutional_visits", td_visit.clone()),
+    ].into_iter().collect();
 
     // 从 ToolDef 列表生成 "可用工具" prompt 片段
     fn tool_prompt(tools: &[ToolDef]) -> String {
@@ -811,14 +869,28 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
     }
 
-    // 工具由 AgentProfile.recommended_tools 统一管理，模板不在节点层面分配
-    // agent_executor 运行时从 profile 读取 recommended_tools 合并到 ChatTool 列表
+    // 工具由模板节点 config.tools 统一管理，LLM 自主决定调用
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
         let mut an = agent(id, title, _expert);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
             a.config.max_tool_rounds = Some(2);
+            // 从 PROFILE_TOOLS 查找该专家的工具列表，生成 ToolDef 填入 config.tools
+            let tool_names = PROFILE_TOOLS
+                .iter()
+                .find(|(k, _)| **k == **_expert)
+                .map(|(_, v)| *v)
+                .unwrap_or(&[]);
+            a.config.tools = tool_names
+                .iter()
+                .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                .collect();
+            a.config.system_prompt = format!(
+                "{}{}",
+                a.config.system_prompt,
+                tool_prompt(&a.config.tools)
+            );
         }
         nodes.push(an);
     }
@@ -959,12 +1031,11 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
     }
 
-    // ── 算法 Tool 节点：仅 4 个核心评分/估值/风控/质量 ——
+    // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控 ——
     let algo_tools: &[(&str, &str, &str, &str)] = &[
         ("t-scoring", "技术评分", "compute_scoring", "stock_code"),
         ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
         ("t-risk", "风险评估", "compute_portfolio_risk", "positions_json"),
-        ("t-quality", "质量门控", "run_quality_gate", "reports_json"),
     ];
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
@@ -974,7 +1045,6 @@ async fn seed_stock_analysis_workflow_template(
     }
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
-    edges.push(edge("e-t-risk-t-quality", "t-risk", "t-quality"));
 
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(
@@ -987,13 +1057,11 @@ async fn seed_stock_analysis_workflow_template(
             "t-scoring".into(),
             "t-valuation".into(),
             "t-risk".into(),
-            "t-quality".into(),
         ];
         a.config.tools = vec![
             td_score.clone(),
             td_val.clone(),
             td_risk.clone(),
-            td_quality.clone(),
             td_fin.clone(),
             td_quote.clone(),
             td_kline.clone(),
@@ -1030,13 +1098,15 @@ async fn seed_stock_analysis_workflow_template(
             td_mc.clone(),
             td_ind.clone(),
             td_lup.clone(),
+            td_block.clone(),
+            td_visit.clone(),
         ];
         a.config.system_prompt =
             format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
     }
     nodes.push(rm);
-    edges.push(edge("e-t-quality-research-mgr", "t-quality", "research-mgr"));
+    edges.push(edge("e-t-risk-research-mgr", "t-risk", "research-mgr"));
 
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
     let mut trader = agent(
@@ -1080,7 +1150,6 @@ async fn seed_stock_analysis_workflow_template(
             td_score.clone(),
             td_val.clone(),
             td_risk.clone(),
-            td_quality.clone(),
             td_maxdd.clone(),
             td_sharpe.clone(),
             td_var.clone(),
@@ -1694,90 +1763,8 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     use axagent_core::entity::agent_profiles;
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    // Profile → 工具映射（上游架构：工具由 AgentProfile 统一管理）
-    let profile_tools: std::collections::HashMap<&str, &[&str]> = [
-        (
-            "market-analyst",
-            &[
-                "get_stock_kline",
-                "get_stock_quote",
-                "compute_scoring",
-                "search_stock",
-            ][..],
-        ),
-        (
-            "sentiment-analyst",
-            &[
-                "get_stock_news",
-                "get_stock_money_flow",
-                "get_hot_stocks",
-                "search_stock",
-            ][..],
-        ),
-        ("news-analyst", &["get_stock_news", "get_announcements", "search_stock"][..]),
-        (
-            "fundamentals-analyst",
-            &[
-                "get_stock_financials",
-                "compute_valuation",
-                "get_consensus_eps",
-                "search_stock",
-            ][..],
-        ),
-        ("policy-analyst", &["get_stock_news", "get_announcements", "search_stock"][..]),
-        (
-            "hot-money-tracker",
-            &["get_stock_money_flow", "get_hot_stocks", "search_stock"][..],
-        ),
-        (
-            "lockup-watcher",
-            &["get_stock_financials", "get_announcements", "search_stock"][..],
-        ),
-        (
-            "research-analyst",
-            &[
-                "get_consensus_eps",
-                "get_stock_financials",
-                "get_stock_news",
-                "search_stock",
-            ][..],
-        ),
-        (
-            "sector-analyst",
-            &[
-                "get_industry_ranking",
-                "get_hot_stocks",
-                "get_stock_quote",
-                "search_stock",
-            ][..],
-        ),
-        ("bull-researcher", &["compute_scoring", "compute_valuation", "search_stock"][..]),
-        ("bear-researcher", &["compute_scoring", "compute_valuation", "search_stock"][..]),
-        ("aggressive-debator", &["compute_portfolio_risk", "search_stock"][..]),
-        ("conservative-debator", &["compute_portfolio_risk", "search_stock"][..]),
-        ("neutral-debator", &["compute_portfolio_risk", "search_stock"][..]),
-        (
-            "research-manager",
-            &[
-                "compute_scoring",
-                "compute_valuation",
-                "compute_portfolio_risk",
-                "search_stock",
-            ][..],
-        ),
-        ("trader", &["get_stock_quote", "compute_scoring", "search_stock"][..]),
-        (
-            "portfolio-manager",
-            &[
-                "compute_scoring",
-                "compute_valuation",
-                "compute_portfolio_risk",
-                "search_stock",
-            ][..],
-        ),
-    ]
-    .into_iter()
-    .collect();
+    // Profile → 工具映射（从模块级 PROFILE_TOOLS 构建）
+    let profile_tools: std::collections::HashMap<&str, &[&str]> = PROFILE_TOOLS.iter().cloned().collect();
 
     let mut count = 0u32;
     for &(expert_id, role_id) in EXPERT_ROLE_MAP {

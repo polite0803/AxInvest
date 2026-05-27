@@ -362,6 +362,33 @@ pub struct MarketDragonTiger {
     pub reason: Option<String>,
 }
 
+/// 大宗交易
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockTrade {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub trade_date: String,
+    pub price: f64,
+    pub volume: f64,
+    pub amount: f64,
+    pub buyer_dept: Option<String>,
+    pub seller_dept: Option<String>,
+    pub discount_pct: Option<f64>,
+}
+
+/// 机构调研记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstitutionalVisit {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub visit_date: String,
+    pub institution_count: i32,
+    pub main_content: String,
+    pub visit_type: Option<String>,
+}
+
 /// 北向资金分钟级流向
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

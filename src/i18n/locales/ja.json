@@ -6648,6 +6648,7 @@
       "tab": {
         "experts": "Experts",
         "roles": "Roles",
+        "profiles": "Profiles",
         "params": "Params"
       },
       "check": "Check",
@@ -6655,6 +6656,28 @@
       "saveSuccess": "Config saved",
       "saveConfig": "Save Config",
       "general": "General",
+      "profile": {
+        "desc": "Manage expert-role-tool combinations. Changes are persisted to the database.",
+        "colName": "Name",
+        "colFixedTools": "Fixed Tools",
+        "colExposedTools": "Exposed Tools",
+        "colTools": "Tools",
+        "editTools": "Edit Exposed Tools",
+        "selectTools": "Select LLM-visible tools...",
+        "save": "Save",
+        "cancel": "Cancel",
+        "saved": "Saved",
+        "saveError": "Save failed: {{error}}",
+        "noTools": "No tools",
+        "noFixedTools": "(from upstream)",
+        "fixedHint": "Fixed tool {{tools}} auto-injected by DAG, no need to expose",
+        "bothHint": "Both fixed input and LLM-selectable",
+        "goToExperts": "Go to expert editor",
+        "goToRoles": "Go to role editor",
+        "legendFixed": "Fixed (DAG ToolNode)",
+        "legendExposed": "LLM (AgentProfile)",
+        "legendBoth": "Both"
+      },
       "group": {
         "vendor": "Data Sources",
         "agent": "Analysts",

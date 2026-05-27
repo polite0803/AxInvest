@@ -110,6 +110,21 @@ pub trait StockVendor: Send + Sync {
     async fn get_north_bound_flow(&self) -> Result<Option<NorthBoundFlow>, DataError> {
         Ok(None)
     }
+
+    /// 获取大宗交易记录
+    async fn get_block_trades(&self, stock_code: &str) -> Result<Vec<BlockTrade>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
+
+    /// 获取机构调研记录
+    async fn get_institutional_visits(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<InstitutionalVisit>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
 }
 
 pub mod akshare;

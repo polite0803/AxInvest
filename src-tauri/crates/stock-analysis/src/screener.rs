@@ -200,9 +200,9 @@ impl StockScreener {
                         } else if criteria.rsi_overbought && rsi > 70.0 {
                             reasons.push(format!("RSI超买{:.1}", rsi));
                             score += 1;
-                        } else if criteria.rsi_oversold && rsi >= 30.0 {
-                            continue;
-                        } else if criteria.rsi_overbought && rsi <= 70.0 {
+                        } else if criteria.rsi_oversold && rsi >= 30.0
+                            || criteria.rsi_overbought && rsi <= 70.0
+                        {
                             continue;
                         }
                     } else {

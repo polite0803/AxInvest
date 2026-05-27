@@ -255,7 +255,7 @@ pub fn risk_parity_weights(volatilities: &[f64], correlations_json: &str) -> Ris
             let target = total_risk / n as f64;
             for i in 0..n {
                 if risk_contrib[i] > 0.0 {
-                    w[i] *= (target / risk_contrib[i]).sqrt().min(2.0).max(0.5);
+                    w[i] *= (target / risk_contrib[i]).sqrt().clamp(0.5, 2.0);
                 }
             }
             let ws: f64 = w.iter().sum();

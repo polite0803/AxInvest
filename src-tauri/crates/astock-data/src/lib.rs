@@ -98,7 +98,7 @@ pub struct AStockClient {
 impl AStockClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("Failed to create HTTP client");
 
@@ -234,10 +234,13 @@ impl AStockClient {
         for name in &self.routing.klines {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_klines(stock_code, period, limit).await {
-                    Ok(result) => {
+                    Ok(result) if !result.is_empty() => {
                         let json = serde_json::to_string(&result).unwrap_or_default();
                         self.cache_set(cache_key, json, 300).await;
                         return Ok(result);
+                    },
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} K线返回空，尝试下一源", name);
                     },
                     Err(e) => {
                         tracing::warn!("[降级] {} K线失败: {}", name, e);
@@ -260,7 +263,10 @@ impl AStockClient {
         for name in &self.routing.financials {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_financials(stock_code).await {
-                    Ok(result) => return Ok(result),
+                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} 财务数据返回空，尝试下一源", name);
+                    },
                     Err(e) => {
                         tracing::warn!("[降级] {} 财务数据失败: {}", name, e);
                         last_err = Some(e);
@@ -279,7 +285,10 @@ impl AStockClient {
         for name in &self.routing.news {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_news(stock_code, limit).await {
-                    Ok(result) => return Ok(result),
+                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} 新闻返回空，尝试下一源", name);
+                    },
                     Err(e) => {
                         tracing::warn!("[降级] {} 新闻失败: {}", name, e);
                         last_err = Some(e);
@@ -296,8 +305,14 @@ impl AStockClient {
     pub async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
         for name in &self.routing.money_flow {
             if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_money_flow(stock_code).await {
-                    return Ok(result);
+                match vendor.get_money_flow(stock_code).await {
+                    Ok(Some(result)) => return Ok(Some(result)),
+                    Ok(None) => {
+                        tracing::warn!("[降级] {} 资金流向返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 资金流向失败: {}", name, e);
+                    },
                 }
             }
         }

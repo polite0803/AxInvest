@@ -125,17 +125,42 @@ const VENDORS: VendorDef[] = [
   },
 ];
 
-/** 固定 ToolNode 定义：tool_name → 路由链 (vendors) + 显示标签 */
-const FIXED_TOOLS = [
-  { tool: "get_stock_kline", label: "K线", vendors: ["eastmoney", "tencent", "mootdx"] },
-  { tool: "get_hot_stocks", label: "热门股", vendors: ["ths", "baidu_stock", "iwencai"] },
-  { tool: "get_announcements", label: "公告", vendors: ["cninfo", "eastmoney"] },
-  { tool: "get_consensus_eps", label: "一致预期", vendors: ["ths", "akshare", "iwencai"] },
-  { tool: "get_stock_money_flow", label: "资金流向", vendors: ["eastmoney", "baidu_stock"] },
-  { tool: "get_industry_ranking", label: "行业排名", vendors: ["ths", "baidu_stock"] },
+/** 工具 → Vendor 路由映射（固定 + 暴露） */
+interface ToolRoute {
+  tool: string;
+  label: string;
+  kind: "fixed" | "exposed"; // 固定 ToolNode / LLM 暴露工具
+  vendors: string[];
+}
+
+/** 固定 ToolNode（DAG 确定性执行）*/
+const FIXED_TOOLS: ToolRoute[] = [
+  { tool: "get_stock_kline", label: "K线", kind: "fixed", vendors: ["eastmoney", "tencent", "mootdx"] },
+  { tool: "get_hot_stocks", label: "热门股", kind: "fixed", vendors: ["ths", "baidu_stock", "iwencai"] },
+  { tool: "get_announcements", label: "公告", kind: "fixed", vendors: ["cninfo", "eastmoney"] },
+  { tool: "get_consensus_eps", label: "一致预期", kind: "fixed", vendors: ["ths", "akshare", "iwencai"] },
+  { tool: "get_stock_money_flow", label: "资金流向", kind: "fixed", vendors: ["eastmoney", "baidu_stock"] },
+  { tool: "get_industry_ranking", label: "行业排名", kind: "fixed", vendors: ["ths", "baidu_stock"] },
 ];
 
-/** 本地计算工具（不依赖远程 vendor）*/
+/** LLM 暴露工具（Agent 自主调用，均走 VendorRouting 降级链）*/
+const EXPOSED_TOOLS: ToolRoute[] = [
+  { tool: "get_stock_quote", label: "实时行情", kind: "exposed", vendors: ["tencent", "mootdx", "eastmoney"] },
+  { tool: "get_stock_news", label: "新闻", kind: "exposed", vendors: ["sina", "baidu_stock", "akshare"] },
+  { tool: "get_stock_financials", label: "财务", kind: "exposed", vendors: ["eastmoney", "baidu_stock", "akshare"] },
+  { tool: "search_stock", label: "搜索", kind: "exposed", vendors: ["eastmoney", "iwencai", "baidu_stock"] },
+  { tool: "get_research_reports", label: "研报", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
+  { tool: "get_concept_blocks", label: "概念板块", kind: "exposed", vendors: ["ths", "baidu_stock", "iwencai"] },
+  { tool: "get_market_dragon_tiger", label: "龙虎榜", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
+  { tool: "get_cls_flash", label: "快讯", kind: "exposed", vendors: ["eastmoney", "akshare"] },
+  { tool: "get_north_bound_flow", label: "北向资金", kind: "exposed", vendors: ["ths", "baidu_stock"] },
+  { tool: "get_block_trades", label: "大宗交易", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
+  { tool: "get_institutional_visits", label: "机构调研", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
+];
+
+const ALL_TOOLS = [...FIXED_TOOLS, ...EXPOSED_TOOLS];
+
+/** 本地计算工具 */
 const LOCAL_TOOLS = [
   { tool: "compute_scoring", label: "技术评分" },
   { tool: "compute_valuation", label: "估值计算" },
@@ -178,12 +203,12 @@ export function DataVendorsTab() {
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  // vendor 英文名 → 依赖的固定工具列表
+  // vendor 英文名 → 依赖的工具列表（固定 + 暴露）
   const vendorTools = useMemo(() => {
-    const map: Record<string, typeof FIXED_TOOLS> = {};
-    for (const ft of FIXED_TOOLS) {
-      for (const vn of ft.vendors) {
-        (map[vn] ??= []).push(ft);
+    const map: Record<string, ToolRoute[]> = {};
+    for (const tr of ALL_TOOLS) {
+      for (const vn of tr.vendors) {
+        (map[vn] ??= []).push(tr);
       }
     }
     return map;
@@ -281,11 +306,8 @@ export function DataVendorsTab() {
         const enabled = vendorValues[v.key] ?? false;
         const status = health[v.enName] ?? "idle";
         const deps = vendorTools[v.enName] ?? [];
-        // 计算依赖工具的降级链中本 vendor 的位置
-        const depInfo = deps.map((ft) => {
-          const idx = ft.vendors.indexOf(v.enName);
-          return { ...ft, isPrimary: idx === 0 };
-        });
+        const fixedDeps = deps.filter((d) => d.kind === "fixed");
+        const exposedDeps = deps.filter((d) => d.kind === "exposed");
 
         return (
           <Card
@@ -349,40 +371,68 @@ export function DataVendorsTab() {
                 ))}
               </Space>
             </div>
-            {/* 依赖的固定工具 + 降级链 */}
-            {depInfo.length > 0 && (
+            {/* 固定工具 (🔧) + LLM 暴露工具 (🤖) */}
+            {deps.length > 0 && (
               <div className="border-t border-gray-100 pt-2 mt-1">
-                <div className="text-xs text-gray-400 mb-1">
-                  {enabled
-                    ? t("stockAnalysis.settings.vendors.depActive")
-                    : t("stockAnalysis.settings.vendors.depInactive")}
-                </div>
-                {depInfo.map((ft) => (
-                  <div key={ft.tool} className="flex items-center gap-2 text-xs py-0.5">
-                    <Tag color="default" className="text-xs m-0">⚙️ {ft.tool}</Tag>
-                    <span className="text-gray-400">{ft.label}</span>
-                    <span className="text-gray-300">
-                      {ft.vendors.map((vn, i) => (
-                        <span key={vn}>
-                          {i > 0 ? " → " : ""}
-                          <span
-                            className={vn === v.enName
-                              ? "font-medium text-gray-600"
-                              : health[vn] === "ok"
-                              ? "text-green-600"
-                              : "text-gray-400"}
-                          >
-                            {vn}
-                          </span>
+                {fixedDeps.length > 0 && (
+                  <div className="mb-1">
+                    <div className="text-xs text-gray-400 mb-0.5">
+                      🔧 {t("stockAnalysis.settings.vendors.fixedToolHeader")}
+                    </div>
+                    {fixedDeps.map((tr) => (
+                      <div key={tr.tool} className="flex items-center gap-1 text-xs py-0.5">
+                        <Tag color="default" className="text-xs m-0">{tr.tool}</Tag>
+                        <span className="text-gray-400">{tr.label}</span>
+                        <span className="text-gray-300">
+                          {tr.vendors.map((vn, i) => (
+                            <span key={vn}>
+                              {i > 0 ? " → " : ""}
+                              <span
+                                className={vn === v.enName
+                                  ? "font-medium text-gray-600"
+                                  : health[vn] === "ok"
+                                  ? "text-green-600"
+                                  : "text-gray-400"}
+                              >
+                                {vn}
+                              </span>
+                            </span>
+                          ))}
                         </span>
-                      ))}
-                    </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+                {exposedDeps.length > 0 && (
+                  <div>
+                    <div className="text-xs text-gray-400 mb-0.5">
+                      🤖 {t("stockAnalysis.settings.vendors.exposedToolHeader")}
+                    </div>
+                    {exposedDeps.map((tr) => (
+                      <div key={tr.tool} className="flex items-center gap-1 text-xs py-0.5">
+                        <Tag color="green" className="text-xs m-0">{tr.tool}</Tag>
+                        <span className="text-gray-400">{tr.label}</span>
+                        <span className="text-gray-300">
+                          {tr.vendors.map((vn, i) => (
+                            <span key={vn}>
+                              {i > 0 ? " → " : ""}
+                              <span
+                                className={vn === v.enName
+                                  ? "font-medium text-gray-600"
+                                  : health[vn] === "ok"
+                                  ? "text-green-600"
+                                  : "text-gray-400"}
+                              >
+                                {vn}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {depInfo.length === 0 && (
-              <div className="text-xs text-gray-400">{t("stockAnalysis.settings.vendors.noDeps")}</div>
             )}
           </Card>
         );

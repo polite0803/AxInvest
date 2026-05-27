@@ -6693,6 +6693,8 @@
         "depActive": "Provides data for these tools:",
         "depInactive": "When disabled, these tools fall back to next vendor:",
         "noDeps": "No tools depend on this vendor",
+        "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
+        "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
         "localCompute": "Local compute tools (no remote vendor dependency)"
       },
       "group": {

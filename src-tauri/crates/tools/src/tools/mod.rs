@@ -247,13 +247,9 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(finance::AnalyzeIndustryTool),
         std::sync::Arc::new(finance::DetectLimitUpTool),
         std::sync::Arc::new(finance::ResearchReportsTool),
-        std::sync::Arc::new(finance::ConsensusEPSTool),
         std::sync::Arc::new(finance::ConceptBlocksTool),
-        std::sync::Arc::new(finance::AnnouncementsTool),
         std::sync::Arc::new(finance::NorthBoundFlowTool),
         std::sync::Arc::new(finance::DragonTigerTool),
-        std::sync::Arc::new(finance::HotStocksTool),
-        std::sync::Arc::new(finance::IndustryRankingTool),
         std::sync::Arc::new(finance::ClsFlashTool),
     ]);
 }

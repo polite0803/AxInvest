@@ -1968,3 +1968,82 @@ mod tests {
         assert!(goal.starts_with("Unnamed"));
     }
 }
+
+/// 更新工作流模板中单个节点的 tools 或 system_prompt。
+/// 自动递增版本号。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateWorkflowTemplateNodeInput {
+    pub tools: Option<Vec<String>>,
+    pub system_prompt: Option<String>,
+}
+
+#[tauri::command]
+pub async fn update_workflow_template_node(
+    state: State<'_, AppState>,
+    template_id: String,
+    node_id: String,
+    input: UpdateWorkflowTemplateNodeInput,
+) -> Result<bool, String> {
+    let db = &state.sea_db;
+    use axagent_core::entity::workflow_template;
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    let row = workflow_template::Entity::find_by_id(&template_id)
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("模板 {} 不存在", template_id))?;
+
+    let mut nodes: Vec<axagent_core::workflow_types::WorkflowNode> =
+        serde_json::from_str(&row.nodes).map_err(|e| format!("解析节点失败: {e}"))?;
+
+    let mut found = false;
+    for node in &mut nodes {
+        if node.base_id() == node_id {
+            let nid = node.base_id().to_string();
+            found = true;
+            match node {
+                axagent_core::workflow_types::WorkflowNode::Agent(an) => {
+                    if let Some(ref tools) = input.tools {
+                        an.config.tools = tools
+                            .iter()
+                            .map(|tn| axagent_core::workflow_types::ToolDef {
+                                name: tn.clone(),
+                                description: None,
+                                parameters: None,
+                            })
+                            .collect();
+                        tracing::info!("[template] 节点 {nid} tools 已更新: {} 个工具", tools.len());
+                    }
+                    if let Some(ref sp) = input.system_prompt {
+                        an.config.system_prompt = sp.clone();
+                    }
+                },
+                other => {
+                    tracing::warn!("[template] 节点 {nid} 不是 Agent 类型");
+                },
+            }
+            break;
+        }
+    }
+
+    if !found {
+        return Err(format!("节点 {} 在模板 {} 中不存在", node_id, template_id));
+    }
+
+    let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
+    let new_version = row.version + 1;
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let mut am: workflow_template::ActiveModel = row.into();
+    am.nodes = Set(nodes_json);
+    am.version = Set(new_version);
+    am.updated_at = Set(now);
+    am.update(db).await.map_err(|e| e.to_string())?;
+
+    tracing::info!(
+        "[template] {template_id} 节点 {node_id} 已更新，版本 {new_version}"
+    );
+    Ok(true)
+}

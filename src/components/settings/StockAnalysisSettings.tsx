@@ -2,12 +2,14 @@ import { invoke } from "@/lib/invoke";
 import { Tabs } from "antd";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AgentProfileList } from "./AgentProfileList";
 import { ExpertPromptList } from "./ExpertPromptList";
 import { RolePromptList } from "./RolePromptList";
 import { StockAnalysisConfigPanel } from "./StockAnalysisConfigPanel";
 
 export function StockAnalysisSettings() {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState("experts");
   const [vendorHealth, setVendorHealth] = useState<Record<string, "ok" | "fail" | "pending">>({});
   const [checkingVendors, setCheckingVendors] = useState(false);
 
@@ -32,6 +34,8 @@ export function StockAnalysisSettings() {
     <div className="p-6 pb-12">
       <Tabs
         size="small"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           {
             key: "experts",
@@ -42,6 +46,16 @@ export function StockAnalysisSettings() {
             key: "roles",
             label: t("stockAnalysis.settings.tab.roles"),
             children: <RolePromptList />,
+          },
+          {
+            key: "profiles",
+            label: t("stockAnalysis.settings.tab.profiles"),
+            children: (
+              <AgentProfileList
+                onGoToExperts={() => setActiveTab("experts")}
+                onGoToRoles={() => setActiveTab("roles")}
+              />
+            ),
           },
           {
             key: "params",

@@ -1154,16 +1154,6 @@ api_tool!(ResearchReportsTool, "get_research_reports", "获取券商研报", |in
         .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
         .map_err(|e| ToolError::execution_failed(e.to_string()))
 });
-api_tool!(ConsensusEPSTool, "get_consensus_eps", "获取一致性预期EPS", |input, c| {
-    let code = input
-        .get("stock_code")
-        .and_then(|v| v.as_str())
-        .unwrap_or("000001");
-    c.get_consensus_eps(code)
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
 api_tool!(
     ConceptBlocksTool,
     "get_concept_blocks",
@@ -1179,16 +1169,6 @@ api_tool!(
             .map_err(|e| ToolError::execution_failed(e.to_string()))
     }
 );
-api_tool!(AnnouncementsTool, "get_announcements", "获取公司公告", |input, c| {
-    let code = input
-        .get("stock_code")
-        .and_then(|v| v.as_str())
-        .unwrap_or("000001");
-    c.get_announcements(code)
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
 api_tool!(
     NorthBoundFlowTool,
     "get_north_bound_flow",
@@ -1206,23 +1186,6 @@ api_tool!(
     "获取龙虎榜数据",
     |_input, c| {
         c.get_market_dragon_tiger()
-            .await
-            .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-            .map_err(|e| ToolError::execution_failed(e.to_string()))
-    }
-);
-api_tool!(HotStocksTool, "get_hot_stocks", "获取市场热门股", |_input, c| {
-    c.get_hot_stocks()
-        .await
-        .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
-        .map_err(|e| ToolError::execution_failed(e.to_string()))
-});
-api_tool!(
-    IndustryRankingTool,
-    "get_industry_ranking",
-    "获取行业涨跌排名",
-    |_input, c| {
-        c.get_industry_ranking()
             .await
             .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
             .map_err(|e| ToolError::execution_failed(e.to_string()))

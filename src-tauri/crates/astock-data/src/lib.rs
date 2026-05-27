@@ -52,6 +52,8 @@ struct VendorRouting {
     industry_ranking: Vec<String>,
     cls_flash: Vec<String>,
     north_bound_flow: Vec<String>,
+    block_trades: Vec<String>,
+    institutional_visits: Vec<String>,
 }
 
 impl VendorRouting {
@@ -59,9 +61,9 @@ impl VendorRouting {
         Self {
             quote: vec!["tencent".into(), "mootdx".into(), "eastmoney".into()],
             klines: vec!["eastmoney".into(), "tencent".into(), "mootdx".into()],
-            financials: vec!["eastmoney".into(), "tencent".into(), "akshare".into()],
-            news: vec!["sina".into(), "tencent".into(), "akshare".into()],
-            money_flow: vec!["eastmoney".into(), "tencent".into(), "baidu_stock".into()],
+            financials: vec!["eastmoney".into(), "baidu_stock".into(), "akshare".into()],
+            news: vec!["sina".into(), "baidu_stock".into(), "akshare".into()],
+            money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
             search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],
@@ -78,12 +80,14 @@ impl VendorRouting {
             research_reports: vec!["eastmoney".into(), "baidu_stock".into()],
             consensus_eps: vec!["ths".into(), "akshare".into(), "iwencai".into()],
             concept_blocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
-            announcements: vec!["cninfo".into()],
-            market_dragon_tiger: vec!["eastmoney".into()],
+            announcements: vec!["cninfo".into(), "eastmoney".into()],
+            market_dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
             industry_ranking: vec!["ths".into(), "baidu_stock".into()],
             cls_flash: vec!["eastmoney".into(), "akshare".into()],
             north_bound_flow: vec!["ths".into(), "baidu_stock".into()],
+            block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
+            institutional_visits: vec!["eastmoney".into(), "baidu_stock".into()],
         }
     }
 }
@@ -556,6 +560,43 @@ impl AStockClient {
             }
         }
         Ok(None)
+    }
+
+    pub async fn get_block_trades(&self, stock_code: &str) -> Result<Vec<BlockTrade>, DataError> {
+        for name in &self.routing.block_trades {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_block_trades(stock_code).await {
+                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} 大宗交易返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 大宗交易失败: {}", name, e);
+                    },
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_institutional_visits(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<InstitutionalVisit>, DataError> {
+        for name in &self.routing.institutional_visits {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_institutional_visits(stock_code).await {
+                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} 机构调研返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 机构调研失败: {}", name, e);
+                    },
+                }
+            }
+        }
+        Ok(vec![])
     }
 
     pub async fn fetch_market_data(&self) -> Result<MarketRawData, DataError> {

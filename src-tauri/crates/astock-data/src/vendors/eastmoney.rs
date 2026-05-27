@@ -597,4 +597,140 @@ impl StockVendor for EastMoneyVendor {
             })
             .collect())
     }
+
+    async fn get_announcements(&self, stock_code: &str) -> Result<Vec<Announcement>, DataError> {
+        let market = if stock_code.starts_with('6') {
+            "1"
+        } else {
+            "0"
+        };
+        let url = format!(
+            "https://np-anotice-stock.eastmoney.com/api/security/ann?page_index=1&page_size=20&stock_list={market},{stock_code}"
+        );
+
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let items = match json["data"]["list"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(items
+            .iter()
+            .filter_map(|item| {
+                Some(Announcement {
+                    title: item.get("title")?.as_str()?.to_string(),
+                    stock_code: stock_code.to_string(),
+                    stock_name: item
+                        .get("art_code")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    announce_date: item
+                        .get("notice_date")
+                        .and_then(|v| v.as_i64())
+                        .map(|ts| {
+                            let secs = ts / 1000;
+                            let naive = chrono::DateTime::from_timestamp(secs as i64, 0)
+                                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                                .unwrap_or_default();
+                            naive
+                        })
+                        .unwrap_or_default(),
+                    ann_type: item
+                        .get("columns")
+                        .and_then(|v| v.get(0))
+                        .and_then(|v| v.get("column_name"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    pdf_url: item
+                        .get("dest_url")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("https://np-anotice-stock.eastmoney.com{s}")),
+                })
+            })
+            .collect())
+    }
+
+    async fn get_block_trades(&self, stock_code: &str) -> Result<Vec<BlockTrade>, DataError> {
+        let secid = to_em_secid(stock_code);
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_BLOCKTRADE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,TRADE_PRICE,TRADE_VOL,TRADE_AMOUNT,BUYER_NAME,SELLER_NAME,DISCOUNT_RATE&filter=(SECURITY_CODE=\"{secid}\")&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
+        );
+
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(rows
+            .iter()
+            .map(|r| BlockTrade {
+                stock_code: stock_code.to_string(),
+                stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
+                trade_date: r["TRADE_DATE"]
+                    .as_str()
+                    .map(|s| s.chars().take(10).collect::<String>())
+                    .unwrap_or(
+                        r["TRADE_DATE"]
+                            .as_i64()
+                            .map(|ts| {
+                                let secs = ts / 1000;
+                                chrono::DateTime::from_timestamp(secs as i64, 0)
+                                    .map(|dt| dt.format("%Y-%m-%d").to_string())
+                                    .unwrap_or_default()
+                            })
+                            .unwrap_or_default(),
+                    ),
+                price: r["TRADE_PRICE"].as_f64().unwrap_or(0.0),
+                volume: r["TRADE_VOL"].as_f64().unwrap_or(0.0),
+                amount: r["TRADE_AMOUNT"].as_f64().unwrap_or(0.0),
+                buyer_dept: r["BUYER_NAME"].as_str().map(|s| s.to_string()),
+                seller_dept: r["SELLER_NAME"].as_str().map(|s| s.to_string()),
+                discount_pct: r["DISCOUNT_RATE"].as_f64(),
+            })
+            .collect())
+    }
+
+    async fn get_institutional_visits(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<InstitutionalVisit>, DataError> {
+        let secid = to_em_secid(stock_code);
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ORG_SURVEY&columns=SECUCODE,SECURITY_NAME_ABBR,SURVEY_DATE,ORG_NUM,MAIN_CONTENT,SURVEY_TYPE&filter=(SECURITY_CODE=\"{secid}\")&sortColumns=SURVEY_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
+        );
+
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let content = r["MAIN_CONTENT"].as_str().unwrap_or("").to_string();
+                if content.is_empty() || content.len() < 10 {
+                    return None;
+                }
+                Some(InstitutionalVisit {
+                    stock_code: stock_code.to_string(),
+                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
+                    visit_date: r["SURVEY_DATE"]
+                        .as_str()
+                        .map(|s| s.chars().take(10).collect::<String>())
+                        .unwrap_or_default(),
+                    institution_count: r["ORG_NUM"].as_i64().unwrap_or(0) as i32,
+                    main_content: content,
+                    visit_type: r["SURVEY_TYPE"].as_str().map(|s| s.to_string()),
+                })
+            })
+            .collect())
+    }
 }

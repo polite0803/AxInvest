@@ -382,6 +382,74 @@ algo_tool!(
     "组合风险指标：集中度/分散度/行业暴露"
 );
 
+// ── 14. StockBlockTradesTool ──
+pub struct StockBlockTradesTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockBlockTradesTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockBlockTradesTool {
+    fn name(&self) -> &str {
+        "get_block_trades"
+    }
+    fn description(&self) -> &str {
+        "获取A股大宗交易记录：成交价、成交量、买卖双方营业部、折价率"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let r = self
+            .client
+            .get_block_trades(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 15. StockInstitutionalVisitsTool ──
+pub struct StockInstitutionalVisitsTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockInstitutionalVisitsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockInstitutionalVisitsTool {
+    fn name(&self) -> &str {
+        "get_institutional_visits"
+    }
+    fn description(&self) -> &str {
+        "获取A股机构调研记录：调研日期、机构数量、调研内容、调研方式"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let r = self
+            .client
+            .get_institutional_visits(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
 // ── Registration ──
 pub fn register_stock_tools(
     registry: &mut crate::registry::ToolRegistry,
@@ -400,6 +468,8 @@ pub fn register_stock_tools(
         Arc::new(SearchStockTool::new(client.clone())),
         Arc::new(ComputeScoringTool::new(client.clone())),
         Arc::new(ComputeValuationTool::new(client.clone())),
-        Arc::new(ComputeRiskTool::new(client)),
+        Arc::new(ComputeRiskTool::new(client.clone())),
+        Arc::new(StockBlockTradesTool::new(client.clone())),
+        Arc::new(StockInstitutionalVisitsTool::new(client)),
     ]);
 }

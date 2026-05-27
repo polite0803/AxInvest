@@ -13,10 +13,15 @@ import { CompareView } from "./CompareView";
 import { DailyReviewPanel } from "./DailyReviewPanel";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
+import { DragonTigerPanel } from "./DragonTigerPanel";
+import { EventCalendarPanel } from "./EventCalendarPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
 import { KLineChart } from "./KLineChart";
+import { LimitUpPanel } from "./LimitUpPanel";
+import { NorthBoundPanel } from "./NorthBoundPanel";
 import { PriceAlertPanel } from "./PriceAlertPanel";
 import { RiskMatrix } from "./RiskMatrix";
+import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
 import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
 import { StockQuoteCard } from "./StockQuoteCard";
 import { StockScreenerPanel } from "./StockScreenerPanel";
@@ -126,6 +131,11 @@ export function StockAnalysisPage() {
 
   const sheetPanels: SheetPanel[] = [
     { key: "screener", label: "荐股", element: <StockScreenerPanel /> },
+    { key: "limitup", label: "涨停", element: <LimitUpPanel /> },
+    { key: "dragontiger", label: "龙虎", element: <DragonTigerPanel /> },
+    { key: "sectors", label: "板块", element: <SectorHeatmapPanel /> },
+    { key: "north", label: "北向", element: <NorthBoundPanel /> },
+    { key: "events", label: "日历", element: <EventCalendarPanel /> },
     { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
     { key: "watchlist", label: t("stockAnalysis.watchlist"), element: <WatchlistPanel /> },
     { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },

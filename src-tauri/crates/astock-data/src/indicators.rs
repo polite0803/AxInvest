@@ -40,15 +40,16 @@ pub struct TechnicalIndicators {
     pub resistance_levels: Vec<f64>,
 }
 
-/// Compute SMA (Simple Moving Average)
+/// Compute SMA (Simple Moving Average) — 取最近 period 个数据
 fn sma(data: &[f64], period: usize) -> Option<f64> {
-    if data.len() < period {
+    if data.len() < period || period == 0 {
         return None;
     }
-    Some(data.iter().take(period).sum::<f64>() / period as f64)
+    let start = data.len() - period;
+    Some(data[start..].iter().sum::<f64>() / period as f64)
 }
 
-/// Compute EMA for MACD
+/// Compute EMA for a single value (used for MACD final value)
 fn ema(data: &[f64], period: usize) -> f64 {
     if data.is_empty() {
         return 0.0;
@@ -61,37 +62,60 @@ fn ema(data: &[f64], period: usize) -> f64 {
     result
 }
 
-/// Compute RSI (Wilder's method)
+/// Build complete EMA series (one EMA value per input point)
+fn build_ema_series(data: &[f64], period: usize) -> Vec<f64> {
+    if data.is_empty() || period == 0 {
+        return vec![0.0];
+    }
+    let multiplier = 2.0 / (period as f64 + 1.0);
+    let mut result = Vec::with_capacity(data.len());
+    let mut ema_val = data[0];
+    result.push(ema_val);
+    for &val in &data[1..] {
+        ema_val = (val - ema_val) * multiplier + ema_val;
+        result.push(ema_val);
+    }
+    result
+}
+
+/// Compute RSI (Wilder's smoothing method)
 fn rsi(closes: &[f64], period: usize) -> f64 {
-    if closes.len() < period + 1 {
+    if closes.len() < period + 1 || period == 0 {
         return 50.0;
     }
-    let mut gains = 0.0;
-    let mut losses = 0.0;
+    let mut avg_gain = 0.0;
+    let mut avg_loss = 0.0;
     for i in 1..=period {
         let diff = closes[i] - closes[i - 1];
         if diff > 0.0 {
-            gains += diff;
+            avg_gain += diff;
         } else {
-            losses += -diff;
+            avg_loss += -diff;
         }
     }
-    let avg_gain = gains / period as f64;
-    let avg_loss = losses / period as f64;
-    if avg_loss == 0.0 {
+    avg_gain /= period as f64;
+    avg_loss /= period as f64;
+    for i in (period + 1)..closes.len() {
+        let diff = closes[i] - closes[i - 1];
+        let gain = if diff > 0.0 { diff } else { 0.0 };
+        let loss = if diff < 0.0 { -diff } else { 0.0 };
+        avg_gain = (avg_gain * (period - 1) as f64 + gain) / period as f64;
+        avg_loss = (avg_loss * (period - 1) as f64 + loss) / period as f64;
+    }
+    if avg_loss < 1e-10 {
         return 100.0;
     }
     let rs = avg_gain / avg_loss;
     100.0 - (100.0 / (1.0 + rs))
 }
 
-/// Compute standard deviation for Bollinger Bands
+/// Compute sample standard deviation for Bollinger Bands (n-1 denominator)
 fn stddev(data: &[f64], mean: f64) -> f64 {
     let n = data.len() as f64;
     if n < 2.0 {
         return 0.0;
     }
-    let variance = data.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+    let variance = data.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n - 1.0);
     variance.sqrt()
 }
 
@@ -155,22 +179,44 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         "缠绕/交叉".to_string()
     };
 
-    // MACD
-    let ema12 = ema(&closes, 12);
-    let ema26 = ema(&closes, 26);
-    let dif = ema12 - ema26;
-    // DEA 是对 DIF 序列做 EMA(9) 的简化：用当前 DIF 值做近似
-    let dea_slice = vec![dif];
-    let dea = ema(&dea_slice, 9);
+    // MACD: 计算完整 DIF 序列后再做 EMA(9) 得到 DEA
+    let dif_series: Vec<f64> = if closes.len() >= 26 {
+        let ema12_series: Vec<f64> = build_ema_series(&closes, 12);
+        let ema26_series: Vec<f64> = build_ema_series(&closes, 26);
+        ema12_series
+            .iter()
+            .zip(ema26_series.iter())
+            .map(|(&e12, &e26)| e12 - e26)
+            .collect()
+    } else {
+        vec![0.0]
+    };
+    let dea_series = build_ema_series(&dif_series, 9);
+    let dif = dif_series.last().copied().unwrap_or(0.0);
+    let prev_dif = if dif_series.len() >= 2 {
+        dif_series[dif_series.len() - 2]
+    } else {
+        dif
+    };
+    let dea = dea_series.last().copied().unwrap_or(0.0);
+    let prev_dea = if dea_series.len() >= 2 {
+        dea_series[dea_series.len() - 2]
+    } else {
+        dea
+    };
     let bar = (dif - dea) * 2.0;
 
-    // MACD signal
-    let macd_signal = if dif > dea && dif > 0.0 {
-        "多头运行".to_string()
-    } else if dif > dea {
+    // MACD signal: 基于金叉/死叉（DIF 与 DEA 交叉）判断
+    let macd_signal = if prev_dif <= prev_dea && dif > dea {
         "金叉".to_string()
+    } else if prev_dif >= prev_dea && dif < dea {
+        "死叉".to_string()
+    } else if dif > dea && dif > 0.0 {
+        "多头运行".to_string()
     } else if dif < dea && dif < 0.0 {
         "空头运行".to_string()
+    } else if dif > dea {
+        "金叉".to_string()
     } else {
         "死叉".to_string()
     };
@@ -192,9 +238,15 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         "中性".to_string()
     };
 
-    // Bollinger Bands (20,2)
+    // Bollinger Bands (20,2) — 取最近20根K线计算
     let boll_mid = ma20;
-    let boll_std = stddev(&closes.iter().take(20).copied().collect::<Vec<_>>(), boll_mid);
+    let boll_std = if closes.len() >= 20 {
+        stddev(&closes[closes.len() - 20..], boll_mid)
+    } else if !closes.is_empty() {
+        stddev(closes, boll_mid)
+    } else {
+        0.0
+    };
     let boll_upper = boll_mid + 2.0 * boll_std;
     let boll_lower = boll_mid - 2.0 * boll_std;
 

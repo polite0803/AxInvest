@@ -192,6 +192,9 @@ export default defineConfig(async () => ({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // React 19 scheduler setImmediate 回调在 jsdom 销毁后访问 window → ReferenceError
+    // pool: "forks" 使每个测试文件独立进程，进程退出时所有 pending 回调一并终止
+    pool: "forks",
     // TODO: 这些测试需要修复 CI 兼容性问题后重新启用
     // 已知问题：mock 依赖缺失、异步竞态导致 CI 环境偶发失败
     exclude: [

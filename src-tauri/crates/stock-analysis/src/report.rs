@@ -13,12 +13,18 @@ pub fn generate_html_report(
     decision_json: &str,
     quality_summary: &str,
     rule_check_result: &str,
+    value_assessment_json: &str,
 ) -> String {
     let quote: serde_json::Value = serde_json::from_str(quote_json).unwrap_or_default();
     let price = quote["price"].as_f64().unwrap_or(0.0);
     let change_pct = quote["changePct"].as_f64().unwrap_or(0.0);
     let score: serde_json::Value = serde_json::from_str(score_json).unwrap_or_default();
     let decision: serde_json::Value = serde_json::from_str(decision_json).unwrap_or_default();
+    let value: serde_json::Value = serde_json::from_str(value_assessment_json).unwrap_or_default();
+    let buffett_verdict = value["buffett_verdict"].as_str().unwrap_or("-");
+    let margin_of_safety = value["margin_of_safety_pct"].as_f64().unwrap_or(0.0);
+    let f_score = value["f_score"].as_f64().unwrap_or(0.0);
+    let moat = value["moat_score"].as_f64().unwrap_or(0.0);
 
     // Build analyst report HTML
     let mut analyst_html = String::new();
@@ -166,6 +172,13 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   <div class="card"><h3>均线</h3><div style="font-size:13px">MA5: {ma5:.2}<br>MA10: {ma10:.2}<br>MA20: {ma20:.2}<br>MA60: {ma60:.2}</div></div>
   <div class="card"><h3>MACD</h3><div style="font-size:13px">DIF: {dif:.2}<br>DEA: {dea:.2}<br>柱: {bar:.2}<br>{macd_signal}</div></div>
   <div class="card"><h3>RSI &amp; 量能</h3><div style="font-size:13px">RSI6: {rsi6:.0}<br>RSI12: {rsi12:.0}<br>RSI24: {rsi24:.0}<br>量比: {vol_ratio:.1}x</div></div>
+</div>
+
+<h3 style="margin:16px 0 8px">价值评估</h3>
+<div class="grid">
+  <div class="card"><h3>巴菲特判定</h3><div class="value" style="font-size:16px">{buffett_verdict}</div></div>
+  <div class="card"><h3>安全边际</h3><div class="value">{margin_of_safety:.1}%</div></div>
+  <div class="card"><h3>F-Score / 护城河</h3><div class="value">{f_score:.0}/9 · {moat:.0}/10</div></div>
 </div>
 
 <div class="decision">

@@ -185,6 +185,24 @@ pub async fn build_analyst_context(
         },
     }
 
+    if expert_id == "portfolio-manager" {
+        if let Some(score) = bb.get_state("raw.objective_score") {
+            let _ = write!(ctx, "\n--- 客观评分 ---\n{}\n", safe_truncate(score, 800));
+        }
+        if let Some(value) = bb.get_state("value.assessment") {
+            let _ = write!(ctx, "\n--- 价值评估 ---\n{}\n", safe_truncate(value, 800));
+        }
+        if let Some(quality) = bb.get_state("data_quality_summary") {
+            let _ = write!(ctx, "\n--- 数据质量 ---\n{}\n", quality);
+        }
+        if let Some(rule_result) = bb.get_state("rule_check.result") {
+            let _ = write!(ctx, "\n--- 规则检查 ---\n{}\n", rule_result);
+        }
+        if let Some(rule_corrections) = bb.get_state("rule_check.corrections") {
+            let _ = write!(ctx, "\n--- 规则修正建议 ---\n{}\n", rule_corrections);
+        }
+    }
+
     ctx
 }
 
@@ -214,4 +232,15 @@ pub async fn export_blackboard_snapshot(blackboard: &Arc<RwLock<SharedBlackboard
         snapshot.insert(key.clone(), serde_json::Value::String(value.clone()));
     }
     serde_json::to_string(&snapshot).unwrap_or_default()
+}
+
+fn safe_truncate(s: &str, max_len: usize) -> &str {
+    if s.len() <= max_len {
+        return s;
+    }
+    let mut end = max_len;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }

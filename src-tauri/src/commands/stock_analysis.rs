@@ -786,6 +786,12 @@ pub async fn generate_stock_report(
         })
         .unwrap_or_default();
 
+    let value_assessment_json = analysis_result_json
+        .as_ref()
+        .and_then(|v| v.get("valueAssessment"))
+        .map(|v| serde_json::to_string(v).unwrap_or_default())
+        .unwrap_or_default();
+
     let html = axagent_stock_analysis::report::generate_html_report(
         &record.stock_code,
         &record.stock_name,
@@ -797,6 +803,7 @@ pub async fn generate_stock_report(
         &decision_json,
         "",
         "",
+        &value_assessment_json,
     );
 
     std::fs::write(&filepath, &html).map_err(|e| e.to_string())?;

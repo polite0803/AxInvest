@@ -1,3 +1,4 @@
+import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
@@ -13,7 +14,6 @@ import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
 import { KLineChart } from "./KLineChart";
 import { PriceAlertPanel } from "./PriceAlertPanel";
 import { RiskMatrix } from "./RiskMatrix";
-import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
 import { StockQuoteCard } from "./StockQuoteCard";
 import { StockSearchBar } from "./StockSearchBar";

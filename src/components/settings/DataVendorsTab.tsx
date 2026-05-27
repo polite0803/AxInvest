@@ -16,15 +16,113 @@ interface VendorDef {
 }
 
 const VENDORS: VendorDef[] = [
-  { key: "vendor_tencent", enName: "tencent", name: "腾讯财经", desc: "报价/K线", capabilities: ["quote", "klines"], requiresKey: false },
-  { key: "vendor_eastmoney", enName: "eastmoney", name: "东方财富", desc: "综合数据", capabilities: ["quote", "klines", "financials", "money_flow", "dragon_tiger", "lockup", "search", "margin", "north_bound", "sector", "shareholder_trades", "dividend", "research_reports", "market_dragon_tiger", "cls_flash"], requiresKey: false },
-  { key: "vendor_sina", enName: "sina", name: "新浪财经", desc: "报价/新闻", capabilities: ["quote", "news"], requiresKey: false },
-  { key: "vendor_ths", enName: "ths", name: "同花顺", desc: "综合数据", capabilities: ["consensus_eps", "concept_blocks", "hot_stocks", "industry_ranking", "north_bound_flow"], requiresKey: false },
-  { key: "vendor_cninfo", enName: "cninfo", name: "巨潮资讯", desc: "信息披露", capabilities: ["announcements"], requiresKey: false },
-  { key: "vendor_baidu_stock", enName: "baidu_stock", name: "百度股市通", desc: "全维度", capabilities: ["quote", "klines", "financials", "news", "money_flow", "dragon_tiger", "lockup", "search", "margin", "north_bound", "sector", "shareholder_trades", "dividend", "research_reports", "concept_blocks", "hot_stocks", "industry_ranking", "north_bound_flow"], requiresKey: false },
-  { key: "vendor_iwencai", enName: "iwencai", name: "问财", desc: "选股/研报", capabilities: ["search", "sector", "consensus_eps", "concept_blocks", "hot_stocks"], requiresKey: true },
-  { key: "vendor_akshare", enName: "akshare", name: "AKShare", desc: "开源数据", capabilities: ["financials", "news", "consensus_eps", "cls_flash"], requiresKey: false },
-  { key: "vendor_mootdx", enName: "mootdx", name: "Mootdx", desc: "通达信本地", capabilities: ["quote", "klines"], requiresKey: false },
+  {
+    key: "vendor_tencent",
+    enName: "tencent",
+    name: "腾讯财经",
+    desc: "报价/K线",
+    capabilities: ["quote", "klines"],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_eastmoney",
+    enName: "eastmoney",
+    name: "东方财富",
+    desc: "综合数据",
+    capabilities: [
+      "quote",
+      "klines",
+      "financials",
+      "money_flow",
+      "dragon_tiger",
+      "lockup",
+      "search",
+      "margin",
+      "north_bound",
+      "sector",
+      "shareholder_trades",
+      "dividend",
+      "research_reports",
+      "market_dragon_tiger",
+      "cls_flash",
+    ],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_sina",
+    enName: "sina",
+    name: "新浪财经",
+    desc: "报价/新闻",
+    capabilities: ["quote", "news"],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_ths",
+    enName: "ths",
+    name: "同花顺",
+    desc: "综合数据",
+    capabilities: ["consensus_eps", "concept_blocks", "hot_stocks", "industry_ranking", "north_bound_flow"],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_cninfo",
+    enName: "cninfo",
+    name: "巨潮资讯",
+    desc: "信息披露",
+    capabilities: ["announcements"],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_baidu_stock",
+    enName: "baidu_stock",
+    name: "百度股市通",
+    desc: "全维度",
+    capabilities: [
+      "quote",
+      "klines",
+      "financials",
+      "news",
+      "money_flow",
+      "dragon_tiger",
+      "lockup",
+      "search",
+      "margin",
+      "north_bound",
+      "sector",
+      "shareholder_trades",
+      "dividend",
+      "research_reports",
+      "concept_blocks",
+      "hot_stocks",
+      "industry_ranking",
+      "north_bound_flow",
+    ],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_iwencai",
+    enName: "iwencai",
+    name: "问财",
+    desc: "选股/研报",
+    capabilities: ["search", "sector", "consensus_eps", "concept_blocks", "hot_stocks"],
+    requiresKey: true,
+  },
+  {
+    key: "vendor_akshare",
+    enName: "akshare",
+    name: "AKShare",
+    desc: "开源数据",
+    capabilities: ["financials", "news", "consensus_eps", "cls_flash"],
+    requiresKey: false,
+  },
+  {
+    key: "vendor_mootdx",
+    enName: "mootdx",
+    name: "Mootdx",
+    desc: "通达信本地",
+    capabilities: ["quote", "klines"],
+    requiresKey: false,
+  },
 ];
 
 /** 固定 ToolNode 定义：tool_name → 路由链 (vendors) + 显示标签 */
@@ -45,13 +143,28 @@ const LOCAL_TOOLS = [
 ];
 
 const CAP_LABELS: Record<string, string> = {
-  quote: "行情", klines: "K线", financials: "财务", news: "新闻",
-  money_flow: "资金流向", dragon_tiger: "龙虎榜", lockup: "解禁", search: "搜索",
-  margin: "融资融券", north_bound: "北向持仓", sector: "行业板块",
-  shareholder_trades: "增减持", dividend: "分红", research_reports: "研报",
-  consensus_eps: "一致预期", concept_blocks: "概念板块", announcements: "公告",
-  market_dragon_tiger: "大盘龙虎", hot_stocks: "热门股", industry_ranking: "行业排名",
-  cls_flash: "快讯", north_bound_flow: "北向资金",
+  quote: "行情",
+  klines: "K线",
+  financials: "财务",
+  news: "新闻",
+  money_flow: "资金流向",
+  dragon_tiger: "龙虎榜",
+  lockup: "解禁",
+  search: "搜索",
+  margin: "融资融券",
+  north_bound: "北向持仓",
+  sector: "行业板块",
+  shareholder_trades: "增减持",
+  dividend: "分红",
+  research_reports: "研报",
+  consensus_eps: "一致预期",
+  concept_blocks: "概念板块",
+  announcements: "公告",
+  market_dragon_tiger: "大盘龙虎",
+  hot_stocks: "热门股",
+  industry_ranking: "行业排名",
+  cls_flash: "快讯",
+  north_bound_flow: "北向资金",
 };
 
 type HealthStatus = "ok" | "fail" | "pending" | "idle";
@@ -86,15 +199,19 @@ export function DataVendorsTab() {
         if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key") {
           vals[v.name] = !!v.value;
         }
-        if (v.name === "vendor_iwencai_key") key = typeof v.value === "string" ? v.value : "";
+        if (v.name === "vendor_iwencai_key") { key = typeof v.value === "string" ? v.value : ""; }
       }
       setVendorValues(vals);
       setIwencaiKey(key);
       setLoaded(true);
-    } catch { setLoaded(true); }
+    } catch {
+      setLoaded(true);
+    }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -109,7 +226,11 @@ export function DataVendorsTab() {
         },
       });
       message.success(t("stockAnalysis.settings.saveSuccess"));
-    } catch { message.error(t("stockAnalysis.settings.saveFailed")); } finally { setSaving(false); }
+    } catch {
+      message.error(t("stockAnalysis.settings.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
   }, [vendorValues, iwencaiKey, t]);
 
   const checkOne = useCallback(async (vendorName: string) => {
@@ -117,7 +238,9 @@ export function DataVendorsTab() {
     try {
       await invoke("check_vendor_health", { vendor: vendorName });
       setHealth((prev) => ({ ...prev, [vendorName]: "ok" }));
-    } catch { setHealth((prev) => ({ ...prev, [vendorName]: "fail" })); }
+    } catch {
+      setHealth((prev) => ({ ...prev, [vendorName]: "fail" }));
+    }
   }, []);
 
   const checkAll = useCallback(async () => {
@@ -128,7 +251,13 @@ export function DataVendorsTab() {
     setCheckingAll(false);
   }, [checkOne]);
 
-  if (!loaded) return <div className="flex justify-center py-12"><Spin /></div>;
+  if (!loaded) {
+    return (
+      <div className="flex justify-center py-12">
+        <Spin />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -172,12 +301,24 @@ export function DataVendorsTab() {
                 />
                 <span className="font-medium text-sm">{v.name}</span>
                 <span className="text-xs text-gray-400">{v.desc}</span>
-                <Tooltip title={
-                  status === "ok" ? t("stockAnalysis.settings.connected")
-                    : status === "fail" ? t("stockAnalysis.settings.disconnected")
-                    : status === "pending" ? "检测中..." : "未检测"
-                }>
-                  <Badge status={status === "ok" ? "success" : status === "fail" ? "error" : status === "pending" ? "processing" : "default"} />
+                <Tooltip
+                  title={status === "ok"
+                    ? t("stockAnalysis.settings.connected")
+                    : status === "fail"
+                    ? t("stockAnalysis.settings.disconnected")
+                    : status === "pending"
+                    ? "检测中..."
+                    : "未检测"}
+                >
+                  <Badge
+                    status={status === "ok"
+                      ? "success"
+                      : status === "fail"
+                      ? "error"
+                      : status === "pending"
+                      ? "processing"
+                      : "default"}
+                  />
                 </Tooltip>
               </Space>
             }
@@ -222,7 +363,13 @@ export function DataVendorsTab() {
                       {ft.vendors.map((vn, i) => (
                         <span key={vn}>
                           {i > 0 ? " → " : ""}
-                          <span className={vn === v.enName ? "font-medium text-gray-600" : health[vn] === "ok" ? "text-green-600" : "text-gray-400"}>
+                          <span
+                            className={vn === v.enName
+                              ? "font-medium text-gray-600"
+                              : health[vn] === "ok"
+                              ? "text-green-600"
+                              : "text-gray-400"}
+                          >
                             {vn}
                           </span>
                         </span>
@@ -232,9 +379,7 @@ export function DataVendorsTab() {
                 ))}
               </div>
             )}
-            {depInfo.length === 0 && (
-              <div className="text-xs text-gray-400">无固定工具依赖此数据源</div>
-            )}
+            {depInfo.length === 0 && <div className="text-xs text-gray-400">无固定工具依赖此数据源</div>}
           </Card>
         );
       })}
@@ -243,9 +388,7 @@ export function DataVendorsTab() {
       <div className="pt-2">
         <div className="text-xs text-gray-400 mb-2">本地计算工具（不依赖远程 vendor）</div>
         <Space wrap size={[4, 8]}>
-          {LOCAL_TOOLS.map((lt) => (
-            <Tag key={lt.tool} color="purple" className="text-xs m-0">💻 {lt.tool}</Tag>
-          ))}
+          {LOCAL_TOOLS.map((lt) => <Tag key={lt.tool} color="purple" className="text-xs m-0">💻 {lt.tool}</Tag>)}
         </Space>
       </div>
     </div>

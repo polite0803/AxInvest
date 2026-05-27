@@ -67,8 +67,8 @@ pub fn detect_ma_cross(klines_json: &str, fast: usize, slow: usize) -> MACrossRe
     };
 
     let confirmation = if signal != "none" && closes.len() >= slow + 2 {
-        let prev2_fast = sma(&closes[..n-2], fast).unwrap_or(cur_fast);
-        let prev2_slow = sma(&closes[..n-2], slow).unwrap_or(cur_slow);
+        let prev2_fast = sma(&closes[..n - 2], fast).unwrap_or(cur_fast);
+        let prev2_slow = sma(&closes[..n - 2], slow).unwrap_or(cur_slow);
         if signal == "golden_cross" && prev2_fast > prev2_slow {
             "confirmed"
         } else if signal == "death_cross" && prev2_fast < prev2_slow {

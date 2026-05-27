@@ -105,7 +105,8 @@ impl PortfolioRiskManager {
             "中"
         } else {
             "高"
-        }.to_string();
+        }
+        .to_string();
 
         PortfolioRiskMetrics {
             total_positions,

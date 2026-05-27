@@ -1,5 +1,5 @@
-use axagent_astock_data::FinancialReport;
 use crate::decision::ValueConfig;
+use axagent_astock_data::FinancialReport;
 
 /// 内在价值估算结果
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -139,7 +139,10 @@ impl ValueEngine {
             details.push("ΔROA≤0 ✗".into());
         }
 
-        if current.revenue.unwrap_or(0.0) > 0.0 && current.net_margin.unwrap_or(0.0) > 0.0 && current.net_margin.unwrap_or(0.0) < current.roe.unwrap_or(0.0) * 2.0 {
+        if current.revenue.unwrap_or(0.0) > 0.0
+            && current.net_margin.unwrap_or(0.0) > 0.0
+            && current.net_margin.unwrap_or(0.0) < current.roe.unwrap_or(0.0) * 2.0
+        {
             profitability += 1;
             details.push("盈利质量好 ✓".into());
         } else {
@@ -182,12 +185,14 @@ impl ValueEngine {
         }
 
         let rev_growth = if previous.revenue.unwrap_or(0.0) > 0.0 {
-            (current.revenue.unwrap_or(0.0) - previous.revenue.unwrap_or(0.0)) / previous.revenue.unwrap_or(0.0)
+            (current.revenue.unwrap_or(0.0) - previous.revenue.unwrap_or(0.0))
+                / previous.revenue.unwrap_or(0.0)
         } else {
             0.0
         };
         let profit_growth = if previous.net_profit.unwrap_or(0.0) > 0.0 {
-            (current.net_profit.unwrap_or(0.0) - previous.net_profit.unwrap_or(0.0)) / previous.net_profit.unwrap_or(0.0)
+            (current.net_profit.unwrap_or(0.0) - previous.net_profit.unwrap_or(0.0))
+                / previous.net_profit.unwrap_or(0.0)
         } else if current.net_profit.unwrap_or(0.0) > 0.0 {
             1.0
         } else {
@@ -267,8 +272,17 @@ impl ValueEngine {
             .take(3)
             .sum::<f64>()
             / 3.0;
-        let latest_debt_ratio = financials.first().and_then(|f| f.debt_ratio).unwrap_or(50.0);
-        let capex_ratio = if latest_debt_ratio > 60.0 { 0.85 } else if latest_debt_ratio > 40.0 { 0.90 } else { 0.95 };
+        let latest_debt_ratio = financials
+            .first()
+            .and_then(|f| f.debt_ratio)
+            .unwrap_or(50.0);
+        let capex_ratio = if latest_debt_ratio > 60.0 {
+            0.85
+        } else if latest_debt_ratio > 40.0 {
+            0.90
+        } else {
+            0.95
+        };
         let est_fcf = avg_net * capex_ratio;
         let fcf_ratio = if avg_net > 0.0 {
             est_fcf / avg_net
@@ -383,10 +397,23 @@ impl ValueEngine {
 
         // DCF
         let dcf = if fcf > 0.0 && shares_outstanding > 0.0 {
-            let growth_rate = value_config.map(|c| c.dcf_growth_rate / 100.0).unwrap_or(0.08);
-            let terminal_rate = value_config.map(|c| c.dcf_perpetual_rate / 100.0).unwrap_or(0.03);
-            let discount_rate = value_config.map(|c| c.dcf_discount_rate / 100.0).unwrap_or(0.10);
-            Some(Self::dcf_valuation(fcf, growth_rate, terminal_rate, discount_rate, shares_outstanding.max(1.0), 5))
+            let growth_rate = value_config
+                .map(|c| c.dcf_growth_rate / 100.0)
+                .unwrap_or(0.08);
+            let terminal_rate = value_config
+                .map(|c| c.dcf_perpetual_rate / 100.0)
+                .unwrap_or(0.03);
+            let discount_rate = value_config
+                .map(|c| c.dcf_discount_rate / 100.0)
+                .unwrap_or(0.10);
+            Some(Self::dcf_valuation(
+                fcf,
+                growth_rate,
+                terminal_rate,
+                discount_rate,
+                shares_outstanding.max(1.0),
+                5,
+            ))
         } else {
             None
         };

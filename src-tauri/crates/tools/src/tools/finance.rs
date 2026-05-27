@@ -240,9 +240,7 @@ fn risk_parity(vols: &[f64], corr_json: &str) -> RpR {
                 }
             }
         }
-        w.iter()
-            .map(|&x| (x * 10000.0).round() / 10000.0)
-            .collect()
+        w.iter().map(|&x| (x * 10000.0).round() / 10000.0).collect()
     } else if total > 0.0 {
         inv.iter()
             .map(|&x| (x / total * 10000.0).round() / 10000.0)
@@ -305,8 +303,8 @@ fn detect_ma_cross(kj: &str, fast: usize, slow: usize) -> CrossR {
         "none"
     };
     let confirmation = if sig != "none" && closes.len() >= slow + 2 {
-        let p2f = sma(&closes[..n-2], fast).unwrap_or(cf);
-        let p2s = sma(&closes[..n-2], slow).unwrap_or(cs);
+        let p2f = sma(&closes[..n - 2], fast).unwrap_or(cf);
+        let p2s = sma(&closes[..n - 2], slow).unwrap_or(cs);
         if sig == "golden_cross" && p2f > p2s {
             "confirmed"
         } else if sig == "death_cross" && p2f < p2s {
@@ -599,14 +597,17 @@ fn adjust_prices(kj: &str, dj: &str) -> AdjR {
         k.volume = (k.volume / factor * 100.0).round() / 100.0;
     }
     AdjR {
-        adjusted_klines: kl.into_iter().map(|k| AdjKLine {
-            date: k.date,
-            open: k.open,
-            high: k.high,
-            low: k.low,
-            close: k.close,
-            volume: k.volume,
-        }).collect(),
+        adjusted_klines: kl
+            .into_iter()
+            .map(|k| AdjKLine {
+                date: k.date,
+                open: k.open,
+                high: k.high,
+                low: k.low,
+                close: k.close,
+                volume: k.volume,
+            })
+            .collect(),
         adjustment_factor: (factor * 10000.0).round() / 10000.0,
     }
 }

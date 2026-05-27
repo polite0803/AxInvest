@@ -761,7 +761,9 @@ pub async fn generate_stock_report(
         .await
         .ok()
         .and_then(|f| f.first().and_then(|r| r.roe));
-    axagent_stock_analysis::scoring::ScoringEngine::apply_fundamental_adjustment(&mut score, pe, pb, roe);
+    axagent_stock_analysis::scoring::ScoringEngine::apply_fundamental_adjustment(
+        &mut score, pe, pb, roe,
+    );
     axagent_stock_analysis::scoring::ScoringEngine::apply_industry_adjustment(
         &mut score, pe, None, pb, None,
     );

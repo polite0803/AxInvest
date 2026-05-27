@@ -373,10 +373,8 @@ impl Tool for ComputeScoringTool {
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let code = input["stock_code"].as_str().unwrap_or("000001");
-        let (klines_r, quote_r) = tokio::join!(
-            self.client.get_klines(code, "daily", 120),
-            self.client.get_quote(code)
-        );
+        let (klines_r, quote_r) =
+            tokio::join!(self.client.get_klines(code, "daily", 120), self.client.get_quote(code));
         let klines = klines_r.map_err(|e| te(e.to_string()))?;
         let quote = quote_r.map_err(|e| te(e.to_string()))?;
         let indicators = axagent_astock_data::indicators::compute_indicators(code, &klines);
@@ -429,14 +427,19 @@ impl Tool for ComputeScoringTool {
             80.0
         };
 
-        let support_score = if !indicators.support_levels.is_empty() && !indicators.resistance_levels.is_empty() {
-            let dist_support = (quote.price - indicators.support_levels[0]).abs();
-            let dist_resist = (indicators.resistance_levels[0] - quote.price).abs();
-            let total = dist_support + dist_resist;
-            if total > 0.0 { (dist_support / total) * 100.0 } else { 50.0 }
-        } else {
-            50.0
-        };
+        let support_score =
+            if !indicators.support_levels.is_empty() && !indicators.resistance_levels.is_empty() {
+                let dist_support = (quote.price - indicators.support_levels[0]).abs();
+                let dist_resist = (indicators.resistance_levels[0] - quote.price).abs();
+                let total = dist_support + dist_resist;
+                if total > 0.0 {
+                    (dist_support / total) * 100.0
+                } else {
+                    50.0
+                }
+            } else {
+                50.0
+            };
 
         let mut value_adj = 0.0;
         if let Some(pe) = quote.pe {
@@ -459,7 +462,14 @@ impl Tool for ComputeScoringTool {
         }
 
         let weights = [0.20, 0.10, 0.20, 0.15, 0.15, 0.20];
-        let scores = [trend_score, deviation_score, macd_score, volume_score, rsi_score, support_score];
+        let scores = [
+            trend_score,
+            deviation_score,
+            macd_score,
+            volume_score,
+            rsi_score,
+            support_score,
+        ];
         let weighted: f64 = scores.iter().zip(weights.iter()).map(|(s, w)| s * w).sum();
         let total_score = (weighted + value_adj).clamp(0.0, 100.0);
 
@@ -520,10 +530,8 @@ impl Tool for ComputeValuationTool {
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let code = input["stock_code"].as_str().unwrap_or("000001");
-        let (quote_r, financials_r) = tokio::join!(
-            self.client.get_quote(code),
-            self.client.get_financials(code)
-        );
+        let (quote_r, financials_r) =
+            tokio::join!(self.client.get_quote(code), self.client.get_financials(code));
         let quote = quote_r.map_err(|e| te(e.to_string()))?;
         let financials = financials_r.map_err(|e| te(e.to_string()))?;
 
@@ -538,7 +546,11 @@ impl Tool for ComputeValuationTool {
         let profit_yoy = latest_fin.and_then(|f| f.profit_yoy).unwrap_or(0.0);
 
         let discount_rate = 0.10;
-        let growth_high = if revenue_yoy > 0.0 { revenue_yoy.min(0.30) } else { 0.05 };
+        let growth_high = if revenue_yoy > 0.0 {
+            revenue_yoy.min(0.30)
+        } else {
+            0.05
+        };
         let growth_stable = 0.03;
         let high_years = 5.0;
         let terminal_multiple = 15.0;
@@ -550,8 +562,10 @@ impl Tool for ComputeValuationTool {
                 let projected_eps = eps * (1.0_f64 + growth_high).powi(year);
                 pv += projected_eps / (1.0_f64 + discount_rate).powi(year);
             }
-            let terminal_eps = eps * (1.0_f64 + growth_high).powi(high_years as i32) * (1.0_f64 + growth_stable);
-            let terminal_value = terminal_eps * terminal_multiple / (1.0_f64 + discount_rate).powi(high_years as i32);
+            let terminal_eps =
+                eps * (1.0_f64 + growth_high).powi(high_years as i32) * (1.0_f64 + growth_stable);
+            let terminal_value = terminal_eps * terminal_multiple
+                / (1.0_f64 + discount_rate).powi(high_years as i32);
             dcf_value = pv + terminal_value;
         }
 
@@ -562,41 +576,95 @@ impl Tool for ComputeValuationTool {
         };
 
         let mut f_score = 0i32;
-        if profit_yoy > 0.0 { f_score += 1; }
-        if revenue_yoy > 0.0 { f_score += 1; }
-        if roe > 0.10 { f_score += 1; }
-        if gross_margin > 0.30 { f_score += 1; }
-        if net_margin > 0.10 { f_score += 1; }
-        if debt_ratio < 0.60 { f_score += 1; }
+        if profit_yoy > 0.0 {
+            f_score += 1;
+        }
+        if revenue_yoy > 0.0 {
+            f_score += 1;
+        }
+        if roe > 0.10 {
+            f_score += 1;
+        }
+        if gross_margin > 0.30 {
+            f_score += 1;
+        }
+        if net_margin > 0.10 {
+            f_score += 1;
+        }
+        if debt_ratio < 0.60 {
+            f_score += 1;
+        }
         if debt_ratio > 0.0 {
             if let Some(prev) = financials.get(1) {
                 if let Some(prev_dr) = prev.debt_ratio {
-                    if debt_ratio < prev_dr { f_score += 1; }
+                    if debt_ratio < prev_dr {
+                        f_score += 1;
+                    }
                 }
             }
         }
         if financials.len() >= 2 {
             if let Some(prev) = financials.get(1) {
                 if let Some(prev_roe) = prev.roe {
-                    if roe > prev_roe { f_score += 1; }
+                    if roe > prev_roe {
+                        f_score += 1;
+                    }
                 }
             }
         }
         if let Some(pe_val) = quote.pe {
-            if pe_val > 0.0 && pe_val < 20.0 { f_score += 1; }
+            if pe_val > 0.0 && pe_val < 20.0 {
+                f_score += 1;
+            }
         }
 
         let mut moat_score = 0i32;
-        if gross_margin > 0.40 { moat_score += 3; } else if gross_margin > 0.25 { moat_score += 2; } else if gross_margin > 0.15 { moat_score += 1; }
-        if roe > 0.15 { moat_score += 3; } else if roe > 0.10 { moat_score += 2; } else if roe > 0.05 { moat_score += 1; }
-        if debt_ratio < 0.40 { moat_score += 2; } else if debt_ratio < 0.60 { moat_score += 1; }
-        if profit_yoy > 0.10 { moat_score += 2; } else if profit_yoy > 0.0 { moat_score += 1; }
+        if gross_margin > 0.40 {
+            moat_score += 3;
+        } else if gross_margin > 0.25 {
+            moat_score += 2;
+        } else if gross_margin > 0.15 {
+            moat_score += 1;
+        }
+        if roe > 0.15 {
+            moat_score += 3;
+        } else if roe > 0.10 {
+            moat_score += 2;
+        } else if roe > 0.05 {
+            moat_score += 1;
+        }
+        if debt_ratio < 0.40 {
+            moat_score += 2;
+        } else if debt_ratio < 0.60 {
+            moat_score += 1;
+        }
+        if profit_yoy > 0.10 {
+            moat_score += 2;
+        } else if profit_yoy > 0.0 {
+            moat_score += 1;
+        }
 
-        let moat_label = if moat_score >= 8 { "强护城河" } else if moat_score >= 5 { "中等护城河" } else if moat_score >= 3 { "弱护城河" } else { "无护城河" };
+        let moat_label = if moat_score >= 8 {
+            "强护城河"
+        } else if moat_score >= 5 {
+            "中等护城河"
+        } else if moat_score >= 3 {
+            "弱护城河"
+        } else {
+            "无护城河"
+        };
 
         let current_price = quote.price;
-        let dcf_upside = if dcf_value > 0.0 { (dcf_value - current_price) / current_price * 100.0 } else { 0.0 };
-        let graham_upside = if graham_value > 0.0 { (graham_value - current_price) / current_price * 100.0 } else { 0.0 };
+        let dcf_upside = if dcf_value > 0.0 {
+            (dcf_value - current_price) / current_price * 100.0
+        } else {
+            0.0
+        };
+        let graham_upside = if graham_value > 0.0 {
+            (graham_value - current_price) / current_price * 100.0
+        } else {
+            0.0
+        };
 
         let result = json!({
             "stockCode": code,
@@ -665,14 +733,25 @@ impl Tool for ComputeRiskTool {
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let codes_str = input["stock_codes"].as_str().unwrap_or("");
-        let codes: Vec<&str> = codes_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        let codes: Vec<&str> = codes_str
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
         if codes.is_empty() {
             return Err(te("stock_codes不能为空".into()));
         }
 
         let weights: Vec<f64> = if let Some(w_str) = input["weights"].as_str() {
-            let parsed: Vec<f64> = w_str.split(',').map(|s| s.trim().parse::<f64>().unwrap_or(0.0)).collect();
-            if parsed.len() == codes.len() { parsed } else { vec![1.0 / codes.len() as f64; codes.len()] }
+            let parsed: Vec<f64> = w_str
+                .split(',')
+                .map(|s| s.trim().parse::<f64>().unwrap_or(0.0))
+                .collect();
+            if parsed.len() == codes.len() {
+                parsed
+            } else {
+                vec![1.0 / codes.len() as f64; codes.len()]
+            }
         } else {
             vec![1.0 / codes.len() as f64; codes.len()]
         };
@@ -690,7 +769,7 @@ impl Tool for ComputeRiskTool {
                 Err(e) => {
                     let code = codes.get(i).unwrap_or(&"");
                     tracing::warn!("获取{}行情失败: {}", code, e);
-                }
+                },
             }
         }
 
@@ -708,8 +787,12 @@ impl Tool for ComputeRiskTool {
         let hhi: f64 = norm_weights.iter().map(|w| w * w).sum();
         let effective_n = if hhi > 0.0 { 1.0 / hhi } else { 1.0 };
 
-        let mut sector_map: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-        let sector_tasks: Vec<_> = positions.iter().map(|(q, _)| self.client.get_sector_info(&q.code)).collect();
+        let mut sector_map: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
+        let sector_tasks: Vec<_> = positions
+            .iter()
+            .map(|(q, _)| self.client.get_sector_info(&q.code))
+            .collect();
         let sector_results = futures::future::join_all(sector_tasks).await;
 
         for (i, sr) in sector_results.into_iter().enumerate() {
@@ -723,10 +806,26 @@ impl Tool for ComputeRiskTool {
         }
 
         let max_sector_concentration = sector_map.values().copied().fold(0.0_f64, f64::max);
-        let max_sector_name = sector_map.iter().max_by_key(|(_, v)| (*v * 10000.0) as i64).map(|(k, _)| k.clone()).unwrap_or_default();
+        let max_sector_name = sector_map
+            .iter()
+            .max_by_key(|(_, v)| (*v * 10000.0) as i64)
+            .map(|(k, _)| k.clone())
+            .unwrap_or_default();
 
-        let concentration_label = if hhi > 0.25 { "高度集中" } else if hhi > 0.15 { "中度集中" } else { "分散" };
-        let diversification_label = if effective_n >= 8.0 { "充分分散" } else if effective_n >= 4.0 { "适度分散" } else { "集中风险" };
+        let concentration_label = if hhi > 0.25 {
+            "高度集中"
+        } else if hhi > 0.15 {
+            "中度集中"
+        } else {
+            "分散"
+        };
+        let diversification_label = if effective_n >= 8.0 {
+            "充分分散"
+        } else if effective_n >= 4.0 {
+            "适度分散"
+        } else {
+            "集中风险"
+        };
 
         let result = json!({
             "stockCount": positions.len(),

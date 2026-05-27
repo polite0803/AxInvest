@@ -198,7 +198,9 @@ impl TradingEngine {
             let current_count = positions.len();
             let total_mv: f64 = positions.iter().filter_map(|p| p.market_value).sum();
             let new_position_value = price * quantity as f64;
-            if let Err(e) = limits.check_new_position(new_position_value, total_mv, current_count, None, &[]) {
+            if let Err(e) =
+                limits.check_new_position(new_position_value, total_mv, current_count, None, &[])
+            {
                 warnings.push(format!("仓位限制: {}", e));
             }
         }

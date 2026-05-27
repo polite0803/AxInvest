@@ -51,7 +51,11 @@ fn remove_outliers_zscore(prices: &[f64], threshold: f64) -> OutlierResult {
     for (i, &p) in prices.iter().enumerate() {
         let z = (p - mean).abs() / stddev;
         if z > threshold {
-            let clamped = if p > mean { mean + threshold * stddev } else { mean - threshold * stddev };
+            let clamped = if p > mean {
+                mean + threshold * stddev
+            } else {
+                mean - threshold * stddev
+            };
             cleaned.push((clamped * 100.0).round() / 100.0);
             removed.push(i);
         } else {

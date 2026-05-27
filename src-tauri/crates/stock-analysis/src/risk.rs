@@ -265,9 +265,7 @@ pub fn risk_parity_weights(volatilities: &[f64], correlations_json: &str) -> Ris
                 }
             }
         }
-        w.iter()
-            .map(|&x| (x * 10000.0).round() / 10000.0)
-            .collect()
+        w.iter().map(|&x| (x * 10000.0).round() / 10000.0).collect()
     } else if total > 0.0 {
         inv_vols
             .iter()

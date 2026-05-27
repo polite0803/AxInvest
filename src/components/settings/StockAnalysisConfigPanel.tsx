@@ -7,6 +7,62 @@ import { SettingsGroup } from "./SettingsGroup";
 
 const TEMPLATE_ID = "stock-analysis";
 
+/** 生成默认参数变量列表（首次初始化） */
+function getDefaultVariables(): Variable[] {
+  const vars: Variable[] = [];
+  const b = (name: string, val: unknown, desc: string, type: string) =>
+    vars.push({ name, var_type: type, value: val, description: desc, is_secret: false });
+  // 分析
+  b("analysis_maxDebateRounds", 3, "辩论轮数", "number");
+  b("analysis_klinePeriod", "daily", "K线周期: daily/weekly/monthly", "string");
+  b("analysis_klineLimit", 120, "K线数量 (60-500)", "number");
+  b("analysis_newsLimit", 30, "新闻数量 (10-100)", "number");
+  b("analysis_maxConcurrent", 9, "并行分析数 (1-20)", "number");
+  b("analysis_temperature", 0.3, "LLM 温度 (0-2)", "number");
+  b("analysis_maxTokens", 4096, "LLM Max Tokens", "number");
+  b("analysis_timeoutSecs", 300, "LLM 超时 (秒)", "number");
+  // 评分权重
+  b("scoring_trend", 30, "趋势评分权重 (0-100)", "number");
+  b("scoring_deviation", 20, "乖离率评分权重 (0-100)", "number");
+  b("scoring_macd", 15, "MACD 评分权重 (0-100)", "number");
+  b("scoring_volume", 15, "量能评分权重 (0-100)", "number");
+  b("scoring_rsi", 10, "RSI 评分权重 (0-100)", "number");
+  b("scoring_support", 10, "支撑评分权重 (0-100)", "number");
+  // 规则
+  b("rule_rsiOverbought", 80, "RSI 超买阈值 (50-100)", "number");
+  b("rule_biasLimit", 5, "乖离率追高阈值 (%)", "number");
+  b("rule_volumeSignalBlock", true, "放量下跌时禁止买入", "boolean");
+  b("rule_bearLowScore", 30, "空头+低分禁买阈值", "number");
+  b("rule_rsiOversold", 20, "RSI 超卖提醒阈值", "number");
+  b("rule_autoStopLossPct", 5, "自动止损百分比 (%)", "number");
+  // 仓位
+  b("pos_maxSingleStockPct", 20, "单股最大仓位 (%)", "number");
+  b("pos_maxTotalPositions", 10, "最大持仓数量", "number");
+  b("pos_maxSectorExposurePct", 40, "单一行业最大暴露 (%)", "number");
+  // 估值
+  b("value_dcfGrowthRate", 8, "DCF 增长率 (%)", "number");
+  b("value_dcfPerpetualRate", 3, "DCF 永续增长率 (%)", "number");
+  b("value_dcfDiscountRate", 10, "DCF 折现率 (%)", "number");
+  b("value_moatThreshold", 60, "宽护城河阈值 (30-90)", "number");
+  b("value_fScoreBuyThreshold", 7, "F-Score 买入阈值 (3-9)", "number");
+  b("value_safetyMarginMin", 20, "最低安全边际 (%)", "number");
+  // 监控
+  b("monitor_pollIntervalSecs", 30, "监控轮询间隔 (秒)", "number");
+  b("monitor_changePctThreshold", 5, "涨跌幅异常阈值 (%)", "number");
+  b("monitor_turnoverThreshold", 10, "换手率异常阈值 (%)", "number");
+  // 数据源
+  b("vendor_tencent", true, "腾讯财经 — 报价数据", "boolean");
+  b("vendor_eastmoney", true, "东方财富 — 财务/K线数据", "boolean");
+  b("vendor_sina", true, "新浪财经 — 新闻数据", "boolean");
+  b("vendor_ths", false, "同花顺 — 综合数据", "boolean");
+  b("vendor_cninfo", false, "巨潮资讯 — 信息披露", "boolean");
+  b("vendor_baidu_stock", false, "百度股票 — 数据", "boolean");
+  b("vendor_iwencai", false, "问财 — 选股数据", "boolean");
+  b("vendor_akshare", false, "AKShare — 开源数据", "boolean");
+  b("vendor_mootdx", false, "Mootdx — 本地行情接口", "boolean");
+  return vars;
+}
+
 function extractPrefix(name: string): string {
   const idx = name.indexOf("_");
   return idx > 0 ? name.slice(0, idx) : "";
@@ -146,8 +202,27 @@ export function StockAnalysisConfigPanel(props: Props) {
 
   useEffect(() => {
     invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID })
-      .then((rsp) => {
+      .then(async (rsp) => {
         if (rsp) {
+          // 首次加载时，若模板无 variables，自动初始化默认值
+          if (!rsp.variables || rsp.variables.length === 0) {
+            const defaults = getDefaultVariables();
+            const input: WorkflowTemplateInput = {
+              name: rsp.name,
+              description: rsp.description,
+              icon: rsp.icon,
+              tags: rsp.tags,
+              trigger_config: rsp.trigger_config,
+              nodes: rsp.nodes,
+              edges: rsp.edges,
+              input_schema: rsp.input_schema,
+              output_schema: rsp.output_schema,
+              variables: defaults,
+              error_config: rsp.error_config,
+            };
+            await invoke<boolean>("update_workflow_template", { id: TEMPLATE_ID, input }).catch(() => {});
+            rsp.variables = defaults;
+          }
           setTemplate(rsp);
           const map: Record<string, unknown> = {};
           for (const v of rsp.variables) { map[v.name] = v.value; }

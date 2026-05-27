@@ -28,7 +28,8 @@ impl PositionLimits {
         current_sector_exposures: &[(String, f64)],
     ) -> Result<(), String> {
         if let Some(sector) = new_sector {
-            let current_sector_pct = current_sector_exposures.iter()
+            let current_sector_pct = current_sector_exposures
+                .iter()
                 .filter(|(s, _)| s == sector)
                 .map(|(_, pct)| *pct)
                 .next()

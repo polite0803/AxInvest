@@ -259,7 +259,11 @@ impl StockAnalysisOrchestrator {
                     let ind_pe = sv.get("avg_pe").and_then(|v| v.as_f64());
                     let ind_pb = sv.get("avg_pb").and_then(|v| v.as_f64());
                     crate::scoring::ScoringEngine::apply_industry_adjustment(
-                        &mut objective_score, pe, ind_pe, pb, ind_pb,
+                        &mut objective_score,
+                        pe,
+                        ind_pe,
+                        pb,
+                        ind_pb,
                     );
                 }
             }
@@ -289,7 +293,12 @@ impl StockAnalysisOrchestrator {
                     }
                 })
                 .unwrap_or(1_000_000_000.0);
-            crate::value::ValueEngine::assess(raw.quote.price, financials, shares, Some(&value_config))
+            crate::value::ValueEngine::assess(
+                raw.quote.price,
+                financials,
+                shares,
+                Some(&value_config),
+            )
         };
         {
             let mut bb = blackboard.write().await;

@@ -173,7 +173,11 @@ impl StockScreener {
                         let mut avg_loss = 0.0;
                         for i in 1..=14 {
                             let diff = closes[i] - closes[i - 1];
-                            if diff > 0.0 { avg_gain += diff; } else { avg_loss += -diff; }
+                            if diff > 0.0 {
+                                avg_gain += diff;
+                            } else {
+                                avg_loss += -diff;
+                            }
                         }
                         avg_gain /= 14.0;
                         avg_loss /= 14.0;
@@ -184,7 +188,11 @@ impl StockScreener {
                             avg_gain = (avg_gain * 13.0 + gain) / 14.0;
                             avg_loss = (avg_loss * 13.0 + loss) / 14.0;
                         }
-                        let rs = if avg_loss > 1e-10 { avg_gain / avg_loss } else { 100.0 };
+                        let rs = if avg_loss > 1e-10 {
+                            avg_gain / avg_loss
+                        } else {
+                            100.0
+                        };
                         let rsi = 100.0 - 100.0 / (1.0 + rs);
                         if criteria.rsi_oversold && rsi < 30.0 {
                             reasons.push(format!("RSI超卖{:.1}", rsi));

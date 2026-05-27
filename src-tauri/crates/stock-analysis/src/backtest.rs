@@ -333,7 +333,10 @@ pub async fn optimize_weights(
     let d = ScoringWeights::default();
     let correct_avg = analyses
         .iter()
-        .filter(|a| a.decision_action.as_deref() == Some("买入") || a.decision_action.as_deref() == Some("增持"))
+        .filter(|a| {
+            a.decision_action.as_deref() == Some("买入")
+                || a.decision_action.as_deref() == Some("增持")
+        })
         .count();
     let adj = if buy_r > 0.5 && correct_avg as f64 / total > 0.5 {
         ScoringWeights {

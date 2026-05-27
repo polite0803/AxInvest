@@ -1695,7 +1695,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                     }}
                   >
                     <div
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 overflow-hidden"
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 ax-truncate"
                       role="button"
                       tabIndex={0}
                       style={{
@@ -1840,7 +1840,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                   }}
                 >
                   <div
-                    className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 overflow-hidden"
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 ax-truncate"
                     role={batchMode ? "button" : undefined}
                     tabIndex={batchMode ? 0 : undefined}
                     style={{
@@ -1880,7 +1880,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                         />
                       )}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1 overflow-hidden">
+                      <div className="flex items-center gap-1 ax-truncate">
                         <span>{model.name || model.model_id}</span>
                         {model.name && model.name !== model.model_id && (
                           <Text type="secondary" style={{ fontSize: 12 }}>
@@ -2371,7 +2371,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                 <div className="font-medium mb-1.5" style={{ fontSize: 13 }}>
                   {t("settings.modelType.title")}
                 </div>
-                <div className="flex gap-2 overflow-hidden">
+                <div className="flex gap-2 flex-wrap">
                   {(Object.keys(MODEL_TYPE_CONFIG) as ModelType[]).map(
                     (type_) => (
                       <Tag
@@ -2410,7 +2410,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                     >
                       {t("settings.modelAbilities")}
                     </div>
-                    <div className="flex gap-2 overflow-hidden">
+                    <div className="flex gap-2 flex-wrap">
                       {getEditableCapabilities(editModelType).map((cap) => {
                         const selected = editCapabilities.includes(cap);
                         return (
@@ -2682,7 +2682,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                 />
               </div>
               <div
-                className="flex gap-2 overflow-hidden"
+                className="flex gap-2 flex-wrap"
                 style={{
                   opacity: batchModelTypeEnabled ? 1 : 0.4,
                   pointerEvents: batchModelTypeEnabled ? "auto" : "none",
@@ -2730,7 +2730,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                 />
               </div>
               <div
-                className="flex gap-2 overflow-hidden"
+                className="flex gap-2 flex-wrap"
                 style={{
                   opacity: batchCapabilitiesEnabled ? 1 : 0.4,
                   pointerEvents: batchCapabilitiesEnabled ? "auto" : "none",
@@ -3203,7 +3203,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                           }}
                         >
                           <div
-                            className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 overflow-hidden"
+                            className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 ax-truncate"
                             role="button"
                             tabIndex={0}
                             style={{
@@ -3300,7 +3300,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                         }}
                       >
                         <div
-                          className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 overflow-hidden"
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-md min-w-0 ax-truncate"
                           style={{ paddingLeft: 36 }}
                         >
                           <Checkbox
@@ -3323,7 +3323,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                             type="avatar"
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1 overflow-hidden">
+                            <div className="flex items-center gap-1 ax-truncate">
                               <span>{m.name || m.model_id}</span>
                               {m.name && m.name !== m.model_id && (
                                 <Text type="secondary" style={{ fontSize: 12 }}>

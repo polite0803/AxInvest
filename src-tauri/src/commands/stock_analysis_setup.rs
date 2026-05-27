@@ -849,6 +849,7 @@ async fn seed_stock_analysis_workflow_template(
                 temperature: Some(0.3),
                 max_tokens: Some(4096),
                 tools: vec![],
+                exposed_tools: vec![],
                 output_mode: OutputMode::Text,
                 agent_profile_id: Some(format!("stock-{expert_id}")),
                 max_tool_rounds: None,
@@ -958,14 +959,16 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
     }
 
-    // 工具由模板节点 config.tools 统一管理，LLM 自主决定调用
+    // 工具由模板节点 config.tools 统一管理：
+    //   tools         — 全部可用工具（固定 + 暴露），供 executor 查找 ToolDef
+    //   exposed_tools — 暴露给 LLM 自主调用的工具名（排除固定 ToolNode 工具）
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
+        let fixed_tool_name = tool_assignments[i].2; // ToolNode 的 tool_name
         let mut an = agent(id, title, _expert);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
             a.config.max_tool_rounds = Some(2);
-            // 从 PROFILE_TOOLS 查找该专家的工具列表，生成 ToolDef 填入 config.tools
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| **k == **_expert)
@@ -974,6 +977,12 @@ async fn seed_stock_analysis_workflow_template(
             a.config.tools = tool_names
                 .iter()
                 .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                .collect();
+            // exposed_tools = 全部 tools 减去固定 ToolNode 的工具
+            a.config.exposed_tools = tool_names
+                .iter()
+                .filter(|&&tn| tn != fixed_tool_name)
+                .map(|&tn| tn.to_string())
                 .collect();
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
@@ -1186,6 +1195,18 @@ async fn seed_stock_analysis_workflow_template(
         a.config.system_prompt =
             format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
+        // exposed_tools 排除已由 t-scoring/t-valuation/t-risk 注入的算法工具
+        a.config.exposed_tools = a
+            .config
+            .tools
+            .iter()
+            .map(|td| td.name.clone())
+            .filter(|n| {
+                n != "compute_scoring"
+                    && n != "compute_valuation"
+                    && n != "compute_portfolio_risk"
+            })
+            .collect();
     }
     nodes.push(rm);
     edges.push(edge("e-t-risk-research-mgr", "t-risk", "research-mgr"));

@@ -6649,6 +6649,7 @@
         "experts": "专家",
         "roles": "角色",
         "profiles": "档案",
+        "data": "数据",
         "params": "参数"
       },
       "check": "检测",
@@ -6660,7 +6661,8 @@
         "desc": "管理专家-角色-工具的组合关系。修改后自动持久化到数据库。",
         "colName": "名称",
         "colTools": "可用工具",
-        "editTools": "编辑工具",
+        "edit": "编辑",
+        "editTools": "编辑暴露工具",
         "selectTools": "选择工具...",
         "save": "保存",
         "cancel": "取消",
@@ -6674,9 +6676,7 @@
         "goToRoles": "跳转到角色编辑",
         "colFixedTools": "固定工具",
         "colExposedTools": "暴露工具",
-        "legendFixed": "固定输入（DAG ToolNode）",
-        "legendExposed": "LLM 可选（AgentProfile）",
-        "legendBoth": "二者皆有"
+        "noPrompt": "（未加载到 prompt 数据）"
       },
       "group": {
         "vendor": "数据源",

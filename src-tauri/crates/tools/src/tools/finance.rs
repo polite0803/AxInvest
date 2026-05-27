@@ -79,9 +79,9 @@ fn value_at_risk(returns: &[f64], conf: f64) -> VarR {
     let mut s = returns.to_vec();
     s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = ((1.0 - conf) * n as f64).floor() as usize;
-    let var = if idx < n { -s[idx] * 100.0 } else { 0.0 };
+    let var = if idx < n { -s[idx] } else { 0.0 };
     let tail: f64 = s[..=idx.min(n - 1)].iter().map(|r| -r).sum();
-    let cvar = tail / (idx + 1) as f64 * 100.0;
+    let cvar = tail / (idx + 1) as f64;
     VarR {
         var_pct: (var * 100.0).round() / 100.0,
         confidence: conf,

@@ -120,8 +120,8 @@ export function AgentProfileList({ onGoToExperts, onGoToRoles }: Props) {
         const parsed = nodes
           .map((n: any) => {
             if (
-              !n?.config?.agent_profile_id ||
-              !n.config.agent_profile_id.startsWith("stock-")
+              !n?.config?.agent_profile_id
+              || !n.config.agent_profile_id.startsWith("stock-")
             ) {
               return null;
             }
@@ -134,8 +134,7 @@ export function AgentProfileList({ onGoToExperts, onGoToRoles }: Props) {
               title: n.base?.title ?? "",
               expertId: profileId,
               profileId,
-              expertName:
-                PROFILE_EXPERT_MAP[profileId] ?? profileId,
+              expertName: PROFILE_EXPERT_MAP[profileId] ?? profileId,
               roleName: PROFILE_ROLE_MAP[profileId] ?? "-",
               tools,
               fixedTools: getFixedTools(
@@ -281,11 +280,7 @@ export function AgentProfileList({ onGoToExperts, onGoToRoles }: Props) {
                 value={record.tools}
                 options={toolOptions}
                 onChange={(vals) => {
-                  setRows((prev) =>
-                    prev.map((r) =>
-                      r.id === record.id ? { ...r, tools: vals } : r,
-                    ),
-                  );
+                  setRows((prev) => prev.map((r) => r.id === record.id ? { ...r, tools: vals } : r));
                 }}
                 placeholder={t("stockAnalysis.settings.profile.selectTools")}
                 maxTagCount={6}

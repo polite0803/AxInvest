@@ -192,138 +192,21 @@ pub async fn run_stock_workflow(
         .variables
         .as_ref()
         .and_then(|v| serde_json::from_str(v).ok());
+    // 注入 iwencai API key（若已配置）
+    if let Some(ref vars) = template_vars {
+        for v in vars {
+            if v.name == "vendor_iwencai_key" {
+                if let serde_json::Value::String(ref key) = v.value {
+                    if !key.is_empty() {
+                        *state.astock_client.iwencai_key.write().await = key.clone();
+                    }
+                }
+            }
+        }
+    }
 
-    // ── 3. 注册工具 handler（数据获取 + 算法计算）──
+    // ── 3. 获取引擎引用（工具由 ToolResolver 自动扫描模板 AgentNode.tools 并注册）──
     let engine = Arc::clone(&state.work_engine);
-
-    // 数据工具
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc = stock_code.clone();
-    engine
-        .register_tool_handler(
-            "get_stock_quote",
-            Arc::new(move |_name: String, args: serde_json::Value| {
-                let client = Arc::clone(&tool_client);
-                let code = sc.clone();
-                Box::pin(async move {
-                    let c = args["stock_code"].as_str().unwrap_or(&code);
-                    match client.get_quote(c).await {
-                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
-                        Err(e) => Ok(json!({"error": e.to_string()})),
-                    }
-                })
-            }),
-        )
-        .await;
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc = stock_code.clone();
-    engine
-        .register_tool_handler(
-            "get_stock_kline",
-            Arc::new(move |_name: String, args: serde_json::Value| {
-                let client = Arc::clone(&tool_client);
-                let code = sc.clone();
-                Box::pin(async move {
-                    let c = args["stock_code"].as_str().unwrap_or(&code);
-                    let period = args["period"].as_str().unwrap_or("daily");
-                    let limit = args["limit"].as_u64().unwrap_or(120) as u32;
-                    match client.get_klines(c, period, limit).await {
-                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
-                        Err(e) => Ok(json!({"error": e.to_string()})),
-                    }
-                })
-            }),
-        )
-        .await;
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc = stock_code.clone();
-    engine
-        .register_tool_handler(
-            "get_stock_financials",
-            Arc::new(move |_name: String, args: serde_json::Value| {
-                let client = Arc::clone(&tool_client);
-                let code = sc.clone();
-                Box::pin(async move {
-                    let c = args["stock_code"].as_str().unwrap_or(&code);
-                    match client.get_financials(c).await {
-                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
-                        Err(e) => Ok(json!({"error": e.to_string()})),
-                    }
-                })
-            }),
-        )
-        .await;
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc = stock_code.clone();
-    engine
-        .register_tool_handler(
-            "get_stock_news",
-            Arc::new(move |_name: String, args: serde_json::Value| {
-                let client = Arc::clone(&tool_client);
-                let code = sc.clone();
-                Box::pin(async move {
-                    let c = args["stock_code"].as_str().unwrap_or(&code);
-                    let limit = args["limit"].as_u64().unwrap_or(30) as u32;
-                    match client.get_news(c, limit).await {
-                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
-                        Err(e) => Ok(json!({"error": e.to_string()})),
-                    }
-                })
-            }),
-        )
-        .await;
-    let tool_client = Arc::clone(&state.astock_client);
-    let sc = stock_code.clone();
-    engine
-        .register_tool_handler(
-            "get_stock_money_flow",
-            Arc::new(move |_name: String, args: serde_json::Value| {
-                let client = Arc::clone(&tool_client);
-                let code = sc.clone();
-                Box::pin(async move {
-                    let c = args["stock_code"].as_str().unwrap_or(&code);
-                    match client.get_money_flow(c).await {
-                        Ok(v) => Ok(serde_json::to_value(v).unwrap_or_default()),
-                        Err(e) => Ok(json!({"error": e.to_string()})),
-                    }
-                })
-            }),
-        )
-        .await;
-
-    // 算法工具
-    engine
-        .register_tool_handler(
-            "compute_scoring",
-            Arc::new(|_name: String, args: serde_json::Value| {
-                Box::pin(async move { compute_scoring_inner(&args).map_err(|e| e.to_string()) })
-            }),
-        )
-        .await;
-    engine
-        .register_tool_handler(
-            "compute_valuation",
-            Arc::new(|_name: String, args: serde_json::Value| {
-                Box::pin(async move { compute_valuation_inner(&args).map_err(|e| e.to_string()) })
-            }),
-        )
-        .await;
-    engine
-        .register_tool_handler(
-            "compute_portfolio_risk",
-            Arc::new(|_name: String, args: serde_json::Value| {
-                Box::pin(async move { Ok(compute_portfolio_risk_inner(&args)) })
-            }),
-        )
-        .await;
-    engine
-        .register_tool_handler(
-            "run_quality_gate",
-            Arc::new(|_name: String, args: serde_json::Value| {
-                Box::pin(async move { Ok(run_quality_gate_inner(&args)) })
-            }),
-        )
-        .await;
 
     // ── 4. 创建并执行工作流 ──
     let wf_name = format!("stock-analysis-{stock_code}");

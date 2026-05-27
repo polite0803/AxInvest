@@ -230,7 +230,7 @@ fn risk_parity(vols: &[f64], corr_json: &str) -> RpR {
             let target = total_risk / n as f64;
             for i in 0..n {
                 if risk_contrib[i] > 0.0 {
-                    w[i] *= (target / risk_contrib[i]).sqrt().min(2.0).max(0.5);
+                    w[i] *= (target / risk_contrib[i]).sqrt().clamp(0.5, 2.0);
                 }
             }
             let ws: f64 = w.iter().sum();
@@ -305,9 +305,7 @@ fn detect_ma_cross(kj: &str, fast: usize, slow: usize) -> CrossR {
     let confirmation = if sig != "none" && closes.len() >= slow + 2 {
         let p2f = sma(&closes[..n - 2], fast).unwrap_or(cf);
         let p2s = sma(&closes[..n - 2], slow).unwrap_or(cs);
-        if sig == "golden_cross" && p2f > p2s {
-            "confirmed"
-        } else if sig == "death_cross" && p2f < p2s {
+        if (sig == "golden_cross" && p2f > p2s) || (sig == "death_cross" && p2f < p2s) {
             "confirmed"
         } else {
             "unconfirmed"

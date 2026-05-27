@@ -445,7 +445,7 @@ impl Tool for ComputeScoringTool {
         if let Some(pe) = quote.pe {
             if pe > 0.0 && pe < 15.0 {
                 value_adj = 10.0;
-            } else if pe >= 15.0 && pe < 30.0 {
+            } else if (15.0..30.0).contains(&pe) {
                 value_adj = 5.0;
             } else if pe >= 50.0 {
                 value_adj = -10.0;
@@ -454,7 +454,7 @@ impl Tool for ComputeScoringTool {
         if let Some(pb) = quote.pb {
             if pb > 0.0 && pb < 1.0 {
                 value_adj += 10.0;
-            } else if pb >= 1.0 && pb < 3.0 {
+            } else if (1.0..3.0).contains(&pb) {
                 value_adj += 5.0;
             } else if pb >= 6.0 {
                 value_adj -= 5.0;
@@ -594,28 +594,25 @@ impl Tool for ComputeValuationTool {
         if debt_ratio < 0.60 {
             f_score += 1;
         }
-        if debt_ratio > 0.0 {
-            if let Some(prev) = financials.get(1) {
-                if let Some(prev_dr) = prev.debt_ratio {
-                    if debt_ratio < prev_dr {
-                        f_score += 1;
-                    }
-                }
-            }
+        if debt_ratio > 0.0
+            && let Some(prev) = financials.get(1)
+            && let Some(prev_dr) = prev.debt_ratio
+            && debt_ratio < prev_dr
+        {
+            f_score += 1;
         }
-        if financials.len() >= 2 {
-            if let Some(prev) = financials.get(1) {
-                if let Some(prev_roe) = prev.roe {
-                    if roe > prev_roe {
-                        f_score += 1;
-                    }
-                }
-            }
+        if financials.len() >= 2
+            && let Some(prev) = financials.get(1)
+            && let Some(prev_roe) = prev.roe
+            && roe > prev_roe
+        {
+            f_score += 1;
         }
-        if let Some(pe_val) = quote.pe {
-            if pe_val > 0.0 && pe_val < 20.0 {
-                f_score += 1;
-            }
+        if let Some(pe_val) = quote.pe
+            && pe_val > 0.0
+            && pe_val < 20.0
+        {
+            f_score += 1;
         }
 
         let mut moat_score = 0i32;

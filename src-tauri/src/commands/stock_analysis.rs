@@ -786,10 +786,13 @@ pub async fn generate_stock_report(
         })
         .unwrap_or_default();
 
-    let value_assessment_json = analysis_result_json
+    let value_assessment_json = record
+        .blackboard_snapshot
         .as_ref()
-        .and_then(|v| v.get("valueAssessment"))
-        .map(|v| serde_json::to_string(v).unwrap_or_default())
+        .and_then(|snap| {
+            serde_json::from_str::<std::collections::HashMap<String, String>>(snap).ok()
+        })
+        .and_then(|all| all.get("value.assessment").cloned())
         .unwrap_or_default();
 
     let html = axagent_stock_analysis::report::generate_html_report(

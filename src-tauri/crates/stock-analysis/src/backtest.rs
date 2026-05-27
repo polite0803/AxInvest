@@ -230,7 +230,7 @@ impl BacktestEngine {
     ) -> Result<BenchmarkResult, String> {
         // 获取沪深300 (000300) 同期表现
         let klines = client
-            .get_klines("000300", "daily", 365)
+            .get_klines("000300", "daily", 500)
             .await
             .map_err(|e| format!("获取沪深300K线失败: {e}"))?;
 

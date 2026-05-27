@@ -2,6 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Empty, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface SectorEntry {
   name: string;
@@ -13,6 +14,7 @@ interface SectorEntry {
 }
 
 export function SectorHeatmapPanel() {
+  const { t } = useTranslation();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -61,14 +63,16 @@ export function SectorHeatmapPanel() {
   return (
     <Card
       size="small"
-      title="🔥 板块轮动"
+      title={`🔥 ${t("stockAnalysis.settings.panels.sectorHeatmap")}`}
       styles={{ body: { padding: "4px 8px" } }}
-      extra={<Button size="small" loading={loading} onClick={load}>刷新</Button>}
+      extra={
+        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+      }
     >
       {loading
         ? <Spin size="small" />
         : sectors.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无板块数据" />
+        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noSector")} />
         : (
           <List
             size="small"

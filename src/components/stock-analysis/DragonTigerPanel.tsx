@@ -2,6 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Empty, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface DtEntry {
   code: string;
@@ -14,6 +15,7 @@ interface DtEntry {
 }
 
 export function DragonTigerPanel() {
+  const { t } = useTranslation();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -54,14 +56,16 @@ export function DragonTigerPanel() {
   return (
     <Card
       size="small"
-      title="🐉 龙虎榜"
+      title={`🐉 ${t("stockAnalysis.settings.panels.dragonTiger")}`}
       styles={{ body: { padding: "4px 8px" } }}
-      extra={<Button size="small" loading={loading} onClick={load}>刷新</Button>}
+      extra={
+        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+      }
     >
       {loading
         ? <Spin size="small" />
         : entries.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无龙虎榜数据" />
+        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noDragonTiger")} />
         : (
           <List
             size="small"
@@ -72,7 +76,10 @@ export function DragonTigerPanel() {
                 onClick={() => analyze(e.code)}
                 actions={[
                   <Tag key="net" color={e.netBuy > 0 ? "red" : "green"} className="text-xs m-0">
-                    净{e.netBuy > 0 ? "买" : "卖"} {(Math.abs(e.netBuy) / 1e4).toFixed(0)}万
+                    {e.netBuy > 0
+                      ? t("stockAnalysis.settings.panels.netBuy")
+                      : t("stockAnalysis.settings.panels.netSell")} {(Math.abs(e.netBuy) / 1e4).toFixed(0)}
+                    {t("stockAnalysis.wanUnit")}
                   </Tag>,
                 ]}
               >

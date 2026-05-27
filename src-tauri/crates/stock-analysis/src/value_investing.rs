@@ -154,23 +154,21 @@ impl ValueInvestingEngine {
         let shares = total_shares.unwrap_or(1.0);
         let fcf_per_share = fcf / shares / 1_0000_0000.0;
 
+        let base_g = growth_rate.unwrap_or(0.08);
+        let base_p = perpetual_rate.unwrap_or(0.03);
+        let base_d = discount_rate.unwrap_or(0.10);
         let low = Self::dcf_two_stage(
             fcf_per_share,
-            growth_rate.unwrap_or(0.05),
-            perpetual_rate.unwrap_or(0.02),
-            discount_rate.unwrap_or(0.10),
+            (base_g * 0.6).max(0.01),
+            (base_p * 0.7).max(0.01),
+            base_d,
         );
-        let mid = Self::dcf_two_stage(
-            fcf_per_share,
-            growth_rate.unwrap_or(0.08),
-            perpetual_rate.unwrap_or(0.03),
-            discount_rate.unwrap_or(0.10),
-        );
+        let mid = Self::dcf_two_stage(fcf_per_share, base_g, base_p, base_d);
         let high = Self::dcf_two_stage(
             fcf_per_share,
-            growth_rate.unwrap_or(0.12),
-            perpetual_rate.unwrap_or(0.04),
-            discount_rate.unwrap_or(0.10),
+            (base_g * 1.5).min(0.30),
+            (base_p * 1.3).min(0.05),
+            base_d,
         );
 
         (low, mid, high)

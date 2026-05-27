@@ -2,6 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Empty, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface EventItem {
   type: string;
@@ -12,6 +13,7 @@ interface EventItem {
 }
 
 export function EventCalendarPanel() {
+  const { t } = useTranslation();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -36,7 +38,9 @@ export function EventCalendarPanel() {
                     code: w.stockCode,
                     name: w.stockName,
                     date: l.unlockDate ?? l.unlock_date ?? "",
-                    detail: `${(l.unlockRatio ?? l.unlock_ratio ?? 0).toFixed(1)}% 解禁`,
+                    detail: `${(l.unlockRatio ?? l.unlock_ratio ?? 0).toFixed(1)}% ${
+                      t("stockAnalysis.settings.panels.lockup")
+                    }`,
                   });
                 }
               }
@@ -60,7 +64,9 @@ export function EventCalendarPanel() {
                       code: w.stockCode,
                       name: w.stockName,
                       date: ex,
-                      detail: `${(d.dividendPerShare ?? d.dividend_per_share ?? 0).toFixed(2)}元/股`,
+                      detail: `${(d.dividendPerShare ?? d.dividend_per_share ?? 0).toFixed(2)}${
+                        t("stockAnalysis.settings.panels.perShare")
+                      }`,
                     });
                   }
                 }
@@ -89,14 +95,16 @@ export function EventCalendarPanel() {
   return (
     <Card
       size="small"
-      title="📅 事件日历"
+      title={`📅 ${t("stockAnalysis.settings.panels.eventCalendar")}`}
       styles={{ body: { padding: "4px 8px" } }}
-      extra={<Button size="small" loading={loading} onClick={load}>刷新</Button>}
+      extra={
+        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+      }
     >
       {loading
         ? <Spin size="small" />
         : events.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无事件数据" />
+        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noEvents")} />
         : (
           <List
             size="small"
@@ -107,7 +115,9 @@ export function EventCalendarPanel() {
                 onClick={() => analyze(ev.code)}
                 actions={[
                   <Tag key="type" color={ev.type === "lockup" ? "orange" : "blue"} className="text-xs m-0">
-                    {ev.type === "lockup" ? "解禁" : "分红"}
+                    {ev.type === "lockup"
+                      ? t("stockAnalysis.settings.panels.lockup")
+                      : t("stockAnalysis.settings.panels.dividend")}
                   </Tag>,
                 ]}
               >

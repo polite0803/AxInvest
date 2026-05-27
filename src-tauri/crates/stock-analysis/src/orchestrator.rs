@@ -243,6 +243,22 @@ impl StockAnalysisOrchestrator {
             quality.summary
         };
 
+        let quality_grade_str = {
+            let bb = blackboard.read().await;
+            bb.get_state("data_quality_summary")
+                .cloned()
+                .unwrap_or_default()
+        };
+        let quality_confidence_factor = if quality_grade_str.starts_with("数据质量: A") {
+            1.0
+        } else if quality_grade_str.starts_with("数据质量: B") {
+            0.9
+        } else if quality_grade_str.starts_with("数据质量: C") {
+            0.7
+        } else {
+            0.5
+        };
+
         // ── NEW ②: 100分客观评分 ──
         let mut objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
 
@@ -251,6 +267,8 @@ impl StockAnalysisOrchestrator {
         let pb = raw.quote.pb;
         let roe = raw.financials.first().and_then(|f| f.roe);
         scoring::ScoringEngine::apply_fundamental_adjustment(&mut objective_score, pe, pb, roe);
+
+        scoring::ScoringEngine::apply_value_adjustment(&mut objective_score, &value_metrics);
 
         {
             let bb = blackboard.read().await;
@@ -268,9 +286,6 @@ impl StockAnalysisOrchestrator {
                 }
             }
         }
-
-        // 应用价值投资修正
-        scoring::ScoringEngine::apply_value_adjustment(&mut objective_score, &value_metrics);
 
         let score_json = serde_json::to_string(&objective_score).unwrap_or_default();
         {
@@ -366,8 +381,28 @@ impl StockAnalysisOrchestrator {
             result_text
         };
 
-        let decision =
+        let mut decision =
             Self::phase_5_decision(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
+
+        {
+            let bb = blackboard.read().await;
+            if let Some(force) = bb.get_state("rule_check.force_signal") {
+                if !force.is_empty() {
+                    let original_action = decision.action.clone();
+                    if original_action == "买入" || original_action == "增持" {
+                        decision.action = "观望".into();
+                        decision.reasoning = format!(
+                            "[严进规则拦截] {} | 原始建议: {} | {}",
+                            force, original_action, decision.reasoning
+                        );
+                        decision.position_pct = 0.0;
+                        decision.confidence = (decision.confidence * 0.5).min(0.3);
+                    }
+                }
+            }
+        }
+
+        decision.confidence *= quality_confidence_factor;
 
         let _ = events.send(AnalysisEvent::Decision(decision.clone()));
 

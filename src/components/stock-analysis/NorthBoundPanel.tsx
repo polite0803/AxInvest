@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Empty, Spin, Statistic } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface NbFlow {
   date: string;
@@ -10,6 +11,7 @@ interface NbFlow {
 }
 
 export function NorthBoundPanel() {
+  const { t } = useTranslation();
   const [flow, setFlow] = useState<NbFlow | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -34,31 +36,39 @@ export function NorthBoundPanel() {
   }, [load]);
 
   const total = flow?.totalFlow ?? 0;
-  const dir = total >= 0 ? "流入" : "流出";
+  const dir = total >= 0 ? t("stockAnalysis.settings.panels.inflow") : t("stockAnalysis.settings.panels.outflow");
   const color = total >= 0 ? "var(--sa-red)" : "var(--sa-green)";
 
   return (
     <Card
       size="small"
-      title="🧭 北向资金"
+      title={`🧭 ${t("stockAnalysis.settings.panels.northBound")}`}
       styles={{ body: { padding: "4px 8px" } }}
-      extra={<Button size="small" loading={loading} onClick={load}>刷新</Button>}
+      extra={
+        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+      }
     >
       {loading
         ? <Spin size="small" />
         : !flow
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无北向数据" />
+        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noNorthBound")} />
         : (
           <div className="text-center">
             <Statistic
-              title={`北向资金 ${dir} (${flow.date})`}
+              title={t("stockAnalysis.settings.panels.northTitle", { dir, date: flow.date })}
               value={Math.abs(total / 1e4).toFixed(1)}
-              suffix="亿"
+              suffix={t("stockAnalysis.settings.panels.yiDisplay")}
               valueStyle={{ fontSize: 20, color, fontWeight: "bold" }}
             />
             <div className="grid grid-cols-2 gap-1 mt-1 text-xs text-gray-500">
-              <span>沪股通: {(flow.shFlow / 1e4).toFixed(1)}亿</span>
-              <span>深股通: {(flow.szFlow / 1e4).toFixed(1)}亿</span>
+              <span>
+                {t("stockAnalysis.settings.panels.shFlow")}: {(flow.shFlow / 1e4).toFixed(1)}
+                {t("stockAnalysis.settings.panels.yiDisplay")}
+              </span>
+              <span>
+                {t("stockAnalysis.settings.panels.szFlow")}: {(flow.szFlow / 1e4).toFixed(1)}
+                {t("stockAnalysis.settings.panels.yiDisplay")}
+              </span>
             </div>
           </div>
         )}

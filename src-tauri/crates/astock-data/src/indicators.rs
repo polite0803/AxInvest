@@ -212,14 +212,12 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         "金叉".to_string()
     } else if prev_dif >= prev_dea && dif < dea {
         "死叉".to_string()
-    } else if dif > dea && dif > 0.0 {
-        "多头运行".to_string()
-    } else if dif < dea && dif < 0.0 {
-        "空头运行".to_string()
     } else if dif > dea {
-        "金叉".to_string()
+        "多头运行".to_string()
+    } else if dif < dea {
+        "空头运行".to_string()
     } else {
-        "死叉".to_string()
+        "缠绕".to_string()
     };
 
     // RSI

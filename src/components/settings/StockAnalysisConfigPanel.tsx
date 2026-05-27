@@ -309,8 +309,34 @@ export function StockAnalysisConfigPanel(_props: Props) {
 
   const rowStyle = { padding: "4px 0" };
 
+  const handleOptimize = async () => {
+    setSaving(true);
+    try {
+      const weights = await invoke<any>("optimize_scoring_weights");
+      if (weights) {
+        const map: Record<string, number> = {
+          scoring_trend: weights.trendWeight,
+          scoring_deviation: weights.deviationWeight,
+          scoring_macd: weights.macdWeight,
+          scoring_volume: weights.volumeWeight,
+          scoring_rsi: weights.rsiWeight,
+          scoring_support: weights.supportWeight,
+        };
+        setValues((prev) => ({ ...prev, ...map }));
+        message.success("评分权重已优化");
+      }
+    } catch {
+      message.error("优化失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex justify-end">
+        <Button size="small" loading={saving} onClick={handleOptimize}>🎯 基于回测优化评分权重</Button>
+      </div>
       {toolGroups.map((g) => (
         <SettingsGroup
           key={g.tool}

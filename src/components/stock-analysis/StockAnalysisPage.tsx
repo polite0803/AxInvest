@@ -1,5 +1,6 @@
 import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
@@ -8,6 +9,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { CompareView } from "./CompareView";
+import { DailyReviewPanel } from "./DailyReviewPanel";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
@@ -56,6 +58,11 @@ export function StockAnalysisPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState("trade");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [marketStatus, setMarketStatus] = useState("");
+
+  useEffect(() => {
+    invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setupEventListener();
@@ -127,6 +134,7 @@ export function StockAnalysisPage() {
       label: t("stockAnalysis.history"),
       element: <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />,
     },
+    { key: "review", label: "复盘", element: <DailyReviewPanel /> },
   ];
 
   const activePanel = sheetPanels.find((p) => p.key === sheetTab);
@@ -140,7 +148,7 @@ export function StockAnalysisPage() {
             ← {t("nav.chat")}
           </button>
           <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
-          <span className="sa-header-meta">{t("stockAnalysis.subtitle")}</span>
+          <span className="sa-header-meta">{marketStatus || t("stockAnalysis.subtitle")}</span>
           <button
             type="button"
             className="sa-header-back"

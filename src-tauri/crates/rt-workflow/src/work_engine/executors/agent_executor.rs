@@ -285,13 +285,27 @@ impl NodeExecutorTrait for AgentExecutor {
         let model = session_model.unwrap_or(default_model);
         let model_for_output = model.clone();
 
-        // 构建工具定义（若配置了 tools）
-        let tools: Option<Vec<axagent_core::types::ChatTool>> = if an.config.tools.is_empty() {
+        // 构建工具定义（合并 AgentNodeConfig.tools + AgentProfile.recommended_tools）
+        let profile_tools_str = profile.and_then(|p| p.recommended_tools.clone());
+        let profile_tool_names: Vec<String> = profile_tools_str
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .unwrap_or_default();
+        let mut merged_tools: Vec<axagent_core::workflow_types::ToolDef> = an.config.tools.clone();
+        for name in &profile_tool_names {
+            if !merged_tools.iter().any(|t| &t.name == name) {
+                merged_tools.push(axagent_core::workflow_types::ToolDef {
+                    name: name.clone(),
+                    description: None,
+                    parameters: None,
+                });
+            }
+        }
+        let tools: Option<Vec<axagent_core::types::ChatTool>> = if merged_tools.is_empty() {
             None
         } else {
             Some(
-                an.config
-                    .tools
+                merged_tools
                     .iter()
                     .map(|td| axagent_core::types::ChatTool {
                         r#type: "function".to_string(),

@@ -85,26 +85,101 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
     })
 }
 
+/// 解析腾讯财经 K 线 JSON 响应
+/// API: http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sz000001,day,,,120,qfq
+fn parse_klines(raw: &str, stock_code: &str) -> Result<Vec<KLine>, DataError> {
+    let json: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|e| DataError::ParseError(format!("K线JSON解析失败: {e}")))?;
+    // 路径: data.{code}.{qfqday|qfqweek|qfqmonth} 或 data.{code}.day/week/month
+    let data = &json["data"];
+    let code_key = data
+        .as_object()
+        .and_then(|obj| {
+            obj.keys()
+                .find(|k| k.starts_with("sz") || k.starts_with("sh") || k.starts_with("bj"))
+        })
+        .cloned()
+        .unwrap_or_default();
+    if code_key.is_empty() {
+        return Err(DataError::ParseError("K线数据中未找到股票代码键".into()));
+    }
+    let stock_data = &data[&code_key];
+    // 尝试各种可能的键名
+    let kline_list = stock_data["qfqday"]
+        .as_array()
+        .or_else(|| stock_data["day"].as_array())
+        .or_else(|| stock_data["qfqweek"].as_array())
+        .or_else(|| stock_data["week"].as_array())
+        .or_else(|| stock_data["qfqmonth"].as_array())
+        .or_else(|| stock_data["month"].as_array())
+        .ok_or_else(|| DataError::ParseError("未找到K线数组".into()))?;
+
+    let mut result = Vec::new();
+    for item in kline_list {
+        let arr = item
+            .as_array()
+            .ok_or_else(|| DataError::ParseError("K线项不是数组".into()))?;
+        if arr.len() < 6 {
+            continue;
+        }
+        let parse = |i: usize| -> f64 {
+            arr.get(i)
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0)
+        };
+        result.push(KLine {
+            date: arr[0].as_str().unwrap_or("").to_string(),
+            open: parse(1),
+            close: parse(2),
+            high: parse(3),
+            low: parse(4),
+            volume: parse(5),
+            amount: parse(6),
+            turnover_rate: None,
+        });
+    }
+    Ok(result)
+}
+
 #[async_trait]
 impl StockVendor for TencentVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let tc_code = to_tencent_code(stock_code);
-        let url = format!("http://qt.gtimg.cn/q={tc_code}");
+        let url = format!("https://qt.gtimg.cn/q={tc_code}");
         let resp = self.http.get(&url).send().await?;
         let text = resp.text().await?;
         parse_quote(&text)
     }
 
-    // 以下方法由其他 vendor 承担，此处返回空
-    async fn get_klines(&self, _: &str, _: &str, _: u32) -> Result<Vec<KLine>, DataError> {
-        Ok(vec![])
+    // 以下方法由腾讯财经 API 提供
+    async fn get_klines(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+    ) -> Result<Vec<KLine>, DataError> {
+        let tc_code = to_tencent_code(stock_code);
+        let period_code = match period {
+            "weekly" => "week",
+            "monthly" => "month",
+            _ => "day",
+        };
+        let url = format!(
+            "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tc_code},{period_code},,,{limit},qfq"
+        );
+        let resp = self.http.get(&url).send().await?;
+        let body = resp.text().await?;
+        parse_klines(&body, stock_code)
     }
 
     async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
+        // 腾讯无直接财务 API，由其他 vendor 承担
         Ok(vec![])
     }
 
     async fn get_news(&self, _: &str, _: u32) -> Result<Vec<NewsItem>, DataError> {
+        // 腾讯无直接新闻 API，由其他 vendor 承担
         Ok(vec![])
     }
 

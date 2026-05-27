@@ -175,7 +175,7 @@ impl AStockClient {
             .map(|(_, v)| v.as_ref())
     }
 
-    /// 检查指定 vendor 的连接可用性（用平安银行 000001 做探针）
+    /// 检查指定 vendor 的连接可用性（按实际能力选择探针方法）
     pub async fn check_vendor_health(&self, vendor_name: &str) -> Result<(), DataError> {
         let vendor = self
             .find_vendor(vendor_name)
@@ -183,8 +183,31 @@ impl AStockClient {
                 vendor: vendor_name.into(),
                 message: "vendor not registered".into(),
             })?;
-        // 用常见股票代码做连通性探针，只检查 HTTP 可达性
-        vendor.get_quote("000001").await?;
+        // 按 vendor 实际能力选择探测方法，避免用未实现的方法误判
+        match vendor_name {
+            "eastmoney" => {
+                vendor.get_klines("000001", "daily", 5).await?;
+            },
+            "sina" => {
+                vendor.get_news("000001", 3).await?;
+            },
+            "ths" => {
+                vendor.get_hot_stocks().await?;
+            },
+            "cninfo" => {
+                vendor.get_announcements("000001").await?;
+            },
+            "iwencai" => {
+                vendor.search_stock("平安银行").await?;
+            },
+            "akshare" => {
+                vendor.get_news("000001", 3).await?;
+            },
+            _ => {
+                // tencent, baidu_stock, mootdx — 有 get_quote
+                vendor.get_quote("000001").await?;
+            },
+        }
         Ok(())
     }
 

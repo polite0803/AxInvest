@@ -9,10 +9,55 @@ pub struct SinaVendor {
 
 #[async_trait]
 impl StockVendor for SinaVendor {
-    async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
-        Err(DataError::VendorError {
-            vendor: "sina".into(),
-            message: "quote handled by tencent".into(),
+    async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
+        let prefix = if stock_code.starts_with('6') {
+            "sh"
+        } else {
+            "sz"
+        };
+        let url = format!("https://hq.sinajs.cn/list={prefix}{stock_code}");
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://finance.sina.com.cn/")
+            .send()
+            .await?;
+        let body = resp.text().await?;
+        // 格式: var hq_str_sz000001="平安银行,12.50,12.30,12.60,12.80,..."
+        let start = body
+            .find('"')
+            .ok_or_else(|| DataError::ParseError("sina quote parse: no opening quote".into()))?;
+        let end = body[start + 1..]
+            .find('"')
+            .ok_or_else(|| DataError::ParseError("sina quote parse: no closing quote".into()))?;
+        let data = &body[start + 1..start + 1 + end];
+        let fields: Vec<&str> = data.split(',').collect();
+        if fields.len() < 32 {
+            return Err(DataError::ParseError(format!(
+                "sina quote: expected >=32 fields, got {}",
+                fields.len()
+            )));
+        }
+        let f = |i: usize| -> f64 { fields.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
+        Ok(StockQuote {
+            code: stock_code.to_string(),
+            name: fields.get(0).copied().unwrap_or("").to_string(),
+            price: f(3),
+            pre_close: f(2),
+            open: f(1),
+            high: f(4),
+            low: f(5),
+            volume: f(8),
+            amount: f(9),
+            change_pct: (f(3) - f(2)) / f(2) * 100.0,
+            turnover_rate: 0.0,
+            pe: None,
+            pb: None,
+            total_mv: None,
+            limit_up: None,
+            limit_down: None,
+            is_st: false,
+            timestamp: chrono::Utc::now().to_rfc3339(),
         })
     }
 

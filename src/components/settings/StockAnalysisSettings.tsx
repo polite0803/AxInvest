@@ -22,7 +22,7 @@ export function StockAnalysisSettings() {
 
   const checkAllVendors = useCallback(async () => {
     setCheckingVendors(true);
-    const vendors = ["tencent", "eastmoney", "sina", "ths", "cninfo", "baiduStock", "iwencai", "akshare", "mootdx"];
+    const vendors = ["tencent", "eastmoney", "sina", "ths", "cninfo", "baidu_stock", "iwencai", "akshare", "mootdx"];
     for (const v of vendors) { setVendorHealth((prev) => ({ ...prev, [v]: "pending" })); }
     for (const v of vendors) { await checkVendor(v); }
     setCheckingVendors(false);

@@ -6609,6 +6609,8 @@
     "settings": {
       "title": "Stock Analysis Settings",
       "saveFailed": "Failed to save",
+      "noExperts": "전문가 데이터 없음. 앱 재시작 필요",
+      "noRoles": "역할 데이터 없음. 앱 재시작 필요",
       "quoteTag": "Quotes",
       "financialKlineTag": "Financial/K-line",
       "newsTag": "News",

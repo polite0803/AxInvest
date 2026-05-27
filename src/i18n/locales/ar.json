@@ -6609,6 +6609,8 @@
     "settings": {
       "title": "Stock Analysis Settings",
       "saveFailed": "Failed to save",
+      "noExperts": "لا توجد بيانات خبراء. أعد تشغيل التطبيق.",
+      "noRoles": "لا توجد بيانات أدوار. أعد تشغيل التطبيق.",
       "quoteTag": "Quotes",
       "financialKlineTag": "Financial/K-line",
       "newsTag": "News",

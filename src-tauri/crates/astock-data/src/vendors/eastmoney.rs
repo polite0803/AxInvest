@@ -679,7 +679,7 @@ impl StockVendor for EastMoneyVendor {
                             .as_i64()
                             .map(|ts| {
                                 let secs = ts / 1000;
-                                chrono::DateTime::from_timestamp(secs as i64, 0)
+                                chrono::DateTime::from_timestamp(secs, 0)
                                     .map(|dt| dt.format("%Y-%m-%d").to_string())
                                     .unwrap_or_default()
                             })

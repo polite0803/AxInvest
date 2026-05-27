@@ -186,6 +186,8 @@ const zhCN = {
       depActive: "为以下固定工具提供数据：",
       depInactive: "关闭后以下工具将降级到下一 vendor：",
       noDeps: "无固定工具依赖此数据源",
+      fixedToolHeader: "固定工具（DAG ToolNode 确定性执行）",
+      exposedToolHeader: "LLM 暴露工具（Agent 自主调用）",
       localCompute: "本地计算工具（不依赖远程 vendor）",
     },
     group: {
@@ -397,6 +399,8 @@ const enUS = {
       depActive: "Provides data for these tools:",
       depInactive: "When disabled, these tools fall back to next vendor:",
       noDeps: "No tools depend on this vendor",
+      fixedToolHeader: "Fixed tools (DAG ToolNode deterministic execution)",
+      exposedToolHeader: "LLM-exposed tools (Agent autonomous invocation)",
       localCompute: "Local compute tools (no remote vendor dependency)",
     },
     group: {

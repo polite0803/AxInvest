@@ -1,6 +1,6 @@
 {
   "version": "1",
-  "generated": "2026-05-25",
+  "generated": "2026-05-27",
   "total_entries": 125,
   "total_files": 125,
   "entries": [
@@ -753,6 +753,16 @@
       "lines": "64,83,193,204,216,221,233,245,256,267",
       "reason": "硬编码中文字符串（工具分组标签 + 温度判断逻辑）",
       "phase": 3
+    },
+    {
+      "file": "src/components/chat/ChatView.tsx",
+      "lines": "282,302",
+      "reason": "内容分析关键词，非 UI 字符串"
+    },
+    {
+      "file": "src/components/chat/StructuredThinking.tsx",
+      "lines": "53,84,112,141",
+      "reason": "LLM 响应分析关键词，非 UI 字符串"
     }
   ]
 }

@@ -1076,10 +1076,10 @@ export function InputArea() {
       label: (
         <span className="flex items-center gap-2">
           {t("common.permissionAcceptEdits")}
-          {agentPermissionMode === "accept_edits" && <Check size={14} style={{ color: "#1890ff" }} />}
+          {agentPermissionMode === "accept_edits" && <Check size={14} style={{ color: token.colorPrimary }} />}
         </span>
       ),
-      icon: <ShieldCheck size={14} style={{ color: "#1890ff" }} />,
+      icon: <ShieldCheck size={14} style={{ color: token.colorPrimary }} />,
       onClick: () => handlePermissionModeChange("accept_edits"),
     },
     {
@@ -1087,10 +1087,10 @@ export function InputArea() {
       label: (
         <span className="flex items-center gap-2">
           {t("common.permissionFullAccess")}
-          {agentPermissionMode === "full_access" && <Check size={14} style={{ color: "#ff4d4f" }} />}
+          {agentPermissionMode === "full_access" && <Check size={14} style={{ color: token.colorError }} />}
         </span>
       ),
-      icon: <ShieldAlert size={14} style={{ color: "#ff4d4f" }} />,
+      icon: <ShieldAlert size={14} style={{ color: token.colorError }} />,
       onClick: () => handlePermissionModeChange("full_access"),
     },
   ], [t, agentPermissionMode, token.colorPrimary]);
@@ -1139,9 +1139,9 @@ export function InputArea() {
   const permissionModeIcon = useMemo(() => {
     switch (agentPermissionMode) {
       case "accept_edits":
-        return <ShieldCheck size={14} style={{ color: "#1890ff" }} />;
+        return <ShieldCheck size={14} style={{ color: token.colorPrimary }} />;
       case "full_access":
-        return <ShieldAlert size={14} style={{ color: "#ff4d4f" }} />;
+        return <ShieldAlert size={14} style={{ color: token.colorError }} />;
       default:
         return <Shield size={14} />;
     }
@@ -2451,12 +2451,8 @@ export function InputArea() {
       {/* Main input container */}
       <div
         ref={containerRef}
-        className="ax-cyber-border"
         style={{
           position: "relative",
-          border: "1px solid var(--border-color)",
-          borderRadius: 16,
-          backgroundColor: token.colorBgContainer,
           overflow: "hidden",
         }}
       >
@@ -3001,7 +2997,7 @@ export function InputArea() {
                     display: "flex",
                     alignItems: "center",
                     gap: 4,
-                    color: workStrategy === "plan" ? "#722ed1" : undefined,
+                    color: workStrategy === "plan" ? "var(--purple, #722ed1)" : undefined,
                   }}
                 />
               </DropdownMenu>
@@ -3109,7 +3105,7 @@ export function InputArea() {
                   gap: 4,
                   fontSize: 12,
                   ...(agentPermissionMode === "full_access"
-                    ? { color: "#ff4d4f" }
+                    ? { color: token.colorError }
                     : {}),
                 }}
               >
@@ -3208,7 +3204,7 @@ export function InputArea() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: "rgba(0, 0, 0, 0.45)",
+            backgroundColor: token.colorBgMask,
             backdropFilter: "blur(4px)",
           }}
         >

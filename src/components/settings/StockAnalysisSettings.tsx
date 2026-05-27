@@ -5,6 +5,7 @@ import { AgentProfileList } from "./AgentProfileList";
 import { DataVendorsTab } from "./DataVendorsTab";
 import { ExpertPromptList } from "./ExpertPromptList";
 import { RolePromptList } from "./RolePromptList";
+import { ScheduledAnalysisTab } from "./ScheduledAnalysisTab";
 import { StockAnalysisConfigPanel } from "./StockAnalysisConfigPanel";
 
 export function StockAnalysisSettings() {
@@ -42,6 +43,11 @@ export function StockAnalysisSettings() {
             key: "params",
             label: t("stockAnalysis.settings.tab.params"),
             children: <StockAnalysisConfigPanel />,
+          },
+          {
+            key: "schedule",
+            label: "定时",
+            children: <ScheduledAnalysisTab />,
           },
         ]}
       />

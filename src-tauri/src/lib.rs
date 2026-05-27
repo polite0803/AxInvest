@@ -13,7 +13,6 @@ mod memory_extract;
 mod paths;
 mod semantic_cache;
 mod smart_router;
-mod stock_scheduler;
 
 #[cfg(not(mobile))]
 mod tray;
@@ -955,10 +954,10 @@ pub fn run() {
             commands::stock_analysis::execute_stock_mcp_tool,
             commands::stock_analysis::backtest_analysis,
             commands::stock_analysis::backtest_all_history,
-            commands::stock_analysis::create_analysis_schedule,
-            commands::stock_analysis::list_analysis_schedules,
-            commands::stock_analysis::toggle_analysis_schedule,
-            commands::stock_analysis::delete_analysis_schedule,
+            commands::stock_analysis::create_stock_cron,
+            commands::stock_analysis::list_stock_crons,
+            commands::stock_analysis::toggle_stock_cron,
+            commands::stock_analysis::delete_stock_cron,
             commands::stock_analysis::create_price_alert,
             commands::stock_analysis::list_price_alerts,
             commands::stock_analysis::delete_price_alert,
@@ -970,10 +969,6 @@ pub fn run() {
             commands::stock_analysis::toggle_trading_enabled,
             commands::stock_analysis::validate_trade,
             commands::stock_analysis::compare_trade_with_analysis,
-            commands::stock_analysis::start_monitor,
-            commands::stock_analysis::stop_monitor,
-            commands::stock_analysis::add_monitor_config,
-            commands::stock_analysis::list_monitor_configs,
             commands::stock_analysis::backtest_key_levels,
             commands::stock_analysis::screen_stocks,
             commands::stock_analysis::discover_stock_candidates,

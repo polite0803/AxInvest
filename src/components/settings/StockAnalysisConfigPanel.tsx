@@ -1,6 +1,6 @@
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
-import { Button, Input, InputNumber, message, Select, Slider, Switch, Tag, theme } from "antd";
+import { Button, Input, InputNumber, message, Select, Slider, Space, Switch, Tag, theme } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "./SettingsGroup";
@@ -50,52 +50,7 @@ function getDefaultVariables(): Variable[] {
   b("monitor_pollIntervalSecs", 30, "监控轮询间隔 (秒)", "number");
   b("monitor_changePctThreshold", 5, "涨跌幅异常阈值 (%)", "number");
   b("monitor_turnoverThreshold", 10, "换手率异常阈值 (%)", "number");
-  // 数据源
-  b("vendor_tencent", true, "腾讯财经 — 报价数据", "boolean");
-  b("vendor_eastmoney", true, "东方财富 — 财务/K线数据", "boolean");
-  b("vendor_sina", true, "新浪财经 — 新闻数据", "boolean");
-  b("vendor_ths", false, "同花顺 — 综合数据", "boolean");
-  b("vendor_cninfo", false, "巨潮资讯 — 信息披露", "boolean");
-  b("vendor_baidu_stock", false, "百度股票 — 数据", "boolean");
-  b("vendor_iwencai", false, "问财 — 选股数据", "boolean");
-  b("vendor_iwencai_key", "", "问财 API Key（openapi.iwencai.com）", "string");
-  b("vendor_akshare", false, "AKShare — 开源数据", "boolean");
-  b("vendor_mootdx", false, "Mootdx — 本地行情接口", "boolean");
   return vars;
-}
-
-function extractPrefix(name: string): string {
-  const idx = name.indexOf("_");
-  return idx > 0 ? name.slice(0, idx) : "";
-}
-
-interface VariableGroup {
-  prefix: string;
-  i18nKey: string;
-  vars: Variable[];
-}
-
-function groupVariables(variables: Variable[], prefixes: Record<string, string>): {
-  grouped: VariableGroup[];
-  ungrouped: Variable[];
-} {
-  const map = new Map<string, Variable[]>();
-  const ungrouped: Variable[] = [];
-  for (const v of variables) {
-    const pre = extractPrefix(v.name);
-    if (pre && prefixes[pre]) {
-      map.get(pre)?.push(v) ?? map.set(pre, [v]);
-    } else {
-      ungrouped.push(v);
-    }
-  }
-  const grouped: VariableGroup[] = [];
-  for (const [prefix, i18nKey] of Object.entries(prefixes)) {
-    if (map.has(prefix)) {
-      grouped.push({ prefix, i18nKey, vars: map.get(prefix)! });
-    }
-  }
-  return { grouped, ungrouped };
 }
 
 function parseEnumOptions(desc?: string): string[] {
@@ -110,13 +65,8 @@ function inferStep(v: Variable): number {
   return 1;
 }
 
-interface Props {
-  showVendorHealth?: boolean;
-  vendorHealth?: Record<string, "ok" | "fail" | "pending">;
-  checkingVendors?: boolean;
-  onCheckVendor?: (name: string) => void;
-  onCheckAllVendors?: () => void;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+interface Props {}
 
 /** number 控件 — 窄屏竖排，宽屏横排 */
 function NumberControl({ v, value, onChange }: {
@@ -181,25 +131,13 @@ function VariableControl({ v, value, onChange }: {
   }
 }
 
-export function StockAnalysisConfigPanel(props: Props) {
-  const { showVendorHealth, vendorHealth, checkingVendors, onCheckVendor, onCheckAllVendors } = props;
+export function StockAnalysisConfigPanel(_props: Props) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [template, setTemplate] = useState<WorkflowTemplateResponse | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const prefixes = useMemo(() => ({
-    vendor: t("stockAnalysis.settings.group.vendor"),
-    agent: t("stockAnalysis.settings.group.agent"),
-    tool: t("stockAnalysis.settings.group.tool"),
-    scoring: t("stockAnalysis.settings.group.scoring"),
-    rule: t("stockAnalysis.settings.group.rule"),
-    pos: t("stockAnalysis.settings.group.pos"),
-    value: t("stockAnalysis.settings.group.value"),
-    monitor: t("stockAnalysis.settings.group.monitor"),
-  } as Record<string, string>), [t]);
 
   useEffect(() => {
     invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID })
@@ -240,10 +178,25 @@ export function StockAnalysisConfigPanel(props: Props) {
       .finally(() => setLoading(false));
   }, [t]);
 
-  const { grouped, ungrouped } = useMemo(() => {
-    const vars = template?.variables ?? getDefaultVariables();
-    return groupVariables(vars, prefixes);
-  }, [template, prefixes]);
+  // 工具 → 参数配对
+  const toolGroups = useMemo(() => {
+    const allVars = template?.variables ?? getDefaultVariables();
+    const varMap: Record<string, Variable> = {};
+    for (const v of allVars) { varMap[v.name] = v; }
+
+    const resolve = (names: string[]) => names.map((n) => varMap[n]).filter(Boolean);
+
+    return [
+      { tool: "compute_scoring", label: "技术评分", vars: resolve(["scoring_trend", "scoring_deviation", "scoring_macd", "scoring_volume", "scoring_rsi", "scoring_support"]) },
+      { tool: "compute_valuation", label: "估值计算", vars: resolve(["value_dcfGrowthRate", "value_dcfPerpetualRate", "value_dcfDiscountRate", "value_moatThreshold", "value_fScoreBuyThreshold", "value_safetyMarginMin"]) },
+      { tool: "compute_portfolio_risk", label: "组合风险", vars: resolve(["pos_maxSingleStockPct", "pos_maxTotalPositions", "pos_maxSectorExposurePct"]) },
+      { tool: "calcs", label: "风险模型", vars: resolve(["var_confidence", "kelly_fraction", "risk_free_rate", "outlier_method", "outlier_threshold", "min_confidence"]) },
+      { tool: "rules", label: "规则引擎", vars: resolve(["rule_rsiOverbought", "rule_rsiOversold", "rule_biasLimit", "rule_volumeSignalBlock", "rule_bearLowScore", "rule_autoStopLossPct"]) },
+      { tool: "agent_executor", label: "Agent 运行时", vars: resolve(["analysis_temperature", "analysis_maxTokens", "analysis_timeoutSecs", "analysis_maxDebateRounds", "analysis_maxConcurrent"]) },
+      { tool: "tool_executor", label: "Tool 运行时", vars: resolve(["tool_timeoutSecs", "tool_retryMax", "analysis_klinePeriod", "analysis_klineLimit", "analysis_newsLimit"]) },
+      { tool: "monitor", label: "监控告警", vars: resolve(["monitor_pollIntervalSecs", "monitor_changePctThreshold", "monitor_turnoverThreshold"]) },
+    ].filter((g) => g.vars.length > 0);
+  }, [template]);
 
   const handleChange = (name: string, val: unknown) => {
     setValues((prev) => ({ ...prev, [name]: val }));
@@ -284,55 +237,30 @@ export function StockAnalysisConfigPanel(props: Props) {
 
   const rowStyle = { padding: "4px 0" };
 
-  const renderGroup = (title: string, vars: Variable[], isVendor: boolean) => (
-    <SettingsGroup
-      key={title}
-      title={title}
-      extra={isVendor && onCheckAllVendors
-        ? (
-          <Button size="small" loading={checkingVendors} onClick={onCheckAllVendors}>
-            {t("stockAnalysis.settings.checkHealth")}
-          </Button>
-        )
-        : undefined}
-    >
-      <div className="sacp-vars">
-        {vars.map((v) => (
-          <div key={v.name} style={rowStyle} className="flex items-center justify-between sacp-row">
-            <span className="sacp-var-label" style={{ fontSize: 13, color: token.colorText }}>
-              {v.description ?? v.name}
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 16 }}>
-              <VariableControl v={v} value={values[v.name]} onChange={handleChange} />
-              {isVendor && onCheckVendor && (
-                <Tag
-                  color={vendorHealth?.[v.name] === "ok"
-                    ? "success"
-                    : vendorHealth?.[v.name] === "fail"
-                    ? "error"
-                    : "default"}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => onCheckVendor(v.name)}
-                >
-                  {vendorHealth?.[v.name] === "ok"
-                    ? t("stockAnalysis.settings.connected")
-                    : vendorHealth?.[v.name] === "fail"
-                    ? t("stockAnalysis.settings.disconnected")
-                    : t("stockAnalysis.settings.check")}
-                </Tag>
-              )}
-            </span>
-          </div>
-        ))}
-      </div>
-    </SettingsGroup>
-  );
-
   return (
-    <div>
-      {ungrouped.length > 0 && renderGroup(t("stockAnalysis.settings.general"), ungrouped, false)}
-      {grouped.map((g) => renderGroup(g.i18nKey, g.vars, g.prefix === "vendor" && !!showVendorHealth))}
-      <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 16 }}>
+    <div className="flex flex-col gap-3">
+      {toolGroups.map((g) => (
+        <SettingsGroup key={g.tool} title={
+          <Space size={4}>
+            <span>{g.label}</span>
+            <Tag className="text-xs m-0" color="default">⚙️ {g.tool}</Tag>
+          </Space>
+        }>
+          <div className="sacp-vars">
+            {g.vars.map((v) => (
+              <div key={v.name} style={rowStyle} className="flex items-center justify-between sacp-row">
+                <span className="sacp-var-label" style={{ fontSize: 13, color: token.colorText }}>
+                  {v.description ?? v.name}
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 16 }}>
+                  <VariableControl v={v} value={values[v.name]} onChange={handleChange} />
+                </span>
+              </div>
+            ))}
+          </div>
+        </SettingsGroup>
+      ))}
+      <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
         <Button type="primary" loading={saving} onClick={handleSave}>
           {t("stockAnalysis.settings.saveConfig")}
         </Button>

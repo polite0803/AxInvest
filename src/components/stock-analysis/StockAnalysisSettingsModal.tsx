@@ -9,7 +9,7 @@ export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; o
     <Drawer
       title={t("stockAnalysis.settings.title")}
       placement="right"
-      width={520}
+      width={900}
       rootClassName="sacp-drawer"
       open={open}
       onClose={onClose}

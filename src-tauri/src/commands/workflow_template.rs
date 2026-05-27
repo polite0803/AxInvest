@@ -1975,7 +1975,11 @@ mod tests {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWorkflowTemplateNodeInput {
     pub tools: Option<Vec<String>>,
+    pub exposed_tools: Option<Vec<String>>,
     pub system_prompt: Option<String>,
+    pub temperature: Option<Option<f32>>,
+    pub max_tokens: Option<Option<u32>>,
+    pub max_tool_rounds: Option<Option<u32>>,
 }
 
 #[tauri::command]
@@ -2021,6 +2025,19 @@ pub async fn update_workflow_template_node(
                     }
                     if let Some(ref sp) = input.system_prompt {
                         an.config.system_prompt = sp.clone();
+                    }
+                    if let Some(ref et) = input.exposed_tools {
+                        an.config.exposed_tools = et.clone();
+                        tracing::info!("[template] 节点 {nid} exposed_tools 已更新: {} 个工具", et.len());
+                    }
+                    if let Some(ref t) = input.temperature {
+                        an.config.temperature = *t;
+                    }
+                    if let Some(ref mt) = input.max_tokens {
+                        an.config.max_tokens = *mt;
+                    }
+                    if let Some(ref mr) = input.max_tool_rounds {
+                        an.config.max_tool_rounds = *mr;
                     }
                 },
                 other => {

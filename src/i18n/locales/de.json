@@ -6650,6 +6650,7 @@
         "experts": "Experts",
         "roles": "Roles",
         "profiles": "Profiles",
+        "data": "Data",
         "params": "Params"
       },
       "check": "Check",
@@ -6660,6 +6661,7 @@
       "profile": {
         "desc": "Manage expert-role-tool combinations. Changes are persisted to the database.",
         "colName": "Name",
+        "edit": "Edit",
         "colFixedTools": "Fixed Tools",
         "colExposedTools": "Exposed Tools",
         "colTools": "Tools",
@@ -6675,9 +6677,7 @@
         "bothHint": "Both fixed input and LLM-selectable",
         "goToExperts": "Go to expert editor",
         "goToRoles": "Go to role editor",
-        "legendFixed": "Fixed (DAG ToolNode)",
-        "legendExposed": "LLM (AgentProfile)",
-        "legendBoth": "Both"
+        "noPrompt": "(Prompt data not loaded)"
       },
       "group": {
         "vendor": "Data Sources",

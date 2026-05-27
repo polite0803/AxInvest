@@ -811,97 +811,14 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
     }
 
-    let analyst_tools: std::collections::HashMap<&str, Vec<ToolDef>> = [
-        (
-            "market-analyst",
-            vec![
-                td_quote.clone(),
-                td_atr.clone(),
-                td_ma_cross.clone(),
-                td_breakout.clone(),
-            ],
-        ),
-        (
-            "sentiment-analyst",
-            vec![
-                td_news.clone(),
-                td_mf.clone(),
-                td_cls.clone(),
-                td_dragon.clone(),
-                td_hot.clone(),
-            ],
-        ),
-        (
-            "news-analyst",
-            vec![
-                td_news.clone(),
-                td_announce.clone(),
-                td_research.clone(),
-                td_cls.clone(),
-            ],
-        ),
-        (
-            "fundamentals-analyst",
-            vec![
-                td_fin.clone(),
-                td_val.clone(),
-                td_pe_pct.clone(),
-                td_peg.clone(),
-            ],
-        ),
-        (
-            "policy-analyst",
-            vec![
-                td_news.clone(),
-                td_research.clone(),
-                td_announce.clone(),
-                td_cls.clone(),
-                td_north.clone(),
-            ],
-        ),
-        (
-            "hot-money-tracker",
-            vec![
-                td_mf.clone(),
-                td_dragon.clone(),
-                td_hot.clone(),
-                td_breakout.clone(),
-            ],
-        ),
-        ("lockup-watcher", vec![td_fin.clone(), td_pledge.clone(), td_announce.clone()]),
-        (
-            "research-analyst",
-            vec![
-                td_research.clone(),
-                td_consensus.clone(),
-                td_earnings.clone(),
-                td_fin.clone(),
-            ],
-        ),
-        (
-            "sector-analyst",
-            vec![
-                td_concepts.clone(),
-                td_ind.clone(),
-                td_industry.clone(),
-                td_quote.clone(),
-            ],
-        ),
-    ]
-    .into_iter()
-    .collect();
-
-    for (i, (id, title, expert)) in analysts.iter().enumerate() {
+    // 工具由 AgentProfile.recommended_tools 统一管理，模板不在节点层面分配
+    // agent_executor 运行时从 profile 读取 recommended_tools 合并到 ChatTool 列表
+    for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
-        let mut an = agent(id, title, expert);
+        let mut an = agent(id, title, _expert);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
-            if let Some(tools) = analyst_tools.get(expert) {
-                a.config.tools = tools.clone();
-                a.config.max_tool_rounds = Some(2);
-                a.config.system_prompt =
-                    format!("{}{}", a.config.system_prompt, tool_prompt(tools));
-            }
+            a.config.max_tool_rounds = Some(2);
         }
         nodes.push(an);
     }

@@ -1,12 +1,11 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Input, InputNumber, message, Select, Switch, Table, Tag } from "antd";
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Button, Card, Input, InputNumber, message, Select, Space, Statistic, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 后端返回的分析动作常量（用于比较，不做 UI 展示） */
 const A = { BUY: "买入", SELL: "卖出" } as const;
 
 interface TradeRecord {
@@ -44,7 +43,6 @@ export function TradePanel() {
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<PositionSummary[]>([]);
   const [loading, setLoading] = useState(false);
-  const [lastAnalysis, setLastAnalysis] = useState<{ action: string; targetPrice: number | null } | null>(null);
   const [form, setForm] = useState({
     stockCode: "",
     stockName: "",
@@ -54,29 +52,27 @@ export function TradePanel() {
     notes: "",
   });
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [t, p] = await Promise.all([
-        invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 50 }),
+        invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 100 }),
         invoke<PositionSummary[]>("get_trade_positions"),
       ]);
       if (Array.isArray(t)) { setTrades(t); }
       if (Array.isArray(p)) { setPositions(p); }
     } catch {
-      // 静默处理
+      /* 静默 */
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (enabled) {
-      loadData();
-    }
-  }, [enabled]);
+    if (enabled) { loadData(); }
+  }, [enabled, loadData]);
 
-  // 自动从分析页同步股票代码/名称
+  // 同步分析页代码
   useEffect(() => {
     if (storeStockCode && !form.stockCode) {
       const dir = storeDecision?.action === A.SELL ? "sell" : "buy";
@@ -84,29 +80,24 @@ export function TradePanel() {
     }
   }, [storeStockCode, storeStockName, storeDecision]);
 
-  // 当股票代码变化时，获取最近分析决策
-  useEffect(() => {
-    if (form.stockCode && enabled) {
-      invoke<{ stockCode: string; decisionJson: string | null }[]>("list_stock_analyses", { limit: 1 })
-        .then((list) => {
-          if (list.length > 0 && list[0].decisionJson) {
-            try {
-              const d = JSON.parse(list[0].decisionJson);
-              setLastAnalysis({ action: d.action, targetPrice: d.targetPrice ?? null });
-            } catch {
-              setLastAnalysis(null);
-            }
-          }
-        })
-        .catch(() => setLastAnalysis(null));
-    }
-  }, [form.stockCode, enabled]);
+  // 一键从分析结论录入
+  const quickRecord = useCallback(() => {
+    if (!storeDecision) { return; }
+    const { action, positionPct, targetPrice, stopLoss } = storeDecision as any;
+    if (!action || action === "持有" || action === "减持") { return; }
+    setForm((f) => ({
+      ...f,
+      stockCode: storeStockCode,
+      stockName: storeStockName,
+      direction: action === "卖出" ? "sell" : "buy",
+      price: targetPrice || 0,
+      quantity: positionPct ? Math.round((positionPct / 100) * 1000) : 100,
+      notes: stopLoss ? `止损: ${stopLoss}` : "",
+    }));
+  }, [storeDecision, storeStockCode, storeStockName]);
 
   const handleRecord = async () => {
-    if (!form.stockCode || !form.stockName || form.price <= 0) {
-      message.warning(t("trade.fillRequired"));
-      return;
-    }
+    if (!form.stockCode || form.price <= 0) { return message.warning(t("trade.fillRequired")); }
     const now = dayjs();
     try {
       await invoke("record_trade", {
@@ -135,29 +126,37 @@ export function TradePanel() {
     }
   };
 
+  // 绩效统计
+  const stats = useMemo(() => {
+    const sells = trades.filter((t) => t.direction === "sell" && t.realizedPnl != null);
+    const winCount = sells.filter((t) => (t.realizedPnl ?? 0) > 0).length;
+    const winRate = sells.length > 0 ? ((winCount / sells.length) * 100).toFixed(0) : "—";
+    const totalPnl = trades.reduce((s, t) => s + (t.realizedPnl ?? 0), 0);
+    const maxDd = computeMaxDrawdown(trades.filter((t) => t.direction === "sell"));
+    return { totalTrades: trades.length, sells: sells.length, winRate, totalPnl, maxDd };
+  }, [trades]);
+
+  // 持仓汇总
+  const totalMv = positions.reduce((s, p) => s + (p.marketValue ?? 0), 0);
+  const totalPnl = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0);
+
   const positionColumns = [
     { title: t("trade.stockCode"), dataIndex: "stockCode", width: 56 },
-    { title: t("trade.shares"), dataIndex: "totalShares", width: 44 },
+    { title: t("trade.shares"), dataIndex: "totalShares", width: 44, render: (v: number) => v.toFixed(0) },
+    { title: t("trade.cost"), dataIndex: "avgCost", width: 50, render: (v: number) => v.toFixed(2) },
     {
-      title: t("trade.cost"),
-      dataIndex: "avgCost",
+      title: "盈亏%",
+      dataIndex: "unrealizedPnlPct",
       width: 50,
-      render: (v: number) => v.toFixed(2),
+      render: (v: number | null) =>
+        v != null ? <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>{v.toFixed(1)}%</span> : "-",
     },
     {
       title: t("trade.pnl"),
       dataIndex: "unrealizedPnl",
       width: 50,
       render: (v: number | null) =>
-        v != null
-          ? (
-            <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
-              {v.toFixed(0)}
-            </span>
-          )
-          : (
-            "-"
-          ),
+        v != null ? <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>{v.toFixed(0)}</span> : "-",
     },
   ];
 
@@ -173,37 +172,21 @@ export function TradePanel() {
       ),
     },
     { title: t("trade.stockCode"), dataIndex: "stockCode", width: 54 },
-    {
-      title: t("trade.price"),
-      dataIndex: "price",
-      width: 50,
-      render: (v: number) => v.toFixed(2),
-    },
+    { title: t("trade.price"), dataIndex: "price", width: 50, render: (v: number) => v.toFixed(2) },
     { title: t("trade.quantity"), dataIndex: "quantity", width: 44 },
     {
       title: t("trade.pnl"),
       dataIndex: "realizedPnl",
       width: 50,
       render: (v: number | null) =>
-        v != null
-          ? (
-            <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
-              {v.toFixed(0)}
-            </span>
-          )
-          : (
-            "-"
-          ),
+        v != null ? <span style={{ color: v >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>{v.toFixed(0)}</span> : "-",
     },
   ];
 
   if (!enabled) {
     return (
       <Card size="small" title={t("trade.title")} styles={{ body: { padding: "8px 12px" } }}>
-        <div
-          className="flex items-center justify-between gap-2 text-xs"
-          style={{ color: "var(--muted)" }}
-        >
+        <div className="flex items-center justify-between gap-2 text-xs" style={{ color: "var(--muted)" }}>
           <span>{t("trade.disabledHint")}</span>
           <Switch checked={enabled} onChange={handleToggle} />
         </div>
@@ -218,11 +201,27 @@ export function TradePanel() {
       title={
         <div className="flex justify-between items-center">
           <span>{t("trade.title")}</span>
-          <Switch size="small" checked={enabled} onChange={handleToggle} />
+          <Space size={4}>
+            <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadData} />
+            <Switch size="small" checked={enabled} onChange={handleToggle} />
+          </Space>
         </div>
       }
     >
-      {/* Entry form — 两行紧凑布局，适配侧栏 260px */}
+      {/* 绩效统计 */}
+      {trades.length > 0 && (
+        <div className="grid grid-cols-3 gap-1 mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>
+          <Statistic title="总交易" value={stats.totalTrades} valueStyle={{ fontSize: 14 }} />
+          <Statistic title="胜率" value={stats.winRate} suffix="%" valueStyle={{ fontSize: 14 }} />
+          <Statistic
+            title="累计盈亏"
+            value={stats.totalPnl.toFixed(0)}
+            valueStyle={{ fontSize: 14, color: stats.totalPnl >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+          />
+        </div>
+      )}
+
+      {/* 快速录入 */}
       <div className="flex flex-col gap-1 mb-2">
         <div className="flex gap-1 flex-wrap">
           <Input
@@ -243,10 +242,10 @@ export function TradePanel() {
             size="small"
             value={form.direction}
             onChange={(v) => setForm({ ...form, direction: v })}
-            options={[
-              { value: "buy", label: t("stockAnalysis.buyShort") },
-              { value: "sell", label: t("stockAnalysis.sellShort") },
-            ]}
+            options={[{ value: "buy", label: t("stockAnalysis.buyShort") }, {
+              value: "sell",
+              label: t("stockAnalysis.sellShort"),
+            }]}
             style={{ width: 50 }}
           />
         </div>
@@ -269,71 +268,46 @@ export function TradePanel() {
             min={100}
             style={{ width: 82 }}
           />
-          <Button
-            size="small"
-            type="primary"
-            icon={<PlusOutlined />}
-            loading={loading}
-            onClick={handleRecord}
-          />
+          <Button size="small" type="primary" icon={<PlusOutlined />} loading={loading} onClick={handleRecord} />
         </div>
       </div>
 
-      {/* Analysis consistency hint */}
-      {lastAnalysis && (
-        <div className="text-xs p-1 rounded" style={{ background: "var(--surface)", marginTop: 4 }}>
+      {/* 分析结论 → 一键录入 */}
+      {storeDecision && (
+        <div className="text-xs p-1 rounded mb-2" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
-          <Tag color={lastAnalysis.action === A.BUY ? "green" : lastAnalysis.action === A.SELL ? "red" : "blue"}>
-            {lastAnalysis.action}
+          <Tag
+            color={(storeDecision as any).action === "买入"
+              ? "green"
+              : (storeDecision as any).action === "卖出"
+              ? "red"
+              : "blue"}
+          >
+            {(storeDecision as any).action}
           </Tag>
-          {lastAnalysis.targetPrice && (
-            <span>{t("stockAnalysis.targetPriceNote", { price: lastAnalysis.targetPrice })}</span>
-          )}
+          <Button size="small" type="link" className="text-xs px-1" onClick={quickRecord}>录入</Button>
         </div>
       )}
 
-      {/* Position summary */}
+      {/* 持仓 */}
       {positions.length > 0 && (
         <>
-          <Table
-            size="small"
-            dataSource={positions}
-            rowKey="stockCode"
-            pagination={false}
-            columns={positionColumns}
-          />
-          {(() => {
-            const totalMv = positions.reduce((s, p) => s + (p.marketValue ?? 0), 0);
-            const totalPnl = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0);
-            const maxPct = positions.length > 0 && totalMv > 0
-              ? Math.max(...positions.map(p => ((p.marketValue ?? 0) / totalMv) * 100))
-              : 0;
-            const riskColor = maxPct > 50 ? "var(--sa-red)" : maxPct > 30 ? "var(--sa-amber)" : "var(--sa-green)";
-            return (
-              <div
-                className="text-xs grid grid-cols-2 gap-x-2 p-1 mt-1 rounded"
-                style={{ background: "var(--surface)" }}
-              >
-                <span>
-                  {t("stockAnalysis.totalMarketValue")}:{" "}
-                  <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
-                </span>
-                <span style={{ color: totalPnl >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
-                  {t("stockAnalysis.unrealizedPnl")}: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
-                </span>
-                <span style={{ color: riskColor }}>
-                  {t("stockAnalysis.concentration")}: <b>{maxPct.toFixed(0)}%</b>
-                </span>
-                <span>
-                  {t("stockAnalysis.holdings")}: <b>{positions.length}{t("stockAnalysis.sharesUnit")}</b>
-                </span>
-              </div>
-            );
-          })()}
+          <Table size="small" dataSource={positions} rowKey="stockCode" pagination={false} columns={positionColumns} />
+          <div className="text-xs grid grid-cols-2 gap-x-2 p-1 mt-1 rounded" style={{ background: "var(--surface)" }}>
+            <span>
+              {t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
+            </span>
+            <span style={{ color: totalPnl >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}>
+              {t("stockAnalysis.unrealizedPnl")}: <b>{totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}</b>
+            </span>
+            <span>
+              {t("stockAnalysis.holdings")}: <b>{positions.length}{t("stockAnalysis.sharesUnit")}</b>
+            </span>
+          </div>
         </>
       )}
 
-      {/* Recent trades */}
+      {/* 最近交易 */}
       {trades.length > 0 && (
         <Table
           size="small"
@@ -346,4 +320,17 @@ export function TradePanel() {
       )}
     </Card>
   );
+}
+
+function computeMaxDrawdown(sells: TradeRecord[]): number {
+  if (sells.length === 0) { return 0; }
+  const pnls = sells.map((t) => t.realizedPnl ?? 0);
+  let peak = 0, cum = 0, maxDd = 0;
+  for (const p of pnls) {
+    cum += p;
+    if (cum > peak) { peak = cum; }
+    const dd = peak - cum;
+    if (dd > maxDd) { maxDd = dd; }
+  }
+  return maxDd;
 }

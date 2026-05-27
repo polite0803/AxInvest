@@ -1164,6 +1164,7 @@ dependencies = [
  "axagent-core",
  "axagent-prompt-guard",
  "axagent-telemetry",
+ "sea-orm",
  "serde",
  "serde_json",
  "sha2",

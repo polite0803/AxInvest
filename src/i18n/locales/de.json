@@ -6609,8 +6609,8 @@
     "settings": {
       "title": "Stock Analysis Settings",
       "saveFailed": "Failed to save",
-      "noExperts": "Keine Expertendaten. App neustarten.",
-      "noRoles": "Keine Rollendaten. App neustarten.",
+      "noExperts": "No expert data. Restart the app to seed.",
+      "noRoles": "No role data. Restart the app to seed.",
       "quoteTag": "Quotes",
       "financialKlineTag": "Financial/K-line",
       "newsTag": "News",
@@ -6639,6 +6639,11 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "checkHealth": "Check Health",
+      "tab": {
+        "experts": "Experts",
+        "roles": "Roles",
+        "params": "Params"
+      },
       "check": "Check",
       "loadFailed": "Failed to load config",
       "saveSuccess": "Config saved",

@@ -141,6 +141,11 @@ const zhCN = {
     connected: "已连接",
     disconnected: "未连接",
     checkHealth: "检测连接",
+    tab: {
+      experts: "专家",
+      roles: "角色",
+      params: "参数",
+    },
     check: "检测",
     loadFailed: "配置加载失败",
     saveSuccess: "配置已保存",
@@ -309,6 +314,11 @@ const enUS = {
     connected: "Connected",
     disconnected: "Disconnected",
     checkHealth: "Check Health",
+    tab: {
+      experts: "Experts",
+      roles: "Roles",
+      params: "Params",
+    },
     check: "Check",
     loadFailed: "Failed to load config",
     saveSuccess: "Config saved",

@@ -58,10 +58,10 @@ impl VendorRouting {
     fn default_routing() -> Self {
         Self {
             quote: vec!["tencent".into(), "mootdx".into(), "eastmoney".into()],
-            klines: vec!["eastmoney".into(), "mootdx".into()],
-            financials: vec!["eastmoney".into(), "akshare".into()],
-            news: vec!["sina".into(), "akshare".into()],
-            money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
+            klines: vec!["eastmoney".into(), "tencent".into(), "mootdx".into()],
+            financials: vec!["eastmoney".into(), "tencent".into(), "akshare".into()],
+            news: vec!["sina".into(), "tencent".into(), "akshare".into()],
+            money_flow: vec!["eastmoney".into(), "tencent".into(), "baidu_stock".into()],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
             search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],

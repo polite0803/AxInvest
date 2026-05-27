@@ -207,7 +207,7 @@ async fn seed_stock_analysis_workflow_template(
                         max_retries: 2,
                         ..Default::default()
                     },
-                    timeout: Some(30),
+                    timeout: Some(120),
                     enabled: true,
                 },
                 config: ToolNodeConfig {

@@ -2,7 +2,7 @@ import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettin
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
-import { Collapse } from "antd";
+import { Collapse, Dropdown } from "antd";
 import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -129,26 +129,29 @@ export function StockAnalysisPage() {
     },
   ];
 
-  const sheetPanels: SheetPanel[] = [
+  const allSheetPanels: SheetPanel[] = [
     { key: "screener", label: "荐股", element: <StockScreenerPanel /> },
     { key: "limitup", label: "涨停", element: <LimitUpPanel /> },
     { key: "dragontiger", label: "龙虎", element: <DragonTigerPanel /> },
     { key: "sectors", label: "板块", element: <SectorHeatmapPanel /> },
     { key: "north", label: "北向", element: <NorthBoundPanel /> },
-    { key: "events", label: "日历", element: <EventCalendarPanel /> },
-    { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
     { key: "watchlist", label: t("stockAnalysis.watchlist"), element: <WatchlistPanel /> },
-    { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },
+    { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
     { key: "alerts", label: t("stockAnalysis.alert.title"), element: <PriceAlertPanel /> },
+    { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },
     {
       key: "history",
       label: t("stockAnalysis.history"),
       element: <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />,
     },
     { key: "review", label: "复盘", element: <DailyReviewPanel /> },
+    { key: "events", label: "日历", element: <EventCalendarPanel /> },
   ];
+  // 桌面全部显示，移动端前7个核心面板 + 其余通过 tag 切换
+  const mobileCoreKeys = ["screener", "limitup", "dragontiger", "sectors", "north", "watchlist", "trade"];
+  const sheetPanels = isMobile ? allSheetPanels.filter((p) => mobileCoreKeys.includes(p.key)) : allSheetPanels;
 
-  const activePanel = sheetPanels.find((p) => p.key === sheetTab);
+  const activePanel = allSheetPanels.find((p) => p.key === sheetTab);
   const activeContent = tabs.find((t) => t.key === activeTab);
 
   return (
@@ -268,6 +271,23 @@ export function StockAnalysisPage() {
                 {p.label}
               </button>
             ))}
+            {isMobile && (
+              <Dropdown
+                menu={{
+                  items: allSheetPanels.filter((p) => !mobileCoreKeys.includes(p.key)).map((p) => ({
+                    key: p.key,
+                    label: p.label,
+                    onClick: () => {
+                      setSheetTab(p.key);
+                      if (!sheetOpen) { setSheetOpen(true); }
+                    },
+                  })),
+                }}
+                trigger={["click"]}
+              >
+                <button type="button" className="sa-sheet-tab">更多 ▾</button>
+              </Dropdown>
+            )}
           </div>
 
           <div className="sa-sheet-body">

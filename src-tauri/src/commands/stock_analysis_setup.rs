@@ -1777,6 +1777,63 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     use axagent_core::entity::agent_profiles;
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
+    // Profile → 工具映射（上游架构：工具由 AgentProfile 统一管理）
+    let profile_tools: std::collections::HashMap<&str, &[&str]> = [
+        ("market-analyst", &["get_stock_kline", "get_stock_quote", "compute_scoring"][..]),
+        (
+            "sentiment-analyst",
+            &["get_stock_news", "get_stock_money_flow", "get_hot_stocks"][..],
+        ),
+        ("news-analyst", &["get_stock_news", "get_announcements"][..]),
+        (
+            "fundamentals-analyst",
+            &[
+                "get_stock_financials",
+                "compute_valuation",
+                "get_consensus_eps",
+            ][..],
+        ),
+        ("policy-analyst", &["get_stock_news", "get_announcements"][..]),
+        ("hot-money-tracker", &["get_stock_money_flow", "get_hot_stocks"][..]),
+        ("lockup-watcher", &["get_stock_financials", "get_announcements"][..]),
+        (
+            "research-analyst",
+            &[
+                "get_consensus_eps",
+                "get_stock_financials",
+                "get_stock_news",
+            ][..],
+        ),
+        (
+            "sector-analyst",
+            &["get_industry_ranking", "get_hot_stocks", "get_stock_quote"][..],
+        ),
+        ("bull-researcher", &["compute_scoring", "compute_valuation"][..]),
+        ("bear-researcher", &["compute_scoring", "compute_valuation"][..]),
+        ("aggressive-debator", &["compute_portfolio_risk"][..]),
+        ("conservative-debator", &["compute_portfolio_risk"][..]),
+        ("neutral-debator", &["compute_portfolio_risk"][..]),
+        (
+            "research-manager",
+            &[
+                "compute_scoring",
+                "compute_valuation",
+                "compute_portfolio_risk",
+            ][..],
+        ),
+        ("trader", &["get_stock_quote", "compute_scoring"][..]),
+        (
+            "portfolio-manager",
+            &[
+                "compute_scoring",
+                "compute_valuation",
+                "compute_portfolio_risk",
+            ][..],
+        ),
+    ]
+    .into_iter()
+    .collect();
+
     let mut count = 0u32;
     for &(expert_id, role_id) in EXPERT_ROLE_MAP {
         let profile_id = format!("stock-{expert_id}");
@@ -1787,9 +1844,12 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             .map_err(|e| e.to_string())?
             .is_some()
         {
-            continue; // 已有 profile，跳过
+            continue;
         }
 
+        let tools_json = profile_tools
+            .get(expert_id)
+            .map(|tools| serde_json::to_string(tools).unwrap_or_default());
         let now = chrono::Utc::now().timestamp_millis();
         let model = agent_profiles::ActiveModel {
             id: Set(profile_id.clone()),
@@ -1806,7 +1866,7 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             suggested_max_tokens: Set(None),
             search_enabled: Set(None),
             recommend_permission_mode: Set(None),
-            recommended_tools: Set(None),
+            recommended_tools: Set(tools_json),
             disallowed_tools: Set(None),
             recommended_workflows: Set(None),
             sort_order: Set(0),

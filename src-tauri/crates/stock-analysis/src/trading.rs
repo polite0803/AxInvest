@@ -121,11 +121,21 @@ impl TradingEngine {
                 ref_price * (1.0 - limit_pct / 100.0)
             });
 
-            if price > limit_up {
+            if direction == "buy" && price > limit_up {
                 errors.push(format!("买入价 {:.2} 超过涨停价 {:.2}", price, limit_up));
             }
-            if price < limit_down {
+            if direction == "buy" && price < limit_down {
+                warnings.push(format!(
+                    "买入价 {:.2} 低于跌停价 {:.2}，可能难以成交",
+                    price, limit_down
+                ));
+            }
+            if direction == "sell" && price < limit_down {
                 errors.push(format!("卖出价 {:.2} 低于跌停价 {:.2}", price, limit_down));
+            }
+            if direction == "sell" && price > limit_up {
+                warnings
+                    .push(format!("卖出价 {:.2} 超过涨停价 {:.2}，可能难以成交", price, limit_up));
             }
         }
 

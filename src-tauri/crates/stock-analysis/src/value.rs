@@ -393,7 +393,15 @@ impl ValueEngine {
 
         let eps = latest.eps.unwrap_or(0.0);
         let bvps = latest.bps.unwrap_or(0.0);
-        let fcf = latest.net_profit.unwrap_or(0.0) * 0.95;
+        let latest_debt_ratio = latest.debt_ratio.unwrap_or(50.0);
+        let capex_ratio = if latest_debt_ratio > 60.0 {
+            0.85
+        } else if latest_debt_ratio > 40.0 {
+            0.90
+        } else {
+            0.95
+        };
+        let fcf = latest.net_profit.unwrap_or(0.0) * capex_ratio;
 
         // DCF
         let dcf = if fcf > 0.0 && shares_outstanding > 0.0 {

@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-27",
-  "total_entries": 130,
-  "total_files": 130,
+  "total_entries": 132,
+  "total_files": 132,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -30,7 +30,7 @@
     },
     {
       "file": "src/components/chat/ChatView.tsx",
-      "lines": "278,279,280,281,283,284,290,291,298,299,305,315",
+      "lines": "278,279,280,281,282,283,284,290,291,298,299,302,305,315",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -60,7 +60,7 @@
     },
     {
       "file": "src/components/chat/StructuredThinking.tsx",
-      "lines": "34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,99,100,101,102,103,104,105,106,107,108,109,110,111,129,130,131,132,133,134,135,136,137,138,139,140",
+      "lines": "34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,99,100,101,102,103,104,105,106,107,108,109,110,111,112,129,130,131,132,133,134,135,136,137,138,139,140,141",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -642,7 +642,7 @@
     },
     {
       "file": "src/components/settings/StockAnalysisSettings.tsx",
-      "lines": "79",
+      "lines": "49,79",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -654,7 +654,7 @@
     },
     {
       "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
-      "lines": "16,17,18,19,20,21,23,25,26,27,28,29,30,32,33,34,35,36,37,39,40,41,43,44,45,46,47,48,50,51,52,54,55,56,57,58,59,60,61,62,108,132",
+      "lines": "16,17,18,19,20,21,23,25,26,27,28,29,30,32,33,34,35,36,37,39,40,41,43,44,45,46,47,48,50,51,52,54,55,56,57,58,59,60,61,62,64,83,108,132,193,204,216,221,233,245,256,267,326,329,338",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -702,7 +702,7 @@
     },
     {
       "file": "src/components/stock-analysis/TradePanel.tsx",
-      "lines": "9,10",
+      "lines": "9,10,65,87,92,95,148,214,215,217,280,282,288",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -739,95 +739,61 @@
     {
       "file": "src/components/settings/AgentProfileList.tsx",
       "lines": "47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103",
-      "reason": "硬编码中文字符串（PROFILE_NAMES / PROFILE_ROLES / PROFILE_ROLE_IDS 静态映射表）",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/settings/DataVendorsTab.tsx",
       "lines": "22,23,30,31,54,55,62,63,70,71,78,79,105,106,114,122,132,138,139,140,141,142,143,148,149,150,151,152,153,154,155,156,157,158,165,166,167,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192",
-      "reason": "硬编码中文字符串（VENDORS / 工具标签 / CAP_LABELS 静态数据表）",
+      "reason": "硬编码中文字符串",
       "phase": 3
-    },
-    {
-      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
-      "lines": "64,83,193,204,216,221,233,245,256,267",
-      "reason": "硬编码中文字符串（工具分组标签 + 温度判断逻辑）",
-      "phase": 3
-    },
-    {
-      "file": "src/components/chat/ChatView.tsx",
-      "lines": "282,302",
-      "reason": "内容分析关键词，非 UI 字符串"
-    },
-    {
-      "file": "src/components/chat/StructuredThinking.tsx",
-      "lines": "53,84,112,141",
-      "reason": "LLM 响应分析关键词，非 UI 字符串"
     },
     {
       "file": "src/components/settings/ScheduledAnalysisTab.tsx",
       "lines": "18,19,20,21,37,55,57,65,72,83,91,98,114,126,131,135,142,145,148,151,158",
-      "reason": "定时分析 Tab 组件",
-      "phase": 3
-    },
-    {
-      "file": "src/components/settings/StockAnalysisConfigPanel.tsx",
-      "lines": "326,329,338",
-      "reason": "评分优化按钮",
-      "phase": 3
-    },
-    {
-      "file": "src/components/settings/StockAnalysisSettings.tsx",
-      "lines": "49",
-      "reason": "定时 Tab 标签",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/CompareView.tsx",
       "lines": "67,222,230,236,242,248,265,266",
-      "reason": "财务对比标签",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/DailyReviewPanel.tsx",
       "lines": "23,30,32,37,44,56,70,76",
-      "reason": "每日复盘面板",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
       "lines": "69,80,149,151,153,158,167,172,177,185,190,199,206,212,219,237,254",
-      "reason": "回测面板",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/PriceAlertPanel.tsx",
       "lines": "34,49,67,74,121,142,159,160,161,162,163,190,204,212",
-      "reason": "价格告警面板增强",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/StockAnalysisPage.tsx",
       "lines": "65,128,138",
-      "reason": "荐股/复盘标签+市场状态",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/StockScreenerPanel.tsx",
       "lines": "22,23,24,25,26,27,28,48,65,98,110,113,120,153,160,169,182,193",
-      "reason": "智能荐股面板",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/TradePanel.tsx",
-      "lines": "65,87,92,95,148,214,215,217,280,282,288",
-      "reason": "交易面板增强",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/WatchlistPanel.tsx",
       "lines": "79,142,149,159,174,176,199,220,236,246,247,248,253,279,285",
-      "reason": "自选股面板增强",
+      "reason": "硬编码中文字符串",
       "phase": 3
     }
   ]

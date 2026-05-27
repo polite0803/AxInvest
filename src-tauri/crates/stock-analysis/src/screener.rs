@@ -205,7 +205,11 @@ impl StockScreener {
                         } else if criteria.rsi_overbought && rsi <= 70.0 {
                             continue;
                         }
+                    } else {
+                        continue;
                     }
+                } else {
+                    continue;
                 }
             }
 

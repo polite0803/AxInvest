@@ -50,6 +50,7 @@ pub struct RealtimeMonitor {
     alert_tx: tokio::sync::broadcast::Sender<MonitorAlert>,
     running: RwLock<bool>,
     app_handle: RwLock<Option<tauri::AppHandle>>,
+    last_alerts: RwLock<HashMap<String, i64>>,
 }
 
 impl RealtimeMonitor {
@@ -61,6 +62,7 @@ impl RealtimeMonitor {
             alert_tx,
             running: RwLock::new(false),
             app_handle: RwLock::new(None),
+            last_alerts: RwLock::new(HashMap::new()),
         }
     }
 
@@ -268,6 +270,20 @@ impl RealtimeMonitor {
                 });
             }
         }
+
+        let now_ts = chrono::Utc::now().timestamp();
+        let cooldown_secs: i64 = 300;
+        let mut last = self.last_alerts.write().await;
+        alerts.retain(|a| {
+            let key = format!("{}:{}", a.stock_code, a.alert_type);
+            if let Some(&last_ts) = last.get(&key) {
+                if now_ts - last_ts < cooldown_secs {
+                    return false;
+                }
+            }
+            last.insert(key, now_ts);
+            true
+        });
 
         // 发送告警 — 内部 broadcast channel + Tauri 前端事件桥接
         let app_handle = self.app_handle.read().await.clone();

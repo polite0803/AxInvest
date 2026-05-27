@@ -2,6 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Empty, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 interface LimitUpStock {
   code: string;
@@ -14,6 +15,7 @@ interface LimitUpStock {
 }
 
 export function LimitUpPanel() {
+  const { t } = useTranslation();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -62,14 +64,16 @@ export function LimitUpPanel() {
   return (
     <Card
       size="small"
-      title="🏆 涨停板"
+      title={`🏆 ${t("stockAnalysis.settings.panels.limitUp")}`}
       styles={{ body: { padding: "4px 8px" } }}
-      extra={<Button size="small" loading={loading} onClick={load}>刷新</Button>}
+      extra={
+        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+      }
     >
       {loading
         ? <Spin size="small" />
         : stocks.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无涨停数据" />
+        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noLimitUp")} />
         : (
           <List
             size="small"
@@ -80,9 +84,13 @@ export function LimitUpPanel() {
                 onClick={() => analyze(s.code)}
                 actions={[
                   <Tag key="seal" color={s.isSealed ? "red" : "orange"} className="text-xs m-0">
-                    {s.isSealed ? "封板" : "开板"}
+                    {s.isSealed ? t("stockAnalysis.settings.panels.sealed") : t("stockAnalysis.settings.panels.opened")}
                   </Tag>,
-                  s.boardCount > 1 && <Tag key="bc" color="volcano" className="text-xs m-0">{s.boardCount}连板</Tag>,
+                  s.boardCount > 1 && (
+                    <Tag key="bc" color="volcano" className="text-xs m-0">
+                      {t("stockAnalysis.settings.panels.consecutive", { n: s.boardCount })}
+                    </Tag>
+                  ),
                 ].filter(Boolean)}
               >
                 <div className="flex items-center gap-2 text-xs w-full">
@@ -90,7 +98,9 @@ export function LimitUpPanel() {
                   <span className="flex-1 truncate">{s.name}</span>
                   <span className="font-mono">{s.price.toFixed(2)}</span>
                   <span className="text-red-500">+{s.changePct.toFixed(1)}%</span>
-                  <span className="text-gray-400">换手 {s.turnoverRate.toFixed(1)}%</span>
+                  <span className="text-gray-400">
+                    {t("stockAnalysis.settings.panels.turnover")} {s.turnoverRate.toFixed(1)}%
+                  </span>
                 </div>
               </List.Item>
             )}

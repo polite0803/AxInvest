@@ -1202,9 +1202,7 @@ async fn seed_stock_analysis_workflow_template(
             .iter()
             .map(|td| td.name.clone())
             .filter(|n| {
-                n != "compute_scoring"
-                    && n != "compute_valuation"
-                    && n != "compute_portfolio_risk"
+                n != "compute_scoring" && n != "compute_valuation" && n != "compute_portfolio_risk"
             })
             .collect();
     }

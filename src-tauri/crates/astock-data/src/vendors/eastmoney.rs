@@ -10,19 +10,21 @@ pub struct EastMoneyVendor {
 
 /// 构建东方财富股票代码 (1.SH600519, 0.SZ000001)
 fn to_em_code(stock_code: &str) -> String {
-    let market = if stock_code.starts_with('6') {
-        "1"
+    if stock_code.starts_with('6') || stock_code.starts_with('9') {
+        format!("1.{stock_code}")
+    } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+        format!("0.BJ{stock_code}")
     } else {
-        "0"
-    };
-    let prefix = if market == "1" { "SH" } else { "SZ" };
-    format!("{market}.{prefix}{stock_code}")
+        format!("0.SZ{stock_code}")
+    }
 }
 
 /// 构建东方财富 secid (1.600519, 0.000001)
 fn to_em_secid(stock_code: &str) -> String {
-    let market = if stock_code.starts_with('6') {
+    let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
         "1"
+    } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+        "0"
     } else {
         "0"
     };
@@ -63,7 +65,7 @@ impl StockVendor for EastMoneyVendor {
             total_mv: Some(f("f116")).filter(|v| *v > 0.0),
             limit_up: None,
             limit_down: None,
-            is_st: d["f57"].as_i64().unwrap_or(0) == 1,
+            is_st: d["f58"].as_str().map(|n| n.contains("ST")).unwrap_or(false),
             timestamp: d["f171"]
                 .as_i64()
                 .map(|t| t.to_string())
@@ -99,7 +101,7 @@ impl StockVendor for EastMoneyVendor {
             .as_array()
             .ok_or_else(|| DataError::ParseError("missing klines array".into()))?;
 
-        klines_raw
+        let mut klines: Vec<KLine> = klines_raw
             .iter()
             .map(|v| {
                 let s = v
@@ -124,7 +126,9 @@ impl StockVendor for EastMoneyVendor {
                     turnover_rate: Some(parse(parts[10])),
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>, DataError>>()?;
+        klines.sort_by(|a, b| a.date.cmp(&b.date));
+        Ok(klines)
     }
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
@@ -163,6 +167,8 @@ impl StockVendor for EastMoneyVendor {
                     net_margin: n("NETPROFIT_MARGIN"),
                     revenue_yoy: n("TOTAL_OPERATE_INCOME_YOY"),
                     profit_yoy: n("PARENT_NETPROFIT_YOY"),
+                    total_assets: n("TOTAL_ASSETS"),
+                    operating_cash_flow: n("NETCASH_OPERATE"),
                 })
             })
             .collect()
@@ -355,6 +361,8 @@ impl StockVendor for EastMoneyVendor {
             sector_name,
             sub_sector,
             concept_tags,
+            avg_pe: None,
+            avg_pb: None,
         }))
     }
 

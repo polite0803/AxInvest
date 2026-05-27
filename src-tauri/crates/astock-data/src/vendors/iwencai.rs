@@ -311,6 +311,8 @@ impl StockVendor for IwencaiVendor {
                 .unwrap_or("")
                 .to_string(),
             concept_tags,
+            avg_pe: None,
+            avg_pb: None,
         }))
     }
 }

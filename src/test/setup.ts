@@ -19,7 +19,7 @@ import "@testing-library/jest-dom";
     set(v) {
       _win = v;
     },
-    configurable: true,
+    configurable: false,
     enumerable: true,
   });
   Object.defineProperty(g, "document", {
@@ -29,7 +29,7 @@ import "@testing-library/jest-dom";
     set(v) {
       _doc = v;
     },
-    configurable: true,
+    configurable: false,
     enumerable: true,
   });
 }

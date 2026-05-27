@@ -103,7 +103,7 @@ pub struct AStockClient {
 impl AStockClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(20))
             .build()
             .expect("Failed to create HTTP client");
 
@@ -161,12 +161,11 @@ impl AStockClient {
             let now = chrono::Utc::now().timestamp();
             cache.retain(|_, (expiry, _)| *expiry > now);
             if cache.len() >= Self::MAX_CACHE_SIZE {
-                if let Some(oldest_key) = cache
-                    .iter()
-                    .min_by_key(|(_, (expiry, _))| *expiry)
-                    .map(|(k, _)| k.clone())
-                {
-                    cache.remove(&oldest_key);
+                let mut entries: Vec<_> = cache.iter().collect();
+                entries.sort_by_key(|(_, (expiry, _))| *expiry);
+                let to_remove = (Self::MAX_CACHE_SIZE / 10).max(1);
+                for (key, _) in entries.into_iter().take(to_remove) {
+                    cache.remove(key);
                 }
             }
         }
@@ -253,20 +252,29 @@ impl AStockClient {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        let cache_key = format!("klines:{stock_code}:{period}:{limit}");
-        if let Some(cached) = self.cache_get(&cache_key).await {
-            if let Ok(klines) = serde_json::from_str(&cached) {
-                return Ok(klines);
+        let cache_key = format!("klines:{stock_code}:{period}");
+        let fetch_limit = limit.max(500);
+
+        {
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(klines) = serde_json::from_str::<Vec<KLine>>(&cached) {
+                    if klines.len() >= limit as usize {
+                        let start = klines.len().saturating_sub(limit as usize);
+                        return Ok(klines[start..].to_vec());
+                    }
+                }
             }
         }
+
         let mut last_err = None;
         for name in &self.routing.klines {
             if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_klines(stock_code, period, limit).await {
+                match vendor.get_klines(stock_code, period, fetch_limit).await {
                     Ok(result) if !result.is_empty() => {
                         let json = serde_json::to_string(&result).unwrap_or_default();
                         self.cache_set(cache_key, json, 300).await;
-                        return Ok(result);
+                        let start = result.len().saturating_sub(limit as usize);
+                        return Ok(result[start..].to_vec());
                     },
                     Ok(_) => {
                         tracing::warn!("[降级] {} K线返回空，尝试下一源", name);
@@ -288,11 +296,24 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<FinancialReport>, DataError> {
+        {
+            let cache_key = format!("financials:{stock_code}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Vec<FinancialReport>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         let mut last_err = None;
         for name in &self.routing.financials {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_financials(stock_code).await {
-                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(result) if !result.is_empty() => {
+                        let cache_key = format!("financials:{stock_code}");
+                        let json = serde_json::to_string(&result).unwrap_or_default();
+                        self.cache_set(cache_key, json, 3600).await;
+                        return Ok(result);
+                    },
                     Ok(_) => {
                         tracing::warn!("[降级] {} 财务数据返回空，尝试下一源", name);
                     },
@@ -310,11 +331,24 @@ impl AStockClient {
     }
 
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        {
+            let cache_key = format!("news:{stock_code}:{limit}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         let mut last_err = None;
         for name in &self.routing.news {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_news(stock_code, limit).await {
-                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(result) if !result.is_empty() => {
+                        let cache_key = format!("news:{stock_code}:{limit}");
+                        let json = serde_json::to_string(&result).unwrap_or_default();
+                        self.cache_set(cache_key, json, 300).await;
+                        return Ok(result);
+                    },
                     Ok(_) => {
                         tracing::warn!("[降级] {} 新闻返回空，尝试下一源", name);
                     },
@@ -332,10 +366,23 @@ impl AStockClient {
     }
 
     pub async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
+        {
+            let cache_key = format!("money_flow:{stock_code}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Option<MoneyFlow>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         for name in &self.routing.money_flow {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_money_flow(stock_code).await {
-                    Ok(Some(result)) => return Ok(Some(result)),
+                    Ok(Some(result)) => {
+                        let cache_key = format!("money_flow:{stock_code}");
+                        let json = serde_json::to_string(&Some(result.clone())).unwrap_or_default();
+                        self.cache_set(cache_key, json, 60).await;
+                        return Ok(Some(result));
+                    },
                     Ok(None) => {
                         tracing::warn!("[降级] {} 资金流向返回空，尝试下一源", name);
                     },
@@ -352,9 +399,20 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<DragonTigerEntry>, DataError> {
+        {
+            let cache_key = format!("dragon_tiger:{stock_code}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Vec<DragonTigerEntry>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         for name in &self.routing.dragon_tiger {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_dragon_tiger(stock_code).await {
+                    let cache_key = format!("dragon_tiger:{stock_code}");
+                    let json = serde_json::to_string(&result).unwrap_or_default();
+                    self.cache_set(cache_key, json, 3600).await;
                     return Ok(result);
                 }
             }
@@ -366,9 +424,20 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<LockupSchedule>, DataError> {
+        {
+            let cache_key = format!("lockup:{stock_code}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Vec<LockupSchedule>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         for name in &self.routing.lockup {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_lockup_schedule(stock_code).await {
+                    let cache_key = format!("lockup:{stock_code}");
+                    let json = serde_json::to_string(&result).unwrap_or_default();
+                    self.cache_set(cache_key, json, 86400).await;
                     return Ok(result);
                 }
             }
@@ -388,9 +457,20 @@ impl AStockClient {
     }
 
     pub async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
+        {
+            let cache_key = format!("margin:{stock_code}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Option<MarginData>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         for name in &self.routing.margin {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_margin_data(stock_code).await {
+                    let cache_key = format!("margin:{stock_code}");
+                    let json = serde_json::to_string(&result).unwrap_or_default();
+                    self.cache_set(cache_key, json, 300).await;
                     return Ok(result);
                 }
             }
@@ -402,9 +482,20 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Option<NorthBoundHolding>, DataError> {
+        {
+            let cache_key = format!("north_bound:{stock_code}");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
         for name in &self.routing.north_bound {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_north_bound_holding(stock_code).await {
+                    let cache_key = format!("north_bound:{stock_code}");
+                    let json = serde_json::to_string(&result).unwrap_or_default();
+                    self.cache_set(cache_key, json, 300).await;
                     return Ok(result);
                 }
             }
@@ -675,10 +766,20 @@ impl AStockClient {
             self.get_announcements(stock_code),
         );
 
-        let quote = quote_r.map_err(|e| {
-            tracing::warn!("quote failed: {e}");
-            e
-        })?;
+        let quote = match quote_r {
+            Ok(q) => q,
+            Err(e) => {
+                tracing::warn!("quote failed: {e}");
+                let cache_key = format!("quote:{stock_code}");
+                match self.cache_get(&cache_key).await {
+                    Some(cached) => match serde_json::from_str(&cached) {
+                        Ok(q) => q,
+                        Err(_) => return Err(e),
+                    },
+                    None => return Err(e),
+                }
+            },
+        };
         let klines = klines_r.unwrap_or_else(|e| {
             tracing::warn!("klines failed: {e}");
             vec![]

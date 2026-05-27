@@ -48,11 +48,26 @@ impl StockVendor for EastMoneyVendor {
             });
         }
         let f = |key: &str| d[key].as_f64().unwrap_or(0.0);
+        let price = f("f43") / 100.0;
+        let pre_close = f("f60") / 100.0;
+        let is_st = d["f58"].as_str().map(|n| n.contains("ST")).unwrap_or(false);
+        let market_type = detect_market_type(stock_code);
+        let limit_pct = get_st_price_limit_pct(is_st, market_type) / 100.0;
+        let limit_up = if pre_close > 0.0 {
+            Some((pre_close * (1.0 + limit_pct) * 100.0).round() / 100.0)
+        } else {
+            None
+        };
+        let limit_down = if pre_close > 0.0 {
+            Some((pre_close * (1.0 - limit_pct) * 100.0).round() / 100.0)
+        } else {
+            None
+        };
         Ok(StockQuote {
             code: stock_code.to_string(),
             name: d["f58"].as_str().unwrap_or("").to_string(),
-            price: f("f43") / 100.0,
-            pre_close: f("f60") / 100.0,
+            price,
+            pre_close,
             open: f("f46") / 100.0,
             high: f("f44") / 100.0,
             low: f("f45") / 100.0,
@@ -63,9 +78,10 @@ impl StockVendor for EastMoneyVendor {
             pe: Some(f("f162") / 100.0).filter(|v| *v > 0.0),
             pb: Some(f("f167") / 100.0).filter(|v| *v > 0.0),
             total_mv: Some(f("f116")).filter(|v| *v > 0.0),
-            limit_up: None,
-            limit_down: None,
-            is_st: d["f58"].as_str().map(|n| n.contains("ST")).unwrap_or(false),
+            circulating_mv: Some(f("f117")).filter(|v| *v > 0.0),
+            limit_up,
+            limit_down,
+            is_st,
             timestamp: d["f171"]
                 .as_i64()
                 .map(|t| t.to_string())
@@ -169,6 +185,10 @@ impl StockVendor for EastMoneyVendor {
                     profit_yoy: n("PARENT_NETPROFIT_YOY"),
                     total_assets: n("TOTAL_ASSETS"),
                     operating_cash_flow: n("NETCASH_OPERATE"),
+                    capital_expenditure: n("CCE_ADD_ASSET"),
+                    free_cash_flow: None,
+                    current_ratio: n("CURRENT_RATIO"),
+                    quick_ratio: n("QUICK_RATIO"),
                 })
             })
             .collect()
@@ -663,7 +683,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_block_trades(&self, stock_code: &str) -> Result<Vec<BlockTrade>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_BLOCKTRADE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,TRADE_PRICE,TRADE_VOL,TRADE_AMOUNT,BUYER_NAME,SELLER_NAME,DISCOUNT_RATE&filter=(SECURITY_CODE=\"{secid}\")&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_BLOCKTRADE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,TRADE_PRICE,TRADE_VOL,TRADE_AMOUNT,BUYER_NAME,SELLER_NAME,DISCOUNT_RATE&filter=(SECURITY_CODE=\"{stock_code}\")&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
         );
 
         let resp = self.http.get(&url).send().await?;
@@ -709,7 +729,7 @@ impl StockVendor for EastMoneyVendor {
     ) -> Result<Vec<InstitutionalVisit>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ORG_SURVEY&columns=SECUCODE,SECURITY_NAME_ABBR,SURVEY_DATE,ORG_NUM,MAIN_CONTENT,SURVEY_TYPE&filter=(SECURITY_CODE=\"{secid}\")&sortColumns=SURVEY_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ORG_SURVEY&columns=SECUCODE,SECURITY_NAME_ABBR,SURVEY_DATE,ORG_NUM,MAIN_CONTENT,SURVEY_TYPE&filter=(SECURITY_CODE=\"{stock_code}\")&sortColumns=SURVEY_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
         );
 
         let resp = self.http.get(&url).send().await?;

@@ -161,11 +161,18 @@ impl AStockClient {
             let now = chrono::Utc::now().timestamp();
             cache.retain(|_, (expiry, _)| *expiry > now);
             if cache.len() >= Self::MAX_CACHE_SIZE {
-                let mut entries: Vec<_> = cache.iter().collect();
-                entries.sort_by_key(|(_, (expiry, _))| *expiry);
-                let to_remove = (Self::MAX_CACHE_SIZE / 10).max(1);
-                for (key, _) in entries.into_iter().take(to_remove) {
-                    cache.remove(key);
+                let keys_to_remove: Vec<String> = {
+                    let mut entries: Vec<_> = cache.iter().collect();
+                    entries.sort_by_key(|(_, (expiry, _))| *expiry);
+                    let to_remove = (Self::MAX_CACHE_SIZE / 10).max(1);
+                    entries
+                        .into_iter()
+                        .take(to_remove)
+                        .map(|(k, _)| k.clone())
+                        .collect()
+                };
+                for key in keys_to_remove {
+                    cache.remove(&key);
                 }
             }
         }

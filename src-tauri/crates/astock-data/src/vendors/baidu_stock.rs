@@ -11,6 +11,8 @@ pub struct BaiduStockVendor {
 fn to_baidu_code(stock_code: &str) -> String {
     let prefix = if stock_code.starts_with('6') || stock_code.starts_with('9') {
         "sh"
+    } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+        "bj"
     } else {
         "sz"
     };

@@ -30,8 +30,10 @@ impl StockVendor for AkshareVendor {
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
         let url = format!(
             "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={}",
-            if stock_code.starts_with('6') {
+            if stock_code.starts_with('6') || stock_code.starts_with('9') {
                 format!("SH{}", stock_code)
+            } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+                format!("BJ{}", stock_code)
             } else {
                 format!("SZ{}", stock_code)
             }

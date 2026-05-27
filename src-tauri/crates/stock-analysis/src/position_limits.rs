@@ -24,7 +24,30 @@ impl PositionLimits {
         new_position_value: f64,
         total_portfolio_value: f64,
         current_positions: usize,
+        new_sector: Option<&str>,
+        current_sector_exposures: &[(String, f64)],
     ) -> Result<(), String> {
+        if let Some(sector) = new_sector {
+            let current_sector_pct = current_sector_exposures.iter()
+                .filter(|(s, _)| s == sector)
+                .map(|(_, pct)| *pct)
+                .next()
+                .unwrap_or(0.0);
+            let new_pct = if total_portfolio_value > 0.0 {
+                (new_position_value / total_portfolio_value) * 100.0
+            } else {
+                0.0
+            };
+            if current_sector_pct + new_pct > self.max_sector_exposure_pct {
+                return Err(format!(
+                    "行业{}暴露{:.1}%将超过上限{:.0}%",
+                    sector,
+                    current_sector_pct + new_pct,
+                    self.max_sector_exposure_pct
+                ));
+            }
+        }
+
         if current_positions >= self.max_total_positions as usize {
             return Err(format!(
                 "持仓数量已达上限 ({}只)，请先减仓再新增",

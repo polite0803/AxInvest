@@ -192,7 +192,7 @@ struct RpR {
     weights: Vec<f64>,
     divers_ratio: f64,
 }
-fn risk_parity(vols: &[f64]) -> RpR {
+fn risk_parity(vols: &[f64], corr_json: &str) -> RpR {
     let n = vols.len();
     if n == 0 {
         return RpR {
@@ -200,12 +200,50 @@ fn risk_parity(vols: &[f64]) -> RpR {
             divers_ratio: 0.0,
         };
     }
+    let corr_matrix: Option<Vec<Vec<f64>>> = serde_json::from_str(corr_json)
+        .ok()
+        .filter(|m: &Vec<Vec<f64>>| m.len() == n && m.iter().all(|r| r.len() == n));
     let inv: Vec<f64> = vols
         .iter()
         .map(|&v| if v > 0.0 { 1.0 / v } else { 0.0 })
         .collect();
     let total: f64 = inv.iter().sum();
-    let w: Vec<f64> = if total > 0.0 {
+    let w = if let Some(corr) = corr_matrix {
+        let mut w: Vec<f64> = inv.clone();
+        let w_sum: f64 = w.iter().sum();
+        if w_sum > 0.0 {
+            for wi in w.iter_mut() {
+                *wi /= w_sum;
+            }
+        }
+        for _ in 0..20 {
+            let mut risk_contrib = vec![0.0; n];
+            for i in 0..n {
+                for j in 0..n {
+                    risk_contrib[i] += w[i] * w[j] * vols[i] * vols[j] * corr[i][j];
+                }
+            }
+            let total_risk: f64 = risk_contrib.iter().sum();
+            if total_risk <= 0.0 {
+                break;
+            }
+            let target = total_risk / n as f64;
+            for i in 0..n {
+                if risk_contrib[i] > 0.0 {
+                    w[i] *= (target / risk_contrib[i]).sqrt().min(2.0).max(0.5);
+                }
+            }
+            let ws: f64 = w.iter().sum();
+            if ws > 0.0 {
+                for wi in w.iter_mut() {
+                    *wi /= ws;
+                }
+            }
+        }
+        w.iter()
+            .map(|&x| (x * 10000.0).round() / 10000.0)
+            .collect()
+    } else if total > 0.0 {
         inv.iter()
             .map(|&x| (x / total * 10000.0).round() / 10000.0)
             .collect()
@@ -236,6 +274,7 @@ struct CrossR {
     fast_ma: f64,
     slow_ma: f64,
     latest_price: f64,
+    confirmation: String,
 }
 fn detect_ma_cross(kj: &str, fast: usize, slow: usize) -> CrossR {
     #[derive(serde::Deserialize)]
@@ -249,6 +288,7 @@ fn detect_ma_cross(kj: &str, fast: usize, slow: usize) -> CrossR {
             fast_ma: 0.0,
             slow_ma: 0.0,
             latest_price: 0.0,
+            confirmation: "n/a".into(),
         };
     }
     let closes: Vec<f64> = kl.iter().map(|k| k.close).collect();
@@ -264,11 +304,27 @@ fn detect_ma_cross(kj: &str, fast: usize, slow: usize) -> CrossR {
     } else {
         "none"
     };
+    let confirmation = if sig != "none" && closes.len() >= slow + 2 {
+        let p2f = sma(&closes[..n-2], fast).unwrap_or(cf);
+        let p2s = sma(&closes[..n-2], slow).unwrap_or(cs);
+        if sig == "golden_cross" && p2f > p2s {
+            "confirmed"
+        } else if sig == "death_cross" && p2f < p2s {
+            "confirmed"
+        } else {
+            "unconfirmed"
+        }
+    } else if sig != "none" {
+        "unconfirmed"
+    } else {
+        "n/a"
+    };
     CrossR {
         signal: sig.into(),
         fast_ma: (cf * 100.0).round() / 100.0,
         slow_ma: (cs * 100.0).round() / 100.0,
         latest_price: kl.last().map(|k| k.close).unwrap_or(0.0),
+        confirmation: confirmation.into(),
     }
 }
 
@@ -277,6 +333,7 @@ struct BrkR {
     breakout_type: String,
     current_price: f64,
     confidence: String,
+    volume_confirmation: bool,
 }
 fn detect_breakout(kj: &str, sup: f64, res: f64) -> BrkR {
     #[derive(serde::Deserialize)]
@@ -290,6 +347,7 @@ fn detect_breakout(kj: &str, sup: f64, res: f64) -> BrkR {
             breakout_type: "none".into(),
             current_price: 0.0,
             confidence: "low".into(),
+            volume_confirmation: false,
         };
     }
     let last = kl.last().unwrap();
@@ -329,6 +387,7 @@ fn detect_breakout(kj: &str, sup: f64, res: f64) -> BrkR {
         breakout_type: bt.into(),
         current_price: price,
         confidence: conf.into(),
+        volume_confirmation: vr.unwrap_or(1.0) > 1.5,
     }
 }
 
@@ -358,12 +417,19 @@ fn remove_outliers(pj: &str, method: &str, th: f64) -> OutR {
             };
         }
         let (lo, hi) = (q1 - th * iqr, q3 + th * iqr);
-        let cleaned: Vec<f64> = prices
-            .iter()
-            .filter(|&&p| p >= lo && p <= hi)
-            .copied()
-            .collect();
-        let rm = prices.len() - cleaned.len();
+        let mut cleaned = Vec::with_capacity(prices.len());
+        let mut rm = 0usize;
+        for &p in &prices {
+            if p < lo {
+                cleaned.push((lo * 100.0).round() / 100.0);
+                rm += 1;
+            } else if p > hi {
+                cleaned.push((hi * 100.0).round() / 100.0);
+                rm += 1;
+            } else {
+                cleaned.push(p);
+            }
+        }
         OutR {
             cleaned,
             removed_count: rm,
@@ -378,12 +444,18 @@ fn remove_outliers(pj: &str, method: &str, th: f64) -> OutR {
                 removed_count: 0,
             };
         }
-        let cleaned: Vec<f64> = prices
-            .iter()
-            .filter(|&&p| (p - m).abs() / std <= th)
-            .copied()
-            .collect();
-        let rm = prices.len() - cleaned.len();
+        let mut cleaned = Vec::with_capacity(prices.len());
+        let mut rm = 0usize;
+        for &p in &prices {
+            let z = (p - m).abs() / std;
+            if z > th {
+                let clamped = if p > m { m + th * std } else { m - th * std };
+                cleaned.push((clamped * 100.0).round() / 100.0);
+                rm += 1;
+            } else {
+                cleaned.push(p);
+            }
+        }
         OutR {
             cleaned,
             removed_count: rm,
@@ -471,7 +543,17 @@ fn fill_missing(pj: &str, method: &str) -> FillR {
 }
 
 #[derive(Serialize)]
+struct AdjKLine {
+    date: String,
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+    volume: f64,
+}
+#[derive(Serialize)]
 struct AdjR {
+    adjusted_klines: Vec<AdjKLine>,
     adjustment_factor: f64,
 }
 fn adjust_prices(kj: &str, dj: &str) -> AdjR {
@@ -479,7 +561,11 @@ fn adjust_prices(kj: &str, dj: &str) -> AdjR {
     struct K {
         date: String,
         open: f64,
+        high: f64,
+        low: f64,
         close: f64,
+        #[serde(default)]
+        volume: f64,
     }
     #[derive(serde::Deserialize)]
     struct D {
@@ -491,6 +577,7 @@ fn adjust_prices(kj: &str, dj: &str) -> AdjR {
     let div: Vec<D> = serde_json::from_str(dj).unwrap_or_default();
     if kl.is_empty() {
         return AdjR {
+            adjusted_klines: vec![],
             adjustment_factor: 1.0,
         };
     }
@@ -507,8 +594,19 @@ fn adjust_prices(kj: &str, dj: &str) -> AdjR {
         }
         k.open = (k.open * factor * 100.0).round() / 100.0;
         k.close = (k.close * factor * 100.0).round() / 100.0;
+        k.high = (k.high * factor * 100.0).round() / 100.0;
+        k.low = (k.low * factor * 100.0).round() / 100.0;
+        k.volume = (k.volume / factor * 100.0).round() / 100.0;
     }
     AdjR {
+        adjusted_klines: kl.into_iter().map(|k| AdjKLine {
+            date: k.date,
+            open: k.open,
+            high: k.high,
+            low: k.low,
+            close: k.close,
+            volume: k.volume,
+        }).collect(),
         adjustment_factor: (factor * 10000.0).round() / 10000.0,
     }
 }
@@ -754,6 +852,21 @@ fn calc_corr_matrix(args: &Value) -> Result<Value, String> {
     Ok(json!({"avg_correlation": avg, "asset_count": n}))
 }
 
+fn xorshift128plus(s0: &mut u64, s1: &mut u64) -> u64 {
+    let result = s0.wrapping_add(*s1);
+    *s1 ^= *s0;
+    *s0 = s0.rotate_left(24) ^ *s1 ^ (*s1 << 16);
+    *s1 = s1.rotate_left(37);
+    result
+}
+
+fn normal_approx(s0: &mut u64, s1: &mut u64) -> f64 {
+    let u1 = (xorshift128plus(s0, s1) >> 11) as f64 / (1u64 << 53) as f64;
+    let u2 = (xorshift128plus(s0, s1) >> 11) as f64 / (1u64 << 53) as f64;
+    let u1 = u1.max(1e-15);
+    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+}
+
 fn monte_carlo(args: &Value) -> Result<Value, String> {
     let price = args
         .get("current_price")
@@ -774,16 +887,12 @@ fn monte_carlo(args: &Value) -> Result<Value, String> {
         .unwrap_or(1000) as usize;
     let (dr, dv) = (ret / 252.0, vol / (252.0f64).sqrt());
     let mut outs = Vec::with_capacity(sims);
-    let mut state = 42u64;
+    let mut s0 = 1234567890123456789u64;
+    let mut s1 = 9876543210987654321u64;
     for _ in 0..sims {
         let mut p = price;
         for _ in 0..days {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            let z = (state as f64 % 1e9) / 1e9 * 2.0 - 1.0;
-            let z2 = (state.wrapping_mul(2) as f64 % 1e9) / 1e9 * 2.0 - 1.0;
-            let nrm = (-2.0 * (1.0 - z2.abs()).ln()).sqrt() * z.signum();
+            let nrm = normal_approx(&mut s0, &mut s1);
             p *= 1.0 + dr + dv * nrm;
         }
         outs.push((p * 100.0).round() / 100.0);
@@ -1007,7 +1116,11 @@ calc_tool_r!(CalcKellyTool, "calc_kelly", "凯利公式仓位计算", |input| {
 });
 calc_tool_r!(CalcRiskParityTool, "calc_risk_parity", "风险平价权重计算", |input| {
     let vols = parse_f64s(&input, "volatilities_json");
-    serde_json::to_value(risk_parity(&vols)).unwrap_or_default()
+    let corr_json = input
+        .get("correlations_json")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]");
+    serde_json::to_value(risk_parity(&vols, corr_json)).unwrap_or_default()
 });
 
 calc_tool_r!(DetectMACrossTool, "detect_ma_cross", "MA 金叉死叉检测", |input| {

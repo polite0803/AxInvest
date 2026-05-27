@@ -11,6 +11,7 @@ pub struct PortfolioRiskMetrics {
     pub diversification_score: u32,
     pub risk_level: String,
     pub warning: Option<String>,
+    pub correlation_risk: String,
 }
 
 pub struct PortfolioRiskManager;
@@ -30,6 +31,7 @@ impl PortfolioRiskManager {
                 diversification_score: 0,
                 risk_level: "无持仓".to_string(),
                 warning: Some("暂无持仓记录，请先添加交易记录或手动录入持仓。".to_string()),
+                correlation_risk: "无持仓".to_string(),
             };
         }
         let total_mv: f64 = positions.iter().filter_map(|p| p.market_value).sum();
@@ -95,6 +97,16 @@ impl PortfolioRiskManager {
             }
         }
 
+        let _sector_count = sector_exposure.len();
+        let max_sector_pct = sector_exposure.values().cloned().fold(0.0f64, f64::max);
+        let correlation_risk = if total_positions >= 5 && max_sector_pct < 30.0 {
+            "低"
+        } else if total_positions >= 3 && max_sector_pct < 50.0 {
+            "中"
+        } else {
+            "高"
+        }.to_string();
+
         PortfolioRiskMetrics {
             total_positions,
             total_market_value: total_mv,
@@ -103,6 +115,7 @@ impl PortfolioRiskManager {
             diversification_score: diversification,
             risk_level,
             warning,
+            correlation_risk,
         }
     }
 }

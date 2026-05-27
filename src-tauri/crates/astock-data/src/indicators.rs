@@ -49,7 +49,8 @@ fn sma(data: &[f64], period: usize) -> Option<f64> {
     Some(data[start..].iter().sum::<f64>() / period as f64)
 }
 
-/// Compute EMA for a single value (used for MACD final value)
+/// Compute EMA for a single final value
+#[allow(dead_code)]
 fn ema(data: &[f64], period: usize) -> f64 {
     if data.is_empty() {
         return 0.0;
@@ -243,7 +244,7 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
     let boll_std = if closes.len() >= 20 {
         stddev(&closes[closes.len() - 20..], boll_mid)
     } else if !closes.is_empty() {
-        stddev(closes, boll_mid)
+        stddev(&closes, boll_mid)
     } else {
         0.0
     };

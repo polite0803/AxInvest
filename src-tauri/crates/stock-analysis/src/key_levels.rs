@@ -121,7 +121,7 @@ impl KeyLevelTracker {
                     // 获取快照日期之后的K线
                     if let Ok(klines) = self
                         .client
-                        .get_klines(&analysis.stock_code, "daily", 250)
+                        .get_klines(&analysis.stock_code, "daily", 500)
                         .await
                     {
                         let future: Vec<_> = klines

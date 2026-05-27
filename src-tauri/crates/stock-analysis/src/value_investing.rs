@@ -33,16 +33,20 @@ impl ValueInvestingEngine {
     pub fn compute(
         _stock_code: &str,
         current_price: f64,
-        total_shares: Option<f64>, // 总股本（亿股），None时用市值/现价估算
+        total_shares: Option<f64>,
         financials: &[FinancialReport],
         pe: Option<f64>,
         pb: Option<f64>,
+        value_config: Option<&crate::decision::ValueConfig>,
     ) -> ValueMetrics {
         let latest = financials.first();
-        let fcf = latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 1_0000_0000.0; // 亿→元
+        let fcf = latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 1_0000_0000.0;
 
-        // 1. DCF 估值
-        let (dcf_low, dcf_mid, dcf_high) = Self::dcf_valuation(fcf, total_shares);
+        let g = value_config.map(|c| c.dcf_growth_rate / 100.0);
+        let p = value_config.map(|c| c.dcf_perpetual_rate / 100.0);
+        let d = value_config.map(|c| c.dcf_discount_rate / 100.0);
+
+        let (dcf_low, dcf_mid, dcf_high) = Self::dcf_valuation(fcf, total_shares, g, p, d);
 
         // 2. 安全边际
         let intrinsic = dcf_mid;
@@ -137,19 +141,16 @@ impl ValueInvestingEngine {
 
     /// 简化 DCF 估值（二阶段模型）
     /// Phase 1: 5年增长期, Phase 2: 永续增长
-    fn dcf_valuation(fcf: f64, total_shares: Option<f64>) -> (f64, f64, f64) {
+    fn dcf_valuation(fcf: f64, total_shares: Option<f64>, growth_rate: Option<f64>, perpetual_rate: Option<f64>, discount_rate: Option<f64>) -> (f64, f64, f64) {
         if fcf <= 0.0 {
             return (0.0, 0.0, 0.0);
         }
         let shares = total_shares.unwrap_or(1.0);
-        let fcf_per_share = fcf / shares / 1_0000_0000.0; // 每股FCF
+        let fcf_per_share = fcf / shares / 1_0000_0000.0;
 
-        // Low: 5% growth → 2% perpetual
-        let low = Self::dcf_two_stage(fcf_per_share, 0.05, 0.02, 0.10);
-        // Mid: 8% growth → 3% perpetual
-        let mid = Self::dcf_two_stage(fcf_per_share, 0.08, 0.03, 0.10);
-        // High: 12% growth → 4% perpetual
-        let high = Self::dcf_two_stage(fcf_per_share, 0.12, 0.04, 0.10);
+        let low = Self::dcf_two_stage(fcf_per_share, growth_rate.unwrap_or(0.05), perpetual_rate.unwrap_or(0.02), discount_rate.unwrap_or(0.10));
+        let mid = Self::dcf_two_stage(fcf_per_share, growth_rate.unwrap_or(0.08), perpetual_rate.unwrap_or(0.03), discount_rate.unwrap_or(0.10));
+        let high = Self::dcf_two_stage(fcf_per_share, growth_rate.unwrap_or(0.12), perpetual_rate.unwrap_or(0.04), discount_rate.unwrap_or(0.10));
 
         (low, mid, high)
     }
@@ -190,7 +191,7 @@ impl ValueInvestingEngine {
         } // ROE增长
         let net_margin = curr.net_margin.unwrap_or(0.0);
         let curr_roe = curr.roe.unwrap_or(0.0);
-        if net_margin > 0.0 && (curr_roe <= 0.0 || net_margin > curr_roe * 0.5) {
+        if curr.revenue.unwrap_or(0.0) > 0.0 && net_margin > 0.0 && net_margin < curr_roe * 2.0 {
             score += 1;
         } // 盈利质量(应计项测试)
 
@@ -199,9 +200,9 @@ impl ValueInvestingEngine {
             score += 1;
         } // 负债率下降
           // 流动比率改善(用负债率代理)
-        if curr.debt_ratio.unwrap_or(100.0) < 50.0 {
+        if curr.revenue.unwrap_or(0.0) > prev.revenue.unwrap_or(0.0) {
             score += 1;
-        } // 负债率<50%
+        }
           // 无增发(用EPS不稀释代理)
         if curr.eps.unwrap_or(0.0) >= prev.eps.unwrap_or(0.0) {
             score += 1;
@@ -211,9 +212,21 @@ impl ValueInvestingEngine {
         if curr.gross_margin.unwrap_or(0.0) > prev.gross_margin.unwrap_or(0.0) {
             score += 1;
         } // 毛利率改善
-        if curr.revenue.unwrap_or(0.0) > prev.revenue.unwrap_or(0.0) {
+        let rev_growth = if prev.revenue.unwrap_or(0.0) > 0.0 {
+            (curr.revenue.unwrap_or(0.0) - prev.revenue.unwrap_or(0.0)) / prev.revenue.unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let profit_growth = if prev.net_profit.unwrap_or(0.0) > 0.0 {
+            (curr.net_profit.unwrap_or(0.0) - prev.net_profit.unwrap_or(0.0)) / prev.net_profit.unwrap_or(0.0)
+        } else if curr.net_profit.unwrap_or(0.0) > 0.0 {
+            1.0
+        } else {
+            0.0
+        };
+        if rev_growth > 0.0 && rev_growth >= profit_growth {
             score += 1;
-        } // 营收增长
+        }
 
         score
     }
@@ -317,6 +330,8 @@ impl ValueInvestingEngine {
         }
         let f = &financials[0];
         let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0;
-        net * 0.95
+        let debt_ratio = f.debt_ratio.unwrap_or(50.0);
+        let capex_ratio = if debt_ratio > 60.0 { 0.85 } else if debt_ratio > 40.0 { 0.90 } else { 0.95 };
+        net * capex_ratio
     }
 }

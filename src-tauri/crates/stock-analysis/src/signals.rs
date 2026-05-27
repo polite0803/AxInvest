@@ -32,6 +32,7 @@ pub struct MACrossResult {
     pub prev_fast_ma: f64,
     pub prev_slow_ma: f64,
     pub latest_price: f64,
+    pub confirmation: String,
 }
 
 /// 检测 MA 金叉/死叉。
@@ -47,6 +48,7 @@ pub fn detect_ma_cross(klines_json: &str, fast: usize, slow: usize) -> MACrossRe
             prev_fast_ma: 0.0,
             prev_slow_ma: 0.0,
             latest_price: 0.0,
+            confirmation: "n/a".into(),
         };
     }
     let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
@@ -64,6 +66,22 @@ pub fn detect_ma_cross(klines_json: &str, fast: usize, slow: usize) -> MACrossRe
         "none"
     };
 
+    let confirmation = if signal != "none" && closes.len() >= slow + 2 {
+        let prev2_fast = sma(&closes[..n-2], fast).unwrap_or(cur_fast);
+        let prev2_slow = sma(&closes[..n-2], slow).unwrap_or(cur_slow);
+        if signal == "golden_cross" && prev2_fast > prev2_slow {
+            "confirmed"
+        } else if signal == "death_cross" && prev2_fast < prev2_slow {
+            "confirmed"
+        } else {
+            "unconfirmed"
+        }
+    } else if signal != "none" {
+        "unconfirmed"
+    } else {
+        "n/a"
+    };
+
     MACrossResult {
         signal: signal.into(),
         fast_ma: (cur_fast * 100.0).round() / 100.0,
@@ -71,6 +89,7 @@ pub fn detect_ma_cross(klines_json: &str, fast: usize, slow: usize) -> MACrossRe
         prev_fast_ma: (prev_fast * 100.0).round() / 100.0,
         prev_slow_ma: (prev_slow * 100.0).round() / 100.0,
         latest_price: klines.last().map(|k| k.close).unwrap_or(0.0),
+        confirmation: confirmation.into(),
     }
 }
 
@@ -84,6 +103,7 @@ pub struct BreakoutResult {
     pub resistance: f64,
     pub volume_ratio: Option<f64>,
     pub confidence: String, // "high" | "medium" | "low"
+    pub volume_confirmation: bool,
 }
 
 /// 检测价格是否突破支撑/阻力位。
@@ -99,6 +119,7 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
             resistance,
             volume_ratio: None,
             confidence: "low".into(),
+            volume_confirmation: false,
         };
     }
     let last = klines.last().unwrap();
@@ -145,6 +166,7 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
         resistance,
         volume_ratio: vol_ratio.map(|v| (v * 100.0).round() / 100.0),
         confidence: confidence.into(),
+        volume_confirmation: vol_ratio.unwrap_or(1.0) > 1.5,
     }
 }
 
@@ -174,9 +196,9 @@ mod tests {
     fn test_ma_cross_golden() {
         let json = sample_klines();
         let r = detect_ma_cross(&json, 3, 7);
-        // 简要检验：至少返回了正确的结构
         assert!(r.fast_ma > 0.0);
         assert!(r.slow_ma > 0.0);
+        assert!(!r.confirmation.is_empty());
     }
 
     #[test]

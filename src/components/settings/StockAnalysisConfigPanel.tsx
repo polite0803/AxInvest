@@ -50,6 +50,12 @@ function getDefaultVariables(): Variable[] {
   b("monitor_pollIntervalSecs", 30, "监控轮询间隔 (秒)", "number");
   b("monitor_changePctThreshold", 5, "涨跌幅异常阈值 (%)", "number");
   b("monitor_turnoverThreshold", 10, "换手率异常阈值 (%)", "number");
+  b("var_confidence", 95, "VaR 置信度 (%)", "number");
+  b("kelly_fraction", 0.25, "凯利公式下注比例", "number");
+  b("risk_free_rate", 2.0, "无风险利率 (%)", "number");
+  b("outlier_method", "zscore", "异常值处理方法: zscore/iqr", "string");
+  b("outlier_threshold", 3.0, "异常值阈值 (Z-Score)", "number");
+  b("min_confidence", 0.6, "最低置信度", "number");
   return vars;
 }
 

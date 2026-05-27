@@ -78,10 +78,10 @@ impl BacktestEngine {
         decision_confidence: f64,
         holding_days: u32,
     ) -> Result<BacktestResult, String> {
-        // 取最近 250 日K线（约一个交易年），最大化覆盖 analysis_date 的概率
+        // 取最近 500 日K线（约两个交易年），最大化覆盖 analysis_date 的概率
         // 注：get_klines 返回最近 N 根K线（按时间升序），若 analysis_date 超出范围则回测失败
         let klines = client
-            .get_klines(stock_code, "daily", 250)
+            .get_klines(stock_code, "daily", 500)
             .await
             .map_err(|e| format!("获取K线失败: {e}"))?;
         if klines.iter().all(|k| k.date.as_str() < analysis_date) {
@@ -331,7 +331,11 @@ pub async fn optimize_weights(
     let total = (buy + sell + hold).max(1) as f64;
     let buy_r = buy as f64 / total;
     let d = ScoringWeights::default();
-    let adj = if buy_r > 0.5 {
+    let correct_avg = analyses
+        .iter()
+        .filter(|a| a.decision_action.as_deref() == Some("买入") || a.decision_action.as_deref() == Some("增持"))
+        .count();
+    let adj = if buy_r > 0.5 && correct_avg as f64 / total > 0.5 {
         ScoringWeights {
             trend: (d.trend * 0.85).max(10.0),
             deviation: (d.deviation * 0.90).max(10.0),

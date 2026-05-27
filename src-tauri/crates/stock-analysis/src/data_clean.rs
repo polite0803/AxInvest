@@ -51,6 +51,8 @@ fn remove_outliers_zscore(prices: &[f64], threshold: f64) -> OutlierResult {
     for (i, &p) in prices.iter().enumerate() {
         let z = (p - mean).abs() / stddev;
         if z > threshold {
+            let clamped = if p > mean { mean + threshold * stddev } else { mean - threshold * stddev };
+            cleaned.push((clamped * 100.0).round() / 100.0);
             removed.push(i);
         } else {
             cleaned.push(p);
@@ -85,7 +87,11 @@ fn remove_outliers_iqr(prices: &[f64], multiplier: f64) -> OutlierResult {
     let mut cleaned = Vec::new();
     let mut removed = Vec::new();
     for (i, &p) in prices.iter().enumerate() {
-        if p < lower || p > upper {
+        if p < lower {
+            cleaned.push((lower * 100.0).round() / 100.0);
+            removed.push(i);
+        } else if p > upper {
+            cleaned.push((upper * 100.0).round() / 100.0);
             removed.push(i);
         } else {
             cleaned.push(p);
@@ -271,6 +277,7 @@ pub fn adjust_prices(klines_json: &str, dividends_json: &str) -> AdjustResult {
         k.high = (k.high * factor * 100.0).round() / 100.0;
         k.low = (k.low * factor * 100.0).round() / 100.0;
         k.close = (k.close * factor * 100.0).round() / 100.0;
+        k.volume = (k.volume / factor * 100.0).round() / 100.0;
     }
 
     let adjusted: Vec<AdjustedKLine> = klines

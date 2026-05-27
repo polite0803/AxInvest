@@ -165,6 +165,42 @@ impl StockScreener {
                 }
             }
 
+            if criteria.rsi_oversold || criteria.rsi_overbought {
+                if let Ok(klines) = client.get_klines(code, "daily", 30).await {
+                    if klines.len() >= 15 {
+                        let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
+                        let mut avg_gain = 0.0;
+                        let mut avg_loss = 0.0;
+                        for i in 1..=14 {
+                            let diff = closes[i] - closes[i - 1];
+                            if diff > 0.0 { avg_gain += diff; } else { avg_loss += -diff; }
+                        }
+                        avg_gain /= 14.0;
+                        avg_loss /= 14.0;
+                        for i in 15..closes.len() {
+                            let diff = closes[i] - closes[i - 1];
+                            let gain = if diff > 0.0 { diff } else { 0.0 };
+                            let loss = if diff < 0.0 { -diff } else { 0.0 };
+                            avg_gain = (avg_gain * 13.0 + gain) / 14.0;
+                            avg_loss = (avg_loss * 13.0 + loss) / 14.0;
+                        }
+                        let rs = if avg_loss > 1e-10 { avg_gain / avg_loss } else { 100.0 };
+                        let rsi = 100.0 - 100.0 / (1.0 + rs);
+                        if criteria.rsi_oversold && rsi < 30.0 {
+                            reasons.push(format!("RSI超卖{:.1}", rsi));
+                            score += 3;
+                        } else if criteria.rsi_overbought && rsi > 70.0 {
+                            reasons.push(format!("RSI超买{:.1}", rsi));
+                            score += 1;
+                        } else if criteria.rsi_oversold && rsi >= 30.0 {
+                            continue;
+                        } else if criteria.rsi_overbought && rsi <= 70.0 {
+                            continue;
+                        }
+                    }
+                }
+            }
+
             results.push(ScreenResult {
                 stock_code: code.clone(),
                 stock_name: name.clone(),

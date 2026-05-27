@@ -283,6 +283,49 @@ impl ScoringEngine {
         );
     }
 
+    pub fn apply_industry_adjustment(
+        score: &mut ObjectiveScore,
+        pe: Option<f64>,
+        industry_avg_pe: Option<f64>,
+        pb: Option<f64>,
+        industry_avg_pb: Option<f64>,
+    ) {
+        let mut adjustment: i32 = 0;
+        if let (Some(pe), Some(ind_pe)) = (pe, industry_avg_pe) {
+            if ind_pe > 0.0 {
+                let ratio = pe / ind_pe;
+                if ratio < 0.7 {
+                    adjustment += 8;
+                } else if ratio < 0.9 {
+                    adjustment += 4;
+                } else if ratio > 2.0 {
+                    adjustment -= 8;
+                } else if ratio > 1.5 {
+                    adjustment -= 4;
+                }
+            }
+        }
+        if let (Some(pb), Some(ind_pb)) = (pb, industry_avg_pb) {
+            if ind_pb > 0.0 {
+                let ratio = pb / ind_pb;
+                if ratio < 0.7 {
+                    adjustment += 5;
+                } else if ratio > 2.0 {
+                    adjustment -= 5;
+                }
+            }
+        }
+        if adjustment != 0 {
+            let orig_alignment = score.signal_code.clone();
+            score.fundamental_adjustment += adjustment;
+            let new_total = (score.total as i32 + adjustment).clamp(0, 100) as u32;
+            score.total = new_total;
+            let (signal, signal_code) = Self::map_signal(new_total, &orig_alignment);
+            score.signal = signal.to_string();
+            score.signal_code = signal_code.to_string();
+        }
+    }
+
     /// 评分到信号映射
     pub fn map_signal(total: u32, alignment: &str) -> (&str, &str) {
         if total >= 75 && alignment == "多头排列" {

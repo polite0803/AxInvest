@@ -217,7 +217,7 @@ pub struct KellyResult {
 // ── 风险平价 ──
 
 /// 风险平价权重：每项资产权重 ∝ 1/volatility，归一化到总和=1。
-pub fn risk_parity_weights(volatilities: &[f64], _correlations_json: &str) -> RiskParityResult {
+pub fn risk_parity_weights(volatilities: &[f64], correlations_json: &str) -> RiskParityResult {
     let n = volatilities.len();
     if n == 0 {
         return RiskParityResult {
@@ -225,13 +225,50 @@ pub fn risk_parity_weights(volatilities: &[f64], _correlations_json: &str) -> Ri
             divers_ratio: 0.0,
         };
     }
-    // 简化版：逆波动率加权（Naive Risk Parity / ERC 近似）
+    let corr_matrix: Option<Vec<Vec<f64>>> = serde_json::from_str(correlations_json)
+        .ok()
+        .filter(|m: &Vec<Vec<f64>>| m.len() == n && m.iter().all(|r| r.len() == n));
     let inv_vols: Vec<f64> = volatilities
         .iter()
         .map(|&v| if v > 0.0 { 1.0 / v } else { 0.0 })
         .collect();
     let total: f64 = inv_vols.iter().sum();
-    let weights: Vec<f64> = if total > 0.0 {
+    let weights = if let Some(corr) = corr_matrix {
+        let mut w: Vec<f64> = inv_vols.clone();
+        let w_sum: f64 = w.iter().sum();
+        if w_sum > 0.0 {
+            for wi in w.iter_mut() {
+                *wi /= w_sum;
+            }
+        }
+        for _ in 0..20 {
+            let mut risk_contrib = vec![0.0; n];
+            for i in 0..n {
+                for j in 0..n {
+                    risk_contrib[i] += w[i] * w[j] * volatilities[i] * volatilities[j] * corr[i][j];
+                }
+            }
+            let total_risk: f64 = risk_contrib.iter().sum();
+            if total_risk <= 0.0 {
+                break;
+            }
+            let target = total_risk / n as f64;
+            for i in 0..n {
+                if risk_contrib[i] > 0.0 {
+                    w[i] *= (target / risk_contrib[i]).sqrt().min(2.0).max(0.5);
+                }
+            }
+            let ws: f64 = w.iter().sum();
+            if ws > 0.0 {
+                for wi in w.iter_mut() {
+                    *wi /= ws;
+                }
+            }
+        }
+        w.iter()
+            .map(|&x| (x * 10000.0).round() / 10000.0)
+            .collect()
+    } else if total > 0.0 {
         inv_vols
             .iter()
             .map(|&w| (w / total * 10000.0).round() / 10000.0)
@@ -239,7 +276,6 @@ pub fn risk_parity_weights(volatilities: &[f64], _correlations_json: &str) -> Ri
     } else {
         vec![1.0 / n as f64; n]
     };
-    // 分散化比率
     let hhi: f64 = weights.iter().map(|w| w * w).sum();
     let divers_ratio = if hhi > 0.0 {
         (1.0 / (hhi * n as f64)).min(1.0)

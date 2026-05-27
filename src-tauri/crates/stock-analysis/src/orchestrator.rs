@@ -54,6 +54,7 @@ impl StockAnalysisOrchestrator {
         date: String,
         config: AnalysisConfig,
         rule_config: RuleConfig,
+        value_config: crate::decision::ValueConfig,
         events: tokio::sync::broadcast::Sender<AnalysisEvent>,
         runner: Option<Arc<dyn AgentRunner>>,
         prompts: HashMap<String, String>,
@@ -151,6 +152,7 @@ impl StockAnalysisOrchestrator {
                 &raw.financials,
                 raw.quote.pe,
                 raw.quote.pb,
+                Some(&value_config),
             )
         };
         {
@@ -250,6 +252,19 @@ impl StockAnalysisOrchestrator {
         let roe = raw.financials.first().and_then(|f| f.roe);
         scoring::ScoringEngine::apply_fundamental_adjustment(&mut objective_score, pe, pb, roe);
 
+        {
+            let bb = blackboard.read().await;
+            if let Some(sector_info) = bb.get_state("raw.sector_info") {
+                if let Ok(sv) = sector_info.parse::<serde_json::Value>() {
+                    let ind_pe = sv.get("avg_pe").and_then(|v| v.as_f64());
+                    let ind_pb = sv.get("avg_pb").and_then(|v| v.as_f64());
+                    crate::scoring::ScoringEngine::apply_industry_adjustment(
+                        &mut objective_score, pe, ind_pe, pb, ind_pb,
+                    );
+                }
+            }
+        }
+
         // 应用价值投资修正
         scoring::ScoringEngine::apply_value_adjustment(&mut objective_score, &value_metrics);
 
@@ -274,7 +289,7 @@ impl StockAnalysisOrchestrator {
                     }
                 })
                 .unwrap_or(1_000_000_000.0);
-            crate::value::ValueEngine::assess(raw.quote.price, financials, shares)
+            crate::value::ValueEngine::assess(raw.quote.price, financials, shares, Some(&value_config))
         };
         {
             let mut bb = blackboard.write().await;

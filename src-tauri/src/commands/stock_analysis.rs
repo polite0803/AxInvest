@@ -192,6 +192,7 @@ fn launch_analysis_worker(
             date,
             full_config.analysis,
             full_config.rules,
+            full_config.value,
             event_tx,
             runner,
             prompts,
@@ -750,8 +751,20 @@ pub async fn generate_stock_report(
     // 计算技术指标和客观评分
     let indicators =
         axagent_astock_data::indicators::compute_indicators(&record.stock_code, &klines);
-    let score =
+    let mut score =
         axagent_stock_analysis::scoring::ScoringEngine::score(&indicators, quote.price, None);
+    let pe = quote.pe;
+    let pb = quote.pb;
+    let roe = state
+        .astock_client
+        .get_financials(&record.stock_code)
+        .await
+        .ok()
+        .and_then(|f| f.first().and_then(|r| r.roe));
+    axagent_stock_analysis::scoring::ScoringEngine::apply_fundamental_adjustment(&mut score, pe, pb, roe);
+    axagent_stock_analysis::scoring::ScoringEngine::apply_industry_adjustment(
+        &mut score, pe, None, pb, None,
+    );
 
     let quote_json = serde_json::to_string(&quote).unwrap_or_default();
     let score_json = serde_json::to_string(&score).unwrap_or_default();
@@ -1051,10 +1064,12 @@ pub async fn get_value_assessment(
             }
         })
         .unwrap_or(1_000_000_000.0);
+    let full_config = load_full_config(&state.sea_db).await;
     Ok(axagent_stock_analysis::value::ValueEngine::assess(
         quote.price,
         &financials,
         shares,
+        Some(&full_config.value),
     ))
 }
 
@@ -1081,6 +1096,7 @@ pub async fn compute_value_metrics(
             1.0
         }
     });
+    let full_config = load_full_config(&state.sea_db).await;
     Ok(axagent_stock_analysis::value_investing::ValueInvestingEngine::compute(
         &stock_code,
         quote.price,
@@ -1088,6 +1104,7 @@ pub async fn compute_value_metrics(
         &financials,
         quote.pe,
         quote.pb,
+        Some(&full_config.value),
     ))
 }
 

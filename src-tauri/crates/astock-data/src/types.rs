@@ -525,6 +525,7 @@ mod tests {
             pe: Some(35.0),
             pb: Some(12.0),
             total_mv: Some(2250000000000.0),
+            circulating_mv: None,
             limit_up: None,
             limit_down: None,
             is_st: false,

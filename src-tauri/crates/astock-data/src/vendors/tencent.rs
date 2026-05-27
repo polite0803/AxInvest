@@ -64,6 +64,7 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
         pe: parse_opt(fields[39]),
         pb: parse_opt(fields[46]),
         total_mv: parse_opt(fields[45]).map(|v| v * 10000.0),
+        circulating_mv: None,
         limit_up: {
             let v = parse(fields[47]);
             if v > 0.0 {

@@ -79,6 +79,10 @@ impl StockVendor for AkshareVendor {
                     .and_then(|s| s.parse().ok()),
                 total_assets: None,
                 operating_cash_flow: None,
+                capital_expenditure: None,
+                free_cash_flow: None,
+                current_ratio: None,
+                quick_ratio: None,
             })
             .collect())
     }

@@ -31,10 +31,43 @@ fn to_em_secid(stock_code: &str) -> String {
 
 #[async_trait]
 impl StockVendor for EastMoneyVendor {
-    async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
-        Err(DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: "quote handled by tencent vendor".into(),
+    async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
+        let secid = to_em_secid(stock_code);
+        let url = format!(
+            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f168,f169,f170,f171"
+        );
+        let resp = self.http.get(&url).send().await?;
+        let json: Value = resp.json().await?;
+        let d = &json["data"];
+        if d.is_null() {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: "no quote data".into(),
+            });
+        }
+        let f = |key: &str| d[key].as_f64().unwrap_or(0.0);
+        Ok(StockQuote {
+            code: stock_code.to_string(),
+            name: d["f58"].as_str().unwrap_or("").to_string(),
+            price: f("f43") / 100.0,
+            pre_close: f("f60") / 100.0,
+            open: f("f46") / 100.0,
+            high: f("f44") / 100.0,
+            low: f("f45") / 100.0,
+            volume: f("f47"),
+            amount: f("f48"),
+            change_pct: f("f170") / 100.0,
+            turnover_rate: f("f168") / 100.0,
+            pe: Some(f("f162") / 100.0).filter(|v| *v > 0.0),
+            pb: Some(f("f167") / 100.0).filter(|v| *v > 0.0),
+            total_mv: Some(f("f116")).filter(|v| *v > 0.0),
+            limit_up: None,
+            limit_down: None,
+            is_st: d["f57"].as_i64().unwrap_or(0) == 1,
+            timestamp: d["f171"]
+                .as_i64()
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
         })
     }
 

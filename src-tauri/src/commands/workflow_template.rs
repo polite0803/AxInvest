@@ -2028,7 +2028,10 @@ pub async fn update_workflow_template_node(
                     }
                     if let Some(ref et) = input.exposed_tools {
                         an.config.exposed_tools = et.clone();
-                        tracing::info!("[template] 节点 {nid} exposed_tools 已更新: {} 个工具", et.len());
+                        tracing::info!(
+                            "[template] 节点 {nid} exposed_tools 已更新: {} 个工具",
+                            et.len()
+                        );
                     }
                     if let Some(ref t) = input.temperature {
                         an.config.temperature = *t;

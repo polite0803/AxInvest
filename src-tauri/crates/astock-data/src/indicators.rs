@@ -272,9 +272,9 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         0.0
     };
 
-    // Volume ratio
+    // Volume ratio — 取最近5日均量
     let avg_vol_5 = if volumes.len() >= 5 {
-        volumes.iter().take(5).sum::<f64>() / 5.0
+        volumes[volumes.len() - 5..].iter().sum::<f64>() / 5.0
     } else {
         volumes.iter().sum::<f64>() / volumes.len().max(1) as f64
     };
@@ -353,6 +353,13 @@ mod tests {
     }
 
     #[test]
+    fn test_sma_takes_latest() {
+        let data = vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
+        let result = sma(&data, 3).unwrap();
+        assert!((result - 50.0).abs() < 1e-6, "SMA(3) of last 3 should be 50.0, got {result}");
+    }
+
+    #[test]
     fn test_sma_insufficient_data() {
         let data = vec![10.0, 20.0];
         assert!(sma(&data, 5).is_none());
@@ -420,10 +427,10 @@ mod tests {
 
     #[test]
     fn test_compute_indicators_ma_alignment() {
-        // SMA 取前 N 个元素，递减价格 → 前高后低 → MA5 > MA10 > MA20 > MA60 为多头排列
+        // SMA 取最近 N 个元素，递增价格 → 最新价格高 → MA5 > MA10 > MA20 > MA60 为多头排列
         let klines: Vec<KLine> = (0..65)
             .map(|i| {
-                let price = 50.0 - i as f64 * 0.5;
+                let price = 10.0 + i as f64 * 0.5;
                 make_kline(
                     &format!("2025-01-{:02}", i + 1),
                     price,
@@ -439,6 +446,28 @@ mod tests {
             result.ma_alignment == "多头排列" || result.ma_alignment == "弱多头",
             "Expected bull alignment, got: {}",
             result.ma_alignment
+        );
+    }
+
+    #[test]
+    fn test_macd_dea_not_equal_dif() {
+        let klines: Vec<KLine> = (0..65)
+            .map(|i| {
+                let price = 10.0 + (i as f64 * 0.3).sin() * 2.0;
+                make_kline(
+                    &format!("2025-01-{:02}", i + 1),
+                    price,
+                    price + 0.5,
+                    price - 0.5,
+                    price,
+                    10000.0,
+                )
+            })
+            .collect();
+        let result = compute_indicators("000001", &klines);
+        assert!(
+            (result.macd_dea - result.macd_dif).abs() > 0.001 || result.macd_bar.abs() > 0.001,
+            "DEA should differ from DIF with sufficient data"
         );
     }
 }

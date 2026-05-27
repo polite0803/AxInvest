@@ -57,7 +57,7 @@ export function StockAnalysisPage() {
   const klinePeriod = useStockAnalysisStore((s) => s.klinePeriod);
 
   const deviceLayout = useUIStore((s) => s.deviceLayout);
-  const isMobile = deviceLayout === "mobile";
+  const isMobile = deviceLayout === "mobile" || deviceLayout === "tablet";
 
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("market");

@@ -69,6 +69,7 @@ pub async fn get_stock_kline(
 }
 
 /// 供 StockScheduler 等内部调用方使用的分析执行函数（不走 Tauri command 通道）
+#[allow(dead_code)]
 pub async fn run_scheduled_analysis(
     app_handle: &tauri::AppHandle,
     stock_code: &str,
@@ -155,6 +156,7 @@ pub async fn run_scheduled_analysis(
 }
 
 /// 启动分析后台任务（start_stock_analysis 和 run_scheduled_analysis 共用）
+#[allow(dead_code)]
 fn launch_analysis_worker(
     app: tauri::AppHandle,
     db: sea_orm::DatabaseConnection,
@@ -421,6 +423,7 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
 
 /// 构建带取消令牌的 AgentRunner（封装 SessionManagerRunner）。
 /// 任何步骤失败都会返回 `Err`，调用方可回退到占位报告模式。
+#[allow(dead_code)]
 async fn build_cancel_aware_runner(
     db: &sea_orm::DatabaseConnection,
     master_key: &[u8; 32],
@@ -506,6 +509,7 @@ async fn build_cancel_aware_runner(
 }
 
 /// 带取消令牌检查的 AgentRunner 包装
+#[allow(dead_code)]
 struct CancelAwareRunner {
     inner: axagent_stock_analysis::runner::SessionManagerRunner,
     token: Arc<AtomicBool>,
@@ -535,6 +539,7 @@ impl AgentRunner for CancelAwareRunner {
 }
 
 /// 从 DB 的 agency_experts 表加载股票分析专家系统提示词
+#[allow(dead_code)]
 pub(crate) async fn load_stock_analysis_prompts(
     db: &sea_orm::DatabaseConnection,
 ) -> std::collections::HashMap<String, String> {
@@ -564,6 +569,7 @@ pub(crate) async fn load_stock_analysis_prompts(
 }
 
 /// 从 settings 表加载完整分析配置，合并默认值
+#[allow(dead_code)]
 async fn load_full_config(db: &sea_orm::DatabaseConnection) -> StockAnalysisFullConfig {
     let mut cfg = StockAnalysisFullConfig::default();
     if let Ok(Some(v)) =

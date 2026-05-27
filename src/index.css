@@ -3639,6 +3639,7 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   .sa-header-meta { display: none; }
   .sa-tab { padding: 6px 10px; font-size: 11px; }
   .sa-bottom-sheet { max-height: 70vh; }
+}
 /* ── 模型/服务商列表单行截断 ──────── */
 .overflow-hidden > span,
 .overflow-hidden > .ant-typography,

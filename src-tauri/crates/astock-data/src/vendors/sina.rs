@@ -41,7 +41,7 @@ impl StockVendor for SinaVendor {
         let f = |i: usize| -> f64 { fields.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
         Ok(StockQuote {
             code: stock_code.to_string(),
-            name: fields.get(0).copied().unwrap_or("").to_string(),
+            name: fields.first().copied().unwrap_or("").to_string(),
             price: f(3),
             pre_close: f(2),
             open: f(1),

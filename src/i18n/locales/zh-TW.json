@@ -6660,7 +6660,11 @@
       "profile": {
         "desc": "管理专家-角色-工具的组合关系。修改后自动持久化到数据库。",
         "colName": "名称",
-        "colTools": "可用工具",
+        "advanced": "高级",
+        "promptSection": "任务指令 + LLM 参数",
+        "promptPlaceholder": "任务指令（如：基于行情数据对该股票进行技术面分析...）",
+        "temperature": "温度",
+        "maxToolRounds": "最大工具轮数",
         "edit": "编辑",
         "editTools": "编辑暴露工具",
         "selectTools": "选择工具...",
@@ -6677,6 +6681,16 @@
         "colFixedTools": "固定工具",
         "colExposedTools": "暴露工具",
         "noPrompt": "（未加载到 prompt 数据）"
+      },
+      "vendors": {
+        "summary": "9 个数据源 + 6 个数据工具 + 3 个本地计算",
+        "checking": "检测中...",
+        "notChecked": "未检测",
+        "apiKey": "API Key",
+        "depActive": "为以下固定工具提供数据：",
+        "depInactive": "关闭后以下工具将降级到下一 vendor：",
+        "noDeps": "无固定工具依赖此数据源",
+        "localCompute": "本地计算工具（不依赖远程 vendor）"
       },
       "group": {
         "vendor": "数据源",

@@ -189,7 +189,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
     return [
       {
         tool: "compute_scoring",
-        label: "技术评分",
+        label: t("stockAnalysis.settings.group.scoring"),
         vars: resolve([
           "scoring_trend",
           "scoring_deviation",

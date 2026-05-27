@@ -6660,6 +6660,11 @@
       "profile": {
         "desc": "Manage expert-role-tool combinations. Changes are persisted to the database.",
         "colName": "Name",
+        "advanced": "Advanced",
+        "promptSection": "Task Instructions + LLM Params",
+        "promptPlaceholder": "Task instructions (e.g., Analyze the technical indicators of this stock...)",
+        "temperature": "Temperature",
+        "maxToolRounds": "Max Tool Rounds",
         "edit": "Edit",
         "colFixedTools": "Fixed Tools",
         "colExposedTools": "Exposed Tools",
@@ -6677,6 +6682,16 @@
         "goToExperts": "Go to expert editor",
         "goToRoles": "Go to role editor",
         "noPrompt": "(Prompt data not loaded)"
+      },
+      "vendors": {
+        "summary": "9 data sources + 6 data tools + 3 local compute",
+        "checking": "Checking...",
+        "notChecked": "Not checked",
+        "apiKey": "API Key",
+        "depActive": "Provides data for these tools:",
+        "depInactive": "When disabled, these tools fall back to next vendor:",
+        "noDeps": "No tools depend on this vendor",
+        "localCompute": "Local compute tools (no remote vendor dependency)"
       },
       "group": {
         "vendor": "Data Sources",

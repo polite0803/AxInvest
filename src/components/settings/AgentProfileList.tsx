@@ -419,7 +419,7 @@ export function AgentProfileList() {
                       }
                     }}
                   >
-                    {expandedId === row.id ? "收起" : "高级"}
+                    {expandedId === row.id ? t("common.collapse") : t("stockAnalysis.settings.profile.advanced")}
                   </Button>
                   {!isEditing && (
                     <Button size="small" type="dashed" onClick={() => setEditingId(row.id)}>
@@ -504,18 +504,18 @@ export function AgentProfileList() {
               {/* LLM 配置展开区 */}
               {expandedId === row.id && editRow && (
                 <div className="mt-3 pt-3 border-t border-gray-100">
-                  <div className="text-xs text-gray-400 mb-2">任务指令 + LLM 参数</div>
+                  <div className="text-xs text-gray-400 mb-2">{t("stockAnalysis.settings.profile.promptSection")}</div>
                   <div className="flex flex-col gap-2">
                     <Input.TextArea
                       size="small"
                       autoSize={{ minRows: 2, maxRows: 6 }}
-                      placeholder="任务指令（如：基于行情数据对该股票进行技术面分析...）"
+                      placeholder={t("stockAnalysis.settings.profile.promptPlaceholder")}
                       value={editRow.systemPrompt}
                       onChange={(e) => setEditRow({ ...editRow, systemPrompt: e.target.value })}
                     />
                     <div className="flex flex-wrap gap-3">
                       <span className="flex items-center gap-1 text-xs">
-                        <span className="text-gray-400">温度</span>
+                        <span className="text-gray-400">{t("stockAnalysis.settings.profile.temperature")}</span>
                         <Input
                           size="small"
                           style={{ width: 70 }}
@@ -533,7 +533,7 @@ export function AgentProfileList() {
                         />
                       </span>
                       <span className="flex items-center gap-1 text-xs">
-                        <span className="text-gray-400">最大工具轮数</span>
+                        <span className="text-gray-400">{t("stockAnalysis.settings.profile.maxToolRounds")}</span>
                         <Input
                           size="small"
                           style={{ width: 60 }}

@@ -264,7 +264,7 @@ export function DataVendorsTab() {
       {/* 顶部操作栏 */}
       <div className="flex items-center justify-between">
         <Space size={4}>
-          <span className="text-sm text-gray-500">9 个数据源 + 6 个数据工具 + 3 个本地计算</span>
+          <span className="text-sm text-gray-500">{t("stockAnalysis.settings.vendors.summary")}</span>
         </Space>
         <Space>
           <Button size="small" loading={checkingAll} onClick={checkAll}>
@@ -307,8 +307,8 @@ export function DataVendorsTab() {
                     : status === "fail"
                     ? t("stockAnalysis.settings.disconnected")
                     : status === "pending"
-                    ? "检测中..."
-                    : "未检测"}
+                    ? t("stockAnalysis.settings.vendors.checking")
+                    : t("stockAnalysis.settings.vendors.notChecked")}
                 >
                   <Badge
                     status={status === "ok"
@@ -330,7 +330,7 @@ export function DataVendorsTab() {
                     size="small"
                     mode="tags"
                     maxCount={1}
-                    placeholder="API Key"
+                    placeholder={t("stockAnalysis.settings.vendors.apiKey")}
                     value={iwencaiKey ? [iwencaiKey] : []}
                     onChange={(vals) => setIwencaiKey(vals[0] ?? "")}
                   />
@@ -353,7 +353,9 @@ export function DataVendorsTab() {
             {depInfo.length > 0 && (
               <div className="border-t border-gray-100 pt-2 mt-1">
                 <div className="text-xs text-gray-400 mb-1">
-                  {enabled ? "为以下固定工具提供数据：" : "关闭后以下工具将降级到下一 vendor："}
+                  {enabled
+                    ? t("stockAnalysis.settings.vendors.depActive")
+                    : t("stockAnalysis.settings.vendors.depInactive")}
                 </div>
                 {depInfo.map((ft) => (
                   <div key={ft.tool} className="flex items-center gap-2 text-xs py-0.5">
@@ -379,14 +381,16 @@ export function DataVendorsTab() {
                 ))}
               </div>
             )}
-            {depInfo.length === 0 && <div className="text-xs text-gray-400">无固定工具依赖此数据源</div>}
+            {depInfo.length === 0 && (
+              <div className="text-xs text-gray-400">{t("stockAnalysis.settings.vendors.noDeps")}</div>
+            )}
           </Card>
         );
       })}
 
       {/* 本地计算工具 */}
       <div className="pt-2">
-        <div className="text-xs text-gray-400 mb-2">本地计算工具（不依赖远程 vendor）</div>
+        <div className="text-xs text-gray-400 mb-2">{t("stockAnalysis.settings.vendors.localCompute")}</div>
         <Space wrap size={[4, 8]}>
           {LOCAL_TOOLS.map((lt) => <Tag key={lt.tool} color="purple" className="text-xs m-0">💻 {lt.tool}</Tag>)}
         </Space>

@@ -87,7 +87,7 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
 
 /// 解析腾讯财经 K 线 JSON 响应
 /// API: http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sz000001,day,,,120,qfq
-fn parse_klines(raw: &str, stock_code: &str) -> Result<Vec<KLine>, DataError> {
+fn parse_klines(raw: &str, _stock_code: &str) -> Result<Vec<KLine>, DataError> {
     let json: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| DataError::ParseError(format!("K线JSON解析失败: {e}")))?;
     // 路径: data.{code}.{qfqday|qfqweek|qfqmonth} 或 data.{code}.day/week/month

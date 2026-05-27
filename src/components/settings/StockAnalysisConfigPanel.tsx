@@ -187,14 +187,86 @@ export function StockAnalysisConfigPanel(_props: Props) {
     const resolve = (names: string[]) => names.map((n) => varMap[n]).filter(Boolean);
 
     return [
-      { tool: "compute_scoring", label: "技术评分", vars: resolve(["scoring_trend", "scoring_deviation", "scoring_macd", "scoring_volume", "scoring_rsi", "scoring_support"]) },
-      { tool: "compute_valuation", label: "估值计算", vars: resolve(["value_dcfGrowthRate", "value_dcfPerpetualRate", "value_dcfDiscountRate", "value_moatThreshold", "value_fScoreBuyThreshold", "value_safetyMarginMin"]) },
-      { tool: "compute_portfolio_risk", label: "组合风险", vars: resolve(["pos_maxSingleStockPct", "pos_maxTotalPositions", "pos_maxSectorExposurePct"]) },
-      { tool: "calcs", label: "风险模型", vars: resolve(["var_confidence", "kelly_fraction", "risk_free_rate", "outlier_method", "outlier_threshold", "min_confidence"]) },
-      { tool: "rules", label: "规则引擎", vars: resolve(["rule_rsiOverbought", "rule_rsiOversold", "rule_biasLimit", "rule_volumeSignalBlock", "rule_bearLowScore", "rule_autoStopLossPct"]) },
-      { tool: "agent_executor", label: "Agent 运行时", vars: resolve(["analysis_temperature", "analysis_maxTokens", "analysis_timeoutSecs", "analysis_maxDebateRounds", "analysis_maxConcurrent"]) },
-      { tool: "tool_executor", label: "Tool 运行时", vars: resolve(["tool_timeoutSecs", "tool_retryMax", "analysis_klinePeriod", "analysis_klineLimit", "analysis_newsLimit"]) },
-      { tool: "monitor", label: "监控告警", vars: resolve(["monitor_pollIntervalSecs", "monitor_changePctThreshold", "monitor_turnoverThreshold"]) },
+      {
+        tool: "compute_scoring",
+        label: "技术评分",
+        vars: resolve([
+          "scoring_trend",
+          "scoring_deviation",
+          "scoring_macd",
+          "scoring_volume",
+          "scoring_rsi",
+          "scoring_support",
+        ]),
+      },
+      {
+        tool: "compute_valuation",
+        label: "估值计算",
+        vars: resolve([
+          "value_dcfGrowthRate",
+          "value_dcfPerpetualRate",
+          "value_dcfDiscountRate",
+          "value_moatThreshold",
+          "value_fScoreBuyThreshold",
+          "value_safetyMarginMin",
+        ]),
+      },
+      {
+        tool: "compute_portfolio_risk",
+        label: "组合风险",
+        vars: resolve(["pos_maxSingleStockPct", "pos_maxTotalPositions", "pos_maxSectorExposurePct"]),
+      },
+      {
+        tool: "calcs",
+        label: "风险模型",
+        vars: resolve([
+          "var_confidence",
+          "kelly_fraction",
+          "risk_free_rate",
+          "outlier_method",
+          "outlier_threshold",
+          "min_confidence",
+        ]),
+      },
+      {
+        tool: "rules",
+        label: "规则引擎",
+        vars: resolve([
+          "rule_rsiOverbought",
+          "rule_rsiOversold",
+          "rule_biasLimit",
+          "rule_volumeSignalBlock",
+          "rule_bearLowScore",
+          "rule_autoStopLossPct",
+        ]),
+      },
+      {
+        tool: "agent_executor",
+        label: "Agent 运行时",
+        vars: resolve([
+          "analysis_temperature",
+          "analysis_maxTokens",
+          "analysis_timeoutSecs",
+          "analysis_maxDebateRounds",
+          "analysis_maxConcurrent",
+        ]),
+      },
+      {
+        tool: "tool_executor",
+        label: "Tool 运行时",
+        vars: resolve([
+          "tool_timeoutSecs",
+          "tool_retryMax",
+          "analysis_klinePeriod",
+          "analysis_klineLimit",
+          "analysis_newsLimit",
+        ]),
+      },
+      {
+        tool: "monitor",
+        label: "监控告警",
+        vars: resolve(["monitor_pollIntervalSecs", "monitor_changePctThreshold", "monitor_turnoverThreshold"]),
+      },
     ].filter((g) => g.vars.length > 0);
   }, [template]);
 
@@ -240,12 +312,15 @@ export function StockAnalysisConfigPanel(_props: Props) {
   return (
     <div className="flex flex-col gap-3">
       {toolGroups.map((g) => (
-        <SettingsGroup key={g.tool} title={
-          <Space size={4}>
-            <span>{g.label}</span>
-            <Tag className="text-xs m-0" color="default">⚙️ {g.tool}</Tag>
-          </Space>
-        }>
+        <SettingsGroup
+          key={g.tool}
+          title={
+            <Space size={4}>
+              <span>{g.label}</span>
+              <Tag className="text-xs m-0" color="default">⚙️ {g.tool}</Tag>
+            </Space>
+          }
+        >
           <div className="sacp-vars">
             {g.vars.map((v) => (
               <div key={v.name} style={rowStyle} className="flex items-center justify-between sacp-row">

@@ -147,7 +147,7 @@ export function AgentProfileList() {
         const parsed = nodes
           .map((n: any) => {
             const pid: string = n?.config?.agent_profile_id ?? "";
-            if (!pid.startsWith("stock-")) return null;
+            if (!pid.startsWith("stock-")) { return null; }
             const exposed: string[] = n.config.exposed_tools ?? [];
             const nodeId: string = n.base?.id ?? n.id ?? "";
             return {
@@ -187,10 +187,18 @@ export function AgentProfileList() {
       const fallbackRows: AgentNodeRow[] = Object.keys(PROFILE_NAMES).map((pid) => {
         const nid = profileToNode[pid] ?? pid.replace("stock-", "");
         return {
-          id: nid, profileId: pid, expertId: `agency-${pid}`,
-          expertName: PROFILE_NAMES[pid], roleId: PROFILE_ROLE_IDS[pid] ?? "", roleName: PROFILE_ROLES[pid] ?? "-",
-          tools: [], fixedTools: FIXED_TOOL_MAP[nid] ?? FIXED_ALGO_TOOLS[nid] ?? [],
-          systemPrompt: "", temperature: 0.3, maxTokens: 4096, maxToolRounds: 2,
+          id: nid,
+          profileId: pid,
+          expertId: `agency-${pid}`,
+          expertName: PROFILE_NAMES[pid],
+          roleId: PROFILE_ROLE_IDS[pid] ?? "",
+          roleName: PROFILE_ROLES[pid] ?? "-",
+          tools: [],
+          fixedTools: FIXED_TOOL_MAP[nid] ?? FIXED_ALGO_TOOLS[nid] ?? [],
+          systemPrompt: "",
+          temperature: 0.3,
+          maxTokens: 4096,
+          maxToolRounds: 2,
         };
       });
       setRows(fallbackRows);
@@ -201,10 +209,12 @@ export function AgentProfileList() {
     }
   }, []);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   const handleSavePrompt = useCallback(async () => {
-    if (!editPrompt) return;
+    if (!editPrompt) { return; }
     setSaving(`prompt-${editPrompt.id}`);
     try {
       if (editPrompt.type === "expert") {
@@ -224,7 +234,7 @@ export function AgentProfileList() {
   }, [editPrompt, t]);
 
   const handleSaveNodeConfig = useCallback(async () => {
-    if (!editRow) return;
+    if (!editRow) { return; }
     setSaving(`node-${editRow.id}`);
     try {
       await invoke("update_workflow_template_node", {
@@ -270,7 +280,11 @@ export function AgentProfileList() {
   );
 
   if (loading) {
-    return <div className="flex justify-center py-12"><Spin /></div>;
+    return (
+      <div className="flex justify-center py-12">
+        <Spin />
+      </div>
+    );
   }
 
   return (
@@ -303,38 +317,40 @@ export function AgentProfileList() {
                           onClick={(e) => {
                             e.stopPropagation();
                             const p = expertMap[row.expertId]?.prompt ?? "";
-                            setEditPrompt(editPrompt?.id === row.expertId ? null : { type: "expert", id: row.expertId, text: p });
+                            setEditPrompt(
+                              editPrompt?.id === row.expertId ? null : { type: "expert", id: row.expertId, text: p },
+                            );
                           }}
                         >
-                          {editPrompt?.id === row.expertId ? t("stockAnalysis.settings.profile.cancel") : t("stockAnalysis.settings.profile.edit")}
+                          {editPrompt?.id === row.expertId
+                            ? t("stockAnalysis.settings.profile.cancel")
+                            : t("stockAnalysis.settings.profile.edit")}
                         </Button>
                       </Space>
                     }
-                    content={
-                      editPrompt?.id === row.expertId && editPrompt.type === "expert"
-                        ? (
-                          <div className="flex flex-col gap-2" style={{ width: 420 }}>
-                            <Input.TextArea
-                              autoSize={{ minRows: 4, maxRows: 16 }}
-                              value={editPrompt.text}
-                              onChange={(e) => setEditPrompt({ ...editPrompt, text: e.target.value })}
-                            />
-                            <Button
-                              size="small"
-                              type="primary"
-                              loading={saving === `prompt-${row.expertId}`}
-                              onClick={handleSavePrompt}
-                            >
-                              {t("stockAnalysis.settings.profile.save")}
-                            </Button>
-                          </div>
-                        )
-                        : (
-                          <div className="max-h-60 max-w-96 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">
-                            {expertMap[row.expertId]?.prompt ?? t("stockAnalysis.settings.profile.noPrompt")}
-                          </div>
-                        )
-                    }
+                    content={editPrompt?.id === row.expertId && editPrompt.type === "expert"
+                      ? (
+                        <div className="flex flex-col gap-2" style={{ width: 420 }}>
+                          <Input.TextArea
+                            autoSize={{ minRows: 4, maxRows: 16 }}
+                            value={editPrompt.text}
+                            onChange={(e) => setEditPrompt({ ...editPrompt, text: e.target.value })}
+                          />
+                          <Button
+                            size="small"
+                            type="primary"
+                            loading={saving === `prompt-${row.expertId}`}
+                            onClick={handleSavePrompt}
+                          >
+                            {t("stockAnalysis.settings.profile.save")}
+                          </Button>
+                        </div>
+                      )
+                      : (
+                        <div className="max-h-60 max-w-96 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">
+                          {expertMap[row.expertId]?.prompt ?? t("stockAnalysis.settings.profile.noPrompt")}
+                        </div>
+                      )}
                   >
                     <span className="font-medium text-sm truncate cursor-pointer hover:text-blue-500 transition-colors">
                       {row.expertName}
@@ -351,38 +367,40 @@ export function AgentProfileList() {
                           onClick={(e) => {
                             e.stopPropagation();
                             const p = roleMap[row.roleId]?.prompt ?? "";
-                            setEditPrompt(editPrompt?.id === row.roleId ? null : { type: "role", id: row.roleId, text: p });
+                            setEditPrompt(
+                              editPrompt?.id === row.roleId ? null : { type: "role", id: row.roleId, text: p },
+                            );
                           }}
                         >
-                          {editPrompt?.id === row.roleId ? t("stockAnalysis.settings.profile.cancel") : t("stockAnalysis.settings.profile.edit")}
+                          {editPrompt?.id === row.roleId
+                            ? t("stockAnalysis.settings.profile.cancel")
+                            : t("stockAnalysis.settings.profile.edit")}
                         </Button>
                       </Space>
                     }
-                    content={
-                      editPrompt?.id === row.roleId && editPrompt.type === "role"
-                        ? (
-                          <div className="flex flex-col gap-2" style={{ width: 420 }}>
-                            <Input.TextArea
-                              autoSize={{ minRows: 4, maxRows: 16 }}
-                              value={editPrompt.text}
-                              onChange={(e) => setEditPrompt({ ...editPrompt, text: e.target.value })}
-                            />
-                            <Button
-                              size="small"
-                              type="primary"
-                              loading={saving === `prompt-${row.roleId}`}
-                              onClick={handleSavePrompt}
-                            >
-                              {t("stockAnalysis.settings.profile.save")}
-                            </Button>
-                          </div>
-                        )
-                        : (
-                          <div className="max-h-60 max-w-96 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">
-                            {roleMap[row.roleId]?.prompt ?? t("stockAnalysis.settings.profile.noPrompt")}
-                          </div>
-                        )
-                    }
+                    content={editPrompt?.id === row.roleId && editPrompt.type === "role"
+                      ? (
+                        <div className="flex flex-col gap-2" style={{ width: 420 }}>
+                          <Input.TextArea
+                            autoSize={{ minRows: 4, maxRows: 16 }}
+                            value={editPrompt.text}
+                            onChange={(e) => setEditPrompt({ ...editPrompt, text: e.target.value })}
+                          />
+                          <Button
+                            size="small"
+                            type="primary"
+                            loading={saving === `prompt-${row.roleId}`}
+                            onClick={handleSavePrompt}
+                          >
+                            {t("stockAnalysis.settings.profile.save")}
+                          </Button>
+                        </div>
+                      )
+                      : (
+                        <div className="max-h-60 max-w-96 overflow-auto whitespace-pre-wrap text-xs leading-relaxed">
+                          {roleMap[row.roleId]?.prompt ?? t("stockAnalysis.settings.profile.noPrompt")}
+                        </div>
+                      )}
                   >
                     <Tag color="blue" className="text-xs m-0 shrink-0 cursor-pointer">{row.roleName}</Tag>
                   </Popover>
@@ -392,8 +410,13 @@ export function AgentProfileList() {
                     size="small"
                     type={expandedId === row.id ? "primary" : "text"}
                     onClick={() => {
-                      if (expandedId === row.id) { setExpandedId(null); setEditRow(null); }
-                      else { setExpandedId(row.id); setEditRow({ ...row }); }
+                      if (expandedId === row.id) {
+                        setExpandedId(null);
+                        setEditRow(null);
+                      } else {
+                        setExpandedId(row.id);
+                        setEditRow({ ...row });
+                      }
                     }}
                   >
                     {expandedId === row.id ? "收起" : "高级"}
@@ -407,69 +430,76 @@ export function AgentProfileList() {
               </div>
 
               {/* 工具行 */}
-              {isEditing ? (
-                <div className="flex flex-col gap-2">
-                  {row.fixedTools.length > 0 && (
-                    <div className="text-xs text-gray-400">
-                      {t("stockAnalysis.settings.profile.fixedHint", { tools: row.fixedTools.join(", ") })}
-                    </div>
-                  )}
-                  <Select
-                    mode="multiple"
-                    style={{ width: "100%" }}
-                    value={row.tools}
-                    options={toolOptions}
-                    onChange={(vals) => {
-                      setRows((prev) =>
-                        prev.map((r) => (r.id === row.id ? { ...r, tools: vals } : r)),
-                      );
-                    }}
-                    placeholder={t("stockAnalysis.settings.profile.selectTools")}
-                    maxTagCount="responsive"
-                  />
-                  <Space>
-                    <Button
-                      size="small"
-                      type="primary"
-                      loading={saving === row.id}
-                      onClick={() => handleSave(row.id, row.tools)}
-                    >
-                      {t("stockAnalysis.settings.profile.save")}
-                    </Button>
-                    <Button size="small" onClick={() => { loadAll(); setEditingId(null); }}>
-                      {t("stockAnalysis.settings.profile.cancel")}
-                    </Button>
-                  </Space>
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-                  {/* 固定工具 */}
-                  {row.fixedTools.length > 0 && (
-                    <span className="inline-flex flex-wrap items-center gap-1">
-                      {row.fixedTools.map((tn) => (
-                        <Tooltip key={tn} title={both.includes(tn) ? t("stockAnalysis.settings.profile.bothHint") : undefined}>
-                          <Tag color={both.includes(tn) ? "cyan" : "default"} className="text-xs m-0">
-                            ⚙️ {tn}
-                          </Tag>
-                        </Tooltip>
-                      ))}
-                    </span>
-                  )}
-                  {/* 纯暴露工具 */}
-                  {exposed.length > 0 && (
-                    <span className="inline-flex flex-wrap items-center gap-1">
-                      {exposed.map((tn) => (
-                        <Tag key={tn} color="green" className="text-xs m-0">🤖 {tn}</Tag>
-                      ))}
-                    </span>
-                  )}
-                  {row.fixedTools.length === 0 && exposed.length === 0 && (
-                    <span className="text-gray-400 text-xs italic">
-                      {t("stockAnalysis.settings.profile.noTools")}
-                    </span>
-                  )}
-                </div>
-              )}
+              {isEditing
+                ? (
+                  <div className="flex flex-col gap-2">
+                    {row.fixedTools.length > 0 && (
+                      <div className="text-xs text-gray-400">
+                        {t("stockAnalysis.settings.profile.fixedHint", { tools: row.fixedTools.join(", ") })}
+                      </div>
+                    )}
+                    <Select
+                      mode="multiple"
+                      style={{ width: "100%" }}
+                      value={row.tools}
+                      options={toolOptions}
+                      onChange={(vals) => {
+                        setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, tools: vals } : r)));
+                      }}
+                      placeholder={t("stockAnalysis.settings.profile.selectTools")}
+                      maxTagCount="responsive"
+                    />
+                    <Space>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={saving === row.id}
+                        onClick={() => handleSave(row.id, row.tools)}
+                      >
+                        {t("stockAnalysis.settings.profile.save")}
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          loadAll();
+                          setEditingId(null);
+                        }}
+                      >
+                        {t("stockAnalysis.settings.profile.cancel")}
+                      </Button>
+                    </Space>
+                  </div>
+                )
+                : (
+                  <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+                    {/* 固定工具 */}
+                    {row.fixedTools.length > 0 && (
+                      <span className="inline-flex flex-wrap items-center gap-1">
+                        {row.fixedTools.map((tn) => (
+                          <Tooltip
+                            key={tn}
+                            title={both.includes(tn) ? t("stockAnalysis.settings.profile.bothHint") : undefined}
+                          >
+                            <Tag color={both.includes(tn) ? "cyan" : "default"} className="text-xs m-0">
+                              ⚙️ {tn}
+                            </Tag>
+                          </Tooltip>
+                        ))}
+                      </span>
+                    )}
+                    {/* 纯暴露工具 */}
+                    {exposed.length > 0 && (
+                      <span className="inline-flex flex-wrap items-center gap-1">
+                        {exposed.map((tn) => <Tag key={tn} color="green" className="text-xs m-0">🤖 {tn}</Tag>)}
+                      </span>
+                    )}
+                    {row.fixedTools.length === 0 && exposed.length === 0 && (
+                      <span className="text-gray-400 text-xs italic">
+                        {t("stockAnalysis.settings.profile.noTools")}
+                      </span>
+                    )}
+                  </div>
+                )}
 
               {/* LLM 配置展开区 */}
               {expandedId === row.id && editRow && (

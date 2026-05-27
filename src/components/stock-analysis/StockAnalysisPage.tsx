@@ -16,6 +16,7 @@ import { PriceAlertPanel } from "./PriceAlertPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
 import { StockQuoteCard } from "./StockQuoteCard";
+import { StockScreenerPanel } from "./StockScreenerPanel";
 import { StockSearchBar } from "./StockSearchBar";
 import { TradePanel } from "./TradePanel";
 import { WatchlistPanel } from "./WatchlistPanel";
@@ -116,6 +117,7 @@ export function StockAnalysisPage() {
   ];
 
   const sheetPanels: SheetPanel[] = [
+    { key: "screener", label: "荐股", element: <StockScreenerPanel /> },
     { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
     { key: "watchlist", label: t("stockAnalysis.watchlist"), element: <WatchlistPanel /> },
     { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },

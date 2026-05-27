@@ -203,29 +203,35 @@ export function StockAnalysisConfigPanel(props: Props) {
   useEffect(() => {
     invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID })
       .then(async (rsp) => {
+        if (rsp && (!rsp.variables || rsp.variables.length === 0)) {
+          // 首次加载时，若模板无 variables，用默认值初始化并保存回模板
+          const defaults = getDefaultVariables();
+          const input: WorkflowTemplateInput = {
+            name: rsp.name,
+            description: rsp.description,
+            icon: rsp.icon,
+            tags: rsp.tags,
+            trigger_config: rsp.trigger_config,
+            nodes: rsp.nodes,
+            edges: rsp.edges,
+            input_schema: rsp.input_schema,
+            output_schema: rsp.output_schema,
+            variables: defaults,
+            error_config: rsp.error_config,
+          };
+          invoke<boolean>("update_workflow_template", { id: TEMPLATE_ID, input }).catch(() => {});
+          rsp.variables = defaults;
+        }
         if (rsp) {
-          // 首次加载时，若模板无 variables，自动初始化默认值
-          if (!rsp.variables || rsp.variables.length === 0) {
-            const defaults = getDefaultVariables();
-            const input: WorkflowTemplateInput = {
-              name: rsp.name,
-              description: rsp.description,
-              icon: rsp.icon,
-              tags: rsp.tags,
-              trigger_config: rsp.trigger_config,
-              nodes: rsp.nodes,
-              edges: rsp.edges,
-              input_schema: rsp.input_schema,
-              output_schema: rsp.output_schema,
-              variables: defaults,
-              error_config: rsp.error_config,
-            };
-            await invoke<boolean>("update_workflow_template", { id: TEMPLATE_ID, input }).catch(() => {});
-            rsp.variables = defaults;
-          }
           setTemplate(rsp);
           const map: Record<string, unknown> = {};
           for (const v of rsp.variables) { map[v.name] = v.value; }
+          setValues(map);
+        } else {
+          // 模板不存在时（浏览器模式），直接用默认变量渲染
+          const defaults = getDefaultVariables();
+          const map: Record<string, unknown> = {};
+          for (const v of defaults) { map[v.name] = v.value; }
           setValues(map);
         }
       })
@@ -234,8 +240,8 @@ export function StockAnalysisConfigPanel(props: Props) {
   }, [t]);
 
   const { grouped, ungrouped } = useMemo(() => {
-    if (!template) { return { grouped: [], ungrouped: [] as Variable[] }; }
-    return groupVariables(template.variables, prefixes);
+    const vars = template?.variables ?? getDefaultVariables();
+    return groupVariables(vars, prefixes);
   }, [template, prefixes]);
 
   const handleChange = (name: string, val: unknown) => {

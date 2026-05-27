@@ -1,18 +1,10 @@
 import "@testing-library/jest-dom";
 
-// React 19 scheduler 在 vitest 销毁 jsdom 后通过 setImmediate 访问 window
-// 导致 ReferenceError。用 getter 固化 window，阻止 jsdom teardown 回收。
-let _win: any = globalThis;
-Object.defineProperty(globalThis, "window", {
-  get() {
-    return _win;
-  },
-  set(v: any) {
-    if (v != null && v !== globalThis) { _win = v; }
-  },
-  configurable: true,
-  enumerable: true,
-});
+// jsdom 环境初始化前的 window 兜底（防止 react-dom 清理阶段报 ReferenceError）
+if (typeof window === "undefined") {
+  // @ts-expect-error - vitest jsdom 环境兜底，提供最小 window stub
+  globalThis.window = globalThis;
+}
 
 if (typeof window !== "undefined" && !window.matchMedia) {
   Object.defineProperty(window, "matchMedia", {

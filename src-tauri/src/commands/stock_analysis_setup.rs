@@ -146,23 +146,103 @@ const STOCK_ROLES: &[StockRoleDef] = &[
 
 /// Profile → 工具映射（模块级，模板 seed 和 agent_profiles seed 共用）
 static PROFILE_TOOLS: &[(&str, &[&str])] = &[
-    ("market-analyst", &["get_stock_kline","get_stock_quote","compute_scoring","compute_kdj","compute_obv","search_stock"]),
-    ("sentiment-analyst", &["get_stock_news","get_stock_money_flow","get_hot_stocks","search_stock"]),
-    ("news-analyst", &["get_stock_news","get_announcements","get_cls_flash","search_stock"]),
-    ("fundamentals-analyst", &["get_stock_financials","compute_valuation","get_consensus_eps","get_institutional_visits","search_stock"]),
-    ("policy-analyst", &["get_stock_news","get_announcements","search_stock"]),
-    ("hot-money-tracker", &["get_stock_money_flow","get_hot_stocks","get_north_bound_flow","get_market_dragon_tiger","get_block_trades","search_stock"]),
-    ("lockup-watcher", &["get_stock_financials","get_announcements","search_stock"]),
-    ("research-analyst", &["get_consensus_eps","get_stock_financials","get_stock_news","get_research_reports","get_institutional_visits","search_stock"]),
-    ("sector-analyst", &["get_industry_ranking","get_hot_stocks","get_stock_quote","get_concept_blocks","search_stock"]),
-    ("bull-researcher", &["compute_scoring","compute_valuation","search_stock"]),
-    ("bear-researcher", &["compute_scoring","compute_valuation","search_stock"]),
-    ("aggressive-debator", &["compute_portfolio_risk","search_stock"]),
-    ("conservative-debator", &["compute_portfolio_risk","search_stock"]),
-    ("neutral-debator", &["compute_portfolio_risk","search_stock"]),
-    ("research-manager", &["compute_scoring","compute_valuation","compute_portfolio_risk","search_stock"]),
-    ("trader", &["get_stock_quote","compute_scoring","search_stock"]),
-    ("portfolio-manager", &["compute_scoring","compute_valuation","compute_portfolio_risk","search_stock"]),
+    (
+        "market-analyst",
+        &[
+            "get_stock_kline",
+            "get_stock_quote",
+            "compute_scoring",
+            "compute_kdj",
+            "compute_obv",
+            "search_stock",
+        ],
+    ),
+    (
+        "sentiment-analyst",
+        &[
+            "get_stock_news",
+            "get_stock_money_flow",
+            "get_hot_stocks",
+            "search_stock",
+        ],
+    ),
+    (
+        "news-analyst",
+        &[
+            "get_stock_news",
+            "get_announcements",
+            "get_cls_flash",
+            "search_stock",
+        ],
+    ),
+    (
+        "fundamentals-analyst",
+        &[
+            "get_stock_financials",
+            "compute_valuation",
+            "get_consensus_eps",
+            "get_institutional_visits",
+            "search_stock",
+        ],
+    ),
+    ("policy-analyst", &["get_stock_news", "get_announcements", "search_stock"]),
+    (
+        "hot-money-tracker",
+        &[
+            "get_stock_money_flow",
+            "get_hot_stocks",
+            "get_north_bound_flow",
+            "get_market_dragon_tiger",
+            "get_block_trades",
+            "search_stock",
+        ],
+    ),
+    ("lockup-watcher", &["get_stock_financials", "get_announcements", "search_stock"]),
+    (
+        "research-analyst",
+        &[
+            "get_consensus_eps",
+            "get_stock_financials",
+            "get_stock_news",
+            "get_research_reports",
+            "get_institutional_visits",
+            "search_stock",
+        ],
+    ),
+    (
+        "sector-analyst",
+        &[
+            "get_industry_ranking",
+            "get_hot_stocks",
+            "get_stock_quote",
+            "get_concept_blocks",
+            "search_stock",
+        ],
+    ),
+    ("bull-researcher", &["compute_scoring", "compute_valuation", "search_stock"]),
+    ("bear-researcher", &["compute_scoring", "compute_valuation", "search_stock"]),
+    ("aggressive-debator", &["compute_portfolio_risk", "search_stock"]),
+    ("conservative-debator", &["compute_portfolio_risk", "search_stock"]),
+    ("neutral-debator", &["compute_portfolio_risk", "search_stock"]),
+    (
+        "research-manager",
+        &[
+            "compute_scoring",
+            "compute_valuation",
+            "compute_portfolio_risk",
+            "search_stock",
+        ],
+    ),
+    ("trader", &["get_stock_quote", "compute_scoring", "search_stock"]),
+    (
+        "portfolio-manager",
+        &[
+            "compute_scoring",
+            "compute_valuation",
+            "compute_portfolio_risk",
+            "search_stock",
+        ],
+    ),
 ];
 
 pub async fn ensure_stock_analysis_experts_seeded(
@@ -707,7 +787,14 @@ async fn seed_stock_analysis_workflow_template(
         ("compute_scoring", td_score.clone()),
         ("compute_valuation", td_val.clone()),
         ("compute_portfolio_risk", td_risk.clone()),
-        ("search_stock", ToolDef { name: "search_stock".into(), description: Some("按代码或名称模糊搜索A股".into()), parameters: None }),
+        (
+            "search_stock",
+            ToolDef {
+                name: "search_stock".into(),
+                description: Some("按代码或名称模糊搜索A股".into()),
+                parameters: None,
+            },
+        ),
         ("get_hot_stocks", td_hot.clone()),
         ("get_industry_ranking", td_industry.clone()),
         ("get_announcements", td_announce.clone()),
@@ -721,7 +808,9 @@ async fn seed_stock_analysis_workflow_template(
         ("get_concept_blocks", td_concepts.clone()),
         ("get_block_trades", td_block.clone()),
         ("get_institutional_visits", td_visit.clone()),
-    ].into_iter().collect();
+    ]
+    .into_iter()
+    .collect();
 
     // 从 ToolDef 列表生成 "可用工具" prompt 片段
     fn tool_prompt(tools: &[ToolDef]) -> String {
@@ -886,11 +975,8 @@ async fn seed_stock_analysis_workflow_template(
                 .iter()
                 .filter_map(|&tn| tool_def_map.get(tn).cloned())
                 .collect();
-            a.config.system_prompt = format!(
-                "{}{}",
-                a.config.system_prompt,
-                tool_prompt(&a.config.tools)
-            );
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         }
         nodes.push(an);
     }
@@ -1053,11 +1139,7 @@ async fn seed_stock_analysis_workflow_template(
         "research-manager",
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
-        a.config.context_sources = vec![
-            "t-scoring".into(),
-            "t-valuation".into(),
-            "t-risk".into(),
-        ];
+        a.config.context_sources = vec!["t-scoring".into(), "t-valuation".into(), "t-risk".into()];
         a.config.tools = vec![
             td_score.clone(),
             td_val.clone(),
@@ -1764,7 +1846,8 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     // Profile → 工具映射（从模块级 PROFILE_TOOLS 构建）
-    let profile_tools: std::collections::HashMap<&str, &[&str]> = PROFILE_TOOLS.iter().cloned().collect();
+    let profile_tools: std::collections::HashMap<&str, &[&str]> =
+        PROFILE_TOOLS.iter().cloned().collect();
 
     let mut count = 0u32;
     for &(expert_id, role_id) in EXPERT_ROLE_MAP {

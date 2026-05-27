@@ -2014,7 +2014,10 @@ pub async fn update_workflow_template_node(
                                 parameters: None,
                             })
                             .collect();
-                        tracing::info!("[template] 节点 {nid} tools 已更新: {} 个工具", tools.len());
+                        tracing::info!(
+                            "[template] 节点 {nid} tools 已更新: {} 个工具",
+                            tools.len()
+                        );
                     }
                     if let Some(ref sp) = input.system_prompt {
                         an.config.system_prompt = sp.clone();
@@ -2042,8 +2045,6 @@ pub async fn update_workflow_template_node(
     am.updated_at = Set(now);
     am.update(db).await.map_err(|e| e.to_string())?;
 
-    tracing::info!(
-        "[template] {template_id} 节点 {node_id} 已更新，版本 {new_version}"
-    );
+    tracing::info!("[template] {template_id} 节点 {node_id} 已更新，版本 {new_version}");
     Ok(true)
 }

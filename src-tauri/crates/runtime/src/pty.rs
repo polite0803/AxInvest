@@ -153,7 +153,7 @@ impl PtySession {
                 let mut buf = buf.as_ref().clone();
                 loop {
                     let n = {
-                        let mut reader = reader.lock().unwrap();
+                        let mut reader = reader.lock().unwrap_or_else(|e| e.into_inner());
                         reader.read(&mut buf)
                     };
 
@@ -287,6 +287,7 @@ impl PtySession {
                     .kill()
                     .map_err(|e| format!("Failed to kill PTY child: {}", e))?;
                 inner.status = PtySessionStatus::Exited;
+                drop(guard);
                 let mut s = self.status.write().await;
                 *s = PtySessionStatus::Exited;
                 Ok(())

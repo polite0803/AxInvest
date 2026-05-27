@@ -331,6 +331,15 @@ pub async fn restore_json_backup(
 
         // Overwrite 策略：先清空表
         if matches!(strategy, crate::types::RestoreStrategy::Overwrite) {
+            if !table_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(AxAgentError::Gateway(format!(
+                    "Invalid table name '{}' in backup: only alphanumeric and underscore allowed",
+                    table_name
+                )));
+            }
             txn.execute_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
                 format!("DELETE FROM \"{}\"", table_name),

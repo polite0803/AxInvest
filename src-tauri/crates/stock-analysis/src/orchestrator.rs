@@ -669,8 +669,8 @@ impl StockAnalysisOrchestrator {
 
         let summary = format!(
             r#"{{"rounds":{max_rounds},"bull_final":"{}","bear_final":"{}"}}"#,
-            &bull_prev[..bull_prev.len().min(200)],
-            &bear_prev[..bear_prev.len().min(200)]
+            safe_truncate(&bull_prev, 500),
+            safe_truncate(&bear_prev, 500)
         );
         {
             let mut bb = blackboard.write().await;
@@ -698,7 +698,7 @@ impl StockAnalysisOrchestrator {
                     ctx,
                     "--- {analyst_id} 报告 ---\n{}\n",
                     if report.len() > 500 {
-                        &report[..500]
+                        safe_truncate(report, 500)
                     } else {
                         report
                     }
@@ -710,7 +710,11 @@ impl StockAnalysisOrchestrator {
             let _ = write!(
                 ctx,
                 "\n--- 对手上一轮论点 ---\n{}\n",
-                if arg.len() > 500 { &arg[..500] } else { arg }
+                if arg.len() > 500 {
+                    safe_truncate(arg, 500)
+                } else {
+                    arg
+                }
             );
         }
 
@@ -838,7 +842,7 @@ impl StockAnalysisOrchestrator {
                         ctx,
                         "--- {analyst_id} 报告 ---\n{}\n\n",
                         if report.len() > 500 {
-                            &report[..500]
+                            safe_truncate(report, 500)
                         } else {
                             report
                         }
@@ -853,7 +857,11 @@ impl StockAnalysisOrchestrator {
                 let _ = write!(
                     ctx,
                     "--- 研究经理综合评估 ---\n{}\n\n",
-                    if risk.len() > 500 { &risk[..500] } else { risk }
+                    if risk.len() > 500 {
+                        safe_truncate(risk, 500)
+                    } else {
+                        risk
+                    }
                 );
             }
 
@@ -911,7 +919,7 @@ impl StockAnalysisOrchestrator {
         let decision = Self::parse_decision(&decision_text).unwrap_or_else(|e| {
             tracing::warn!("决策解析失败，使用默认值: {e}");
             StockDecision {
-                action: "持有".into(),
+                action: "待定".into(),
                 position_pct: 0.0,
                 target_price: None,
                 stop_loss: None,
@@ -1023,4 +1031,15 @@ fn extract_number_after(text: &str, keyword: &str) -> Option<f64> {
                 .parse()
                 .ok()
         })
+}
+
+fn safe_truncate(s: &str, max_len: usize) -> &str {
+    if s.len() <= max_len {
+        return s;
+    }
+    let mut end = max_len;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }

@@ -32,7 +32,7 @@ pub struct QualityCheck {
 pub fn check_report_quality(
     _expert_id: &str,
     report_text: &str,
-    required_items: &[&str],
+    required_items: &[Vec<&str>],
 ) -> QualityGrade {
     let text = report_text.to_lowercase();
 
@@ -70,7 +70,11 @@ pub fn check_report_quality(
     // 硬检查 3: 必采清单覆盖率
     let covered = required_items
         .iter()
-        .filter(|item| text.contains(&item.to_lowercase()))
+        .filter(|group| {
+            group
+                .iter()
+                .any(|keyword| text.contains(&keyword.to_lowercase()))
+        })
         .count();
     let total = required_items.len();
     if total == 0 {
@@ -90,15 +94,58 @@ pub fn check_report_quality(
 }
 
 /// 必采清单 — 每个分析师报告必须包含的关键数据项
-pub fn get_required_items(expert_id: &str) -> Vec<&'static str> {
+pub fn get_required_items(expert_id: &str) -> Vec<Vec<&'static str>> {
     match expert_id {
-        "market-analyst" => vec!["趋势", "形态", "指标", "支撑", "压力"],
-        "sentiment-analyst" => vec!["情绪", "乐观", "悲观", "舆情", "散户"],
-        "news-analyst" => vec!["公告", "新闻", "行业", "宏观", "影响"],
-        "fundamentals-analyst" => vec!["盈利", "营收", "ROE", "PE", "估值"],
-        "policy-analyst" => vec!["政策", "监管", "产业", "补贴", "窗口指导"],
-        "hot-money-tracker" => vec!["资金", "龙虎榜", "主力", "北向", "流入", "流出"],
-        "lockup-watcher" => vec!["解禁", "减持", "质押", "增持", "限售"],
+        "market-analyst" => vec![
+            vec!["趋势", "走势", "方向"],
+            vec!["形态", "图形", "模式"],
+            vec!["指标", "MACD", "RSI", "KDJ"],
+            vec!["支撑", "支撑位", "底部"],
+            vec!["压力", "压力位", "阻力", "阻力位"],
+        ],
+        "sentiment-analyst" => vec![
+            vec!["情绪", "市场情绪", "人气"],
+            vec!["乐观", "看多", "积极"],
+            vec!["悲观", "看空", "消极"],
+            vec!["舆情", "舆论", "社交媒体"],
+            vec!["散户", "个人投资者", "零售"],
+        ],
+        "news-analyst" => vec![
+            vec!["公告", "披露", "通告"],
+            vec!["新闻", "资讯", "消息"],
+            vec!["行业", "产业", "板块"],
+            vec!["宏观", "经济", "GDP"],
+            vec!["影响", "冲击", "效应"],
+        ],
+        "fundamentals-analyst" => vec![
+            vec!["盈利", "利润", "收益"],
+            vec!["营收", "收入", "营业额"],
+            vec!["ROE", "净资产收益率"],
+            vec!["PE", "市盈率", "估值"],
+            vec!["估值", "价值", "定价"],
+        ],
+        "policy-analyst" => vec![
+            vec!["政策", "方针", "规划"],
+            vec!["监管", "合规", "审查"],
+            vec!["产业", "行业政策"],
+            vec!["补贴", "扶持", "优惠"],
+            vec!["窗口指导", "约谈", "警示"],
+        ],
+        "hot-money-tracker" => vec![
+            vec!["资金", "成交", "流入"],
+            vec!["龙虎榜", "席位", "营业部"],
+            vec!["主力", "机构", "大单"],
+            vec!["北向", "外资", "沪港通", "深港通"],
+            vec!["流入", "净流入", "增仓"],
+            vec!["流出", "净流出", "减仓"],
+        ],
+        "lockup-watcher" => vec![
+            vec!["解禁", "限售股", "锁定期"],
+            vec!["减持", "套现", "抛售"],
+            vec!["质押", "抵押", "担保"],
+            vec!["增持", "回购", "护盘"],
+            vec!["限售", "锁股", "禁售"],
+        ],
         _ => vec![],
     }
 }
@@ -185,20 +232,20 @@ mod tests {
 
     #[test]
     fn test_empty_report_gets_f() {
-        let grade = check_report_quality("market-analyst", "", &["趋势"]);
+        let grade = check_report_quality("market-analyst", "", &[vec!["趋势"]]);
         assert_eq!(grade, QualityGrade::F);
     }
 
     #[test]
     fn test_short_report_gets_d() {
-        let grade = check_report_quality("market-analyst", "短", &["趋势"]);
+        let grade = check_report_quality("market-analyst", "短", &[vec!["趋势"]]);
         assert_eq!(grade, QualityGrade::D);
     }
 
     #[test]
     fn test_failure_marker_gets_d() {
         let report = "无法获取数据，分析失败。".repeat(10);
-        let grade = check_report_quality("market-analyst", &report, &["趋势"]);
+        let grade = check_report_quality("market-analyst", &report, &[vec!["趋势"]]);
         assert_eq!(grade, QualityGrade::D);
     }
 
@@ -208,7 +255,13 @@ mod tests {
         let grade = check_report_quality(
             "market-analyst",
             &report,
-            &["趋势", "形态", "指标", "支撑", "压力"],
+            &[
+                vec!["趋势"],
+                vec!["形态"],
+                vec!["指标"],
+                vec!["支撑"],
+                vec!["压力"],
+            ],
         );
         assert_eq!(grade, QualityGrade::A);
     }
@@ -219,7 +272,13 @@ mod tests {
         let grade = check_report_quality(
             "market-analyst",
             &report,
-            &["趋势", "形态", "指标", "支撑", "压力"],
+            &[
+                vec!["趋势"],
+                vec!["形态"],
+                vec!["指标"],
+                vec!["支撑"],
+                vec!["压力"],
+            ],
         );
         assert!(grade == QualityGrade::C || grade == QualityGrade::B);
     }

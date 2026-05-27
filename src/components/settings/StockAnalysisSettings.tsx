@@ -33,17 +33,17 @@ export function StockAnalysisSettings() {
         items={[
           {
             key: "experts",
-            label: "专家",
+            label: t("stockAnalysis.settings.tab.experts"),
             children: <ExpertPromptList />,
           },
           {
             key: "roles",
-            label: "角色",
+            label: t("stockAnalysis.settings.tab.roles"),
             children: <RolePromptList />,
           },
           {
             key: "params",
-            label: "参数",
+            label: t("stockAnalysis.settings.tab.params"),
             children: (
               <StockAnalysisConfigPanel
                 showVendorHealth

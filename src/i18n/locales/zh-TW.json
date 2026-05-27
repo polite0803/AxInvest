@@ -6608,8 +6608,8 @@
     "settings": {
       "title": "股票分析设置",
       "saveFailed": "设置保存失败",
-      "noExperts": "暫無專家數據，請重啟應用完成種子化",
-      "noRoles": "暫無角色數據，請重啟應用完成種子化",
+      "noExperts": "暂无专家数据",
+      "noRoles": "暂无角色数据",
       "quoteTag": "行情",
       "financialKlineTag": "财务/K线",
       "newsTag": "新闻",
@@ -6638,6 +6638,11 @@
       "connected": "已连接",
       "disconnected": "未连接",
       "checkHealth": "检测连接",
+      "tab": {
+        "experts": "专家",
+        "roles": "角色",
+        "params": "参数"
+      },
       "check": "检测",
       "loadFailed": "配置加载失败",
       "saveSuccess": "配置已保存",

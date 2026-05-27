@@ -6608,8 +6608,8 @@
     "settings": {
       "title": "Stock Analysis Settings",
       "saveFailed": "Failed to save",
-      "noExperts": "エキスパートデータがありません。アプリを再起動してください",
-      "noRoles": "ロールデータがありません。アプリを再起動してください",
+      "noExperts": "No expert data. Restart the app to seed.",
+      "noRoles": "No role data. Restart the app to seed.",
       "quoteTag": "Quotes",
       "financialKlineTag": "Financial/K-line",
       "newsTag": "News",
@@ -6638,6 +6638,11 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "checkHealth": "Check Health",
+      "tab": {
+        "experts": "Experts",
+        "roles": "Roles",
+        "params": "Params"
+      },
       "check": "Check",
       "loadFailed": "Failed to load config",
       "saveSuccess": "Config saved",

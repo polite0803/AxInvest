@@ -6640,6 +6640,11 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "checkHealth": "Check Health",
+      "tab": {
+        "experts": "Experts",
+        "roles": "Roles",
+        "params": "Params"
+      },
       "check": "Check",
       "loadFailed": "Failed to load config",
       "saveSuccess": "Config saved",

@@ -438,6 +438,8 @@ pub struct StockRawData {
     pub consensus_eps: Option<ConsensusEPS>,
     pub concept_blocks: Option<ConceptBlocks>,
     pub announcements: Vec<Announcement>,
+    pub block_trades: Vec<BlockTrade>,
+    pub institutional_visits: Vec<InstitutionalVisit>,
 }
 
 /// 市场级原始数据

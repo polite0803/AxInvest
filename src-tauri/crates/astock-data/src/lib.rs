@@ -754,6 +754,8 @@ impl AStockClient {
             consensus_r,
             concept_r,
             announcements_r,
+            block_trades_r,
+            institutional_visits_r,
         ) = tokio::join!(
             self.get_quote(stock_code),
             self.get_klines(stock_code, kline_period, kline_limit),
@@ -771,6 +773,8 @@ impl AStockClient {
             self.get_consensus_eps(stock_code),
             self.get_concept_blocks(stock_code),
             self.get_announcements(stock_code),
+            self.get_block_trades(stock_code),
+            self.get_institutional_visits(stock_code),
         );
 
         let quote = match quote_r {
@@ -847,6 +851,14 @@ impl AStockClient {
             tracing::warn!("announcements failed: {e}");
             vec![]
         });
+        let block_trades = block_trades_r.unwrap_or_else(|e| {
+            tracing::warn!("block_trades failed: {e}");
+            vec![]
+        });
+        let institutional_visits = institutional_visits_r.unwrap_or_else(|e| {
+            tracing::warn!("institutional_visits failed: {e}");
+            vec![]
+        });
 
         Ok(StockRawData {
             quote,
@@ -865,6 +877,8 @@ impl AStockClient {
             consensus_eps,
             concept_blocks,
             announcements,
+            block_trades,
+            institutional_visits,
         })
     }
 }

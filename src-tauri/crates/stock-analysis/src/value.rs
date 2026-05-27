@@ -159,11 +159,13 @@ impl ValueEngine {
             details.push("Δ负债率↑ ✗".into());
         }
 
-        if current.revenue.unwrap_or(0.0) > previous.revenue.unwrap_or(0.0) {
+        if current.current_ratio.map(|r| r > 1.5).unwrap_or(false) {
             leverage += 1;
-            details.push("营收增长(流动性代理) ✓".into());
+            details.push("流动比率>1.5 ✓".into());
+        } else if current.current_ratio.map(|r| r > 1.0).unwrap_or(false) {
+            details.push("流动比率一般 ✗".into());
         } else {
-            details.push("营收未增长 ✗".into());
+            details.push("流动比率<1.0 ✗".into());
         }
 
         // 无增发：EPS 不稀释（用 EPS 不低于上年判断）
@@ -276,14 +278,23 @@ impl ValueEngine {
             .first()
             .and_then(|f| f.debt_ratio)
             .unwrap_or(50.0);
-        let capex_ratio = if latest_debt_ratio > 60.0 {
-            0.85
-        } else if latest_debt_ratio > 40.0 {
-            0.90
-        } else {
-            0.95
-        };
-        let est_fcf = avg_net * capex_ratio;
+        let est_fcf = financials
+            .first()
+            .and_then(|f| f.free_cash_flow)
+            .or_else(|| {
+                let capex_ratio = if latest_debt_ratio > 60.0 {
+                    0.85
+                } else if latest_debt_ratio > 40.0 {
+                    0.90
+                } else {
+                    0.95
+                };
+                financials
+                    .first()
+                    .and_then(|f| f.net_profit)
+                    .map(|np| np * capex_ratio)
+            })
+            .unwrap_or(0.0);
         let fcf_ratio = if avg_net > 0.0 {
             est_fcf / avg_net
         } else {
@@ -394,14 +405,22 @@ impl ValueEngine {
         let eps = latest.eps.unwrap_or(0.0);
         let bvps = latest.bps.unwrap_or(0.0);
         let latest_debt_ratio = latest.debt_ratio.unwrap_or(50.0);
-        let capex_ratio = if latest_debt_ratio > 60.0 {
-            0.85
-        } else if latest_debt_ratio > 40.0 {
-            0.90
-        } else {
-            0.95
-        };
-        let fcf = latest.net_profit.unwrap_or(0.0) * capex_ratio;
+        let fcf = latest
+            .free_cash_flow
+            .or_else(|| {
+                let capex_ratio = if latest_debt_ratio > 60.0 {
+                    0.85
+                } else if latest_debt_ratio > 40.0 {
+                    0.90
+                } else {
+                    0.95
+                };
+                latest
+                    .operating_cash_flow
+                    .and_then(|ocf| latest.capital_expenditure.map(|capex| ocf - capex))
+                    .or_else(|| latest.net_profit.map(|np| np * capex_ratio))
+            })
+            .unwrap_or(0.0);
 
         // DCF
         let dcf = if fcf > 0.0 && shares_outstanding > 0.0 {

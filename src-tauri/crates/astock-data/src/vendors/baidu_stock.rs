@@ -87,6 +87,7 @@ impl StockVendor for BaiduStockVendor {
             pe: val_to_f64(&result["pe"]),
             pb: val_to_f64(&result["pb"]),
             total_mv: val_to_f64(&result["totalmktcap"]),
+            circulating_mv: val_to_f64(&result["circulatingmktcap"]),
             limit_up: None,
             limit_down: None,
             is_st: false,
@@ -171,6 +172,10 @@ impl StockVendor for BaiduStockVendor {
                 profit_yoy: val_to_f64(&item["parentNetprofitYoy"]),
                 total_assets: None,
                 operating_cash_flow: None,
+                capital_expenditure: None,
+                free_cash_flow: None,
+                current_ratio: None,
+                quick_ratio: None,
             })
             .collect())
     }

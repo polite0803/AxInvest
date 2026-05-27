@@ -583,6 +583,7 @@ impl StockVendor for MootdxVendor {
             pe: None,
             pb: None,
             total_mv: None,
+            circulating_mv: None,
             limit_up: None,
             limit_down: None,
             is_st: false,

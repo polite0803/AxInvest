@@ -1,8 +1,8 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Checkbox, Empty, InputNumber, List, Spin, Tag } from "antd";
-import { useEffect, useState } from "react";
+import { Button, Card, Empty, InputNumber, List, Space, Spin, Tag } from "antd";
+import { useCallback, useEffect, useState } from "react";
 
 interface ScreenResult {
   stockCode: string;
@@ -13,21 +13,20 @@ interface ScreenResult {
   score: number;
 }
 
-interface CriteriaState {
-  minChangePct?: number;
-  maxChangePct?: number;
-  turnoverRateMin?: number;
-  dragonTigerNetMin?: number;
-  mainInflowMin?: number;
-  northboundRatioMin?: number;
-  rsiOversold: boolean;
-  rsiOverbought: boolean;
+interface FactorState {
+  enabled: boolean;
+  value?: number;
 }
 
-const defaultCriteria: CriteriaState = {
-  rsiOversold: false,
-  rsiOverbought: false,
-};
+const FACTOR_DEFS = [
+  { key: "minChangePct", label: "涨跌幅≥", unit: "%", min: -10, max: 10, step: 0.5 },
+  { key: "turnoverRateMin", label: "换手率≥", unit: "%", min: 0, max: 50, step: 0.5 },
+  { key: "mainInflowMin", label: "主力净流入≥", unit: "万元", min: 0, max: 999999, step: 100 },
+  { key: "dragonTigerNetMin", label: "龙虎榜净买≥", unit: "万元", min: 0, max: 999999, step: 100 },
+  { key: "northboundRatioMin", label: "北向持仓≥", unit: "%", min: 0, max: 100, step: 0.5 },
+  { key: "rsiOversold", label: "RSI 超卖", unit: "", min: 0, max: 0, step: 0 },
+  { key: "rsiOverbought", label: "RSI 超买", unit: "", min: 0, max: 0, step: 0 },
+] as const;
 
 export function StockScreenerPanel() {
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -38,29 +37,52 @@ export function StockScreenerPanel() {
   const [results, setResults] = useState<ScreenResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<"discover" | "screen">("discover");
-  const [criteria, setCriteria] = useState<CriteriaState>(defaultCriteria);
+  const [factors, setFactors] = useState<Record<string, FactorState>>({});
+  const [selectedCount, setSelectedCount] = useState(0);
 
-  const discover = async () => {
+  const discover = useCallback(async () => {
     setLoading(true);
     try {
       const r = await invoke<ScreenResult[]>("discover_stock_candidates");
       if (Array.isArray(r)) { setResults(r); }
     } catch { /* 静默 */ }
     setLoading(false);
-  };
+  }, []);
 
-  const screen = async () => {
+  const screen = useCallback(async () => {
     setLoading(true);
     try {
+      const criteria: Record<string, any> = {};
+      for (const fd of FACTOR_DEFS) {
+        const f = factors[fd.key];
+        if (!f?.enabled) { continue; }
+        if (fd.key === "rsiOversold") { criteria.rsiOversold = true; }
+        else if (fd.key === "rsiOverbought") { criteria.rsiOverbought = true; }
+        else if (f.value != null) { criteria[fd.key] = f.value; }
+      }
       const r = await invoke<ScreenResult[]>("screen_stocks", { criteria });
       if (Array.isArray(r)) { setResults(r); }
     } catch { /* 静默 */ }
     setLoading(false);
-  };
+  }, [factors]);
 
   useEffect(() => {
     discover();
-  }, [watchlistVersion]);
+  }, [watchlistVersion, discover]);
+
+  const toggleFactor = (key: string) => {
+    setFactors((prev) => {
+      const cur = prev[key];
+      const enabled = !cur?.enabled;
+      const next = { ...prev, [key]: { ...cur, enabled, value: cur?.value } };
+      setSelectedCount(Object.values(next).filter((f) => f.enabled).length);
+      return next;
+    });
+  };
+
+  const setValue = (key: string, v: number | null) => {
+    setFactors((prev) => ({ ...prev, [key]: { ...prev[key], value: v ?? undefined } }));
+  };
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);
@@ -68,7 +90,7 @@ export function StockScreenerPanel() {
     startAnalysis(code);
   };
 
-  const nf = (v: number | null | undefined): number | undefined => v ?? undefined;
+  const isRsiFactor = (key: string) => key.startsWith("rsi");
 
   return (
     <Card
@@ -95,97 +117,59 @@ export function StockScreenerPanel() {
     >
       {mode === "screen" && (
         <div className="flex flex-col gap-1 mb-2">
-          {/* 基础条件 */}
-          <div className="flex gap-1 flex-wrap items-center text-xs">
-            <span className="text-gray-400">涨跌</span>
-            <InputNumber
-              size="small"
-              style={{ width: 62 }}
-              min={-10}
-              max={10}
-              step={0.5}
-              value={criteria.minChangePct}
-              onChange={(v) => setCriteria({ ...criteria, minChangePct: nf(v) })}
-              placeholder="≥ %"
-            />
-            <span className="text-gray-400">~</span>
-            <InputNumber
-              size="small"
-              style={{ width: 62 }}
-              min={-10}
-              max={10}
-              step={0.5}
-              value={criteria.maxChangePct}
-              onChange={(v) => setCriteria({ ...criteria, maxChangePct: nf(v) })}
-              placeholder="≤ %"
-            />
-            <span className="text-gray-400 ml-1">换手率≥</span>
-            <InputNumber
-              size="small"
-              style={{ width: 60 }}
-              min={0}
-              max={50}
-              step={0.5}
-              value={criteria.turnoverRateMin}
-              onChange={(v) => setCriteria({ ...criteria, turnoverRateMin: nf(v) })}
-              placeholder="%"
-            />
+          <div className="text-xs text-gray-400 mb-1">选择筛选因子（已选 {selectedCount} 项）：</div>
+          <div className="flex flex-wrap gap-1.5">
+            {FACTOR_DEFS.map((fd) => {
+              const f = factors[fd.key];
+              const active = f?.enabled;
+              return (
+                <Tag
+                  key={fd.key}
+                  color={active ? "blue" : "default"}
+                  className="cursor-pointer text-xs m-0 select-none"
+                  onClick={() => toggleFactor(fd.key)}
+                >
+                  {active ? "✓ " : ""}
+                  {fd.label}
+                </Tag>
+              );
+            })}
           </div>
-
-          {/* 资金面 */}
-          <div className="flex gap-1 flex-wrap items-center text-xs">
-            <span className="text-gray-400">主力净流入≥</span>
-            <InputNumber
-              size="small"
-              style={{ width: 72 }}
-              min={0}
-              step={100}
-              value={criteria.mainInflowMin}
-              onChange={(v) => setCriteria({ ...criteria, mainInflowMin: nf(v) })}
-              placeholder="万元"
-            />
-            <span className="text-gray-400 ml-1">龙虎榜≥</span>
-            <InputNumber
-              size="small"
-              style={{ width: 72 }}
-              min={0}
-              step={100}
-              value={criteria.dragonTigerNetMin}
-              onChange={(v) => setCriteria({ ...criteria, dragonTigerNetMin: nf(v) })}
-              placeholder="万元"
-            />
-            <span className="text-gray-400 ml-1">北向持仓≥</span>
-            <InputNumber
-              size="small"
-              style={{ width: 60 }}
-              min={0}
-              max={100}
-              step={0.5}
-              value={criteria.northboundRatioMin}
-              onChange={(v) => setCriteria({ ...criteria, northboundRatioMin: nf(v) })}
-              placeholder="%"
-            />
-          </div>
-
-          {/* 技术指标 + 操作按钮 */}
-          <div className="flex gap-1 flex-wrap items-center text-xs">
-            <Checkbox
-              checked={criteria.rsiOversold}
-              onChange={(e) => setCriteria({ ...criteria, rsiOversold: e.target.checked })}
-            >
-              RSI超卖
-            </Checkbox>
-            <Checkbox
-              checked={criteria.rsiOverbought}
-              onChange={(e) => setCriteria({ ...criteria, rsiOverbought: e.target.checked })}
-            >
-              RSI超买
-            </Checkbox>
-            <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
-              筛选
-            </Button>
-            <Button size="small" onClick={() => setCriteria(defaultCriteria)}>重置</Button>
-          </div>
+          {selectedCount > 0 && (
+            <div className="flex gap-1 flex-wrap items-center text-xs mt-1">
+              {FACTOR_DEFS.filter((fd) => factors[fd.key]?.enabled).map((fd) => {
+                if (isRsiFactor(fd.key)) { return null; }
+                return (
+                  <Space key={fd.key} size={2}>
+                    <span className="text-gray-500">{fd.label}</span>
+                    <InputNumber
+                      size="small"
+                      style={{ width: 72 }}
+                      min={fd.min}
+                      max={fd.max}
+                      step={fd.step}
+                      value={factors[fd.key]?.value}
+                      onChange={(v) => setValue(fd.key, v)}
+                      placeholder={fd.unit || "值"}
+                      suffix={fd.unit || undefined}
+                    />
+                  </Space>
+                );
+              })}
+              <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
+                筛选
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  setFactors({});
+                  setSelectedCount(0);
+                }}
+              >
+                清空
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -195,7 +179,7 @@ export function StockScreenerPanel() {
         ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={mode === "discover" ? "点击'全市场'发现候选" : "设置筛选条件后点击筛选"}
+            description={mode === "discover" ? "点击全市场发现候选" : "选择因子并点击筛选"}
           />
         )
         : (

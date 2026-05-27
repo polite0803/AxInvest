@@ -795,6 +795,14 @@ pub async fn generate_stock_report(
         .and_then(|all| all.get("value.assessment").cloned())
         .unwrap_or_default();
 
+    let bb_map = record
+        .blackboard_snapshot
+        .as_ref()
+        .and_then(|snap| {
+            serde_json::from_str::<std::collections::HashMap<String, String>>(snap).ok()
+        })
+        .unwrap_or_default();
+
     let html = axagent_stock_analysis::report::generate_html_report(
         &record.stock_code,
         &record.stock_name,
@@ -807,6 +815,11 @@ pub async fn generate_stock_report(
         "",
         "",
         &value_assessment_json,
+        &bb_map.get("raw.block_trades").cloned().unwrap_or_default(),
+        &bb_map
+            .get("raw.institutional_visits")
+            .cloned()
+            .unwrap_or_default(),
     );
 
     std::fs::write(&filepath, &html).map_err(|e| e.to_string())?;

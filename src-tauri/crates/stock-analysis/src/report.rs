@@ -14,6 +14,8 @@ pub fn generate_html_report(
     quality_summary: &str,
     rule_check_result: &str,
     value_assessment_json: &str,
+    block_trades_json: &str,
+    institutional_visits_json: &str,
 ) -> String {
     let quote: serde_json::Value = serde_json::from_str(quote_json).unwrap_or_default();
     let price = quote["price"].as_f64().unwrap_or(0.0);
@@ -25,6 +27,45 @@ pub fn generate_html_report(
     let margin_of_safety = value["margin_of_safety_pct"].as_f64().unwrap_or(0.0);
     let f_score = value["f_score"].as_f64().unwrap_or(0.0);
     let moat = value["moat_score"].as_f64().unwrap_or(0.0);
+
+    let block_trades: Vec<serde_json::Value> =
+        serde_json::from_str(block_trades_json).unwrap_or_default();
+    let block_trades_section = if block_trades.is_empty() {
+        String::new()
+    } else {
+        let mut rows = String::new();
+        for bt in block_trades.iter().take(5) {
+            let date = bt["date"].as_str().unwrap_or("-");
+            let price = bt["price"].as_f64().unwrap_or(0.0);
+            let vol = bt["volume"].as_f64().unwrap_or(0.0);
+            let buyer = bt["buyer"].as_str().unwrap_or("-");
+            let seller = bt["seller"].as_str().unwrap_or("-");
+            rows.push_str(&format!(
+                "<tr><td>{date}</td><td>{price:.2}</td><td>{vol:.0}</td><td>{buyer}</td><td>{seller}</td></tr>"
+            ));
+        }
+        format!("<h3 style=\"margin:16px 0 8px\">大宗交易</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>日期</th><th>价格</th><th>数量</th><th>买方</th><th>卖方</th></tr>{rows}</table>")
+    };
+
+    let visits: Vec<serde_json::Value> =
+        serde_json::from_str(institutional_visits_json).unwrap_or_default();
+    let institutional_visits_section = if visits.is_empty() {
+        String::new()
+    } else {
+        let mut rows = String::new();
+        for v in visits.iter().take(5) {
+            let date = v["date"].as_str().unwrap_or("-");
+            let orgs = v["org_count"].as_u64().unwrap_or(0);
+            let content = v["content"].as_str().unwrap_or("-");
+            let short = if content.len() > 60 {
+                &content[..60]
+            } else {
+                content
+            };
+            rows.push_str(&format!("<tr><td>{date}</td><td>{orgs}</td><td>{short}</td></tr>"));
+        }
+        format!("<h3 style=\"margin:16px 0 8px\">机构调研</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>日期</th><th>机构数</th><th>内容</th></tr>{rows}</table>")
+    };
 
     // Build analyst report HTML
     let mut analyst_html = String::new();
@@ -180,6 +221,10 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   <div class="card"><h3>安全边际</h3><div class="value">{margin_of_safety:.1}%</div></div>
   <div class="card"><h3>F-Score / 护城河</h3><div class="value">{f_score:.0}/9 · {moat:.0}/10</div></div>
 </div>
+
+{block_trades_section}
+
+{institutional_visits_section}
 
 <div class="decision">
   <h2>最终决策</h2>

@@ -469,6 +469,9 @@ impl StockAnalysisOrchestrator {
             .map(|c| serde_json::to_string(c).unwrap_or_default())
             .unwrap_or_default();
         let announcements_json = serde_json::to_string(&raw.announcements).unwrap_or_default();
+        let block_trades_json = serde_json::to_string(&raw.block_trades).unwrap_or_default();
+        let institutional_visits_json =
+            serde_json::to_string(&raw.institutional_visits).unwrap_or_default();
 
         {
             let mut bb = blackboard.write().await;
@@ -487,6 +490,8 @@ impl StockAnalysisOrchestrator {
             bb.set_state("raw.consensus_eps", &eps_json);
             bb.set_state("raw.concept_blocks", &concept_json);
             bb.set_state("raw.announcements", &announcements_json);
+            bb.set_state("raw.block_trades", &block_trades_json);
+            bb.set_state("raw.institutional_visits", &institutional_visits_json);
         }
 
         let _ = events.send(AnalysisEvent::DataLoaded {

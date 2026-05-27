@@ -40,7 +40,15 @@ impl ValueInvestingEngine {
         value_config: Option<&crate::decision::ValueConfig>,
     ) -> ValueMetrics {
         let latest = financials.first();
-        let fcf = latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 1_0000_0000.0;
+        let fcf = latest
+            .and_then(|f| {
+                f.free_cash_flow.or_else(|| {
+                    f.operating_cash_flow
+                        .and_then(|ocf| f.capital_expenditure.map(|capex| ocf - capex))
+                })
+            })
+            .unwrap_or_else(|| latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 0.90)
+            * 1_0000_0000.0;
 
         let g = value_config.map(|c| c.dcf_growth_rate / 100.0);
         let p = value_config.map(|c| c.dcf_perpetual_rate / 100.0);
@@ -218,8 +226,7 @@ impl ValueInvestingEngine {
         if curr.debt_ratio.unwrap_or(100.0) < prev.debt_ratio.unwrap_or(100.0) {
             score += 1;
         } // 负债率下降
-          // 流动比率改善(用负债率代理)
-        if curr.revenue.unwrap_or(0.0) > prev.revenue.unwrap_or(0.0) {
+        if curr.current_ratio.map(|r| r > 1.5).unwrap_or(false) {
             score += 1;
         }
         // 无增发(用EPS不稀释代理)
@@ -351,14 +358,22 @@ impl ValueInvestingEngine {
         }
         let f = &financials[0];
         let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0;
-        let debt_ratio = f.debt_ratio.unwrap_or(50.0);
-        let capex_ratio = if debt_ratio > 60.0 {
-            0.85
-        } else if debt_ratio > 40.0 {
-            0.90
+        if let (Some(ocf), Some(capex)) = (f.operating_cash_flow, f.capital_expenditure) {
+            let ocf_scaled = ocf * 1_0000_0000.0;
+            let capex_scaled = capex * 1_0000_0000.0;
+            ocf_scaled - capex_scaled
+        } else if let Some(fcf) = f.free_cash_flow {
+            fcf * 1_0000_0000.0
         } else {
-            0.95
-        };
-        net * capex_ratio
+            let debt_ratio = f.debt_ratio.unwrap_or(50.0);
+            let capex_ratio = if debt_ratio > 60.0 {
+                0.85
+            } else if debt_ratio > 40.0 {
+                0.90
+            } else {
+                0.95
+            };
+            net * capex_ratio
+        }
     }
 }

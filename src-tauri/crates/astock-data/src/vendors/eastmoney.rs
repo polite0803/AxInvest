@@ -325,41 +325,47 @@ impl StockVendor for EastMoneyVendor {
         stock_code: &str,
     ) -> Result<Option<NorthBoundHolding>, DataError> {
         let secid = to_em_secid(stock_code);
-        // 东方财富北向资金个股级别API: 通过个股资金流向K线接口获取
-        // klt=3 代表日级别北向资金数据
         let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3&fields2=f51,f52,f53&lmt=1&klt=3"
+            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3&fields2=f51,f52,f53&lmt=2&klt=3"
         );
         let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
 
         if let Some(arr) = json["data"]["klines"].as_array() {
-            if let Some(line) = arr.first().and_then(|v| v.as_str()) {
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 3 {
-                    let holding_shares: f64 = parts[1].parse().unwrap_or(0.0);
-                    let holding_ratio: f64 = parts[2].parse().unwrap_or(0.0);
-                    // 变动数量通过与前一日差值计算（此处返回0，由调用方自行计算）
-                    return Ok(Some(NorthBoundHolding {
-                        stock_code: stock_code.to_string(),
-                        date: parts[0].to_string(),
-                        holding_shares,
-                        holding_ratio,
-                        change_shares: 0.0,
-                    }));
+            let len = arr.len();
+            if len >= 1 {
+                if let Some(line) = arr[len - 1].as_str() {
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() >= 3 {
+                        let holding_shares: f64 = parts[1].parse().unwrap_or(0.0);
+                        let holding_ratio: f64 = parts[2].parse().unwrap_or(0.0);
+                        let prev_shares = if len >= 2 {
+                            arr[len - 2]
+                                .as_str()
+                                .and_then(|s| s.split(',').nth(1))
+                                .and_then(|v| v.parse::<f64>().ok())
+                                .unwrap_or(0.0)
+                        } else {
+                            0.0
+                        };
+                        return Ok(Some(NorthBoundHolding {
+                            stock_code: stock_code.to_string(),
+                            date: parts[0].to_string(),
+                            holding_shares,
+                            holding_ratio,
+                            change_shares: holding_shares - prev_shares,
+                        }));
+                    }
                 }
             }
         }
-        // 北向资金个股数据可能不可用（部分股票无数据），返回 None 而非错误
         Ok(None)
     }
 
     async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
-        // 通过东方财富行情API获取个股的行业和概念板块信息
-        // f158=申万一级行业, f159=申万二级行业, f160=概念板块, f161/f162=其他分类
+        let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2.eastmoney.com/api/qt/stock/get?secid={}&fields=f158,f159,f160",
-            to_em_secid(stock_code)
+            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f158,f159,f160"
         );
         let resp = self.http.get(&url).send().await?;
         let json: Value = resp.json().await?;
@@ -376,13 +382,38 @@ impl StockVendor for EastMoneyVendor {
             return Ok(None);
         }
 
+        let (avg_pe, avg_pb) = if !sector_name.is_empty() {
+            let board_url = format!(
+                "https://push2.eastmoney.com/api/qt/plate/get?secid=90.{}&fields=f162,f167",
+                urlencoding::encode(&sector_name)
+            );
+            match self.http.get(&board_url).send().await {
+                Ok(resp) => {
+                    let board_json: Value = resp.json().await.unwrap_or(Value::Null);
+                    let f = |key: &str| {
+                        board_json["data"][key].as_f64().and_then(|v| {
+                            if v > 0.0 {
+                                Some(v / 100.0)
+                            } else {
+                                None
+                            }
+                        })
+                    };
+                    (f("f162"), f("f167"))
+                },
+                Err(_) => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+
         Ok(Some(SectorInfo {
             stock_code: stock_code.to_string(),
             sector_name,
             sub_sector,
             concept_tags,
-            avg_pe: None,
-            avg_pb: None,
+            avg_pe,
+            avg_pb,
         }))
     }
 
@@ -681,7 +712,7 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_block_trades(&self, stock_code: &str) -> Result<Vec<BlockTrade>, DataError> {
-        let secid = to_em_secid(stock_code);
+        let _secid = to_em_secid(stock_code);
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_BLOCKTRADE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,TRADE_PRICE,TRADE_VOL,TRADE_AMOUNT,BUYER_NAME,SELLER_NAME,DISCOUNT_RATE&filter=(SECURITY_CODE=\"{stock_code}\")&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
         );
@@ -727,7 +758,7 @@ impl StockVendor for EastMoneyVendor {
         &self,
         stock_code: &str,
     ) -> Result<Vec<InstitutionalVisit>, DataError> {
-        let secid = to_em_secid(stock_code);
+        let _secid = to_em_secid(stock_code);
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ORG_SURVEY&columns=SECUCODE,SECURITY_NAME_ABBR,SURVEY_DATE,ORG_NUM,MAIN_CONTENT,SURVEY_TYPE&filter=(SECURITY_CODE=\"{stock_code}\")&sortColumns=SURVEY_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
         );

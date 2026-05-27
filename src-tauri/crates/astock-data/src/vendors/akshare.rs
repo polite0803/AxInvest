@@ -75,6 +75,8 @@ impl StockVendor for AkshareVendor {
                 profit_yoy: r["PARENT_NETPROFIT_YOY"]
                     .as_str()
                     .and_then(|s| s.parse().ok()),
+                total_assets: None,
+                operating_cash_flow: None,
             })
             .collect())
     }

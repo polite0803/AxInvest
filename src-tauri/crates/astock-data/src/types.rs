@@ -104,6 +104,10 @@ pub struct FinancialReport {
     pub net_margin: Option<f64>,
     pub revenue_yoy: Option<f64>,
     pub profit_yoy: Option<f64>,
+    #[serde(default)]
+    pub total_assets: Option<f64>,
+    #[serde(default)]
+    pub operating_cash_flow: Option<f64>,
 }
 
 /// 新闻/公告条目
@@ -183,9 +187,13 @@ pub struct NorthBoundHolding {
 #[serde(rename_all = "camelCase")]
 pub struct SectorInfo {
     pub stock_code: String,
-    pub sector_name: String,       // 申万一级行业
-    pub sub_sector: String,        // 申万二级行业
-    pub concept_tags: Vec<String>, // 概念板块标签
+    pub sector_name: String, // 申万一级行业
+    pub sub_sector: String,  // 申万二级行业
+    pub concept_tags: Vec<String>,
+    #[serde(default)]
+    pub avg_pe: Option<f64>,
+    #[serde(default)]
+    pub avg_pb: Option<f64>,
 }
 
 /// 股东增减持

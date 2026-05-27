@@ -167,6 +167,8 @@ impl StockVendor for BaiduStockVendor {
                 net_margin: val_to_f64(&item["netprofitMargin"]),
                 revenue_yoy: val_to_f64(&item["totalOperateIncomeYoy"]),
                 profit_yoy: val_to_f64(&item["parentNetprofitYoy"]),
+                total_assets: None,
+                operating_cash_flow: None,
             })
             .collect())
     }
@@ -359,6 +361,8 @@ impl StockVendor for BaiduStockVendor {
             sector_name,
             sub_sector: data["subIndustry"].as_str().unwrap_or("").to_string(),
             concept_tags,
+            avg_pe: None,
+            avg_pb: None,
         }))
     }
 

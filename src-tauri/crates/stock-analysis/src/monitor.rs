@@ -78,29 +78,21 @@ impl RealtimeMonitor {
     /// 添加监控标的
     pub async fn add_config(&self, config: MonitorConfig) {
         let mut configs = self.configs.write().await;
-        configs.insert(config.stock_code.clone(), config.clone());
-        let _ = Self::persist_configs(&configs);
+        configs.insert(config.stock_code.clone(), config);
     }
 
     /// 移除监控标的
     pub async fn remove_config(&self, stock_code: &str) {
         let mut configs = self.configs.write().await;
         configs.remove(stock_code);
-        let _ = Self::persist_configs(&configs);
     }
 
-    fn persist_configs(configs: &HashMap<String, MonitorConfig>) -> Result<(), String> {
-        let json = serde_json::to_string(&configs.values().collect::<Vec<_>>())
-            .map_err(|e| e.to_string())?;
-        axagent_core::repo::settings::set_setting_sync("monitor_configs", &json)
+    pub fn serialize_configs(configs: &HashMap<String, MonitorConfig>) -> String {
+        serde_json::to_string(&configs.values().collect::<Vec<_>>()).unwrap_or_default()
     }
 
-    pub fn load_configs_from_db() -> Vec<MonitorConfig> {
-        axagent_core::repo::settings::get_setting_sync("monitor_configs")
-            .ok()
-            .flatten()
-            .and_then(|json| serde_json::from_str::<Vec<MonitorConfig>>(&json).ok())
-            .unwrap_or_default()
+    pub fn deserialize_configs(json: &str) -> Vec<MonitorConfig> {
+        serde_json::from_str::<Vec<MonitorConfig>>(json).unwrap_or_default()
     }
 
     /// 获取所有监控配置

@@ -2,6 +2,7 @@ import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettin
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
+import { Collapse } from "antd";
 import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -223,14 +224,16 @@ export function StockAnalysisPage() {
             </div>
 
             <div className="sa-sidebar">
-              {sheetPanels.map((p) => (
-                <div key={p.key} className="sa-panel">
-                  <div className="sa-panel-header">
-                    <span className="sa-panel-title">{p.label}</span>
-                  </div>
-                  <div className="sa-panel-body">{p.element}</div>
-                </div>
-              ))}
+              <Collapse
+                size="small"
+                ghost
+                defaultActiveKey={["screener"]}
+                items={sheetPanels.map((p) => ({
+                  key: p.key,
+                  label: <span className="text-xs font-medium">{p.label}</span>,
+                  children: <div className="sa-panel-body">{p.element}</div>,
+                }))}
+              />
             </div>
           </div>
         </div>

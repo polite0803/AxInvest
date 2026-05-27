@@ -3639,4 +3639,28 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   .sa-header-meta { display: none; }
   .sa-tab { padding: 6px 10px; font-size: 11px; }
   .sa-bottom-sheet { max-height: 70vh; }
+/* ── 模型/服务商列表单行截断 ──────── */
+.overflow-hidden > span,
+.overflow-hidden > .ant-typography,
+.provider-detail-card .flex-1 > .flex > span:first-child,
+.provider-detail-card .flex-1 > .flex > .ant-typography:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.overflow-hidden > span:hover,
+.overflow-hidden > .ant-typography:hover,
+.provider-detail-card .flex-1 > .flex > span:first-child:hover,
+.provider-detail-card .flex-1 > .flex > .ant-typography:first-child:hover {
+  overflow: visible;
+  white-space: nowrap;
+  background: var(--color-bg-elevated, var(--ant-color-bg-elevated));
+  position: absolute;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  max-width: none;
 }

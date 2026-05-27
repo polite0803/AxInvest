@@ -1,7 +1,7 @@
 use crate::AppState;
 use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_core::entity::{
-    analysis_schedules, portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
+    portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
 use axagent_core::types::ProviderProxyConfig;
 use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
@@ -10,7 +10,6 @@ use axagent_stock_analysis::backtest::{
 };
 use axagent_stock_analysis::decision::{AgentRunner, AnalysisEvent, StockAnalysisFullConfig};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
-use axagent_stock_analysis::monitor::MonitorConfig;
 use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
@@ -652,76 +651,6 @@ pub async fn backtest_all_history(
     Ok(stats)
 }
 
-// ── Analysis Schedules ──
-
-/// 创建定时分析计划
-#[tauri::command]
-pub async fn create_analysis_schedule(
-    state: State<'_, AppState>,
-    stock_code: String,
-    stock_name: String,
-    cron_expression: String,
-    provider_id: String,
-) -> Result<analysis_schedules::Model, String> {
-    let now = chrono::Utc::now().timestamp_millis();
-    let model = analysis_schedules::ActiveModel {
-        id: Set(uuid::Uuid::new_v4().to_string()),
-        stock_code: Set(stock_code),
-        stock_name: Set(stock_name),
-        cron_expression: Set(cron_expression),
-        provider_id: Set(provider_id),
-        is_enabled: Set(true),
-        last_run_at: Set(None),
-        next_run_at: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
-}
-
-/// 查询定时分析计划列表
-#[tauri::command]
-pub async fn list_analysis_schedules(
-    state: State<'_, AppState>,
-) -> Result<Vec<analysis_schedules::Model>, String> {
-    analysis_schedules::Entity::find()
-        .order_by_desc(analysis_schedules::Column::CreatedAt)
-        .all(&state.sea_db)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// 切换定时分析计划启用/禁用
-#[tauri::command]
-pub async fn toggle_analysis_schedule(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    let now = chrono::Utc::now().timestamp_millis();
-    analysis_schedules::Entity::update_many()
-        .col_expr(analysis_schedules::Column::IsEnabled, Expr::value(enabled))
-        .col_expr(analysis_schedules::Column::UpdatedAt, Expr::value(now))
-        .filter(analysis_schedules::Column::Id.eq(id))
-        .exec(&state.sea_db)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// 删除定时分析计划
-#[tauri::command]
-pub async fn delete_analysis_schedule(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
-    analysis_schedules::Entity::delete_by_id(id)
-        .exec(&state.sea_db)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 // ── Price Alerts ──
 
 /// 创建价格告警
@@ -956,56 +885,6 @@ pub async fn compare_trade_with_analysis(
 
     let engine = state.trading_engine.read().await;
     engine.compare_trade_vs_prediction(&trade).await
-}
-
-// ── Monitor Commands ──
-
-/// 启动实时监控引擎
-#[tauri::command]
-pub async fn start_monitor(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(ref monitor) = state.stock_monitor {
-        monitor.start().await;
-        Ok(())
-    } else {
-        Err("监控引擎未初始化".to_string())
-    }
-}
-
-/// 停止实时监控引擎
-#[tauri::command]
-pub async fn stop_monitor(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(ref monitor) = state.stock_monitor {
-        monitor.stop().await;
-        Ok(())
-    } else {
-        Err("监控引擎未初始化".to_string())
-    }
-}
-
-/// 添加监控配置
-#[tauri::command]
-pub async fn add_monitor_config(
-    state: State<'_, AppState>,
-    config: MonitorConfig,
-) -> Result<(), String> {
-    if let Some(ref monitor) = state.stock_monitor {
-        monitor.add_config(config).await;
-        Ok(())
-    } else {
-        Err("监控引擎未初始化".to_string())
-    }
-}
-
-/// 获取所有监控配置
-#[tauri::command]
-pub async fn list_monitor_configs(
-    state: State<'_, AppState>,
-) -> Result<Vec<MonitorConfig>, String> {
-    if let Some(ref monitor) = state.stock_monitor {
-        Ok(monitor.list_configs().await)
-    } else {
-        Err("监控引擎未初始化".to_string())
-    }
 }
 
 // ── Key Levels Commands ──
@@ -1317,6 +1196,106 @@ pub async fn get_north_bound_flow(
         .get_north_bound_flow()
         .await
         .map_err(|e| e.to_string())
+}
+
+// ── CronJob 定时任务（基于上游 CronJobStore + 持久化）──
+
+use axagent_runtime_core::{CronJob, CronJobStatus, TaskConfig, TaskRunResult};
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CronJobResponse {
+    id: String,
+    name: String,
+    description: String,
+    schedule: String,
+    status: String,
+    recurring: bool,
+    run_count: u32,
+    last_run_at: Option<i64>,
+    next_run_at: Option<i64>,
+}
+
+impl From<&CronJob> for CronJobResponse {
+    fn from(j: &CronJob) -> Self {
+        Self {
+            id: j.id.clone(),
+            name: j.name.clone(),
+            description: j.description.clone(),
+            schedule: j.schedule.clone(),
+            status: format!("{:?}", j.status).to_lowercase(),
+            recurring: j.recurring,
+            run_count: j.run_count,
+            last_run_at: j.last_run_at,
+            next_run_at: j.next_run_at,
+        }
+    }
+}
+
+/// 创建股票定时分析任务
+#[tauri::command]
+pub async fn create_stock_cron(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+    cron_expression: String,
+) -> Result<CronJobResponse, String> {
+    let id = format!(
+        "stock-{}-{}",
+        stock_code,
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("x")
+    );
+    let prompt = format!("对 {} ({}) 执行完整股票分析", stock_code, stock_name);
+    let desc = format!("定时分析 {}", stock_code);
+    let job = CronJob::new(&id, &cron_expression, &prompt, &desc)
+        .with_workflow_id("stock-analysis".to_string())
+        .with_task_type("stock-analysis");
+    state.cron_job_store.add(job.clone()).await;
+    Ok(CronJobResponse::from(&job))
+}
+
+/// 列出所有股票定时分析任务
+#[tauri::command]
+pub async fn list_stock_crons(state: State<'_, AppState>) -> Result<Vec<CronJobResponse>, String> {
+    let jobs = state.cron_job_store.list().await;
+    Ok(jobs
+        .iter()
+        .filter(|j| j.task_type.as_deref() == Some("stock-analysis"))
+        .map(CronJobResponse::from)
+        .collect())
+}
+
+/// 启停定时任务
+#[tauri::command]
+pub async fn toggle_stock_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .cron_job_store
+        .set_status(
+            &id,
+            if enabled {
+                CronJobStatus::Active
+            } else {
+                CronJobStatus::Paused
+            },
+        )
+        .await;
+    Ok(())
+}
+
+/// 删除定时任务
+#[tauri::command]
+pub async fn delete_stock_cron(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.cron_job_store.remove(&id).await;
+    Ok(())
 }
 
 /// 检查指定数据源的连接可用性

@@ -195,7 +195,7 @@ check("Rust 股票分析命令", () => {
 
   const keyCmds = [
     "search_stock",
-    "start_monitor",
+    "create_stock_cron",
     "run_stock_workflow",
     "ensure_stock_analysis_experts_seeded",
   ];

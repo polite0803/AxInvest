@@ -1696,57 +1696,23 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
 
     // Profile → 工具映射（上游架构：工具由 AgentProfile 统一管理）
     let profile_tools: std::collections::HashMap<&str, &[&str]> = [
-        ("market-analyst", &["get_stock_kline", "get_stock_quote", "compute_scoring"][..]),
-        (
-            "sentiment-analyst",
-            &["get_stock_news", "get_stock_money_flow", "get_hot_stocks"][..],
-        ),
-        ("news-analyst", &["get_stock_news", "get_announcements"][..]),
-        (
-            "fundamentals-analyst",
-            &[
-                "get_stock_financials",
-                "compute_valuation",
-                "get_consensus_eps",
-            ][..],
-        ),
-        ("policy-analyst", &["get_stock_news", "get_announcements"][..]),
-        ("hot-money-tracker", &["get_stock_money_flow", "get_hot_stocks"][..]),
-        ("lockup-watcher", &["get_stock_financials", "get_announcements"][..]),
-        (
-            "research-analyst",
-            &[
-                "get_consensus_eps",
-                "get_stock_financials",
-                "get_stock_news",
-            ][..],
-        ),
-        (
-            "sector-analyst",
-            &["get_industry_ranking", "get_hot_stocks", "get_stock_quote"][..],
-        ),
-        ("bull-researcher", &["compute_scoring", "compute_valuation"][..]),
-        ("bear-researcher", &["compute_scoring", "compute_valuation"][..]),
-        ("aggressive-debator", &["compute_portfolio_risk"][..]),
-        ("conservative-debator", &["compute_portfolio_risk"][..]),
-        ("neutral-debator", &["compute_portfolio_risk"][..]),
-        (
-            "research-manager",
-            &[
-                "compute_scoring",
-                "compute_valuation",
-                "compute_portfolio_risk",
-            ][..],
-        ),
-        ("trader", &["get_stock_quote", "compute_scoring"][..]),
-        (
-            "portfolio-manager",
-            &[
-                "compute_scoring",
-                "compute_valuation",
-                "compute_portfolio_risk",
-            ][..],
-        ),
+        ("market-analyst", &["get_stock_kline", "get_stock_quote", "compute_scoring", "search_stock"][..]),
+        ("sentiment-analyst", &["get_stock_news", "get_stock_money_flow", "get_hot_stocks", "search_stock"][..]),
+        ("news-analyst", &["get_stock_news", "get_announcements", "search_stock"][..]),
+        ("fundamentals-analyst", &["get_stock_financials", "compute_valuation", "get_consensus_eps", "search_stock"][..]),
+        ("policy-analyst", &["get_stock_news", "get_announcements", "search_stock"][..]),
+        ("hot-money-tracker", &["get_stock_money_flow", "get_hot_stocks", "search_stock"][..]),
+        ("lockup-watcher", &["get_stock_financials", "get_announcements", "search_stock"][..]),
+        ("research-analyst", &["get_consensus_eps", "get_stock_financials", "get_stock_news", "search_stock"][..]),
+        ("sector-analyst", &["get_industry_ranking", "get_hot_stocks", "get_stock_quote", "search_stock"][..]),
+        ("bull-researcher", &["compute_scoring", "compute_valuation", "search_stock"][..]),
+        ("bear-researcher", &["compute_scoring", "compute_valuation", "search_stock"][..]),
+        ("aggressive-debator", &["compute_portfolio_risk", "search_stock"][..]),
+        ("conservative-debator", &["compute_portfolio_risk", "search_stock"][..]),
+        ("neutral-debator", &["compute_portfolio_risk", "search_stock"][..]),
+        ("research-manager", &["compute_scoring", "compute_valuation", "compute_portfolio_risk", "search_stock"][..]),
+        ("trader", &["get_stock_quote", "compute_scoring", "search_stock"][..]),
+        ("portfolio-manager", &["compute_scoring", "compute_valuation", "compute_portfolio_risk", "search_stock"][..]),
     ]
     .into_iter()
     .collect();

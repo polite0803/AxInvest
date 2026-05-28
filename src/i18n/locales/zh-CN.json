@@ -6850,6 +6850,21 @@
         "success": "评分权重已优化",
         "failed": "优化失败",
         "btn": "🎯 基于回测优化评分权重"
+      },
+      "screener": {
+        "title": "🔍 智能荐股",
+        "discover": "全市场",
+        "screen": "自选筛选",
+        "factorHint": "选择筛选因子（已选 {{count}} 项）：",
+        "placeholder": "值",
+        "filter": "筛选",
+        "clear": "清空",
+        "discoverHint": "点击全市场发现候选",
+        "screenHint": "选择因子并点击筛选",
+        "score": "得分 {{score}}"
+      },
+      "vendor": {
+        "disabled": "数据源未开启：{{names}} 均未启用"
       }
     },
     "progress.fetchingData": "正在获取股票数据，请稍候...",

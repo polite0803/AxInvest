@@ -1,5 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { message } from "antd";
+import i18next from "i18next";
 
 const PANEL_VENDORS: Record<string, string[]> = {
   limitup: ["ths", "baidu_stock", "iwencai"],
@@ -10,7 +11,6 @@ const PANEL_VENDORS: Record<string, string[]> = {
   events: ["cninfo", "eastmoney", "baidu_stock"],
 };
 
-/** 刷新前检查 vendor 是否开启，未开启则弹提示并返回 false */
 export async function checkVendorEnabled(panelKey: string): Promise<boolean> {
   const names = PANEL_VENDORS[panelKey];
   if (!names) { return true; }
@@ -24,7 +24,7 @@ export async function checkVendorEnabled(panelKey: string): Promise<boolean> {
       }
     }
     if (!names.some((n) => enabledSet.has(n))) {
-      message.warning(`数据源未开启：${names.join(" / ")} 均未启用`);
+      message.warning(i18next.t("stockAnalysis.settings.vendor.disabled", { names: names.join(" / ") }));
       return false;
     }
   } catch { /* 后端未运行不阻塞 */ }

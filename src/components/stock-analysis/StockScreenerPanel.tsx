@@ -3,6 +3,7 @@ import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, InputNumber, List, Space, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { checkVendorEnabled } from "./vendorCheck";
 
 interface ScreenResult {
@@ -30,6 +31,7 @@ const FACTOR_DEFS = [
 ] as const;
 
 export function StockScreenerPanel() {
+  const { t } = useTranslation();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -96,7 +98,7 @@ export function StockScreenerPanel() {
   return (
     <Card
       size="small"
-      title="🔍 智能荐股"
+      title={t("stockAnalysis.settings.screener.title")}
       styles={{ body: { padding: "8px 10px" } }}
       extra={
         <div className="flex gap-1">
@@ -108,17 +110,19 @@ export function StockScreenerPanel() {
               if (await checkVendorEnabled("screener")) { discover(); }
             }}
           >
-            全市场
+            {t("stockAnalysis.settings.screener.discover")}
           </Button>
           <Button size="small" type={mode === "screen" ? "primary" : "default"} onClick={() => setMode("screen")}>
-            自选筛选
+            {t("stockAnalysis.settings.screener.screen")}
           </Button>
         </div>
       }
     >
       {mode === "screen" && (
         <div className="flex flex-col gap-1 mb-2">
-          <div className="text-xs text-gray-400 mb-1">选择筛选因子（已选 {selectedCount} 项）：</div>
+          <div className="text-xs text-gray-400 mb-1">
+            {t("stockAnalysis.settings.screener.factorHint", { count: selectedCount })}
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {FACTOR_DEFS.map((fd) => {
               const f = factors[fd.key];
@@ -151,14 +155,14 @@ export function StockScreenerPanel() {
                       step={fd.step}
                       value={factors[fd.key]?.value}
                       onChange={(v) => setValue(fd.key, v)}
-                      placeholder={fd.unit || "值"}
+                      placeholder={fd.unit || t("stockAnalysis.settings.screener.placeholder")}
                       suffix={fd.unit || undefined}
                     />
                   </Space>
                 );
               })}
               <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
-                筛选
+                {t("stockAnalysis.settings.screener.filter")}
               </Button>
               <Button
                 size="small"
@@ -167,7 +171,7 @@ export function StockScreenerPanel() {
                   setSelectedCount(0);
                 }}
               >
-                清空
+                {t("stockAnalysis.settings.screener.clear")}
               </Button>
             </div>
           )}
@@ -180,7 +184,9 @@ export function StockScreenerPanel() {
         ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={mode === "discover" ? "点击全市场发现候选" : "选择因子并点击筛选"}
+            description={mode === "discover"
+              ? t("stockAnalysis.settings.screener.discoverHint")
+              : t("stockAnalysis.settings.screener.screenHint")}
           />
         )
         : (
@@ -191,7 +197,11 @@ export function StockScreenerPanel() {
               <List.Item
                 style={{ cursor: "pointer", padding: "4px 0" }}
                 onClick={() => handleAnalyze(r.stockCode)}
-                actions={[<Tag key="score" color="blue" className="text-xs m-0">得分 {r.score}</Tag>]}
+                actions={[
+                  <Tag key="score" color="blue" className="text-xs m-0">
+                    {t("stockAnalysis.settings.screener.score", { score: r.score })}
+                  </Tag>,
+                ]}
               >
                 <div className="flex items-center gap-2 text-xs w-full">
                   <Tag className="m-0 text-xs">{r.stockCode}</Tag>

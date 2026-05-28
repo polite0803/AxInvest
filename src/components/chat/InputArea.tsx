@@ -213,24 +213,15 @@ async function handleStockAnalysisTrigger(
     }
     convStore.setActiveConversation(conv.id);
 
-    const prompt = `分析A股 ${quote.name}(${stockCode})：
-现价 ¥${quote.price} | ${quote.changePct > 0 ? "+" : ""}${quote.changePct.toFixed(2)}%
-今开 ¥${quote.open} 最高 ¥${quote.high} 最低 ¥${quote.low}
-PE:${quote.pe?.toFixed(1) ?? "N/A"} PB:${quote.pb?.toFixed(1) ?? "N/A"} 市值:${
-      quote.totalMv ? (quote.totalMv / 1e8).toFixed(0) + "亿" : "N/A"
-    }
-请从技术面、基本面、消息面、资金面多维度分析，给出买入/增持/持有/减持/卖出建议。`;
-    convStore.sendAgentMessage(prompt); // fire-and-forget
-
-    // 3. 工作流→对话桥接：工作流事件实时注入对话消息
+    // 工作流→对话桥接：先注册桥接监听，再启动工作流，确保事件不丢失
     const { startStockWorkflowChatBridge } = await import(
       "@/stores/feature/stockWorkflowChatBridge"
     );
     startStockWorkflowChatBridge(conv.id);
 
-    // 4. 分析页：启动独立管线，填充结构化 tabs
+    // 分析页：启动完整工作流管线
     const { startAnalysis } = useStockAnalysisStore.getState();
-    startAnalysis(stockCode); // fire-and-forget
+    startAnalysis(stockCode); // fire-and-forget (内部调用 run_stock_workflow + 注册事件监听)
     navigate(`/stock-analysis?code=${stockCode}`);
   } catch (e) {
     console.error("[StockAnalysis]", e);

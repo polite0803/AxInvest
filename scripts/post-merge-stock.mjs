@@ -267,6 +267,7 @@ const zhCN = {
         rsiOversold: "RSI 超卖",
         rsiOverbought: "RSI 超买",
       },
+      unit10k: "万元",
     },
     vendor: {
       disabled: "数据源未开启：{{names}} 均未启用",
@@ -551,6 +552,7 @@ const enUS = {
         rsiOversold: "RSI Oversold",
         rsiOverbought: "RSI Overbought",
       },
+      unit10k: "10k",
     },
     vendor: {
       disabled: "No vendor enabled: {{names}}",

@@ -181,7 +181,7 @@ impl ValueInvestingEngine {
         let mid = Self::dcf_two_stage(fcf_per_share, base_g.max(0.01), base_p, base_d);
         let high = Self::dcf_two_stage(
             fcf_per_share,
-            (base_g * 1.5).max(0.02).min(0.30),
+            (base_g * 1.5).clamp(0.02, 0.30),
             (base_p * 1.3).min(0.05),
             base_d,
         );

@@ -126,14 +126,20 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
     let price = last.close;
 
     // 计算量比
-    let avg_vol: f64 = if klines.len() >= 5 {
+    let avg_vol: f64 = if klines.len() >= 6 {
         klines[klines.len() - 6..klines.len() - 1]
             .iter()
             .map(|k| k.volume)
             .sum::<f64>()
             / 5.0
+    } else if klines.len() >= 2 {
+        klines[..klines.len() - 1]
+            .iter()
+            .map(|k| k.volume)
+            .sum::<f64>()
+            / (klines.len() - 1) as f64
     } else {
-        klines.iter().map(|k| k.volume).sum::<f64>() / klines.len() as f64
+        klines[0].volume
     };
     let vol_ratio = if avg_vol > 0.0 {
         Some(last.volume / avg_vol)

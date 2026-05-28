@@ -194,14 +194,14 @@ impl Default for ScoringWeights {
             macd: 15.0,
             volume: 15.0,
             rsi: 10.0,
-            support: 10.0,
-            boll: 10.0,
+            support: 5.0,
+            boll: 5.0,
         }
     }
 }
 
 fn default_boll() -> f64 {
-    10.0
+    5.0
 }
 
 // ── 规则引擎可调阈值 ──

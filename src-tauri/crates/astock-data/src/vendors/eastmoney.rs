@@ -674,8 +674,10 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_announcements(&self, stock_code: &str) -> Result<Vec<Announcement>, DataError> {
-        let market = if stock_code.starts_with('6') {
+        let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
             "1"
+        } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+            "0"
         } else {
             "0"
         };

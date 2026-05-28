@@ -374,7 +374,7 @@ impl ValueEngine {
     pub fn assess_no_shares(
         current_price: f64,
         financials: &[FinancialReport],
-        value_config: Option<&ValueConfig>,
+        _value_config: Option<&ValueConfig>,
     ) -> ValueAssessment {
         let latest = match financials.first() {
             Some(f) => f,

@@ -40,15 +40,15 @@ impl ValueInvestingEngine {
         value_config: Option<&crate::decision::ValueConfig>,
     ) -> ValueMetrics {
         let latest = financials.first();
-        let fcf = latest
+        let fcf_raw = latest
             .and_then(|f| {
                 f.free_cash_flow.or_else(|| {
                     f.operating_cash_flow
                         .and_then(|ocf| f.capital_expenditure.map(|capex| ocf - capex))
                 })
             })
-            .unwrap_or_else(|| latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 0.90)
-            * 1_0000_0000.0;
+            .unwrap_or_else(|| latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 0.90);
+        let fcf = fcf_raw * 1_0000_0000.0;
 
         let g = value_config.map(|c| c.dcf_growth_rate / 100.0);
         let p = value_config.map(|c| c.dcf_perpetual_rate / 100.0);

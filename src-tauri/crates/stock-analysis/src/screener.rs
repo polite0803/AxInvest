@@ -181,11 +181,12 @@ impl StockScreener {
 
             if criteria.rsi_oversold || criteria.rsi_overbought {
                 if let Ok(klines) = client.get_klines(code, "daily", 30).await {
-                    if klines.len() >= 15 {
+                    if klines.len() >= 8 {
                         let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
+                        let period = 6usize;
                         let mut avg_gain = 0.0;
                         let mut avg_loss = 0.0;
-                        for i in 1..=14 {
+                        for i in 1..=period {
                             let diff = closes[i] - closes[i - 1];
                             if diff > 0.0 {
                                 avg_gain += diff;
@@ -193,14 +194,14 @@ impl StockScreener {
                                 avg_loss += -diff;
                             }
                         }
-                        avg_gain /= 14.0;
-                        avg_loss /= 14.0;
-                        for i in 15..closes.len() {
+                        avg_gain /= period as f64;
+                        avg_loss /= period as f64;
+                        for i in (period + 1)..closes.len() {
                             let diff = closes[i] - closes[i - 1];
                             let gain = if diff > 0.0 { diff } else { 0.0 };
                             let loss = if diff < 0.0 { -diff } else { 0.0 };
-                            avg_gain = (avg_gain * 13.0 + gain) / 14.0;
-                            avg_loss = (avg_loss * 13.0 + loss) / 14.0;
+                            avg_gain = (avg_gain * (period - 1) as f64 + gain) / period as f64;
+                            avg_loss = (avg_loss * (period - 1) as f64 + loss) / period as f64;
                         }
                         let rs = if avg_loss > 1e-10 {
                             avg_gain / avg_loss

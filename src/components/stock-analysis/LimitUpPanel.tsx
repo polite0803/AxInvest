@@ -3,6 +3,7 @@ import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Empty, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { checkVendorEnabled } from "./vendorCheck";
 
 interface LimitUpStock {
   code: string;
@@ -21,7 +22,6 @@ export function LimitUpPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [stocks, setStocks] = useState<LimitUpStock[]>([]);
   const [loading, setLoading] = useState(false);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -67,7 +67,15 @@ export function LimitUpPanel() {
       title={`🏆 ${t("stockAnalysis.settings.panels.limitUp")}`}
       styles={{ body: { padding: "4px 8px" } }}
       extra={
-        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+        <Button
+          size="small"
+          loading={loading}
+          onClick={async () => {
+            if (await checkVendorEnabled("limitup")) { load(); }
+          }}
+        >
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
       }
     >
       {loading

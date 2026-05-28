@@ -3,6 +3,7 @@ import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Empty, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { checkVendorEnabled } from "./vendorCheck";
 
 interface DtEntry {
   code: string;
@@ -59,7 +60,15 @@ export function DragonTigerPanel() {
       title={`🐉 ${t("stockAnalysis.settings.panels.dragonTiger")}`}
       styles={{ body: { padding: "4px 8px" } }}
       extra={
-        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+        <Button
+          size="small"
+          loading={loading}
+          onClick={async () => {
+            if (await checkVendorEnabled("dragontiger")) { load(); }
+          }}
+        >
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
       }
     >
       {loading

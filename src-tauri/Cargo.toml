@@ -20,7 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "cookies"] }
 sqlite-vec = "0.1.8-alpha.1"
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 lazy_static = "1"

@@ -110,10 +110,10 @@ impl BacktestEngine {
             .take(holding_days as usize + 1)
             .collect();
 
-        let mut peak = 0.0;
+        let mut peak = 0.0_f64;
         let mut max_dd = 0.0;
         for k in &relevant {
-            if k.close > peak {
+            if k.close > peak && k.close > 0.0 {
                 peak = k.close;
             }
             let dd = if peak > 0.0 {

@@ -1079,23 +1079,27 @@ pub async fn get_value_assessment(
         .get_financials(&stock_code)
         .await
         .map_err(|e| e.to_string())?;
-    let shares = quote
-        .total_mv
-        .map(|mv| {
-            if quote.price > 0.0 {
-                mv / quote.price / 1_0000_0000.0
-            } else {
-                100.0
-            }
-        })
-        .unwrap_or(100.0);
+    let shares = quote.total_mv.and_then(|mv| {
+        if quote.price > 0.0 {
+            Some(mv / quote.price / 1_0000_0000.0)
+        } else {
+            None
+        }
+    });
     let full_config = load_full_config(&state.sea_db).await;
-    Ok(axagent_stock_analysis::value::ValueEngine::assess(
-        quote.price,
-        &financials,
-        shares,
-        Some(&full_config.value),
-    ))
+    Ok(match shares {
+        Some(s) if s > 0.0 => axagent_stock_analysis::value::ValueEngine::assess(
+            quote.price,
+            &financials,
+            s,
+            Some(&full_config.value),
+        ),
+        _ => axagent_stock_analysis::value::ValueEngine::assess_no_shares(
+            quote.price,
+            &financials,
+            Some(&full_config.value),
+        ),
+    })
 }
 
 /// 计算巴菲特式价值投资综合指标（DCF + F-Score + 护城河量化 + 安全边际 + 所有者收益）

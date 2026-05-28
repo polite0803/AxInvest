@@ -14,8 +14,8 @@ pub struct ObjectiveScore {
     pub macd_score: u32,             // MACD 0-15
     pub volume_score: u32,           // 量能 0-15
     pub rsi_score: u32,              // RSI 0-10
-    pub support_score: u32,          // 支撑 0-10
-    pub boll_score: u32,             // 布林带 0-10
+    pub support_score: u32,          // 支撑 0-5
+    pub boll_score: u32,             // 布林带 0-5
     pub fundamental_adjustment: i32, // 基本面修正值（正加分/负扣分）
     pub signal: String, // "🟢强烈买入" | "🔵买入" | "🟡持有" | "⚪观望" | "🟠卖出" | "🔴强烈卖出"
     pub signal_code: String, // strong_buy | buy | hold | watch | sell | strong_sell
@@ -43,8 +43,8 @@ impl ScoringEngine {
         let rsi = (Self::score_rsi(indicators.rsi6) as f64 * w.rsi / 10.0) as u32;
         let support = (Self::score_support(latest_price, &indicators.support_levels) as f64
             * w.support
-            / 10.0) as u32;
-        let boll = (Self::score_boll(&indicators.boll_position) as f64 * w.boll / 10.0) as u32;
+            / 5.0) as u32;
+        let boll = (Self::score_boll(&indicators.boll_position) as f64 * w.boll / 5.0) as u32;
         let total = (trend + deviation + macd + volume + rsi + support + boll).min(100);
 
         let (signal, signal_code) = Self::map_signal(total, &indicators.ma_alignment);
@@ -144,7 +144,7 @@ impl ScoringEngine {
         0
     }
 
-    /// 支撑评分 (满分10) -- 同时受MA5和MA10双重支撑最佳
+    /// 支撑评分 (满分5) -- 同时受MA5和MA10双重支撑最佳
     fn score_support(price: f64, supports: &[f64]) -> u32 {
         if price <= 0.0 {
             return 2;
@@ -154,21 +154,21 @@ impl ScoringEngine {
             .filter(|&&s| s > 0.0 && price > s && (price - s) / price < 0.03)
             .count();
         match near_support {
-            2.. => 10,
-            1 => 6,
-            _ => 2,
+            2.. => 5,
+            1 => 3,
+            _ => 1,
         }
     }
 
-    /// 布林带位置评分 (满分10) -- 中轨附近最佳，上轨以上超买，下轨以下超卖
+    /// 布林带位置评分 (满分5) -- 中轨附近最佳，上轨以上超买，下轨以下超卖
     fn score_boll(position: &str) -> u32 {
         match position {
-            "中轨附近" => 10,
-            "下轨区间" => 7,
-            "上轨区间" => 6,
-            "下轨以下" => 4,
-            "上轨以上" => 2,
-            _ => 5,
+            "中轨附近" => 5,
+            "下轨区间" => 4,
+            "上轨区间" => 3,
+            "下轨以下" => 2,
+            "上轨以上" => 1,
+            _ => 3,
         }
     }
 
@@ -468,14 +468,13 @@ mod tests {
 
     #[test]
     fn test_score_support_double() {
-        // 价格 10.0，3% 以内 = 0.3，支撑 9.8 和 9.75 均在 3% 以内
         let supports = vec![9.8, 9.75, 7.0];
-        assert!(ScoringEngine::score_support(10.0, &supports) >= 6);
+        assert!(ScoringEngine::score_support(10.0, &supports) >= 5);
     }
 
     #[test]
     fn test_score_support_none() {
-        assert_eq!(ScoringEngine::score_support(10.0, &[12.0, 15.0]), 2);
+        assert_eq!(ScoringEngine::score_support(10.0, &[12.0, 15.0]), 1);
     }
 
     #[test]

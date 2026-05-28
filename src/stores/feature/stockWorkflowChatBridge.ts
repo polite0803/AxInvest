@@ -35,6 +35,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const unlisteners: UnlistenFn[] = [];
   let progressMsgId: string | null = null;
   const completedNodes = new Set<string>();
+  const pendingAnalystCards = new Map<string, string>(); // msg_id → nodeId
 
   // 插入初始进度消息
   try {
@@ -74,14 +75,18 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
 
     if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
       const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
-      invoke("send_system_message", {
+      // 先发占位消息，等工作流完成时在 results 中查找报告内容回填
+      const msg = await invoke<{ id: string }>("send_system_message", {
         conversationId,
         content: wf(
           "analyst",
-          { analystName, analystReport: "" },
+          { analystName, analystReport: "", nodeId },
           "📊 " + i18next.t("stockAnalysis.workflow.analystComplete"),
         ),
-      }).catch(() => {});
+      }).catch(() => null);
+      if (msg) {
+        pendingAnalystCards.set(msg.id, nodeId);
+      }
     }
   });
   unlisteners.push(u1);
@@ -92,7 +97,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     results: Record<string, unknown>;
     output?: Record<string, unknown> | null;
   }>("workflow-completed", async (event) => {
-    const output = event.payload.output;
+    const { results, output } = event.payload;
 
     if (progressMsgId) {
       invoke("update_message_content", {
@@ -104,6 +109,27 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         ),
       }).catch(() => {});
     }
+
+    // 回填分析师报告内容：从 results 中提取 "report.xxx" 键
+    for (const [msgId, nodeId] of pendingAnalystCards) {
+      const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
+      const reportKey = `report.${analystName}`;
+      const resultsObj: Record<string, unknown> = results ?? {};
+      const reportText: string = (resultsObj[reportKey] as string)
+        || (Object.entries(resultsObj).find(([k]) => k.includes(analystName)) ?? [])[1] as string
+        || "";
+      if (reportText) {
+        invoke("update_message_content", {
+          id: msgId,
+          content: wf(
+            "analyst",
+            { analystName, analystReport: reportText, nodeId },
+            "📊 " + i18next.t("stockAnalysis.workflow.analystComplete"),
+          ),
+        }).catch(() => {});
+      }
+    }
+    pendingAnalystCards.clear();
 
     if (output && typeof output === "object") {
       invoke("send_system_message", {

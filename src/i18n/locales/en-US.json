@@ -6764,7 +6764,16 @@
         "clear": "Clear",
         "discoverHint": "Click Discover to find candidates",
         "screenHint": "Select factors and click Filter",
-        "score": "Score {{score}}"
+        "score": "Score {{score}}",
+        "factor": {
+          "changePct": "Change% ≥",
+          "turnover": "Turnover ≥",
+          "mainInflow": "Main Inflow ≥",
+          "dragonTiger": "Dragon&Tiger ≥",
+          "northbound": "Northbound ≥",
+          "rsiOversold": "RSI Oversold",
+          "rsiOverbought": "RSI Overbought"
+        }
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}"

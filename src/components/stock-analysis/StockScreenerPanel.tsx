@@ -21,13 +21,62 @@ interface FactorState {
 }
 
 const FACTOR_DEFS = [
-  { key: "minChangePct", label: "涨跌幅≥", unit: "%", min: -10, max: 10, step: 0.5 },
-  { key: "turnoverRateMin", label: "换手率≥", unit: "%", min: 0, max: 50, step: 0.5 },
-  { key: "mainInflowMin", label: "主力净流入≥", unit: "万元", min: 0, max: 999999, step: 100 },
-  { key: "dragonTigerNetMin", label: "龙虎榜净买≥", unit: "万元", min: 0, max: 999999, step: 100 },
-  { key: "northboundRatioMin", label: "北向持仓≥", unit: "%", min: 0, max: 100, step: 0.5 },
-  { key: "rsiOversold", label: "RSI 超卖", unit: "", min: 0, max: 0, step: 0 },
-  { key: "rsiOverbought", label: "RSI 超买", unit: "", min: 0, max: 0, step: 0 },
+  {
+    key: "minChangePct",
+    i18nKey: "stockAnalysis.settings.screener.factor.changePct",
+    unit: "%",
+    min: -10,
+    max: 10,
+    step: 0.5,
+  },
+  {
+    key: "turnoverRateMin",
+    i18nKey: "stockAnalysis.settings.screener.factor.turnover",
+    unit: "%",
+    min: 0,
+    max: 50,
+    step: 0.5,
+  },
+  {
+    key: "mainInflowMin",
+    i18nKey: "stockAnalysis.settings.screener.factor.mainInflow",
+    unit: "万元",
+    min: 0,
+    max: 999999,
+    step: 100,
+  },
+  {
+    key: "dragonTigerNetMin",
+    i18nKey: "stockAnalysis.settings.screener.factor.dragonTiger",
+    unit: "万元",
+    min: 0,
+    max: 999999,
+    step: 100,
+  },
+  {
+    key: "northboundRatioMin",
+    i18nKey: "stockAnalysis.settings.screener.factor.northbound",
+    unit: "%",
+    min: 0,
+    max: 100,
+    step: 0.5,
+  },
+  {
+    key: "rsiOversold",
+    i18nKey: "stockAnalysis.settings.screener.factor.rsiOversold",
+    unit: "",
+    min: 0,
+    max: 0,
+    step: 0,
+  },
+  {
+    key: "rsiOverbought",
+    i18nKey: "stockAnalysis.settings.screener.factor.rsiOverbought",
+    unit: "",
+    min: 0,
+    max: 0,
+    step: 0,
+  },
 ] as const;
 
 export function StockScreenerPanel() {
@@ -48,7 +97,7 @@ export function StockScreenerPanel() {
     try {
       const r = await invoke<ScreenResult[]>("discover_stock_candidates");
       if (Array.isArray(r)) { setResults(r); }
-    } catch { /* 静默 */ }
+    } catch { /* silent */ }
     setLoading(false);
   }, []);
 
@@ -65,7 +114,7 @@ export function StockScreenerPanel() {
       }
       const r = await invoke<ScreenResult[]>("screen_stocks", { criteria });
       if (Array.isArray(r)) { setResults(r); }
-    } catch { /* 静默 */ }
+    } catch { /* silent */ }
     setLoading(false);
   }, [factors]);
 
@@ -135,7 +184,7 @@ export function StockScreenerPanel() {
                   onClick={() => toggleFactor(fd.key)}
                 >
                   {active ? "✓ " : ""}
-                  {fd.label}
+                  {t(fd.i18nKey)}
                 </Tag>
               );
             })}
@@ -146,7 +195,7 @@ export function StockScreenerPanel() {
                 if (isRsiFactor(fd.key)) { return null; }
                 return (
                   <Space key={fd.key} size={2}>
-                    <span className="text-gray-500">{fd.label}</span>
+                    <span className="text-gray-500">{t(fd.i18nKey)}</span>
                     <InputNumber
                       size="small"
                       style={{ width: 72 }}

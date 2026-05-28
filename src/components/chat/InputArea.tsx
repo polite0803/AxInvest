@@ -177,22 +177,7 @@ async function handleStockAnalysisTrigger(
   const stockCode = stockCodeMatch[1];
 
   try {
-    // 1. 行情数据
-    const quote = await invoke<
-      {
-        name: string;
-        price: number;
-        changePct: number;
-        open: number;
-        high: number;
-        low: number;
-        pe?: number;
-        pb?: number;
-        totalMv?: number;
-      }
-    >("get_stock_quote", { stockCode });
-
-    // 2. Agent 对话：创建/激活 stock-portfolio-manager 对话，走 agent_query
+    // 1. Agent 对话：创建/激活 stock-portfolio-manager 对话
     const convStore = useConversationStore.getState();
     let conv = convStore.conversations.find((c) =>
       c.agent_profile_id === "stock-portfolio-manager" && c.title?.includes(stockCode)
@@ -205,7 +190,7 @@ async function handleStockAnalysisTrigger(
         return true;
       }
       conv = await convStore.createConversation(
-        `📈 ${quote.name}(${stockCode})`,
+        `📈 ${stockCode}`,
         modelId,
         prov.id,
         { agent_profile_id: "stock-portfolio-manager" },
@@ -219,9 +204,9 @@ async function handleStockAnalysisTrigger(
     );
     startStockWorkflowChatBridge(conv.id);
 
-    // 分析页：启动完整工作流管线
+    // 分析页：启动完整工作流管线（内部会获取行情+K线，无需重复调用）
     const { startAnalysis } = useStockAnalysisStore.getState();
-    startAnalysis(stockCode); // fire-and-forget (内部调用 run_stock_workflow + 注册事件监听)
+    startAnalysis(stockCode);
     navigate(`/stock-analysis?code=${stockCode}`);
   } catch (e) {
     console.error("[StockAnalysis]", e);

@@ -1083,12 +1083,12 @@ pub async fn get_value_assessment(
         .total_mv
         .map(|mv| {
             if quote.price > 0.0 {
-                mv / quote.price
+                mv / quote.price / 1_0000_0000.0
             } else {
-                1_000_000_000.0
+                100.0
             }
         })
-        .unwrap_or(1_000_000_000.0);
+        .unwrap_or(100.0);
     let full_config = load_full_config(&state.sea_db).await;
     Ok(axagent_stock_analysis::value::ValueEngine::assess(
         quote.price,
@@ -1114,11 +1114,11 @@ pub async fn compute_value_metrics(
         .get_financials(&stock_code)
         .await
         .map_err(|e| e.to_string())?;
-    let total_shares = quote.total_mv.map(|mv| {
+    let total_shares = quote.total_mv.and_then(|mv| {
         if quote.price > 0.0 {
-            mv / quote.price / 1_0000_0000.0
+            Some(mv / quote.price / 1_0000_0000.0)
         } else {
-            1.0
+            None
         }
     });
     let full_config = load_full_config(&state.sea_db).await;

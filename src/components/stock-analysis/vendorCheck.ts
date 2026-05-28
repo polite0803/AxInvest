@@ -27,6 +27,6 @@ export async function checkVendorEnabled(panelKey: string): Promise<boolean> {
       message.warning(i18next.t("stockAnalysis.settings.vendor.disabled", { names: names.join(" / ") }));
       return false;
     }
-  } catch { /* 后端未运行不阻塞 */ }
+  } catch { /* backend offline, don't block */ }
   return true;
 }

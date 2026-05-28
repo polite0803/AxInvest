@@ -6761,7 +6761,16 @@
         "clear": "清空",
         "discoverHint": "点击全市场发现候选",
         "screenHint": "选择因子并点击筛选",
-        "score": "得分 {{score}}"
+        "score": "得分 {{score}}",
+        "factor": {
+          "changePct": "涨跌幅≥",
+          "turnover": "换手率≥",
+          "mainInflow": "主力净流入≥",
+          "dragonTiger": "龙虎榜净买≥",
+          "northbound": "北向持仓≥",
+          "rsiOversold": "RSI 超卖",
+          "rsiOverbought": "RSI 超买"
+        }
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用"

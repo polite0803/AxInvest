@@ -258,6 +258,15 @@ const zhCN = {
       discoverHint: "点击全市场发现候选",
       screenHint: "选择因子并点击筛选",
       score: "得分 {{score}}",
+      factor: {
+        changePct: "涨跌幅≥",
+        turnover: "换手率≥",
+        mainInflow: "主力净流入≥",
+        dragonTiger: "龙虎榜净买≥",
+        northbound: "北向持仓≥",
+        rsiOversold: "RSI 超卖",
+        rsiOverbought: "RSI 超买",
+      },
     },
     vendor: {
       disabled: "数据源未开启：{{names}} 均未启用",
@@ -533,6 +542,15 @@ const enUS = {
       discoverHint: "Click Discover to find candidates",
       screenHint: "Select factors and click Filter",
       score: "Score {{score}}",
+      factor: {
+        changePct: "Change% ≥",
+        turnover: "Turnover ≥",
+        mainInflow: "Main Inflow ≥",
+        dragonTiger: "Dragon&Tiger ≥",
+        northbound: "Northbound ≥",
+        rsiOversold: "RSI Oversold",
+        rsiOverbought: "RSI Overbought",
+      },
     },
     vendor: {
       disabled: "No vendor enabled: {{names}}",

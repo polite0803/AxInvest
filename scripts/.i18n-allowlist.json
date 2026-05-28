@@ -786,7 +786,7 @@
     },
     {
       "file": "src/components/stock-analysis/StockScreenerPanel.tsx",
-      "lines": "22,23,24,25,26,27,28,48,65,98,110,113,120,153,160,169,182,193",
+      "lines": "24,25,26,27,28,29,30,51,68",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

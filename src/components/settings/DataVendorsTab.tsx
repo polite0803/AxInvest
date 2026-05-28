@@ -241,14 +241,28 @@ export function DataVendorsTab() {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      // 先加载全量模板变量，只更新 vendor_ 部分，避免覆盖评分/规则等参数
+      // 先加载全量模板，只更新 vendor_ 变量，其余字段原样保留避免覆盖
       const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
       const allVars: { name: string; value: any }[] = tmpl?.variables ?? [];
       const varMap = new Map(allVars.map((v: any) => [v.name, v]));
       for (const [k, v] of Object.entries(vendorValues)) { varMap.set(k, v); }
       varMap.set("vendor_iwencai_key", iwencaiKey);
       const merged = Array.from(varMap, ([name, value]) => ({ name, value }));
-      await invoke("update_workflow_template", { id: "stock-analysis", input: { variables: merged } });
+      await invoke("update_workflow_template", {
+        id: "stock-analysis",
+        input: {
+          name: tmpl.name,
+          icon: tmpl.icon,
+          nodes: tmpl.nodes,
+          edges: tmpl.edges,
+          tags: tmpl.tags,
+          trigger_config: tmpl.triggerConfig,
+          input_schema: tmpl.inputSchema,
+          output_schema: tmpl.outputSchema,
+          error_config: tmpl.errorConfig,
+          variables: merged,
+        },
+      });
       message.success(t("stockAnalysis.settings.saveSuccess"));
     } catch {
       message.error(t("stockAnalysis.settings.saveFailed"));

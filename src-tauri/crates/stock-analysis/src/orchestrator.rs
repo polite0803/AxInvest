@@ -302,12 +302,12 @@ impl StockAnalysisOrchestrator {
                 .total_mv
                 .map(|mv| {
                     if raw.quote.price > 0.0 {
-                        mv / raw.quote.price
+                        mv / raw.quote.price / 1_0000_0000.0
                     } else {
-                        1_000_000_000.0
+                        100.0
                     }
                 })
-                .unwrap_or(1_000_000_000.0);
+                .unwrap_or(100.0);
             crate::value::ValueEngine::assess(
                 raw.quote.price,
                 financials,
@@ -389,10 +389,15 @@ impl StockAnalysisOrchestrator {
             if let Some(force) = bb.get_state("rule_check.force_signal") {
                 if !force.is_empty() {
                     let original_action = decision.action.clone();
-                    if original_action == "买入" || original_action == "增持" {
+                    let should_block = match force.as_str() {
+                        "block_buy" => original_action == "买入" || original_action == "增持",
+                        "block_all" => true,
+                        _ => original_action == "买入" || original_action == "增持",
+                    };
+                    if should_block {
                         decision.action = "观望".into();
                         decision.reasoning = format!(
-                            "[严进规则拦截] {} | 原始建议: {} | {}",
+                            "[规则拦截] {} | 原始建议: {} | {}",
                             force, original_action, decision.reasoning
                         );
                         decision.position_pct = 0.0;

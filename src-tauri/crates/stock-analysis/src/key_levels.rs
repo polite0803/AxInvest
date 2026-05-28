@@ -66,7 +66,18 @@ impl KeyLevelTracker {
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
         use axagent_core::entity::stock_analyses;
-        let snapshot_json = serde_json::json!({
+        let analysis = stock_analyses::Entity::find_by_id(analysis_id)
+            .one(self.db.as_ref())
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("分析记录不存在".to_string())?;
+
+        let mut existing_bb: serde_json::Value = analysis
+            .blackboard_snapshot
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(serde_json::json!({}));
+        existing_bb["key_levels"] = serde_json::json!({
             "support": support_level,
             "resistance": resistance_level,
             "stop_loss": stop_loss,
@@ -79,7 +90,7 @@ impl KeyLevelTracker {
         stock_analyses::Entity::update_many()
             .col_expr(
                 stock_analyses::Column::BlackboardSnapshot,
-                sea_orm::sea_query::Expr::value(snapshot_json.to_string()),
+                sea_orm::sea_query::Expr::value(existing_bb.to_string()),
             )
             .filter(stock_analyses::Column::Id.eq(analysis_id))
             .exec(self.db.as_ref())
@@ -112,11 +123,12 @@ impl KeyLevelTracker {
         for analysis in analyses {
             if let Some(snapshot_str) = analysis.blackboard_snapshot.as_deref() {
                 if let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(snapshot_str) {
-                    let support = snapshot["support"].as_f64().unwrap_or(0.0);
-                    let resistance = snapshot["resistance"].as_f64().unwrap_or(0.0);
-                    let stop_loss = snapshot["stop_loss"].as_f64();
-                    let take_profit = snapshot["take_profit"].as_f64();
-                    let snapshot_date = snapshot["snapshot_date"].as_str().unwrap_or("");
+                    let kl = &snapshot["key_levels"];
+                    let support = kl["support"].as_f64().unwrap_or(0.0);
+                    let resistance = kl["resistance"].as_f64().unwrap_or(0.0);
+                    let stop_loss = kl["stop_loss"].as_f64();
+                    let take_profit = kl["take_profit"].as_f64();
+                    let snapshot_date = kl["snapshot_date"].as_str().unwrap_or("");
 
                     // 获取快照日期之后的K线
                     if let Ok(klines) = self

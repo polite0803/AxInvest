@@ -346,6 +346,7 @@ pub async fn optimize_weights(
             volume: d.volume,
             rsi: (d.rsi * 1.15).min(20.0),
             support: (d.support * 1.20).min(20.0),
+            boll: d.boll,
         }
     } else if buy_r < 0.3 {
         ScoringWeights {
@@ -355,6 +356,7 @@ pub async fn optimize_weights(
             volume: d.volume,
             rsi: (d.rsi * 0.90).max(5.0),
             support: (d.support * 0.85).max(5.0),
+            boll: d.boll,
         }
     } else {
         d

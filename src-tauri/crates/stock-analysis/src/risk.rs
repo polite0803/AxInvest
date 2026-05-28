@@ -12,14 +12,19 @@ pub fn max_drawdown(prices: &[f64]) -> f64 {
         return 0.0;
     }
     let mut peak = prices[0];
+    if peak <= 0.0 {
+        peak = f64::MAX;
+    }
     let mut max_dd = 0.0;
     for &p in prices.iter() {
         if p > peak {
             peak = p;
         }
-        let dd = (peak - p) / peak;
-        if dd > max_dd {
-            max_dd = dd;
+        if peak > 0.0 {
+            let dd = (peak - p) / peak;
+            if dd > max_dd {
+                max_dd = dd;
+            }
         }
     }
     max_dd
@@ -75,11 +80,14 @@ pub fn value_at_risk(returns: &[f64], confidence: f64) -> VarResult {
     }
     let mut sorted = returns.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let idx = ((1.0 - confidence) * n as f64).floor() as usize;
-    let var_val = if idx < n { -sorted[idx] } else { 0.0 };
-    // CVaR: 尾部平均
-    let tail: f64 = sorted[..=idx.min(n - 1)].iter().map(|r| -r).sum::<f64>();
-    let cvar = tail / (idx + 1) as f64;
+    let idx = ((1.0 - confidence) * (n as f64 + 1.0)).floor() as usize;
+    let var_idx = if idx == 0 { 0 } else { idx - 1 };
+    let var_val = if var_idx < n { -sorted[var_idx] } else { 0.0 };
+    let tail: f64 = sorted[..=var_idx.min(n - 1)]
+        .iter()
+        .map(|r| -r)
+        .sum::<f64>();
+    let cvar = tail / (var_idx + 1) as f64;
     VarResult {
         var_pct: (var_val * 100.0).round() / 100.0,
         confidence,

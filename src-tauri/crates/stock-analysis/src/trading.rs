@@ -91,11 +91,7 @@ impl TradingEngine {
 
         // 数量必须是整手数
         let market = detect_market_type(stock_code);
-        let min_lot: i32 = if market == "star" || market == "chinext" {
-            200
-        } else {
-            100
-        };
+        let min_lot: i32 = 100;
         if quantity % min_lot != 0 {
             errors.push(format!("数量必须是 {} 股的整数倍（{}手）", min_lot, min_lot));
         }

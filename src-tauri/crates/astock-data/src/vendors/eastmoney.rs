@@ -384,14 +384,14 @@ impl StockVendor for EastMoneyVendor {
 
         let (avg_pe, avg_pb) = if !sector_name.is_empty() {
             let board_url = format!(
-                "https://push2.eastmoney.com/api/qt/plate/get?secid=90.{}&fields=f162,f167",
-                urlencoding::encode(&sector_name)
+                "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{sector_name}&fields=f162,f167"
             );
             match self.http.get(&board_url).send().await {
                 Ok(resp) => {
                     let board_json: Value = resp.json().await.unwrap_or(Value::Null);
+                    let diff = &board_json["data"]["diff"];
                     let f = |key: &str| {
-                        board_json["data"][key].as_f64().and_then(|v| {
+                        diff.get(0).and_then(|row| row[key].as_f64()).and_then(|v| {
                             if v > 0.0 {
                                 Some(v / 100.0)
                             } else {

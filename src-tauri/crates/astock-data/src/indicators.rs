@@ -249,10 +249,13 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
     let boll_upper = boll_mid + 2.0 * boll_std;
     let boll_lower = boll_mid - 2.0 * boll_std;
 
+    let half_std = boll_std * 0.5;
     let boll_position = if latest_close > boll_upper {
         "上轨以上".to_string()
-    } else if latest_close > boll_mid {
+    } else if latest_close > boll_mid + half_std {
         "上轨区间".to_string()
+    } else if latest_close >= boll_mid - half_std {
+        "中轨附近".to_string()
     } else if latest_close > boll_lower {
         "下轨区间".to_string()
     } else {
@@ -272,10 +275,15 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
     };
 
     // Volume ratio — 取最近5日均量
-    let avg_vol_5 = if volumes.len() >= 5 {
-        volumes[volumes.len() - 5..].iter().sum::<f64>() / 5.0
+    let avg_vol_5 = if volumes.len() >= 6 {
+        volumes[volumes.len() - 6..volumes.len() - 1]
+            .iter()
+            .sum::<f64>()
+            / 5.0
+    } else if volumes.len() >= 2 {
+        volumes[..volumes.len() - 1].iter().sum::<f64>() / (volumes.len() - 1) as f64
     } else {
-        volumes.iter().sum::<f64>() / volumes.len().max(1) as f64
+        latest_volume
     };
     let volume_ratio = if avg_vol_5 > 0.0 {
         latest_volume / avg_vol_5
@@ -296,8 +304,12 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
     };
 
     // Support/Resistance from MAs and Bollinger
-    let support_levels = vec![ma5.min(ma10).min(ma20), ma20.min(ma60)];
-    let resistance_levels = vec![ma5.max(ma10).max(ma20), boll_upper];
+    let mut support_levels = vec![ma5.min(ma10).min(ma20), ma20.min(ma60)];
+    support_levels.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    support_levels.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+    let mut resistance_levels = vec![ma5.max(ma10).max(ma20), boll_upper];
+    resistance_levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    resistance_levels.dedup_by(|a, b| (*a - *b).abs() < 0.01);
 
     TechnicalIndicators {
         stock_code: stock_code.to_string(),

@@ -6424,6 +6424,9 @@
     }
   },
   "chatRightPanel": {
+    "title": "Right Panel",
+    "expand": "Expand Panel",
+    "collapse": "Collapse Panel",
     "agent": "Agent",
     "hierarchy": "Hierarchy",
     "research": "Research",

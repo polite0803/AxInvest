@@ -6511,6 +6511,9 @@
     }
   },
   "chatRightPanel": {
+    "title": "右侧面板",
+    "expand": "展开面板",
+    "collapse": "收起面板",
     "agent": "智能体",
     "hierarchy": "层级",
     "research": "调研",

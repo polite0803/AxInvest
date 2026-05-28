@@ -202,7 +202,10 @@ impl TradingEngine {
             let limits = crate::position_limits::PositionLimits::default();
             let positions = self.get_positions().await.unwrap_or_default();
             let current_count = positions.len();
-            let total_mv: f64 = positions.iter().filter_map(|p| p.market_value).sum();
+            let total_mv: f64 = positions
+                .iter()
+                .map(|p| p.market_value.unwrap_or(0.0))
+                .sum();
             let new_position_value = price * quantity as f64;
             if let Err(e) =
                 limits.check_new_position(new_position_value, total_mv, current_count, None, &[])

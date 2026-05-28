@@ -435,7 +435,8 @@ impl ValueEngine {
         let dcf = if fcf > 0.0 && shares_outstanding > 0.0 {
             let growth_rate = value_config
                 .map(|c| c.dcf_growth_rate / 100.0)
-                .unwrap_or(0.08);
+                .unwrap_or(0.08)
+                .max(0.0);
             let terminal_rate = value_config
                 .map(|c| c.dcf_perpetual_rate / 100.0)
                 .unwrap_or(0.03);

@@ -58,9 +58,9 @@ pub fn generate_html_report(
             let orgs = v["org_count"].as_u64().unwrap_or(0);
             let content = v["content"].as_str().unwrap_or("-");
             let short = if content.len() > 60 {
-                &content[..60]
+                content.chars().take(60).collect::<String>()
             } else {
-                content
+                content.to_string()
             };
             rows.push_str(&format!("<tr><td>{date}</td><td>{orgs}</td><td>{short}</td></tr>"));
         }

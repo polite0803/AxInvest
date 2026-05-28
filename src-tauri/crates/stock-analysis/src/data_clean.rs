@@ -265,15 +265,13 @@ pub fn adjust_prices(klines_json: &str, dividends_json: &str) -> AdjustResult {
     // 按日期排序（最新在前）
     klines.sort_by(|a, b| b.date.cmp(&a.date));
 
-    // 从最新到最旧累积调整因子
     let mut factor = 1.0;
     for k in klines.iter_mut() {
-        // 查找该日期的分红
         for d in &dividends {
             if d.date == k.date {
                 let total_return = d.cash_dividend / k.close + d.share_dividend;
                 if total_return > 0.0 {
-                    factor *= 1.0 + total_return;
+                    factor /= 1.0 + total_return;
                 }
             }
         }
@@ -349,6 +347,8 @@ mod tests {
         let dividends = r#"[{"date":"2024-01-02","cash_dividend":0.5,"share_dividend":0.0}]"#;
         let r = adjust_prices(klines, dividends);
         assert_eq!(r.adjusted_klines.len(), 3);
-        assert!(r.adjustment_factor > 1.0);
+        assert!(r.adjustment_factor < 1.0, "前复权因子应小于1");
+        assert!(r.adjusted_klines[0].close > 0.0, "最新价不变");
+        assert!(r.adjusted_klines[2].close < 9.7, "历史价应被调低");
     }
 }

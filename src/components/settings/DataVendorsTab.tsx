@@ -2,7 +2,7 @@
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
 import { invoke } from "@/lib/invoke";
-import { Badge, Button, Card, message, Select, Space, Spin, Switch, Tag, Tooltip } from "antd";
+import { Button, Card, message, Select, Space, Spin, Switch, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -323,25 +323,24 @@ export function DataVendorsTab() {
                 />
                 <span className="font-medium text-sm">{v.name}</span>
                 <span className="text-xs text-gray-400">{v.desc}</span>
-                <Tooltip
-                  title={status === "ok"
+                <Tag
+                  className="text-xs m-0"
+                  color={status === "ok"
+                    ? "green"
+                    : status === "fail"
+                    ? "red"
+                    : status === "pending"
+                    ? "blue"
+                    : "default"}
+                >
+                  {status === "ok"
                     ? t("stockAnalysis.settings.connected")
                     : status === "fail"
                     ? t("stockAnalysis.settings.disconnected")
                     : status === "pending"
                     ? t("stockAnalysis.settings.vendors.checking")
                     : t("stockAnalysis.settings.vendors.notChecked")}
-                >
-                  <Badge
-                    status={status === "ok"
-                      ? "success"
-                      : status === "fail"
-                      ? "error"
-                      : status === "pending"
-                      ? "processing"
-                      : "default"}
-                  />
-                </Tooltip>
+                </Tag>
               </Space>
             }
             extra={

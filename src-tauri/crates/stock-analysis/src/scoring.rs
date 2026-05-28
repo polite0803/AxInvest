@@ -9,12 +9,13 @@ use crate::value_investing::ValueMetrics;
 #[serde(rename_all = "camelCase")]
 pub struct ObjectiveScore {
     pub total: u32,                  // 综合评分 0-100
-    pub trend_score: u32,            // 趋势 0-30
-    pub deviation_score: u32,        // 乖离率 0-20
+    pub trend_score: u32,            // 趋势 0-25
+    pub deviation_score: u32,        // 乖离率 0-15
     pub macd_score: u32,             // MACD 0-15
     pub volume_score: u32,           // 量能 0-15
     pub rsi_score: u32,              // RSI 0-10
     pub support_score: u32,          // 支撑 0-10
+    pub boll_score: u32,             // 布林带 0-10
     pub fundamental_adjustment: i32, // 基本面修正值（正加分/负扣分）
     pub signal: String, // "🟢强烈买入" | "🔵买入" | "🟡持有" | "⚪观望" | "🟠卖出" | "🔴强烈卖出"
     pub signal_code: String, // strong_buy | buy | hold | watch | sell | strong_sell
@@ -43,7 +44,8 @@ impl ScoringEngine {
         let support = (Self::score_support(latest_price, &indicators.support_levels) as f64
             * w.support
             / 10.0) as u32;
-        let total = (trend + deviation + macd + volume + rsi + support).min(100);
+        let boll = (Self::score_boll(&indicators.boll_position) as f64 * w.boll / 10.0) as u32;
+        let total = (trend + deviation + macd + volume + rsi + support + boll).min(100);
 
         let (signal, signal_code) = Self::map_signal(total, &indicators.ma_alignment);
 
@@ -55,6 +57,7 @@ impl ScoringEngine {
             volume_score: volume,
             rsi_score: rsi,
             support_score: support,
+            boll_score: boll,
             fundamental_adjustment: 0,
             signal: signal.to_string(),
             signal_code: signal_code.to_string(),
@@ -151,6 +154,18 @@ impl ScoringEngine {
             2.. => 10,
             1 => 6,
             _ => 2,
+        }
+    }
+
+    /// 布林带位置评分 (满分10) -- 中轨附近最佳，上轨以上超买，下轨以下超卖
+    fn score_boll(position: &str) -> u32 {
+        match position {
+            "中轨附近" => 10,
+            "下轨区间" => 7,
+            "上轨区间" => 6,
+            "下轨以下" => 4,
+            "上轨以上" => 2,
+            _ => 5,
         }
     }
 
@@ -293,7 +308,7 @@ impl ScoringEngine {
     ) {
         let mut adjustment: i32 = 0;
         if let (Some(pe), Some(ind_pe)) = (pe, industry_avg_pe) {
-            if ind_pe > 0.0 {
+            if ind_pe > 0.0 && pe > 0.0 {
                 let ratio = pe / ind_pe;
                 if ratio < 0.7 {
                     adjustment += 8;

@@ -165,6 +165,20 @@ impl StockScreener {
                 }
             }
 
+            // 北向持仓占比
+            if let Some(min_ratio) = criteria.northbound_ratio_min {
+                if let Ok(Some(nb)) = client.get_north_bound_holding(code).await {
+                    if nb.holding_ratio >= min_ratio {
+                        reasons.push(format!("北向持仓{:.2}%", nb.holding_ratio));
+                        score += 3;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+
             if criteria.rsi_oversold || criteria.rsi_overbought {
                 if let Ok(klines) = client.get_klines(code, "daily", 30).await {
                     if klines.len() >= 15 {
@@ -194,16 +208,17 @@ impl StockScreener {
                             100.0
                         };
                         let rsi = 100.0 - 100.0 / (1.0 + rs);
-                        if criteria.rsi_oversold && rsi < 30.0 {
+                        let matches_criteria = (criteria.rsi_oversold && rsi < 30.0)
+                            || (criteria.rsi_overbought && rsi > 70.0);
+                        if !matches_criteria {
+                            continue;
+                        }
+                        if rsi < 30.0 {
                             reasons.push(format!("RSI超卖{:.1}", rsi));
                             score += 3;
-                        } else if criteria.rsi_overbought && rsi > 70.0 {
+                        } else {
                             reasons.push(format!("RSI超买{:.1}", rsi));
                             score += 1;
-                        } else if criteria.rsi_oversold && rsi >= 30.0
-                            || criteria.rsi_overbought && rsi <= 70.0
-                        {
-                            continue;
                         }
                     } else {
                         continue;

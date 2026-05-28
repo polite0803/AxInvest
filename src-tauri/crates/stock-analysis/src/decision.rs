@@ -182,6 +182,8 @@ pub struct ScoringWeights {
     pub volume: f64,
     pub rsi: f64,
     pub support: f64,
+    #[serde(default = "default_boll")]
+    pub boll: f64,
 }
 
 impl Default for ScoringWeights {
@@ -193,8 +195,13 @@ impl Default for ScoringWeights {
             volume: 15.0,
             rsi: 10.0,
             support: 10.0,
+            boll: 10.0,
         }
     }
+}
+
+fn default_boll() -> f64 {
+    10.0
 }
 
 // ── 规则引擎可调阈值 ──

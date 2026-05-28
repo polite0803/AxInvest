@@ -19,14 +19,20 @@ fn max_drawdown(prices: &[f64]) -> f64 {
     if prices.is_empty() {
         return 0.0;
     }
-    let (mut peak, mut max_dd) = (prices[0], 0.0);
+    let mut peak = prices[0];
+    if peak <= 0.0 {
+        peak = f64::MAX;
+    }
+    let mut max_dd = 0.0;
     for &p in prices {
         if p > peak {
             peak = p;
         }
-        let dd = (peak - p) / peak;
-        if dd > max_dd {
-            max_dd = dd;
+        if peak > 0.0 {
+            let dd = (peak - p) / peak;
+            if dd > max_dd {
+                max_dd = dd;
+            }
         }
     }
     max_dd
@@ -584,7 +590,7 @@ fn adjust_prices(kj: &str, dj: &str) -> AdjR {
             if d.date == k.date {
                 let tr = d.cash_dividend / k.close + d.share_dividend;
                 if tr > 0.0 {
-                    factor *= 1.0 + tr;
+                    factor /= 1.0 + tr;
                 }
             }
         }

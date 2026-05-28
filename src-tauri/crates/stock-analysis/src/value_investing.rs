@@ -87,7 +87,11 @@ impl ValueInvestingEngine {
 
         // 5. 所有者收益
         let owner_earnings = Self::buffett_owner_earnings(financials);
-        let market_cap = current_price * total_shares.unwrap_or(1.0) * 1_0000_0000.0; // 亿股→元
+        let market_cap = if let Some(ts) = total_shares {
+            current_price * ts * 1_0000_0000.0
+        } else {
+            0.0
+        };
         let oe_yield = if market_cap > 0.0 {
             (owner_earnings / market_cap) * 100.0
         } else {
@@ -162,7 +166,7 @@ impl ValueInvestingEngine {
         let shares = total_shares.unwrap_or(1.0);
         let fcf_per_share = fcf / shares / 1_0000_0000.0;
 
-        let base_g = growth_rate.unwrap_or(0.08);
+        let base_g = growth_rate.unwrap_or(0.08).max(0.0);
         let base_p = perpetual_rate.unwrap_or(0.03);
         let base_d = discount_rate.unwrap_or(0.10);
         let low = Self::dcf_two_stage(
@@ -171,10 +175,10 @@ impl ValueInvestingEngine {
             (base_p * 0.7).max(0.01),
             base_d,
         );
-        let mid = Self::dcf_two_stage(fcf_per_share, base_g, base_p, base_d);
+        let mid = Self::dcf_two_stage(fcf_per_share, base_g.max(0.01), base_p, base_d);
         let high = Self::dcf_two_stage(
             fcf_per_share,
-            (base_g * 1.5).min(0.30),
+            (base_g * 1.5).max(0.02).min(0.30),
             (base_p * 1.3).min(0.05),
             base_d,
         );
@@ -191,7 +195,8 @@ impl ValueInvestingEngine {
         }
         // Terminal value
         let terminal_fcf = current_fcf * (1.0 + perpetual);
-        let terminal_value = terminal_fcf / (discount - perpetual);
+        let terminal_spread = (discount - perpetual).max(0.001);
+        let terminal_value = terminal_fcf / terminal_spread;
         let terminal_pv = terminal_value / (1.0 + discount).powi(5);
         pv + terminal_pv
     }
@@ -272,9 +277,10 @@ impl ValueInvestingEngine {
         let mut score = 0u32;
 
         // 1. ROE 持续性 (30分)
-        let roe_count = financials.iter().filter_map(|r| r.roe).take(5).count() as f64;
+        let roe_values: Vec<f64> = financials.iter().take(5).filter_map(|r| r.roe).collect();
+        let roe_count = roe_values.len() as f64;
         let avg_roe = if roe_count > 0.0 {
-            financials.iter().filter_map(|r| r.roe).take(5).sum::<f64>() / roe_count
+            roe_values.iter().sum::<f64>() / roe_count
         } else {
             0.0
         };
@@ -287,18 +293,14 @@ impl ValueInvestingEngine {
         }
 
         // 2. 毛利率稳定性 (20分)
-        let gm_count = financials
+        let gm_values: Vec<f64> = financials
             .iter()
-            .filter_map(|r| r.gross_margin)
             .take(5)
-            .count() as f64;
+            .filter_map(|r| r.gross_margin)
+            .collect();
+        let gm_count = gm_values.len() as f64;
         let avg_gm = if gm_count > 0.0 {
-            financials
-                .iter()
-                .filter_map(|r| r.gross_margin)
-                .take(5)
-                .sum::<f64>()
-                / gm_count
+            gm_values.iter().sum::<f64>() / gm_count
         } else {
             0.0
         };
@@ -358,7 +360,7 @@ impl ValueInvestingEngine {
         }
         let f = &financials[0];
         let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0;
-        if let (Some(ocf), Some(capex)) = (f.operating_cash_flow, f.capital_expenditure) {
+        let oe = if let (Some(ocf), Some(capex)) = (f.operating_cash_flow, f.capital_expenditure) {
             let ocf_scaled = ocf * 1_0000_0000.0;
             let capex_scaled = capex * 1_0000_0000.0;
             ocf_scaled - capex_scaled
@@ -374,6 +376,7 @@ impl ValueInvestingEngine {
                 0.95
             };
             net * capex_ratio
-        }
+        };
+        oe.max(0.0)
     }
 }

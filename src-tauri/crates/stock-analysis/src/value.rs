@@ -97,7 +97,12 @@ impl ValueEngine {
     /// ── 格雷厄姆公式 ──
     /// 内在价值 = √(22.5 × EPS × BVPS)
     pub fn graham_formula(eps: f64, bvps: f64) -> f64 {
-        (22.5_f64 * eps.abs() * bvps.abs()).sqrt()
+        let product = 22.5_f64 * eps * bvps;
+        if product > 0.0 {
+            product.sqrt()
+        } else {
+            0.0
+        }
     }
 
     /// ── 安全边际 ──
@@ -268,12 +273,16 @@ impl ValueEngine {
         }
 
         // FCF/净利润
-        let avg_net = financials
+        let net_values: Vec<f64> = financials
             .iter()
             .filter_map(|f| f.net_profit)
             .take(3)
-            .sum::<f64>()
-            / 3.0;
+            .collect();
+        let avg_net = if net_values.is_empty() {
+            0.0
+        } else {
+            net_values.iter().sum::<f64>() / net_values.len() as f64
+        };
         let latest_debt_ratio = financials
             .first()
             .and_then(|f| f.debt_ratio)

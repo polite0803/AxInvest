@@ -193,6 +193,28 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
             }
         }),
         json!({
+            "name": "get_stock_block_trades",
+            "description": "获取大宗交易记录（交易日期、价格、数量、买方/卖方营业部）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_institutional_visits",
+            "description": "获取机构调研记录（调研日期、参与机构数、调研内容摘要）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
             "name": "get_market_dragon_tiger",
             "description": "获取全市场龙虎榜（每日上榜股票+净买额排名）",
             "inputSchema": {
@@ -423,6 +445,22 @@ pub async fn execute_mcp_tool(
                 .await
                 .map_err(|e| e.to_string())?;
             serde_json::to_string(&anns).map_err(|e| e.to_string())
+        },
+        "get_stock_block_trades" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let bt = client
+                .get_block_trades(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&bt).map_err(|e| e.to_string())
+        },
+        "get_stock_institutional_visits" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let visits = client
+                .get_institutional_visits(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&visits).map_err(|e| e.to_string())
         },
         "get_market_dragon_tiger" => {
             let dt = client

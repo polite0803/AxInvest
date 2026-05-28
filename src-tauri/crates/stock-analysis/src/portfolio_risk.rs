@@ -34,14 +34,15 @@ impl PortfolioRiskManager {
                 correlation_risk: "无持仓".to_string(),
             };
         }
-        let total_mv: f64 = positions.iter().filter_map(|p| p.market_value).sum();
+        let total_mv: f64 = positions
+            .iter()
+            .map(|p| p.market_value.unwrap_or(0.0))
+            .sum();
 
-        // 最大单股集中度
         let max_mv = positions
             .iter()
-            .filter_map(|p| p.market_value)
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap_or(0.0);
+            .map(|p| p.market_value.unwrap_or(0.0))
+            .fold(0.0f64, f64::max);
         let concentration = if total_mv > 0.0 {
             (max_mv / total_mv) * 100.0
         } else {

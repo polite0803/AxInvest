@@ -216,7 +216,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       return;
     }
 
-    // 重置旧的事件监听器，确保新工作流的事件被正确捕获
+    // 先注册事件监听再启动工作流，防止竞态丢失事件
     const { _unlisten } = get();
     if (_unlisten) { _unlisten(); }
 
@@ -234,6 +234,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       decision: null,
       _unlisten: null,
     });
+
+    // 先注册事件监听，再触发工作流
+    await get().setupEventListener();
 
     const result = await invoke<{
       analysisId: string;
@@ -254,9 +257,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
     get().getStockQuote(result.stockCode);
     get().getStockKline(result.stockCode, "daily", 120);
-
-    // 重建事件监听，捕获新工作流的完成/错误事件
-    get().setupEventListener();
   },
 
   cancelAnalysis: async () => {

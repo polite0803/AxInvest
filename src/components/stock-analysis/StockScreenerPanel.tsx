@@ -205,7 +205,7 @@ export function StockScreenerPanel() {
                       value={factors[fd.key]?.value}
                       onChange={(v) => setValue(fd.key, v)}
                       placeholder={fd.unit || t("stockAnalysis.settings.screener.placeholder")}
-                      suffix={fd.unit || undefined}
+                      suffix={fd.unit === "万元" ? t("stockAnalysis.settings.screener.unit10k") : fd.unit || undefined}
                     />
                   </Space>
                 );

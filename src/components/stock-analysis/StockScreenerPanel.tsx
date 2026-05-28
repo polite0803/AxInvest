@@ -41,6 +41,7 @@ const FACTOR_DEFS = [
     key: "mainInflowMin",
     i18nKey: "stockAnalysis.settings.screener.factor.mainInflow",
     unit: "万元",
+    unitI18n: true as const,
     min: 0,
     max: 999999,
     step: 100,
@@ -49,6 +50,7 @@ const FACTOR_DEFS = [
     key: "dragonTigerNetMin",
     i18nKey: "stockAnalysis.settings.screener.factor.dragonTiger",
     unit: "万元",
+    unitI18n: true as const,
     min: 0,
     max: 999999,
     step: 100,
@@ -205,7 +207,7 @@ export function StockScreenerPanel() {
                       value={factors[fd.key]?.value}
                       onChange={(v) => setValue(fd.key, v)}
                       placeholder={fd.unit || t("stockAnalysis.settings.screener.placeholder")}
-                      suffix={fd.unit === "万元" ? t("stockAnalysis.settings.screener.unit10k") : fd.unit || undefined}
+                      suffix={"unitI18n" in fd ? t("stockAnalysis.settings.screener.unit10k") : fd.unit || undefined}
                     />
                   </Space>
                 );

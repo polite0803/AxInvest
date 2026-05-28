@@ -2244,11 +2244,13 @@ html[data-theme="dark"] .markstream-react .table-node thead {
 }
 .rp-tabs {
   display: flex;
+  flex-direction: column;
   border-bottom: 1px solid var(--border-color);
-  padding: 0 8px;
-  gap: 0;
+  padding: 4px 8px;
+  gap: 1px;
   flex-shrink: 0;
-  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 60vh;
 }
 .rp-tabs::-webkit-scrollbar { display: none; }
 
@@ -2271,7 +2273,10 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 7px 10px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  width: 100%;
+  text-align: left;
   font-size: 11.5px;
   color: var(--color-text-secondary);
   cursor: pointer;

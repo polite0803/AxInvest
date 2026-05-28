@@ -33,6 +33,19 @@ async fn load_and_inject_template(
     let edges: Vec<WorkflowEdge> =
         serde_json::from_str(&template.edges).map_err(|e| format!("解析模板边失败: {e}"))?;
 
+    // 模板数据损坏时自动重 seed（如空字段保存覆盖了 nodes/edges）
+    if nodes.is_empty() {
+        tracing::warn!("[stock_workflow] 模板节点为空，自动重新种子化");
+        crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(db).await?;
+        let template = workflow_template::Entity::find_by_id("stock-analysis")
+            .one(db)
+            .await
+            .map_err(|e| format!("重查模板失败: {e}"))?
+            .ok_or("模板种子化后仍不存在")?;
+        nodes =
+            serde_json::from_str(&template.nodes).map_err(|e| format!("解析模板节点失败: {e}"))?;
+    }
+
     // 仅注入 stock_code 到 trigger 节点，prompt 不再手动替换
     for node in &mut nodes {
         if let WorkflowNode::Trigger(tn) = node {

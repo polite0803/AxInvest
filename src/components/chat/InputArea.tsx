@@ -177,7 +177,6 @@ async function handleStockAnalysisTrigger(
   const stockCode = stockCodeMatch[1];
 
   try {
-    // 1. Agent 对话：创建/激活 stock-portfolio-manager 对话
     const convStore = useConversationStore.getState();
     let conv = convStore.conversations.find((c) =>
       c.agent_profile_id === "stock-portfolio-manager" && c.title?.includes(stockCode)
@@ -198,15 +197,26 @@ async function handleStockAnalysisTrigger(
     }
     convStore.setActiveConversation(conv.id);
 
-    // 工作流→对话桥接：先注册桥接监听，再启动工作流，确保事件不丢失
+    // 先插一条可见消息，避免对话页空白
+    invoke("send_system_message", {
+      conversationId: conv.id,
+      content: `⏳ 正在启动 ${stockCode} 股票分析工作流...`,
+    }).catch(() => {});
+
+    // 工作流→对话桥接
     const { startStockWorkflowChatBridge } = await import(
       "@/stores/feature/stockWorkflowChatBridge"
     );
     startStockWorkflowChatBridge(conv.id);
 
-    // 分析页：启动完整工作流管线（内部会获取行情+K线，无需重复调用）
+    // 启动工作流
     const { startAnalysis } = useStockAnalysisStore.getState();
-    startAnalysis(stockCode);
+    startAnalysis(stockCode).catch((e) => {
+      invoke("send_system_message", {
+        conversationId: conv.id,
+        content: `❌ 工作流启动失败: ${String(e)}。请检查数据源设置或重启应用。`,
+      }).catch(() => {});
+    });
     navigate(`/stock-analysis?code=${stockCode}`);
   } catch (e) {
     console.error("[StockAnalysis]", e);

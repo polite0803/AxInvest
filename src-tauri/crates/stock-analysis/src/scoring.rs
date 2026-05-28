@@ -146,9 +146,12 @@ impl ScoringEngine {
 
     /// 支撑评分 (满分10) -- 同时受MA5和MA10双重支撑最佳
     fn score_support(price: f64, supports: &[f64]) -> u32 {
+        if price <= 0.0 {
+            return 2;
+        }
         let near_support = supports
             .iter()
-            .filter(|&&s| price > s && (price - s) / price < 0.03)
+            .filter(|&&s| s > 0.0 && price > s && (price - s) / price < 0.03)
             .count();
         match near_support {
             2.. => 10,

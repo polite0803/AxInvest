@@ -372,7 +372,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f158,f159,f160"
+            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f158,f159,f160,f127"
         );
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
@@ -384,12 +384,34 @@ impl StockVendor for EastMoneyVendor {
             .as_str()
             .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
             .unwrap_or_default();
+        let board_code = data["f127"].as_str().unwrap_or("").to_string();
 
         if sector_name.is_empty() && concept_tags.is_empty() {
             return Ok(None);
         }
 
-        let (avg_pe, avg_pb) = if !sector_name.is_empty() {
+        let (avg_pe, avg_pb) = if !board_code.is_empty() {
+            let board_url = format!(
+                "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{board_code}&fields=f162,f167"
+            );
+            match self.em_get(&board_url).await {
+                Ok(resp) => {
+                    let board_json: Value = resp.json().await.unwrap_or(Value::Null);
+                    let diff = &board_json["data"]["diff"];
+                    let f = |key: &str| {
+                        diff.get(0).and_then(|row| row[key].as_f64()).and_then(|v| {
+                            if v > 0.0 {
+                                Some(v / 100.0)
+                            } else {
+                                None
+                            }
+                        })
+                    };
+                    (f("f162"), f("f167"))
+                },
+                Err(_) => (None, None),
+            }
+        } else if !sector_name.is_empty() {
             let board_url = format!(
                 "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{sector_name}&fields=f162,f167"
             );

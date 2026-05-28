@@ -370,6 +370,125 @@ impl ValueEngine {
         }
     }
 
+    /// ── 综合价值评估（无股本数据时使用）──
+    pub fn assess_no_shares(
+        current_price: f64,
+        financials: &[FinancialReport],
+        value_config: Option<&ValueConfig>,
+    ) -> ValueAssessment {
+        let latest = match financials.first() {
+            Some(f) => f,
+            None => {
+                return ValueAssessment {
+                    intrinsic_value: IntrinsicValue {
+                        dcf_value: None,
+                        graham_value: None,
+                        avg_intrinsic_value: None,
+                        margin_of_safety: None,
+                        mos_judgment: "无财务数据，无法估值".to_string(),
+                    },
+                    f_score: FScore {
+                        profitability: 0,
+                        leverage: 0,
+                        efficiency: 0,
+                        total: 0,
+                        grade: "无数据".to_string(),
+                        details: vec![],
+                    },
+                    moat: MoatAssessment {
+                        roe_consistency_years: None,
+                        avg_gross_margin: None,
+                        gross_margin_stability: None,
+                        fcf_to_earnings: None,
+                        moat_score: 0,
+                        moat_type: "无数据".to_string(),
+                        details: vec![],
+                    },
+                    value_judgment: "无足够财务数据".to_string(),
+                    buffett_verdict: "数据不足，无法判断。巴菲特原则：不懂不做。".to_string(),
+                };
+            },
+        };
+
+        let eps = latest.eps.unwrap_or(0.0);
+        let bvps = latest.bps.unwrap_or(0.0);
+
+        let graham = if eps > 0.0 && bvps > 0.0 {
+            Some(Self::graham_formula(eps, bvps))
+        } else {
+            None
+        };
+
+        let avg_iv = graham;
+        let mos = avg_iv.map(|iv| Self::margin_of_safety(iv, current_price));
+        let mos_judgment = match mos {
+            Some(m) if m >= 30.0 => {
+                format!("充足的安全边际 {:.0}%（内在价值远高于现价）", m)
+            },
+            Some(m) if m >= 15.0 => {
+                format!("有一定安全边际 {:.0}%", m)
+            },
+            Some(m) if m >= 0.0 => {
+                format!("安全边际不足 {:.0}%（现价接近内在价值）", m)
+            },
+            Some(m) => {
+                format!("无安全边际 {:.0}%（现价高于内在价值）", m)
+            },
+            None => "无法计算安全边际（缺少股本数据，DCF不可用）".to_string(),
+        };
+
+        let previous = financials.get(1);
+        let f_score = if let Some(prev) = previous {
+            Self::f_score(latest, prev)
+        } else {
+            FScore {
+                profitability: 0,
+                leverage: 0,
+                efficiency: 0,
+                total: 0,
+                grade: "无对比数据".to_string(),
+                details: vec![],
+            }
+        };
+
+        let moat = Self::moat_assessment(financials);
+
+        let buffett_verdict = if moat.moat_score >= 70
+            && f_score.total >= 7
+            && mos.unwrap_or(0.0) >= 20.0
+        {
+            "🎯 巴菲特可能会喜欢：宽护城河+财务健康+充足安全边际。以合理价格买入优秀公司。"
+                .to_string()
+        } else if moat.moat_score >= 50 && f_score.total >= 5 && mos.unwrap_or(0.0) >= 10.0 {
+            "👍 有一定吸引力：护城河和财务状况尚可，安全边际处于临界点。可小仓位观察。".to_string()
+        } else if moat.moat_score >= 30 {
+            "🤔 需要更多安全边际：公司质地一般，等待更好的价格。巴菲特会说：'等待那个又胖又慢的球'。"
+                .to_string()
+        } else {
+            "❌ 不符合巴菲特标准：护城河不足或财务质量差。'以合理价格买入优秀公司比以便宜价格买入平庸公司好得多'。"
+                .to_string()
+        };
+
+        let value_judgment = format!(
+            "护城河评分{}/100 | F-Score {}/9 | {}（无股本数据，DCF不可用）",
+            moat.moat_score, f_score.total, mos_judgment
+        );
+
+        ValueAssessment {
+            intrinsic_value: IntrinsicValue {
+                dcf_value: None,
+                graham_value: graham,
+                avg_intrinsic_value: avg_iv,
+                margin_of_safety: mos,
+                mos_judgment,
+            },
+            f_score,
+            moat,
+            value_judgment,
+            buffett_verdict,
+        }
+    }
+
     /// ── 综合价值评估 ──
     pub fn assess(
         current_price: f64,

@@ -297,23 +297,26 @@ impl StockAnalysisOrchestrator {
         // ── 价值投资评估 ──
         let value_assessment = {
             let financials = &raw.financials;
-            let shares = raw
-                .quote
-                .total_mv
-                .map(|mv| {
-                    if raw.quote.price > 0.0 {
-                        mv / raw.quote.price / 1_0000_0000.0
-                    } else {
-                        100.0
-                    }
-                })
-                .unwrap_or(100.0);
-            crate::value::ValueEngine::assess(
-                raw.quote.price,
-                financials,
-                shares,
-                Some(&value_config),
-            )
+            let shares = raw.quote.total_mv.and_then(|mv| {
+                if raw.quote.price > 0.0 {
+                    Some(mv / raw.quote.price / 1_0000_0000.0)
+                } else {
+                    None
+                }
+            });
+            match shares {
+                Some(s) if s > 0.0 => crate::value::ValueEngine::assess(
+                    raw.quote.price,
+                    financials,
+                    s,
+                    Some(&value_config),
+                ),
+                _ => crate::value::ValueEngine::assess_no_shares(
+                    raw.quote.price,
+                    financials,
+                    Some(&value_config),
+                ),
+            }
         };
         {
             let mut bb = blackboard.write().await;

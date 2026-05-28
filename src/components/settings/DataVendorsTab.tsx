@@ -241,15 +241,14 @@ export function DataVendorsTab() {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      await invoke("update_workflow_template", {
-        id: "stock-analysis",
-        input: {
-          variables: [
-            ...Object.entries(vendorValues).map(([k, v]) => ({ name: k, value: v })),
-            { name: "vendor_iwencai_key", value: iwencaiKey },
-          ],
-        },
-      });
+      // 先加载全量模板变量，只更新 vendor_ 部分，避免覆盖评分/规则等参数
+      const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
+      const allVars: { name: string; value: any }[] = tmpl?.variables ?? [];
+      const varMap = new Map(allVars.map((v: any) => [v.name, v]));
+      for (const [k, v] of Object.entries(vendorValues)) { varMap.set(k, v); }
+      varMap.set("vendor_iwencai_key", iwencaiKey);
+      const merged = Array.from(varMap, ([name, value]) => ({ name, value }));
+      await invoke("update_workflow_template", { id: "stock-analysis", input: { variables: merged } });
       message.success(t("stockAnalysis.settings.saveSuccess"));
     } catch {
       message.error(t("stockAnalysis.settings.saveFailed"));

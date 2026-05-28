@@ -278,7 +278,7 @@ impl StockVendor for EastMoneyVendor {
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_LOCKUP&columns=SECURITY_CODE,SECURITY_NAME_ABBR,UNLOCK_DATE,UNLOCK_SHARES,PLACING_RATIO,HOLDER_NAME&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=20&sortColumns=UNLOCK_DATE&pageNumber=1"
         );
 
-        let resp = self.em_get(url).await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -339,6 +339,7 @@ impl StockVendor for EastMoneyVendor {
         let json: Value = resp.json().await?;
 
         if let Some(arr) = json["data"]["klines"].as_array() {
+            let len = arr.len();
             if len >= 1 {
                 if let Some(line) = arr[len - 1].as_str() {
                     let parts: Vec<&str> = line.split(',').collect();

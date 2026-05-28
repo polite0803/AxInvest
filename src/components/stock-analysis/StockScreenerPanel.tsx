@@ -3,6 +3,7 @@ import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, InputNumber, List, Space, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { checkVendorEnabled } from "./vendorCheck";
 
 interface ScreenResult {
   stockCode: string;
@@ -102,9 +103,9 @@ export function StockScreenerPanel() {
           <Button
             size="small"
             type={mode === "discover" ? "primary" : "default"}
-            onClick={() => {
+            onClick={async () => {
               setMode("discover");
-              discover();
+              if (await checkVendorEnabled("screener")) { discover(); }
             }}
           >
             全市场

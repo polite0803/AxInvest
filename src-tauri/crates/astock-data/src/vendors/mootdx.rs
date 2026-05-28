@@ -40,9 +40,18 @@ impl MootdxVendor {
     }
 
     async fn connect(&self) -> Result<TdxConnection, DataError> {
-        let stream = TcpStream::connect((&*self.host, self.port))
-            .await
-            .map_err(|e| DataError::IoError(e))?;
+        let stream = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            TcpStream::connect((&*self.host, self.port)),
+        )
+        .await
+        .map_err(|_| {
+            DataError::IoError(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("TDX connect timeout: {}:{}", self.host, self.port),
+            ))
+        })?
+        .map_err(DataError::IoError)?;
 
         let mut conn = TdxConnection { stream };
 
@@ -549,46 +558,67 @@ fn decompress_zlib(data: &[u8], expected_size: usize) -> Result<Vec<u8>, DataErr
 impl StockVendor for MootdxVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let market = Self::market_code(stock_code);
-        let mut conn = self.connect().await?;
-
-        let stocks = vec![(market, stock_code)];
-        let quotes = conn.get_security_quotes(&stocks).await?;
-
-        if quotes.is_empty() {
-            return Err(DataError::VendorError {
-                vendor: "mootdx".into(),
-                message: "no quote data from TDX server".into(),
-            });
+        let mut last_err = None;
+        for (host, port) in TDX_SERVERS.iter().take(3) {
+            let vendor = MootdxVendor {
+                host: host.to_string(),
+                port: *port,
+            };
+            match vendor.connect().await {
+                Ok(mut conn) => {
+                    let stocks = vec![(market, stock_code)];
+                    match conn.get_security_quotes(&stocks).await {
+                        Ok(quotes) if !quotes.is_empty() => {
+                            let q = &quotes[0];
+                            let change_pct = if q.last_close > 0.0 {
+                                (q.price - q.last_close) / q.last_close * 100.0
+                            } else {
+                                0.0
+                            };
+                            return Ok(StockQuote {
+                                code: q.code.clone(),
+                                name: String::new(),
+                                price: q.price,
+                                pre_close: q.last_close,
+                                open: q.open,
+                                high: q.high,
+                                low: q.low,
+                                volume: q.vol,
+                                amount: q.amount,
+                                change_pct,
+                                turnover_rate: 0.0,
+                                pe: None,
+                                pb: None,
+                                total_mv: None,
+                                circulating_mv: None,
+                                limit_up: None,
+                                limit_down: None,
+                                is_st: false,
+                                timestamp: chrono::Utc::now()
+                                    .format("%Y-%m-%d %H:%M:%S")
+                                    .to_string(),
+                            });
+                        },
+                        Ok(_) => {
+                            last_err = Some(DataError::VendorError {
+                                vendor: "mootdx".into(),
+                                message: "no quote data from TDX server".into(),
+                            });
+                        },
+                        Err(e) => {
+                            last_err = Some(e);
+                        },
+                    }
+                },
+                Err(e) => {
+                    last_err = Some(e);
+                },
+            }
         }
-
-        let q = &quotes[0];
-        let change_pct = if q.last_close > 0.0 {
-            (q.price - q.last_close) / q.last_close * 100.0
-        } else {
-            0.0
-        };
-
-        Ok(StockQuote {
-            code: q.code.clone(),
-            name: String::new(),
-            price: q.price,
-            pre_close: q.last_close,
-            open: q.open,
-            high: q.high,
-            low: q.low,
-            volume: q.vol,
-            amount: q.amount,
-            change_pct,
-            turnover_rate: 0.0,
-            pe: None,
-            pb: None,
-            total_mv: None,
-            circulating_mv: None,
-            limit_up: None,
-            limit_down: None,
-            is_st: false,
-            timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-        })
+        Err(last_err.unwrap_or_else(|| DataError::VendorError {
+            vendor: "mootdx".into(),
+            message: "all TDX servers failed".into(),
+        }))
     }
 
     async fn get_klines(
@@ -599,25 +629,53 @@ impl StockVendor for MootdxVendor {
     ) -> Result<Vec<KLine>, DataError> {
         let market = Self::market_code(stock_code) as u16;
         let category = Self::kline_category(period);
-        let mut conn = self.connect().await?;
-
-        let bars = conn
-            .get_security_bars(category, market, stock_code, 0, limit as u16)
-            .await?;
-
-        Ok(bars
-            .into_iter()
-            .map(|b| KLine {
-                date: b.date,
-                open: b.open,
-                high: b.high,
-                low: b.low,
-                close: b.close,
-                volume: b.vol,
-                amount: b.amount,
-                turnover_rate: None,
-            })
-            .collect())
+        let mut last_err = None;
+        for (host, port) in TDX_SERVERS.iter().take(3) {
+            let vendor = MootdxVendor {
+                host: host.to_string(),
+                port: *port,
+            };
+            match vendor.connect().await {
+                Ok(mut conn) => {
+                    match conn
+                        .get_security_bars(category, market, stock_code, 0, limit as u16)
+                        .await
+                    {
+                        Ok(bars) if !bars.is_empty() => {
+                            return Ok(bars
+                                .into_iter()
+                                .map(|b| KLine {
+                                    date: b.date,
+                                    open: b.open,
+                                    high: b.high,
+                                    low: b.low,
+                                    close: b.close,
+                                    volume: b.vol,
+                                    amount: b.amount,
+                                    turnover_rate: None,
+                                })
+                                .collect());
+                        },
+                        Ok(_) => {
+                            last_err = Some(DataError::VendorError {
+                                vendor: "mootdx".into(),
+                                message: "no kline data from TDX server".into(),
+                            });
+                        },
+                        Err(e) => {
+                            last_err = Some(e);
+                        },
+                    }
+                },
+                Err(e) => {
+                    last_err = Some(e);
+                },
+            }
+        }
+        Err(last_err.unwrap_or_else(|| DataError::VendorError {
+            vendor: "mootdx".into(),
+            message: "all TDX servers failed for klines".into(),
+        }))
     }
 
     async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {

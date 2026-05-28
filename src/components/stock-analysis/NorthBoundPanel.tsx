@@ -2,6 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { Button, Card, Empty, Spin, Statistic } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { checkVendorEnabled } from "./vendorCheck";
 
 interface NbFlow {
   date: string;
@@ -45,7 +46,15 @@ export function NorthBoundPanel() {
       title={`🧭 ${t("stockAnalysis.settings.panels.northBound")}`}
       styles={{ body: { padding: "4px 8px" } }}
       extra={
-        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+        <Button
+          size="small"
+          loading={loading}
+          onClick={async () => {
+            if (await checkVendorEnabled("north")) { load(); }
+          }}
+        >
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
       }
     >
       {loading

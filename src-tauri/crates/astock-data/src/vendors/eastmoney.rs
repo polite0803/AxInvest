@@ -50,13 +50,7 @@ impl StockVendor for EastMoneyVendor {
         let url = format!(
             "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f168,f169,f170,f171"
         );
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://quote.eastmoney.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send()
-            .await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
         let d = &json["data"];
         if d.is_null() {
@@ -128,13 +122,7 @@ impl StockVendor for EastMoneyVendor {
             "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt={period_code}&fqt=1&end=20500101&lmt={limit}"
         );
 
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://quote.eastmoney.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send()
-            .await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let klines_raw = json["data"]["klines"]
@@ -177,12 +165,7 @@ impl StockVendor for EastMoneyVendor {
             to_em_code(stock_code)
         );
 
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://emweb.securities.eastmoney.com/")
-            .send()
-            .await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let reports = json["data"]["list"]
@@ -228,7 +211,7 @@ impl StockVendor for EastMoneyVendor {
             "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&lmt=1"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let klines = json["data"]["klines"].as_array();
@@ -260,7 +243,7 @@ impl StockVendor for EastMoneyVendor {
             "https://push2his.eastmoney.com/api/qt/stock/mmpa/get?secid={secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let entries = match json["data"]["mmpa"].as_array() {
@@ -295,7 +278,7 @@ impl StockVendor for EastMoneyVendor {
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_LOCKUP&columns=SECURITY_CODE,SECURITY_NAME_ABBR,UNLOCK_DATE,UNLOCK_SHARES,PLACING_RATIO,HOLDER_NAME&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=20&sortColumns=UNLOCK_DATE&pageNumber=1"
         );
 
-        let resp = self.http.get(url).send().await?;
+        let resp = self.em_get(url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -323,7 +306,7 @@ impl StockVendor for EastMoneyVendor {
             "https://push2his.eastmoney.com/api/qt/stock/margin/get?secid={secid}&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let data = &json["data"];
@@ -390,7 +373,7 @@ impl StockVendor for EastMoneyVendor {
         let url = format!(
             "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f158,f159,f160"
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let data = &json["data"];
@@ -409,7 +392,7 @@ impl StockVendor for EastMoneyVendor {
             let board_url = format!(
                 "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{sector_name}&fields=f162,f167"
             );
-            match self.http.get(&board_url).send().await {
+            match self.em_get(&board_url).await {
                 Ok(resp) => {
                     let board_json: Value = resp.json().await.unwrap_or(Value::Null);
                     let diff = &board_json["data"]["diff"];
@@ -450,7 +433,7 @@ impl StockVendor for EastMoneyVendor {
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_MAJORHOLDERS_TRADE&columns=SECURITY_CODE,CHANGE_DATE,SHAREHD_NAME,CHANGE_TYPE,CHANGE_NUM,CHANGE_PRICE,CHANGE_REASON&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=20&pageNumber=1"
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -478,12 +461,10 @@ impl StockVendor for EastMoneyVendor {
         stock_code: &str,
     ) -> Result<Vec<DividendRecord>, DataError> {
         // 东方财富数据中心: 分红送配数据
-        // SECURITY_CODE=股票代码, EX_DIVIDEND_DATE=除权除息日
-        // DIVIDEND_PER_SHARE=每股分红, BONUS_SHARE_RATIO=送转比例, RECORD_DATE=股权登记日
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_DIVIDEND&columns=SECURITY_CODE,EX_DIVIDEND_DATE,DIVIDEND_PER_SHARE,BONUS_SHARE_RATIO,RECORD_DATE&filter=(SECURITY_CODE=\"{stock_code}\")&pageSize=10&pageNumber=1"
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -510,7 +491,7 @@ impl StockVendor for EastMoneyVendor {
             urlencoding::encode(keyword)
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let stocks = match json["QuotationCodeTable"]["Data"].as_array() {
@@ -537,12 +518,7 @@ impl StockVendor for EastMoneyVendor {
             stock_code
         );
 
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://data.eastmoney.com/")
-            .send()
-            .await?;
+        let resp = self.em_get(&url).await?;
 
         let json: Value = resp.json().await?;
 
@@ -604,7 +580,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
         let url = "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_DAILYBOARD_DETAILS_NEW&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,BUY_AMOUNT,SELL_AMOUNT,NET_BUY,CHANGE_REASON&sortColumns=NET_BUY&sortTypes=-1&pageSize=30&pageNumber=1";
 
-        let resp = self.http.get(url).send().await?;
+        let resp = self.em_get(url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -629,13 +605,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
         let url = "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns?client=web&biz=web_news_col&column=250&order=1&needInteractData=0&page_index=1&page_size=20";
 
-        let resp = self
-            .http
-            .get(url)
-            .header("Referer", "https://finance.eastmoney.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send()
-            .await?;
+        let resp = self.em_get(url).await?;
 
         let json: Value = resp.json().await?;
 
@@ -690,7 +660,7 @@ impl StockVendor for EastMoneyVendor {
             "https://np-anotice-stock.eastmoney.com/api/security/ann?page_index=1&page_size=20&stock_list={market},{stock_code}"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let items = match json["data"]["list"].as_array() {
@@ -740,7 +710,7 @@ impl StockVendor for EastMoneyVendor {
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_BLOCKTRADE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,TRADE_PRICE,TRADE_VOL,TRADE_AMOUNT,BUYER_NAME,SELLER_NAME,DISCOUNT_RATE&filter=(SECURITY_CODE=\"{stock_code}\")&sortColumns=TRADE_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {
@@ -786,7 +756,7 @@ impl StockVendor for EastMoneyVendor {
             "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_ORG_SURVEY&columns=SECUCODE,SECURITY_NAME_ABBR,SURVEY_DATE,ORG_NUM,MAIN_CONTENT,SURVEY_TYPE&filter=(SECURITY_CODE=\"{stock_code}\")&sortColumns=SURVEY_DATE&sortTypes=-1&pageSize=20&pageNumber=1"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         let rows = match json["result"]["data"].as_array() {

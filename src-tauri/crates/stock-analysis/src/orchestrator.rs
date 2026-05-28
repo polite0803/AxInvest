@@ -138,11 +138,11 @@ impl StockAnalysisOrchestrator {
 
         // ── 价值投资指标计算 ──
         let value_metrics = {
-            let total_shares = raw.quote.total_mv.map(|mv| {
+            let total_shares = raw.quote.total_mv.and_then(|mv| {
                 if raw.quote.price > 0.0 {
-                    mv / raw.quote.price / 1_0000_0000.0
+                    Some(mv / raw.quote.price / 1_0000_0000.0)
                 } else {
-                    1.0
+                    None
                 }
             });
             crate::value_investing::ValueInvestingEngine::compute(

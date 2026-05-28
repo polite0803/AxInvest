@@ -8,6 +8,18 @@ pub struct EastMoneyVendor {
     pub http: reqwest::Client,
 }
 
+impl EastMoneyVendor {
+    async fn em_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
+        self.http
+            .get(url)
+            .header("Referer", "https://quote.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await
+            .map_err(DataError::from)
+    }
+}
+
 /// 构建东方财富股票代码 (1.SH600519, 0.SZ000001)
 fn to_em_code(stock_code: &str) -> String {
     if stock_code.starts_with('6') || stock_code.starts_with('9') {
@@ -38,7 +50,13 @@ impl StockVendor for EastMoneyVendor {
         let url = format!(
             "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f168,f169,f170,f171"
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://quote.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
         let json: Value = resp.json().await?;
         let d = &json["data"];
         if d.is_null() {
@@ -110,7 +128,13 @@ impl StockVendor for EastMoneyVendor {
             "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt={period_code}&fqt=1&end=20500101&lmt={limit}"
         );
 
-        let resp = self.http.get(&url).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://quote.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await?;
         let json: Value = resp.json().await?;
 
         let klines_raw = json["data"]["klines"]
@@ -328,11 +352,10 @@ impl StockVendor for EastMoneyVendor {
         let url = format!(
             "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3&fields2=f51,f52,f53&lmt=2&klt=3"
         );
-        let resp = self.http.get(&url).send().await?;
+        let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
         if let Some(arr) = json["data"]["klines"].as_array() {
-            let len = arr.len();
             if len >= 1 {
                 if let Some(line) = arr[len - 1].as_str() {
                     let parts: Vec<&str> = line.split(',').collect();

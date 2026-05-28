@@ -163,7 +163,10 @@ impl ValueInvestingEngine {
         if fcf <= 0.0 {
             return (0.0, 0.0, 0.0);
         }
-        let shares = total_shares.unwrap_or(1.0);
+        let shares = match total_shares {
+            Some(s) if s > 0.0 => s,
+            _ => return (0.0, 0.0, 0.0),
+        };
         let fcf_per_share = fcf / shares / 1_0000_0000.0;
 
         let base_g = growth_rate.unwrap_or(0.08).max(0.0);

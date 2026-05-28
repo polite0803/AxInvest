@@ -103,7 +103,13 @@ pub struct AStockClient {
 impl AStockClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
+            .timeout(std::time::Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .cookie_store(true)
+            .pool_max_idle_per_host(4)
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .min_tls_version(reqwest::tls::Version::TLS_1_2)
             .build()
             .expect("Failed to create HTTP client");
 

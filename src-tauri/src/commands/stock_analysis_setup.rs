@@ -252,6 +252,7 @@ pub async fn ensure_stock_analysis_experts_seeded(
     seed_agent_roles(db).await?;
     seed_agent_profiles(db).await?;
     seed_stock_analysis_workflow_template(db).await?;
+    seed_debate_subworkflow(db).await?;
     Ok(())
 }
 
@@ -273,7 +274,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 19;
+    const TEMPLATE_VERSION: i32 = 20;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -1970,7 +1971,20 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         is_preset: Set(true),
         is_editable: Set(true),
         is_public: Set(true),
-        trigger_config: Set(None),
+        trigger_config: Set(Some(
+            serde_json::to_string(&TriggerConfig {
+                trigger_type: TriggerType::Schedule,
+                config: serde_json::json!({
+                    "schedules": {
+                        "morning": "0 9 * * 1-5",
+                        "afternoon": "0 14 * * 1-5",
+                    },
+                    "enabled": false,
+                    "timezone": "Asia/Shanghai",
+                }),
+            })
+            .unwrap_or_default(),
+        )),
         nodes: Set(nodes_json),
         edges: Set(edges_json),
         input_schema: Set(Some(input_schema_val)),
@@ -2176,4 +2190,174 @@ fn role_id_to_display(id: &str) -> String {
         "decision-maker" => "决策者".to_string(),
         o => o.to_string(),
     }
+}
+
+/// 种子化多空辩论子工作流模板，供 stock-analysis 主模板的 SubWorkflowNode 调用。
+pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
+    use axagent_core::entity::workflow_template;
+    use axagent_core::workflow_types::{
+        AgentNode, AgentNodeConfig, EdgeType, OutputMode, Position, RetryConfig, WorkflowEdge,
+        WorkflowNode, WorkflowNodeBase,
+    };
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    const DEBATE_ID: &str = "stock-debate";
+    const DEBATE_VERSION: i32 = 1;
+
+    if workflow_template::Entity::find_by_id(DEBATE_ID)
+        .one(db)
+        .await
+        .map_err(|e| format!("查询辩论模板失败: {e}"))?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let agent = |id: &str,
+                 title: &str,
+                 expert_id: &str,
+                 tools: Vec<&str>,
+                 deps: Vec<&str>,
+                 _next: &str|
+     -> (WorkflowNode, Vec<WorkflowEdge>) {
+        let tool_names = tools.iter().map(|&n| n.to_string()).collect::<Vec<_>>();
+        let n = WorkflowNode::Agent(AgentNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: title.into(),
+                description: Some(format!("辩论: {expert_id}")),
+                position: Position { x: 0.0, y: 0.0 },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
+                },
+                timeout: Some(300),
+                enabled: true,
+            },
+            config: AgentNodeConfig {
+                system_prompt: format!("你的任务: {title}\n工具: {}", tool_names.join(", ")),
+                context_sources: vec![],
+                output_var: id.into(),
+                model: None,
+                temperature: Some(0.3),
+                max_tokens: Some(4096),
+                tools: vec![],
+                exposed_tools: vec![],
+                output_mode: OutputMode::Text,
+                agent_profile_id: Some(format!("stock-{expert_id}")),
+                max_tool_rounds: Some(2),
+                execution_mode: None,
+                rag_source_ids: vec![],
+            },
+        });
+        let edges: Vec<WorkflowEdge> = deps
+            .iter()
+            .map(|dep| WorkflowEdge {
+                id: format!("e-{dep}-{id}"),
+                source: dep.to_string(),
+                source_handle: None,
+                target: id.to_string(),
+                target_handle: None,
+                edge_type: EdgeType::Direct,
+                label: None,
+            })
+            .collect();
+        (n, edges)
+    };
+
+    let pairs = [
+        (
+            "bull-r1",
+            "构建买入论点",
+            "bull-researcher",
+            vec!["compute_scoring"],
+            vec![],
+            "bear-r1",
+        ),
+        (
+            "bear-r1",
+            "反驳多方论点",
+            "bear-researcher",
+            vec!["compute_scoring"],
+            vec!["bull-r1"],
+            "bull-r2",
+        ),
+        (
+            "bull-r2",
+            "二次反击",
+            "bull-researcher",
+            vec!["compute_scoring"],
+            vec!["bear-r1"],
+            "bear-r2",
+        ),
+        (
+            "bear-r2",
+            "挖掘隐藏风险",
+            "bear-researcher",
+            vec!["compute_scoring"],
+            vec!["bull-r2"],
+            "bull-r3",
+        ),
+        (
+            "bull-r3",
+            "终极多方辩护",
+            "bull-researcher",
+            vec!["compute_scoring"],
+            vec!["bear-r2"],
+            "bear-r3",
+        ),
+        (
+            "bear-r3",
+            "终极空方陈词",
+            "bear-researcher",
+            vec!["compute_scoring"],
+            vec!["bull-r3"],
+            "",
+        ),
+    ];
+
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for (id, title, expert, tools, deps, _next) in &pairs {
+        let (n, e) = agent(id, title, expert, tools.clone(), deps.to_vec(), "");
+        nodes.push(n);
+        edges.extend(e);
+    }
+
+    let nodes_json =
+        serde_json::to_string(&nodes).map_err(|e| format!("序列化辩论节点失败: {e}"))?;
+    let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化辩论边失败: {e}"))?;
+
+    workflow_template::ActiveModel {
+        id: Set(DEBATE_ID.to_string()),
+        name: Set("多空辩论".to_string()),
+        description: Set(Some(
+            "6 轮多空辩论：bull-r1→bear-r1→bull-r2→bear-r2→bull-r3→bear-r3".into(),
+        )),
+        icon: Set("swords".into()),
+        tags: Set(Some(serde_json::to_string(&["debate", "stock"]).unwrap())),
+        version: Set(DEBATE_VERSION),
+        is_preset: Set(true),
+        is_editable: Set(false),
+        is_public: Set(true),
+        trigger_config: Set(None),
+        nodes: Set(nodes_json),
+        edges: Set(edges_json),
+        input_schema: Set(None),
+        output_schema: Set(None),
+        variables: Set(Some("[]".into())),
+        error_config: Set(None),
+        composite_source: Set(None),
+        tool_defs: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| format!("写入辩论模板失败: {e}"))?;
+
+    tracing::info!("[stock_analysis_setup] 辩论子工作流模板已种子化 ({DEBATE_ID})");
+    Ok(())
 }

@@ -45,9 +45,13 @@ pub enum BackoffType {
 pub struct JsonSchema {
     #[serde(rename = "type")]
     pub schema_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub properties: Option<std::collections::HashMap<String, JsonSchemaProperty>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub items: Option<Box<JsonSchema>>,
 }
 
@@ -67,9 +71,13 @@ pub struct ToolDef {
 pub struct JsonSchemaProperty {
     #[serde(rename = "type")]
     pub schema_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
 }
 

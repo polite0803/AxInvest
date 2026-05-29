@@ -263,14 +263,16 @@ async fn seed_stock_analysis_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
-        AgentNode, AgentNodeConfig, EdgeType, JsonSchema, JsonSchemaProperty, OutputMode, Position,
-        RetryConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
-        Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, Branch, ConditionNode, ConditionNodeConfig, EdgeType,
+        ErrorConfig, JsonSchema, JsonSchemaProperty, LogicalOperator, OnFailureAction, OutputMode,
+        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
+        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge,
+        WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 17;
+    const TEMPLATE_VERSION: i32 = 18;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -954,19 +956,28 @@ async fn seed_stock_analysis_workflow_template(
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
-    for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {
-        let analyst_id = a_ids[i];
-        nodes.push(tool_node(tool_id, tool_title, tool_name, tool_id, arg_key));
-        edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
-        edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
-    }
+    // ── Phase 1: ParallelNode 包裹 9 组 Tool+Agent 分析师 ──
+    let analyst_branches: Vec<Branch> = tool_assignments
+        .iter()
+        .enumerate()
+        .map(|(i, (tool_id, _tool_title, tool_name, arg_key))| {
+            let analyst_id = a_ids[i];
+            // 每个分支内部：ToolNode → AgentNode
+            nodes.push(tool_node(tool_id, &format!("获取数据"), tool_name, tool_id, arg_key));
+            edges.push(edge(&format!("e-p-analysts-{tool_id}"), "p-analysts", tool_id));
+            edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
+            Branch {
+                id: analyst_id.to_string(),
+                title: analysts[i].1.to_string(),
+                steps: vec![tool_id.to_string(), analyst_id.to_string()],
+            }
+        })
+        .collect();
 
-    // 工具由模板节点 config.tools 统一管理：
-    //   tools         — 全部可用工具（固定 + 暴露），供 executor 查找 ToolDef
-    //   exposed_tools — 暴露给 LLM 自主调用的工具名（排除固定 ToolNode 工具）
+    // 工具由模板节点 config.tools 统一管理
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
-        let fixed_tool_name = tool_assignments[i].2; // ToolNode 的 tool_name
+        let fixed_tool_name = tool_assignments[i].2;
         let mut an = agent(id, title, _expert);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
@@ -980,7 +991,6 @@ async fn seed_stock_analysis_workflow_template(
                 .iter()
                 .filter_map(|&tn| tool_def_map.get(tn).cloned())
                 .collect();
-            // exposed_tools = 全部 tools 减去固定 ToolNode 的工具
             a.config.exposed_tools = tool_names
                 .iter()
                 .filter(|&&tn| tn != fixed_tool_name)
@@ -992,13 +1002,60 @@ async fn seed_stock_analysis_workflow_template(
         nodes.push(an);
     }
 
-    // 辩论 6 轮
+    // ParallelNode: 将 9 组分析师封装为统一并行节点
+    nodes.push(WorkflowNode::Parallel(ParallelNode {
+        base: WorkflowNodeBase {
+            id: "p-analysts".into(),
+            title: "9 维度分析师并行".into(),
+            description: Some("行情/情绪/新闻/基本面/政策/游资/解禁/研报/行业".into()),
+            position: Position { x: 300.0, y: 100.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(600),
+            enabled: true,
+        },
+        config: ParallelNodeConfig {
+            branches: analyst_branches,
+            wait_for_all: true,
+            timeout: Some(600),
+            aggregation: Some("all".into()),
+        },
+    }));
+    edges.push(edge("e-trigger-p-analysts", "trigger", "p-analysts"));
+
+    // ── Phase 2: 条件分支 — LLM 动态判断是否需要多空辩论 ──
+    nodes.push(WorkflowNode::Condition(ConditionNode {
+        base: WorkflowNodeBase {
+            id: "c-need-debate".into(),
+            title: "是否需多空辩论".into(),
+            description: Some("基于9位分析师报告，LLM判断观点是否已有明确共识".into()),
+            position: Position { x: 300.0, y: 350.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(120),
+            enabled: true,
+        },
+        config: ConditionNodeConfig {
+            conditions: vec![],
+            logical_op: LogicalOperator::And,
+            judge_by_llm: Some(true),
+            routing_prompt: Some(
+                "基于9位分析师的综合报告，判断是否需要启动多空辩论流程。\
+                 如果分析师观点高度一致（>80%同方向），可跳过辩论直接进入风险评估。\
+                 如果存在显著分歧，则需要辩论。\
+                 输出 JSON: {\"need_debate\": true/false, \"reason\": \"简要理由\"}"
+                    .into(),
+            ),
+            routing_model: None,
+        },
+    }));
+    edges.push(edge("e-p-analysts-c-debate", "p-analysts", "c-need-debate"));
+
+    // 辩论 6 轮 — bull-r1 依赖 c-need-debate (true 分支)
     let debate_pairs = [
         (
             "bull-r1",
             "基于9位分析师的报告，构建该股票的完整买入论点。引用分析师数据支撑，明确列出3-5个看涨理由，每个理由需有具体数据",
             "bull-researcher",
-            &a_ids[..],
+            &["c-need-debate"][..],
             "bear-r1",
         ),
         (
@@ -1759,6 +1816,52 @@ async fn seed_stock_analysis_workflow_template(
     let variables_val =
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;
 
+    // ── Phase 3/4: Rhai 综合评分工具 + ErrorConfig ──
+    use axagent_core::workflow_types::RhaiToolDef;
+    let stock_score_rhai = r##"
+// 综合评分脚本：技术面(30%) + 基本面(25%) + 情绪面(20%) + 资金面(15%) + 政策面(10%)
+let w_tech = ctx.variables.weight_technical ?? 30.0;
+let w_fund = ctx.variables.weight_fundamental ?? 25.0;
+let w_sent = ctx.variables.weight_sentiment ?? 20.0;
+let w_flow = ctx.variables.weight_money_flow ?? 15.0;
+let w_pol = ctx.variables.weight_policy ?? 10.0;
+
+let tech = ctx.results["a-market-analyst"] ?? 50.0;
+let fund = ctx.results["a-fundamentals"] ?? 50.0;
+let sent = ctx.results["a-sentiment"] ?? 50.0;
+let flow = ctx.results["a-hot-money"] ?? 50.0;
+let pol = ctx.results["a-policy"] ?? 50.0;
+
+let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol * w_pol) / 100.0;
+#{
+    score: score,
+    level: if score >= 80 { "强烈推荐" }
+           else if score >= 60 { "推荐" }
+           else if score >= 40 { "中性" }
+           else { "回避" }
+}
+"##;
+    let rhai_tool_defs: Vec<RhaiToolDef> = vec![RhaiToolDef {
+        tool_name: "compute_stock_score".into(),
+        description: Some("综合技术面/基本面/情绪面/资金面/政策面计算 0-100 评分".into()),
+        code: stock_score_rhai.into(),
+    }];
+    let tool_defs_val = serde_json::to_string(&rhai_tool_defs)
+        .map_err(|e| format!("序列化 Rhai 工具定义失败: {e}"))?;
+
+    let error_config = ErrorConfig {
+        retry_policy: Some(RetryPolicy {
+            max_retries: 3,
+            base_delay_ms: 1000,
+            max_delay_ms: 30000,
+        }),
+        on_failure: OnFailureAction::ContinueWithDefault,
+        error_branch: None,
+        compensation_steps: None,
+    };
+    let error_config_val = serde_json::to_string(&error_config)
+        .map_err(|e| format!("序列化 ErrorConfig 失败: {e}"))?;
+
     // 写入 DB
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
     let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化边失败: {e}"))?;
@@ -1769,9 +1872,10 @@ async fn seed_stock_analysis_workflow_template(
         id: Set(TEMPLATE_ID.to_string()),
         name: Set("A股多维度分析".to_string()),
         description: Set(Some(
-            "9 维度分析师 → 6 轮多空辩论 → 3 风险维度 → 交易方案 → 投资决策".to_string(),
+            "9 维度分析师 → LLM 智能辩论 → 3 风险维度 → Rhai 评分 → 交易方案 → 投资决策"
+                .to_string(),
         )),
-        icon: Set("chart-bar".to_string()),
+        icon: Set("chart-bar".into()),
         tags: Set(Some(tags)),
         version: Set(TEMPLATE_VERSION),
         is_preset: Set(true),
@@ -1783,9 +1887,9 @@ async fn seed_stock_analysis_workflow_template(
         input_schema: Set(Some(input_schema_val)),
         output_schema: Set(Some(output_schema_val)),
         variables: Set(Some(variables_val)),
-        error_config: Set(None),
+        error_config: Set(Some(error_config_val)),
         composite_source: Set(None),
-        tool_defs: Set(None),
+        tool_defs: Set(Some(tool_defs_val)),
         created_at: Set(now),
         updated_at: Set(now),
     }

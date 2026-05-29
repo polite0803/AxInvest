@@ -4062,13 +4062,14 @@
     "start": "Start",
     "startExecution": "Start Execution",
     "startTime": "Start Time",
-    "status": "Status",
+    "status": "상태",
     "statusCancelled": "Cancelled",
     "statusCompleted": "Completed",
     "statusFailed": "Failed",
     "statusPaused": "Paused",
     "statusPending": "Pending",
-    "statusRunning": "Running"
+    "statusRunning": "Running",
+    "nodes": "노드"
   },
   "rl": {
     "policyDashboard": "RL Policy Dashboard",

@@ -4175,7 +4175,8 @@
     "statusFailed": "Failed",
     "statusPaused": "Paused",
     "statusPending": "Pending",
-    "statusRunning": "Running"
+    "statusRunning": "Running",
+    "nodes": "Nodes"
   },
   "rl": {
     "policyDashboard": "RL Policy Dashboard",

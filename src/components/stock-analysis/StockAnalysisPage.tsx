@@ -15,6 +15,7 @@ import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
 import { DragonTigerPanel } from "./DragonTigerPanel";
 import { EventCalendarPanel } from "./EventCalendarPanel";
+import { ExecutionReplayPanel } from "./ExecutionReplayPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
 import { KLineChart } from "./KLineChart";
 import { LimitUpPanel } from "./LimitUpPanel";
@@ -146,6 +147,7 @@ export function StockAnalysisPage() {
     },
     { key: "review", label: t("stockAnalysis.settings.sheet.review"), element: <DailyReviewPanel /> },
     { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
+    { key: "replay", label: t("workEngine.executionHistory"), element: <ExecutionReplayPanel /> },
   ];
   // 桌面全部显示，移动端前7个核心面板 + 其余通过 tag 切换
   const mobileCoreKeys = ["screener", "limitup", "dragontiger", "sectors", "north", "watchlist", "trade"];

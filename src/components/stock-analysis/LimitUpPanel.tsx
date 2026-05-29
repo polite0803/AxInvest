@@ -22,8 +22,10 @@ export function LimitUpPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [stocks, setStocks] = useState<LimitUpStock[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const hot: any[] = await invoke("get_hot_stocks");
       if (!Array.isArray(hot)) { return; }
@@ -47,7 +49,9 @@ export function LimitUpPanel() {
       }
       results.sort((a, b) => b.changePct - a.changePct);
       setStocks(results);
-    } catch { /* */ }
+    } catch {
+      setFetchError(true);
+    }
     setLoading(false);
   }, []);
 
@@ -61,6 +65,11 @@ export function LimitUpPanel() {
     startAnalysis(code);
   };
 
+  const handleRefresh = async () => {
+    const r = await checkVendorEnabled("limitup");
+    if (r.status === "ok") { load(); }
+  };
+
   return (
     <Card
       size="small"
@@ -70,9 +79,7 @@ export function LimitUpPanel() {
         <Button
           size="small"
           loading={loading}
-          onClick={async () => {
-            if (await checkVendorEnabled("limitup")) { load(); }
-          }}
+          onClick={handleRefresh}
         >
           {t("stockAnalysis.settings.panels.refresh")}
         </Button>
@@ -81,7 +88,14 @@ export function LimitUpPanel() {
       {loading
         ? <Spin size="small" />
         : stocks.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noLimitUp")} />
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={fetchError
+              ? t("stockAnalysis.settings.vendor.connectionFailed")
+              : t("stockAnalysis.settings.panels.noLimitUp")}
+          />
+        )
         : (
           <List
             size="small"

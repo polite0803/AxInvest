@@ -6862,7 +6862,9 @@
         "unit10k": "10k"
       },
       "vendor": {
-        "disabled": "No vendor enabled: {{names}}"
+        "disabled": "No vendor enabled: {{names}}",
+        "backendOffline": "Backend not ready, please try again later",
+        "connectionFailed": "Connection failed, please check network and retry"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

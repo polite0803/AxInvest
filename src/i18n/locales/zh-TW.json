@@ -6812,7 +6812,9 @@
         "unit10k": "万元"
       },
       "vendor": {
-        "disabled": "数据源未开启：{{names}} 均未启用"
+        "disabled": "数据源未开启：{{names}} 均未启用",
+        "backendOffline": "後端服務未就緒，請稍後重試",
+        "connectionFailed": "資料來源連線失敗，請檢查網路或稍後重試"
       }
     },
     "progress.fetchingData": "正在获取股票資料，请稍候...",

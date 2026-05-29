@@ -15,9 +15,11 @@ export function NorthBoundPanel() {
   const { t } = useTranslation();
   const [flow, setFlow] = useState<NbFlow | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const f: any = await invoke("get_north_bound_flow");
       if (f) {
@@ -28,7 +30,9 @@ export function NorthBoundPanel() {
           totalFlow: f.totalFlow ?? f.total_flow ?? 0,
         });
       }
-    } catch { /* */ }
+    } catch {
+      setFetchError(true);
+    }
     setLoading(false);
   }, []);
 
@@ -40,6 +44,11 @@ export function NorthBoundPanel() {
   const dir = total >= 0 ? t("stockAnalysis.settings.panels.inflow") : t("stockAnalysis.settings.panels.outflow");
   const color = total >= 0 ? "var(--sa-red)" : "var(--sa-green)";
 
+  const handleRefresh = async () => {
+    const r = await checkVendorEnabled("north");
+    if (r.status === "ok") { load(); }
+  };
+
   return (
     <Card
       size="small"
@@ -49,9 +58,7 @@ export function NorthBoundPanel() {
         <Button
           size="small"
           loading={loading}
-          onClick={async () => {
-            if (await checkVendorEnabled("north")) { load(); }
-          }}
+          onClick={handleRefresh}
         >
           {t("stockAnalysis.settings.panels.refresh")}
         </Button>
@@ -60,7 +67,14 @@ export function NorthBoundPanel() {
       {loading
         ? <Spin size="small" />
         : !flow
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noNorthBound")} />
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={fetchError
+              ? t("stockAnalysis.settings.vendor.connectionFailed")
+              : t("stockAnalysis.settings.panels.noNorthBound")}
+          />
+        )
         : (
           <div className="text-center">
             <Statistic

@@ -4067,7 +4067,8 @@
     "statusFailed": "失敗",
     "statusPaused": "一時停止中",
     "statusPending": "保留中",
-    "statusRunning": "実行中"
+    "statusRunning": "実行中",
+    "nodes": "ノード"
   },
   "rl": {
     "policyDashboard": "RL 策略面板",

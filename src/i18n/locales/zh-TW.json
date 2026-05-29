@@ -4067,7 +4067,8 @@
     "statusFailed": "失敗",
     "statusPaused": "已暫停",
     "statusPending": "待執行",
-    "statusRunning": "運行中"
+    "statusRunning": "運行中",
+    "nodes": "節點"
   },
   "rl": {
     "policyDashboard": "RL 策略面板",

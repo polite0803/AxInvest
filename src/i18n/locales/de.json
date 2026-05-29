@@ -4467,7 +4467,8 @@
     "statusFailed": "Failed",
     "statusPaused": "Paused",
     "statusPending": "Pending",
-    "statusRunning": "Running"
+    "statusRunning": "Running",
+    "nodes": "Knoten"
   },
   "rl": {
     "policyDashboard": "RL Policy Dashboard",

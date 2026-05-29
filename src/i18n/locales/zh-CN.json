@@ -4583,7 +4583,8 @@
     "statusFailed": "失败",
     "statusPaused": "已暂停",
     "statusPending": "待执行",
-    "statusRunning": "运行中"
+    "statusRunning": "运行中",
+    "nodes": "节点"
   },
   "rl": {
     "policyDashboard": "RL 策略面板",

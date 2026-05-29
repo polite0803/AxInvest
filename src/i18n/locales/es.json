@@ -4461,13 +4461,14 @@
     "start": "Start",
     "startExecution": "Start Execution",
     "startTime": "Start Time",
-    "status": "Status",
+    "status": "Estado",
     "statusCancelled": "Cancelled",
     "statusCompleted": "Completed",
     "statusFailed": "Failed",
     "statusPaused": "Paused",
     "statusPending": "Pending",
-    "statusRunning": "Running"
+    "statusRunning": "Running",
+    "nodes": "Nodos"
   },
   "rl": {
     "policyDashboard": "RL Policy Dashboard",

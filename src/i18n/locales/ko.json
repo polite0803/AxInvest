@@ -2795,7 +2795,9 @@
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "단축키가 다른 애플리케이션에서 사용 중입니다. 다른 키를 시도하세요"
+    "conflictError": "단축키가 다른 애플리케이션에서 사용 중입니다. 다른 키를 시도하세요",
+    "invalidFormat": "잘못된 바로 가기 형식",
+    "unsupportedCombo": "시스템이 이 바로 가기 조합을 지원하지 않습니다"
   },
   "tray": {
     "show": "표시",
@@ -6950,7 +6952,8 @@
       "high": "높음",
       "medium": "중간",
       "low": "낮음"
-    }
+    },
+    "workflowStarting": "⏳ {{stockCode}} 주식 분석 워크플로 시작 중..."
   },
   "trade": {
     "title": "Trading Log",

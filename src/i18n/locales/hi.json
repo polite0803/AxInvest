@@ -2762,7 +2762,9 @@
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "शॉर्टकट पहले से उपयोग में है, कृपया अन्य कुंजी आज़माएं"
+    "conflictError": "शॉर्टकट पहले से उपयोग में है, कृपया अन्य कुंजी आज़माएं",
+    "invalidFormat": "अमान्य शॉर्टकट प्रारूप",
+    "unsupportedCombo": "सिस्टम इस शॉर्टकट संयोजन का समर्थन नहीं करता"
   },
   "tray": {
     "show": "दिखाएँ",
@@ -6929,7 +6931,8 @@
       "high": "उच्च",
       "medium": "मध्यम",
       "low": "निम्न"
-    }
+    },
+    "workflowStarting": "⏳ {{stockCode}} स्टॉक विश्लेषण वर्कफ़्लो शुरू कर रहा है..."
   },
   "trade": {
     "title": "Trading Log",

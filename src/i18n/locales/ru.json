@@ -2762,7 +2762,9 @@
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "Сочетание уже используется, попробуйте другие клавиши"
+    "conflictError": "Сочетание уже используется, попробуйте другие клавиши",
+    "invalidFormat": "Неверный формат сочетания клавиш",
+    "unsupportedCombo": "Система не поддерживает эту комбинацию клавиш"
   },
   "tray": {
     "show": "Показать",
@@ -6950,7 +6952,8 @@
       "high": "Высокий",
       "medium": "Средний",
       "low": "Низкий"
-    }
+    },
+    "workflowStarting": "⏳ Запуск рабочего процесса анализа {{stockCode}}..."
   },
   "trade": {
     "title": "Trading Log",

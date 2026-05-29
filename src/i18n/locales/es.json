@@ -2795,7 +2795,9 @@
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "Atajo ya en uso, intente otra combinación de teclas"
+    "conflictError": "Atajo ya en uso, intente otra combinación de teclas",
+    "invalidFormat": "Formato de atajo inválido",
+    "unsupportedCombo": "El sistema no admite esta combinación de teclas"
   },
   "tray": {
     "show": "Mostrar",
@@ -6950,7 +6952,8 @@
       "high": "Alto",
       "medium": "Medio",
       "low": "Bajo"
-    }
+    },
+    "workflowStarting": "⏳ Iniciando flujo de análisis de {{stockCode}}..."
   },
   "trade": {
     "title": "Trading Log",

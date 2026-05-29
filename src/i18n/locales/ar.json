@@ -2762,7 +2762,9 @@
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "الاختصار قيد الاستخدام بالفعل، يرجى تجربة مفاتيح أخرى"
+    "conflictError": "الاختصار قيد الاستخدام بالفعل، يرجى تجربة مفاتيح أخرى",
+    "invalidFormat": "تنسيق اختصار غير صالح",
+    "unsupportedCombo": "النظام لا يدعم مجموعة الاختصارات هذه"
   },
   "tray": {
     "show": "إظهار",
@@ -6950,7 +6952,8 @@
       "high": "مرتفع",
       "medium": "متوسط",
       "low": "منخفض"
-    }
+    },
+    "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}..."
   },
   "trade": {
     "title": "Trading Log",

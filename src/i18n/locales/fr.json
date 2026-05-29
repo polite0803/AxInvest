@@ -2795,7 +2795,9 @@
     "conflictApp1": "Feishu/WeChat/Enterprise WeChat/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "Raccourci déjà utilisé, veuillez essayer une autre combinaison"
+    "conflictError": "Raccourci déjà utilisé, veuillez essayer une autre combinaison",
+    "invalidFormat": "Format de raccourci invalide",
+    "unsupportedCombo": "Le système ne prend pas en charge cette combinaison"
   },
   "tray": {
     "show": "Afficher",
@@ -6950,7 +6952,8 @@
       "high": "Élevé",
       "medium": "Moyen",
       "low": "Faible"
-    }
+    },
+    "workflowStarting": "⏳ Démarrage du workflow d'analyse de {{stockCode}}..."
   },
   "trade": {
     "title": "Trading Log",

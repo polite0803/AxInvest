@@ -200,7 +200,7 @@ async function handleStockAnalysisTrigger(
     // 先插一条可见消息，避免对话页空白
     invoke("send_system_message", {
       conversationId: conv.id,
-      content: `⏳ 正在启动 ${stockCode} 股票分析工作流...`,
+      content: t("stockAnalysis.workflowStarting", { stockCode }),
     }).catch(() => {});
 
     // 工作流→对话桥接

@@ -2795,7 +2795,9 @@
     "conflictApp1": "飛書/微信/企業微信/釘釘",
     "conflictApp2": "QQ/微信",
     "conflictApp3": "微信 (Windows)",
-    "conflictError": "快捷鍵已被其他應用程式佔用，請嘗試更換快捷鍵"
+    "conflictError": "快捷鍵已被其他應用程式佔用，請嘗試更換快捷鍵",
+    "invalidFormat": "快捷鍵格式無效",
+    "unsupportedCombo": "系統不支援此快捷鍵組合"
   },
   "tray": {
     "show": "顯示",
@@ -6927,7 +6929,8 @@
       "high": "高",
       "medium": "中",
       "low": "低"
-    }
+    },
+    "workflowStarting": "⏳ 正在啟動 {{stockCode}} 股票分析工作流程..."
   },
   "trade": {
     "title": "交易日志",

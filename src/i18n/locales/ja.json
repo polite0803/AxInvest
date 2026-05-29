@@ -2795,7 +2795,9 @@
     "conflictApp1": "飞书/微信/企业微信/钉钉",
     "conflictApp2": "QQ/微信",
     "conflictApp3": "微信 (Windows)",
-    "conflictError": "ショートカットは別のアプリケーションで使用されています。別のキーをお試しください"
+    "conflictError": "ショートカットは別のアプリケーションで使用されています。別のキーをお試しください",
+    "invalidFormat": "無効なショートカット形式",
+    "unsupportedCombo": "システムはこのショートカットの組み合わせをサポートしていません"
   },
   "tray": {
     "show": "表示",
@@ -6949,7 +6951,8 @@
       "high": "高",
       "medium": "中",
       "low": "低"
-    }
+    },
+    "workflowStarting": "⏳ {{stockCode}} 株式分析ワークフローを起動中..."
   },
   "trade": {
     "title": "Trading Log",

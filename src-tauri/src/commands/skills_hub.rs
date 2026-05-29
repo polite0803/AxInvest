@@ -83,7 +83,7 @@ pub async fn skills_hub_install(
     tracing::info!("Installing skill '{}' from Skills Hub", axagent_skill.name);
 
     // 写入 skill 目录，使 PluginManager 可以发现它
-    let skills_dir = axagent_home().join("skills");
+    let skills_dir = axinvest_home().join("skills");
     std::fs::create_dir_all(&skills_dir).map_err(|e| format!("创建 skills 目录失败: {e}"))?;
 
     let skill_dir = skills_dir.join(&axagent_skill.name);

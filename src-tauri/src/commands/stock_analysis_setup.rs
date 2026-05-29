@@ -853,6 +853,8 @@ async fn seed_stock_analysis_workflow_template(
                 output_mode: OutputMode::Text,
                 agent_profile_id: Some(format!("stock-{expert_id}")),
                 max_tool_rounds: None,
+                execution_mode: None,
+                rag_source_ids: vec![],
             },
         })
     };
@@ -1783,6 +1785,7 @@ async fn seed_stock_analysis_workflow_template(
         variables: Set(Some(variables_val)),
         error_config: Set(None),
         composite_source: Set(None),
+        tool_defs: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     }

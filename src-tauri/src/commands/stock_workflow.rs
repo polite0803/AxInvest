@@ -63,6 +63,7 @@ pub async fn run_stock_workflow(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     stock_code: String,
+    dry_run: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     // ── 1. 获取行情基本信息（用于写入分析记录）──
     let quote = state
@@ -179,6 +180,9 @@ pub async fn run_stock_workflow(
         }
         if let Some(s) = output_schema {
             opts = opts.with_output_schema(s);
+        }
+        if dry_run.unwrap_or(false) {
+            opts.dry_run = true;
         }
         if let Some(v) = template_vars {
             opts = opts.with_variables(v);

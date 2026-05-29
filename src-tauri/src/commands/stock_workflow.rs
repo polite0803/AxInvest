@@ -132,8 +132,19 @@ pub async fn run_stock_workflow(
         }
     }
 
-    // ── 3. 获取引擎引用（工具由 ToolResolver 自动扫描模板 AgentNode.tools 并注册）──
+    // ── 3. 获取引擎引用，注册断点 ──
     let engine = Arc::clone(&state.work_engine);
+    // 在关键决策点设置断点（可在前端单步调试）
+    let _ = state.work_engine.set_breakpoints(
+        [
+            "p-analysts".to_string(),
+            "c-need-debate".to_string(),
+            "trader".to_string(),
+            "portfolio-mgr".to_string(),
+        ]
+        .into_iter()
+        .collect(),
+    );
 
     // ── 4. 创建并执行工作流 ──
     let wf_name = format!("stock-analysis-{stock_code}");

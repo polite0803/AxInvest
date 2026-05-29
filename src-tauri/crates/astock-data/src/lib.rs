@@ -207,7 +207,8 @@ impl AStockClient {
                 vendor.get_klines("000001", "daily", 5).await?;
             },
             "sina" => {
-                vendor.get_news("000001", 3).await?;
+                // sina news API (vip.stock.finance.sina.com.cn) 不稳定，改用 quote 探测
+                vendor.get_quote("000001").await?;
             },
             "ths" => {
                 vendor.get_hot_stocks().await?;

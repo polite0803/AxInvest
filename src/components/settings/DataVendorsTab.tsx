@@ -13,6 +13,8 @@ interface VendorDef {
   desc: string;
   capabilities: string[];
   requiresKey: boolean;
+  helpUrl?: string;
+  helpText?: string;
 }
 
 const VENDORS: VendorDef[] = [
@@ -106,6 +108,8 @@ const VENDORS: VendorDef[] = [
     desc: "选股/研报",
     capabilities: ["search", "sector", "consensus_eps", "concept_blocks", "hot_stocks"],
     requiresKey: true,
+    helpUrl: "https://www.iwencai.com/",
+    helpText: "注册登录后获取 API token",
   },
   {
     key: "vendor_akshare",
@@ -122,6 +126,7 @@ const VENDORS: VendorDef[] = [
     desc: "通达信本地",
     capabilities: ["quote", "klines"],
     requiresKey: false,
+    helpText: "需本地安装通达信客户端，启动后 Mootdx 自动通过 127.0.0.1:7709 连接行情服务",
   },
 ];
 
@@ -398,6 +403,17 @@ export function DataVendorsTab() {
                 ))}
               </Space>
             </div>
+            {/* 帮助信息：API Key 获取地址 / 使用说明 */}
+            {v.helpUrl && (
+              <div className="text-xs text-blue-500 mb-2">
+                🔑{" "}
+                <a href={v.helpUrl} target="_blank" rel="noopener noreferrer" className="underline">
+                  {v.helpUrl}
+                </a>
+                {v.helpText && <span className="text-gray-400 ml-1">{v.helpText}</span>}
+              </div>
+            )}
+            {v.helpText && !v.helpUrl && <div className="text-xs text-gray-400 mb-2">💡 {v.helpText}</div>}
             {/* 固定工具 (🔧) + LLM 暴露工具 (🤖) */}
             {deps.length > 0 && (
               <div className="border-t border-gray-100 pt-2 mt-1">

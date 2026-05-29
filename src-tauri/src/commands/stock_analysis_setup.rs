@@ -265,14 +265,15 @@ async fn seed_stock_analysis_workflow_template(
     use axagent_core::workflow_types::{
         AgentNode, AgentNodeConfig, Branch, ConditionNode, ConditionNodeConfig, EdgeType,
         ErrorConfig, JsonSchema, JsonSchemaProperty, LogicalOperator, OnFailureAction, OutputMode,
-        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
-        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge,
-        WorkflowNode, WorkflowNodeBase,
+        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, SubWorkflowNode,
+        SubWorkflowNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
+        TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable,
+        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 18;
+    const TEMPLATE_VERSION: i32 = 19;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -1049,7 +1050,37 @@ async fn seed_stock_analysis_workflow_template(
     }));
     edges.push(edge("e-p-analysts-c-debate", "p-analysts", "c-need-debate"));
 
-    // 辩论 6 轮 — bull-r1 依赖 c-need-debate (true 分支)
+    // ── Conditional 边：c-need-debate → true: 辩论 / false: 跳过辩论直接进风险评估 ──
+    let cond_true_edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
+        WorkflowEdge {
+            id: id.into(),
+            source: source.into(),
+            source_handle: Some("true".into()),
+            target: target.into(),
+            target_handle: None,
+            edge_type: EdgeType::ConditionTrue,
+            label: None,
+        }
+    };
+    let cond_false_edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
+        WorkflowEdge {
+            id: id.into(),
+            source: source.into(),
+            source_handle: Some("false".into()),
+            target: target.into(),
+            target_handle: None,
+            edge_type: EdgeType::ConditionFalse,
+            label: None,
+        }
+    };
+    // true → 辩论
+    edges.push(cond_true_edge("e-cond-debate", "c-need-debate", "bull-r1"));
+    // false → 跳过辩论，直接风险评估
+    edges.push(cond_false_edge("e-cond-skip-debate", "c-need-debate", "risk-agg"));
+    edges.push(cond_false_edge("e-cond-skip-debate-con", "c-need-debate", "risk-con"));
+    edges.push(cond_false_edge("e-cond-skip-debate-neu", "c-need-debate", "risk-neu"));
+
+    // 辩论 6 轮 — bull-r1 通过 ConditionTrue 边激活
     let debate_pairs = [
         (
             "bull-r1",
@@ -1132,6 +1163,30 @@ async fn seed_stock_analysis_workflow_template(
         }
     }
 
+    // ── SubWorkflow: 多空辩论子流程 ──
+    nodes.push(WorkflowNode::SubWorkflow(SubWorkflowNode {
+        base: WorkflowNodeBase {
+            id: "sub-debate".into(),
+            title: "多空辩论子工作流".into(),
+            description: Some(
+                "多空辩论 6 轮：bull-r1→bear-r1→bull-r2→bear-r2→bull-r3→bear-r3".into(),
+            ),
+            position: Position { x: 400.0, y: 400.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(900),
+            enabled: true,
+        },
+        config: SubWorkflowNodeConfig {
+            sub_workflow_id: "stock-debate".into(),
+            input_mapping: std::collections::HashMap::from([(
+                "analyst_reports".into(),
+                "p-analysts.output".into(),
+            )]),
+            output_var: "debate_result".into(),
+            is_async: false,
+        },
+    }));
+
     // 风险评估（3 个并行，均依赖 bear-r3）
     for (rid, rtitle, rexpert, rtools) in &[
         (
@@ -1200,6 +1255,33 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 
+    // ── Validation: 结果完整性校验 ──
+    nodes.push(WorkflowNode::Validation(ValidationNode {
+        base: WorkflowNodeBase {
+            id: "v-validate".into(),
+            title: "结果完整性校验".into(),
+            description: Some("确保分析报告包含必要字段，缺失时降级处理".into()),
+            position: Position {
+                x: 300.0,
+                y: 1000.0,
+            },
+            retry: RetryConfig::default(),
+            timeout: Some(60),
+            enabled: true,
+        },
+        config: ValidationNodeConfig {
+            assertions: vec![ValidationAssertion {
+                assertion_type: "exists".into(),
+                expected: None,
+                actual: Some("t-risk.output".into()),
+                expression: None,
+            }],
+            on_fail: "skip".into(),
+            max_retries: 1,
+        },
+    }));
+    edges.push(edge("e-t-risk-v-validate", "t-risk", "v-validate"));
+
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(
         "research-mgr",
@@ -1266,7 +1348,7 @@ async fn seed_stock_analysis_workflow_template(
             .collect();
     }
     nodes.push(rm);
-    edges.push(edge("e-t-risk-research-mgr", "t-risk", "research-mgr"));
+    edges.push(edge("e-v-validate-research-mgr", "v-validate", "research-mgr"));
 
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
     let mut trader = agent(

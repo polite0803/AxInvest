@@ -535,6 +535,7 @@ pub fn run() {
             commands::proactive::proactive_set_enabled,
             commands::proactive::proactive_update_config,
             commands::proactive::proactive_prefetch,
+            commands::proactive::list_insights,
             commands::message_continuation::continue_message,
             commands::message_continuation::list_continuable_messages,
             commands::onboarding::detect_ollama_availability,
@@ -991,6 +992,8 @@ pub fn run() {
             commands::stock_analysis::get_market_dragon_tiger,
             commands::stock_analysis::get_north_bound_flow,
             commands::stock_analysis::check_vendor_health,
+            // Service health check
+            commands::health::get_service_health,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");
@@ -1000,6 +1003,15 @@ pub fn run() {
                 use objc2::msg_send;
                 use objc2::rc::Retained;
                 use objc2::runtime::{AnyClass, AnyObject};
+                // SAFETY:
+                // 1. objc2 msg_send! 调用的都是 macOS Foundation 框架中文档完备的 API
+                //    (NSUserDefaults、NSString)，其行为和线程安全性有明确保证。
+                // 2. AnyClass::get() 使用 .expect() 进行检查，若类不存在会 panic，
+                //    这在 #[cfg(target_os = "macos")] 限定下是可接受的——这些类在 macOS 上必然存在。
+                // 3. c"" 语法的字符串常量是合法的 C 字符串，以 null 结尾，生命周期为 'static，
+                //    传递给 stringWithUTF8String: 是安全的。
+                // 4. Retained<AnyObject> 确保返回的 Objective-C 对象遵循正确的引用计数管理，
+                //    不会提前释放或泄漏。
                 unsafe {
                     let defaults_cls = AnyClass::get(c"NSUserDefaults").expect("NSUserDefaults class exists on macOS");
                     let defaults: Retained<AnyObject> = msg_send![defaults_cls, standardUserDefaults];

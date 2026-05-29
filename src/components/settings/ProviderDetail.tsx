@@ -4,7 +4,7 @@ import { PasteButton } from "@/components/common/PasteButton";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { DynamicLobeIcon } from "@/components/shared/DynamicLobeIcon";
 import { IconEditor } from "@/components/shared/IconEditor";
-import { invoke } from "@/lib/invoke";
+import { invoke, logIpcError } from "@/lib/invoke";
 import {
   getEditableCapabilities,
   getVisibleModelCapabilities,
@@ -1298,7 +1298,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                       size={14}
                       successMessage={t("common.copySuccess")}
                       onError={(e) => {
-                        console.error("copy key failed:", e);
+                        logIpcError("ProviderDetail.copyKey")(e);
                         message.error(t("error.unknown"));
                       }}
                     />
@@ -1571,6 +1571,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                   type="text"
                   size="small"
                   icon={<Plus size={14} />}
+                  aria-label={t("settings.addModel")}
                   onClick={() => handleOpenAddModel()}
                 />
               </Tooltip>
@@ -1761,6 +1762,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                               size="small"
                               type="text"
                               icon={<Plus size={14} />}
+                              aria-label={t("settings.addModelToGroup")}
                               onClick={() => handleOpenAddModel(group)}
                             />
                           </Tooltip>

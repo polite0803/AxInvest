@@ -255,9 +255,7 @@ export function TitleBar() {
           }
         }
       })
-      .catch((e: unknown) => {
-        console.warn("[IPC]", e);
-      });
+      .catch(logIpcError("webdav_sync_status"));
 
     invoke<Array<{ createdAt: string }>>("list_backups")
       .then((list) => {
@@ -271,11 +269,8 @@ export function TitleBar() {
           }
         }
       })
-      .catch((e: unknown) => {
-        console.warn("[IPC]", e);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backupPopoverOpen]);
+      .catch(logIpcError("list_backups"));
+  }, [backupPopoverOpen, loadBackupSettings]);
 
   // Calculate next WebDAV sync timestamp (re-run when settings or lastWebDavSync change)
   useEffect(() => {

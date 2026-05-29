@@ -152,6 +152,8 @@ fn parse_llm_response(
                         context_sources: vec![],
                         agent_profile_id: None,
                         max_tool_rounds: None,
+                        execution_mode: None,
+                        rag_source_ids: vec![],
                     });
                 WorkflowNode::Agent(AgentNode {
                     base,
@@ -182,6 +184,8 @@ fn parse_llm_response(
                     conditions: vec![],
                     logical_op: LogicalOperator::And,
                     judge_by_llm: None,
+                    routing_prompt: None,
+                    routing_model: None,
                 });
                 WorkflowNode::Condition(ConditionNode {
                     base,
@@ -194,6 +198,7 @@ fn parse_llm_response(
                         branches: vec![],
                         wait_for_all: true,
                         timeout: None,
+                        aggregation: None,
                     });
                 WorkflowNode::Parallel(ParallelNode {
                     base,
@@ -234,6 +239,7 @@ fn parse_llm_response(
                         language: "javascript".to_string(),
                         code: "".to_string(),
                         output_var: "".to_string(),
+                        tool_name: None,
                     });
                 WorkflowNode::Code(CodeNode {
                     base,
@@ -262,6 +268,8 @@ fn parse_llm_response(
                     context_sources: vec![],
                     agent_profile_id: None,
                     max_tool_rounds: None,
+                    execution_mode: None,
+                    rag_source_ids: vec![],
                 },
             }),
         };

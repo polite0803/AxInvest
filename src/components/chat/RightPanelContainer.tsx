@@ -30,8 +30,35 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Component, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+// 单个 tab 面板的错误边界，防止一个 tab 崩溃导致整个右侧栏白屏
+class TabErrorBoundary extends Component<
+  { children: React.ReactNode; tabKey: string },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode; tabKey: string }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 16, color: "var(--muted)", fontSize: 12 }}>
+          <p>⚠️ 面板 "{this.props.tabKey}" 加载失败</p>
+          <p style={{ color: "var(--danger)", fontSize: 11 }}>
+            {this.state.error?.message || "未知错误"}
+          </p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { AgentExecutionPanel } from "./AgentExecutionPanel";
 import { AgentHierarchyTree } from "./AgentHierarchyTree";
 import { ArtifactPanel } from "./ArtifactPanel";
@@ -431,14 +458,13 @@ export function RightPanelContainer({
     ];
 
     return entries;
-    // 精简依赖：isAgent 和面板特定数据变化时才重算
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     conversationId,
     compactMode,
     onToggleCompact,
     isAgent,
     inspectorTab,
+    setInspectorTab,
     isDarkMode,
     codeThemes,
     cacheValid,
@@ -446,8 +472,11 @@ export function RightPanelContainer({
     tokensSaved,
     cacheHits,
     panelReport,
+    panelSetReport,
     panelChartData,
+    panelChartRawAnalysis,
     panelSnapshotElements,
+    panelSnapshotDescription,
     panelResearchSources,
   ]);
 
@@ -516,7 +545,9 @@ export function RightPanelContainer({
         ))}
       </div>
       <div className="rp-body" style={{ flex: 1, overflow: "auto", paddingBottom: 16 }}>
-        {activePanel?.render()}
+        <TabErrorBoundary tabKey={activeTab}>
+          {activePanel?.render()}
+        </TabErrorBoundary>
       </div>
       {!compactMode && (
         <button

@@ -215,6 +215,13 @@ pub struct AgentNodeConfig {
     /// Agent 多轮工具调用最大轮数，默认 1（不配置则仅单轮）
     #[serde(default)]
     pub max_tool_rounds: Option<u32>,
+    /// 执行模式: "react" = 逐步思考-行动（默认）, "plan" = 先规划为工作流再执行
+    #[serde(default)]
+    pub execution_mode: Option<String>,
+    /// RAG 知识源 ID 列表。格式: "knowledge:<kb_id>", "memory:<ns_id>", "wiki:<wiki_id>"。
+    /// 执行时从这些源检索与 query 相关的内容注入 system prompt。
+    #[serde(default)]
+    pub rag_source_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,6 +301,12 @@ pub struct ConditionNodeConfig {
     /// 启用 LLM 动态路由：由 AI 判断走哪条分支（忽略 conditions 静态规则）
     #[serde(default)]
     pub judge_by_llm: Option<bool>,
+    /// LLM 路由时的提示词（描述路由判断逻辑）
+    #[serde(default)]
+    pub routing_prompt: Option<String>,
+    /// LLM 路由使用模型（为空则用系统默认）
+    #[serde(default)]
+    pub routing_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,6 +328,9 @@ pub struct ParallelNodeConfig {
     pub branches: Vec<Branch>,
     pub wait_for_all: bool,
     pub timeout: Option<u64>,
+    /// 结果聚合策略: "all" | "first" | "race" | "majority"（默认 all）
+    #[serde(default)]
+    pub aggregation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -400,6 +416,9 @@ pub struct CodeNodeConfig {
     pub language: String,
     pub code: String,
     pub output_var: String,
+    /// Rhai 脚本注册为工具名（language="rhai" 时生效，为空则用 code_<node_id>）
+    #[serde(default)]
+    pub tool_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -636,7 +655,17 @@ pub struct ErrorConfig {
     pub compensation_steps: Option<Vec<CompensationStep>>,
 }
 
+/// Rhai 脚本工具定义（不属于 DAG 节点，仅作为工具注册）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RhaiToolDef {
+    /// 注册为工具名（Agent exposed_tools 引用此名）
+    pub tool_name: String,
+    /// 工具描述（发给 LLM）
+    pub description: Option<String>,
+    /// Rhai 脚本代码
+    pub code: String,
+}
+
 pub struct WorkflowTemplateData {
     pub id: String,
     pub name: String,
@@ -654,6 +683,8 @@ pub struct WorkflowTemplateData {
     pub output_schema: Option<JsonSchema>,
     pub variables: Vec<Variable>,
     pub error_config: Option<ErrorConfig>,
+    /// Rhai 工具定义（非 DAG 节点，仅注册为可调用工具）
+    pub tool_defs: Vec<RhaiToolDef>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -672,6 +703,7 @@ impl WorkflowTemplateData {
             output_schema: self.output_schema.clone(),
             variables: self.variables.clone(),
             error_config: self.error_config.clone(),
+            tool_defs: Some(self.tool_defs.clone()),
         }
     }
 }
@@ -689,6 +721,7 @@ pub struct WorkflowTemplateInput {
     pub output_schema: Option<JsonSchema>,
     pub variables: Vec<Variable>,
     pub error_config: Option<ErrorConfig>,
+    pub tool_defs: Option<Vec<RhaiToolDef>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -709,6 +742,7 @@ pub struct WorkflowTemplateResponse {
     pub output_schema: Option<JsonSchema>,
     pub variables: Vec<Variable>,
     pub error_config: Option<ErrorConfig>,
+    pub tool_defs: Option<Vec<RhaiToolDef>>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -732,6 +766,7 @@ impl From<WorkflowTemplateData> for WorkflowTemplateResponse {
             output_schema: data.output_schema,
             variables: data.variables,
             error_config: data.error_config,
+            tool_defs: Some(data.tool_defs),
             created_at: data.created_at,
             updated_at: data.updated_at,
         }
@@ -771,6 +806,11 @@ impl From<crate::entity::workflow_template::Model> for WorkflowTemplateResponse 
             .as_ref()
             .and_then(|e| serde_json::from_str(e).ok());
 
+        let tool_defs: Option<Vec<RhaiToolDef>> = model
+            .tool_defs
+            .as_ref()
+            .and_then(|t| serde_json::from_str(t).ok());
+
         Self {
             id: model.id,
             name: model.name,
@@ -788,6 +828,7 @@ impl From<crate::entity::workflow_template::Model> for WorkflowTemplateResponse 
             output_schema,
             variables,
             error_config,
+            tool_defs,
             created_at: model.created_at,
             updated_at: model.updated_at,
         }
@@ -880,6 +921,8 @@ impl WorkflowMigrator {
                             output_mode: OutputMode::Text,
                             agent_profile_id: None,
                             max_tool_rounds: None,
+                            execution_mode: None,
+                            rag_source_ids: vec![],
                         },
                     }))
                 },
@@ -906,6 +949,8 @@ impl WorkflowMigrator {
                             output_mode: OutputMode::Text,
                             agent_profile_id: None,
                             max_tool_rounds: None,
+                            execution_mode: None,
+                            rag_source_ids: vec![],
                         },
                     }))
                 },

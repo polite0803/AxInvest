@@ -4,7 +4,7 @@ import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, TeamOutlined
 
 const _EMPTY: never[] = [];
 import { Button, Collapse, message, Tag, theme, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type CreateTeamData, CreateTeamModal, type TeammateBackendType } from "./CreateTeamModal";
 
@@ -94,6 +94,31 @@ export function TeammatePanel({
   const { token } = theme.useToken();
   const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [creatingTeam, setCreatingTeam] = useState(false);
+
+  const handleCreateTeam = useCallback((data: CreateTeamData) => {
+    setCreatingTeam(true);
+    const teamName = data.teamName || t("teammatePanel.newTeam");
+    for (const tm of data.teammates) {
+      upsertPoolItem({
+        id: `${teamName}-${tm.name}-${Date.now()}`,
+        conversationId,
+        type: "worker",
+        name: tm.name,
+        status: "pending",
+        teamName,
+        agentType: tm.backendType as TeammateBackendType,
+        currentTask: t("teammatePanel.waitingForTask"),
+      });
+    }
+    message.success(
+      t("teammatePanel.teamCreated", {
+        name: teamName,
+        count: data.teammates.length,
+      }),
+    );
+    setCreatingTeam(false);
+    setTeamModalOpen(false);
+  }, [conversationId, t, upsertPoolItem]);
 
   // 按团队分组
   const grouped = useMemo(() => {
@@ -237,32 +262,7 @@ export function TeammatePanel({
         open={teamModalOpen}
         onCancel={() => setTeamModalOpen(false)}
         loading={creatingTeam}
-        onCreate={(data: CreateTeamData) => {
-          setCreatingTeam(true);
-          // 将队友添加到 agentPool
-          const teamName = data.teamName || t("teammatePanel.newTeam");
-          for (const tm of data.teammates) {
-            upsertPoolItem({
-              // eslint-disable-next-line react-doctor/rendering-hydration-mismatch-time
-              id: `${teamName}-${tm.name}-${Date.now()}`,
-              conversationId,
-              type: "worker",
-              name: tm.name,
-              status: "pending",
-              teamName,
-              agentType: tm.backendType as TeammateBackendType,
-              currentTask: t("teammatePanel.waitingForTask"),
-            });
-          }
-          message.success(
-            t("teammatePanel.teamCreated", {
-              name: teamName,
-              count: data.teammates.length,
-            }),
-          );
-          setCreatingTeam(false);
-          setTeamModalOpen(false);
-        }}
+        onCreate={handleCreateTeam}
       />
     </div>
   );

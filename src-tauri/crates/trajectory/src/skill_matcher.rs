@@ -108,7 +108,6 @@ impl KeywordPatterns {
 
 struct ComplexityIndicators;
 
-#[allow(dead_code)]
 impl ComplexityIndicators {
     fn get_high() -> Vec<&'static str> {
         vec![
@@ -128,6 +127,7 @@ impl ComplexityIndicators {
         ]
     }
 
+    #[allow(dead_code)]
     fn get_low() -> Vec<&'static str> {
         vec!["show", "tell", "what is", "how to", "find", "search"]
     }
@@ -264,7 +264,11 @@ impl SkillMatcher {
             }
         }
 
-        matches.sort_by(|a, b| b.match_score.partial_cmp(&a.match_score).unwrap());
+        matches.sort_by(|a, b| {
+            b.match_score
+                .partial_cmp(&a.match_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let best_match = matches.first().cloned();
         let complexity = estimate_complexity(user_input);

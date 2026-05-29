@@ -6766,7 +6766,8 @@
         "monitor": "Monitor",
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
-        "toolRuntime": "Tool Runtime"
+        "toolRuntime": "Tool Runtime",
+        "workflow": "Воркфлоу"
       },
       "panels": {
         "refresh": "Refresh",

@@ -124,6 +124,7 @@ interface StockAnalysisState {
   getStockKline: (code: string, period: string, limit: number) => Promise<void>;
   startAnalysis: (stockCode: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
+  getDryRun: () => Promise<boolean>;
   fetchHistory: (limit?: number, offset?: number) => Promise<void>;
   loadAnalysis: (analysisId: string) => Promise<void>;
   reset: () => void;
@@ -209,6 +210,18 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
+  /** 读取 analysis_dry_run 模板变量 */
+  getDryRun: async () => {
+    try {
+      const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
+      const vars: any[] = tmpl?.variables ?? [];
+      const v = vars.find((x: any) => x.name === "analysis_dry_run");
+      return !!v?.value;
+    } catch {
+      return false;
+    }
+  },
+
   startAnalysis: async (stockCode: string) => {
     const { status } = get();
     if (status === "loading" || status === "running") {
@@ -238,12 +251,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     // 先注册事件监听，再触发工作流
     await get().setupEventListener();
 
+    const dryRun = await get().getDryRun();
     const result = await invoke<{
       analysisId: string;
       workflowId: string;
       stockCode: string;
       stockName: string;
-    }>("run_stock_workflow", { stockCode });
+    }>("run_stock_workflow", { stockCode, dryRun });
 
     set({
       analysisId: result.analysisId,

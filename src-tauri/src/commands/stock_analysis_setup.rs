@@ -1812,6 +1812,13 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("凯利仓位系数 (建议仓位 = half_kelly × 此系数)".into()),
             is_secret: false,
         },
+        Variable {
+            name: "analysis_dry_run".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(false),
+            description: Some("干跑模式：不调用 LLM，用 mock 输出验证流程".into()),
+            is_secret: false,
+        },
     ];
     let variables_val =
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;

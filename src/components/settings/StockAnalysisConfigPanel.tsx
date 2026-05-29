@@ -56,6 +56,7 @@ function getDefaultVariables(): Variable[] {
   b("outlier_method", "zscore", "异常值处理方法: zscore/iqr", "string");
   b("outlier_threshold", 3.0, "异常值阈值 (Z-Score)", "number");
   b("min_confidence", 0.6, "最低置信度", "number");
+  b("analysis_dry_run", false, "干跑模式：不调用 LLM，用 mock 输出验证流程", "boolean");
   return vars;
 }
 
@@ -272,6 +273,11 @@ export function StockAnalysisConfigPanel(_props: Props) {
         tool: "monitor",
         label: t("stockAnalysis.settings.group.monitor"),
         vars: resolve(["monitor_pollIntervalSecs", "monitor_changePctThreshold", "monitor_turnoverThreshold"]),
+      },
+      {
+        tool: "workflow",
+        label: t("stockAnalysis.settings.group.workflow"),
+        vars: resolve(["analysis_dry_run"]),
       },
     ].filter((g) => g.vars.length > 0);
   }, [template]);

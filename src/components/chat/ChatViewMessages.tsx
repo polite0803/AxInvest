@@ -826,7 +826,12 @@ export function useChatViewMessages({
         const cached = cache.get(msg.id);
         const item = cached?.signature === signature
           ? cached.item
-          : { key: msg.id, role: "workflow-card", content: data ?? msg.content, variant: "borderless" as const };
+          : {
+            key: msg.id,
+            role: "workflow-card",
+            content: data ?? msg.content,
+            variant: "borderless" as const,
+          } as BubbleItemType;
         nextCache.set(msg.id, { signature, item });
         nextItems.push(item);
         continue;

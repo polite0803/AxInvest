@@ -10,13 +10,18 @@ import {
 } from "@/lib/shortcuts";
 import { useSettingsStore } from "@/stores";
 import type { GlobalShortcutDiagnostic, GlobalShortcutStatus } from "@/stores";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export function useGlobalShortcutManager() {
   const settings = useSettingsStore((s) => s.settings);
   const setGlobalShortcutStatus = useSettingsStore(
     (s) => s.setGlobalShortcutStatus,
   );
+
+  // 用 ref 保存最新 settings，避免 effect 依赖整个 settings 对象
+  // 每次任意设置字段变更都触发全部快捷键重注册
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   useEffect(() => {
     const diagnostics: GlobalShortcutDiagnostic[] = [];
@@ -31,7 +36,7 @@ export function useGlobalShortcutManager() {
       if (diagnostics.length > 40) {
         diagnostics.splice(0, diagnostics.length - 40);
       }
-      if (!settings.shortcut_registration_logs_enabled) {
+      if (!settingsRef.current.shortcut_registration_logs_enabled) {
         return;
       }
       const consolePayload = {
@@ -53,7 +58,7 @@ export function useGlobalShortcutManager() {
     ) => {
       setGlobalShortcutStatus({
         ...status,
-        diagnostics: settings.shortcut_registration_logs_enabled
+        diagnostics: settingsRef.current.shortcut_registration_logs_enabled
           ? [...diagnostics]
           : [],
       });
@@ -129,7 +134,7 @@ export function useGlobalShortcutManager() {
             isGlobalShortcutAction(action)
               ? [
                 (async () => {
-                  const binding = getShortcutBinding(settings, action);
+                  const binding = getShortcutBinding(settingsRef.current, action);
                   const accelerator = toTauriAccelerator(binding);
                   pushDiagnostic({
                     phase: "register",
@@ -274,5 +279,7 @@ export function useGlobalShortcutManager() {
           });
       }
     };
-  }, [settings, setGlobalShortcutStatus]);
+    // 只依赖 global_shortcuts_enabled 开关，其他 settings 字段通过 settingsRef 读取
+    // 避免每次任意设置变更（主题、语言等）都触发全部快捷键的重注销+重注册
+  }, [settings.global_shortcuts_enabled, setGlobalShortcutStatus]);
 }

@@ -61,12 +61,6 @@ interface MonacoDiffEditorProps {
   readOnly?: boolean;
 }
 
-declare global {
-  interface Window {
-    monaco: typeof import("monaco-editor");
-  }
-}
-
 function MonacoDiffEditor({
   original,
   modified,
@@ -80,13 +74,16 @@ function MonacoDiffEditor({
   >(null);
 
   useEffect(() => {
-    if (!containerRef.current || typeof window.monaco === "undefined") {
-      return;
-    }
+    if (!containerRef.current) { return; }
 
-    const diffEditor = window.monaco.editor.createDiffEditor(
-      containerRef.current,
-      {
+    let disposed = false;
+    let diffEditor: import("monaco-editor").editor.IStandaloneDiffEditor | null = null;
+    let originalModel: import("monaco-editor").editor.ITextModel | null = null;
+    let modifiedModel: import("monaco-editor").editor.ITextModel | null = null;
+
+    import("monaco-editor").then((monaco) => {
+      if (disposed || !containerRef.current) { return; }
+      diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
         theme: "vs-dark",
         readOnly,
         automaticLayout: true,
@@ -98,19 +95,18 @@ function MonacoDiffEditor({
         padding: { top: 8 },
         renderSideBySide: true,
         originalEditable: false,
-      },
-    );
-
-    const originalModel = window.monaco.editor.createModel(original, language);
-    const modifiedModel = window.monaco.editor.createModel(modified, language);
-    diffEditor.setModel({ original: originalModel, modified: modifiedModel });
-
-    editorRef.current = diffEditor;
+      });
+      originalModel = monaco.editor.createModel(original, language);
+      modifiedModel = monaco.editor.createModel(modified, language);
+      diffEditor.setModel({ original: originalModel, modified: modifiedModel });
+      editorRef.current = diffEditor;
+    });
 
     return () => {
-      originalModel.dispose();
-      modifiedModel.dispose();
-      diffEditor.dispose();
+      disposed = true;
+      originalModel?.dispose();
+      modifiedModel?.dispose();
+      diffEditor?.dispose();
     };
   }, []);
 

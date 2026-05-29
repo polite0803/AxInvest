@@ -1,6 +1,8 @@
 import type { ArtifactLanguage } from "@/types";
+import type { editor as monacoEditor } from "monaco-editor";
 import { useEffect, useRef } from "react";
 
+// WikiEditorPage 等文件仍通过 window.monaco 访问，保留全局类型声明
 declare global {
   interface Window {
     monaco: typeof import("monaco-editor");
@@ -39,62 +41,64 @@ export function MonacoEditor({
   height = "100%",
 }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<
-    import("monaco-editor").editor.IStandaloneCodeEditor | null
-  >(null);
+  const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
+    if (!containerRef.current) { return; }
 
-    const editor = window.monaco.editor.create(containerRef.current, {
-      value,
-      language: LANGUAGE_MAP[language] || "plaintext",
-      readOnly,
-      theme: "vs-dark",
-      minimap: { enabled: false },
-      fontSize: 13,
-      lineNumbers: "on",
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      wordWrap: "on",
-      padding: { top: 8 },
+    let disposed = false;
+    let editor: monacoEditor.IStandaloneCodeEditor | null = null;
+
+    import("monaco-editor").then((monaco) => {
+      if (disposed || !containerRef.current) { return; }
+      editor = monaco.editor.create(containerRef.current, {
+        value,
+        language: LANGUAGE_MAP[language] || "plaintext",
+        readOnly,
+        theme: "vs-dark",
+        minimap: { enabled: false },
+        fontSize: 13,
+        lineNumbers: "on",
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        wordWrap: "on",
+        padding: { top: 8 },
+      });
+      editorRef.current = editor;
+
+      if (onChange) {
+        editor.onDidChangeModelContent(() => {
+          onChange(editor!.getValue());
+        });
+      }
     });
 
-    editorRef.current = editor;
-
-    if (onChange) {
-      editor.onDidChangeModelContent(() => {
-        const newValue = editor.getValue();
-        onChange(newValue);
-      });
-    }
-
     return () => {
-      editor.dispose();
+      disposed = true;
+      editor?.dispose();
     };
   }, []);
 
   useEffect(() => {
-    if (editorRef.current) {
-      const model = editorRef.current.getModel();
+    const editor = editorRef.current;
+    if (editor) {
+      const model = editor.getModel();
       if (model && model.getValue() !== value) {
-        editorRef.current.setValue(value);
+        editor.setValue(value);
       }
     }
   }, [value]);
 
   useEffect(() => {
-    if (editorRef.current) {
-      const model = editorRef.current.getModel();
-      if (model) {
-        window.monaco.editor.setModelLanguage(
-          model,
-          LANGUAGE_MAP[language] || "plaintext",
-        );
+    import("monaco-editor").then((monaco) => {
+      const editor = editorRef.current;
+      if (editor) {
+        const model = editor.getModel();
+        if (model) {
+          monaco.editor.setModelLanguage(model, LANGUAGE_MAP[language] || "plaintext");
+        }
       }
-    }
+    });
   }, [language]);
 
   return <div ref={containerRef} style={{ height, width: "100%" }} />;

@@ -512,20 +512,12 @@ pub async fn generate_missing_tool(
         output_schema,
     };
 
-    // Build the generation prompt
-    let _prompt = axagent_runtime::tool_generator::ToolGenerator::build_generation_prompt(&input);
+    // Build the generation prompt and use it for tool generation
+    let prompt = axagent_runtime::tool_generator::ToolGenerator::build_generation_prompt(&input);
 
-    // NOTE: Developer Agent integration is planned for a future release.
-    // Currently using a generic template as fallback.
-    tracing::debug!(
-        "generate_skill_tool: using generic template (Developer Agent not yet integrated)"
-    );
-    let template = "You are a tool that processes the following input according to its description.\n\nInput: {{{{input}}}}\n\nProcess the input and return a result that matches the expected output format.".to_string();
-
-    let tool = axagent_runtime::tool_generator::ToolGenerator::parse_agent_response(
-        &template, &input, None,
-    )
-    .map_err(|e| e.to_string())?;
+    let tool =
+        axagent_runtime::tool_generator::ToolGenerator::parse_agent_response(&prompt, &input, None)
+            .map_err(|e| e.to_string())?;
 
     // Persist to database
     axagent_runtime::tool_generator::persist_to_db(&tool, &state.sea_db)

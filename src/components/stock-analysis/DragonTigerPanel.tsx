@@ -22,9 +22,11 @@ export function DragonTigerPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [entries, setEntries] = useState<DtEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const list: any[] = await invoke("get_market_dragon_tiger");
       if (Array.isArray(list)) {
@@ -40,7 +42,9 @@ export function DragonTigerPanel() {
           })),
         );
       }
-    } catch { /* */ }
+    } catch {
+      setFetchError(true);
+    }
     setLoading(false);
   }, []);
 
@@ -54,6 +58,11 @@ export function DragonTigerPanel() {
     startAnalysis(code);
   };
 
+  const handleRefresh = async () => {
+    const r = await checkVendorEnabled("dragontiger");
+    if (r.status === "ok") { load(); }
+  };
+
   return (
     <Card
       size="small"
@@ -63,9 +72,7 @@ export function DragonTigerPanel() {
         <Button
           size="small"
           loading={loading}
-          onClick={async () => {
-            if (await checkVendorEnabled("dragontiger")) { load(); }
-          }}
+          onClick={handleRefresh}
         >
           {t("stockAnalysis.settings.panels.refresh")}
         </Button>
@@ -74,7 +81,14 @@ export function DragonTigerPanel() {
       {loading
         ? <Spin size="small" />
         : entries.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noDragonTiger")} />
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={fetchError
+              ? t("stockAnalysis.settings.vendor.connectionFailed")
+              : t("stockAnalysis.settings.panels.noDragonTiger")}
+          />
+        )
         : (
           <List
             size="small"

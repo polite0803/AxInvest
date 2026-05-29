@@ -11,9 +11,14 @@ const PANEL_VENDORS: Record<string, string[]> = {
   events: ["cninfo", "eastmoney", "baidu_stock"],
 };
 
-export async function checkVendorEnabled(panelKey: string): Promise<boolean> {
+export type VendorCheckResult =
+  | { status: "ok" }
+  | { status: "disabled"; panelName: string }
+  | { status: "backend_offline" };
+
+export async function checkVendorEnabled(panelKey: string): Promise<VendorCheckResult> {
   const names = PANEL_VENDORS[panelKey];
-  if (!names) { return true; }
+  if (!names) { return { status: "ok" }; }
   try {
     const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
     const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
@@ -25,8 +30,11 @@ export async function checkVendorEnabled(panelKey: string): Promise<boolean> {
     }
     if (!names.some((n) => enabledSet.has(n))) {
       message.warning(i18next.t("stockAnalysis.settings.vendor.disabled", { names: names.join(" / ") }));
-      return false;
+      return { status: "disabled", panelName: panelKey };
     }
-  } catch { /* backend offline, don't block */ }
-  return true;
+  } catch {
+    message.error(i18next.t("stockAnalysis.settings.vendor.backendOffline"));
+    return { status: "backend_offline" };
+  }
+  return { status: "ok" };
 }

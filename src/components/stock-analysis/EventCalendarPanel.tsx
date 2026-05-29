@@ -20,9 +20,11 @@ export function EventCalendarPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     const items: EventItem[] = [];
     try {
       // 从自选股批量获取解禁数据
@@ -76,7 +78,9 @@ export function EventCalendarPanel() {
           }
         }
       } catch { /* */ }
-    } catch { /* */ }
+    } catch {
+      setFetchError(true);
+    }
 
     items.sort((a, b) => a.date.localeCompare(b.date));
     setEvents(items.slice(0, 30));
@@ -93,6 +97,11 @@ export function EventCalendarPanel() {
     startAnalysis(code);
   };
 
+  const handleRefresh = async () => {
+    const r = await checkVendorEnabled("events");
+    if (r.status === "ok") { load(); }
+  };
+
   return (
     <Card
       size="small"
@@ -102,9 +111,7 @@ export function EventCalendarPanel() {
         <Button
           size="small"
           loading={loading}
-          onClick={async () => {
-            if (await checkVendorEnabled("events")) { load(); }
-          }}
+          onClick={handleRefresh}
         >
           {t("stockAnalysis.settings.panels.refresh")}
         </Button>
@@ -113,7 +120,14 @@ export function EventCalendarPanel() {
       {loading
         ? <Spin size="small" />
         : events.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noEvents")} />
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={fetchError
+              ? t("stockAnalysis.settings.vendor.connectionFailed")
+              : t("stockAnalysis.settings.panels.noEvents")}
+          />
+        )
         : (
           <List
             size="small"

@@ -21,9 +21,11 @@ export function SectorHeatmapPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [sectors, setSectors] = useState<SectorEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const list: any[] = await invoke("get_industry_ranking");
       if (Array.isArray(list)) {
@@ -38,7 +40,9 @@ export function SectorHeatmapPanel() {
           })),
         );
       }
-    } catch { /* */ }
+    } catch {
+      setFetchError(true);
+    }
     setLoading(false);
   }, []);
 
@@ -61,6 +65,11 @@ export function SectorHeatmapPanel() {
     return "blue";
   };
 
+  const handleRefresh = async () => {
+    const r = await checkVendorEnabled("sectors");
+    if (r.status === "ok") { load(); }
+  };
+
   return (
     <Card
       size="small"
@@ -70,9 +79,7 @@ export function SectorHeatmapPanel() {
         <Button
           size="small"
           loading={loading}
-          onClick={async () => {
-            if (await checkVendorEnabled("sectors")) { load(); }
-          }}
+          onClick={handleRefresh}
         >
           {t("stockAnalysis.settings.panels.refresh")}
         </Button>
@@ -81,7 +88,14 @@ export function SectorHeatmapPanel() {
       {loading
         ? <Spin size="small" />
         : sectors.length === 0
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.settings.panels.noSector")} />
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={fetchError
+              ? t("stockAnalysis.settings.vendor.connectionFailed")
+              : t("stockAnalysis.settings.panels.noSector")}
+          />
+        )
         : (
           <List
             size="small"

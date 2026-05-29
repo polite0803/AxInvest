@@ -90,21 +90,26 @@ export function StockScreenerPanel() {
 
   const [results, setResults] = useState<ScreenResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [mode, setMode] = useState<"discover" | "screen">("discover");
   const [factors, setFactors] = useState<Record<string, FactorState>>({});
   const [selectedCount, setSelectedCount] = useState(0);
 
   const discover = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const r = await invoke<ScreenResult[]>("discover_stock_candidates");
       if (Array.isArray(r)) { setResults(r); }
-    } catch { /* silent */ }
+    } catch {
+      setFetchError(true);
+    }
     setLoading(false);
   }, []);
 
   const screen = useCallback(async () => {
     setLoading(true);
+    setFetchError(false);
     try {
       const criteria: Record<string, any> = {};
       for (const fd of FACTOR_DEFS) {
@@ -116,7 +121,9 @@ export function StockScreenerPanel() {
       }
       const r = await invoke<ScreenResult[]>("screen_stocks", { criteria });
       if (Array.isArray(r)) { setResults(r); }
-    } catch { /* silent */ }
+    } catch {
+      setFetchError(true);
+    }
     setLoading(false);
   }, [factors]);
 
@@ -158,7 +165,8 @@ export function StockScreenerPanel() {
             type={mode === "discover" ? "primary" : "default"}
             onClick={async () => {
               setMode("discover");
-              if (await checkVendorEnabled("screener")) { discover(); }
+              const r = await checkVendorEnabled("screener");
+              if (r.status === "ok") { discover(); }
             }}
           >
             {t("stockAnalysis.settings.screener.discover")}
@@ -235,7 +243,7 @@ export function StockScreenerPanel() {
         ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={mode === "discover"
+            description={fetchError ? t("stockAnalysis.settings.vendor.connectionFailed") : mode === "discover"
               ? t("stockAnalysis.settings.screener.discoverHint")
               : t("stockAnalysis.settings.screener.screenHint")}
           />

@@ -241,13 +241,28 @@ export function DataVendorsTab() {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      // 先加载全量模板，只更新 vendor_ 变量，其余字段原样保留避免覆盖
+      // 先加载全量模板，只更新 vendor_ 变量值，保留 var_type/is_secret 等字段
       const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
-      const allVars: { name: string; value: any }[] = tmpl?.variables ?? [];
-      const varMap = new Map(allVars.map((v: any) => [v.name, v]));
-      for (const [k, v] of Object.entries(vendorValues)) { varMap.set(k, v); }
-      varMap.set("vendor_iwencai_key", iwencaiKey);
-      const merged = Array.from(varMap, ([name, value]) => ({ name, value }));
+      const allVars: any[] = tmpl?.variables ?? [];
+      const varMap = new Map<string, any>();
+      for (const v of allVars) { varMap.set(v.name, v); }
+      for (const [k, v] of Object.entries(vendorValues)) {
+        const existing = varMap.get(k);
+        if (existing && typeof existing === "object" && "name" in existing) {
+          varMap.set(k, { ...existing, value: v });
+        } else {
+          varMap.set(k, { name: k, var_type: "boolean", value: v, is_secret: false });
+        }
+      }
+      const iwencaiExisting = varMap.get("vendor_iwencai_key");
+      varMap.set("vendor_iwencai_key", {
+        ...(iwencaiExisting && typeof iwencaiExisting === "object" ? iwencaiExisting : {}),
+        name: "vendor_iwencai_key",
+        var_type: "string",
+        value: iwencaiKey,
+        is_secret: true,
+      });
+      const merged = Array.from(varMap.values());
       await invoke("update_workflow_template", {
         id: "stock-analysis",
         input: {

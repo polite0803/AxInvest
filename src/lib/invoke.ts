@@ -459,11 +459,62 @@ async function withTimeout<T>(
 /**
  * 创建统一的 IPC 错误日志回调，替代散布各处的 .catch(() => {})
  * 用法: invoke("command", args).catch(logIpcError("操作描述"))
+ *
+ * 当 notify=true 时，同时推送到错误通知 store 让用户可见。
  */
-export function logIpcError(context: string): (err: unknown) => void {
+export function logIpcError(
+  context: string,
+  options?: { notify?: boolean; retryFn?: () => Promise<unknown> },
+): (err: unknown) => void {
   return (err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[IPC] ${context}: ${message}`);
+
+    if (options?.notify) {
+      import("@/stores/shared/errorNotificationStore").then(({ useErrorNotificationStore }) => {
+        useErrorNotificationStore.getState().pushError({
+          message,
+          context,
+          retryFn: options.retryFn,
+        });
+      }).catch(() => {});
+    }
+  };
+}
+
+/**
+ * Create an error handler for React components that sets an error state.
+ * Combines logIpcError logging with a state setter for UI feedback.
+ *
+ * @example
+ * const [error, setError] = useState<string | null>(null);
+ * invoke("command", args).catch(createErrorHandler("operation", setError));
+ */
+export function createErrorHandler(
+  context: string,
+  setError: (error: string | null) => void,
+): (err: unknown) => void {
+  return (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[IPC] ${context}: ${message}`);
+    setError(message);
+  };
+}
+
+/**
+ * Create an error handler that logs and shows a toast notification.
+ * Use this for fire-and-forget operations where the user should be notified.
+ *
+ * @example
+ * invoke("command", args).catch(logAndNotify("operation"));
+ */
+export function logAndNotify(context: string): (err: unknown) => void {
+  return (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[IPC] ${context}: ${message}`);
+    import("antd").then(({ message: messageApi }) => {
+      messageApi.error(`${context} failed: ${message.slice(0, 100)}`);
+    }).catch(() => {});
   };
 }
 

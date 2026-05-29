@@ -96,6 +96,8 @@ export interface AgentNodeConfig {
   output_mode: OutputMode;
   /** 工具调用最大轮数（默认 5，仅 tools 非空时生效） */
   max_tool_rounds?: number;
+  /** 执行模式: "react" = 逐步思考-行动, "plan" = 先规划为工作流再执行 */
+  execution_mode?: "react" | "plan";
 }
 
 export interface AgentNode extends WorkflowNodeBase {
@@ -146,6 +148,10 @@ export interface ConditionNodeConfig {
   logical_op: LogicalOperator;
   /** 启用 LLM 动态路由：由 AI 判断走哪条分支（忽略 conditions 静态规则） */
   judge_by_llm?: boolean;
+  /** LLM 路由时的提示词（描述路由判断逻辑） */
+  routing_prompt?: string;
+  /** LLM 路由使用模型（为空则用系统默认） */
+  routing_model?: string;
 }
 
 export interface ConditionNode extends WorkflowNodeBase {
@@ -163,6 +169,8 @@ export interface ParallelNodeConfig {
   branches: Branch[];
   wait_for_all: boolean;
   timeout?: number;
+  /** 结果聚合策略: "all" | "first" | "race" | "majority" */
+  aggregation?: string;
 }
 
 export interface ParallelNode extends WorkflowNodeBase {
@@ -223,6 +231,8 @@ export interface CodeNodeConfig {
   language: string;
   code: string;
   output_var: string;
+  /** Rhai 脚本注册为工具名（language="rhai" 时生效） */
+  tool_name?: string;
 }
 
 export interface CodeNode extends WorkflowNodeBase {
@@ -357,6 +367,12 @@ export interface ErrorConfig {
   compensation_steps?: CompensationStep[];
 }
 
+export interface RhaiToolDef {
+  tool_name: string;
+  description?: string;
+  code: string;
+}
+
 export interface WorkflowTemplateInput {
   name: string;
   description?: string;
@@ -369,6 +385,7 @@ export interface WorkflowTemplateInput {
   output_schema?: JsonSchema;
   variables: Variable[];
   error_config?: ErrorConfig;
+  tool_defs?: RhaiToolDef[];
 }
 
 export interface WorkflowTemplateResponse {
@@ -388,6 +405,7 @@ export interface WorkflowTemplateResponse {
   output_schema?: JsonSchema;
   variables: Variable[];
   error_config?: ErrorConfig;
+  tool_defs?: RhaiToolDef[];
   created_at: number;
   updated_at: number;
 }

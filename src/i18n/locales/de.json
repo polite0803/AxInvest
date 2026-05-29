@@ -1891,6 +1891,9 @@
     "proxyTestFailed": "Proxy-Verbindung fehlgeschlagen",
     "groupData": "Datenverwaltung",
     "groupAppInfo": "App-Informationen",
+    "groupServiceHealth": "Dienstzustand",
+    "overallStatus": "Gesamtstatus",
+    "recheckHealth": "Erneut prüfen",
     "groupLinks": "Links",
     "useModelIcon": "Modellsymbol verwenden",
     "systemPromptLabel": "Systemanweisung (Rolleneinstellung)",
@@ -4848,7 +4851,21 @@
     "scheduledWas": "Scheduled: {{time}}",
     "retry": "Retry",
     "applied": "Applied",
-    "copied": "Copied to clipboard"
+    "copied": "Copied to clipboard",
+    "insight": {
+      "title": "Lernerkenntnisse",
+      "refresh": "Aktualisieren",
+      "all": "Alle",
+      "empty": "Keine Erkenntnisse",
+      "evidence": "Nachweise",
+      "suggestedAction": "Vorgeschlagene Aktion: ",
+      "category": {
+        "pattern": "Muster",
+        "preference": "Präferenz",
+        "improvement": "Verbesserung",
+        "warning": "Warnung"
+      }
+    }
   },
   "review": {
     "commentPlaceholder": "Enter comment...",
@@ -6324,6 +6341,24 @@
     "title": "Something went wrong",
     "retryLoad": "Retry loading this module"
   },
+  "appInit": {
+    "idle": "Preparing to start...",
+    "healthCheck": "Checking system connection...",
+    "loadSettings": "Loading settings...",
+    "applyConfig": "Applying configuration...",
+    "startServices": "Starting services...",
+    "ready": "Ready",
+    "failedTitle": "Startup Failed",
+    "failedSubtitle": "An error occurred during app initialization. Please retry.",
+    "retry": "Restart"
+  },
+  "errorNotification": {
+    "retry": "Erneut versuchen"
+  },
+  "backendStatus": {
+    "done": "Fertig",
+    "failed": "Fehlgeschlagen"
+  },
   "cacheIndicator": {
     "notEstablished": "Prompt cache not established. First turn in session.",
     "pendingChanges": "Pending changes detected. Changes apply next session. Use --now to force.",
@@ -6423,6 +6458,7 @@
     }
   },
   "chatRightPanel": {
+    "title": "Assistent",
     "agent": "Agent",
     "hierarchy": "Hierarchie",
     "research": "Recherche",

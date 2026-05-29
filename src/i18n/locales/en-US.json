@@ -2115,6 +2115,9 @@
     "proxyTestFailed": "Proxy connection failed",
     "groupData": "Data Management",
     "groupAppInfo": "App Info",
+    "groupServiceHealth": "Service Health",
+    "overallStatus": "Overall Status",
+    "recheckHealth": "Recheck",
     "groupLinks": "Links",
     "useModelIcon": "Use Model Icon",
     "systemPromptLabel": "System Prompt (Role Setting)",
@@ -3629,7 +3632,17 @@
       "invalidJson": "Invalid JSON format",
       "unsupportedNodeType": "Editing this node type is not supported yet",
       "llmRouting": "LLM Dynamic Routing",
-      "llmRoutingHint": "Let AI decide which branch to take based on context"
+      "llmRoutingHint": "Let AI decide which branch to take based on context",
+      "aiGenerate": "AI Generate",
+      "codeTemplates": "Templates",
+      "showTools": "Tool Browser",
+      "hideTools": "Hide Tools",
+      "availableTools": "Available Tools ({{count}})",
+      "noToolsAvailable": "No tools available",
+      "routingPrompt": "Routing Prompt",
+      "routingPromptPlaceholder": "Describe how LLM should decide...",
+      "routingModel": "Routing Model (optional)",
+      "routingModelPlaceholder": "Leave empty for system default"
     },
     "preset": "Preset",
     "custom": "Custom",
@@ -3726,6 +3739,14 @@
       "selectTools": "Select tools...",
       "maxToolRounds": "Max Tool Rounds",
       "maxToolRoundsHint": "Maximum iterations of agent-tool interaction loop",
+      "executionMode": "Execution Mode",
+      "executionReact": "🧠 ReAct Step-by-Step",
+      "executionPlan": "📋 Plan Then Execute",
+      "executionReactHint": "LLM thinks→acts→observes each step, best for exploratory tasks",
+      "executionPlanHint": "LLM generates hierarchical plan first, then executes phase by phase, best for complex multi-step tasks",
+      "toolName": "Tool Name (Rhai)",
+      "toolNamePlaceholder": "Name for Agent exposed_tools reference...",
+      "toolNameHint": "Leave empty to auto-generate code_<nodeId>",
       "exposedTools": "Tools Exposed to LLM ({{count}})",
       "exposedToolsPlaceholder": "Select tools for LLM to call autonomously...",
       "exposedToolsHint": "Unselected fixed tools will only be available via context injection, LLM won't see their definitions",
@@ -3879,6 +3900,12 @@
       "custom": "Custom",
       "branchTitle": "Branch {{index}}",
       "waitForAnyHint": "Continue as soon as any branch completes",
+      "aggregation": "Aggregation Strategy",
+      "aggregationAll": "Wait for All",
+      "aggregationFirst": "First to Complete",
+      "aggregationRace": "Race (first within timeout)",
+      "aggregationMajority": "Majority Complete",
+      "aggregationHint": "How to collect results from parallel branches",
       "noLoopSteps": "No loop body steps yet",
       "clickToAddMapping": "Click \"Add\" to create input mapping",
       "language": "Language",
@@ -4926,7 +4953,21 @@
     "yesterday": "Yesterday",
     "retry": "Retry",
     "applied": "Applied",
-    "copied": "Copied to clipboard"
+    "copied": "Copied to clipboard",
+    "insight": {
+      "title": "Learning Insights",
+      "refresh": "Refresh",
+      "all": "All",
+      "empty": "No insights yet",
+      "evidence": "Evidence",
+      "suggestedAction": "Suggested action: ",
+      "category": {
+        "pattern": "Pattern",
+        "preference": "Preference",
+        "improvement": "Improvement",
+        "warning": "Warning"
+      }
+    }
   },
   "review": {
     "commentPlaceholder": "Enter comment...",
@@ -6090,6 +6131,24 @@
     "title": "Something went wrong",
     "retryLoad": "Retry loading this module"
   },
+  "appInit": {
+    "idle": "Preparing to start...",
+    "healthCheck": "Checking system connection...",
+    "loadSettings": "Loading settings...",
+    "applyConfig": "Applying configuration...",
+    "startServices": "Starting services...",
+    "ready": "Ready",
+    "failedTitle": "Startup Failed",
+    "failedSubtitle": "An error occurred during app initialization. Please retry.",
+    "retry": "Restart"
+  },
+  "errorNotification": {
+    "retry": "Retry"
+  },
+  "backendStatus": {
+    "done": "Done",
+    "failed": "Failed"
+  },
   "cacheIndicator": {
     "notEstablished": "Prompt cache not established. First turn in session.",
     "pendingChanges": "Pending changes detected. Changes apply next session. Use --now to force.",
@@ -6424,7 +6483,7 @@
     }
   },
   "chatRightPanel": {
-    "title": "Right Panel",
+    "title": "Assistant Panel",
     "expand": "Expand Panel",
     "collapse": "Collapse Panel",
     "agent": "Agent",

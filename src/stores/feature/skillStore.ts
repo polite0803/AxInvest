@@ -1,4 +1,4 @@
-import { invoke } from "@/lib/invoke";
+import { invoke, isTauri, listen, logIpcError } from "@/lib/invoke";
 import type {
   MarketplaceSkill,
   Skill,
@@ -82,7 +82,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       const skills = await invoke<Skill[]>("list_skills");
       set({ skills, loading: false });
     } catch (e) {
-      console.error("Failed to load skills:", e);
+      logIpcError("Failed to load skills")(e);
       set({ loading: false });
     }
   },
@@ -92,7 +92,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       const detail = await invoke<SkillDetail>("get_skill", { name });
       set({ selectedSkill: detail });
     } catch (e) {
-      console.error("Failed to get skill:", e);
+      logIpcError("Failed to get skill")(e);
     }
   },
 
@@ -104,13 +104,13 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       await invoke("toggle_skill", { name, enabled });
       const { triggerOnEnable, triggerOnDisable } = await import("@/lib/skillLifecycle");
       if (enabled) {
-        triggerOnEnable(name).catch((e) => console.error("onEnable 失败:", e));
+        triggerOnEnable(name).catch(logIpcError("triggerOnEnable"));
       } else {
-        triggerOnDisable(name).catch((e) => console.error("onDisable 失败:", e));
+        triggerOnDisable(name).catch(logIpcError("triggerOnDisable"));
       }
       syncExtensionStore();
     } catch (e) {
-      console.error("切换 skill 状态失败:", e);
+      logIpcError("切换 skill 状态失败")(e);
       set({
         skills: get().skills.map((s) => s.name === name ? { ...s, enabled: !enabled } : s),
       });
@@ -132,14 +132,14 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       marketplaceSkills: get().marketplaceSkills.map((s) => s.repo === source ? { ...s, installed: true } : s),
     });
     const { triggerOnInstall } = await import("@/lib/skillLifecycle");
-    triggerOnInstall(name).catch((e) => console.error("onInstall failed:", e));
+    triggerOnInstall(name).catch(logIpcError("triggerOnInstall"));
     syncExtensionStore();
     return name;
   },
 
   uninstallSkill: async (name: string) => {
     const { triggerOnUninstall } = await import("@/lib/skillLifecycle");
-    await triggerOnUninstall(name).catch((e) => console.error("onUninstall failed:", e));
+    await triggerOnUninstall(name).catch(logIpcError("triggerOnUninstall"));
     await invoke("uninstall_skill", { name });
     set((state) => ({ skills: state.skills.filter((s) => s.name !== name) }));
     syncExtensionStore();
@@ -149,9 +149,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
     const groupSkills = get().skills.filter((s) => s.group === group);
     const { triggerOnUninstall } = await import("@/lib/skillLifecycle");
     await Promise.all(
-      groupSkills.map((skill) =>
-        triggerOnUninstall(skill.name).catch((e) => console.error(`onUninstall for ${skill.name} failed:`, e))
-      ),
+      groupSkills.map((skill) => triggerOnUninstall(skill.name).catch(logIpcError("triggerOnUninstall"))),
     );
     await invoke("uninstall_skill_group", { group });
     set((state) => ({ skills: state.skills.filter((s) => s.group !== group) }));
@@ -204,7 +202,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
         marketplaceHasMore: results.length >= 20,
       }));
     } catch (e) {
-      console.error("Failed to search marketplace:", e);
+      logIpcError("Failed to search marketplace")(e);
       set({ marketplaceLoading: false });
     }
   },
@@ -227,7 +225,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       const updates = await invoke<SkillUpdateInfo[]>("check_skill_updates");
       return updates;
     } catch (e) {
-      console.error("Failed to check updates:", e);
+      logIpcError("Failed to check updates")(e);
       return [];
     }
   },
@@ -243,7 +241,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
     if (result.can_create) {
       await get().loadSkills();
       const { triggerOnInstall } = await import("@/lib/skillLifecycle");
-      triggerOnInstall(name).catch((e) => console.error("onInstall 失败:", e));
+      triggerOnInstall(name).catch(logIpcError("triggerOnInstall"));
       syncExtensionStore();
     }
     return result;
@@ -253,7 +251,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
     const result = await invoke<string>("skill_patch", { name, content });
     await get().getSkill(name);
     const { triggerSkillReload } = await import("@/lib/skillLifecycle");
-    triggerSkillReload(name).catch((e) => console.error("skillReload 失败:", e));
+    triggerSkillReload(name).catch(logIpcError("triggerSkillReload"));
     syncExtensionStore();
     return result;
   },
@@ -262,7 +260,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
     const result = await invoke<string>("skill_edit", { name, content });
     await get().getSkill(name);
     const { triggerSkillReload } = await import("@/lib/skillLifecycle");
-    triggerSkillReload(name).catch((e) => console.error("skillReload 失败:", e));
+    triggerSkillReload(name).catch(logIpcError("triggerSkillReload"));
     syncExtensionStore();
     return result;
   },
@@ -288,8 +286,14 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       skillProposals: s.skillProposals.filter((p) => p.suggested_name !== name),
     }));
     const { triggerOnInstall } = await import("@/lib/skillLifecycle");
-    triggerOnInstall(name).catch((e) => console.error("onInstall 失败:", e));
+    triggerOnInstall(name).catch(logIpcError("triggerOnInstall"));
     syncExtensionStore();
     return result;
   },
 }));
+
+if (isTauri()) {
+  listen<{ skillName: string; enabled?: boolean; action?: string }>("skill-state-changed", () => {
+    useSkillStore.getState().loadSkills();
+  }).catch(logIpcError("listen:skill-state-changed"));
+}

@@ -1,4 +1,4 @@
-import { invoke, isTauri } from "@/lib/invoke";
+import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { useBackupStore, useSettingsStore } from "@/stores";
 import {
   App,
@@ -19,7 +19,7 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { Calendar, Clock, Edit2, History, Pause, Play, Plus, RefreshCw, Rocket, Trash2, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "./SettingsGroup";
 
@@ -83,6 +83,7 @@ interface ScheduledTask {
   schedule_config: ScheduleConfig;
   created_at: string;
   updated_at: string;
+  workflowId?: string | null;
 }
 
 interface TaskFormData {
@@ -100,11 +101,13 @@ interface TaskFormData {
 }
 
 interface TaskTemplate {
+  templateType?: string;
   template_type: string;
   name: string;
   description: string;
-  schedule_config: ScheduleConfig;
+  schedule_config?: ScheduleConfig;
   workflow_id: string | null;
+  default_schedule?: string;
 }
 
 export function SchedulerSettings() {
@@ -143,33 +146,32 @@ export function SchedulerSettings() {
     Record<string, boolean>
   >({});
 
-  const loadCustomTasks = async () => {
+  const loadCustomTasks = useCallback(async () => {
     try {
       const tasks = await invoke<ScheduledTask[]>("list_scheduled_tasks");
       setCustomTasks(Array.isArray(tasks) ? tasks.filter((t) => t.task_type === "custom") : []);
     } catch (e) {
-      console.warn("Failed to load scheduled tasks:", e);
+      logIpcError("Failed to load scheduled tasks")(e);
     }
-  };
+  }, []);
 
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async () => {
     try {
       const templates = await invoke<TaskTemplate[]>(
         "get_scheduled_task_templates",
       );
       setTaskTemplates(templates);
     } catch (e) {
-      console.warn("Failed to load task templates:", e);
+      logIpcError("Failed to load task templates")(e);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (inTauri) {
       loadCustomTasks();
       loadTemplates();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inTauri]);
+  }, [inTauri, loadCustomTasks, loadTemplates]);
 
   const handleAutoBackupChange = async (enabled: boolean) => {
     if (!backupSettings) {
@@ -195,7 +197,7 @@ export function SchedulerSettings() {
       try {
         await invoke("restart_webdav_sync");
       } catch (e) {
-        console.warn("Failed to restart WebDAV sync:", e);
+        logIpcError("Failed to restart WebDAV sync")(e);
       }
     }
     message.success(t("settings.scheduler.saved"));
@@ -207,7 +209,7 @@ export function SchedulerSettings() {
       try {
         await invoke("restart_webdav_sync");
       } catch (e) {
-        console.warn("Failed to restart WebDAV sync:", e);
+        logIpcError("Failed to restart WebDAV sync")(e);
       }
     }
     message.success(t("settings.scheduler.saved"));
@@ -381,6 +383,7 @@ export function SchedulerSettings() {
         return t("settings.scheduler.dailyDesc");
       case "weekly":
         const dayNames = (config.weekdays || [])
+          .filter((w): w is Weekday => !!w)
           .map((w) => t(`settings.scheduler.${w}`))
           .join(", ");
         return t("settings.scheduler.weeklyDesc", { days: dayNames || "-" });
@@ -420,6 +423,7 @@ export function SchedulerSettings() {
     form.setFieldsValue({
       name: task.name,
       description: task.description,
+      workflow_id: task.workflowId,
       ...parsedConfig,
     });
     setTaskModalOpen(true);
@@ -432,7 +436,7 @@ export function SchedulerSettings() {
     if (template) {
       setSelectedTemplate(templateType);
       const config = template.schedule_config;
-      const timeRanges = config.time_ranges?.map((tr: TimeRange) => ({
+      const timeRanges = config?.time_ranges?.map((tr: TimeRange) => ({
         start: dayjs().hour(tr.start_hour).minute(tr.start_minute),
         end: dayjs().hour(tr.end_hour).minute(tr.end_minute),
       })) || [
@@ -444,15 +448,15 @@ export function SchedulerSettings() {
         description: template.description,
         template_type: template.template_type,
         workflow_id: template.workflow_id,
-        schedule_type: config.schedule_type,
-        weekdays: config.weekdays || [],
+        schedule_type: config?.schedule_type || "daily",
+        weekdays: config?.weekdays || [],
         time_ranges: timeRanges,
-        interval_hours: config.interval_seconds
+        interval_hours: config?.interval_seconds
           ? config.interval_seconds / 3600
           : 24,
-        exclude_holidays: config.exclude_holidays,
-        exclude_custom_dates: config.exclude_custom_dates || [],
-        month_day: config.month_day,
+        exclude_holidays: config?.exclude_holidays ?? false,
+        exclude_custom_dates: config?.exclude_custom_dates || [],
+        month_day: config?.month_day ?? null,
       });
     }
   };
@@ -492,7 +496,7 @@ export function SchedulerSettings() {
       setTaskModalOpen(false);
       await loadCustomTasks();
     } catch (e) {
-      console.error("Failed to save task:", e);
+      logIpcError("Failed to save task")(e);
       message.error(String(e));
     } finally {
       setLoading(false);
@@ -505,7 +509,8 @@ export function SchedulerSettings() {
       await loadCustomTasks();
       message.success(t("settings.scheduler.pauseTask") + " - OK");
     } catch (e) {
-      console.error("Failed to pause task:", e);
+      logIpcError("Failed to pause task")(e);
+      message.error(String(e));
     }
   };
 
@@ -515,7 +520,8 @@ export function SchedulerSettings() {
       await loadCustomTasks();
       message.success(t("settings.scheduler.resumeTask") + " - OK");
     } catch (e) {
-      console.error("Failed to resume task:", e);
+      logIpcError("Failed to resume task")(e);
+      message.error(String(e));
     }
   };
 
@@ -525,7 +531,8 @@ export function SchedulerSettings() {
       await loadCustomTasks();
       message.success(t("settings.scheduler.deleteTask") + " - OK");
     } catch (e) {
-      console.error("Failed to delete task:", e);
+      logIpcError("Failed to delete task")(e);
+      message.error(String(e));
     }
   };
 
@@ -558,7 +565,7 @@ export function SchedulerSettings() {
       setHistoryMap((prev) => ({ ...prev, [taskId]: records }));
       setExpandedHistory((prev) => ({ ...prev, [taskId]: true }));
     } catch (e) {
-      console.warn("Failed to load history:", e);
+      logIpcError("Failed to load history")(e);
     }
   };
 
@@ -1073,9 +1080,9 @@ export function SchedulerSettings() {
                               color: "var(--color-text-secondary)",
                             }}
                           >
-                            {t(
-                              `settings.scheduler.${template.template_type}Desc`,
-                            ) || template.description}
+                            {(template.template_type
+                              ? t(`settings.scheduler.${template.template_type}Desc`)
+                              : null) || template.description}
                           </div>
                         </div>,
                       ]
@@ -1145,9 +1152,9 @@ export function SchedulerSettings() {
                               color: "var(--color-text-secondary)",
                             }}
                           >
-                            {t(
-                              `settings.scheduler.${template.template_type}Desc`,
-                            ) || template.description}
+                            {(template.template_type
+                              ? t(`settings.scheduler.${template.template_type}Desc`)
+                              : null) || template.description}
                           </div>
                         </div>,
                       ]

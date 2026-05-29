@@ -90,6 +90,7 @@ fn generate_hook_id() -> String {
     format!("hook_{}_{}", timestamp, counter)
 }
 
+#[allow(dead_code)]
 static EXEC_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[allow(dead_code)]

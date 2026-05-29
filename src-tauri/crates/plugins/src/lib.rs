@@ -2728,7 +2728,7 @@ fn materialize_source(
             let unique = MATERIALIZE_COUNTER.fetch_add(1, Ordering::Relaxed);
             let nanos = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("system time is after UNIX epoch")
                 .as_nanos();
             let destination = temp_root.join(format!("plugin-{nanos}-{unique}"));
             let output = Command::new("git")
@@ -2767,7 +2767,7 @@ fn materialize_source(
                 })
             })
             .join()
-            .unwrap();
+            .map_err(|e| PluginError::CommandFailed(format!("install thread panicked: {:?}", e)))?;
             result.map_err(PluginError::CommandFailed)
         },
     }
@@ -2904,7 +2904,7 @@ fn sha256_hash(data: &[u8]) -> String {
     let hash = <sha2::Sha256 as sha2::Digest>::digest(data);
     let mut result = String::with_capacity(hash.len() * 2);
     for byte in hash {
-        write!(result, "{byte:02x}").unwrap();
+        write!(result, "{byte:02x}").expect("writing to String should never fail");
     }
     result
 }
@@ -4176,6 +4176,9 @@ mod tests {
         let bundled_root = temp_dir("isolated-bundled");
 
         // Set CLAW_CONFIG_HOME to our temp directory
+        // SAFETY: Test code (inside #[test] fn); set_var is unsafe because it's not
+        // thread-safe in multi-threaded contexts; the test uses env_lock() to ensure
+        // exclusive access; the env var is restored/removed in cleanup.
         unsafe { std::env::set_var("CLAW_CONFIG_HOME", &config_home) };
 
         // Create a test fixture plugin in the isolated config home
@@ -4212,6 +4215,7 @@ mod tests {
         );
 
         // Cleanup
+        // SAFETY: Same as above — test code with env_lock() guard ensuring exclusive access.
         unsafe { std::env::remove_var("CLAW_CONFIG_HOME") };
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);

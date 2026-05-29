@@ -1085,9 +1085,11 @@ fn start_cron_scheduler(state: &AppState) {
         }
 
         let registry = state.local_tool_registry.clone();
+        let work_engine = state.work_engine.clone();
         let resolver: axagent_runtime::work_engine::ToolResolver =
             std::sync::Arc::new(move |tool_name: String| {
                 let registry = registry.clone();
+                let work_engine = work_engine.clone();
                 Box::pin(async move {
                     let reg = registry.lock().await;
                     let known = reg.list_all_tool_names().contains(&tool_name)
@@ -1110,6 +1112,34 @@ fn start_cron_scheduler(state: &AppState) {
                                 })
                             });
                         Some(cb)
+                    } else if let Some(template_id) = tool_name.strip_prefix("workflow::") {
+                        // 工作流注册为工具：workflow::<template_id>
+                        let engine = work_engine.clone();
+                        let template_id = template_id.to_string();
+                        let cb: axagent_runtime::work_engine::ToolCallback =
+                            std::sync::Arc::new(move |_tn: String, args: serde_json::Value| {
+                                let engine = engine.clone();
+                                let tid = template_id.clone();
+                                Box::pin(async move {
+                                    let mut opts =
+                                        axagent_runtime::work_engine::RunOptions::default();
+                                    if let Some(input) = args.get("input") {
+                                        opts.input = Some(input.clone());
+                                    }
+                                    match engine.run_workflow(&tid, opts).await {
+                                        Ok(wf) => Ok(serde_json::json!({
+                                            "content": serde_json::json!({
+                                                "status": format!("{:?}", wf.status),
+                                                "results": wf.results,
+                                            }).to_string()
+                                        })),
+                                        Err(e) => {
+                                            Err(format!("Workflow tool '{}' failed: {:?}", tid, e))
+                                        },
+                                    }
+                                })
+                            });
+                        Some(cb)
                     } else {
                         None
                     }
@@ -1118,26 +1148,93 @@ fn start_cron_scheduler(state: &AppState) {
         rt.block_on(state.work_engine.set_tool_resolver(resolver));
     }
 
+    // 设置 RAG 知识源检索回调（供工作流 Agent 节点从知识库/记忆/Wiki 检索上下文）
+    {
+        let db = state.sea_db.clone();
+        let master_key = state.master_key;
+        let vector_store = state.vector_store.clone();
+        let rag_callback: axagent_rt_workflow::work_engine::RagCallback = std::sync::Arc::new(
+            move |kb_ids: Vec<String>,
+                  mem_ids: Vec<String>,
+                  wiki_ids: Vec<String>,
+                  query: String| {
+                let db = db.clone();
+                let vector_store = vector_store.clone();
+                Box::pin(async move {
+                    let embed_fn = crate::indexing::ProviderEmbedFn;
+                    let result = axagent_core::rag::collect_rag_context(
+                        &db,
+                        &master_key,
+                        &vector_store,
+                        &kb_ids,
+                        &mem_ids,
+                        &wiki_ids,
+                        &query,
+                        5,
+                        embed_fn,
+                    )
+                    .await;
+                    Ok(result)
+                })
+            },
+        );
+        let rt = tokio::runtime::Runtime::new()
+            .expect("Failed to create tokio runtime for RAG callback");
+        rt.block_on(state.work_engine.set_rag_callback(rag_callback));
+    }
+
     let work_engine = state.work_engine.clone();
+    let cron_store = state.cron_job_store.clone();
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
         if let Some(ref wf_id) = job.workflow_id {
             let engine = work_engine.clone();
+            let store = cron_store.clone();
             let wf_id = wf_id.clone();
+            let job_id = job.id.clone();
             let job_name = job.name.clone();
+            let recurring = job.recurring;
             tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
                 let opts = axagent_runtime::work_engine::RunOptions::default();
-                match engine.run_workflow(&wf_id, opts).await {
+                let result = match engine.run_workflow(&wf_id, opts).await {
                     Ok(workflow) => {
                         tracing::info!(
                             "[CronScheduler] 工作流任务 '{}' 完成: {:?}",
                             job_name,
                             workflow.status
                         );
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some(format!("{:?}", workflow.status)),
+                            error: None,
+                            duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
+                                as u64,
+                            executed_at: started,
+                        }
                     },
                     Err(e) => {
-                        tracing::error!("[CronScheduler] 工作流任务 '{}' 失败: {:?}", job_name, e);
+                        let err_msg = format!("{:?}", e);
+                        tracing::error!(
+                            "[CronScheduler] 工作流任务 '{}' 失败: {err_msg}",
+                            job_name
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(err_msg),
+                            duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
+                                as u64,
+                            executed_at: started,
+                        }
                     },
+                };
+                store.record_run(&job_id, result).await;
+                // 非循环任务执行后禁用
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
                 }
             });
         } else {

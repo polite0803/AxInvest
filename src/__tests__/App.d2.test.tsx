@@ -44,6 +44,8 @@ vi.mock("antd", () => ({
   ),
   Space: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Button: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  Spin: () => <div data-testid="spin" />,
+  Result: () => <div data-testid="result" />,
   Typography: {
     Text: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
     Paragraph: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
@@ -72,6 +74,7 @@ vi.mock("react-i18next", () => ({
     init: () => {},
   },
   useTranslation: () => ({
+    t: (key: string) => key,
     i18n: {
       language: "zh-CN",
       getFixedT: () => (_key: string) => _key,
@@ -111,36 +114,57 @@ vi.mock("@/stores", () => ({
       getState: () => settingsState,
     },
   ),
-  useConversationStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      startStreamListening: vi.fn(),
-    }),
-  useStreamStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      stopStreamListening: vi.fn(),
-    }),
-  useSkillExtensionStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      skills: [],
-      loading: false,
-      navItems: [],
-      pages: [],
-      commands: [],
-      panels: [],
-      settingsSections: [],
-      toolbarButtons: [],
-      chatCommands: [],
-      statusBarItems: [],
-      handlers: {},
-      fetchSkills: vi.fn(),
-      getHandler: vi.fn().mockReturnValue(undefined),
-      refreshSkill: vi.fn(),
-    }),
-  useOnboardingStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      completed: true,
-      setCompleted: vi.fn(),
-    }),
+  useConversationStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        startStreamListening: vi.fn(),
+      }),
+    { getState: () => ({ startStreamListening: vi.fn() }) },
+  ),
+  useStreamStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        stopStreamListening: vi.fn(),
+      }),
+    { getState: () => ({ stopStreamListening: vi.fn() }) },
+  ),
+  useSkillExtensionStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        skills: [],
+        loading: false,
+        navItems: [],
+        pages: [],
+        commands: [],
+        panels: [],
+        settingsSections: [],
+        toolbarButtons: [],
+        chatCommands: [],
+        statusBarItems: [],
+        handlers: {},
+        fetchSkills: vi.fn().mockResolvedValue(undefined),
+        getHandler: vi.fn().mockReturnValue(undefined),
+        refreshSkill: vi.fn(),
+      }),
+    {
+      getState: () => ({
+        fetchSkills: vi.fn().mockResolvedValue(undefined),
+      }),
+    },
+  ),
+  useOnboardingStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        completed: true,
+        setCompleted: vi.fn(),
+        loadFromSettings: vi.fn(),
+      }),
+    {
+      getState: () => ({
+        loadFromSettings: vi.fn(),
+      }),
+    },
+  ),
 }));
 
 vi.mock("@/hooks/useKeyboardShortcuts", () => ({
@@ -158,10 +182,90 @@ vi.mock("@/theme/shadcnTheme", () => ({
 vi.mock("@/lib/invoke", () => ({
   isTauri: () => false,
   invoke: vi.fn().mockResolvedValue(undefined),
+  checkIpcHealth: vi.fn().mockResolvedValue({ ok: true }),
+  listen: vi.fn().mockResolvedValue(() => {}),
+  logIpcError: vi.fn(),
 }));
+
+vi.mock("@/i18n", () => ({
+  default: { language: "zh-CN", changeLanguage: vi.fn() },
+}));
+
+vi.mock("react-router-dom", () => ({
+  BrowserRouter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  useLocation: () => ({ pathname: "/" }),
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock("@/components/chat/BuddyWidget", () => ({
+  BuddyWidget: () => null,
+}));
+
+vi.mock("@/components/chat/TabBar", () => ({
+  TabBar: () => null,
+}));
+
+vi.mock("@/components/help/HelpPanel", () => ({
+  HelpPanel: () => null,
+}));
+
+vi.mock("@/components/layout/GlobalCopyMenu", () => ({
+  GlobalCopyMenu: () => null,
+}));
+
+vi.mock("@/components/layout/GlobalErrorBoundary", () => ({
+  GlobalErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/components/layout/GlobalStatusBar", () => ({
+  GlobalStatusBar: () => null,
+}));
+
+vi.mock("@/components/layout/ModuleErrorBoundary", () => ({
+  ModuleErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/components/onboarding/InteractiveTutorial", () => ({
+  InteractiveTutorial: () => null,
+}));
+
+vi.mock("@/components/onboarding/WelcomeWizard", () => ({
+  WelcomeWizard: () => null,
+}));
+
+vi.mock("@/components/shared/ErrorBoundary", () => ({
+  PageErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock("@/components/skill/SkillPanels", () => ({
+  SkillPanels: () => null,
+}));
+
+vi.mock("@/hooks/useResponsive", () => ({
+  useResponsive: vi.fn(),
+}));
+
+vi.mock("@/hooks/useUpdateChecker", () => ({
+  useUpdateChecker: () => ({ checkForUpdate: vi.fn() }),
+}));
+
+vi.mock("@/hooks/useGlobalOverlayScrollbars", () => ({
+  useGlobalOverlayScrollbars: vi.fn(),
+}));
+
+vi.mock("@ant-design/icons", () =>
+  new Proxy({}, {
+    get: (_target, prop) => () => <span data-icon={String(prop)} />,
+  }));
 
 vi.mock("@/lib/preloadChatRenderers", () => ({
   preloadChatRenderers,
+}));
+
+vi.mock("@lobehub/ui", () => ({}));
+
+vi.mock("@lobehub/icons", () => ({
+  Icon: () => null,
 }));
 
 vi.mock("@terrastruct/d2", () => ({}));
@@ -193,8 +297,8 @@ describe("AppRoot D2 setup", () => {
       () => {
         expect(enableD2).toHaveBeenCalledTimes(1);
       },
-      { timeout: 30000 },
+      { timeout: 5000 },
     );
     expect(preloadChatRenderers).toHaveBeenCalledTimes(1);
-  }, 35000);
+  }, 10000);
 });

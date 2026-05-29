@@ -1,6 +1,7 @@
-import { invoke } from "@/lib/invoke";
+import { invoke, logIpcError } from "@/lib/invoke";
 import type {
   ContextPrediction,
+  LearningInsight,
   PredictionResult,
   PrefetchResult,
   PrefetchResults,
@@ -156,6 +157,7 @@ interface ProactiveState {
   suggestions: ProactiveSuggestion[];
   predictions: ContextPrediction[];
   reminders: Reminder[];
+  insights: LearningInsight[];
   config: ProactiveConfig | null;
   isEnabled: boolean;
   isLoading: boolean;
@@ -171,6 +173,7 @@ interface ProactiveState {
   refreshSuggestions: (context: Record<string, unknown>) => Promise<void>;
   fetchPredictions: (context: Record<string, unknown>) => Promise<void>;
   fetchReminders: () => Promise<void>;
+  fetchInsights: (category?: string, limit?: number) => Promise<void>;
   dismissSuggestion: (id: string) => Promise<void>;
   acceptSuggestion: (id: string) => Promise<void>;
   snoozeSuggestion: (id: string, durationMinutes: number) => Promise<void>;
@@ -220,6 +223,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
   suggestions: [],
   predictions: [],
   reminders: [],
+  insights: [],
   config: null,
   isEnabled: true,
   isLoading: false,
@@ -295,6 +299,20 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
       set({
         error: error instanceof Error ? error.message : "Failed to fetch reminders",
         isLoading: false,
+      });
+    }
+  },
+
+  fetchInsights: async (category?: string, limit?: number) => {
+    try {
+      const insights = await invoke<LearningInsight[]>("list_insights", {
+        category: category ?? null,
+        limit: limit ?? 50,
+      });
+      set({ insights });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to fetch insights",
       });
     }
   },
@@ -448,6 +466,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
       suggestions: [],
       predictions: [],
       reminders: [],
+      insights: [],
       error: null,
     });
   },
@@ -519,7 +538,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
         schedulePrefetchCleanup(compResourceId);
       })
       .catch((e: unknown) => {
-        console.warn("[IPC]", e);
+        logIpcError("get_compression_summary")(e);
         schedulePrefetchCleanup(compResourceId);
       });
   },
@@ -556,7 +575,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
         schedulePrefetchCleanup(resourceId);
       })
       .catch((e: unknown) => {
-        console.warn("[IPC]", e);
+        logIpcError("get_invoke_metrics")(e);
         schedulePrefetchCleanup(resourceId);
       });
   },
@@ -601,7 +620,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
               schedulePrefetchCleanup(resourceId);
             })
             .catch((e: unknown) => {
-              console.warn("[IPC]", e);
+              logIpcError("list_search_providers")(e);
               schedulePrefetchCleanup(resourceId);
             });
           break;
@@ -630,7 +649,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
               schedulePrefetchCleanup(resourceId);
             })
             .catch((e: unknown) => {
-              console.warn("[IPC]", e);
+              logIpcError("list_local_tools")(e);
               schedulePrefetchCleanup(resourceId);
             });
           break;
@@ -659,7 +678,7 @@ export const useProactiveStore = create<ProactiveState>((set, get) => ({
               schedulePrefetchCleanup(resourceId);
             })
             .catch((e: unknown) => {
-              console.warn("[IPC]", e);
+              logIpcError("list_providers")(e);
               schedulePrefetchCleanup(resourceId);
             });
           break;

@@ -1934,6 +1934,9 @@
     "proxyTestFailed": "Échec de la connexion proxy",
     "groupData": "Gestion des données",
     "groupAppInfo": "Informations sur l'application",
+    "groupServiceHealth": "État des services",
+    "overallStatus": "État global",
+    "recheckHealth": "Revérifier",
     "groupLinks": "Liens",
     "useModelIcon": "Utiliser l'icône du modèle",
     "systemPromptLabel": "Invite système (définition du rôle)",
@@ -4848,7 +4851,21 @@
     "scheduledWas": "Scheduled: {{time}}",
     "retry": "Retry",
     "applied": "Applied",
-    "copied": "Copied to clipboard"
+    "copied": "Copied to clipboard",
+    "insight": {
+      "title": "Apprentissage",
+      "refresh": "Actualiser",
+      "all": "Tout",
+      "empty": "Aucun insight",
+      "evidence": "Preuves",
+      "suggestedAction": "Action suggérée : ",
+      "category": {
+        "pattern": "Motif",
+        "preference": "Préférence",
+        "improvement": "Amélioration",
+        "warning": "Avertissement"
+      }
+    }
   },
   "review": {
     "commentPlaceholder": "Enter comment...",
@@ -6324,6 +6341,24 @@
     "title": "Something went wrong",
     "retryLoad": "Retry loading this module"
   },
+  "appInit": {
+    "idle": "Preparing to start...",
+    "healthCheck": "Checking system connection...",
+    "loadSettings": "Loading settings...",
+    "applyConfig": "Applying configuration...",
+    "startServices": "Starting services...",
+    "ready": "Ready",
+    "failedTitle": "Startup Failed",
+    "failedSubtitle": "An error occurred during app initialization. Please retry.",
+    "retry": "Restart"
+  },
+  "errorNotification": {
+    "retry": "Réessayer"
+  },
+  "backendStatus": {
+    "done": "Terminé",
+    "failed": "Échoué"
+  },
   "cacheIndicator": {
     "notEstablished": "Prompt cache not established. First turn in session.",
     "pendingChanges": "Pending changes detected. Changes apply next session. Use --now to force.",
@@ -6423,6 +6458,7 @@
     }
   },
   "chatRightPanel": {
+    "title": "Assistant",
     "agent": "Agent",
     "hierarchy": "Hiérarchie",
     "research": "Recherche",

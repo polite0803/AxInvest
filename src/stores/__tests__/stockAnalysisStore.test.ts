@@ -56,8 +56,12 @@ describe("stockAnalysisStore", () => {
       expect(state.status).toBe("running");
       expect(state.stockCode).toBe("600519");
       expect(state.analysisId).toBe("test-id");
+      expect(invokeMock).toHaveBeenCalledWith("get_workflow_template", {
+        id: "stock-analysis",
+      });
       expect(invokeMock).toHaveBeenCalledWith("run_stock_workflow", {
         stockCode: "600519",
+        dryRun: false,
       });
     });
 

@@ -12,7 +12,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use axagent_core::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
+use axagent_core::workflow_types::{EdgeType, JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 
 use crate::workflow_engine::{
     NodeRuntimeState, NodeStatus, Workflow, WorkflowError, WorkflowStatus, current_epoch_ms,
@@ -22,8 +22,8 @@ use crate::workflow_engine::{
 use super::dispatcher::NodeDispatcher;
 use super::execution_state::{ExecutionState, ExecutionStatus, NodeExecutionRecord};
 use super::executors::{
-    AgentExecutor, ConditionExecutor, LlmExecutor, ProfileCache, ProviderCache, RagCallback,
-    SubWorkflowCallback, ToolCallback, VectorRetrieveCallback,
+    AgentExecutor, ConditionExecutor, LlmExecutor, PlanCallbacks, ProfileCache, ProviderCache,
+    RagCallback, SubWorkflowCallback, ToolCallback, VectorRetrieveCallback,
 };
 use super::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};
 use super::prompt_template::{CompiledPrompt, compile_prompt};
@@ -60,6 +60,8 @@ pub struct RunOptions {
     pub variables: Option<Vec<Variable>>,
     /// 干跑模式：不实际调用 LLM/Tool，用 mock 输出验证流程
     pub dry_run: bool,
+    /// Plan 模式回调：审批 + 步骤进度事件（通过 ExecutionState 传递给 AgentExecutor）
+    pub plan_callbacks: Option<PlanCallbacks>,
 }
 
 /// 步骤进度事件
@@ -90,6 +92,7 @@ impl std::fmt::Debug for RunOptions {
             .field("input_schema", &self.input_schema.is_some())
             .field("output_schema", &self.output_schema.is_some())
             .field("variables", &self.variables.as_ref().map(|v| v.len()))
+            .field("plan_callbacks", &self.plan_callbacks.is_some())
             .finish()
     }
 }
@@ -107,6 +110,7 @@ impl Default for RunOptions {
             output_schema: None,
             variables: None,
             dry_run: false,
+            plan_callbacks: None,
         }
     }
 }
@@ -226,6 +230,8 @@ pub struct WorkEngine {
     pub breakpoints: Arc<Mutex<HashSet<String>>>,
     /// 暂停信号（resume 时通知等待中的执行）
     pause_signal: Arc<tokio::sync::Notify>,
+    /// 节点断路器状态（跨 workflow 运行持久化，防止重试风暴）
+    node_breakers: Arc<Mutex<HashMap<String, NodeCircuitBreaker>>>,
 }
 
 impl WorkEngine {
@@ -355,6 +361,7 @@ impl WorkEngine {
             agent_profile_cache,
             breakpoints: Arc::new(Mutex::new(HashSet::new())),
             pause_signal: Arc::new(tokio::sync::Notify::new()),
+            node_breakers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -483,8 +490,34 @@ impl WorkEngine {
             remaining_deps.entry(node.base_id()).or_insert(0);
         }
         for edge in &workflow.edges {
+            // source 未完成 → target 有未满足的依赖
             if !done_or_skipped.contains(edge.source.as_str()) {
                 *remaining_deps.entry(edge.target.as_str()).or_insert(0) += 1;
+                continue;
+            }
+
+            // ConditionTrue/ConditionFalse 边：根据 condition 节点的输出决定是否激活
+            if edge.edge_type == EdgeType::ConditionTrue
+                || edge.edge_type == EdgeType::ConditionFalse
+            {
+                let cond_output = workflow.results.get(edge.source.as_str());
+                let result = cond_output
+                    .and_then(|o| o.get("result"))
+                    .and_then(|r| r.as_bool())
+                    .unwrap_or(false);
+                // source_handle 回退到 edge_type：ConditionTrue → "true", ConditionFalse → "false"
+                let branch = edge
+                    .source_handle
+                    .as_deref()
+                    .unwrap_or(match edge.edge_type {
+                        EdgeType::ConditionTrue => "true",
+                        EdgeType::ConditionFalse => "false",
+                        _ => "true",
+                    });
+                let should_follow = (branch == "true" && result) || (branch == "false" && !result);
+                if !should_follow {
+                    continue;
+                }
             }
         }
 
@@ -539,6 +572,7 @@ impl WorkEngine {
         status: NodeStatus,
         result: Option<serde_json::Value>,
         error: Option<String>,
+        output_var: Option<&str>,
     ) -> Result<(), WorkflowError> {
         let mut workflows = self.workflows.write().await;
         let workflow = workflows
@@ -552,7 +586,10 @@ impl WorkEngine {
 
         state.status = status;
         if let Some(r) = result {
-            workflow.results.insert(node_id.to_string(), r);
+            workflow.results.insert(node_id.to_string(), r.clone());
+            if let Some(var) = output_var {
+                workflow.results.insert(var.to_string(), r);
+            }
         }
         if let Some(e) = error {
             state.error = Some(e);
@@ -730,6 +767,12 @@ impl WorkEngine {
                 }
             }
         }
+        if options.plan_callbacks.is_some() {
+            let mut executions = self.executions.lock().await;
+            if let Some(state) = executions.get_mut(&execution_id) {
+                state.plan_callbacks = options.plan_callbacks.clone();
+            }
+        }
 
         {
             let mut workflows = self.workflows.write().await;
@@ -878,7 +921,8 @@ impl WorkEngine {
                 .unwrap_or(0)
         };
         let progress_cb = options.progress_callback.clone();
-        let mut breakers: HashMap<String, NodeCircuitBreaker> = HashMap::new();
+        let mut breakers: HashMap<String, NodeCircuitBreaker> =
+            { self.node_breakers.lock().await.clone() };
 
         loop {
             if cancel_token.is_cancelled() {
@@ -952,6 +996,7 @@ impl WorkEngine {
                         NodeStatus::Failed,
                         None,
                         Some("Circuit breaker open".to_string()),
+                        None,
                     )
                     .await
                     .ok();
@@ -968,9 +1013,16 @@ impl WorkEngine {
                 };
                 let started_at = Utc::now().timestamp_millis();
 
-                self.update_node_status(workflow_id, &node_id, NodeStatus::Running, None, None)
-                    .await
-                    .ok();
+                self.update_node_status(
+                    workflow_id,
+                    &node_id,
+                    NodeStatus::Running,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .ok();
 
                 // 向前端推送"步骤开始运行"进度事件
                 if let Some(ref cb) = progress_cb {
@@ -1064,12 +1116,14 @@ impl WorkEngine {
                             .or_insert_with(NodeCircuitBreaker::new)
                             .record_success();
 
+                        let out_var = output.output_var.clone();
                         self.update_node_status(
                             workflow_id,
                             &node_id,
                             NodeStatus::Completed,
                             Some(output.output.clone()),
                             None,
+                            out_var.as_deref(),
                         )
                         .await
                         .ok();
@@ -1090,6 +1144,14 @@ impl WorkEngine {
                         )
                         .await
                         .ok();
+
+                        // ConditionNode 完成后，将不匹配分支的节点标记为 Skipped
+                        if matches!(node, WorkflowNode::Condition(_)) {
+                            let mut workflows = self.workflows.write().await;
+                            if let Some(wf) = workflows.get_mut(workflow_id) {
+                                skip_disabled_branch_nodes(wf, &wf.edges.clone(), &node_id);
+                            }
+                        }
                     },
                     Ok(Err(err)) => {
                         breakers
@@ -1123,6 +1185,7 @@ impl WorkEngine {
                                 NodeStatus::Ready,
                                 None,
                                 Some(err_msg.clone()),
+                                None,
                             )
                             .await
                             .ok();
@@ -1133,6 +1196,7 @@ impl WorkEngine {
                                 NodeStatus::Failed,
                                 None,
                                 Some(err_msg.clone()),
+                                None,
                             )
                             .await
                             .ok();
@@ -1188,6 +1252,7 @@ impl WorkEngine {
                                 NodeStatus::Ready,
                                 None,
                                 Some(err_msg.clone()),
+                                None,
                             )
                             .await
                             .ok();
@@ -1198,6 +1263,7 @@ impl WorkEngine {
                                 NodeStatus::Failed,
                                 None,
                                 Some(err_msg.clone()),
+                                None,
                             )
                             .await
                             .ok();
@@ -1280,6 +1346,14 @@ impl WorkEngine {
                 if let Some(shared_wf) = workflows.get_mut(workflow_id) {
                     shared_wf.output = wf.output.clone();
                 }
+            }
+        }
+
+        // Write back breaker state for cross-run persistence
+        {
+            let mut shared = self.node_breakers.lock().await;
+            for (k, v) in breakers {
+                shared.insert(k, v);
             }
         }
 
@@ -1616,3 +1690,66 @@ impl std::fmt::Display for WorkEngineError {
 }
 
 impl std::error::Error for WorkEngineError {}
+
+// ── Condition 节点分支跳过辅助 ──
+
+/// Condition 节点完成后，将不匹配分支上的所有下游节点标记为 Skipped。
+fn skip_disabled_branch_nodes(workflow: &mut Workflow, edges: &[WorkflowEdge], cond_node_id: &str) {
+    let cond_output = workflow.results.get(cond_node_id);
+    let result = cond_output
+        .and_then(|o| o.get("result"))
+        .and_then(|r| r.as_bool())
+        .unwrap_or(false);
+
+    // 确定要跳过的分支：result==true → 跳过 "false" 分支；result==false → 跳过 "true" 分支
+    let skip_branch = if result { "false" } else { "true" };
+
+    for edge in edges {
+        if edge.source != cond_node_id {
+            continue;
+        }
+        if edge.edge_type != EdgeType::ConditionTrue && edge.edge_type != EdgeType::ConditionFalse {
+            continue;
+        }
+        let actual_branch = edge
+            .source_handle
+            .as_deref()
+            .unwrap_or(match edge.edge_type {
+                EdgeType::ConditionTrue => "true",
+                EdgeType::ConditionFalse => "false",
+                _ => "true",
+            });
+        if actual_branch == skip_branch {
+            mark_subtree_skipped(workflow, edges, &edge.target);
+        }
+    }
+}
+
+/// 递归标记节点及其所有下游节点为 Skipped
+fn mark_subtree_skipped(workflow: &mut Workflow, edges: &[WorkflowEdge], node_id: &str) {
+    // 如果已经标记过（Completed/Failed/Skipped），不再递归
+    if let Some(state) = workflow.node_states.get(node_id)
+        && matches!(state.status, NodeStatus::Completed | NodeStatus::Failed | NodeStatus::Skipped)
+    {
+        return;
+    }
+
+    workflow
+        .node_states
+        .entry(node_id.to_string())
+        .or_insert_with(|| NodeRuntimeState {
+            status: NodeStatus::Skipped,
+            attempts: 0,
+            error: None,
+            started_at: None,
+            completed_at: Some(current_timestamp() as i64),
+        })
+        .status = NodeStatus::Skipped;
+
+    // 递归跳过所有下游节点
+    for edge in edges {
+        if edge.source == node_id {
+            mark_subtree_skipped(workflow, edges, &edge.target);
+        }
+    }
+}

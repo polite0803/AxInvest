@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, InputNumber, List, Space, Spin, Tag } from "antd";
+import { Button, Card, Empty, InputNumber, List, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { checkVendorEnabled } from "./vendorCheck";
@@ -28,6 +28,7 @@ const FACTOR_DEFS = [
     min: -10,
     max: 10,
     step: 0.5,
+    default: 3,
   },
   {
     key: "turnoverRateMin",
@@ -36,6 +37,7 @@ const FACTOR_DEFS = [
     min: 0,
     max: 50,
     step: 0.5,
+    default: 3,
   },
   {
     key: "mainInflowMin",
@@ -45,6 +47,7 @@ const FACTOR_DEFS = [
     min: 0,
     max: 999999,
     step: 100,
+    default: 1000,
   },
   {
     key: "dragonTigerNetMin",
@@ -54,6 +57,7 @@ const FACTOR_DEFS = [
     min: 0,
     max: 999999,
     step: 100,
+    default: 500,
   },
   {
     key: "northboundRatioMin",
@@ -62,6 +66,7 @@ const FACTOR_DEFS = [
     min: 0,
     max: 100,
     step: 0.5,
+    default: 1,
   },
   {
     key: "rsiOversold",
@@ -135,7 +140,9 @@ export function StockScreenerPanel() {
     setFactors((prev) => {
       const cur = prev[key];
       const enabled = !cur?.enabled;
-      const next = { ...prev, [key]: { ...cur, enabled, value: cur?.value } };
+      const fd = FACTOR_DEFS.find((f) => f.key === key);
+      const value = enabled ? (cur?.value ?? ("default" in fd! ? (fd as any).default : undefined)) : cur?.value;
+      const next = { ...prev, [key]: { ...cur, enabled, value } };
       setSelectedCount(Object.values(next).filter((f) => f.enabled).length);
       return next;
     });
@@ -182,7 +189,7 @@ export function StockScreenerPanel() {
           <div className="text-xs text-gray-400 mb-1">
             {t("stockAnalysis.settings.screener.factorHint", { count: selectedCount })}
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-0.5">
             {FACTOR_DEFS.map((fd) => {
               const f = factors[fd.key];
               const active = f?.enabled;
@@ -200,15 +207,15 @@ export function StockScreenerPanel() {
             })}
           </div>
           {selectedCount > 0 && (
-            <div className="flex gap-1 flex-wrap items-center text-xs mt-1">
+            <div className="flex flex-col gap-1 items-stretch text-xs mt-1">
               {FACTOR_DEFS.filter((fd) => factors[fd.key]?.enabled).map((fd) => {
                 if (isRsiFactor(fd.key)) { return null; }
                 return (
-                  <Space key={fd.key} size={2}>
-                    <span className="text-gray-500">{t(fd.i18nKey)}</span>
+                  <div key={fd.key} className="flex items-center gap-1">
+                    <span className="text-gray-500 shrink-0">{t(fd.i18nKey)}</span>
                     <InputNumber
                       size="small"
-                      style={{ width: 72 }}
+                      style={{ flex: 1, minWidth: 50 }}
                       min={fd.min}
                       max={fd.max}
                       step={fd.step}
@@ -217,21 +224,23 @@ export function StockScreenerPanel() {
                       placeholder={fd.unit || t("stockAnalysis.settings.screener.placeholder")}
                       suffix={"unitI18n" in fd ? t("stockAnalysis.settings.screener.unit10k") : fd.unit || undefined}
                     />
-                  </Space>
+                  </div>
                 );
               })}
-              <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
-                {t("stockAnalysis.settings.screener.filter")}
-              </Button>
-              <Button
-                size="small"
-                onClick={() => {
-                  setFactors({});
-                  setSelectedCount(0);
-                }}
-              >
-                {t("stockAnalysis.settings.screener.clear")}
-              </Button>
+              <div className="flex gap-1">
+                <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
+                  {t("stockAnalysis.settings.screener.filter")}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setFactors({});
+                    setSelectedCount(0);
+                  }}
+                >
+                  {t("stockAnalysis.settings.screener.clear")}
+                </Button>
+              </div>
             </div>
           )}
         </div>

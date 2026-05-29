@@ -6818,7 +6818,8 @@
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "backendOffline": "बैकएंड तैयार नहीं है, कृपया बाद में पुनः प्रयास करें",
-        "connectionFailed": "कनेक्शन विफल, कृपया नेटवर्क जांचें और पुनः प्रयास करें"
+        "connectionFailed": "कनेक्शन विफल, कृपया नेटवर्क जांचें और पुनः प्रयास करें",
+        "autoDisabled": "{{count}} अनुपलब्ध डेटा स्रोत स्वचालित रूप से अक्षम किए गए"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

@@ -6866,7 +6866,8 @@
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "backendOffline": "Backend not ready, please try again later",
-        "connectionFailed": "Connection failed, please check network and retry"
+        "connectionFailed": "Connection failed, please check network and retry",
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

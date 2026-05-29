@@ -6838,7 +6838,8 @@
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "backendOffline": "バックエンドの準備ができていません。しばらくしてから再試行してください",
-        "connectionFailed": "接続に失敗しました。ネットワークを確認して再試行してください"
+        "connectionFailed": "接続に失敗しました。ネットワークを確認して再試行してください",
+        "autoDisabled": "接続できないデータソース {{count}} 件を自動無効化しました"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

@@ -6839,7 +6839,8 @@
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "backendOffline": "Сервер не готов, повторите попытку позже",
-        "connectionFailed": "Ошибка подключения, проверьте сеть и повторите попытку"
+        "connectionFailed": "Ошибка подключения, проверьте сеть и повторите попытку",
+        "autoDisabled": "Автоматически отключено {{count}} недоступных источников данных"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

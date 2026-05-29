@@ -307,7 +307,24 @@ export function DataVendorsTab() {
     for (const n of names) { setHealth((prev) => ({ ...prev, [n]: "pending" })); }
     for (const n of names) { await checkOne(n); }
     setCheckingAll(false);
-  }, [checkOne]);
+    // 延迟一帧读取 health 状态，自动关闭失败的 vendor
+    setTimeout(() => {
+      setHealth((prev) => {
+        const toDisable: Record<string, boolean> = {};
+        for (const n of names) {
+          if (prev[n] === "fail") {
+            const key = `vendor_${n}`;
+            toDisable[key] = false;
+          }
+        }
+        if (Object.keys(toDisable).length > 0) {
+          setVendorValues((prev) => ({ ...prev, ...toDisable }));
+          message.warning(t("stockAnalysis.settings.vendor.autoDisabled", { count: Object.keys(toDisable).length }));
+        }
+        return prev;
+      });
+    }, 100);
+  }, [checkOne, t]);
 
   if (!loaded) {
     return (

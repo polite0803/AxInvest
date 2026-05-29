@@ -274,7 +274,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 20;
+    const TEMPLATE_VERSION: i32 = 21;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -1820,42 +1820,42 @@ async fn seed_stock_analysis_workflow_template(
         Variable {
             name: "vendor_ths".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some("同花顺 — 综合数据".into()),
             is_secret: false,
         },
         Variable {
             name: "vendor_cninfo".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some("巨潮资讯 — 信息披露".into()),
             is_secret: false,
         },
         Variable {
             name: "vendor_baidu_stock".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some("百度股票 — 数据".into()),
             is_secret: false,
         },
         Variable {
             name: "vendor_iwencai".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some("问财 — 选股数据".into()),
             is_secret: false,
         },
         Variable {
             name: "vendor_akshare".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some("AKShare — 开源数据".into()),
             is_secret: false,
         },
         Variable {
             name: "vendor_mootdx".into(),
             var_type: "boolean".into(),
-            value: serde_json::json!(false),
+            value: serde_json::json!(true),
             description: Some("Mootdx — 本地行情接口".into()),
             is_secret: false,
         },

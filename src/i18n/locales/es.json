@@ -6839,7 +6839,8 @@
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "backendOffline": "Backend no disponible, inténtelo de nuevo más tarde",
-        "connectionFailed": "Error de conexión, verifique la red y reintente"
+        "connectionFailed": "Error de conexión, verifique la red y reintente",
+        "autoDisabled": "{{count}} fuente(s) de datos inaccesibles desactivada(s) automáticamente"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

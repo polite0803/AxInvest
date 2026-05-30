@@ -129,7 +129,12 @@ impl StockAnalysisOrchestrator {
             let ma_cross = crate::signals::detect_ma_cross(&klines_for_signal, 5, 20);
             bb.set_state("signal.ma_cross", &serde_json::to_string(&ma_cross).unwrap_or_default());
             if ma_cross.signal != "none" {
-                tracing::info!("[信号] 均线交叉: {} (MA5={:.2}, MA20={:.2})", ma_cross.signal, ma_cross.fast_ma, ma_cross.slow_ma);
+                tracing::info!(
+                    "[信号] 均线交叉: {} (MA5={:.2}, MA20={:.2})",
+                    ma_cross.signal,
+                    ma_cross.fast_ma,
+                    ma_cross.slow_ma
+                );
             }
 
             let ma20 = indicators.ma20;
@@ -137,7 +142,11 @@ impl StockAnalysisOrchestrator {
             let breakout = crate::signals::detect_breakout(&klines_for_signal, ma20, ma20_x2);
             bb.set_state("signal.breakout", &serde_json::to_string(&breakout).unwrap_or_default());
             if breakout.breakout_type != "none" {
-                tracing::info!("[信号] 突破检测: {} (价格={:.2})", breakout.breakout_type, breakout.current_price);
+                tracing::info!(
+                    "[信号] 突破检测: {} (价格={:.2})",
+                    breakout.breakout_type,
+                    breakout.current_price
+                );
             }
         }
 
@@ -306,7 +315,8 @@ impl StockAnalysisOrchestrator {
         }
         tracing::info!("客观评分: {}/100 ({})", objective_score.total, objective_score.signal);
 
-        let value_assessment = crate::value::ValueAssessment::from_metrics(&value_metrics, raw.quote.price);
+        let value_assessment =
+            crate::value::ValueAssessment::from_metrics(&value_metrics, raw.quote.price);
         {
             let mut bb = blackboard.write().await;
             bb.set_state(
@@ -428,8 +438,7 @@ impl StockAnalysisOrchestrator {
         if raw.klines.len() >= 4 {
             let close_prices: Vec<f64> = raw.klines.iter().map(|k| k.close).collect();
             let close_json = serde_json::to_string(&close_prices).unwrap_or_default();
-            let outlier_result =
-                crate::data_clean::remove_outliers(&close_json, "iqr", 1.5);
+            let outlier_result = crate::data_clean::remove_outliers(&close_json, "iqr", 1.5);
             if outlier_result.removed_count > 0 {
                 tracing::info!(
                     "[数据清洗] IQR 异常值剔除: 移除/修正 {} 个收盘价",

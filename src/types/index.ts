@@ -1274,13 +1274,9 @@ export interface ExecutionStatusResponse {
   current_node_id: string | null;
   total_time_ms: number;
   node_count: number;
-  node_records: {
-    node_id: string;
-    node_type: string;
-    status: string;
-    duration_ms: number | null;
-    output_summary: string | null;
-  }[];
+  node_records: NodeExecutionRecord[];
+  parent_execution_id?: string | null;
+  variables?: Record<string, unknown>;
 }
 
 export interface ExecutionSummary {

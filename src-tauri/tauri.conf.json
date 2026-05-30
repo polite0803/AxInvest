@@ -7,6 +7,9 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "productName": "AxInvest",
+    "version": "2.4.5",
+    "identifier": "top.axinvest.desktop",
     "withGlobalTauri": false,
     "security": {
       "csp": "default-src 'self' https://tauri.localhost asset: tauri: ipc: https: wss: http: data: blob: filesystem:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://tauri.localhost asset: tauri: ipc: https: http:; style-src 'self' 'unsafe-inline' https://tauri.localhost asset: tauri: ipc: https: http:; img-src 'self' data: https: asset:; connect-src 'self' http: https: wss: https://tauri.localhost tauri: ipc:; frame-src 'self';"

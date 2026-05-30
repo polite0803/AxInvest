@@ -61,7 +61,10 @@ pub struct ValueAssessment {
 }
 
 impl ValueAssessment {
-    pub fn from_metrics(metrics: &crate::value_investing::ValueMetrics, _current_price: f64) -> Self {
+    pub fn from_metrics(
+        metrics: &crate::value_investing::ValueMetrics,
+        _current_price: f64,
+    ) -> Self {
         let dcf_value = if metrics.dcf_mid > 0.0 {
             Some(metrics.dcf_mid)
         } else {
@@ -99,7 +102,10 @@ impl ValueAssessment {
             },
             moat_score: metrics.moat_score,
             moat_type: metrics.moat_level.clone(),
-            details: vec![format!("护城河{}/100({})", metrics.moat_score, metrics.moat_level)],
+            details: vec![format!(
+                "护城河{}/100({})",
+                metrics.moat_score, metrics.moat_level
+            )],
         };
 
         let buffett_verdict = if metrics.moat_score >= 70
@@ -112,8 +118,7 @@ impl ValueAssessment {
             && metrics.f_score >= 5
             && metrics.margin_of_safety_pct >= 10.0
         {
-            "👍 有一定吸引力：护城河和财务状况尚可，安全边际处于临界点。可小仓位观察。"
-                .to_string()
+            "👍 有一定吸引力：护城河和财务状况尚可，安全边际处于临界点。可小仓位观察。".to_string()
         } else if metrics.moat_score >= 30 {
             "🤔 需要更多安全边际：公司质地一般，等待更好的价格。巴菲特会说：'等待那个又胖又慢的球'。"
                 .to_string()

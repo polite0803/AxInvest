@@ -282,10 +282,7 @@ pub async fn run_stock_workflow(
                             extract_decision_fields(&decision_json);
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
-                            .col_expr(
-                                stock_analyses::Column::DecisionAction,
-                                Expr::value(action),
-                            )
+                            .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
                             .col_expr(
                                 stock_analyses::Column::DecisionPositionPct,
                                 Expr::value(position_pct),

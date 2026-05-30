@@ -158,15 +158,15 @@ export function ExecutionReplayPanel() {
                                   color={STATUS_COLOR[r.status] as any}
                                   className="shrink-0"
                                 />
-                                <span className="font-medium truncate">{r.node_id}</span>
+                                <span className="font-medium truncate">{r.node_name ?? r.node_id}</span>
                                 <Tag className="text-xs m-0 leading-none" style={{ fontSize: 10, padding: "0 3px" }}>
                                   {r.node_type}
                                 </Tag>
                               </div>
-                              {r.duration_ms != null && (
-                                <span className="text-gray-400">{formatMs(r.duration_ms)}</span>
+                              {r.execution_time_ms != null && (
+                                <span className="text-gray-400">{formatMs(r.execution_time_ms)}</span>
                               )}
-                              {r.output_summary && <span className="text-gray-500 truncate">{r.output_summary}</span>}
+                              {r.error && <span className="text-red-400 truncate text-xs">{r.error}</span>}
                             </div>
                           ),
                         })),

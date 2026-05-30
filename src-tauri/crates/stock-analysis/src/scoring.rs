@@ -8,14 +8,14 @@ use crate::value_investing::ValueMetrics;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectiveScore {
-    pub total: u32,                  // 综合评分 0-100
-    pub trend_score: u32,            // 趋势 0-25
-    pub deviation_score: u32,        // 乖离率 0-15
-    pub macd_score: u32,             // MACD 0-15
-    pub volume_score: u32,           // 量能 0-15
-    pub rsi_score: u32,              // RSI 0-10
-    pub support_score: u32,          // 支撑 0-5
-    pub boll_score: u32,             // 布林带 0-5
+    pub total: u32,           // 综合评分 0-100
+    pub trend_score: u32,     // 趋势 0-25
+    pub deviation_score: u32, // 乖离率 0-15
+    pub macd_score: u32,      // MACD 0-15
+    pub volume_score: u32,    // 量能 0-15
+    pub rsi_score: u32,       // RSI 0-10
+    pub support_score: u32,   // 支撑 0-5
+    pub boll_score: u32,      // 布林带 0-5
     #[serde(rename = "fundamentalAdjustment")]
     pub total_adjustment: i32,
     pub signal: String, // "🟢强烈买入" | "🔵买入" | "🟡持有" | "⚪观望" | "🟠卖出" | "🔴强烈卖出"

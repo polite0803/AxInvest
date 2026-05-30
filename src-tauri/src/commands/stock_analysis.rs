@@ -553,10 +553,7 @@ impl AgentRunner for CancelAwareRunner {
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(format!(
-                "[{expert_id}] LLM 调用超时 ({}秒)",
-                self.timeout_secs
-            )),
+            Err(_) => Err(format!("[{expert_id}] LLM 调用超时 ({}秒)", self.timeout_secs)),
         }
     }
 }

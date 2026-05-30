@@ -64,7 +64,7 @@ pub fn run() {
         for bp in &boot_paths {
             // 追加而非覆盖
             let existing = std::fs::read_to_string(bp).unwrap_or_default();
-            let _ = std::fs::write(bp, existing + boot_msg.as_str());
+            let _ = std::fs::write(bp, existing + &*boot_msg);
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -694,6 +694,8 @@ pub fn run() {
             commands::workflow_ai::generate_workflow_from_prompt,
             commands::workflow_ai::optimize_agent_prompt,
             commands::workflow_ai::recommend_nodes,
+            commands::workflow_ai::workflow_ai_chat_stream,
+            commands::workflow_ai::workflow_ai_chat_cancel,
             // Platform integration commands
             commands::platform_integration::get_platform_config,
             commands::platform_integration::update_platform_config,
@@ -734,6 +736,10 @@ pub fn run() {
             commands::work_engine::migrate_all_workflows,
             commands::work_engine::execute_workflow_node,
             commands::work_engine::list_node_executor_types,
+            commands::work_engine::debug_run_workflow,
+            commands::work_engine::set_workflow_breakpoints,
+            commands::work_engine::resume_workflow_breakpoint,
+            commands::work_engine::step_workflow_breakpoint,
             // User Profile & Style Migration commands
             commands::user_profile::get_user_profile,
             commands::user_profile::update_user_profile,

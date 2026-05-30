@@ -123,8 +123,22 @@ impl StockAnalysisOrchestrator {
         {
             let mut bb = blackboard.write().await;
             bb.set_state("raw.indicators", &serde_json::to_string(&indicators).unwrap_or_default());
-            // 同时写入行情到 blackboard（供后续评分等阶段使用）
             bb.set_state("raw.quote", &serde_json::to_string(&raw.quote).unwrap_or_default());
+
+            let klines_for_signal = serde_json::to_string(&raw.klines).unwrap_or_default();
+            let ma_cross = crate::signals::detect_ma_cross(&klines_for_signal, 5, 20);
+            bb.set_state("signal.ma_cross", &serde_json::to_string(&ma_cross).unwrap_or_default());
+            if ma_cross.signal != "none" {
+                tracing::info!("[信号] 均线交叉: {} (MA5={:.2}, MA20={:.2})", ma_cross.signal, ma_cross.fast_ma, ma_cross.slow_ma);
+            }
+
+            let ma20 = indicators.ma20;
+            let ma20_x2 = ma20 * 2.0;
+            let breakout = crate::signals::detect_breakout(&klines_for_signal, ma20, ma20_x2);
+            bb.set_state("signal.breakout", &serde_json::to_string(&breakout).unwrap_or_default());
+            if breakout.breakout_type != "none" {
+                tracing::info!("[信号] 突破检测: {} (价格={:.2})", breakout.breakout_type, breakout.current_price);
+            }
         }
 
         let _ = events.send(AnalysisEvent::AnalystProgress {
@@ -262,11 +276,9 @@ impl StockAnalysisOrchestrator {
         // ── NEW ②: 100分客观评分 ──
         let mut objective_score = scoring::ScoringEngine::score(&indicators, raw.quote.price, None);
 
-        // 应用基本面修正
         let pe = raw.quote.pe;
         let pb = raw.quote.pb;
-        let roe = raw.financials.first().and_then(|f| f.roe);
-        scoring::ScoringEngine::apply_fundamental_adjustment(&mut objective_score, pe, pb, roe);
+        let _roe = raw.financials.first().and_then(|f| f.roe);
 
         scoring::ScoringEngine::apply_value_adjustment(&mut objective_score, &value_metrics);
 
@@ -294,30 +306,7 @@ impl StockAnalysisOrchestrator {
         }
         tracing::info!("客观评分: {}/100 ({})", objective_score.total, objective_score.signal);
 
-        // ── 价值投资评估 ──
-        let value_assessment = {
-            let financials = &raw.financials;
-            let shares = raw.quote.total_mv.and_then(|mv| {
-                if raw.quote.price > 0.0 {
-                    Some(mv / raw.quote.price / 1_0000_0000.0)
-                } else {
-                    None
-                }
-            });
-            match shares {
-                Some(s) if s > 0.0 => crate::value::ValueEngine::assess(
-                    raw.quote.price,
-                    financials,
-                    s,
-                    Some(&value_config),
-                ),
-                _ => crate::value::ValueEngine::assess_no_shares(
-                    raw.quote.price,
-                    financials,
-                    Some(&value_config),
-                ),
-            }
-        };
+        let value_assessment = crate::value::ValueAssessment::from_metrics(&value_metrics, raw.quote.price);
         {
             let mut bb = blackboard.write().await;
             bb.set_state(
@@ -431,10 +420,28 @@ impl StockAnalysisOrchestrator {
         blackboard: &Arc<RwLock<SharedBlackboard>>,
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
     ) -> Result<StockRawData, String> {
-        let raw = data_client
+        let mut raw = data_client
             .fetch_all(stock_code, &config.kline_period, config.kline_limit, config.news_limit)
             .await
             .map_err(|e| format!("数据获取失败: {e}"))?;
+
+        if raw.klines.len() >= 4 {
+            let close_prices: Vec<f64> = raw.klines.iter().map(|k| k.close).collect();
+            let close_json = serde_json::to_string(&close_prices).unwrap_or_default();
+            let outlier_result =
+                crate::data_clean::remove_outliers(&close_json, "iqr", 1.5);
+            if outlier_result.removed_count > 0 {
+                tracing::info!(
+                    "[数据清洗] IQR 异常值剔除: 移除/修正 {} 个收盘价",
+                    outlier_result.removed_count
+                );
+                for (i, kline) in raw.klines.iter_mut().enumerate() {
+                    if i < outlier_result.cleaned.len() {
+                        kline.close = outlier_result.cleaned[i];
+                    }
+                }
+            }
+        }
 
         let klines_json = serde_json::to_string(&raw.klines).unwrap_or_default();
         let financials_json = serde_json::to_string(&raw.financials).unwrap_or_default();
@@ -680,11 +687,12 @@ impl StockAnalysisOrchestrator {
             });
         }
 
-        let summary = format!(
-            r#"{{"rounds":{max_rounds},"bull_final":"{}","bear_final":"{}"}}"#,
-            safe_truncate(&bull_prev, 500),
-            safe_truncate(&bear_prev, 500)
-        );
+        let summary = serde_json::json!({
+            "rounds": max_rounds,
+            "bull_final": safe_truncate(&bull_prev, 500),
+            "bear_final": safe_truncate(&bear_prev, 500),
+        })
+        .to_string();
         {
             let mut bb = blackboard.write().await;
             bb.set_state("debate.summary", &summary);
@@ -1008,10 +1016,14 @@ fn parse_trader_decision(report: &str) -> (String, Option<f64>, Option<f64>) {
         return (action, stop, entry);
     }
     // 回退：字符串匹配
-    let action = if report.contains("买入") {
+    let action = if contains_action_keyword(report, "买入") {
         "买入".to_string()
-    } else if report.contains("卖出") {
+    } else if contains_action_keyword(report, "卖出") {
         "卖出".to_string()
+    } else if contains_action_keyword(report, "增持") {
+        "增持".to_string()
+    } else if contains_action_keyword(report, "减持") {
+        "减持".to_string()
     } else {
         "持有".to_string()
     };
@@ -1033,6 +1045,33 @@ fn try_parse_json(text: &str) -> Option<serde_json::Value> {
         }
     }
     None
+}
+
+fn contains_action_keyword(text: &str, keyword: &str) -> bool {
+    let negative_prefixes = ["不", "未", "非", "无", "暂缓", "避免", "谨慎"];
+    for neg in negative_prefixes {
+        let pattern = format!("{neg}{keyword}");
+        if text.contains(&pattern) {
+            return false;
+        }
+    }
+    let affirmative_patterns = [
+        format!("建议{keyword}"),
+        format!("操作：{keyword}"),
+        format!("操作:{keyword}"),
+        format!("决策：{keyword}"),
+        format!("决策:{keyword}"),
+        format!("方向：{keyword}"),
+        format!("方向:{keyword}"),
+        format!("\"action\":\"{keyword}\""),
+        format!("\"action\": \"{keyword}\""),
+    ];
+    for pattern in &affirmative_patterns {
+        if text.contains(pattern) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 从文本中提取关键字后面的数字

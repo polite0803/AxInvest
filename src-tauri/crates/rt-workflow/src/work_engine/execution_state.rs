@@ -28,6 +28,7 @@ impl std::fmt::Display for ExecutionStatus {
 pub struct NodeExecutionRecord {
     pub node_id: String,
     pub node_type: String,
+    pub node_name: Option<String>,
     pub status: String,
     pub input: Option<serde_json::Value>,
     pub output: Option<serde_json::Value>,
@@ -35,6 +36,8 @@ pub struct NodeExecutionRecord {
     pub error: Option<String>,
     pub started_at: i64,
     pub completed_at: Option<i64>,
+    pub parent_execution_id: Option<String>,
+    pub sub_workflow_id: Option<String>,
 }
 
 use std::collections::HashMap;
@@ -94,6 +97,7 @@ pub struct ExecutionState {
     pub variables: std::collections::HashMap<String, serde_json::Value>,
     pub node_records: Vec<NodeExecutionRecord>,
     pub current_node_id: Option<String>,
+    pub parent_execution_id: Option<String>,
     pub total_time_ms: u64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -110,6 +114,7 @@ impl ExecutionState {
             variables: std::collections::HashMap::new(),
             node_records: Vec::new(),
             current_node_id: None,
+            parent_execution_id: None,
             callbacks: None,
             compiled_prompts: None,
             cancel_token: None,

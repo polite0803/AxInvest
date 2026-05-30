@@ -48,6 +48,8 @@ pub fn detect_market_type(code: &str) -> &str {
         Some('0') => "main_sz",
         Some('3') => "chinext",
         Some('8') => "bj",
+        Some('4') => "neeq",
+        Some('9') => "b_share",
         _ => "unknown",
     }
 }

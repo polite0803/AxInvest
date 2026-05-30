@@ -54,13 +54,13 @@ pub fn check_report_quality(
 
     // 硬检查 2: 是否包含失败标记
     let failure_markers = [
-        "无法获取",
-        "数据不足",
-        "无数据",
-        "error",
-        "failed",
-        "抱歉",
-        "无法分析",
+        "无法获取数据",
+        "数据不足，无法",
+        "无可用数据",
+        "分析失败",
+        "无法完成分析",
+        "抱歉，我无法",
+        "数据获取失败",
     ];
     let has_failure = failure_markers.iter().any(|m| text.contains(m));
     if has_failure {

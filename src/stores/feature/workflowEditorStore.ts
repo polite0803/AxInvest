@@ -12,9 +12,24 @@ import type {
   WorkflowTemplateInput,
   WorkflowTemplateResponse,
 } from "@/components/workflow/types";
-import { invoke } from "@/lib/invoke";
+import { invoke, logIpcError } from "@/lib/invoke";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+
+export interface AiChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  id: string;
+  isStreaming?: boolean;
+  actions?: AiChatAction[];
+  rawContent?: string;
+}
+
+export interface AiChatAction {
+  action_type: string;
+  data: Record<string, unknown>;
+}
 
 export interface SimilarWorkflow {
   workflow_id: string;
@@ -174,6 +189,7 @@ interface WorkflowEditorState {
 
   generateWorkflowFromPrompt: (
     prompt: string,
+    mergeMode?: boolean,
   ) => Promise<
     {
       nodes: WorkflowNode[];
@@ -192,6 +208,16 @@ interface WorkflowEditorState {
       confidence: number;
     }> | null
   >;
+  applyOptimizedPromptToNode: (nodeId: string, optimizedPrompt: string) => void;
+
+  aiChatMessages: AiChatMessage[];
+  aiChatSessionId: string;
+  aiChatStreaming: boolean;
+  aiChatStreamingMessageId: string | null;
+  aiChatSend: (message: string) => Promise<void>;
+  aiChatCancel: () => void;
+  aiChatClear: () => void;
+  applyAiChatAction: (action: AiChatAction) => void;
 
   semanticCheckResult: SemanticCheckResult | null;
   pendingReplacements: Map<
@@ -257,6 +283,37 @@ const buildHistoryEntry = (state: WorkflowEditorState): HistoryEntry => ({
   trigger_config: state.currentTemplate?.trigger_config,
 });
 
+function parseActionsFromContent(content: string): AiChatAction[] {
+  const actions: AiChatAction[] = [];
+  const regex = /:::action\s*\n([\s\S]*?)\n:::/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      actions.push({
+        action_type: parsed.action_type || "unknown",
+        data: parsed.data || {},
+      });
+    } catch {
+      // skip invalid JSON
+    }
+  }
+  return actions;
+}
+
+function stripActionBlocks(content: string): string {
+  return content.replace(/:::action\s*\n[\s\S]*?\n:::/g, "").trim();
+}
+
+function stripPartialActionBlocks(content: string): string {
+  let result = content.replace(/:::action\s*\n[\s\S]*?\n:::/g, "");
+  const partialMatch = result.match(/:::action\s*\n[\s\S]*$/);
+  if (partialMatch) {
+    result = result.slice(0, partialMatch.index);
+  }
+  return result.trim();
+}
+
 export const useWorkflowEditorStore = create<WorkflowEditorState>()(
   immer((set, get) => ({
     currentTemplate: null,
@@ -276,6 +333,10 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     pendingWorkflowData: null,
     nodes: [],
     edges: [],
+    aiChatMessages: [],
+    aiChatSessionId: `ai-session-${Date.now()}`,
+    aiChatStreaming: false,
+    aiChatStreamingMessageId: null,
     past: [],
     future: [],
     _lastUndoRecordTime: 0,
@@ -1049,26 +1110,55 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
     },
 
-    generateWorkflowFromPrompt: async (prompt: string) => {
+    generateWorkflowFromPrompt: async (prompt: string, mergeMode?: boolean) => {
       set((state) => {
         state.isLoading = true;
         state.error = null;
       });
       try {
+        const { nodes, edges } = get();
         const result = await invoke<{
           nodes: WorkflowNode[];
           edges: WorkflowEdge[];
           explanation?: string;
-        }>("generate_workflow_from_prompt", { prompt });
+        }>("generate_workflow_from_prompt", {
+          prompt,
+          current_nodes: nodes.length > 0 ? nodes : undefined,
+          current_edges: edges.length > 0 ? edges : undefined,
+        });
         if (result) {
           set((state) => {
-            state.nodes = result.nodes;
-            state.edges = result.edges;
+            if (mergeMode && state.nodes.length > 0) {
+              const existingIds = new Set(state.nodes.map(n => n.id));
+              const prefix = `ai-${Date.now()}`;
+              const newNodes = result.nodes.map(n => ({
+                ...n,
+                id: existingIds.has(n.id) ? `${prefix}-${n.id}` : n.id,
+                position: { x: n.position.x + 50, y: n.position.y + 50 },
+              }));
+              const nodeIdMap = new Map<string, string>();
+              result.nodes.forEach((orig, i) => {
+                if (newNodes[i].id !== orig.id) {
+                  nodeIdMap.set(orig.id, newNodes[i].id);
+                }
+              });
+              const newEdges = result.edges.map(e => ({
+                ...e,
+                id: `ai-edge-${Date.now()}-${e.id}`,
+                source: nodeIdMap.get(e.source) || e.source,
+                target: nodeIdMap.get(e.target) || e.target,
+              }));
+              state.nodes = [...state.nodes, ...newNodes];
+              state.edges = [...state.edges, ...newEdges];
+            } else {
+              state.nodes = result.nodes;
+              state.edges = result.edges;
+            }
             state.isLoading = false;
           });
           return {
-            nodes: result.nodes,
-            edges: result.edges,
+            nodes: get().nodes,
+            edges: get().edges,
             explanation: result.explanation,
           };
         }
@@ -1110,6 +1200,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         state.error = null;
       });
       try {
+        const { nodes } = get();
+        const currentNodeTypes = nodes.map(n => n.type).filter(Boolean) as string[];
         const result = await invoke<
           Array<{
             node_type: string;
@@ -1117,7 +1209,10 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             description: string;
             confidence: number;
           }>
-        >("recommend_nodes", { context });
+        >("recommend_nodes", {
+          context,
+          current_node_types: currentNodeTypes.length > 0 ? currentNodeTypes : undefined,
+        });
         set((state) => {
           state.isLoading = false;
         });
@@ -1128,6 +1223,217 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           state.isLoading = false;
         });
         return null;
+      }
+    },
+
+    applyOptimizedPromptToNode: (nodeId: string, optimizedPrompt: string) => {
+      const { nodes } = get();
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) { return; }
+      if (node.type === "agent") {
+        const agentNode = node as import("@/components/workflow/types").AgentNode;
+        get().updateNode(nodeId, {
+          ...agentNode,
+          config: { ...agentNode.config, system_prompt: optimizedPrompt },
+        });
+      }
+    },
+
+    aiChatSend: async (message: string) => {
+      const { aiChatMessages, aiChatSessionId } = get();
+      const msgId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const userMsg: AiChatMessage = {
+        role: "user",
+        content: message,
+        timestamp: Date.now(),
+        id: msgId,
+      };
+      const assistantMsg: AiChatMessage = {
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        id: assistantId,
+        isStreaming: true,
+        actions: [],
+        rawContent: "",
+      };
+      set((state) => {
+        state.aiChatMessages = [...state.aiChatMessages, userMsg, assistantMsg];
+        state.aiChatStreaming = true;
+        state.aiChatStreamingMessageId = assistantMsg.id;
+      });
+      let chunkUnlisten: (() => void) | null = null;
+      let errorUnlisten: (() => void) | null = null;
+      const cleanupListeners = () => {
+        chunkUnlisten?.();
+        errorUnlisten?.();
+        chunkUnlisten = null;
+        errorUnlisten = null;
+      };
+      try {
+        const history = aiChatMessages.map((m) => ({
+          role: m.role,
+          content: (m as any).rawContent || m.content,
+        }));
+        const { listen } = await import("@/lib/invoke");
+        let accumulatedContent = "";
+        chunkUnlisten = await listen<
+          { conversation_id: string; message_id: string; chunk: { content: string | null; done: boolean } }
+        >(
+          "workflow-ai-chat-chunk",
+          (event) => {
+            if (event.payload.conversation_id !== aiChatSessionId) { return; }
+            const chunk = event.payload.chunk;
+            if (chunk.content) {
+              accumulatedContent += chunk.content;
+            }
+            if (chunk.done) {
+              const actions = parseActionsFromContent(accumulatedContent);
+              const cleanContent = stripActionBlocks(accumulatedContent);
+              set((state) => {
+                state.aiChatMessages = state.aiChatMessages.map((m) =>
+                  m.id === assistantMsg.id
+                    ? { ...m, content: cleanContent, isStreaming: false, actions, rawContent: accumulatedContent }
+                    : m
+                );
+                state.aiChatStreaming = false;
+                state.aiChatStreamingMessageId = null;
+              });
+              cleanupListeners();
+            } else {
+              const displayContent = stripPartialActionBlocks(accumulatedContent);
+              set((state) => {
+                state.aiChatMessages = state.aiChatMessages.map((m) =>
+                  m.id === assistantMsg.id
+                    ? { ...m, content: displayContent + "▍", isStreaming: true, rawContent: accumulatedContent }
+                    : m
+                );
+              });
+            }
+          },
+        );
+        errorUnlisten = await listen<{ conversation_id: string; error: string }>(
+          "workflow-ai-chat-error",
+          (event) => {
+            if (event.payload.conversation_id !== aiChatSessionId) { return; }
+            set((state) => {
+              state.aiChatMessages = state.aiChatMessages.map((m) =>
+                m.id === assistantMsg.id
+                  ? { ...m, content: m.content + `\n\n❌ Error: ${event.payload.error}`, isStreaming: false }
+                  : m
+              );
+              state.aiChatStreaming = false;
+              state.aiChatStreamingMessageId = null;
+            });
+            cleanupListeners();
+          },
+        );
+        await invoke("workflow_ai_chat_stream", {
+          message,
+          history,
+          currentNodes: get().nodes.length > 0 ? get().nodes : undefined,
+          currentEdges: get().edges.length > 0 ? get().edges : undefined,
+          sessionId: aiChatSessionId,
+        });
+      } catch (error) {
+        logIpcError("AI Chat")(error);
+        cleanupListeners();
+        set((state) => {
+          state.aiChatMessages = state.aiChatMessages.map((m) =>
+            m.id === assistantMsg.id
+              ? { ...m, content: `❌ ${String(error)}`, isStreaming: false }
+              : m
+          );
+          state.aiChatStreaming = false;
+          state.aiChatStreamingMessageId = null;
+        });
+      }
+    },
+
+    aiChatCancel: () => {
+      const { aiChatSessionId, aiChatStreamingMessageId } = get();
+      invoke("workflow_ai_chat_cancel", { sessionId: aiChatSessionId }).catch(logIpcError("AI Chat Cancel"));
+      set((state) => {
+        state.aiChatMessages = state.aiChatMessages.map((m) =>
+          m.id === aiChatStreamingMessageId
+            ? { ...m, isStreaming: false }
+            : m
+        );
+        state.aiChatStreaming = false;
+        state.aiChatStreamingMessageId = null;
+      });
+    },
+
+    aiChatClear: () => {
+      set((state) => {
+        state.aiChatMessages = [];
+        state.aiChatSessionId = `ai-session-${Date.now()}`;
+      });
+    },
+
+    applyAiChatAction: (action: AiChatAction) => {
+      const { nodes } = get();
+      switch (action.action_type) {
+        case "generate_workflow": {
+          const data = action.data as { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
+          if (data.nodes && data.edges) {
+            set((state) => {
+              state.nodes = data.nodes;
+              state.edges = data.edges;
+            });
+          }
+          break;
+        }
+        case "add_nodes": {
+          const data = action.data as { nodes: WorkflowNode[] };
+          if (data.nodes) {
+            const existingIds = new Set(nodes.map(n => n.id));
+            const newNodes = data.nodes.map(n => ({
+              ...n,
+              id: existingIds.has(n.id) ? `ai-${Date.now()}-${n.id}` : n.id,
+              position: { x: n.position.x + 50, y: n.position.y + 50 },
+            }));
+            set((state) => {
+              state.nodes = [...state.nodes, ...newNodes];
+            });
+          }
+          break;
+        }
+        case "modify_node": {
+          const data = action.data as { node_id: string; changes: Record<string, unknown> };
+          if (data.node_id) {
+            set((state) => {
+              state.nodes = state.nodes.map(n => {
+                if (n.id !== data.node_id) { return n; }
+                const changes = { ...data.changes };
+                if (changes.config && typeof changes.config === "object" && n.config) {
+                  changes.config = { ...n.config, ...changes.config };
+                }
+                return { ...n, ...changes };
+              });
+            });
+          }
+          break;
+        }
+        case "optimize_prompt": {
+          const data = action.data as { node_id: string; optimized_prompt: string };
+          if (data.node_id && data.optimized_prompt) {
+            get().applyOptimizedPromptToNode(data.node_id, data.optimized_prompt);
+          }
+          break;
+        }
+        case "delete_nodes": {
+          const data = action.data as { node_ids: string[] };
+          if (data.node_ids) {
+            const idsToDelete = new Set(data.node_ids);
+            set((state) => {
+              state.nodes = state.nodes.filter(n => !idsToDelete.has(n.id));
+              state.edges = state.edges.filter(e => !idsToDelete.has(e.source) && !idsToDelete.has(e.target));
+            });
+          }
+          break;
+        }
       }
     },
 

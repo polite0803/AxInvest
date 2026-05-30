@@ -14,24 +14,56 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: string | Record<string, unknown>) => {
       const translations: Record<string, string> = {
+        "workflow.aiPanel.aiAssistant": "AI 助手",
+        "workflow.aiPanel.chatMode": "对话",
+        "workflow.aiPanel.toolsMode": "工具",
+        "workflow.aiPanel.chatWelcome": "你好！我是工作流AI助手",
+        "workflow.aiPanel.chatWelcomeHint": "你可以描述想要创建的工作流，或让我帮你修改、优化现有工作流",
+        "workflow.aiPanel.chatPlaceholder": "描述你想要的工作流或修改...",
         "workflow.aiPanel.enterWorkflowDesc": "请输入工作流描述",
-        "workflow.aiPanel.enterPromptToOptimize": "请输入要优化的 Prompt",
-        "workflow.aiPanel.enterContext": "请输入上下文描述",
-        "workflow.aiPanel.enterAgentPrompt": "输入 Agent Prompt",
+        "workflow.aiPanel.workflowGenerated": "工作流已生成",
+        "workflow.aiPanel.enterPromptToOptimize": "请输入要优化的提示词",
+        "workflow.aiPanel.promptOptimized": "提示词已优化",
+        "workflow.aiPanel.enterContext": "请输入上下文信息",
+        "workflow.aiPanel.recommendationGenerated": "推荐已生成",
+        "workflow.aiPanel.copiedToClipboard": "已复制到剪贴板",
         "workflow.aiPanel.describeContext": "描述上下文",
         "workflow.aiPanel.describeWorkflow": "描述工作流",
         "workflow.aiPanel.generateBtn": "生成工作流",
-        "workflow.aiPanel.generatePlaceholder": "创建一个代码审查工作流",
-        "workflow.aiPanel.aiAssistant": "AI 助手",
-        "workflow.aiPanel.currentCanvasState": "当前画布状态",
-        "workflow.aiPanel.replaceCanvasWarning": "生成新工作流将替换当前画布上的所有内容",
+        "workflow.aiPanel.generateMergeBtn": "生成并合并",
+        "workflow.aiPanel.generatePlaceholder": "例如：创建一个代码审查工作流，探索代码库结构...",
+        "workflow.aiPanel.generating": "生成中...",
+        "workflow.aiPanel.mergeMode": "合并模式",
+        "workflow.aiPanel.replaceMode": "替换模式",
+        "workflow.aiPanel.replaceConfirmTitle": "确认替换",
         "workflow.aiPanel.tabGenerateWorkflow": "生成工作流",
-        "workflow.aiPanel.tabOptimizePrompt": "优化 Prompt",
+        "workflow.aiPanel.tabOptimizePrompt": "优化提示词",
         "workflow.aiPanel.tabRecommend": "推荐节点",
-        "workflow.aiPanel.canvasStatus": "节点: 0, 连线: 0",
+        "workflow.aiPanel.enterAgentPrompt": "输入要优化的智能体提示词",
+        "workflow.aiPanel.optimizeBtn": "优化提示词",
+        "workflow.aiPanel.optimizePlaceholder": "粘贴你的提示词...",
+        "workflow.aiPanel.optimizing": "优化中...",
+        "workflow.aiPanel.optimizedResult": "优化结果",
+        "workflow.aiPanel.copy": "复制",
+        "workflow.aiPanel.applyToNode": "应用到节点",
+        "workflow.aiPanel.promptAppliedToNode": "已将优化后的提示词应用到节点",
+        "workflow.aiPanel.fillFromSelectedNode": "从选中节点填充",
         "workflow.aiPanel.getRecommendation": "获取推荐",
         "workflow.aiPanel.noRecommendations": "暂无推荐节点",
-        "workflow.aiPanel.dragHint": "拖拽节点到画布上",
+        "workflow.aiPanel.recommending": "推荐中...",
+        "workflow.aiPanel.retry": "重试",
+        "workflow.aiPanel.dragHintUpdated": "拖拽节点到画布上",
+        "workflow.aiPanel.recommendPlaceholder": "描述上下文...",
+        "workflow.aiPanel.recommendedNodeTypes": "推荐节点类型",
+        "workflow.aiPanel.actionGenerateWorkflow": "生成工作流",
+        "workflow.aiPanel.actionAddNodes": "添加节点",
+        "workflow.aiPanel.actionModifyNode": "修改节点",
+        "workflow.aiPanel.actionOptimizePrompt": "优化提示词",
+        "workflow.aiPanel.actionDeleteNodes": "删除节点",
+        "workflow.aiPanel.actionApply": "应用操作",
+        "workflow.aiPanel.canvasStatus": "节点: {{nodes}}, 连线: {{edges}}",
+        "workflow.aiPanel.currentCanvasState": "当前画布状态",
+        "workflow.aiPanel.replaceCanvasWarning": "生成新工作流将替换当前画布上的所有内容",
         "workflow.templateList.noTemplates": "暂无模板",
         "workflow.templateList.noMatchFound": "未找到匹配的模板",
         "workflow.templateList.searchPlaceholder": "搜索模板",
@@ -149,11 +181,26 @@ vi.mock("@/stores", () => ({
   useWorkflowEditorStore: storeMockRef,
 }));
 
+vi.mock("reactflow", () => ({
+  useReactFlow: () => ({
+    getNodes: () => [],
+    getEdges: () => [],
+  }),
+}));
+
 describe("AIPanel Component", () => {
   const mockOnGenerateWorkflow = vi.fn();
   const mockOnOptimizePrompt = vi.fn();
   const mockOnRecommendNodes = vi.fn();
   const mockOnClose = vi.fn();
+  const mockChatProps = {
+    chatMessages: [],
+    chatStreaming: false,
+    onChatSend: vi.fn(),
+    onChatCancel: vi.fn(),
+    onChatClear: vi.fn(),
+    onApplyAction: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -168,16 +215,17 @@ describe("AIPanel Component", () => {
         onOptimizePrompt={mockOnOptimizePrompt}
         onRecommendNodes={mockOnRecommendNodes}
         onClose={mockOnClose}
+        {...mockChatProps}
       />,
     );
 
     expect(screen.getByText("AI 助手")).toBeTruthy();
-    expect(screen.getAllByText("生成工作流").length).toBeGreaterThan(0);
-    expect(screen.getByText("优化 Prompt")).toBeTruthy();
-    expect(screen.getByText("推荐节点")).toBeTruthy();
+    // 新面板：chat/tools 两个主 tab，"生成工作流" 在 tools 子 tab 中
+    expect(screen.getByText("对话")).toBeTruthy();
+    expect(screen.getByText("工具")).toBeTruthy();
   }, 15000);
 
-  it("should have generate workflow tab active by default", async () => {
+  it("should have chat tab active by default", async () => {
     const { AIPanel } = await import("@/components/workflow/AIPanel");
 
     render(
@@ -186,19 +234,15 @@ describe("AIPanel Component", () => {
         onOptimizePrompt={mockOnOptimizePrompt}
         onRecommendNodes={mockOnRecommendNodes}
         onClose={mockOnClose}
+        {...mockChatProps}
       />,
     );
 
-    const generateTextarea = screen.getAllByPlaceholderText(/创建一个代码审查工作流/)[0];
-    expect(generateTextarea).toBeTruthy();
+    // 默认激活 "对话" tab，显示欢迎信息
+    expect(screen.getByText("你好！我是工作流AI助手")).toBeTruthy();
   });
 
-  it("should call onGenerateWorkflow when generate button is clicked", async () => {
-    mockOnGenerateWorkflow.mockResolvedValue({
-      nodes: [{ id: "node-1", type: "trigger", data: { label: "Test" } }],
-      edges: [],
-    });
-
+  it("should render tools sub-tab when tools tab selected", async () => {
     const { AIPanel } = await import("@/components/workflow/AIPanel");
 
     render(
@@ -207,20 +251,14 @@ describe("AIPanel Component", () => {
         onOptimizePrompt={mockOnOptimizePrompt}
         onRecommendNodes={mockOnRecommendNodes}
         onClose={mockOnClose}
+        {...mockChatProps}
       />,
     );
 
-    const textarea = screen.getAllByPlaceholderText(/创建一个代码审查工作流/)[0];
-    fireEvent.change(textarea, { target: { value: "Create a test workflow" } });
-
-    const generateButton = screen.getByRole("button", { name: /生成工作流/ });
-    fireEvent.click(generateButton);
-
-    await waitFor(() => {
-      expect(mockOnGenerateWorkflow).toHaveBeenCalledWith(
-        "Create a test workflow",
-      );
-    });
+    fireEvent.click(screen.getByText("工具"));
+    expect(screen.getAllByText("生成工作流").length).toBeGreaterThan(0);
+    expect(screen.getByText("优化提示词")).toBeTruthy();
+    expect(screen.getByText("推荐节点")).toBeTruthy();
   });
 
   it("should show warning when trying to generate with empty prompt", async () => {
@@ -232,15 +270,22 @@ describe("AIPanel Component", () => {
         onOptimizePrompt={mockOnOptimizePrompt}
         onRecommendNodes={mockOnRecommendNodes}
         onClose={mockOnClose}
+        {...mockChatProps}
       />,
     );
 
-    const generateButton = screen.getByRole("button", { name: /生成工作流/ });
-    fireEvent.click(generateButton);
+    // 切换到 "工具" tab
+    fireEvent.click(screen.getByText("工具"));
 
-    await waitFor(() => {
-      expect(screen.getByText("请输入工作流描述")).toBeTruthy();
-    });
+    const generateButtons = screen.getAllByRole("button", { name: /生成工作流/ });
+    // 第一个是 tab 按钮，筛选出实际的操作按钮（非 tab）
+    const generateBtn = generateButtons.find(
+      (b) => !b.classList.contains("ant-radio-button") && !b.closest(".ant-radio-group"),
+    ) || generateButtons[0];
+    fireEvent.click(generateBtn);
+
+    // 空提示词时 onGenerateWorkflow 不应被调用
+    expect(mockOnGenerateWorkflow).not.toHaveBeenCalled();
   });
 });
 

@@ -5,7 +5,7 @@
 
 use crate::AppState;
 use axagent_core::entity::stock_analyses;
-use axagent_core::workflow_types::{WorkflowEdge, WorkflowNode};
+use axagent_core::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
@@ -13,13 +13,18 @@ use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
-/// 专家 prompt 由 AgentExecutor 从 agent_profile 自动加载，
-/// 行情数据通过 ToolNode 的 context_sources 由上游工具节点输出注入，
-/// 运行时变量由 prompt_template 两阶段渲染处理。
+struct LoadedTemplate {
+    nodes: Vec<WorkflowNode>,
+    edges: Vec<WorkflowEdge>,
+    input_schema: Option<JsonSchema>,
+    output_schema: Option<JsonSchema>,
+    variables: Option<Vec<Variable>>,
+}
+
 async fn load_and_inject_template(
     db: &sea_orm::DatabaseConnection,
     stock_code: &str,
-) -> Result<(Vec<WorkflowNode>, Vec<WorkflowEdge>), String> {
+) -> Result<LoadedTemplate, String> {
     use axagent_core::entity::workflow_template;
 
     let template = workflow_template::Entity::find_by_id("stock-analysis")
@@ -33,7 +38,6 @@ async fn load_and_inject_template(
     let edges: Vec<WorkflowEdge> =
         serde_json::from_str(&template.edges).map_err(|e| format!("解析模板边失败: {e}"))?;
 
-    // 模板数据损坏时自动重 seed（如空字段保存覆盖了 nodes/edges）
     if nodes.is_empty() {
         tracing::warn!("[stock_workflow] 模板节点为空，自动重新种子化");
         crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(db).await?;
@@ -46,7 +50,6 @@ async fn load_and_inject_template(
             serde_json::from_str(&template.nodes).map_err(|e| format!("解析模板节点失败: {e}"))?;
     }
 
-    // 仅注入 stock_code 到 trigger 节点，prompt 不再手动替换
     for node in &mut nodes {
         if let WorkflowNode::Trigger(tn) = node {
             if let Some(sc) = tn.config.config.get_mut("stock_code") {
@@ -55,7 +58,52 @@ async fn load_and_inject_template(
         }
     }
 
-    Ok((nodes, edges))
+    let input_schema: Option<JsonSchema> = template
+        .input_schema
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let output_schema: Option<JsonSchema> = template
+        .output_schema
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let variables: Option<Vec<Variable>> = template
+        .variables
+        .as_ref()
+        .and_then(|v| serde_json::from_str(v).ok());
+
+    Ok(LoadedTemplate {
+        nodes,
+        edges,
+        input_schema,
+        output_schema,
+        variables,
+    })
+}
+
+fn extract_decision_fields(
+    decision_json: &Option<String>,
+) -> (Option<String>, Option<f64>, Option<String>) {
+    let raw = match decision_json {
+        Some(s) if !s.is_empty() => s,
+        _ => return (None, None, None),
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return (None, None, None),
+    };
+    let action = parsed
+        .get("action")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let position_pct = parsed
+        .get("positionPct")
+        .or_else(|| parsed.get("position_pct"))
+        .and_then(|v| v.as_f64());
+    let reasoning = parsed
+        .get("reasoning")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    (action, position_pct, reasoning)
 }
 
 #[tauri::command]
@@ -65,7 +113,6 @@ pub async fn run_stock_workflow(
     stock_code: String,
     dry_run: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    // ── 1. 获取行情基本信息（用于写入分析记录）──
     let quote = state
         .astock_client
         .get_quote(&stock_code)
@@ -74,7 +121,6 @@ pub async fn run_stock_workflow(
     let now_ms = chrono::Utc::now().timestamp_millis();
     let analysis_id = uuid::Uuid::new_v4().to_string();
 
-    // 写入 stock_analyses 表
     stock_analyses::ActiveModel {
         id: Set(analysis_id.clone()),
         stock_code: Set(stock_code.clone()),
@@ -96,31 +142,9 @@ pub async fn run_stock_workflow(
     .await
     .map_err(|e| format!("DB 写入失败: {e}"))?;
 
-    // ── 2. 从模板加载 DAG 并注入 stock_code ──
-    let (nodes, edges) = load_and_inject_template(&state.sea_db, &stock_code).await?;
+    let loaded = load_and_inject_template(&state.sea_db, &stock_code).await?;
 
-    // 加载模板的 schema 和 variables
-    use axagent_core::entity::workflow_template;
-    use axagent_core::workflow_types::JsonSchema;
-    let template = workflow_template::Entity::find_by_id("stock-analysis")
-        .one(&state.sea_db)
-        .await
-        .map_err(|e| format!("查询工作流模板失败: {e}"))?
-        .ok_or("股票分析工作流模板未种子化，请重启应用")?;
-    let input_schema: Option<JsonSchema> = template
-        .input_schema
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let output_schema: Option<JsonSchema> = template
-        .output_schema
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let template_vars: Option<Vec<axagent_core::workflow_types::Variable>> = template
-        .variables
-        .as_ref()
-        .and_then(|v| serde_json::from_str(v).ok());
-    // 注入 iwencai API key（若已配置）
-    if let Some(ref vars) = template_vars {
+    if let Some(ref vars) = loaded.variables {
         for v in vars {
             if v.name == "vendor_iwencai_key" {
                 if let serde_json::Value::String(ref key) = v.value {
@@ -132,9 +156,7 @@ pub async fn run_stock_workflow(
         }
     }
 
-    // ── 3. 获取引擎引用，注册断点 ──
     let engine = Arc::clone(&state.work_engine);
-    // 在关键决策点设置断点（可在前端单步调试）
     state
         .work_engine
         .set_breakpoints(
@@ -149,10 +171,9 @@ pub async fn run_stock_workflow(
         )
         .await;
 
-    // ── 4. 创建并执行工作流 ──
     let wf_name = format!("stock-analysis-{stock_code}");
     let workflow = engine
-        .create_workflow(&wf_name, nodes, edges)
+        .create_workflow(&wf_name, loaded.nodes, loaded.edges)
         .await
         .map_err(|e| format!("创建工作流失败: {e}"))?;
     let wf_id = workflow.id.clone();
@@ -161,7 +182,6 @@ pub async fn run_stock_workflow(
     let db = state.sea_db.clone();
     let aid = analysis_id.clone();
 
-    // 进度回调
     let progress_app = app.clone();
     let progress_wf_id = wf_id.clone();
     let progress_cb: ProgressCallback = Arc::new(move |event: StepProgressEvent| {
@@ -180,6 +200,10 @@ pub async fn run_stock_workflow(
             );
         })
     });
+
+    let input_schema = loaded.input_schema;
+    let output_schema = loaded.output_schema;
+    let template_vars = loaded.variables;
 
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
@@ -245,8 +269,6 @@ pub async fn run_stock_workflow(
                                 "output": result.output,
                             }),
                         );
-                        // 优先用 output（EndNode 聚合 + output_schema 过滤），
-                        // 回退到 results["portfolio-mgr"] 兼容旧模板
                         let decision_json = result
                             .output
                             .and_then(|v| serde_json::to_string(&v).ok())
@@ -256,8 +278,22 @@ pub async fn run_stock_workflow(
                                     .get("portfolio-mgr")
                                     .and_then(|v| serde_json::to_string(v).ok())
                             });
+                        let (action, position_pct, reasoning) =
+                            extract_decision_fields(&decision_json);
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
+                            .col_expr(
+                                stock_analyses::Column::DecisionAction,
+                                Expr::value(action),
+                            )
+                            .col_expr(
+                                stock_analyses::Column::DecisionPositionPct,
+                                Expr::value(position_pct),
+                            )
+                            .col_expr(
+                                stock_analyses::Column::DecisionReasoning,
+                                Expr::value(reasoning),
+                            )
                             .col_expr(
                                 stock_analyses::Column::DecisionJson,
                                 Expr::value(decision_json),

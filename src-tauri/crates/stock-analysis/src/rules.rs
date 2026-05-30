@@ -27,29 +27,26 @@ impl RuleEngine {
     ) -> RuleCheckResult {
         let mut violations = Vec::new();
         let mut corrections = Vec::new();
-        let mut force_signal = None;
+        let mut force_signals: Vec<String> = Vec::new();
 
         let is_buy = matches!(proposed_action, "买入" | "增持");
 
-        // 规则1: RSI 超买 -> 绝不给买入信号
         if is_buy && indicators.rsi6 > config.rsi_overbought {
             violations.push(format!(
                 "RSI6={:.1}>{:.0}处于严重超买，禁止买入。",
                 indicators.rsi6, config.rsi_overbought
             ));
-            force_signal = Some("🔴强制调整为观望 — RSI超买".to_string());
+            force_signals.push("block_buy".to_string());
         }
 
-        // 规则2: 乖离MA5过高 -> 禁止追高
         if is_buy && indicators.bias_ma5 > config.bias_limit {
             violations.push(format!(
                 "乖离MA5={:.1}%>{:.0}%，禁止追高。建议等待回调至MA5（{:.2}）附近。",
                 indicators.bias_ma5, config.bias_limit, indicators.ma5
             ));
-            force_signal = Some("🔴强制调整为观望 — 乖离率过高".to_string());
+            force_signals.push("block_buy".to_string());
         }
 
-        // 规则3: 必须给出精确止损价
         if proposed_stop_loss.is_none() || proposed_stop_loss == Some(0.0) {
             violations.push("缺少止损价位，不符合严进策略要求。".to_string());
             let auto_stop = if let Some(entry) = proposed_entry_price {
@@ -72,29 +69,34 @@ impl RuleEngine {
             ));
         }
 
-        // 规则4: 放量下跌 -> 禁止买入
         if config.volume_signal_block && is_buy && indicators.volume_signal == "放量下跌" {
             violations.push("放量下跌中禁止买入，等待缩量企稳信号。".to_string());
-            force_signal = Some("🔴强制调整为观望 — 放量下跌".to_string());
+            force_signals.push("block_buy".to_string());
         }
 
-        // 规则5: 空头排列且评分过低 -> 强制卖出/观望
         if is_buy && indicators.ma_alignment == "空头排列" && score.total < config.bear_low_score
         {
             violations.push(format!(
                 "空头排列+评分{}<{}，绝不适合买入。",
                 score.total, config.bear_low_score
             ));
-            force_signal = Some("🔴强制调整为观望/卖出 — 空头低分".to_string());
+            force_signals.push("block_all".to_string());
         }
 
-        // 规则6: RSI 超卖 -> 关注超跌反弹（提醒）
         if indicators.rsi6 < config.rsi_oversold {
             corrections.push(format!(
                 "提示: RSI6={:.1}<{:.0}处于超卖区域，关注超跌反弹机会。",
                 indicators.rsi6, config.rsi_oversold
             ));
         }
+
+        let force_signal = if force_signals.iter().any(|s| s == "block_all") {
+            Some("block_all".to_string())
+        } else if force_signals.iter().any(|s| s == "block_buy") {
+            Some("block_buy".to_string())
+        } else {
+            None
+        };
 
         RuleCheckResult {
             passed: violations.is_empty(),

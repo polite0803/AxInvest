@@ -16,7 +16,8 @@ pub struct ObjectiveScore {
     pub rsi_score: u32,              // RSI 0-10
     pub support_score: u32,          // 支撑 0-5
     pub boll_score: u32,             // 布林带 0-5
-    pub fundamental_adjustment: i32, // 基本面修正值（正加分/负扣分）
+    #[serde(rename = "fundamentalAdjustment")]
+    pub total_adjustment: i32,
     pub signal: String, // "🟢强烈买入" | "🔵买入" | "🟡持有" | "⚪观望" | "🟠卖出" | "🔴强烈卖出"
     pub signal_code: String, // strong_buy | buy | hold | watch | sell | strong_sell
 }
@@ -58,7 +59,7 @@ impl ScoringEngine {
             rsi_score: rsi,
             support_score: support,
             boll_score: boll,
-            fundamental_adjustment: 0,
+            total_adjustment: 0,
             signal: signal.to_string(),
             signal_code: signal_code.to_string(),
         }
@@ -231,9 +232,8 @@ impl ScoringEngine {
             }
         }
 
-        score.fundamental_adjustment = adjustment;
+        score.total_adjustment = adjustment;
 
-        // Apply adjustment (cap at 0-100)
         let new_total = (score.total as i32 + adjustment).clamp(0, 100) as u32;
         score.total = new_total;
 
@@ -282,7 +282,7 @@ impl ScoringEngine {
 
         let total_adj = adjustment + f_score_bonus + moat_bonus;
         let orig_alignment = score.signal_code.clone();
-        score.fundamental_adjustment += total_adj;
+        score.total_adjustment += total_adj;
         let new_total = (score.total as i32 + total_adj).clamp(0, 100) as u32;
         score.total = new_total;
         let (signal, signal_code) = Self::map_signal(new_total, &orig_alignment);
@@ -336,7 +336,7 @@ impl ScoringEngine {
         }
         if adjustment != 0 {
             let orig_alignment = score.signal_code.clone();
-            score.fundamental_adjustment += adjustment;
+            score.total_adjustment += adjustment;
             let new_total = (score.total as i32 + adjustment).clamp(0, 100) as u32;
             score.total = new_total;
             let (signal, signal_code) = Self::map_signal(new_total, &orig_alignment);
@@ -518,7 +518,7 @@ mod tests {
         let before = score.total;
         ScoringEngine::apply_fundamental_adjustment(&mut score, Some(8.0), Some(0.8), Some(22.0));
         assert!(
-            score.fundamental_adjustment > 0,
+            score.total_adjustment > 0,
             "Low PE + low PB + high ROE should yield positive adjustment"
         );
         assert!(score.total >= before || score.total <= 100, "Score should be capped at 0-100");

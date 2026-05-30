@@ -48,7 +48,8 @@ impl ValueInvestingEngine {
                 })
             })
             .unwrap_or_else(|| latest.and_then(|f| f.net_profit).unwrap_or(0.0) * 0.90);
-        let fcf = fcf_raw * 1_0000_0000.0;
+        let fcf_scale = Self::detect_financial_unit(financials);
+        let fcf = fcf_raw * fcf_scale;
 
         let g = value_config.map(|c| c.dcf_growth_rate / 100.0);
         let p = value_config.map(|c| c.dcf_perpetual_rate / 100.0);
@@ -362,13 +363,14 @@ impl ValueInvestingEngine {
             return 0.0;
         }
         let f = &financials[0];
-        let net = f.net_profit.unwrap_or(0.0) * 1_0000_0000.0;
+        let scale = Self::detect_financial_unit(financials);
+        let net = f.net_profit.unwrap_or(0.0) * scale;
         let oe = if let (Some(ocf), Some(capex)) = (f.operating_cash_flow, f.capital_expenditure) {
-            let ocf_scaled = ocf * 1_0000_0000.0;
-            let capex_scaled = capex * 1_0000_0000.0;
+            let ocf_scaled = ocf * scale;
+            let capex_scaled = capex * scale;
             ocf_scaled - capex_scaled
         } else if let Some(fcf) = f.free_cash_flow {
-            fcf * 1_0000_0000.0
+            fcf * scale
         } else {
             let debt_ratio = f.debt_ratio.unwrap_or(50.0);
             let capex_ratio = if debt_ratio > 60.0 {
@@ -381,5 +383,29 @@ impl ValueInvestingEngine {
             net * capex_ratio
         };
         oe.max(0.0)
+    }
+
+    fn detect_financial_unit(financials: &[FinancialReport]) -> f64 {
+        if financials.is_empty() {
+            return 1_0000_0000.0;
+        }
+        let f = &financials[0];
+        let revenue = f.revenue.unwrap_or(0.0).abs();
+        let net_profit = f.net_profit.unwrap_or(0.0).abs();
+        let ref_value = if revenue > 0.0 { revenue } else { net_profit };
+        if ref_value <= 0.0 {
+            return 1_0000_0000.0;
+        }
+        if ref_value < 1.0 {
+            1_0000_0000.0
+        } else if ref_value < 100.0 {
+            1_0000_0000.0
+        } else if ref_value < 10_000.0 {
+            1_0000.0
+        } else if ref_value < 1_0000_0000.0 {
+            1.0
+        } else {
+            0.001
+        }
     }
 }

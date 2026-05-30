@@ -56,10 +56,91 @@ pub struct ValueAssessment {
     pub intrinsic_value: IntrinsicValue,
     pub f_score: FScore,
     pub moat: MoatAssessment,
-    /// 价值投资综合判断
     pub value_judgment: String,
-    /// 巴菲特式投资建议
     pub buffett_verdict: String,
+}
+
+impl ValueAssessment {
+    pub fn from_metrics(metrics: &crate::value_investing::ValueMetrics, _current_price: f64) -> Self {
+        let dcf_value = if metrics.dcf_mid > 0.0 {
+            Some(metrics.dcf_mid)
+        } else {
+            None
+        };
+        let mos = if dcf_value.is_some() {
+            Some(metrics.margin_of_safety_pct)
+        } else {
+            None
+        };
+        let mos_judgment = match metrics.mos_level.as_str() {
+            "充足" => format!("充足的安全边际 {:.0}%", metrics.margin_of_safety_pct),
+            "适中" => format!("有一定安全边际 {:.0}%", metrics.margin_of_safety_pct),
+            "不足" => format!("安全边际不足 {:.0}%", metrics.margin_of_safety_pct),
+            _ => format!("无安全边际 {:.0}%", metrics.margin_of_safety_pct),
+        };
+
+        let f_score = FScore {
+            profitability: (metrics.f_score as u32).min(4),
+            leverage: (metrics.f_score as u32).saturating_sub(4).min(3),
+            efficiency: (metrics.f_score as u32).saturating_sub(7).min(2),
+            total: metrics.f_score,
+            grade: metrics.f_score_level.clone(),
+            details: vec![format!("F-Score={}/9", metrics.f_score)],
+        };
+
+        let moat = MoatAssessment {
+            roe_consistency_years: None,
+            avg_gross_margin: None,
+            gross_margin_stability: None,
+            fcf_to_earnings: if metrics.owner_earnings_yield > 0.0 {
+                Some(metrics.owner_earnings_yield / 100.0)
+            } else {
+                None
+            },
+            moat_score: metrics.moat_score,
+            moat_type: metrics.moat_level.clone(),
+            details: vec![format!("护城河{}/100({})", metrics.moat_score, metrics.moat_level)],
+        };
+
+        let buffett_verdict = if metrics.moat_score >= 70
+            && metrics.f_score >= 7
+            && metrics.margin_of_safety_pct >= 20.0
+        {
+            "🎯 巴菲特可能会喜欢：宽护城河+财务健康+充足安全边际。以合理价格买入优秀公司。"
+                .to_string()
+        } else if metrics.moat_score >= 50
+            && metrics.f_score >= 5
+            && metrics.margin_of_safety_pct >= 10.0
+        {
+            "👍 有一定吸引力：护城河和财务状况尚可，安全边际处于临界点。可小仓位观察。"
+                .to_string()
+        } else if metrics.moat_score >= 30 {
+            "🤔 需要更多安全边际：公司质地一般，等待更好的价格。巴菲特会说：'等待那个又胖又慢的球'。"
+                .to_string()
+        } else {
+            "❌ 不符合巴菲特标准：护城河不足或财务质量差。'以合理价格买入优秀公司比以便宜价格买入平庸公司好得多'。"
+                .to_string()
+        };
+
+        let value_judgment = format!(
+            "护城河评分{}/100 | F-Score {}/9 | {}",
+            metrics.moat_score, metrics.f_score, mos_judgment
+        );
+
+        ValueAssessment {
+            intrinsic_value: IntrinsicValue {
+                dcf_value,
+                graham_value: None,
+                avg_intrinsic_value: dcf_value,
+                margin_of_safety: mos,
+                mos_judgment,
+            },
+            f_score,
+            moat,
+            value_judgment,
+            buffett_verdict,
+        }
+    }
 }
 
 /// 价值投资引擎

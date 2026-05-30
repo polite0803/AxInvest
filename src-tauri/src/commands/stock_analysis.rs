@@ -389,34 +389,52 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
         .await
         .map_err(|e| e.to_string())?;
 
-    // 附加实时行情计算盈亏
-    let mut enriched = Vec::new();
-    for h in holdings {
-        let quote = state.astock_client.get_quote(&h.stock_code).await.ok();
-        let current_price = quote.as_ref().map(|q| q.price).unwrap_or(h.avg_cost);
-        let market_value = current_price * h.shares;
-        let cost_basis = h.avg_cost * h.shares;
-        let pnl = market_value - cost_basis;
-        let pnl_pct = if cost_basis != 0.0 {
-            (pnl / cost_basis) * 100.0
-        } else {
-            0.0
-        };
-
-        enriched.push(serde_json::json!({
-            "id": h.id,
-            "stockCode": h.stock_code,
-            "stockName": h.stock_name,
-            "shares": h.shares,
-            "avgCost": h.avg_cost,
-            "currentPrice": current_price,
-            "marketValue": market_value,
-            "pnl": pnl,
-            "pnlPct": pnl_pct,
-            "notes": h.notes,
-            "createdAt": h.created_at,
-        }));
+    let client = state.astock_client.clone();
+    let codes: Vec<String> = holdings.iter().map(|h| h.stock_code.clone()).collect();
+    let mut quote_tasks = tokio::task::JoinSet::new();
+    for code in codes {
+        let c = client.clone();
+        quote_tasks.spawn(async move {
+            let quote = c.get_quote(&code).await.ok();
+            (code, quote)
+        });
     }
+    let mut quotes = std::collections::HashMap::new();
+    while let Some(result) = quote_tasks.join_next().await {
+        if let Ok((code, quote)) = result {
+            quotes.insert(code, quote);
+        }
+    }
+
+    let enriched: Vec<serde_json::Value> = holdings
+        .into_iter()
+        .map(|h| {
+            let quote = quotes.get(&h.stock_code).and_then(|q| q.as_ref());
+            let current_price = quote.map(|q| q.price).unwrap_or(h.avg_cost);
+            let market_value = current_price * h.shares;
+            let cost_basis = h.avg_cost * h.shares;
+            let pnl = market_value - cost_basis;
+            let pnl_pct = if cost_basis != 0.0 {
+                (pnl / cost_basis) * 100.0
+            } else {
+                0.0
+            };
+
+            serde_json::json!({
+                "id": h.id,
+                "stockCode": h.stock_code,
+                "stockName": h.stock_name,
+                "shares": h.shares,
+                "avgCost": h.avg_cost,
+                "currentPrice": current_price,
+                "marketValue": market_value,
+                "pnl": pnl,
+                "pnlPct": pnl_pct,
+                "notes": h.notes,
+                "createdAt": h.created_at,
+            })
+        })
+        .collect();
     Ok(enriched)
 }
 
@@ -432,7 +450,7 @@ async fn build_cancel_aware_runner(
     cancel_token: Arc<AtomicBool>,
     temperature: f64,
     max_tokens: u32,
-    _timeout_secs: u64,
+    timeout_secs: u64,
 ) -> Result<impl AgentRunner + use<>, String> {
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await
@@ -506,14 +524,15 @@ async fn build_cancel_aware_runner(
     Ok(CancelAwareRunner {
         inner,
         token: cancel_token,
+        timeout_secs,
     })
 }
 
-/// 带取消令牌检查的 AgentRunner 包装
 #[allow(dead_code)]
 struct CancelAwareRunner {
     inner: axagent_stock_analysis::runner::SessionManagerRunner,
     token: Arc<AtomicBool>,
+    timeout_secs: u64,
 }
 
 #[async_trait::async_trait]
@@ -528,13 +547,16 @@ impl AgentRunner for CancelAwareRunner {
             return Err("已取消".into());
         }
         match tokio::time::timeout(
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_secs(self.timeout_secs),
             self.inner.run_agent(expert_id, sys_prompt, user_prompt),
         )
         .await
         {
             Ok(result) => result,
-            Err(_) => Err(format!("[{expert_id}] LLM 调用超时 (2分钟)")),
+            Err(_) => Err(format!(
+                "[{expert_id}] LLM 调用超时 ({}秒)",
+                self.timeout_secs
+            )),
         }
     }
 }
@@ -641,14 +663,22 @@ pub async fn backtest_all_history(
 
     let historical: Vec<HistoricalAnalysis> = analyses
         .iter()
-        .map(|a| HistoricalAnalysis {
-            stock_code: a.stock_code.clone(),
-            analysis_date: a.analysis_date.clone(),
-            decision_action: a
-                .decision_action
-                .clone()
-                .unwrap_or_else(|| "持有".to_string()),
-            decision_confidence: 0.5,
+        .map(|a| {
+            let confidence = a
+                .decision_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+                .unwrap_or(0.5);
+            HistoricalAnalysis {
+                stock_code: a.stock_code.clone(),
+                analysis_date: a.analysis_date.clone(),
+                decision_action: a
+                    .decision_action
+                    .clone()
+                    .unwrap_or_else(|| "持有".to_string()),
+                decision_confidence: confidence,
+            }
         })
         .collect();
 
@@ -729,8 +759,11 @@ pub async fn generate_stock_report(
         .ok_or_else(|| "分析记录不存在".to_string())?;
 
     // 生成报告路径
-    let reports_dir = std::path::Path::new("reports");
-    std::fs::create_dir_all(reports_dir).map_err(|e| e.to_string())?;
+    let reports_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("AxInvest")
+        .join("reports");
+    std::fs::create_dir_all(&reports_dir).map_err(|e| e.to_string())?;
 
     let filename = format!("{}_{}.html", record.stock_code, record.analysis_date.replace('-', ""));
     let filepath = reports_dir.join(&filename);

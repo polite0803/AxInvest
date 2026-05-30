@@ -1004,6 +1004,11 @@ async fn seed_stock_analysis_workflow_template(
         nodes.push(an);
     }
 
+    // 分析师节点 → c-need-debate 的出边（编辑器可视化 + 运行时依赖）
+    for aid in &a_ids {
+        edges.push(edge(&format!("e-{aid}-c-debate"), aid, "c-need-debate"));
+    }
+
     // ParallelNode: 将 9 组分析师封装为统一并行节点
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
@@ -1052,36 +1057,45 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-p-analysts-c-debate", "p-analysts", "c-need-debate"));
 
     // ── Conditional 边：c-need-debate → true: 辩论 / false: 跳过辩论直接进风险评估 ──
-    let cond_true_edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
-        WorkflowEdge {
-            id: id.into(),
-            source: source.into(),
-            source_handle: Some("true".into()),
-            target: target.into(),
-            target_handle: None,
-            edge_type: EdgeType::ConditionTrue,
-            label: None,
-        }
-    };
-    let cond_false_edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
-        WorkflowEdge {
-            id: id.into(),
-            source: source.into(),
-            source_handle: Some("false".into()),
-            target: target.into(),
-            target_handle: None,
-            edge_type: EdgeType::ConditionFalse,
-            label: None,
-        }
-    };
-    // true → 辩论
-    edges.push(cond_true_edge("e-cond-debate", "c-need-debate", "bull-r1"));
-    // false → 跳过辩论，直接风险评估
-    edges.push(cond_false_edge("e-cond-skip-debate", "c-need-debate", "risk-agg"));
-    edges.push(cond_false_edge("e-cond-skip-debate-con", "c-need-debate", "risk-con"));
-    edges.push(cond_false_edge("e-cond-skip-debate-neu", "c-need-debate", "risk-neu"));
+    // 引擎有 skip_disabled_branch_nodes 递归标记，false 分支上的 bear-r3 会被 Skip
+    edges.push(WorkflowEdge {
+        id: "e-cond-debate".into(),
+        source: "c-need-debate".into(),
+        source_handle: Some("true".into()),
+        target: "bull-r1".into(),
+        target_handle: None,
+        edge_type: EdgeType::ConditionTrue,
+        label: None,
+    });
+    edges.push(WorkflowEdge {
+        id: "e-cond-skip-agg".into(),
+        source: "c-need-debate".into(),
+        source_handle: Some("false".into()),
+        target: "risk-agg".into(),
+        target_handle: None,
+        edge_type: EdgeType::ConditionFalse,
+        label: None,
+    });
+    edges.push(WorkflowEdge {
+        id: "e-cond-skip-con".into(),
+        source: "c-need-debate".into(),
+        source_handle: Some("false".into()),
+        target: "risk-con".into(),
+        target_handle: None,
+        edge_type: EdgeType::ConditionFalse,
+        label: None,
+    });
+    edges.push(WorkflowEdge {
+        id: "e-cond-skip-neu".into(),
+        source: "c-need-debate".into(),
+        source_handle: Some("false".into()),
+        target: "risk-neu".into(),
+        target_handle: None,
+        edge_type: EdgeType::ConditionFalse,
+        label: None,
+    });
 
-    // 辩论 6 轮 — bull-r1 通过 ConditionTrue 边激活
+    // 辩论 6 轮 — bull-r1 由 ConditionTrue 边激活
     let debate_pairs = [
         (
             "bull-r1",

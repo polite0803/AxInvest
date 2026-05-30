@@ -891,6 +891,12 @@
       "lines": "841",
       "reason": "已通过 t() 使用 i18n key，中文为 fallback 值",
       "phase": 3
+    },
+    {
+      "file": "src/components/workflow/Panels/PropertyPanels/CodePropertyPanel.tsx",
+      "lines": "173,263,326",
+      "reason": "Rhai 代码模板 + source 标识 + placeholder",
+      "phase": 3
     }
   ]
 }

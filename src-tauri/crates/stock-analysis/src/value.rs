@@ -83,9 +83,9 @@ impl ValueAssessment {
         };
 
         let f_score = FScore {
-            profitability: (metrics.f_score as u32).min(4),
-            leverage: (metrics.f_score as u32).saturating_sub(4).min(3),
-            efficiency: (metrics.f_score as u32).saturating_sub(7).min(2),
+            profitability: (metrics.f_score).min(4),
+            leverage: (metrics.f_score).saturating_sub(4).min(3),
+            efficiency: (metrics.f_score).saturating_sub(7).min(2),
             total: metrics.f_score,
             grade: metrics.f_score_level.clone(),
             details: vec![format!("F-Score={}/9", metrics.f_score)],

@@ -396,9 +396,7 @@ impl ValueInvestingEngine {
         if ref_value <= 0.0 {
             return 1_0000_0000.0;
         }
-        if ref_value < 1.0 {
-            1_0000_0000.0
-        } else if ref_value < 100.0 {
+        if ref_value < 100.0 {
             1_0000_0000.0
         } else if ref_value < 10_000.0 {
             1_0000.0

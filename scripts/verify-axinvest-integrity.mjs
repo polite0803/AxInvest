@@ -146,16 +146,16 @@ check("Tauri 品牌配置", () => {
   const f = readFileSync(join(ROOT, "src-tauri/tauri.conf.json"), "utf8");
   const j = JSON.parse(f);
 
-  if ((j.app?.productName ?? j.productName) === "AxInvest") {
-    pass(`productName = "${j.app?.productName ?? j.productName}"`);
+  if ((j.productName ?? j.app?.productName) === "AxInvest") {
+    pass(`productName = "${j.productName ?? j.app?.productName}"`);
   } else {
-    fail(`productName = "${j.app?.productName ?? j.productName}" (应为 "AxInvest")`);
+    fail(`productName = "${j.productName ?? j.app?.productName}" (应为 "AxInvest")`);
   }
 
-  if ((j.app?.identifier ?? j.identifier) === "top.axinvest.desktop") {
-    pass(`identifier = "${j.app?.identifier ?? j.identifier}"`);
+  if ((j.identifier ?? j.app?.identifier) === "top.axinvest.desktop") {
+    pass(`identifier = "${j.identifier ?? j.app?.identifier}"`);
   } else {
-    fail(`identifier = "${j.app?.identifier ?? j.identifier}" (应为 "top.axinvest.desktop")`);
+    fail(`identifier = "${j.identifier ?? j.app?.identifier}" (应为 "top.axinvest.desktop")`);
   }
 
   if (j.app?.windows?.[0]?.title?.includes("AxInvest")) {

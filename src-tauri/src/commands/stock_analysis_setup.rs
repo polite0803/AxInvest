@@ -266,10 +266,10 @@ async fn seed_stock_analysis_workflow_template(
     use axagent_core::workflow_types::{
         AgentNode, AgentNodeConfig, Branch, ConditionNode, ConditionNodeConfig, EdgeType,
         ErrorConfig, JsonSchema, JsonSchemaProperty, LogicalOperator, OnFailureAction, OutputMode,
-        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, SubWorkflowNode,
-        SubWorkflowNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
-        TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable,
-        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
+        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
+        ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -1177,30 +1177,6 @@ async fn seed_stock_analysis_workflow_template(
             edges.push(edge(&format!("e-{dep}-{id}"), dep, id));
         }
     }
-
-    // ── SubWorkflow: 多空辩论子流程 ──
-    nodes.push(WorkflowNode::SubWorkflow(SubWorkflowNode {
-        base: WorkflowNodeBase {
-            id: "sub-debate".into(),
-            title: "多空辩论子工作流".into(),
-            description: Some(
-                "多空辩论 6 轮：bull-r1→bear-r1→bull-r2→bear-r2→bull-r3→bear-r3".into(),
-            ),
-            position: Position { x: 400.0, y: 400.0 },
-            retry: RetryConfig::default(),
-            timeout: Some(900),
-            enabled: true,
-        },
-        config: SubWorkflowNodeConfig {
-            sub_workflow_id: "stock-debate".into(),
-            input_mapping: std::collections::HashMap::from([(
-                "analyst_reports".into(),
-                "p-analysts.output".into(),
-            )]),
-            output_var: "debate_result".into(),
-            is_async: false,
-        },
-    }));
 
     // 风险评估（3 个并行，均依赖 bear-r3）
     for (rid, rtitle, rexpert, rtools) in &[

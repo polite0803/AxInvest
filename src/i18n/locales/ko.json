@@ -7102,5 +7102,6 @@
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
   },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} 실행 중"
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} 실행 중",
+  "stockAnalysis.progress.fetchingData": "주식 데이터 가져오는 중..."
 }

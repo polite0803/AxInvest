@@ -7102,5 +7102,6 @@
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
   },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} выполняется"
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} выполняется",
+  "stockAnalysis.progress.fetchingData": "Получение данных об акциях..."
 }

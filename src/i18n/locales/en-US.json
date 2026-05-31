@@ -7118,5 +7118,6 @@
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
   },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} running"
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} running",
+  "stockAnalysis.progress.fetchingData": "Fetching stock data, please wait..."
 }

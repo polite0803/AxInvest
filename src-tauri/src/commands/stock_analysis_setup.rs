@@ -1029,77 +1029,32 @@ async fn seed_stock_analysis_workflow_template(
     }));
     edges.push(edge("e-trigger-p-analysts", "trigger", "p-analysts"));
 
-    // ── Phase 2: 条件分支 — LLM 动态判断是否需要多空辩论 ──
+    // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
     nodes.push(WorkflowNode::Condition(ConditionNode {
         base: WorkflowNodeBase {
             id: "c-need-debate".into(),
-            title: "是否需多空辩论".into(),
-            description: Some("基于9位分析师报告，LLM判断观点是否已有明确共识".into()),
+            title: "分析师检查点".into(),
+            description: Some("确认9位分析师已全部完成，是否需辩论由后续流程决定".into()),
             position: Position { x: 300.0, y: 350.0 },
             retry: RetryConfig::default(),
-            timeout: Some(120),
+            timeout: Some(60),
             enabled: true,
         },
         config: ConditionNodeConfig {
             conditions: vec![],
             logical_op: LogicalOperator::And,
-            judge_by_llm: Some(true),
-            routing_prompt: Some(
-                "基于9位分析师的综合报告，判断是否需要启动多空辩论流程。\
-                 如果分析师观点高度一致（>80%同方向），可跳过辩论直接进入风险评估。\
-                 如果存在显著分歧，则需要辩论。\
-                 输出 JSON: {\"need_debate\": true/false, \"reason\": \"简要理由\"}"
-                    .into(),
-            ),
+            judge_by_llm: None,
+            routing_prompt: None,
             routing_model: None,
         },
     }));
     edges.push(edge("e-p-analysts-c-debate", "p-analysts", "c-need-debate"));
 
-    // ── Conditional 边：c-need-debate → true: 辩论 / false: 跳过辩论直接进风险评估 ──
-    // 引擎有 skip_disabled_branch_nodes 递归标记，false 分支上的 bear-r3 会被 Skip
-    edges.push(WorkflowEdge {
-        id: "e-cond-debate".into(),
-        source: "c-need-debate".into(),
-        source_handle: Some("true".into()),
-        target: "bull-r1".into(),
-        target_handle: None,
-        edge_type: EdgeType::ConditionTrue,
-        label: None,
-    });
-    edges.push(WorkflowEdge {
-        id: "e-cond-skip-agg".into(),
-        source: "c-need-debate".into(),
-        source_handle: Some("false".into()),
-        target: "risk-agg".into(),
-        target_handle: None,
-        edge_type: EdgeType::ConditionFalse,
-        label: None,
-    });
-    edges.push(WorkflowEdge {
-        id: "e-cond-skip-con".into(),
-        source: "c-need-debate".into(),
-        source_handle: Some("false".into()),
-        target: "risk-con".into(),
-        target_handle: None,
-        edge_type: EdgeType::ConditionFalse,
-        label: None,
-    });
-    edges.push(WorkflowEdge {
-        id: "e-cond-skip-neu".into(),
-        source: "c-need-debate".into(),
-        source_handle: Some("false".into()),
-        target: "risk-neu".into(),
-        target_handle: None,
-        edge_type: EdgeType::ConditionFalse,
-        label: None,
-    });
-
-    // 辩论 6 轮 — bull-r1 由 ConditionTrue 边激活
+    // 辩论 6 轮 — 线性执行，ConditionNode 记录判断结果但不路由分支
     let debate_pairs = [
         (
             "bull-r1",
-            "基于9位分析师的报告，构建该股票的完整买入论点。引用分析师数据支撑，明确列出3-5个看涨理由，每个理由需有具体数据",
+            "基于9位分析师的报告和是否辩论的判断，构建该股票的买入论点",
             "bull-researcher",
             &["c-need-debate"][..],
             "bear-r1",

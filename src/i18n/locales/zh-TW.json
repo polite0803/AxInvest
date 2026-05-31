@@ -7068,9 +7068,7 @@
       "low": "低"
     },
     "workflowStarting": "⏳ 正在啟動 {{stockCode}} 股票分析工作流程...",
-    "progress": {
-      "stepRunning": "⏳ {{name}} 執行中"
-    }
+    "progress": {}
   },
   "trade": {
     "title": "交易日志",
@@ -7095,5 +7093,6 @@
     "agentRole.browser": "浏览器",
     "agentRole.synthesizer": "综合者",
     "agentRole.executor": "执行者"
-  }
+  },
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} 執行中"
 }

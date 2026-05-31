@@ -7076,9 +7076,7 @@
       "low": "낮음"
     },
     "workflowStarting": "⏳ {{stockCode}} 주식 분석 워크플로 시작 중...",
-    "progress": {
-      "stepRunning": "⏳ {{name}} 실행 중"
-    }
+    "progress": {}
   },
   "trade": {
     "title": "Trading Log",
@@ -7103,5 +7101,6 @@
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
-  }
+  },
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} 실행 중"
 }

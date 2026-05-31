@@ -7076,9 +7076,7 @@
       "low": "Bajo"
     },
     "workflowStarting": "⏳ Iniciando flujo de análisis de {{stockCode}}...",
-    "progress": {
-      "stepRunning": "⏳ {{name}} ejecutando"
-    }
+    "progress": {}
   },
   "trade": {
     "title": "Trading Log",
@@ -7103,5 +7101,6 @@
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
-  }
+  },
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} ejecutando"
 }

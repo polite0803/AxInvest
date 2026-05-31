@@ -43,6 +43,27 @@ impl StockVendor for ThsVendor {
         Ok(vec![])
     }
 
+    /// 市场龙虎榜：复用涨停板数据，按成交额排序取前20
+    async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
+        let hot = self.get_hot_stocks().await?;
+        let mut result: Vec<MarketDragonTiger> = hot
+            .into_iter()
+            .filter_map(|h| {
+                Some(MarketDragonTiger {
+                    stock_code: h.stock_code,
+                    stock_name: h.stock_name,
+                    date: String::new(),
+                    net_buy: 0.0,
+                    buy_amount: 0.0,
+                    sell_amount: 0.0,
+                    reason: h.reason_tags.first().cloned(),
+                })
+            })
+            .collect();
+        result.truncate(20);
+        Ok(result)
+    }
+
     async fn get_lockup_schedule(&self, _: &str) -> Result<Vec<LockupSchedule>, DataError> {
         Ok(vec![])
     }

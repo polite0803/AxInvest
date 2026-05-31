@@ -81,7 +81,7 @@ impl VendorRouting {
             consensus_eps: vec!["ths".into(), "akshare".into(), "iwencai".into()],
             concept_blocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
             announcements: vec!["cninfo".into(), "eastmoney".into()],
-            market_dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
+            market_dragon_tiger: vec!["ths".into(), "eastmoney".into(), "baidu_stock".into()],
             hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
             industry_ranking: vec!["ths".into(), "baidu_stock".into()],
             cls_flash: vec!["eastmoney".into(), "akshare".into()],

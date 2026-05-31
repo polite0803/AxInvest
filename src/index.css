@@ -2210,7 +2210,7 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   display: flex;
   flex-direction: column;
 }
-.right-panel.open { width: 300px; min-width: 300px; }
+.right-panel.open { width: 360px; min-width: 360px; }
 .rp-header {
   display: flex;
   align-items: center;

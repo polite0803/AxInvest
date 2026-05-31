@@ -435,7 +435,10 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         );
         set((state) => {
           state.currentTemplate = template;
-          state.nodes = template.nodes;
+          state.nodes = (template.nodes as any[]).map((n: any) => ({
+            ...n,
+            type: typeof n.type === "string" ? n.type.toLowerCase() : n.type,
+          }));
           state.edges = template.edges;
           state.isLoading = false;
           state.isDirty = false;
@@ -800,6 +803,10 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     },
 
     setNodes: (nodes: WorkflowNode[]) => {
+      const normalized = (nodes as any[]).map((n: any) => ({
+        ...n,
+        type: typeof n.type === "string" ? n.type.toLowerCase() : n.type,
+      }));
       set((state) => {
         state.past.push(buildHistoryEntry(state));
         state.future = [];
@@ -807,7 +814,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           state.past = state.past.slice(-50);
         }
         state._lastUndoRecordTime = Date.now();
-        state.nodes = nodes;
+        state.nodes = normalized;
         state.isDirty = true;
       });
     },

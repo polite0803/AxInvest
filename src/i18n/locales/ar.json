@@ -7075,7 +7075,10 @@
       "medium": "متوسط",
       "low": "منخفض"
     },
-    "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}..."
+    "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}...",
+    "progress": {
+      "stepRunning": "⏳ {{name}} قيد التشغيل"
+    }
   },
   "trade": {
     "title": "Trading Log",

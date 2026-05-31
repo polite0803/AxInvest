@@ -7075,7 +7075,10 @@
       "medium": "Средний",
       "low": "Низкий"
     },
-    "workflowStarting": "⏳ Запуск рабочего процесса анализа {{stockCode}}..."
+    "workflowStarting": "⏳ Запуск рабочего процесса анализа {{stockCode}}...",
+    "progress": {
+      "stepRunning": "⏳ {{name}} выполняется"
+    }
   },
   "trade": {
     "title": "Trading Log",

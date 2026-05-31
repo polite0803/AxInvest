@@ -202,6 +202,9 @@ impl NodeExecutorTrait for AgentExecutor {
             ));
         };
 
+        let node_id = node.base_id().to_string();
+        tracing::info!(%node_id, agent_profile_id = ?an.config.agent_profile_id, "Agent: 开始执行");
+
         // 1. 加载 agent profile（带缓存）
         use axagent_core::entity::agent_profiles;
         use sea_orm::EntityTrait;
@@ -248,7 +251,11 @@ impl NodeExecutorTrait for AgentExecutor {
             .map(|s| s.to_string());
         let (prov, key, default_model) = self
             .resolve_provider(profile.as_ref(), session_provider_id.as_deref())
-            .await?;
+            .await
+            .map_err(|e| {
+                tracing::error!(%node_id, "Agent resolve_provider失败: {e:?}");
+                e
+            })?;
         let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, &self.master_key)
             .map_err(|e| {
                 NodeError::exec_failed(

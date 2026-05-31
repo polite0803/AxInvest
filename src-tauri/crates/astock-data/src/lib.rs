@@ -62,7 +62,7 @@ impl VendorRouting {
             quote: vec!["tencent".into(), "mootdx".into(), "eastmoney".into()],
             klines: vec!["eastmoney".into(), "tencent".into(), "mootdx".into()],
             financials: vec!["eastmoney".into(), "baidu_stock".into(), "akshare".into()],
-            news: vec!["sina".into(), "baidu_stock".into(), "akshare".into()],
+            news: vec!["eastmoney".into(), "baidu_stock".into(), "akshare".into()],
             money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],

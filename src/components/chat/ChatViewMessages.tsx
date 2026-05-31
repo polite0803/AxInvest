@@ -24,7 +24,7 @@ type RoleType = Record<
 >;
 
 interface BubbleListRef {
-  scrollBoxNativeElement: HTMLElement | null;
+  scrollBoxNativeElement?: HTMLElement | null;
 }
 
 // Local replacement for @ant-design/x Actions
@@ -61,7 +61,6 @@ function Actions({ items, onActionClick }: { items: ActionItem[]; onActionClick?
   );
 }
 import { ModelIcon } from "@lobehub/icons";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { Alert, App, Avatar, Input, Modal, Popconfirm, Spin, Tag, theme, Typography } from "antd";
 import {
   ArrowDown,
@@ -81,7 +80,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
@@ -612,7 +611,7 @@ export function useChatViewMessages({
   streaming,
   compressing,
   bubbleStyle,
-  bubbleListRef,
+  bubbleListRef: _bubbleListRef,
   handleEditMessage,
 }: ChatViewMessagesProps) {
   const { t } = useTranslation();
@@ -760,10 +759,6 @@ export function useChatViewMessages({
     return next;
   }, [activeMessages]);
 
-  const deferredActiveMessages = useDeferredValue(activeMessages);
-  const deferredThinkingIds = useDeferredValue(thinkingActiveMessageIds);
-  const deferredSearchContent = useDeferredValue(userSearchContentById);
-
   const bubbleItemCacheRef = useRef<
     Map<string, { signature: string; item: BubbleItemType }>
   >(new Map());
@@ -780,7 +775,7 @@ export function useChatViewMessages({
     >();
     const nextItems: BubbleItemType[] = [];
 
-    for (const msg of deferredActiveMessages) {
+    for (const msg of activeMessages) {
       if (msg.role === "tool") {
         continue;
       }
@@ -850,7 +845,7 @@ export function useChatViewMessages({
       }
 
       let aiContent = msg.role === "assistant"
-        ? buildAssistantDisplayContent(msg, deferredActiveMessages)
+        ? buildAssistantDisplayContent(msg, activeMessages)
         : msg.content;
       if (shouldHideAssistantBubble(msg, aiContent)) {
         continue;
@@ -858,7 +853,7 @@ export function useChatViewMessages({
       // js-set-map-lookups: 单次子串检查，Set 无优化收益
       if (
         msg.role === "assistant"
-        && deferredThinkingIds.has(msg.id)
+        && thinkingActiveMessageIds.has(msg.id)
         && aiContent.includes("<think")
       ) {
         const lastOpen = aiContent.lastIndexOf("<think");
@@ -870,7 +865,7 @@ export function useChatViewMessages({
       // js-set-map-lookups: 单次子串检查，Set 无优化收益
       if (msg.role === "assistant" && !aiContent.includes('data-axagent="1"')) {
         const parentSearch = msg.parent_message_id
-          ? deferredSearchContent.get(msg.parent_message_id)
+          ? userSearchContentById.get(msg.parent_message_id)
           : undefined;
         if (parentSearch?.hasSearch && parentSearch.sources.length > 0) {
           const { sources } = parentSearch;
@@ -898,7 +893,7 @@ export function useChatViewMessages({
 
     bubbleItemCacheRef.current = nextCache;
     return nextItems;
-  }, [deferredActiveMessages, deferredThinkingIds, deferredSearchContent]);
+  }, [activeMessages, thinkingActiveMessageIds, userSearchContentById]);
 
   const [expertSwitchBubble, setExpertSwitchBubble] = useState<BubbleItemType | null>(null);
   useEffect(() => {
@@ -985,39 +980,11 @@ export function useChatViewMessages({
     topicGroupsByConv,
   ]);
 
-  const ESTIMATED_BUBBLE_HEIGHT = 200;
-  const VIRTUAL_OVERSCAN = 8;
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    count: allBubbleItems.length,
-    getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => ESTIMATED_BUBBLE_HEIGHT,
-    overscan: VIRTUAL_OVERSCAN,
-  });
-
-  useEffect(() => {
-    const nativeEl = bubbleListRef.current?.scrollBoxNativeElement;
-    if (nativeEl && nativeEl !== scrollContainerRef.current) {
-      scrollContainerRef.current = nativeEl as HTMLDivElement;
-      virtualizer.measure();
-    }
-  });
-
   const visibleBubbleItems = useMemo(() => {
-    const range = virtualizer.range;
-    if (allBubbleItems.length < 30) {
-      return allBubbleItems;
-    }
-    if (range) {
-      return allBubbleItems.slice(range.startIndex, range.endIndex + 1);
-    }
     return allBubbleItems;
-  }, [allBubbleItems, virtualizer.range]);
+  }, [allBubbleItems]);
 
-  const hiddenEarlierCount = useMemo(() => {
-    const range = virtualizer.range;
-    return range ? range.startIndex : 0;
-  }, [virtualizer.range]);
+  const hiddenEarlierCount = 0;
 
   const aiContentNodesCacheRef = useRef<
     Map<string, { content: string; nodes: ChatMarkdownNode[] }>
@@ -2150,7 +2117,6 @@ export function useChatViewMessages({
     hiddenEarlierCount,
     lastBubbleKey,
     roles,
-    virtualizer,
     bubbleItems,
     summaryModalOpen,
     setSummaryModalOpen,

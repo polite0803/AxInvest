@@ -49,19 +49,30 @@ export function KLineChart() {
   }, [stockCode, getStockKline, setKlinePeriod]);
 
   useEffect(() => {
-    if (!chartRef.current) { return; }
-    instanceRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
-    setChartReady(true);
-    const chart = instanceRef.current;
-    const onResize = () => chart.resize();
-    const ro = new ResizeObserver(onResize);
-    ro.observe(chartRef.current);
-    window.addEventListener("resize", onResize);
+    const container = chartRef.current;
+    if (!container) { return; }
+
+    const tryInit = () => {
+      if (instanceRef.current) { return; } // already initialized
+      const { clientWidth, clientHeight } = container;
+      if (clientWidth === 0 || clientHeight === 0) { return; }
+      instanceRef.current = echarts.init(container, undefined, { renderer: "canvas" });
+      setChartReady(true);
+      const chart = instanceRef.current;
+      const onResize = () => chart.resize();
+      ro.observe(container);
+      window.addEventListener("resize", onResize);
+    };
+
+    const ro = new ResizeObserver(() => tryInit());
+    tryInit(); // first attempt
     return () => {
       ro.disconnect();
-      window.removeEventListener("resize", onResize);
-      chart.dispose();
-      instanceRef.current = null;
+      if (instanceRef.current) {
+        window.removeEventListener("resize", () => instanceRef.current?.resize());
+        instanceRef.current.dispose();
+        instanceRef.current = null;
+      }
     };
   }, []);
 

@@ -305,8 +305,8 @@ async fn seed_stock_analysis_workflow_template(
                     description: Some(format!("获取数据: {tool_name}")),
                     position: Position { x: 0.0, y: 0.0 },
                     retry: RetryConfig {
-                        enabled: true,
-                        max_retries: 2,
+                        enabled: false,
+                        max_retries: 0,
                         ..Default::default()
                     },
                     timeout: Some(120),

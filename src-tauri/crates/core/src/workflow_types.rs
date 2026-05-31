@@ -5,8 +5,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::constants;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Position {
     pub x: f64,
@@ -933,119 +931,6 @@ pub struct ValidationResult {
     pub is_valid: bool,
     pub errors: Vec<ValidationError>,
     pub warnings: Vec<ValidationWarning>,
-}
-
-/// Result of migrating Tool/Code nodes to Agent nodes
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MigrationResult {
-    pub workflow_id: String,
-    pub migrated_nodes: Vec<NodeMigrationEntry>,
-    pub unchanged: bool,
-}
-
-/// A single node migration record
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeMigrationEntry {
-    pub node_id: String,
-    pub from_type: String,
-    pub to_skill_id: String,
-    pub to_skill_name: String,
-    pub status: String,
-}
-
-/// Workflow migrator that converts Tool/Code nodes to Agent nodes
-pub struct WorkflowMigrator;
-
-impl WorkflowMigrator {
-    /// Migrate a workflow Tool and Code nodes to Agent nodes.
-    /// Returns a MigrationResult with details of what was migrated.
-    pub fn migrate(nodes: &mut [WorkflowNode]) -> MigrationResult {
-        let mut migrated_nodes = Vec::new();
-        let mut has_changes = false;
-
-        for node in nodes.iter_mut() {
-            let new_node = match node {
-                WorkflowNode::Tool(tool_node) => {
-                    has_changes = true;
-                    migrated_nodes.push(NodeMigrationEntry {
-                        node_id: tool_node.base.id.clone(),
-                        from_type: constants::role::TOOL.to_string(),
-                        to_skill_id: String::new(),
-                        to_skill_name: String::new(),
-                        status: "migrated_to_agent".to_string(),
-                    });
-                    Some(WorkflowNode::Agent(AgentNode {
-                        base: tool_node.base.clone(),
-                        config: AgentNodeConfig {
-                            system_prompt: String::new(),
-                            context_sources: Vec::new(),
-                            output_var: tool_node.config.output_var.clone(),
-                            model: None,
-                            temperature: None,
-                            max_tokens: None,
-                            tools: vec![ToolDef {
-                                name: tool_node.config.tool_name.clone(),
-                                description: None,
-                                parameters: None,
-                            }],
-                            exposed_tools: vec![],
-                            output_mode: OutputMode::Text,
-                            agent_profile_id: None,
-                            max_tool_rounds: None,
-                            execution_mode: None,
-                            rag_source_ids: vec![],
-                        },
-                    }))
-                },
-                WorkflowNode::Code(code_node) => {
-                    has_changes = true;
-                    migrated_nodes.push(NodeMigrationEntry {
-                        node_id: code_node.base.id.clone(),
-                        from_type: "code".to_string(),
-                        to_skill_id: String::new(),
-                        to_skill_name: String::new(),
-                        status: "migrated_to_agent".to_string(),
-                    });
-                    Some(WorkflowNode::Agent(AgentNode {
-                        base: code_node.base.clone(),
-                        config: AgentNodeConfig {
-                            system_prompt: String::new(),
-                            context_sources: Vec::new(),
-                            output_var: code_node.config.output_var.clone(),
-                            model: None,
-                            temperature: None,
-                            max_tokens: None,
-                            tools: Vec::new(),
-                            exposed_tools: vec![],
-                            output_mode: OutputMode::Text,
-                            agent_profile_id: None,
-                            max_tool_rounds: None,
-                            execution_mode: None,
-                            rag_source_ids: vec![],
-                        },
-                    }))
-                },
-                _ => None,
-            };
-
-            if let Some(new) = new_node {
-                *node = new;
-            }
-        }
-
-        MigrationResult {
-            workflow_id: String::new(),
-            migrated_nodes,
-            unchanged: !has_changes,
-        }
-    }
-
-    /// Check if a workflow contains Tool or Code nodes
-    pub fn has_legacy_nodes(nodes: &[WorkflowNode]) -> bool {
-        nodes
-            .iter()
-            .any(|n| matches!(n, WorkflowNode::Tool(_) | WorkflowNode::Code(_)))
-    }
 }
 
 // ── 自定义反序列化 ──

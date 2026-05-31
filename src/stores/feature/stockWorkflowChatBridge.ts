@@ -54,7 +54,6 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const unlisteners: UnlistenFn[] = [];
   let progressMsgId: string | null = null;
   const completedNodes = new Set<string>();
-  const pendingAnalystCards = new Map<string, string>();
 
   try {
     const m = await invoke<Message>("send_system_message", {
@@ -75,8 +74,9 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     status: string;
     totalNodes: number;
     completedNodes: number;
+    output?: unknown;
   }>("workflow-step-done", async (event) => {
-    const { nodeId, totalNodes, status } = event.payload;
+    const { nodeId, totalNodes, status, output } = event.payload;
     if (status === "completed" || status === "failed") {
       completedNodes.add(nodeId);
     }
@@ -97,16 +97,18 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
 
     if (status === "completed" && nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
       const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
+      const reportText = output != null
+        ? (typeof output === "string" ? output : JSON.stringify(output, null, 2))
+        : "";
       const msg = await invoke<Message>("send_system_message", {
         conversationId,
         content: wf(
           "analyst",
-          { analystName, analystReport: "", nodeId },
+          { analystName, analystReport: reportText, nodeId },
           "📊 " + i18next.t("stockAnalysis.workflow.analystComplete"),
         ),
       }).catch(() => null);
       if (msg) {
-        pendingAnalystCards.set(msg.id, nodeId);
         appendMessageToStore(conversationId, msg);
       }
     }
@@ -118,7 +120,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     results: Record<string, unknown>;
     output?: Record<string, unknown> | null;
   }>("workflow-completed", async (event) => {
-    const { results, output } = event.payload;
+    const { output } = event.payload;
 
     if (progressMsgId) {
       const newContent = wf(
@@ -132,32 +134,6 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       }).catch(() => {});
       updateMessageInStore(progressMsgId, newContent);
     }
-
-    for (const [msgId, nodeId] of pendingAnalystCards) {
-      const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
-      const resultsObj: Record<string, unknown> = results ?? {};
-      let reportText = "";
-      const directKey = Object.entries(resultsObj).find(([k]) => k === nodeId);
-      const fuzzyKey = !directKey ? Object.entries(resultsObj).find(([k]) => k.includes(analystName)) : null;
-      const matchEntry = directKey || fuzzyKey;
-      if (matchEntry) {
-        const val = matchEntry[1];
-        reportText = typeof val === "string" ? val : JSON.stringify(val, null, 2);
-      }
-      if (reportText) {
-        const newContent = wf(
-          "analyst",
-          { analystName, analystReport: reportText, nodeId },
-          "📊 " + i18next.t("stockAnalysis.workflow.analystComplete"),
-        );
-        invoke("update_message_content", {
-          id: msgId,
-          content: newContent,
-        }).catch(() => {});
-        updateMessageInStore(msgId, newContent);
-      }
-    }
-    pendingAnalystCards.clear();
 
     if (output && typeof output === "object") {
       const msg = await invoke<Message>("send_system_message", {

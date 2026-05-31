@@ -175,16 +175,17 @@ pub async fn run_stock_workflow(
         let app = progress_app.clone();
         let wf_id = progress_wf_id.clone();
         Box::pin(async move {
-            let _ = app.emit(
-                "workflow-step-done",
-                serde_json::json!({
-                    "workflowId": wf_id,
-                    "nodeId": event.node_id,
-                    "status": event.status,
-                    "totalNodes": event.total_nodes,
-                    "completedNodes": event.completed_nodes,
-                }),
-            );
+            let mut payload = serde_json::json!({
+                "workflowId": wf_id,
+                "nodeId": event.node_id,
+                "status": event.status,
+                "totalNodes": event.total_nodes,
+                "completedNodes": event.completed_nodes,
+            });
+            if let Some(output) = event.output {
+                payload["output"] = output;
+            }
+            let _ = app.emit("workflow-step-done", payload);
         })
     });
 

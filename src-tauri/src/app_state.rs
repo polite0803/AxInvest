@@ -268,7 +268,7 @@ pub struct AppState {
     pub stock_monitor: Option<Arc<axagent_stock_analysis::monitor::RealtimeMonitor>>,
     /// 手动交易引擎（单例，避免每次命令调用重新创建）
     pub trading_engine: Arc<TokioRwLock<axagent_stock_analysis::trading::TradingEngine>>,
-    pub plugin_manager: std::sync::Mutex<PluginManager>,
+    pub plugin_manager: std::sync::RwLock<PluginManager>,
     pub file_authorizer: Arc<FileAuthorizer>,
     pub session_share_manager: SessionShareStore,
 }

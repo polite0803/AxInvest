@@ -488,7 +488,9 @@ impl WorkEngine {
         let done_or_skipped: HashSet<&str> = workflow
             .node_states
             .iter()
-            .filter(|(_, s)| matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped))
+            .filter(|(_, s)| {
+                matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped | NodeStatus::Failed)
+            })
             .map(|(id, _)| id.as_str())
             .collect();
 
@@ -992,6 +994,21 @@ impl WorkEngine {
                             }
                         }
                         wf.status = WorkflowStatus::PartiallyCompleted;
+                        wf.completed_at = Some(current_timestamp());
+                    }
+                } else {
+                    // 全部节点已完成/失败/跳过，正常结束
+                    let mut workflows = self.workflows.write().await;
+                    if let Some(wf) = workflows.get_mut(workflow_id) {
+                        let has_failure = wf
+                            .node_states
+                            .values()
+                            .any(|s| matches!(s.status, NodeStatus::Failed));
+                        wf.status = if has_failure {
+                            WorkflowStatus::PartiallyCompleted
+                        } else {
+                            WorkflowStatus::Completed
+                        };
                         wf.completed_at = Some(current_timestamp());
                     }
                 }

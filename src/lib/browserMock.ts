@@ -3345,6 +3345,309 @@ export async function handleCommand<T>(
     case "pty_clear_output":
       return null as T;
 
+    // ── Stock Analysis Side Panel ─────────────────────────────────────
+    case "get_market_dragon_tiger":
+      return [
+        {
+          stockCode: "002400",
+          stockName: "省广集团",
+          date: "2026-05-30",
+          netBuy: 125000000,
+          buyAmount: 520000000,
+          sellAmount: 395000000,
+          reason: "游资博弈",
+        },
+        {
+          stockCode: "002354",
+          stockName: "天娱数科",
+          date: "2026-05-30",
+          netBuy: 98000000,
+          buyAmount: 410000000,
+          sellAmount: 312000000,
+          reason: "AI概念",
+        },
+        {
+          stockCode: "603000",
+          stockName: "人民网",
+          date: "2026-05-30",
+          netBuy: 87000000,
+          buyAmount: 330000000,
+          sellAmount: 243000000,
+          reason: "数据要素",
+        },
+        {
+          stockCode: "002230",
+          stockName: "科大讯飞",
+          date: "2026-05-30",
+          netBuy: -45000000,
+          buyAmount: 280000000,
+          sellAmount: 325000000,
+          reason: "机构调仓",
+        },
+        {
+          stockCode: "601728",
+          stockName: "中国电信",
+          date: "2026-05-30",
+          netBuy: 210000000,
+          buyAmount: 680000000,
+          sellAmount: 470000000,
+          reason: "算力概念",
+        },
+      ] as T;
+    case "get_hot_stocks":
+      return [
+        { stockCode: "600519", stockName: "贵州茅台", price: 1780.50, changePct: 2.35 },
+        { stockCode: "000858", stockName: "五粮液", price: 156.80, changePct: 10.02 },
+        { stockCode: "002400", stockName: "省广集团", price: 8.45, changePct: 9.98 },
+        { stockCode: "300750", stockName: "宁德时代", price: 220.30, changePct: 5.67 },
+        { stockCode: "000001", stockName: "平安银行", price: 12.50, changePct: 1.20 },
+        { stockCode: "688981", stockName: "中芯国际", price: 52.30, changePct: 8.15 },
+      ] as T;
+    case "get_industry_ranking":
+      return [
+        {
+          industryName: "计算机应用",
+          changePct: 4.52,
+          turnover: 89000000000,
+          leaderCode: "002230",
+          leaderName: "科大讯飞",
+          leaderChangePct: 6.80,
+        },
+        {
+          industryName: "半导体",
+          changePct: 3.85,
+          turnover: 67000000000,
+          leaderCode: "688981",
+          leaderName: "中芯国际",
+          leaderChangePct: 8.15,
+        },
+        {
+          industryName: "传媒",
+          changePct: 3.21,
+          turnover: 45000000000,
+          leaderCode: "002400",
+          leaderName: "省广集团",
+          leaderChangePct: 9.98,
+        },
+        {
+          industryName: "通信设备",
+          changePct: 2.95,
+          turnover: 52000000000,
+          leaderCode: "601728",
+          leaderName: "中国电信",
+          leaderChangePct: 3.40,
+        },
+        {
+          industryName: "白酒",
+          changePct: 2.10,
+          turnover: 78000000000,
+          leaderCode: "000858",
+          leaderName: "五粮液",
+          leaderChangePct: 10.02,
+        },
+        {
+          industryName: "银行",
+          changePct: -0.35,
+          turnover: 56000000000,
+          leaderCode: "000001",
+          leaderName: "平安银行",
+          leaderChangePct: 1.20,
+        },
+      ] as T;
+    case "get_north_bound_flow":
+      return { date: "2026-05-30", shFlow: 4500000000, szFlow: 3200000000, totalFlow: 7700000000 } as T;
+    case "get_cls_flash":
+      return [
+        { title: "央行下调MLF利率10个基点", time: "10:30", tag: "宏观" },
+        { title: "工信部：加快6G网络核心技术攻关", time: "09:45", tag: "政策" },
+        { title: "贵州茅台：预计上半年营收同比增长15%", time: "08:30", tag: "业绩" },
+      ] as T;
+    case "list_watchlist":
+      return [
+        { stockCode: "600519", stockName: "贵州茅台" },
+        { stockCode: "000858", stockName: "五粮液" },
+      ] as T;
+    case "get_lockup_schedule":
+      return [{ unlockDate: "2026-06-15", unlockRatio: 5.0 }] as T;
+    case "get_dividend_records":
+      return [{ exDate: "2026-06-20", dividendPerShare: 12.5 }] as T;
+    case "get_market_status":
+      return { isTrading: true, marketStatus: "交易中" } as T;
+    case "discover_stock_candidates":
+      return [
+        {
+          stockCode: "002400",
+          stockName: "省广集团",
+          price: 8.45,
+          changePct: 9.98,
+          reasons: ["AI概念", "游资介入"],
+          score: 85,
+        },
+        {
+          stockCode: "000858",
+          stockName: "五粮液",
+          price: 156.80,
+          changePct: 10.02,
+          reasons: ["业绩超预期", "外资增持"],
+          score: 92,
+        },
+        {
+          stockCode: "300750",
+          stockName: "宁德时代",
+          price: 220.30,
+          changePct: 5.67,
+          reasons: ["锂电池龙头", "储能概念"],
+          score: 78,
+        },
+      ] as T;
+    case "screen_stocks":
+      return [
+        {
+          stockCode: "600519",
+          stockName: "贵州茅台",
+          price: 1780.50,
+          changePct: 2.35,
+          reasons: ["北向资金流入", "股息率提升"],
+          score: 90,
+        },
+        {
+          stockCode: "002230",
+          stockName: "科大讯飞",
+          price: 58.70,
+          changePct: 6.80,
+          reasons: ["AI赛道龙头", "政策利好"],
+          score: 88,
+        },
+      ] as T;
+    case "list_workflow_executions":
+      return [
+        {
+          id: "exec-001",
+          workflow_id: "stock-analysis",
+          status: "completed",
+          total_time_ms: 45000,
+          created_at: Date.now() - 3600000,
+        },
+        {
+          id: "exec-002",
+          workflow_id: "stock-analysis",
+          status: "completed",
+          total_time_ms: 32000,
+          created_at: Date.now() - 7200000,
+        },
+      ] as T;
+    case "get_workflow_execution_status": {
+      const execId = (args as { executionId?: string })?.executionId;
+      return {
+        execution_id: execId ?? "exec-001",
+        workflow_id: "stock-analysis",
+        status: "completed",
+        current_node_id: null,
+        total_time_ms: 45000,
+        node_count: 26,
+        node_records: [
+          {
+            node_id: "trigger",
+            node_type: "trigger",
+            node_name: "开始分析",
+            status: "completed",
+            execution_time_ms: 5,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+          {
+            node_id: "p-analysts",
+            node_type: "parallel",
+            node_name: "9维度分析师并行",
+            status: "completed",
+            execution_time_ms: 12000,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+          {
+            node_id: "a-market-analyst",
+            node_type: "agent",
+            node_name: "行情分析师",
+            status: "completed",
+            execution_time_ms: 8500,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+          {
+            node_id: "bull-r1",
+            node_type: "agent",
+            node_name: "多方辩论R1",
+            status: "completed",
+            execution_time_ms: 3500,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+          {
+            node_id: "bear-r1",
+            node_type: "agent",
+            node_name: "空方辩论R1",
+            status: "completed",
+            execution_time_ms: 3200,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+          {
+            node_id: "trader",
+            node_type: "agent",
+            node_name: "交易方案",
+            status: "completed",
+            execution_time_ms: 5000,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+          {
+            node_id: "portfolio-mgr",
+            node_type: "agent",
+            node_name: "最终决策",
+            status: "completed",
+            execution_time_ms: 3500,
+            error: null,
+            input: null,
+            output: null,
+            started_at: null,
+            completed_at: null,
+            parent_execution_id: null,
+            sub_workflow_id: null,
+          },
+        ],
+      } as T;
+    }
+
     default: {
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);
       // Safe defaults based on command naming convention

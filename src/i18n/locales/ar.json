@@ -7076,9 +7076,7 @@
       "low": "منخفض"
     },
     "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}...",
-    "progress": {
-      "stepRunning": "⏳ {{name}} قيد التشغيل"
-    }
+    "progress": {}
   },
   "trade": {
     "title": "Trading Log",
@@ -7103,5 +7101,6 @@
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
-  }
+  },
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} قيد التشغيل"
 }

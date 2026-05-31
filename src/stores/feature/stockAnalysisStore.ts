@@ -397,8 +397,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       set({
         progressPct: Math.max(pct, get().progressPct),
         progressMessage: status === "completed"
-          ? i18n.t("stockAnalysis.progress.stepDone", { node: nodeId })
-          : i18n.t("stockAnalysis.progress.stepRetrying", { node: nodeId }),
+          ? i18n.t("stockAnalysis.progress.stepDone", { name: nodeId })
+          : i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId }),
       });
     });
 

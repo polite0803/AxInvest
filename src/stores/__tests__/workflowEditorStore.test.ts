@@ -430,7 +430,7 @@ describe("WorkflowEditorStore", () => {
       const result = await store.importTemplate(jsonData);
 
       expect(invokeMock).toHaveBeenCalledWith("import_workflow_template", {
-        json_data: jsonData,
+        jsonData,
       });
       expect(result).toEqual({
         id: "imported-template-id",

@@ -233,9 +233,15 @@ pub async fn run_stock_workflow(
                             .await;
                     },
                     axagent_rt_workflow::workflow_engine::WorkflowStatus::Failed => {
+                        tracing::warn!(%wf_id, status=?wf_status, "工作流以 Failed 状态结束");
                         let _ = app_h.emit(
                             "workflow-error",
-                            serde_json::json!({ "workflowId": wf_id, "error": "部分分析步骤失败" }),
+                            serde_json::json!({
+                                "workflowId": wf_id,
+                                "error": "部分分析步骤失败",
+                                "results": result.results,
+                                "output": result.output,
+                            }),
                         );
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("failed"))

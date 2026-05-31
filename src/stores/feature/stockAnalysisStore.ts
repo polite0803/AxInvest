@@ -404,7 +404,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       });
     });
 
-    // 工作流完成事件
+    // 工作流完成事件（Completed / PartiallyCompleted）
     const unlistenComplete = await listen<{
       workflowId: string;
       results: Record<string, unknown>;
@@ -412,7 +412,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }>("workflow-completed", (event) => {
       const { results, output } = event.payload;
       const parsed = parseWorkflowResults(results);
-      // 优先用 Workflow.output（经 output_schema 过滤 + EndNode 聚合）
       const decision = output ?? parsed.decision;
       set({
         ...parsed,
@@ -427,15 +426,25 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const unlistenError = await listen<{
       workflowId: string;
       error: string;
+      results?: Record<string, unknown>;
+      output?: StockDecision | null;
     }>("workflow-error", (event) => {
       const msg = event.payload.error;
+      // 即使失败也尝试解析已有的部分结果
+      const { results, output } = event.payload;
+      if (results) {
+        const parsed = parseWorkflowResults(results);
+        set({ ...parsed, decision: output ?? parsed.decision });
+      }
       set({
         error: msg,
         status: msg.includes("LLM") ? "running" : "error",
         llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
         progressMessage: msg.includes("LLM")
           ? i18n.t("stockAnalysis.progress.llmFallback")
-          : i18n.t("stockAnalysis.progress.error", { msg }),
+          : msg,
+        progressPct: 100,
+        currentStage: 4,
       });
     });
 

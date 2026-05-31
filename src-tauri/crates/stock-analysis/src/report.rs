@@ -16,6 +16,9 @@ pub fn generate_html_report(
     value_assessment_json: &str,
     block_trades_json: &str,
     institutional_visits_json: &str,
+    index_quotes_json: &str,
+    peers_json: &str,
+    option_pcr_json: &str,
 ) -> String {
     let quote: serde_json::Value = serde_json::from_str(quote_json).unwrap_or_default();
     let price = quote["price"].as_f64().unwrap_or(0.0);
@@ -65,6 +68,74 @@ pub fn generate_html_report(
             rows.push_str(&format!("<tr><td>{date}</td><td>{orgs}</td><td>{short}</td></tr>"));
         }
         format!("<h3 style=\"margin:16px 0 8px\">机构调研</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>日期</th><th>机构数</th><th>内容</th></tr>{rows}</table>")
+    };
+
+    let index_quotes: Vec<serde_json::Value> =
+        serde_json::from_str(index_quotes_json).unwrap_or_default();
+    let index_quotes_section = if index_quotes.is_empty() {
+        String::new()
+    } else {
+        let mut rows = String::new();
+        for idx in index_quotes.iter() {
+            let name = idx["name"].as_str().unwrap_or("-");
+            let price = idx["price"].as_f64().unwrap_or(0.0);
+            let pct = idx["changePct"].as_f64().unwrap_or(0.0);
+            let color = if pct >= 0.0 { "#3fb950" } else { "#f85149" };
+            let sign = if pct >= 0.0 { "+" } else { "" };
+            rows.push_str(&format!(
+                "<tr><td>{name}</td><td>{price:.2}</td><td style=\"color:{color}\">{sign}{pct:.2}%</td></tr>"
+            ));
+        }
+        format!("<h3 style=\"margin:16px 0 8px\">大盘指数</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>指数</th><th>点位</th><th>涨跌幅</th></tr>{rows}</table>")
+    };
+
+    let peers: Vec<serde_json::Value> = serde_json::from_str(peers_json).unwrap_or_default();
+    let peers_section = if peers.is_empty() {
+        String::new()
+    } else {
+        let mut rows = String::new();
+        for p in peers.iter().take(8) {
+            let code = p["stockCode"].as_str().unwrap_or("-");
+            let name = p["stockName"].as_str().unwrap_or("-");
+            let pe = p["pe"]
+                .as_f64()
+                .map(|v| format!("{v:.1}"))
+                .unwrap_or("-".into());
+            let pb = p["pb"]
+                .as_f64()
+                .map(|v| format!("{v:.1}"))
+                .unwrap_or("-".into());
+            let roe = p["roe"]
+                .as_f64()
+                .map(|v| format!("{v:.1}%"))
+                .unwrap_or("-".into());
+            let pct = p["changePct"].as_f64().unwrap_or(0.0);
+            let color = if pct >= 0.0 { "#3fb950" } else { "#f85149" };
+            let sign = if pct >= 0.0 { "+" } else { "" };
+            rows.push_str(&format!(
+                "<tr><td>{code} {name}</td><td>{pe}</td><td>{pb}</td><td>{roe}</td><td style=\"color:{color}\">{sign}{pct:.2}%</td></tr>"
+            ));
+        }
+        format!("<h3 style=\"margin:16px 0 8px\">同行业可比公司</h3><table style=\"width:100%;font-size:12px;border-collapse:collapse\"><tr style=\"color:#8b949e\"><th>股票</th><th>PE</th><th>PB</th><th>ROE</th><th>涨跌幅</th></tr>{rows}</table>")
+    };
+
+    let option_pcr: serde_json::Value = serde_json::from_str(option_pcr_json).unwrap_or_default();
+    let option_pcr_section = if option_pcr.is_null() || option_pcr_json.is_empty() {
+        String::new()
+    } else {
+        let vol_pcr = option_pcr["volumePcr"].as_f64().unwrap_or(0.0);
+        let oi_pcr = option_pcr["oiPcr"].as_f64().unwrap_or(0.0);
+        let call_vol = option_pcr["callVolume"].as_f64().unwrap_or(0.0);
+        let put_vol = option_pcr["putVolume"].as_f64().unwrap_or(0.0);
+        let vol_color = if vol_pcr > 1.0 { "#f85149" } else { "#3fb950" };
+        let oi_color = if oi_pcr > 1.0 { "#f85149" } else { "#3fb950" };
+        format!(
+            "<h3 style=\"margin:16px 0 8px\">期权PCR（情绪指标）</h3>\
+            <div class=\"grid\">\
+            <div class=\"card\"><h3>成交量PCR</h3><div class=\"value\" style=\"color:{vol_color}\">{vol_pcr:.2}</div><div style=\"font-size:12px;color:#8b949e\">看跌{put_vol:.0} / 看涨{call_vol:.0}</div></div>\
+            <div class=\"card\"><h3>持仓量PCR</h3><div class=\"value\" style=\"color:{oi_color}\">{oi_pcr:.2}</div><div style=\"font-size:12px;color:#8b949e\">&gt;1 看空偏强，&lt;1 看多偏强</div></div>\
+            </div>"
+        )
     };
 
     // Build analyst report HTML
@@ -225,6 +296,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
 {block_trades_section}
 
 {institutional_visits_section}
+
+{index_quotes_section}
+
+{peers_section}
+
+{option_pcr_section}
 
 <div class="decision">
   <h2>最终决策</h2>

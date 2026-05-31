@@ -195,6 +195,7 @@ pub async fn run_stock_workflow(
 
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
+    let sc_name_for_spawn = sc_name.clone();
     tokio::spawn(async move {
         let mut opts = RunOptions::default()
             .with_max_concurrent(9)
@@ -210,16 +211,30 @@ pub async fn run_stock_workflow(
         if dry_run.unwrap_or(false) {
             opts.dry_run = true;
         }
+        let mut merged_vars: Vec<axagent_core::workflow_types::Variable> = vec![
+            axagent_core::workflow_types::Variable {
+                name: "stock_code".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(stock_code.clone()),
+                description: Some("当前分析的股票代码".into()),
+                is_secret: false,
+            },
+            axagent_core::workflow_types::Variable {
+                name: "stock_name".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(sc_name_for_spawn.clone()),
+                description: Some("当前分析的股票名称".into()),
+                is_secret: false,
+            },
+        ];
         if let Some(v) = template_vars {
-            opts = opts.with_variables(v);
+            for tv in v {
+                if !merged_vars.iter().any(|mv| mv.name == tv.name) {
+                    merged_vars.push(tv);
+                }
+            }
         }
-        opts = opts.with_variables(vec![axagent_core::workflow_types::Variable {
-            name: "stock_code".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(stock_code.clone()),
-            description: Some("当前分析的股票代码".into()),
-            is_secret: false,
-        }]);
+        opts = opts.with_variables(merged_vars);
 
         match engine.run_workflow(&wf_id, opts).await {
             Ok(result) => {

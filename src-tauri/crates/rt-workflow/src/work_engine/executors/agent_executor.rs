@@ -382,24 +382,37 @@ impl NodeExecutorTrait for AgentExecutor {
             )
         })?;
 
-        // 5. 构建 user_prompt：仅包含 context_sources 的变量（更精准，减少噪声）
-        let user_prompt = if an.config.context_sources.is_empty() {
-            // 向后兼容：无 context_sources 时包含所有变量
-            context
+        // 5. 构建 user_prompt：context_sources 控制上游数据注入，
+        //    但 stock_code / stock_name 等核心标识变量始终前置，确保 Agent 不会搞错分析对象
+        let mut user_prompt_parts: Vec<String> = Vec::new();
+
+        let core_id_keys = ["stock_code", "stock_name"];
+        for key in &core_id_keys {
+            if let Some(val) = context.variables.get(*key) {
+                user_prompt_parts.push(format!("{key}: {val}"));
+            }
+        }
+
+        if an.config.context_sources.is_empty() {
+            let rest: Vec<String> = context
                 .variables
                 .iter()
-                .filter(|(k, _)| !k.starts_with("__"))
+                .filter(|(k, _)| !k.starts_with("__") && !core_id_keys.contains(&k.as_str()))
                 .map(|(k, v)| format!("{k}: {v}"))
-                .collect::<Vec<_>>()
-                .join("\n")
+                .collect();
+            user_prompt_parts.extend(rest);
         } else {
-            an.config
+            let rest: Vec<String> = an
+                .config
                 .context_sources
                 .iter()
+                .filter(|s| !core_id_keys.contains(&s.as_str()))
                 .filter_map(|s| context.variables.get(s).map(|v| format!("{s}: {v}")))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
+                .collect();
+            user_prompt_parts.extend(rest);
+        }
+
+        let user_prompt = user_prompt_parts.join("\n");
 
         let mut messages: Vec<ChatMessage> = vec![
             ChatMessage {

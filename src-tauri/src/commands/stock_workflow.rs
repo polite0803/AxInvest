@@ -157,19 +157,6 @@ pub async fn run_stock_workflow(
     }
 
     let engine = Arc::clone(&state.work_engine);
-    state
-        .work_engine
-        .set_breakpoints(
-            [
-                "p-analysts".to_string(),
-                "c-need-debate".to_string(),
-                "trader".to_string(),
-                "portfolio-mgr".to_string(),
-            ]
-            .into_iter()
-            .collect(),
-        )
-        .await;
 
     let wf_name = format!("stock-analysis-{stock_code}");
     let workflow = engine

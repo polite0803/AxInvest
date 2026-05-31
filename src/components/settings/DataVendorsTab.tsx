@@ -47,6 +47,12 @@ const VENDORS: VendorDef[] = [
       "research_reports",
       "market_dragon_tiger",
       "cls_flash",
+      "announcements",
+      "block_trades",
+      "institutional_visits",
+      "index_quotes",
+      "peers",
+      "option_pcr",
     ],
     requiresKey: false,
   },
@@ -160,7 +166,10 @@ const EXPOSED_TOOLS: ToolRoute[] = [
   { tool: "get_cls_flash", label: "快讯", kind: "exposed", vendors: ["eastmoney", "akshare"] },
   { tool: "get_north_bound_flow", label: "北向资金", kind: "exposed", vendors: ["ths", "baidu_stock"] },
   { tool: "get_block_trades", label: "大宗交易", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
-  { tool: "get_institutional_visits", label: "机构调研", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
+  { tool: "get_institutional_visits", label: "机构调研", kind: "exposed", vendors: ["eastmoney"] },
+  { tool: "get_index_quotes", label: "大盘指数", kind: "exposed", vendors: ["eastmoney"] },
+  { tool: "get_stock_peers", label: "同行对比", kind: "exposed", vendors: ["eastmoney"] },
+  { tool: "get_stock_option_pcr", label: "期权PCR", kind: "exposed", vendors: ["eastmoney"] },
 ];
 
 const ALL_TOOLS = [...FIXED_TOOLS, ...EXPOSED_TOOLS];
@@ -195,6 +204,11 @@ const CAP_LABELS: Record<string, string> = {
   industry_ranking: "行业排名",
   cls_flash: "快讯",
   north_bound_flow: "北向资金",
+  block_trades: "大宗交易",
+  institutional_visits: "机构调研",
+  index_quotes: "大盘指数",
+  peers: "同行对比",
+  option_pcr: "期权PCR",
 };
 
 type HealthStatus = "ok" | "fail" | "pending" | "idle";

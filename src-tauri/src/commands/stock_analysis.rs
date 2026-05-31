@@ -850,6 +850,12 @@ pub async fn generate_stock_report(
             .get("raw.institutional_visits")
             .cloned()
             .unwrap_or_default(),
+        &bb_map
+            .get("market.index_quotes")
+            .cloned()
+            .unwrap_or_default(),
+        &bb_map.get("raw.peers").cloned().unwrap_or_default(),
+        &bb_map.get("raw.option_pcr").cloned().unwrap_or_default(),
     );
 
     std::fs::write(&filepath, &html).map_err(|e| e.to_string())?;
@@ -1276,6 +1282,41 @@ pub async fn get_north_bound_flow(
     state
         .astock_client
         .get_north_bound_flow()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_index_quotes(
+    state: State<'_, AppState>,
+) -> Result<Vec<axagent_astock_data::IndexQuote>, String> {
+    state
+        .astock_client
+        .get_index_quotes()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_stock_peers(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Vec<axagent_astock_data::PeerComparison>, String> {
+    state
+        .astock_client
+        .get_peers(&stock_code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_stock_option_pcr(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Option<axagent_astock_data::OptionPCR>, String> {
+    state
+        .astock_client
+        .get_option_pcr(&stock_code)
         .await
         .map_err(|e| e.to_string())
 }

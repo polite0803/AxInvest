@@ -90,7 +90,7 @@ impl VendorRouting {
             cls_flash: vec!["eastmoney".into(), "akshare".into()],
             north_bound_flow: vec!["ths".into(), "baidu_stock".into()],
             block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
-            institutional_visits: vec!["eastmoney".into(), "baidu_stock".into()],
+            institutional_visits: vec!["eastmoney".into()],
             index_quotes: vec!["eastmoney".into()],
             peers: vec!["eastmoney".into()],
             option_pcr: vec!["eastmoney".into()],

@@ -843,6 +843,17 @@ impl WorkEngine {
                 }
             }
         }
+
+        // 将 options.input 以 __workflow_input__ 为 key 注入变量表，
+        // 使得 input_mapping 中 "xxx": "__workflow_input__.field" 形式的路径可被解析
+        if let Some(ref input) = options.input {
+            let mut executions = self.executions.lock().await;
+            if let Some(state) = executions.get_mut(&execution_id) {
+                state
+                    .variables
+                    .insert("__workflow_input__".to_string(), input.clone());
+            }
+        }
         if options.plan_callbacks.is_some() {
             let mut executions = self.executions.lock().await;
             if let Some(state) = executions.get_mut(&execution_id) {

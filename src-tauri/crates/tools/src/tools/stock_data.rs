@@ -32,7 +32,9 @@ impl Tool for StockQuoteTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_quote(code)
@@ -66,7 +68,9 @@ impl Tool for StockKlineTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let period = input["period"].as_str().unwrap_or("daily");
         let limit = input["limit"].as_u64().unwrap_or(120) as u32;
         let r = self
@@ -102,7 +106,9 @@ impl Tool for StockFinancialsTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_financials(code)
@@ -136,7 +142,9 @@ impl Tool for StockNewsTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let limit = input["limit"].as_u64().unwrap_or(30) as u32;
         let r = self
             .client
@@ -171,7 +179,9 @@ impl Tool for StockMoneyFlowTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_money_flow(code)
@@ -271,7 +281,9 @@ impl Tool for StockAnnouncementsTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_announcements(code)
@@ -305,7 +317,9 @@ impl Tool for StockConsensusEPSTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_consensus_eps(code)
@@ -339,7 +353,9 @@ impl Tool for SearchStockTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let kw = input["keyword"].as_str().unwrap_or("000001");
+        let kw = input["keyword"]
+            .as_str()
+            .ok_or_else(|| te("keyword不能为空".into()))?;
         let r = self
             .client
             .search_stock(kw)
@@ -372,7 +388,9 @@ impl Tool for ComputeScoringTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let (klines_r, quote_r) =
             tokio::join!(self.client.get_klines(code, "daily", 120), self.client.get_quote(code));
         let klines = klines_r.map_err(|e| te(e.to_string()))?;
@@ -529,7 +547,9 @@ impl Tool for ComputeValuationTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let (quote_r, financials_r) =
             tokio::join!(self.client.get_quote(code), self.client.get_financials(code));
         let quote = quote_r.map_err(|e| te(e.to_string()))?;
@@ -876,7 +896,9 @@ impl Tool for StockBlockTradesTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_block_trades(code)
@@ -910,7 +932,9 @@ impl Tool for StockInstitutionalVisitsTool {
         ToolCategory::Finance
     }
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let code = input["stock_code"].as_str().unwrap_or("000001");
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
         let r = self
             .client
             .get_institutional_visits(code)

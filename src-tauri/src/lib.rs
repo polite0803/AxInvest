@@ -994,6 +994,9 @@ pub fn run() {
             commands::stock_analysis::get_cls_flash,
             commands::stock_analysis::get_market_dragon_tiger,
             commands::stock_analysis::get_north_bound_flow,
+            commands::stock_analysis::get_index_quotes,
+            commands::stock_analysis::get_stock_peers,
+            commands::stock_analysis::get_stock_option_pcr,
             commands::stock_analysis::check_vendor_health,
             // Service health check
             commands::health::get_service_health,

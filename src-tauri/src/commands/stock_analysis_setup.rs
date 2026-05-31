@@ -163,6 +163,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_stock_news",
             "get_stock_money_flow",
             "get_hot_stocks",
+            "get_stock_option_pcr",
             "search_stock",
         ],
     ),
@@ -172,6 +173,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_stock_news",
             "get_announcements",
             "get_cls_flash",
+            "get_stock_option_pcr",
             "search_stock",
         ],
     ),
@@ -182,6 +184,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "compute_valuation",
             "get_consensus_eps",
             "get_institutional_visits",
+            "get_stock_peers",
             "search_stock",
         ],
     ),
@@ -197,7 +200,16 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "search_stock",
         ],
     ),
-    ("lockup-watcher", &["get_stock_financials", "get_announcements", "search_stock"]),
+    (
+        "lockup-watcher",
+        &[
+            "get_stock_financials",
+            "get_announcements",
+            "get_block_trades",
+            "get_institutional_visits",
+            "search_stock",
+        ],
+    ),
     (
         "research-analyst",
         &[
@@ -216,6 +228,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_hot_stocks",
             "get_stock_quote",
             "get_concept_blocks",
+            "get_stock_peers",
             "search_stock",
         ],
     ),
@@ -240,6 +253,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "compute_scoring",
             "compute_valuation",
             "compute_portfolio_risk",
+            "get_index_quotes",
             "search_stock",
         ],
     ),
@@ -281,15 +295,21 @@ async fn seed_stock_analysis_workflow_template(
         .await
         .map_err(|e| format!("查询工作流模板失败: {e}"))?
     {
-        // 始终删除重建，确保模板与代码一致
-        workflow_template::Entity::delete_by_id(TEMPLATE_ID)
-            .exec(db)
-            .await
-            .map_err(|e| format!("删除旧模板失败: {e}"))?;
+        if existing.version >= TEMPLATE_VERSION {
+            tracing::info!(
+                "[stock_analysis_setup] 模板已是最新版本 v{}，跳过种子化以保留用户修改",
+                existing.version
+            );
+            return Ok(());
+        }
         tracing::info!(
             "[stock_analysis_setup] 更新股票分析工作流模板 v{} → v{TEMPLATE_VERSION}",
             existing.version
         );
+        workflow_template::Entity::delete_by_id(TEMPLATE_ID)
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除旧模板失败: {e}"))?;
     }
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -297,7 +317,7 @@ async fn seed_stock_analysis_workflow_template(
     let tool_node =
         |id: &str, title: &str, tool_name: &str, output_var: &str, arg_key: &str| -> WorkflowNode {
             let mut input_mapping = std::collections::HashMap::new();
-            input_mapping.insert(arg_key.to_string(), "__workflow_input__.stock_code".to_string());
+            input_mapping.insert(arg_key.to_string(), "stock_code".to_string());
             WorkflowNode::Tool(ToolNode {
                 base: WorkflowNodeBase {
                     id: id.into(),
@@ -777,6 +797,39 @@ async fn seed_stock_analysis_workflow_template(
             items: None,
         }),
     };
+    let td_idx = ToolDef {
+        name: "get_index_quotes".into(),
+        description: Some("获取大盘指数行情（上证指数、深证成指、创业板指）".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
+    };
+    let td_peers = ToolDef {
+        name: "get_stock_peers".into(),
+        description: Some("获取同行业可比公司估值（PE/PB/ROE/涨跌幅/市值）".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
+    };
+    let td_pcr = ToolDef {
+        name: "get_stock_option_pcr".into(),
+        description: Some("获取期权PCR（看跌/看涨比率和持仓量比率，市场情绪前瞻指标）".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::new()),
+            required: None,
+            items: None,
+        }),
+    };
 
     // 工具名 → ToolDef 映射（用于按名查找，给节点填充 config.tools）
     let tool_def_map: std::collections::HashMap<&str, ToolDef> = [
@@ -809,6 +862,9 @@ async fn seed_stock_analysis_workflow_template(
         ("get_concept_blocks", td_concepts.clone()),
         ("get_block_trades", td_block.clone()),
         ("get_institutional_visits", td_visit.clone()),
+        ("get_index_quotes", td_idx.clone()),
+        ("get_stock_peers", td_peers.clone()),
+        ("get_stock_option_pcr", td_pcr.clone()),
     ]
     .into_iter()
     .collect();
@@ -1187,7 +1243,7 @@ async fn seed_stock_analysis_workflow_template(
     let algo_tools: &[(&str, &str, &str, &str)] = &[
         ("t-scoring", "技术评分", "compute_scoring", "stock_code"),
         ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
-        ("t-risk", "风险评估", "compute_portfolio_risk", "positions_json"),
+        ("t-risk", "风险评估", "compute_portfolio_risk", "stock_codes"),
     ];
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
@@ -2156,13 +2212,26 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
     const DEBATE_ID: &str = "stock-debate";
     const DEBATE_VERSION: i32 = 1;
 
-    if workflow_template::Entity::find_by_id(DEBATE_ID)
+    if let Some(existing) = workflow_template::Entity::find_by_id(DEBATE_ID)
         .one(db)
         .await
         .map_err(|e| format!("查询辩论模板失败: {e}"))?
-        .is_some()
     {
-        return Ok(());
+        if existing.version >= DEBATE_VERSION {
+            tracing::info!(
+                "[stock_analysis_setup] 辩论模板已是最新版本 v{}，跳过种子化以保留用户修改",
+                existing.version
+            );
+            return Ok(());
+        }
+        tracing::info!(
+            "[stock_analysis_setup] 更新辩论工作流模板 v{} → v{DEBATE_VERSION}",
+            existing.version
+        );
+        workflow_template::Entity::delete_by_id(DEBATE_ID)
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除旧辩论模板失败: {e}"))?;
     }
 
     let now = chrono::Utc::now().timestamp_millis();

@@ -5098,7 +5098,7 @@ mod tests_conversation {
                     Arc::new(axagent_astock_data::AStockClient::new()),
                 ),
             )),
-            plugin_manager: std::sync::Mutex::new(axagent_plugins::PluginManager::new(
+            plugin_manager: std::sync::RwLock::new(axagent_plugins::PluginManager::new(
                 axagent_plugins::PluginManagerConfig::new(temp_dir.clone()),
             )),
             shutdown_token: tokio_util::sync::CancellationToken::new(),

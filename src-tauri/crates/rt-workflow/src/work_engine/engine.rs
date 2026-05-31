@@ -78,6 +78,7 @@ pub struct StepProgressEvent {
     pub total_nodes: usize,
     pub completed_nodes: usize,
     pub execution_id: Option<String>,
+    pub output: Option<serde_json::Value>,
 }
 
 /// 步骤进度回调：`&self` 不可用时使用独立函数签名
@@ -1163,6 +1164,7 @@ impl WorkEngine {
                         total_nodes,
                         completed_nodes: completed,
                         execution_id: Some(execution_id.clone()),
+                        output: None,
                     })
                     .await;
                 }
@@ -1346,6 +1348,7 @@ impl WorkEngine {
                             .record_success();
 
                         let out_var = output.output_var.clone();
+                        let output_value = output.output.clone();
                         self.update_node_status(
                             workflow_id,
                             &node_id,
@@ -1419,6 +1422,7 @@ impl WorkEngine {
                                 total_nodes,
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
+                                output: Some(output_value.clone()),
                             })
                             .await;
                         }
@@ -1524,6 +1528,7 @@ impl WorkEngine {
                                     total_nodes,
                                     completed_nodes: completed,
                                     execution_id: Some(execution_id.clone()),
+                                    output: None,
                                 })
                                 .await;
                             }
@@ -1630,6 +1635,7 @@ impl WorkEngine {
                                     total_nodes,
                                     completed_nodes: completed,
                                     execution_id: Some(execution_id.clone()),
+                                    output: None,
                                 })
                                 .await;
                             }

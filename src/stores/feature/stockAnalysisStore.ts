@@ -387,8 +387,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       status: string;
       totalNodes: number;
       completedNodes: number;
+      output?: unknown;
     }>("workflow-step-done", (event) => {
-      const { nodeId, status, totalNodes, completedNodes } = event.payload;
+      const { nodeId, status, totalNodes, completedNodes, output } = event.payload;
       const stage = inferStage(nodeId);
       if (stage >= 0) { set({ currentStage: stage }); }
       const pct = totalNodes > 0
@@ -402,6 +403,56 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           ? i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId })
           : i18n.t("stockAnalysis.progress.stepRunning", { name: nodeId }),
       });
+
+      if (status === "completed" && output != null) {
+        const text = extractContent(output);
+        const s = get();
+        if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
+          set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });
+        } else if (nodeId.startsWith("bull-r")) {
+          const round = parseInt(nodeId.slice(6), 10);
+          const debates = [...s.debateRounds];
+          const idx = debates.findIndex((d) => d.round === round - 1);
+          if (idx >= 0) {
+            debates[idx] = { ...debates[idx], bull: text };
+          } else {
+            debates.push({ round: round - 1, bull: text, bear: "" });
+          }
+          debates.sort((a, b) => a.round - b.round);
+          set({ debateRounds: debates });
+        } else if (nodeId.startsWith("bear-r")) {
+          const round = parseInt(nodeId.slice(6), 10);
+          const debates = [...s.debateRounds];
+          const idx = debates.findIndex((d) => d.round === round - 1);
+          if (idx >= 0) {
+            debates[idx] = { ...debates[idx], bear: text };
+          } else {
+            debates.push({ round: round - 1, bull: "", bear: text });
+          }
+          debates.sort((a, b) => a.round - b.round);
+          set({ debateRounds: debates });
+        } else if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
+          set({ riskAssessments: { ...s.riskAssessments, [nodeId]: text } });
+        } else if (nodeId === "trader") {
+          set({ analystReports: { ...s.analystReports, "investment-plan": text } });
+        } else if (nodeId === "portfolio-mgr") {
+          try {
+            set({ decision: JSON.parse(text) as StockDecision });
+          } catch {
+            set({
+              decision: {
+                action: "HOLD",
+                positionPct: 0,
+                targetPrice: null,
+                stopLoss: null,
+                reasoning: text,
+                riskLevel: i18n.t("stockAnalysis.riskUnknown"),
+                confidence: 0,
+              },
+            });
+          }
+        }
+      }
     });
 
     // 工作流完成事件（Completed / PartiallyCompleted）

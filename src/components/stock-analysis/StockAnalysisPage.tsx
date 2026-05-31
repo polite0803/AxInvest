@@ -75,15 +75,6 @@ export function StockAnalysisPage() {
   }, []);
 
   useEffect(() => {
-    return () => {
-      const store = useStockAnalysisStore.getState();
-      if (store.status === "idle" || store.status === "completed" || store.status === "error") {
-        store.reset();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     const code = searchParams.get("code");
     if (code) {
       getStockQuote(code);

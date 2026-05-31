@@ -281,10 +281,7 @@ async fn seed_stock_analysis_workflow_template(
         .await
         .map_err(|e| format!("查询工作流模板失败: {e}"))?
     {
-        if existing.version >= TEMPLATE_VERSION {
-            return Ok(()); // 版本已最新，跳过
-        }
-        // 旧版本 → 删除重建
+        // 始终删除重建，确保模板与代码一致
         workflow_template::Entity::delete_by_id(TEMPLATE_ID)
             .exec(db)
             .await

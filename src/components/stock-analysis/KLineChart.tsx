@@ -50,6 +50,8 @@ export function KLineChart() {
 
   useEffect(() => {
     if (!chartRef.current) { return; }
+    const { clientWidth, clientHeight } = chartRef.current;
+    if (clientWidth === 0 || clientHeight === 0) { return; }
     instanceRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
     setChartReady(true);
     const chart = instanceRef.current;

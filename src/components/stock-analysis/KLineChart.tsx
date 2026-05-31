@@ -49,30 +49,21 @@ export function KLineChart() {
   }, [stockCode, getStockKline, setKlinePeriod]);
 
   useEffect(() => {
-    const container = chartRef.current;
-    if (!container) { return; }
-
-    const tryInit = () => {
-      if (instanceRef.current) { return; } // already initialized
-      const { clientWidth, clientHeight } = container;
-      if (clientWidth === 0 || clientHeight === 0) { return; }
-      instanceRef.current = echarts.init(container, undefined, { renderer: "canvas" });
-      setChartReady(true);
-      const chart = instanceRef.current;
-      const onResize = () => chart.resize();
-      ro.observe(container);
-      window.addEventListener("resize", onResize);
-    };
-
-    const ro = new ResizeObserver(() => tryInit());
-    tryInit(); // first attempt
+    if (!chartRef.current) { return; }
+    const chart = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
+    instanceRef.current = chart;
+    setChartReady(true);
+    const onResize = () => chart.resize();
+    const ro = new ResizeObserver(onResize);
+    ro.observe(chartRef.current);
+    window.addEventListener("resize", onResize);
+    // 确保布局完成后 resize 一次（解决首次挂载容器 0×0 导致空白的问题）
+    requestAnimationFrame(() => chart.resize());
     return () => {
       ro.disconnect();
-      if (instanceRef.current) {
-        window.removeEventListener("resize", () => instanceRef.current?.resize());
-        instanceRef.current.dispose();
-        instanceRef.current = null;
-      }
+      window.removeEventListener("resize", onResize);
+      chart.dispose();
+      instanceRef.current = null;
     };
   }, []);
 

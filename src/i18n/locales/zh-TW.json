@@ -7067,7 +7067,10 @@
       "medium": "中",
       "low": "低"
     },
-    "workflowStarting": "⏳ 正在啟動 {{stockCode}} 股票分析工作流程..."
+    "workflowStarting": "⏳ 正在啟動 {{stockCode}} 股票分析工作流程...",
+    "progress": {
+      "stepRunning": "⏳ {{name}} 執行中"
+    }
   },
   "trade": {
     "title": "交易日志",

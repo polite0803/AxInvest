@@ -7075,7 +7075,10 @@
       "medium": "Mittel",
       "low": "Niedrig"
     },
-    "workflowStarting": "⏳ Starte {{stockCode}} Aktienanalyse-Workflow..."
+    "workflowStarting": "⏳ Starte {{stockCode}} Aktienanalyse-Workflow...",
+    "progress": {
+      "stepRunning": "⏳ {{name}} läuft"
+    }
   },
   "trade": {
     "title": "Trading Log",

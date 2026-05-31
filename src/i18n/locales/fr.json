@@ -7075,7 +7075,10 @@
       "medium": "Moyen",
       "low": "Faible"
     },
-    "workflowStarting": "⏳ Démarrage du workflow d'analyse de {{stockCode}}..."
+    "workflowStarting": "⏳ Démarrage du workflow d'analyse de {{stockCode}}...",
+    "progress": {
+      "stepRunning": "⏳ {{name}} en cours"
+    }
   },
   "trade": {
     "title": "Trading Log",

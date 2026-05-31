@@ -7075,7 +7075,10 @@
       "medium": "中",
       "low": "低"
     },
-    "workflowStarting": "⏳ {{stockCode}} 株式分析ワークフローを起動中..."
+    "workflowStarting": "⏳ {{stockCode}} 株式分析ワークフローを起動中...",
+    "progress": {
+      "stepRunning": "⏳ {{name}} 実行中"
+    }
   },
   "trade": {
     "title": "Trading Log",

@@ -7143,5 +7143,6 @@
     "agentRole.synthesizer": "综合者",
     "agentRole.executor": "执行者"
   },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} 运行中"
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} 运行中",
+  "stockAnalysis.progress.fetchingData": "正在获取股票数据，请稍候..."
 }

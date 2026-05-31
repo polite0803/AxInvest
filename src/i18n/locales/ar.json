@@ -7102,5 +7102,6 @@
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
   },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} قيد التشغيل"
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} قيد التشغيل",
+  "stockAnalysis.progress.fetchingData": "جاري جلب بيانات الأسهم..."
 }

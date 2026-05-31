@@ -7095,5 +7095,6 @@
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor"
   },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} चल रहा है"
+  "stockAnalysis.progress.stepRunning": "⏳ {{name}} चल रहा है",
+  "stockAnalysis.progress.fetchingData": "शेयर डेटा प्राप्त किया जा रहा है..."
 }

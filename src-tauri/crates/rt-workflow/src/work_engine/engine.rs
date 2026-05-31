@@ -1106,12 +1106,19 @@ impl WorkEngine {
                     continue;
                 }
 
-                // 2. 构建执行上下文（含依赖结果）
+                // 2. 构建执行上下文（含依赖结果 + 工作流级变量）
                 let deps_results = {
                     let workflows = self.workflows.read().await;
                     workflows
                         .get(workflow_id)
                         .map(|wf| Self::get_node_dependency_results(wf, &node_id))
+                        .unwrap_or_default()
+                };
+                let workflow_vars = {
+                    let executions = self.executions.lock().await;
+                    executions
+                        .get(&execution_id)
+                        .map(|s| s.variables.clone())
                         .unwrap_or_default()
                 };
                 let input_snapshot =
@@ -1170,7 +1177,12 @@ impl WorkEngine {
                     workflow_id.to_string(),
                     serde_json::json!({}),
                 );
-                exec_ctx.variables = deps_results;
+                for (k, v) in workflow_vars {
+                    exec_ctx.variables.entry(k).or_insert(v);
+                }
+                for (k, v) in deps_results {
+                    exec_ctx.variables.insert(k, v);
+                }
                 exec_ctx.cancel_token = Some(cancel_token.clone());
                 exec_ctx.dry_run = options.dry_run;
                 {
@@ -1379,6 +1391,37 @@ impl WorkEngine {
                                 skip_disabled_branch_nodes(wf, &wf.edges.clone(), &node_id);
                             }
                         }
+
+                        // 向前端推送"步骤完成"进度事件
+                        if let Some(ref cb) = progress_cb {
+                            let completed = {
+                                let workflows = self.workflows.read().await;
+                                workflows
+                                    .get(workflow_id)
+                                    .map(|w| {
+                                        w.node_states
+                                            .values()
+                                            .filter(|s| {
+                                                matches!(
+                                                    s.status,
+                                                    NodeStatus::Completed
+                                                        | NodeStatus::Failed
+                                                        | NodeStatus::Skipped
+                                                )
+                                            })
+                                            .count()
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            cb(StepProgressEvent {
+                                node_id: node_id.clone(),
+                                status: "completed".to_string(),
+                                total_nodes,
+                                completed_nodes: completed,
+                                execution_id: Some(execution_id.clone()),
+                            })
+                            .await;
+                        }
                     },
                     Ok(Err(err)) => {
                         breakers
@@ -1452,6 +1495,39 @@ impl WorkEngine {
                         )
                         .await
                         .ok();
+
+                        // 向前端推送"步骤失败"进度事件（仅在重试耗尽后）
+                        if current_attempts >= max_retries {
+                            if let Some(ref cb) = progress_cb {
+                                let completed = {
+                                    let workflows = self.workflows.read().await;
+                                    workflows
+                                        .get(workflow_id)
+                                        .map(|w| {
+                                            w.node_states
+                                                .values()
+                                                .filter(|s| {
+                                                    matches!(
+                                                        s.status,
+                                                        NodeStatus::Completed
+                                                            | NodeStatus::Failed
+                                                            | NodeStatus::Skipped
+                                                    )
+                                                })
+                                                .count()
+                                        })
+                                        .unwrap_or(0)
+                                };
+                                cb(StepProgressEvent {
+                                    node_id: node_id.clone(),
+                                    status: "failed".to_string(),
+                                    total_nodes,
+                                    completed_nodes: completed,
+                                    execution_id: Some(execution_id.clone()),
+                                })
+                                .await;
+                            }
+                        }
                     },
                     Err(_) => {
                         breakers
@@ -1525,6 +1601,39 @@ impl WorkEngine {
                         )
                         .await
                         .ok();
+
+                        // 向前端推送"步骤超时失败"进度事件（仅在重试耗尽后）
+                        if current_attempts >= max_retries {
+                            if let Some(ref cb) = progress_cb {
+                                let completed = {
+                                    let workflows = self.workflows.read().await;
+                                    workflows
+                                        .get(workflow_id)
+                                        .map(|w| {
+                                            w.node_states
+                                                .values()
+                                                .filter(|s| {
+                                                    matches!(
+                                                        s.status,
+                                                        NodeStatus::Completed
+                                                            | NodeStatus::Failed
+                                                            | NodeStatus::Skipped
+                                                    )
+                                                })
+                                                .count()
+                                        })
+                                        .unwrap_or(0)
+                                };
+                                cb(StepProgressEvent {
+                                    node_id: node_id.clone(),
+                                    status: "failed".to_string(),
+                                    total_nodes,
+                                    completed_nodes: completed,
+                                    execution_id: Some(execution_id.clone()),
+                                })
+                                .await;
+                            }
+                        }
                     },
                 }
             } // end for node_id in ready_nodes

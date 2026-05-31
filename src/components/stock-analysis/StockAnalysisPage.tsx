@@ -50,7 +50,6 @@ export function StockAnalysisPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const analysisId = useStockAnalysisStore((s) => s.analysisId);
-  const setupEventListener = useStockAnalysisStore((s) => s.setupEventListener);
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const status = useStockAnalysisStore((s) => s.status);
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -72,8 +71,17 @@ export function StockAnalysisPage() {
   }, []);
 
   useEffect(() => {
-    setupEventListener();
-  }, [setupEventListener]);
+    useStockAnalysisStore.getState().setupEventListener();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      const store = useStockAnalysisStore.getState();
+      if (store.status === "idle" || store.status === "completed" || store.status === "error") {
+        store.reset();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const code = searchParams.get("code");

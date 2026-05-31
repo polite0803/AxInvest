@@ -810,4 +810,137 @@ impl StockVendor for EastMoneyVendor {
             })
             .collect())
     }
+
+    async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        let indices = [
+            ("1.000001", "上证指数"),
+            ("0.399001", "深证成指"),
+            ("0.399006", "创业板指"),
+        ];
+        let mut results = Vec::with_capacity(indices.len());
+        for (secid, name) in &indices {
+            let url = format!(
+                "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f170"
+            );
+            match self.em_get(&url).await {
+                Ok(resp) => {
+                    let json: Value = resp.json().await.unwrap_or(Value::Null);
+                    let d = &json["data"];
+                    if d.is_null() {
+                        continue;
+                    }
+                    let f = |key: &str| d[key].as_f64().unwrap_or(0.0);
+                    results.push(IndexQuote {
+                        code: d["f57"].as_str().unwrap_or("").to_string(),
+                        name: name.to_string(),
+                        price: f("f43") / 100.0,
+                        pre_close: f("f60") / 100.0,
+                        change_pct: f("f170") / 100.0,
+                        volume: f("f47"),
+                        amount: f("f48"),
+                    });
+                },
+                Err(_) => continue,
+            }
+        }
+        Ok(results)
+    }
+
+    async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
+        let secid = to_em_secid(stock_code);
+        let board_url =
+            format!("https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f127");
+        let resp = self.em_get(&board_url).await?;
+        let json: Value = resp.json().await.unwrap_or(Value::Null);
+        let board_code = json["data"]["f127"].as_str().unwrap_or("").to_string();
+        if board_code.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let peer_url = format!(
+            "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&fs=b:{board_code}&fields=f12,f14,f162,f167,f127,f2,f116,f170"
+        );
+        let resp = self.em_get(&peer_url).await?;
+        let json: Value = resp.json().await.unwrap_or(Value::Null);
+
+        let rows = match json["data"]["diff"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(rows
+            .iter()
+            .filter(|r| r["f12"].as_str().map(|c| c != stock_code).unwrap_or(false))
+            .map(|r| {
+                let f = |key: &str| r[key].as_f64();
+                PeerComparison {
+                    stock_code: r["f12"].as_str().unwrap_or("").to_string(),
+                    stock_name: r["f14"].as_str().unwrap_or("").to_string(),
+                    pe: f("f162").and_then(|v| if v > 0.0 { Some(v / 100.0) } else { None }),
+                    pb: f("f167").and_then(|v| if v > 0.0 { Some(v / 100.0) } else { None }),
+                    roe: f("f127").and_then(|v| if v > 0.0 { Some(v / 100.0) } else { None }),
+                    change_pct: f("f170").unwrap_or(0.0) / 100.0,
+                    market_cap: f("f116").filter(|v| *v > 0.0),
+                }
+            })
+            .collect())
+    }
+
+    async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
+        let underlying = if stock_code.starts_with('5') || stock_code.starts_with('6') {
+            format!("1.{stock_code}")
+        } else {
+            format!("0.{stock_code}")
+        };
+        let url = format!(
+            "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=50&fs=option_{underlying}&fields=f12,f14,f164,f165,f166,f167"
+        );
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await.unwrap_or(Value::Null);
+
+        let rows = match json["data"]["diff"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(None),
+        };
+
+        let mut call_volume = 0.0_f64;
+        let mut put_volume = 0.0_f64;
+        let mut call_oi = 0.0_f64;
+        let mut put_oi = 0.0_f64;
+
+        for r in rows {
+            let name = r["f14"].as_str().unwrap_or("");
+            let vol = r["f164"].as_f64().unwrap_or(0.0);
+            let oi = r["f165"].as_f64().unwrap_or(0.0);
+            if name.contains("购") || name.contains("C") {
+                call_volume += vol;
+                call_oi += oi;
+            } else if name.contains("沽") || name.contains("P") {
+                put_volume += vol;
+                put_oi += oi;
+            }
+        }
+
+        if call_volume == 0.0 && put_volume == 0.0 && call_oi == 0.0 && put_oi == 0.0 {
+            return Ok(None);
+        }
+
+        let volume_pcr = if call_volume > 0.0 {
+            put_volume / call_volume
+        } else {
+            0.0
+        };
+        let oi_pcr = if call_oi > 0.0 { put_oi / call_oi } else { 0.0 };
+
+        Ok(Some(OptionPCR {
+            stock_code: stock_code.to_string(),
+            date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+            call_volume,
+            put_volume,
+            call_oi,
+            put_oi,
+            volume_pcr,
+            oi_pcr,
+        }))
+    }
 }

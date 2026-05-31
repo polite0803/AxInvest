@@ -17,7 +17,6 @@ pub async fn build_analyst_context(
 
     match expert_id {
         "market-analyst" => {
-            // 优先提供已计算的技术指标（预计算），K线数据作为补充
             if let Some(indicators) = bb.get_state("raw.indicators") {
                 let _ = write!(ctx, "## 预计算技术指标\n{indicators}\n\n");
             }
@@ -26,6 +25,9 @@ pub async fn build_analyst_context(
             }
             if let Some(score) = bb.get_state("raw.objective_score") {
                 let _ = write!(ctx, "## 客观评分参考\n{score}\n");
+            }
+            if let Some(idx) = bb.get_state("market.index_quotes") {
+                let _ = write!(ctx, "## 大盘指数行情\n{idx}\n");
             }
         },
         "fundamentals-analyst" => {
@@ -50,6 +52,9 @@ pub async fn build_analyst_context(
             if let Some(eps) = bb.get_state("raw.consensus_eps") {
                 let _ = write!(ctx, "## 机构一致预期EPS\n{eps}\n");
             }
+            if let Some(peers) = bb.get_state("raw.peers") {
+                let _ = write!(ctx, "## 同行业可比公司估值\n{peers}\n");
+            }
         },
         "news-analyst" | "sentiment-analyst" => {
             if let Some(news) = bb.get_state("raw.news") {
@@ -57,6 +62,12 @@ pub async fn build_analyst_context(
             }
             if let Some(cls) = bb.get_state("market.cls_flash") {
                 let _ = write!(ctx, "## 财联社快讯\n{cls}\n");
+            }
+            if let Some(ann) = bb.get_state("raw.announcements") {
+                let _ = write!(ctx, "## 公司公告\n{ann}\n");
+            }
+            if let Some(pcr) = bb.get_state("raw.option_pcr") {
+                let _ = write!(ctx, "## 期权PCR（看跌/看涨比率）\n{pcr}\n");
             }
         },
         "policy-analyst" => {
@@ -100,6 +111,12 @@ pub async fn build_analyst_context(
             if let Some(trades) = bb.get_state("raw.shareholder_trades") {
                 let _ = write!(ctx, "## 股东增减持记录\n{trades}\n");
             }
+            if let Some(block) = bb.get_state("raw.block_trades") {
+                let _ = write!(ctx, "## 大宗交易\n{block}\n");
+            }
+            if let Some(visits) = bb.get_state("raw.institutional_visits") {
+                let _ = write!(ctx, "## 机构调研记录\n{visits}\n");
+            }
         },
         "value-investor" => {
             if let Some(fin) = bb.get_state("raw.financials") {
@@ -141,6 +158,9 @@ pub async fn build_analyst_context(
             }
             if let Some(sector) = bb.get_state("raw.sector_info") {
                 let _ = write!(ctx, "## 行业分类\n{sector}\n");
+            }
+            if let Some(peers) = bb.get_state("raw.peers") {
+                let _ = write!(ctx, "## 同行业可比公司估值\n{peers}\n");
             }
         },
         _ => {
@@ -191,6 +211,9 @@ pub async fn build_analyst_context(
         }
         if let Some(value) = bb.get_state("value.assessment") {
             let _ = write!(ctx, "\n--- 价值评估 ---\n{}\n", safe_truncate(value, 800));
+        }
+        if let Some(idx) = bb.get_state("market.index_quotes") {
+            let _ = write!(ctx, "\n--- 大盘指数 ---\n{}\n", safe_truncate(idx, 500));
         }
         if let Some(quality) = bb.get_state("data_quality_summary") {
             let _ = write!(ctx, "\n--- 数据质量 ---\n{}\n", quality);

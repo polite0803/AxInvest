@@ -54,6 +54,9 @@ struct VendorRouting {
     north_bound_flow: Vec<String>,
     block_trades: Vec<String>,
     institutional_visits: Vec<String>,
+    index_quotes: Vec<String>,
+    peers: Vec<String>,
+    option_pcr: Vec<String>,
 }
 
 impl VendorRouting {
@@ -88,6 +91,9 @@ impl VendorRouting {
             north_bound_flow: vec!["ths".into(), "baidu_stock".into()],
             block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             institutional_visits: vec!["eastmoney".into(), "baidu_stock".into()],
+            index_quotes: vec!["eastmoney".into()],
+            peers: vec!["eastmoney".into()],
+            option_pcr: vec!["eastmoney".into()],
         }
     }
 }
@@ -704,13 +710,65 @@ impl AStockClient {
         Ok(vec![])
     }
 
+    pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        for name in &self.routing.index_quotes {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_index_quotes().await {
+                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} 指数行情返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 指数行情失败: {}", name, e);
+                    },
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
+        for name in &self.routing.peers {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_peers(stock_code).await {
+                    Ok(result) if !result.is_empty() => return Ok(result),
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} 同行对比返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 同行对比失败: {}", name, e);
+                    },
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    pub async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
+        for name in &self.routing.option_pcr {
+            if let Some(vendor) = self.find_vendor(name) {
+                match vendor.get_option_pcr(stock_code).await {
+                    Ok(Some(result)) => return Ok(Some(result)),
+                    Ok(None) => {
+                        tracing::warn!("[降级] {} 期权PCR返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 期权PCR失败: {}", name, e);
+                    },
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn fetch_market_data(&self) -> Result<MarketRawData, DataError> {
-        let (hot_r, industry_r, cls_r, mdt_r, nbf_r) = tokio::join!(
+        let (hot_r, industry_r, cls_r, mdt_r, nbf_r, idx_r) = tokio::join!(
             self.get_hot_stocks(),
             self.get_industry_ranking(),
             self.get_cls_flash(),
             self.get_market_dragon_tiger(),
             self.get_north_bound_flow(),
+            self.get_index_quotes(),
         );
 
         Ok(MarketRawData {
@@ -733,6 +791,10 @@ impl AStockClient {
             north_bound_flow: nbf_r.unwrap_or_else(|e| {
                 tracing::warn!("north_bound_flow failed: {e}");
                 None
+            }),
+            index_quotes: idx_r.unwrap_or_else(|e| {
+                tracing::warn!("index_quotes failed: {e}");
+                vec![]
             }),
         })
     }
@@ -763,6 +825,8 @@ impl AStockClient {
             announcements_r,
             block_trades_r,
             institutional_visits_r,
+            peers_r,
+            option_pcr_r,
         ) = tokio::join!(
             self.get_quote(stock_code),
             self.get_klines(stock_code, kline_period, kline_limit),
@@ -782,6 +846,8 @@ impl AStockClient {
             self.get_announcements(stock_code),
             self.get_block_trades(stock_code),
             self.get_institutional_visits(stock_code),
+            self.get_peers(stock_code),
+            self.get_option_pcr(stock_code),
         );
 
         let quote = match quote_r {
@@ -866,6 +932,14 @@ impl AStockClient {
             tracing::warn!("institutional_visits failed: {e}");
             vec![]
         });
+        let peers = peers_r.unwrap_or_else(|e| {
+            tracing::warn!("peers failed: {e}");
+            vec![]
+        });
+        let option_pcr = option_pcr_r.unwrap_or_else(|e| {
+            tracing::warn!("option_pcr failed: {e}");
+            None
+        });
 
         Ok(StockRawData {
             quote,
@@ -886,6 +960,8 @@ impl AStockClient {
             announcements,
             block_trades,
             institutional_visits,
+            peers,
+            option_pcr,
         })
     }
 }

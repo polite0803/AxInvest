@@ -35,6 +35,7 @@ import { ContextPredictionPanel } from "../proactive/ContextPredictionPanel";
 import { PrefetchIndicator } from "../proactive/PrefetchIndicator";
 import { ProactiveSuggestionBar } from "../proactive/ProactiveSuggestionBar";
 import { ReminderList } from "../proactive/ReminderList";
+import { StockAnalysisChatIndicator } from "../stock-analysis/StockAnalysisChatIndicator";
 import { AgentProgressBar } from "./AgentProgressBar";
 import { AgentStatsPanel } from "./AgentStatsPanel";
 import { BreadcrumbBar } from "./BreadcrumbBar";
@@ -773,6 +774,8 @@ function ChatViewInner({
       )}
 
       {activeConversation?.mode !== "agent" && <QuickCommandBar />}
+
+      <StockAnalysisChatIndicator />
 
       <div className="relative">
         {scroll.showScrollToBottom && (

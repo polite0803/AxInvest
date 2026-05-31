@@ -210,6 +210,10 @@ export const ContentArea = memo(function ContentArea() {
             element={<SafeLazyPage Page={LazyStockAnalysisPage} />}
           />
           <Route
+            path="/stock-analysis/:id"
+            element={<SafeLazyPage Page={LazyStockAnalysisPage} />}
+          />
+          <Route
             path="/devtools/trace-explorer"
             element={<SafeLazyPage Page={LazyTraceExplorer} />}
           />

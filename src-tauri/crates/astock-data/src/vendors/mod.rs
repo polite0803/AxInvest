@@ -125,6 +125,23 @@ pub trait StockVendor: Send + Sync {
         let _ = stock_code;
         Ok(vec![])
     }
+
+    /// 获取大盘指数行情（上证/深证/创业板）
+    async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        Ok(vec![])
+    }
+
+    /// 获取同行业可比公司估值
+    async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
+        let _ = stock_code;
+        Ok(vec![])
+    }
+
+    /// 获取期权PCR（看跌/看涨比率）
+    async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
 }
 
 pub mod akshare;

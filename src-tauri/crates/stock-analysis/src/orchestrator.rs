@@ -93,6 +93,7 @@ impl StockAnalysisOrchestrator {
                 cls_flash: vec![],
                 market_dragon_tiger: vec![],
                 north_bound_flow: None,
+                index_quotes: vec![],
             }
         });
         {
@@ -108,11 +109,13 @@ impl StockAnalysisOrchestrator {
                 .as_ref()
                 .map(|n| serde_json::to_string(n).unwrap_or_default())
                 .unwrap_or_default();
+            let idx_json = serde_json::to_string(&market_data.index_quotes).unwrap_or_default();
             bb.set_state("market.hot_stocks", &hot_json);
             bb.set_state("market.industry_ranking", &industry_json);
             bb.set_state("market.cls_flash", &cls_json);
             bb.set_state("market.market_dragon_tiger", &mdt_json);
             bb.set_state("market.north_bound_flow", &nbf_json);
+            bb.set_state("market.index_quotes", &idx_json);
         }
 
         // ── NEW ①: 计算技术指标 ──
@@ -496,6 +499,12 @@ impl StockAnalysisOrchestrator {
         let block_trades_json = serde_json::to_string(&raw.block_trades).unwrap_or_default();
         let institutional_visits_json =
             serde_json::to_string(&raw.institutional_visits).unwrap_or_default();
+        let peers_json = serde_json::to_string(&raw.peers).unwrap_or_default();
+        let option_pcr_json = raw
+            .option_pcr
+            .as_ref()
+            .map(|p| serde_json::to_string(p).unwrap_or_default())
+            .unwrap_or_default();
 
         {
             let mut bb = blackboard.write().await;
@@ -516,6 +525,8 @@ impl StockAnalysisOrchestrator {
             bb.set_state("raw.announcements", &announcements_json);
             bb.set_state("raw.block_trades", &block_trades_json);
             bb.set_state("raw.institutional_visits", &institutional_visits_json);
+            bb.set_state("raw.peers", &peers_json);
+            bb.set_state("raw.option_pcr", &option_pcr_json);
         }
 
         let _ = events.send(AnalysisEvent::DataLoaded {

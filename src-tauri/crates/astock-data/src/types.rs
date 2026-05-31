@@ -420,6 +420,46 @@ pub struct NorthBoundFlow {
     pub timestamp: Option<String>,
 }
 
+/// 大盘指数行情
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexQuote {
+    pub code: String,
+    pub name: String,
+    pub price: f64,
+    pub pre_close: f64,
+    pub change_pct: f64,
+    pub volume: f64,
+    pub amount: f64,
+}
+
+/// 同行业可比公司估值
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerComparison {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub pe: Option<f64>,
+    pub pb: Option<f64>,
+    pub roe: Option<f64>,
+    pub change_pct: f64,
+    pub market_cap: Option<f64>,
+}
+
+/// 期权PCR（看跌/看涨比率）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptionPCR {
+    pub stock_code: String,
+    pub date: String,
+    pub call_volume: f64,
+    pub put_volume: f64,
+    pub call_oi: f64,
+    pub put_oi: f64,
+    pub volume_pcr: f64,
+    pub oi_pcr: f64,
+}
+
 /// 批量原始数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -442,6 +482,8 @@ pub struct StockRawData {
     pub announcements: Vec<Announcement>,
     pub block_trades: Vec<BlockTrade>,
     pub institutional_visits: Vec<InstitutionalVisit>,
+    pub peers: Vec<PeerComparison>,
+    pub option_pcr: Option<OptionPCR>,
 }
 
 /// 市场级原始数据
@@ -453,6 +495,7 @@ pub struct MarketRawData {
     pub cls_flash: Vec<ClsFlashItem>,
     pub market_dragon_tiger: Vec<MarketDragonTiger>,
     pub north_bound_flow: Option<NorthBoundFlow>,
+    pub index_quotes: Vec<IndexQuote>,
 }
 
 #[cfg(test)]

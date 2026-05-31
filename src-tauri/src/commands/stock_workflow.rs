@@ -212,6 +212,13 @@ pub async fn run_stock_workflow(
         if let Some(v) = template_vars {
             opts = opts.with_variables(v);
         }
+        opts = opts.with_variables(vec![axagent_core::workflow_types::Variable {
+            name: "stock_code".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(stock_code.clone()),
+            description: Some("当前分析的股票代码".into()),
+            is_secret: false,
+        }]);
 
         match engine.run_workflow(&wf_id, opts).await {
             Ok(result) => {

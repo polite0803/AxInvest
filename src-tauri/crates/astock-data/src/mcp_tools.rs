@@ -254,6 +254,36 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "properties": {}
             }
         }),
+        json!({
+            "name": "get_index_quotes",
+            "description": "获取大盘指数行情（上证指数、深证成指、创业板指）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_stock_peers",
+            "description": "获取同行业可比公司估值（PE/PB/ROE/涨跌幅/市值）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "get_stock_option_pcr",
+            "description": "获取期权PCR（看跌/看涨成交量和持仓量比率，市场情绪前瞻指标）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
         // ── 算法工具 ──
         json!({
             "name": "compute_scoring",
@@ -490,6 +520,23 @@ pub async fn execute_mcp_tool(
                 .await
                 .map_err(|e| e.to_string())?;
             serde_json::to_string(&flow).map_err(|e| e.to_string())
+        },
+        "get_index_quotes" => {
+            let idx = client.get_index_quotes().await.map_err(|e| e.to_string())?;
+            serde_json::to_string(&idx).map_err(|e| e.to_string())
+        },
+        "get_stock_peers" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let peers = client.get_peers(code).await.map_err(|e| e.to_string())?;
+            serde_json::to_string(&peers).map_err(|e| e.to_string())
+        },
+        "get_stock_option_pcr" => {
+            let code = arguments["stock_code"].as_str().unwrap_or("");
+            let pcr = client
+                .get_option_pcr(code)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&pcr).map_err(|e| e.to_string())
         },
         _ => Err(format!("Unknown MCP tool: {tool_name}")),
     }

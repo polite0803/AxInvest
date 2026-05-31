@@ -172,7 +172,7 @@ impl StockVendor for ThsVendor {
         let empty_vec = vec![];
         let stocks = data
             .as_object()
-            .and_then(|obj| obj.get("list"))
+            .and_then(|obj| obj.get("info").or_else(|| obj.get("list")))
             .and_then(|v| v.as_array())
             .or_else(|| data.as_array())
             .unwrap_or(&empty_vec);
@@ -182,7 +182,11 @@ impl StockVendor for ThsVendor {
             .filter_map(|item| {
                 let code = item.get("code")?.as_str()?.to_string();
                 let name = item.get("name")?.as_str()?.to_string();
-                let change_pct = item.get("change_pct").and_then(val_to_f64).unwrap_or(0.0);
+                let change_pct = item
+                    .get("change_rate")
+                    .or_else(|| item.get("change_pct"))
+                    .and_then(val_to_f64)
+                    .unwrap_or(0.0);
                 let turnover_rate = item
                     .get("turnover_ratio")
                     .or_else(|| item.get("hs"))
@@ -231,7 +235,7 @@ impl StockVendor for ThsVendor {
         let empty_vec2 = vec![];
         let ranks = data
             .as_object()
-            .and_then(|obj| obj.get("list"))
+            .and_then(|obj| obj.get("info").or_else(|| obj.get("list")))
             .and_then(|v| v.as_array())
             .or_else(|| data.as_array())
             .unwrap_or(&empty_vec2);
@@ -244,7 +248,11 @@ impl StockVendor for ThsVendor {
                     .or_else(|| item.get("name"))
                     .and_then(|v| v.as_str())?
                     .to_string();
-                let change_pct = item.get("change_pct").and_then(val_to_f64).unwrap_or(0.0);
+                let change_pct = item
+                    .get("change_rate")
+                    .or_else(|| item.get("change_pct"))
+                    .and_then(val_to_f64)
+                    .unwrap_or(0.0);
                 let turnover = item
                     .get("turnover")
                     .or_else(|| item.get("amount"))

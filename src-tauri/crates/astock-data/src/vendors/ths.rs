@@ -48,16 +48,14 @@ impl StockVendor for ThsVendor {
         let hot = self.get_hot_stocks().await?;
         let mut result: Vec<MarketDragonTiger> = hot
             .into_iter()
-            .filter_map(|h| {
-                Some(MarketDragonTiger {
-                    stock_code: h.stock_code,
-                    stock_name: h.stock_name,
-                    date: String::new(),
-                    net_buy: 0.0,
-                    buy_amount: 0.0,
-                    sell_amount: 0.0,
-                    reason: h.reason_tags.first().cloned(),
-                })
+            .map(|h| MarketDragonTiger {
+                stock_code: h.stock_code,
+                stock_name: h.stock_name,
+                date: String::new(),
+                net_buy: 0.0,
+                buy_amount: 0.0,
+                sell_amount: 0.0,
+                reason: h.reason_tags.first().cloned(),
             })
             .collect();
         result.truncate(20);

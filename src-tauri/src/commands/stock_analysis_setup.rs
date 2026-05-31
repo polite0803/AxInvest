@@ -317,7 +317,7 @@ async fn seed_stock_analysis_workflow_template(
     let tool_node =
         |id: &str, title: &str, tool_name: &str, output_var: &str, arg_key: &str| -> WorkflowNode {
             let mut input_mapping = std::collections::HashMap::new();
-            input_mapping.insert(arg_key.to_string(), "trigger.config.stock_code".to_string());
+            input_mapping.insert(arg_key.to_string(), "trigger.stock_code".to_string());
             WorkflowNode::Tool(ToolNode {
                 base: WorkflowNodeBase {
                     id: id.into(),
@@ -1020,6 +1020,7 @@ async fn seed_stock_analysis_workflow_template(
             // 每个分支内部：ToolNode → AgentNode
             nodes.push(tool_node(tool_id, "获取数据", tool_name, tool_id, arg_key));
             edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
+            edges.push(edge(&format!("e-p-analysts-{tool_id}"), "p-analysts", tool_id));
             edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
             Branch {
                 id: analyst_id.to_string(),

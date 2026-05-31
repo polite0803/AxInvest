@@ -1,7 +1,7 @@
+import i18n from "@/i18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import type { AnalysisStatus, AnalysisSummary, KLine, StockDecision, StockQuote, StockSearchResult } from "@/types";
-import i18n from "i18next";
 import { create } from "zustand";
 
 // ── 工作流结果解析 ──

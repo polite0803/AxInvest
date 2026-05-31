@@ -1896,6 +1896,16 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
 
     // 写入 DB
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
+    // DEBUG: 验证前几个 Tool 节点的 type 字段
+    for n in nodes.iter().take(5) {
+        let json = serde_json::to_string(n).unwrap_or_default();
+        let preview = if json.len() > 200 {
+            &json[..200]
+        } else {
+            &json
+        };
+        tracing::info!(node_id = %n.base_id(), json_preview = %preview, "seed_node_type");
+    }
     let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化边失败: {e}"))?;
     let tags = serde_json::to_string(&["stock", "analysis", "A股"])
         .map_err(|e| format!("序列化标签失败: {e}"))?;

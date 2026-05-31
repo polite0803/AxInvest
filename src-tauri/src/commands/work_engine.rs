@@ -233,6 +233,10 @@ pub async fn debug_run_workflow(
 
     let nodes: Vec<axagent_core::workflow_types::WorkflowNode> =
         serde_json::from_str(&template.nodes).map_err(|e| format!("节点解析失败: {}", e))?;
+    for (i, n) in nodes.iter().enumerate() {
+        let typ = axagent_rt_workflow::work_engine::node_executor_trait::node_type_name(n);
+        tracing::info!(i, node_id = %n.base_id(), node_type = typ, "deserialized node");
+    }
     let edges: Vec<axagent_core::workflow_types::WorkflowEdge> =
         serde_json::from_str(&template.edges).map_err(|e| format!("边解析失败: {}", e))?;
 

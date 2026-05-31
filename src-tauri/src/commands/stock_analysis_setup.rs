@@ -297,7 +297,7 @@ async fn seed_stock_analysis_workflow_template(
     let tool_node =
         |id: &str, title: &str, tool_name: &str, output_var: &str, arg_key: &str| -> WorkflowNode {
             let mut input_mapping = std::collections::HashMap::new();
-            input_mapping.insert(arg_key.to_string(), "stock_code".to_string());
+            input_mapping.insert(arg_key.to_string(), "__workflow_input__.stock_code".to_string());
             WorkflowNode::Tool(ToolNode {
                 base: WorkflowNodeBase {
                     id: id.into(),

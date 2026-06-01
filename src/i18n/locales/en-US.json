@@ -6980,6 +6980,18 @@
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
         "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+      },
+      "workflow": {
+        "title": "Stock Analysis Workflow",
+        "inProgress": "In Progress",
+        "running": "Running",
+        "pending": "Pending",
+        "completed": "Completed",
+        "phase": "Phase",
+        "debateRound": "Debate Round",
+        "bullBearDebate": "Bull vs Bear Debate",
+        "riskAssessment": "Risk Assessment",
+        "analystReports": "Analyst Reports"
       }
     },
     "progress.fetchingData": "Fetching stock data...",

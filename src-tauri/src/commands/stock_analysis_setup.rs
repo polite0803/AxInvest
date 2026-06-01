@@ -1019,6 +1019,7 @@ async fn seed_stock_analysis_workflow_template(
             let analyst_id = a_ids[i];
             // 每个分支内部：ToolNode → AgentNode
             nodes.push(tool_node(tool_id, "获取数据", tool_name, tool_id, arg_key));
+            edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
             edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
             Branch {
                 id: analyst_id.to_string(),

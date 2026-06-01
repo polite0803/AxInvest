@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-05-29",
-  "total_entries": 148,
-  "total_files": 148,
+  "total_entries": 150,
+  "total_files": 150,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -324,7 +324,7 @@
     },
     {
       "file": "src/components/stock-analysis/__tests__/DecisionBanner.test.tsx",
-      "lines": "37,39,40,42,44,45,47",
+      "lines": "37,39,40,42,44,45,46,47",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -342,7 +342,7 @@
     },
     {
       "file": "src/components/stock-analysis/AnalystReportCard.tsx",
-      "lines": "77,79",
+      "lines": "77,79,80,82",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -366,7 +366,7 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "8,9,10,11,12,27,28,29,30,31,45,46,47,48,49,69,70,71,72,73,74,75,76,78,81,82,83,111,112,113,114,115,135,137,139,230,232",
+      "lines": "8,9,10,11,12,27,28,29,30,31,45,46,47,48,49,50,51,52,53,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,86,87,88,111,112,113,114,115,116,117,118,119,120,135,137,139,140,142,144,230,232,235,237",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -390,7 +390,7 @@
     },
     {
       "file": "src/components/stock-analysis/RiskMatrix.tsx",
-      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,40",
+      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,39,40,41",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -822,7 +822,7 @@
     },
     {
       "file": "src/stores/feature/stockAnalysisStore.ts",
-      "lines": "295",
+      "lines": "34,97,295,483",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -890,6 +890,18 @@
       "file": "src/components/workflow/WorkflowEditor.tsx",
       "lines": "841",
       "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/chat/WorkflowAgentCard.tsx",
+      "lines": "44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,301,303,305,347,349,351,352",
+      "reason": "工具名映射+内部状态标签，非UI文本",
+      "phase": 3
+    },
+    {
+      "file": "src/stores/feature/stockWorkflowChatBridge.ts",
+      "lines": "23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,103,107,109,114,116,117,118,121,282",
+      "reason": "工具标签映射+数据格式化逻辑",
       "phase": 3
     }
   ]

@@ -99,9 +99,27 @@ where
             }
             sp
         } else if config.system_prompt.is_empty() {
-            Vec::new()
+            let personality_prompt = crate::personality::PersonalityManager::get_active()
+                .ok()
+                .flatten()
+                .map(|p| p.system_prompt_injection())
+                .unwrap_or_default();
+            if personality_prompt.is_empty() {
+                Vec::new()
+            } else {
+                vec![personality_prompt]
+            }
         } else {
-            vec![config.system_prompt.clone()]
+            let personality_prompt = crate::personality::PersonalityManager::get_active()
+                .ok()
+                .flatten()
+                .map(|p| p.system_prompt_injection())
+                .unwrap_or_default();
+            if personality_prompt.is_empty() {
+                vec![config.system_prompt.clone()]
+            } else {
+                vec![personality_prompt, config.system_prompt.clone()]
+            }
         };
 
         let conversation_runtime = ConversationRuntime::new(
@@ -159,18 +177,20 @@ where
     pub fn run(&mut self, input: &str) -> Result<AgentOutput, AgentRuntimeError> {
         self.emit(AgentEvent::TurnStarted { iteration: 0 });
 
+        let preprocessed = crate::slash_command::apply_slash_command_for_agent(input);
+
         // 主动模式：检查是否应该注入 tick
         let effective_input = if let Some(ref mut proactive) = self.proactive {
             if proactive.should_tick() {
                 proactive.record_tick();
                 let tick = proactive.build_tick_prompt();
                 self.emit(AgentEvent::ProactiveTick);
-                format!("{}\n{}", tick, input)
+                format!("{}\n{}", tick, preprocessed.modified_text)
             } else {
-                input.to_string()
+                preprocessed.modified_text
             }
         } else {
-            input.to_string()
+            preprocessed.modified_text
         };
 
         let result = self.conversation_runtime.run_turn(&effective_input, None);

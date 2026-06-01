@@ -1,5 +1,7 @@
 //! 内置工具实现
 
+use std::collections::HashSet;
+
 pub mod agent;
 pub mod agent_memory;
 pub mod bash;
@@ -25,15 +27,19 @@ pub mod integration;
 pub mod knowledge;
 pub mod lsp;
 pub mod media;
+pub mod media_delivery;
 pub mod messaging;
+pub mod migration_tool;
 pub mod misc;
 pub mod monitor;
 pub mod network;
 pub mod obsidian;
 pub mod ocr;
+pub mod personality;
 pub mod plan;
 pub mod push_notification;
 pub mod repl;
+pub mod rpc;
 pub mod skill;
 pub mod stock_data;
 pub mod storage;
@@ -81,11 +87,19 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(todo_write::NotebookEditTool),
         // ── Agent 和 Skill ──
         std::sync::Arc::new(agent::AgentTool),
-        std::sync::Arc::new(skill::SkillTool),
+        std::sync::Arc::new(skill::SkillsListTool),
+        std::sync::Arc::new(skill::SkillViewTool),
+        std::sync::Arc::new(skill::SkillReferenceTool),
+        std::sync::Arc::new(skill::SkillBundleListTool),
+        std::sync::Arc::new(skill::SkillBundleCreateTool),
+        std::sync::Arc::new(skill::SkillBundleLoadTool),
+        std::sync::Arc::new(skill::SkillBundleDeleteTool),
         // ── 计划模式 ──
         std::sync::Arc::new(plan::EnterPlanModeTool),
         std::sync::Arc::new(plan::ExitPlanModeTool),
         std::sync::Arc::new(plan::VerifyPlanExecutionTool),
+        // ── 人格系统 ──
+        std::sync::Arc::new(personality::PersonalityTool),
         // ── 桌面控制 ──
         std::sync::Arc::new(computer_use::ComputerUseTool),
         // ── 浏览器 ──
@@ -120,6 +134,13 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(batch_missing::ReviewArtifactTool),
         std::sync::Arc::new(batch_missing::TerminalCaptureTool),
         std::sync::Arc::new(skill::DiscoverSkillsTool),
+        // ── Skills Hub (agentskills.io) ──
+        std::sync::Arc::new(skill::SkillHubSearchTool),
+        std::sync::Arc::new(skill::SkillHubInstallTool),
+        std::sync::Arc::new(skill::SkillHubReviewTool),
+        std::sync::Arc::new(skill::SkillHubPublishTool),
+        std::sync::Arc::new(skill::SkillEnvCheckTool),
+        std::sync::Arc::new(skill::SkillConfigTool),
         // ── 消息和文件 ──
         std::sync::Arc::new(batch_missing::BriefTool),
         std::sync::Arc::new(batch_missing::SendUserFileTool),
@@ -139,6 +160,7 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(monitor::MonitorTool),
         std::sync::Arc::new(context::CtxInspectTool),
         std::sync::Arc::new(context::SnipTool),
+        std::sync::Arc::new(context::ContextResolveTool),
         // ── 知识库 ──
         std::sync::Arc::new(knowledge::ListKnowledgeBasesTool),
         std::sync::Arc::new(knowledge::SearchKnowledgeTool),
@@ -200,6 +222,10 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(media::GenerateChartConfigTool),
         std::sync::Arc::new(media::SequentialThinkingTool),
         std::sync::Arc::new(media::Base64ImageTool),
+        // ── 媒体智能投递 ──
+        std::sync::Arc::new(media_delivery::MediaDetectTool),
+        std::sync::Arc::new(media_delivery::MediaDeliverTool),
+        std::sync::Arc::new(media_delivery::MediaPreviewTool),
         // ── 外部集成 ──
         std::sync::Arc::new(integration::DifyListBasesTool),
         std::sync::Arc::new(integration::DifySearchTool),
@@ -252,4 +278,13 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(finance::DragonTigerTool),
         std::sync::Arc::new(finance::ClsFlashTool),
     ]);
+
+    let available_toolsets: HashSet<String> = registry
+        .list_all()
+        .iter()
+        .map(|t| format!("{:?}", t.category).to_lowercase())
+        .collect();
+    skill::set_available_toolsets(available_toolsets);
+
+    rpc::set_tool_executor(std::sync::Arc::new(registry.clone()));
 }

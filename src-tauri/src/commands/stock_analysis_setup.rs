@@ -1011,20 +1011,20 @@ async fn seed_stock_analysis_workflow_template(
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
-    // ── Phase 1: ParallelNode 包裹 9 组 Tool+Agent 分析师 ──
+    // ── Phase 1: ParallelNode 作为视觉分组，包裹 9 个数据获取 Tool 节点 ──
     let analyst_branches: Vec<Branch> = tool_assignments
         .iter()
         .enumerate()
-        .map(|(i, (tool_id, _tool_title, tool_name, arg_key))| {
+        .map(|(i, (tool_id, tool_title, tool_name, arg_key))| {
             let analyst_id = a_ids[i];
-            // 每个分支内部：ToolNode → AgentNode
+            // ToolNode → AgentNode 通过边连接；ParallelNode 仅分组包裹 Tool
             nodes.push(tool_node(tool_id, "获取数据", tool_name, tool_id, arg_key));
             edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
             edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
             Branch {
-                id: analyst_id.to_string(),
-                title: analysts[i].1.to_string(),
-                steps: vec![tool_id.to_string(), analyst_id.to_string()],
+                id: tool_id.to_string(),
+                title: tool_title.to_string(),
+                steps: vec![tool_id.to_string()],
             }
         })
         .collect();

@@ -1242,7 +1242,11 @@ async fn convert_n8n_to_axagent(
                 config: MergeNodeConfig {
                     merge_type: MergeStrategy::All,
                     inputs: Vec::new(),
+<<<<<<< Updated upstream
                     auto_inputs_from_branches: false,
+=======
+                    auto_inputs_from_branches: true,
+>>>>>>> Stashed changes
                 },
             });
             ax_nodes.push(merge_node);

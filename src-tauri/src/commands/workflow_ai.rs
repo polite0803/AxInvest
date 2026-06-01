@@ -444,7 +444,11 @@ fn parse_llm_response(
                     .unwrap_or(MergeNodeConfig {
                         merge_type: MergeStrategy::All,
                         inputs: vec![],
+<<<<<<< Updated upstream
                         auto_inputs_from_branches: false,
+=======
+                        auto_inputs_from_branches: true,
+>>>>>>> Stashed changes
                     });
                 WorkflowNode::Merge(MergeNode {
                     base,

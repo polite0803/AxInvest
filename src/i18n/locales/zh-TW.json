@@ -7119,5 +7119,7 @@
   "stockAnalysis.workflow.bullBearDebate": "多空辯論",
   "stockAnalysis.settings.group.workflow": "工作流程",
   "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
-  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later"
+  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
+  "stockAnalysis.workflow.bullCase": "多方論點",
+  "stockAnalysis.workflow.bearCase": "空方論點"
 }

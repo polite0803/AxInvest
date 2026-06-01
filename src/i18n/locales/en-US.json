@@ -7150,5 +7150,7 @@
   "stockAnalysis.workflow.bullBearDebate": "Bull vs Bear Debate",
   "stockAnalysis.settings.group.workflow": "Workflow",
   "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
-  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later"
+  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
+  "stockAnalysis.workflow.bullCase": "Bull Case",
+  "stockAnalysis.workflow.bearCase": "Bear Case"
 }

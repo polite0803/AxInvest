@@ -736,10 +736,18 @@ for (const f of files) {
   const fp = join(dir, f);
   const j = JSON.parse(readFileSync(fp, "utf8"));
 
-  // stockAnalysis — MERGE mode (never replace)
+  // stockAnalysis — DEEP MERGE mode
   if (!j.stockAnalysis) { j.stockAnalysis = {}; }
   const saSource = f === "zh-CN.json" ? zhCN : f === "zh-TW.json" ? zhTW : enUS;
-  Object.assign(j.stockAnalysis, saSource);
+  for (const [k, v] of Object.entries(saSource)) {
+    if (
+      v && typeof v === "object" && !Array.isArray(v) && j.stockAnalysis[k] && typeof j.stockAnalysis[k] === "object"
+    ) {
+      Object.assign(j.stockAnalysis[k], v);
+    } else {
+      j.stockAnalysis[k] = v;
+    }
+  }
 
   // trade — MERGE mode
   if (!j.trade) { j.trade = {}; }

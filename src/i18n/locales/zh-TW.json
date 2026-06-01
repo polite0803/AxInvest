@@ -7095,5 +7095,14 @@
     "agentRole.executor": "执行者"
   },
   "stockAnalysis.progress.stepRunning": "⏳ {{name}} 執行中",
-  "stockAnalysis.progress.fetchingData": "正在獲取股票資料，請稍候..."
+  "stockAnalysis.progress.fetchingData": "正在獲取股票資料，請稍候...",
+  "stockAnalysis.workflow.debateRound": "辯論輪次",
+  "stockAnalysis.workflow.pending": "等待中",
+  "stockAnalysis.workflow.riskAssessment": "風險評估",
+  "stockAnalysis.workflow.analystReports": "分析師報告",
+  "stockAnalysis.workflow.inProgress": "進行中",
+  "stockAnalysis.workflow.running": "執行中",
+  "stockAnalysis.workflow.completed": "已完成",
+  "stockAnalysis.workflow.phase": "階段",
+  "stockAnalysis.workflow.title": "股票分析工作流程"
 }

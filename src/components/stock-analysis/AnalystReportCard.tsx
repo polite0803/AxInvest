@@ -1,5 +1,7 @@
+import { useSettingsStore } from "@/stores";
 import { ANALYST_NAMES } from "@/types";
-import { Card, Tag, Typography } from "antd";
+import { Card, Tag } from "antd";
+import NodeRenderer from "markstream-react";
 import { useTranslation } from "react-i18next";
 
 interface Props {
@@ -29,15 +31,18 @@ function tryParse(report: string): ParsedReport | null {
 
 export function AnalystReportCard({ expertId, report }: Props) {
   const { t } = useTranslation();
+  const themeMode = useSettingsStore((s) => s.settings.theme_mode);
+  const isDark = themeMode === "dark"
+    || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const name = ANALYST_NAMES[expertId] || expertId;
   const parsed = tryParse(report);
 
   if (!parsed) {
     return (
-      <Card size="small" title={name}>
-        <Typography.Paragraph ellipsis={{ rows: 5, expandable: true }}>
-          {report}
-        </Typography.Paragraph>
+      <Card size="small" title={name} styles={{ body: { maxHeight: 320, overflow: "auto" } }}>
+        <div className="sa-markdown-content">
+          <NodeRenderer content={report} isDark={isDark} />
+        </div>
       </Card>
     );
   }
@@ -53,22 +58,20 @@ export function AnalystReportCard({ expertId, report }: Props) {
           {type && <Tag style={{ marginLeft: 8 }}>{type}</Tag>}
         </span>
       }
+      styles={{ body: { maxHeight: 400, overflow: "auto" } }}
     >
-      {/* 摘要 */}
       {(summary || argument) && (
-        <Typography.Paragraph ellipsis={{ rows: 4, expandable: true }} className="text-xs">
-          {summary || argument}
-        </Typography.Paragraph>
+        <div className="sa-markdown-content text-xs">
+          <NodeRenderer content={summary || argument || ""} isDark={isDark} />
+        </div>
       )}
 
-      {/* 关键论点 */}
       {key_points && key_points.length > 0 && (
         <ul className="text-xs list-disc pl-4 mb-1" style={{ color: "var(--muted)" }}>
           {key_points.map((p, i) => <li key={i}>{p}</li>)}
         </ul>
       )}
 
-      {/* 信号标签 */}
       {signals && signals.length > 0 && (
         <div className="flex gap-1 flex-wrap mt-1">
           {signals.map((s, i) => (
@@ -86,14 +89,12 @@ export function AnalystReportCard({ expertId, report }: Props) {
         </div>
       )}
 
-      {/* 风险标记 */}
       {risk_flags && risk_flags.length > 0 && (
         <div className="flex gap-1 flex-wrap mt-1">
           {risk_flags.map((r, i) => <Tag key={i} color="orange">{r}</Tag>)}
         </div>
       )}
 
-      {/* 置信度 */}
       {confidence != null && (
         <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
           {t("stockAnalysis.confidence")}: {(confidence * 100).toFixed(0)}%

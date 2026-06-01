@@ -14,6 +14,7 @@ interface AgentResult {
   thinking?: string;
   usage?: { input_tokens?: number; output_tokens?: number };
   node_id?: string;
+  tool_calls_made?: unknown[];
 }
 
 /** 从 AgentExecutor 输出中提取纯文本内容 */
@@ -21,9 +22,51 @@ function extractContent(value: unknown): string {
   if (typeof value === "string") { return value; }
   if (value && typeof value === "object") {
     const r = value as AgentResult;
-    return r.content ?? JSON.stringify(value);
+    if (typeof r.content === "string" && r.content.length > 0) { return r.content; }
+    if (r.content != null && typeof r.content === "object") { return JSON.stringify(r.content); }
+    return JSON.stringify(value);
   }
   return String(value ?? "");
+}
+
+/** 规范化 decision 对象：兼容 snake_case/camelCase、confidence 0-1 vs 0-100、空值保护 */
+function normalizeDecision(raw: Record<string, unknown>): StockDecision {
+  const action = String(raw.action ?? raw["action"] ?? "持有");
+  const positionPct = Number(raw.positionPct ?? raw.position_pct ?? 0);
+  const targetPrice = raw.targetPrice != null
+    ? Number(raw.targetPrice)
+    : (raw.target_price != null ? Number(raw.target_price) : null);
+  const stopLoss = raw.stopLoss != null ? Number(raw.stopLoss) : (raw.stop_loss != null ? Number(raw.stop_loss) : null);
+  const reasoning = String(raw.reasoning ?? "");
+  const riskLevel = String(raw.riskLevel ?? raw.risk_level ?? i18n.t("stockAnalysis.riskUnknown"));
+  let confidence = Number(raw.confidence ?? 0);
+  if (confidence > 0 && confidence <= 1) { confidence = Math.round(confidence * 100); }
+  confidence = Math.round(Math.max(0, Math.min(100, confidence)));
+  return {
+    action,
+    positionPct: isNaN(positionPct) ? 0 : positionPct,
+    targetPrice: targetPrice != null && !isNaN(targetPrice) ? targetPrice : null,
+    stopLoss: stopLoss != null && !isNaN(stopLoss) ? stopLoss : null,
+    reasoning,
+    riskLevel,
+    confidence,
+  };
+}
+
+/** 尝试从文本中解析 JSON decision（兼容 markdown 代码块包裹） */
+function tryParseDecision(text: string): StockDecision | null {
+  const trimmed = text.trim();
+  const candidates = [trimmed];
+  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (m) { candidates.unshift(m[1].trim()); }
+  for (const candidate of candidates) {
+    if (!candidate.startsWith("{")) { continue; }
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed === "object" && parsed !== null) { return normalizeDecision(parsed); }
+    } catch { /* try next */ }
+  }
+  return null;
 }
 
 /** 从工作流 step results 解析结构化状态 */
@@ -43,25 +86,22 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       const bearKey = `bear-r${round}`;
       debateRounds.push({ round, bull: output, bear: extractContent(results[bearKey] ?? "") });
     } else if (stepId.startsWith("bear-r")) {
-      continue; // 已在 bull 处理时配对
+      continue;
     } else if (stepId.startsWith("risk-") || stepId === "research-mgr") {
       riskAssessments[stepId] = output;
     } else if (stepId === "trader") {
       analystReports["investment-plan"] = output;
     } else if (stepId === "portfolio-mgr") {
-      try {
-        decision = JSON.parse(output) as StockDecision;
-      } catch {
-        decision = {
-          action: "HOLD",
-          positionPct: 0,
-          targetPrice: null,
-          stopLoss: null,
-          reasoning: output,
-          riskLevel: i18n.t("stockAnalysis.riskUnknown"),
-          confidence: 0,
-        };
-      }
+      const parsed = tryParseDecision(output);
+      decision = parsed ?? {
+        action: "持有",
+        positionPct: 0,
+        targetPrice: null,
+        stopLoss: null,
+        reasoning: output,
+        riskLevel: i18n.t("stockAnalysis.riskUnknown"),
+        confidence: 0,
+      };
     }
   }
 
@@ -296,7 +336,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName, status: "completed" });
     if (record.decisionJson) {
       try {
-        set({ decision: JSON.parse(record.decisionJson) });
+        const raw = JSON.parse(record.decisionJson);
+        set({ decision: normalizeDecision(raw) });
       } catch (e) {
         console.error("[StockAnalysis] Failed to parse decision JSON:", e);
       }
@@ -436,21 +477,18 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         } else if (nodeId === "trader") {
           set({ analystReports: { ...s.analystReports, "investment-plan": text } });
         } else if (nodeId === "portfolio-mgr") {
-          try {
-            set({ decision: JSON.parse(text) as StockDecision });
-          } catch {
-            set({
-              decision: {
-                action: "HOLD",
-                positionPct: 0,
-                targetPrice: null,
-                stopLoss: null,
-                reasoning: text,
-                riskLevel: i18n.t("stockAnalysis.riskUnknown"),
-                confidence: 0,
-              },
-            });
-          }
+          const parsed = tryParseDecision(text);
+          set({
+            decision: parsed ?? {
+              action: "持有",
+              positionPct: 0,
+              targetPrice: null,
+              stopLoss: null,
+              reasoning: text,
+              riskLevel: i18n.t("stockAnalysis.riskUnknown"),
+              confidence: 0,
+            },
+          });
         }
       }
     });
@@ -459,11 +497,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const unlistenComplete = await listen<{
       workflowId: string;
       results: Record<string, unknown>;
-      output?: StockDecision | null;
+      output?: unknown;
     }>("workflow-completed", (event) => {
       const { results, output } = event.payload;
       const parsed = parseWorkflowResults(results);
-      const decision = output ?? parsed.decision;
+      let decision: StockDecision | null = parsed.decision;
+      if (output && typeof output === "object") {
+        decision = normalizeDecision(output as Record<string, unknown>);
+      } else if (typeof output === "string") {
+        const tryParsed = tryParseDecision(output);
+        if (tryParsed) { decision = tryParsed; }
+      }
       set({
         ...parsed,
         decision,

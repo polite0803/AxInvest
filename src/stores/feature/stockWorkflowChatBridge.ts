@@ -1,4 +1,4 @@
-import { makeWorkflowContent } from "@/components/chat/WorkflowAgentCard";
+import { makeWorkflowContent, type WorkflowCardData } from "@/components/chat/WorkflowAgentCard";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { useConversationStore } from "@/stores/domain/conversationStore";
@@ -17,6 +17,34 @@ const ANALYST_NODE_TO_NAME: Record<string, string> = {
   "a-lockup": "lockup-watcher",
   "a-research": "research-analyst",
   "a-sector": "sector-analyst",
+};
+
+const TOOL_NODE_TO_LABEL: Record<string, string> = {
+  "t-market-data": "市场行情",
+  "t-kline-data": "K线数据",
+  "t-financial-data": "财务数据",
+  "t-news-data": "新闻资讯",
+  "t-money-flow": "资金流向",
+  "t-sentiment-data": "市场情绪",
+  "t-policy-data": "政策数据",
+  "t-hot-money-data": "游资数据",
+  "t-lockup-data": "解禁数据",
+  "t-research-data": "研报数据",
+  "t-sector-data": "板块数据",
+  "t-scoring": "技术评分",
+  "t-valuation": "估值计算",
+  "t-portfolio-risk": "组合风险",
+  "t-peers-data": "同业可比",
+  "t-option-data": "期权数据",
+  "t-index-data": "大盘指数",
+  "t-announcement-data": "公司公告",
+  "t-northbound-data": "北向资金",
+  "t-dragon-tiger-data": "龙虎榜",
+  "t-cls-flash-data": "财联社快讯",
+  "t-block-trade-data": "大宗交易",
+  "t-institutional-data": "机构调研",
+  "t-consensus-data": "一致预期",
+  "t-concept-data": "概念板块",
 };
 
 function wf(type: string, data: Record<string, unknown>, fallback: string): string {
@@ -48,23 +76,154 @@ function updateMessageInStore(messageId: string, content: string) {
   }));
 }
 
+function extractContent(output: unknown): string {
+  if (output == null) { return ""; }
+  if (typeof output === "string") { return output; }
+  try {
+    return JSON.stringify(output, null, 2);
+  } catch {
+    return String(output);
+  }
+}
+
+function summarizeToolResult(result: unknown): string {
+  if (result == null) { return ""; }
+  if (typeof result === "string") {
+    try {
+      return summarizeParsed(JSON.parse(result));
+    } catch {
+      return result.length > 120 ? result.slice(0, 120) + "..." : result;
+    }
+  }
+  return summarizeParsed(result);
+}
+
+function summarizeParsed(v: unknown): string {
+  if (Array.isArray(v)) {
+    if (v.length === 0) { return "0 条记录"; }
+    const first = v[0];
+    if (first && typeof first === "object") {
+      const keys = Object.keys(first as Record<string, unknown>);
+      return `${v.length} 条记录 (${keys.slice(0, 3).join(", ")}${keys.length > 3 ? "..." : ""})`;
+    }
+    return `${v.length} 条记录`;
+  }
+  if (v && typeof v === "object") {
+    const obj = v as Record<string, unknown>;
+    if (obj.stockName && obj.price) { return `${obj.stockName} ¥${obj.price}`; }
+    if (obj.stockCode && obj.totalScore) { return `评分 ${obj.totalScore}`; }
+    if (obj.stockCode && obj.dcf) { return `DCF ¥${(obj.dcf as Record<string, unknown>)?.intrinsicValue ?? "N/A"}`; }
+    if (obj.items && Array.isArray(obj.items)) { return `${(obj.items as unknown[]).length} 条记录`; }
+    if (obj.news && Array.isArray(obj.news)) { return `${(obj.news as unknown[]).length} 条新闻`; }
+    if (obj.data && Array.isArray(obj.data)) { return `${(obj.data as unknown[]).length} 条数据`; }
+    const keys = Object.keys(obj);
+    if (keys.length <= 4) { return keys.map((k) => `${k}: ${JSON.stringify(obj[k]).slice(0, 30)}`).join(", "); }
+    return `${keys.length} 个字段`;
+  }
+  return String(v).slice(0, 80);
+}
+
+interface DataSourceEntry {
+  nodeId: string;
+  toolName: string;
+  label: string;
+  status: "pending" | "fetching" | "success" | "failed";
+  error?: string;
+  summary?: string;
+}
+
 export async function startStockWorkflowChatBridge(conversationId: string): Promise<void> {
   stopStockWorkflowChatBridge(conversationId);
 
   const unlisteners: UnlistenFn[] = [];
-  let progressMsgId: string | null = null;
+  let aggregateMsgId: string | null = null;
+
+  const analystsMap = new Map(
+    Object.entries(ANALYST_NODE_TO_NAME).map(([nodeId, name]) => [
+      nodeId,
+      {
+        nodeId,
+        name,
+        status: "pending" as "pending" | "running" | "done" | "failed",
+        report: undefined as string | undefined,
+      },
+    ]),
+  );
+
+  const debatesMap = new Map(
+    [1, 2, 3].map((round) => [
+      round,
+      {
+        round,
+        bull: undefined as string | undefined,
+        bear: undefined as string | undefined,
+        status: "pending" as "pending" | "running" | "done" | "failed",
+      },
+    ]),
+  );
+
+  const risksMap = new Map([
+    ["risk-macro", {
+      key: "risk-macro",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+      content: undefined as string | undefined,
+    }],
+    ["risk-industry", {
+      key: "risk-industry",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+      content: undefined as string | undefined,
+    }],
+    ["risk-company", {
+      key: "risk-company",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+      content: undefined as string | undefined,
+    }],
+    ["research-mgr", {
+      key: "research-mgr",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+      content: undefined as string | undefined,
+    }],
+  ]);
+
+  const dataSourcesMap = new Map<string, DataSourceEntry>();
   const completedNodes = new Set<string>();
+  let finalDecision: WorkflowCardData | null = null;
+
+  const buildAggregateContent = (
+    phase: string,
+    status: "running" | "done" | "error",
+    totalNodes: number,
+    error?: string,
+  ) => {
+    const analysts = Array.from(analystsMap.values());
+    const debates = Array.from(debatesMap.values());
+    const risks = Array.from(risksMap.values());
+    const dataSources = Array.from(dataSourcesMap.values());
+    const count = completedNodes.size;
+    return wf(
+      "aggregate",
+      {
+        phase,
+        completed: count,
+        total: totalNodes,
+        analysts,
+        debates,
+        risks,
+        dataSources,
+        status,
+        error,
+        decision: finalDecision,
+      },
+      `${i18next.t("stockAnalysis.workflow.title")} (${count}/${totalNodes})`,
+    );
+  };
 
   try {
     const m = await invoke<Message>("send_system_message", {
       conversationId,
-      content: wf(
-        "progress",
-        { phase: "trigger", completed: 0, total: 30 },
-        i18next.t("stockAnalysis.workflow.title") + "...",
-      ),
+      content: buildAggregateContent("trigger", "running", 30),
     });
-    progressMsgId = m.id;
+    aggregateMsgId = m.id;
     appendMessageToStore(conversationId, m);
   } catch { /* silent */ }
 
@@ -80,37 +239,114 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     if (status === "completed" || status === "failed") {
       completedNodes.add(nodeId);
     }
-    const count = completedNodes.size;
 
-    if (progressMsgId) {
-      const newContent = wf(
-        "progress",
-        { phase: nodeId, completed: count, total: totalNodes },
-        `${i18next.t("stockAnalysis.workflow.inProgress")} (${count}/${totalNodes})`,
-      );
-      invoke("update_message_content", {
-        id: progressMsgId,
-        content: newContent,
-      }).catch(() => {});
-      updateMessageInStore(progressMsgId, newContent);
+    // ── Tool 节点 (t- 前缀)：数据源信息 ──
+    if (nodeId.startsWith("t-")) {
+      if (!dataSourcesMap.has(nodeId)) {
+        let toolName = "";
+        let label = TOOL_NODE_TO_LABEL[nodeId] ?? nodeId.slice(2);
+
+        if (output != null && typeof output === "object") {
+          const out = output as Record<string, unknown>;
+          if (out.tool_name && typeof out.tool_name === "string") {
+            toolName = out.tool_name;
+          }
+        }
+
+        dataSourcesMap.set(nodeId, { nodeId, toolName, label, status: "pending" });
+      }
+
+      const ds = dataSourcesMap.get(nodeId)!;
+      if (status === "running") {
+        ds.status = "fetching";
+      } else if (status === "completed") {
+        ds.status = "success";
+        if (output != null && typeof output === "object") {
+          const out = output as Record<string, unknown>;
+          if (out.tool_name && typeof out.tool_name === "string" && !ds.toolName) {
+            ds.toolName = out.tool_name;
+          }
+          if (out.result != null) {
+            ds.summary = summarizeToolResult(out.result);
+          } else {
+            ds.summary = summarizeToolResult(output);
+          }
+        } else if (output != null) {
+          ds.summary = summarizeToolResult(output);
+        }
+      } else if (status === "failed") {
+        ds.status = "failed";
+        if (output != null) {
+          ds.error = typeof output === "string" ? output : JSON.stringify(output);
+        } else {
+          ds.error = "数据获取失败";
+        }
+      }
     }
 
-    if (status === "completed" && nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
-      const analystName = ANALYST_NODE_TO_NAME[nodeId] || nodeId.replace("a-", "");
-      const reportText = output != null
-        ? (typeof output === "string" ? output : JSON.stringify(output, null, 2))
-        : "";
-      const msg = await invoke<Message>("send_system_message", {
-        conversationId,
-        content: wf(
-          "analyst",
-          { analystName, analystReport: reportText, nodeId },
-          "📊 " + i18next.t("stockAnalysis.workflow.analystComplete"),
-        ),
-      }).catch(() => null);
-      if (msg) {
-        appendMessageToStore(conversationId, msg);
+    // ── Agent 节点 (a- 前缀)：分析师报告 ──
+    if (analystsMap.has(nodeId)) {
+      const analyst = analystsMap.get(nodeId)!;
+      if (status === "running") {
+        analyst.status = "running";
+      } else if (status === "completed") {
+        analyst.status = "done";
+        if (output != null) {
+          analyst.report = extractContent(output);
+        }
+      } else if (status === "failed") {
+        analyst.status = "failed";
       }
+    }
+
+    // ── 辩论节点 (bull-r*/bear-r*) ──
+    const bullMatch = nodeId.match(/^bull-r(\d+)$/);
+    const bearMatch = nodeId.match(/^bear-r(\d+)$/);
+    if (bullMatch || bearMatch) {
+      const roundStr = bullMatch ? bullMatch[1] : bearMatch![1];
+      const roundNum = parseInt(roundStr);
+      const debate = debatesMap.get(roundNum);
+      if (debate) {
+        if (status === "running") {
+          debate.status = "running";
+        } else if (status === "completed") {
+          if (bullMatch) {
+            debate.bull = extractContent(output);
+          } else {
+            debate.bear = extractContent(output);
+          }
+          if (debate.bull && debate.bear) {
+            debate.status = "done";
+          }
+        } else if (status === "failed") {
+          debate.status = "failed";
+        }
+      }
+    }
+
+    // ── 风险评估节点 ──
+    if (risksMap.has(nodeId)) {
+      const risk = risksMap.get(nodeId)!;
+      if (status === "running") {
+        risk.status = "running";
+      } else if (status === "completed") {
+        risk.status = "done";
+        if (output != null) {
+          risk.content = extractContent(output);
+        }
+      } else if (status === "failed") {
+        risk.status = "failed";
+      }
+    }
+
+    // ── 更新聚合卡片 ──
+    if (aggregateMsgId) {
+      const newContent = buildAggregateContent(nodeId, "running", totalNodes);
+      invoke("update_message_content", {
+        id: aggregateMsgId,
+        content: newContent,
+      }).catch(() => {});
+      updateMessageInStore(aggregateMsgId, newContent);
     }
   });
   unlisteners.push(u1);
@@ -122,41 +358,26 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   }>("workflow-completed", async (event) => {
     const { output } = event.payload;
 
-    if (progressMsgId) {
-      const newContent = wf(
-        "progress",
-        { phase: "done", completed: completedNodes.size, total: completedNodes.size },
-        `✅ ${i18next.t("stockAnalysis.workflow.phase.done")}`,
-      );
-      invoke("update_message_content", {
-        id: progressMsgId,
-        content: newContent,
-      }).catch(() => {});
-      updateMessageInStore(progressMsgId, newContent);
+    if (output && typeof output === "object") {
+      finalDecision = {
+        type: "decision",
+        action: String(output.action ?? "N/A"),
+        positionPct: Number(output.positionPct ?? 0),
+        targetPrice: Number(output.targetPrice ?? 0),
+        stopLoss: Number(output.stopLoss ?? 0),
+        reasoning: String(output.reasoning ?? ""),
+        riskLevel: String(output.riskLevel ?? "N/A"),
+        confidence: Number(output.confidence ?? 0),
+      };
     }
 
-    if (output && typeof output === "object") {
-      const msg = await invoke<Message>("send_system_message", {
-        conversationId,
-        content: wf(
-          "decision",
-          {
-            action: String(output.action ?? "N/A"),
-            positionPct: Number(output.positionPct ?? 0),
-            targetPrice: Number(output.targetPrice ?? 0),
-            stopLoss: Number(output.stopLoss ?? 0),
-            reasoning: String(output.reasoning ?? ""),
-            riskLevel: String(output.riskLevel ?? "N/A"),
-            confidence: Number(output.confidence ?? 0),
-          },
-          `${i18next.t("stockAnalysis.workflow.decisionTitle")}: ${output.action} | ${
-            i18next.t("stockAnalysis.workflow.positionPct")
-          }${output.positionPct}%`,
-        ),
-      }).catch(() => null);
-      if (msg) {
-        appendMessageToStore(conversationId, msg);
-      }
+    if (aggregateMsgId) {
+      const newContent = buildAggregateContent("done", "done", completedNodes.size);
+      invoke("update_message_content", {
+        id: aggregateMsgId,
+        content: newContent,
+      }).catch(() => {});
+      updateMessageInStore(aggregateMsgId, newContent);
     }
 
     stopStockWorkflowChatBridge(conversationId);
@@ -166,17 +387,13 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const u3 = await listen<{ workflowId: string; error: string }>(
     "workflow-error",
     async (event) => {
-      if (progressMsgId) {
-        const newContent = wf(
-          "progress",
-          { phase: "error", completed: completedNodes.size, total: completedNodes.size },
-          `❌ ${i18next.t("stockAnalysis.workflow.phase.error")}: ${event.payload.error}`,
-        );
+      if (aggregateMsgId) {
+        const newContent = buildAggregateContent("error", "error", completedNodes.size, event.payload.error);
         invoke("update_message_content", {
-          id: progressMsgId,
+          id: aggregateMsgId,
           content: newContent,
         }).catch(() => {});
-        updateMessageInStore(progressMsgId, newContent);
+        updateMessageInStore(aggregateMsgId, newContent);
       }
       stopStockWorkflowChatBridge(conversationId);
     },

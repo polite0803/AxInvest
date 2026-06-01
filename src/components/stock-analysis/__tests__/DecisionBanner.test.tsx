@@ -24,6 +24,8 @@ const storeState = {
 
 vi.mock("@/stores", () => ({
   useStockAnalysisStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+  useSettingsStore: (selector: (s: { settings: { theme_mode: string } }) => unknown) =>
+    selector({ settings: { theme_mode: "system" } }),
 }));
 
 describe("DecisionBanner", () => {

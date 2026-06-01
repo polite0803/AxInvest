@@ -7103,5 +7103,14 @@
     "agentRole.executor": "Executor"
   },
   "stockAnalysis.progress.stepRunning": "⏳ {{name}} en cours",
-  "stockAnalysis.progress.fetchingData": "Récupération des données boursières..."
+  "stockAnalysis.progress.fetchingData": "Récupération des données boursières...",
+  "stockAnalysis.workflow.debateRound": "Debate Round",
+  "stockAnalysis.workflow.pending": "Pending",
+  "stockAnalysis.workflow.riskAssessment": "Risk Assessment",
+  "stockAnalysis.workflow.analystReports": "Analyst Reports",
+  "stockAnalysis.workflow.inProgress": "In Progress",
+  "stockAnalysis.workflow.running": "Running",
+  "stockAnalysis.workflow.completed": "Completed",
+  "stockAnalysis.workflow.phase": "Phase",
+  "stockAnalysis.workflow.title": "Stock Analysis Workflow"
 }

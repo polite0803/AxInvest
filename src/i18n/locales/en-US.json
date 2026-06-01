@@ -7119,5 +7119,14 @@
     "agentRole.executor": "Executor"
   },
   "stockAnalysis.progress.stepRunning": "⏳ {{name}} running",
-  "stockAnalysis.progress.fetchingData": "Fetching stock data, please wait..."
+  "stockAnalysis.progress.fetchingData": "Fetching stock data, please wait...",
+  "stockAnalysis.workflow.debateRound": "Debate Round",
+  "stockAnalysis.workflow.pending": "Pending",
+  "stockAnalysis.workflow.riskAssessment": "Risk Assessment",
+  "stockAnalysis.workflow.analystReports": "Analyst Reports",
+  "stockAnalysis.workflow.inProgress": "In Progress",
+  "stockAnalysis.workflow.running": "Running",
+  "stockAnalysis.workflow.completed": "Completed",
+  "stockAnalysis.workflow.phase": "Phase",
+  "stockAnalysis.workflow.title": "Stock Analysis Workflow"
 }

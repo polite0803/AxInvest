@@ -1,15 +1,10 @@
-/**
- * 工作流 Agent 卡片 — 在对话页中渲染工作流执行状态。
- */
 import { Card, Progress, Tag } from "antd";
 import { TrendingUp } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-// ── 卡片数据类型 ──
-
 export interface WorkflowCardData {
-  type: "progress" | "analyst" | "decision";
+  type: "progress" | "analyst" | "decision" | "aggregate" | "debate" | "risk";
   phase?: string;
   completed?: number;
   total?: number;
@@ -22,12 +17,57 @@ export interface WorkflowCardData {
   reasoning?: string;
   riskLevel?: string;
   confidence?: number;
+  round?: number;
+  bull?: string;
+  bear?: string;
+  riskKey?: string;
+  riskContent?: string;
+  analysts?: Array<
+    { nodeId: string; name: string; report?: string; status: "pending" | "running" | "done" | "failed" }
+  >;
+  debates?: Array<{ round: number; bull?: string; bear?: string; status: "pending" | "running" | "done" | "failed" }>;
+  risks?: Array<{ key: string; content?: string; status: "pending" | "running" | "done" | "failed" }>;
+  dataSources?: Array<{
+    nodeId: string;
+    toolName: string;
+    label: string;
+    status: "pending" | "fetching" | "success" | "failed";
+    error?: string;
+    summary?: string;
+  }>;
+  decision?: WorkflowCardData;
+  status?: "running" | "done" | "error";
+  error?: string;
 }
 
-// ── 解析消息内容中的 workflow 标记 ──
+const TOOL_NAME_LABELS: Record<string, string> = {
+  get_stock_quote: "实时行情",
+  get_stock_kline: "K线数据",
+  get_stock_financials: "财务报表",
+  get_stock_news: "新闻资讯",
+  get_stock_money_flow: "资金流向",
+  get_hot_stocks: "热门股票",
+  get_industry_ranking: "行业排名",
+  get_announcements: "公司公告",
+  get_consensus_eps: "一致预期EPS",
+  get_research_reports: "券商研报",
+  get_concept_blocks: "概念板块",
+  get_north_bound_flow: "北向资金",
+  get_market_dragon_tiger: "龙虎榜",
+  get_cls_flash: "财联社快讯",
+  get_block_trades: "大宗交易",
+  get_institutional_visits: "机构调研",
+  get_index_quotes: "大盘指数",
+  get_stock_peers: "同业可比",
+  get_stock_option_pcr: "期权PCR",
+  compute_scoring: "技术评分",
+  compute_valuation: "估值计算",
+  compute_portfolio_risk: "组合风险",
+  search_stock: "股票搜索",
+};
 
 export function parseWorkflowCard(content: string): WorkflowCardData | null {
-  const match = content.match(/^<!-- workflow-(progress|analyst|decision):(.*?) -->/);
+  const match = content.match(/^<!-- workflow-(progress|analyst|decision|aggregate|debate|risk):(.*?) -->/);
   if (!match) { return null; }
   try {
     return { type: match[1] as WorkflowCardData["type"], ...JSON.parse(match[2]) };
@@ -39,8 +79,6 @@ export function parseWorkflowCard(content: string): WorkflowCardData | null {
 export function makeWorkflowContent(type: string, data: Record<string, unknown>, fallback: string): string {
   return `<!-- workflow-${type}:${JSON.stringify(data)} -->${fallback}`;
 }
-
-// ── 组件 ──
 
 export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   const { t } = useTranslation();
@@ -54,6 +92,14 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
     if (!data.analystName) { return t("stockAnalysis.workflow.analyst"); }
     return t(`stockAnalysis.workflow.analyst.${data.analystName}`, data.analystName);
   }, [data.analystName, t]);
+
+  const getAnalystDisplayName = (name: string) => {
+    return t(`stockAnalysis.workflow.analyst.${name}`, name);
+  };
+
+  const getToolLabel = (toolName: string) => {
+    return TOOL_NAME_LABELS[toolName] ?? toolName;
+  };
 
   if (data.type === "progress") {
     const pct = data.total && data.total > 0
@@ -84,6 +130,69 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
       <div className="workflow-card" style={{ padding: "10px 14px" }}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>📊 {analystLabel}</div>
         <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>{brief}</div>
+      </div>
+    );
+  }
+
+  if (data.type === "debate") {
+    const round = data.round ?? 1;
+    const bullBrief = data.bull
+      ? (data.bull.length > 200 ? data.bull.slice(0, 200) + "..." : data.bull)
+      : t("stockAnalysis.workflow.pending");
+    const bearBrief = data.bear
+      ? (data.bear.length > 200 ? data.bear.slice(0, 200) + "..." : data.bear)
+      : t("stockAnalysis.workflow.pending");
+    return (
+      <div className="workflow-card" style={{ padding: "10px 14px" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+          🎯 {t("stockAnalysis.workflow.debateRound")} {round}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <div
+            style={{
+              flex: 1,
+              background: "var(--sa-red-glass)",
+              padding: 8,
+              borderRadius: 6,
+              border: "1px solid var(--sa-red-soft)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
+              🐂 {t("stockAnalysis.workflow.bullCase")}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>{bullBrief}</div>
+          </div>
+          <div
+            style={{
+              flex: 1,
+              background: "var(--sa-green-glass)",
+              padding: 8,
+              borderRadius: 6,
+              border: "1px solid var(--sa-green-soft)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
+              🐻 {t("stockAnalysis.workflow.bearCase")}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>{bearBrief}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (data.type === "risk") {
+    const riskKey = data.riskKey ?? "risk";
+    const riskName = riskKey.startsWith("risk-") ? riskKey.slice(5) : riskKey;
+    const riskBrief = data.riskContent
+      ? (data.riskContent.length > 300 ? data.riskContent.slice(0, 300) + "..." : data.riskContent)
+      : "";
+    return (
+      <div className="workflow-card" style={{ padding: "10px 14px" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+          ⚠️ {t("stockAnalysis.workflow.riskAssessment")}: {riskName}
+        </div>
+        {riskBrief && <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>{riskBrief}</div>}
       </div>
     );
   }
@@ -133,6 +242,304 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
           </div>
         )}
       </Card>
+    );
+  }
+
+  if (data.type === "aggregate") {
+    const analysts = data.analysts || [];
+    const dataSources = data.dataSources || [];
+    const pct = data.total && data.total > 0
+      ? Math.round(((data.completed ?? 0) / data.total) * 100)
+      : 0;
+
+    const successCount = dataSources.filter((d) => d.status === "success").length;
+    const failedCount = dataSources.filter((d) => d.status === "failed").length;
+
+    return (
+      <div className="workflow-card" style={{ padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <TrendingUp size={16} style={{ color: "var(--accent)" }} />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>
+            {t("stockAnalysis.workflow.title")}
+          </span>
+          {data.status === "running" && (
+            <Tag color="processing" style={{ fontSize: 11 }}>{t("stockAnalysis.workflow.inProgress")}</Tag>
+          )}
+          {data.status === "done" && (
+            <Tag color="success" style={{ fontSize: 11 }}>{t("stockAnalysis.workflow.phase.done")}</Tag>
+          )}
+          {data.status === "error" && (
+            <Tag color="error" style={{ fontSize: 11 }}>{t("stockAnalysis.workflow.phase.error")}</Tag>
+          )}
+        </div>
+
+        {data.status !== "error" && (
+          <>
+            <Progress
+              percent={pct}
+              size="small"
+              status={data.status === "done" ? "success" : "active"}
+              style={{ marginBottom: 12 }}
+            />
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+              {t("stockAnalysis.workflow.currentPhase")}: {phaseLabel} ({data.completed ?? 0}/{data.total ?? "?"})
+            </div>
+
+            {dataSources.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    marginBottom: 8,
+                    color: "var(--text)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  🔗 数据源
+                  {successCount > 0 && (
+                    <Tag color="success" style={{ fontSize: 10, margin: 0 }}>{successCount} 成功</Tag>
+                  )}
+                  {failedCount > 0 && <Tag color="error" style={{ fontSize: 10, margin: 0 }}>{failedCount} 失败</Tag>}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {dataSources.map((ds) => (
+                    <div
+                      key={ds.nodeId}
+                      style={{
+                        padding: "6px 10px",
+                        background: ds.status === "failed"
+                          ? "var(--error-glass, rgba(255,77,79,0.06))"
+                          : ds.status === "success"
+                          ? "var(--accent-glass)"
+                          : "var(--bg-glass)",
+                        borderRadius: 6,
+                        border: ds.status === "failed"
+                          ? "1px solid var(--error-soft, rgba(255,77,79,0.2))"
+                          : ds.status === "success"
+                          ? "1px solid var(--accent-soft)"
+                          : "1px solid var(--border)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 12, fontWeight: 500 }}>
+                          {ds.status === "success"
+                            ? "✅"
+                            : ds.status === "failed"
+                            ? "❌"
+                            : ds.status === "fetching"
+                            ? "🔄"
+                            : "⏳"} {ds.label || getToolLabel(ds.toolName)}
+                        </span>
+                        <Tag
+                          color={ds.status === "success"
+                            ? "success"
+                            : ds.status === "failed"
+                            ? "error"
+                            : ds.status === "fetching"
+                            ? "processing"
+                            : "default"}
+                          style={{ fontSize: 10 }}
+                        >
+                          {ds.status === "success"
+                            ? "已获取"
+                            : ds.status === "failed"
+                            ? "失败"
+                            : ds.status === "fetching"
+                            ? "获取中"
+                            : "等待"}
+                        </Tag>
+                      </div>
+                      {ds.status === "success" && ds.summary && (
+                        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+                          {ds.summary}
+                        </div>
+                      )}
+                      {ds.status === "failed" && ds.error && (
+                        <div style={{ fontSize: 11, color: "var(--error, #ff4d4f)", marginTop: 2, lineHeight: 1.4 }}>
+                          {ds.error}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {analysts.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                  📊 {t("stockAnalysis.workflow.analystReports")}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {analysts.map((a) => (
+                    <div
+                      key={a.nodeId}
+                      style={{
+                        padding: "8px 10px",
+                        background: a.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                        borderRadius: 6,
+                        border: a.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>
+                          {a.status === "done" ? "✅" : a.status === "running" ? "⚙️" : "⏳"}{" "}
+                          {getAnalystDisplayName(a.name)}
+                        </span>
+                        <Tag
+                          color={a.status === "done" ? "success" : a.status === "running" ? "processing" : "default"}
+                          style={{ fontSize: 10 }}
+                        >
+                          {a.status === "done"
+                            ? t("stockAnalysis.workflow.completed")
+                            : a.status === "running"
+                            ? t("stockAnalysis.workflow.running")
+                            : t("stockAnalysis.workflow.pending")}
+                        </Tag>
+                      </div>
+                      {a.status === "done" && a.report && (
+                        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                          {a.report.length > 500 ? a.report.slice(0, 500) + "..." : a.report}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.debates && data.debates.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                  🎯 {t("stockAnalysis.workflow.bullBearDebate")}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {data.debates.map((d) => (
+                    <div
+                      key={`debate-${d.round}`}
+                      style={{
+                        padding: "8px 10px",
+                        background: d.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                        borderRadius: 6,
+                        border: d.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                        {d.status === "done" ? "✅" : d.status === "running" ? "⚙️" : "⏳"}{" "}
+                        {t("stockAnalysis.workflow.debateRound")} {d.round}
+                      </div>
+                      {d.status === "done" && d.bull && d.bear && (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <div
+                            style={{
+                              flex: 1,
+                              background: "var(--sa-red-glass)",
+                              padding: 8,
+                              borderRadius: 6,
+                              border: "1px solid var(--sa-red-soft)",
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
+                              🐂 {t("stockAnalysis.workflow.bullCase")}
+                            </div>
+                            <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
+                              {d.bull.length > 200 ? d.bull.slice(0, 200) + "..." : d.bull}
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              flex: 1,
+                              background: "var(--sa-green-glass)",
+                              padding: 8,
+                              borderRadius: 6,
+                              border: "1px solid var(--sa-green-soft)",
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
+                              🐻 {t("stockAnalysis.workflow.bearCase")}
+                            </div>
+                            <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
+                              {d.bear.length > 200 ? d.bear.slice(0, 200) + "..." : d.bear}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.risks && data.risks.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                  ⚠️ {t("stockAnalysis.workflow.riskAssessment")}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {data.risks.map((r) => (
+                    <div
+                      key={`risk-${r.key}`}
+                      style={{
+                        padding: "8px 10px",
+                        background: r.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                        borderRadius: 6,
+                        border: r.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span style={{ fontSize: 12, fontWeight: 600 }}>
+                          {r.status === "done" ? "✅" : r.status === "running" ? "⚙️" : "⏳"}{" "}
+                          {r.key.startsWith("risk-") ? r.key.slice(5) : r.key}
+                        </span>
+                        <Tag
+                          color={r.status === "done" ? "success" : r.status === "running" ? "processing" : "default"}
+                          style={{ fontSize: 10 }}
+                        >
+                          {r.status === "done"
+                            ? t("stockAnalysis.workflow.completed")
+                            : r.status === "running"
+                            ? t("stockAnalysis.workflow.running")
+                            : t("stockAnalysis.workflow.pending")}
+                        </Tag>
+                      </div>
+                      {r.status === "done" && r.content && (
+                        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                          {r.content.length > 400 ? r.content.slice(0, 400) + "..." : r.content}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.decision && data.status === "done" && <WorkflowAgentCard data={data.decision} />}
+          </>
+        )}
+
+        {data.status === "error" && data.error && (
+          <div style={{ fontSize: 12, color: "var(--error)" }}>
+            ❌ {data.error}
+          </div>
+        )}
+      </div>
     );
   }
 

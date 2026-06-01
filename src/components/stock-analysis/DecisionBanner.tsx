@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/invoke";
-import { useStockAnalysisStore } from "@/stores";
+import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { Button, Card, message, Tag } from "antd";
+import NodeRenderer from "markstream-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +9,9 @@ import { useNavigate } from "react-router-dom";
 export function DecisionBanner() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const themeMode = useSettingsStore((s) => s.settings.theme_mode);
+  const isDark = themeMode === "dark"
+    || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const decision = useStockAnalysisStore((s) => s.decision);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
@@ -58,8 +62,9 @@ export function DecisionBanner() {
 
   // 从报价和决策计算预期收益
   const currentPrice = quote?.price ?? 0;
-  const upside = decision?.targetPrice && currentPrice > 0
-    ? ((decision.targetPrice - currentPrice) / currentPrice * 100)
+  const targetPriceNum = decision?.targetPrice != null ? Number(decision.targetPrice) : 0;
+  const upside = targetPriceNum > 0 && currentPrice > 0
+    ? ((targetPriceNum - currentPrice) / currentPrice * 100)
     : null;
 
   // 导出报告
@@ -173,10 +178,10 @@ export function DecisionBanner() {
 
       {/* 推理摘要 */}
       <div
-        className="text-xs mb-3 p-2 rounded"
-        style={{ whiteSpace: "pre-wrap", background: "var(--surface)" }}
+        className="sa-markdown-content text-xs mb-3 p-2 rounded"
+        style={{ background: "var(--surface)" }}
       >
-        {decision.reasoning}
+        <NodeRenderer content={decision.reasoning || ""} isDark={isDark} />
       </div>
 
       {/* 核心指标网格 — 固定3列、窄屏2列，防止侧栏坍塌 */}
@@ -227,9 +232,9 @@ export function DecisionBanner() {
           <div
             className="text-sm font-semibold"
             style={{
-              color: decision.riskLevel.includes("高")
+              color: String(decision.riskLevel ?? "").includes("高")
                 ? "var(--sa-red)"
-                : decision.riskLevel.includes("低")
+                : String(decision.riskLevel ?? "").includes("低")
                 ? "var(--sa-green)"
                 : "var(--sa-amber)",
             }}

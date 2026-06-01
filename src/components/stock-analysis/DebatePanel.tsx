@@ -1,10 +1,14 @@
-import { useStockAnalysisStore } from "@/stores";
+import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { Card, Collapse, Tag } from "antd";
+import NodeRenderer from "markstream-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 export function DebatePanel() {
   const { t } = useTranslation();
+  const themeMode = useSettingsStore((s) => s.settings.theme_mode);
+  const isDark = themeMode === "dark"
+    || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
 
   const [sentimentRatio, bullCount, bearCount] = useMemo(() => {
@@ -33,14 +37,12 @@ export function DebatePanel() {
 
   return (
     <Card size="small" title={t("stockAnalysis.debate")}>
-      {/* 情绪仪表 */}
       <div className="mb-3">
         <div className="flex justify-between text-xs mb-1">
           <span style={{ color: "var(--sa-green)" }}>{t("stockAnalysis.bear")}</span>
           <span className="font-semibold" style={{ fontSize: 13 }}>{sentimentText}</span>
           <span style={{ color: "var(--sa-red)" }}>{t("stockAnalysis.bull")}</span>
         </div>
-        {/* 渐变色条 */}
         <div
           className="relative"
           style={{
@@ -50,7 +52,6 @@ export function DebatePanel() {
             overflow: "hidden",
           }}
         >
-          {/* 指针 */}
           <div
             style={{
               position: "absolute",
@@ -64,9 +65,7 @@ export function DebatePanel() {
               zIndex: 2,
             }}
           />
-          {/* 无数据时半透明遮罩 */}
         </div>
-        {/* 统计数据 */}
         <div className="flex justify-between text-xs mt-1">
           <span style={{ color: "var(--muted)" }}>
             🐻 {bearCount}
@@ -88,18 +87,18 @@ export function DebatePanel() {
           key: i,
           label: <span>{t("stockAnalysis.debateRound", { round: r.round })}</span>,
           children: (
-            <div className="flex flex-col sm:flex-row gap-2" style={{ maxHeight: 260, overflow: "auto" }}>
+            <div className="flex flex-col sm:flex-row gap-2" style={{ maxHeight: 360, overflow: "auto" }}>
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
                 <Tag color="red">{t("stockAnalysis.bull")}</Tag>
-                <p className="text-xs mt-1" style={{ whiteSpace: "pre-wrap" }}>
-                  {r.bull}
-                </p>
+                <div className="sa-markdown-content text-xs mt-1">
+                  <NodeRenderer content={r.bull} isDark={isDark} />
+                </div>
               </div>
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
                 <Tag color="green">{t("stockAnalysis.bear")}</Tag>
-                <p className="text-xs mt-1" style={{ whiteSpace: "pre-wrap" }}>
-                  {r.bear}
-                </p>
+                <div className="sa-markdown-content text-xs mt-1">
+                  <NodeRenderer content={r.bear} isDark={isDark} />
+                </div>
               </div>
             </div>
           ),

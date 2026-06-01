@@ -6949,6 +6949,18 @@
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
         "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
+      },
+      "workflow": {
+        "title": "股票分析工作流",
+        "inProgress": "进行中",
+        "running": "运行中",
+        "pending": "等待中",
+        "completed": "已完成",
+        "phase": "阶段",
+        "debateRound": "辩论轮次",
+        "bullBearDebate": "多空辩论",
+        "riskAssessment": "风险评估",
+        "analystReports": "分析师报告"
       }
     },
     "progress.fetchingData": "正在获取股票資料，请稍候...",

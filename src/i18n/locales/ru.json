@@ -6884,8 +6884,7 @@
         "monitor": "Monitor",
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
-        "toolRuntime": "Tool Runtime",
-        "workflow": "Воркфлоу"
+        "toolRuntime": "Tool Runtime"
       },
       "panels": {
         "refresh": "Refresh",
@@ -6955,9 +6954,9 @@
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
-        "backendOffline": "Сервер не готов, повторите попытку позже",
-        "connectionFailed": "Ошибка подключения, проверьте сеть и повторите попытку",
-        "autoDisabled": "Автоматически отключено {{count}} недоступных источников данных"
+        "connectionFailed": "Connection failed, please check network and retry",
+        "backendOffline": "Backend not ready, please try again later",
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       }
     },
     "progress.fetchingData": "Fetching stock data...",
@@ -7112,5 +7111,9 @@
   "stockAnalysis.workflow.running": "Running",
   "stockAnalysis.workflow.completed": "Completed",
   "stockAnalysis.workflow.phase": "Phase",
-  "stockAnalysis.workflow.title": "Stock Analysis Workflow"
+  "stockAnalysis.workflow.title": "Stock Analysis Workflow",
+  "stockAnalysis.workflow.bullBearDebate": "Bull vs Bear Debate",
+  "stockAnalysis.settings.group.workflow": "Workflow",
+  "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
+  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later"
 }

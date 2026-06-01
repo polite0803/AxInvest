@@ -6884,8 +6884,7 @@
         "monitor": "Monitor",
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
-        "toolRuntime": "Tool Runtime",
-        "workflow": "워크플로"
+        "toolRuntime": "Tool Runtime"
       },
       "panels": {
         "refresh": "Refresh",
@@ -6955,9 +6954,9 @@
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
-        "backendOffline": "백엔드 서비스가 준비되지 않았습니다. 나중에 다시 시도하세요",
-        "connectionFailed": "연결 실패, 네트워크를 확인하고 다시 시도하세요",
-        "autoDisabled": "연결할 수 없는 {{count}}개의 데이터 소스를 자동 비활성화했습니다"
+        "connectionFailed": "Connection failed, please check network and retry",
+        "backendOffline": "Backend not ready, please try again later",
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       }
     },
     "progress.fetchingData": "Fetching stock data...",
@@ -7112,5 +7111,9 @@
   "stockAnalysis.workflow.running": "Running",
   "stockAnalysis.workflow.completed": "Completed",
   "stockAnalysis.workflow.phase": "Phase",
-  "stockAnalysis.workflow.title": "Stock Analysis Workflow"
+  "stockAnalysis.workflow.title": "Stock Analysis Workflow",
+  "stockAnalysis.workflow.bullBearDebate": "Bull vs Bear Debate",
+  "stockAnalysis.settings.group.workflow": "Workflow",
+  "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
+  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later"
 }

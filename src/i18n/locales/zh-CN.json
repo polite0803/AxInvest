@@ -6934,8 +6934,7 @@
         "monitor": "监控",
         "riskModel": "风险模型",
         "agentRuntime": "Agent 运行时",
-        "toolRuntime": "Tool 运行时",
-        "workflow": "工作流"
+        "toolRuntime": "Tool 运行时"
       },
       "panels": {
         "refresh": "刷新",
@@ -7005,8 +7004,8 @@
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
-        "backendOffline": "后端服务未就绪，请稍后重试",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
+        "backendOffline": "后端服务未就绪，请稍后重试",
         "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
       }
     },
@@ -7153,5 +7152,9 @@
   "stockAnalysis.workflow.running": "运行中",
   "stockAnalysis.workflow.completed": "已完成",
   "stockAnalysis.workflow.phase": "阶段",
-  "stockAnalysis.workflow.title": "股票分析工作流"
+  "stockAnalysis.workflow.title": "股票分析工作流",
+  "stockAnalysis.workflow.bullBearDebate": "多空辩论",
+  "stockAnalysis.settings.group.workflow": "工作流",
+  "stockAnalysis.settings.vendor.connectionFailed": "数据源连接失败，请检查网络或稍后重试",
+  "stockAnalysis.settings.vendor.backendOffline": "后端服务未就绪，请稍后重试"
 }

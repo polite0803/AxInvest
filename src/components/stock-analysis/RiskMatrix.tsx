@@ -1,6 +1,7 @@
-import { useStockAnalysisStore } from "@/stores";
+import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { Card, Tag } from "antd";
 import * as echarts from "echarts";
+import NodeRenderer from "markstream-react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -56,6 +57,9 @@ function computeRiskScore(text: string): number {
 
 export function RiskMatrix() {
   const { t } = useTranslation();
+  const themeMode = useSettingsStore((s) => s.settings.theme_mode);
+  const isDark = themeMode === "dark"
+    || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
@@ -146,12 +150,12 @@ export function RiskMatrix() {
                   {t("stockAnalysis.riskScore", { score })}
                 </span>
               </div>
-              <p
-                className="text-xs leading-relaxed"
-                style={{ whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}
+              <div
+                className="sa-markdown-content text-xs leading-relaxed"
+                style={{ maxHeight: 160, overflow: "auto" }}
               >
-                {report}
-              </p>
+                <NodeRenderer content={report} isDark={isDark} />
+              </div>
             </div>
           );
         })}

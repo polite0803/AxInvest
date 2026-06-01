@@ -7096,5 +7096,14 @@
     "agentRole.executor": "Executor"
   },
   "stockAnalysis.progress.stepRunning": "⏳ {{name}} चल रहा है",
-  "stockAnalysis.progress.fetchingData": "शेयर डेटा प्राप्त किया जा रहा है..."
+  "stockAnalysis.progress.fetchingData": "शेयर डेटा प्राप्त किया जा रहा है...",
+  "stockAnalysis.workflow.debateRound": "Debate Round",
+  "stockAnalysis.workflow.pending": "Pending",
+  "stockAnalysis.workflow.riskAssessment": "Risk Assessment",
+  "stockAnalysis.workflow.analystReports": "Analyst Reports",
+  "stockAnalysis.workflow.inProgress": "In Progress",
+  "stockAnalysis.workflow.running": "Running",
+  "stockAnalysis.workflow.completed": "Completed",
+  "stockAnalysis.workflow.phase": "Phase",
+  "stockAnalysis.workflow.title": "Stock Analysis Workflow"
 }

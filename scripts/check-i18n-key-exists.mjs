@@ -60,6 +60,8 @@ function deepHas(obj, path) {
     cur = cur[p];
   }
   if (nestedOk) { return true; }
+  // Then try flat key at top level: "a.b.c" as a single key in obj
+  if (path in obj && typeof obj[path] === "string") { return true; }
   // Then try flat key: first section is obj, rest is a flat dot-key
   const dotIdx = path.indexOf(".");
   if (dotIdx === -1) { return false; }

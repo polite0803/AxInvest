@@ -7181,5 +7181,7 @@
   "stockAnalysis.workflow.bullBearDebate": "多空辩论",
   "stockAnalysis.settings.group.workflow": "工作流",
   "stockAnalysis.settings.vendor.connectionFailed": "数据源连接失败，请检查网络或稍后重试",
-  "stockAnalysis.settings.vendor.backendOffline": "后端服务未就绪，请稍后重试"
+  "stockAnalysis.settings.vendor.backendOffline": "后端服务未就绪，请稍后重试",
+  "stockAnalysis.workflow.bullCase": "多方论点",
+  "stockAnalysis.workflow.bearCase": "空方论点"
 }

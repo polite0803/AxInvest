@@ -1512,37 +1512,37 @@ impl WorkEngine {
                         .ok();
 
                         // 向前端推送"步骤失败"进度事件（仅在重试耗尽后）
-                        if current_attempts >= max_retries {
-                            if let Some(ref cb) = progress_cb {
-                                let completed = {
-                                    let workflows = self.workflows.read().await;
-                                    workflows
-                                        .get(workflow_id)
-                                        .map(|w| {
-                                            w.node_states
-                                                .values()
-                                                .filter(|s| {
-                                                    matches!(
-                                                        s.status,
-                                                        NodeStatus::Completed
-                                                            | NodeStatus::Failed
-                                                            | NodeStatus::Skipped
-                                                    )
-                                                })
-                                                .count()
-                                        })
-                                        .unwrap_or(0)
-                                };
-                                cb(StepProgressEvent {
-                                    node_id: node_id.clone(),
-                                    status: "failed".to_string(),
-                                    total_nodes,
-                                    completed_nodes: completed,
-                                    execution_id: Some(execution_id.clone()),
-                                    output: None,
-                                })
-                                .await;
-                            }
+                        if current_attempts >= max_retries
+                            && let Some(ref cb) = progress_cb
+                        {
+                            let completed = {
+                                let workflows = self.workflows.read().await;
+                                workflows
+                                    .get(workflow_id)
+                                    .map(|w| {
+                                        w.node_states
+                                            .values()
+                                            .filter(|s| {
+                                                matches!(
+                                                    s.status,
+                                                    NodeStatus::Completed
+                                                        | NodeStatus::Failed
+                                                        | NodeStatus::Skipped
+                                                )
+                                            })
+                                            .count()
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            cb(StepProgressEvent {
+                                node_id: node_id.clone(),
+                                status: "failed".to_string(),
+                                total_nodes,
+                                completed_nodes: completed,
+                                execution_id: Some(execution_id.clone()),
+                                output: None,
+                            })
+                            .await;
                         }
                     },
                     Err(_) => {
@@ -1619,37 +1619,37 @@ impl WorkEngine {
                         .ok();
 
                         // 向前端推送"步骤超时失败"进度事件（仅在重试耗尽后）
-                        if current_attempts >= max_retries {
-                            if let Some(ref cb) = progress_cb {
-                                let completed = {
-                                    let workflows = self.workflows.read().await;
-                                    workflows
-                                        .get(workflow_id)
-                                        .map(|w| {
-                                            w.node_states
-                                                .values()
-                                                .filter(|s| {
-                                                    matches!(
-                                                        s.status,
-                                                        NodeStatus::Completed
-                                                            | NodeStatus::Failed
-                                                            | NodeStatus::Skipped
-                                                    )
-                                                })
-                                                .count()
-                                        })
-                                        .unwrap_or(0)
-                                };
-                                cb(StepProgressEvent {
-                                    node_id: node_id.clone(),
-                                    status: "failed".to_string(),
-                                    total_nodes,
-                                    completed_nodes: completed,
-                                    execution_id: Some(execution_id.clone()),
-                                    output: None,
-                                })
-                                .await;
-                            }
+                        if current_attempts >= max_retries
+                            && let Some(ref cb) = progress_cb
+                        {
+                            let completed = {
+                                let workflows = self.workflows.read().await;
+                                workflows
+                                    .get(workflow_id)
+                                    .map(|w| {
+                                        w.node_states
+                                            .values()
+                                            .filter(|s| {
+                                                matches!(
+                                                    s.status,
+                                                    NodeStatus::Completed
+                                                        | NodeStatus::Failed
+                                                        | NodeStatus::Skipped
+                                                )
+                                            })
+                                            .count()
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            cb(StepProgressEvent {
+                                node_id: node_id.clone(),
+                                status: "failed".to_string(),
+                                total_nodes,
+                                completed_nodes: completed,
+                                execution_id: Some(execution_id.clone()),
+                                output: None,
+                            })
+                            .await;
                         }
                     },
                 }

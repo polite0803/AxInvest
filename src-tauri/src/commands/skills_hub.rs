@@ -83,6 +83,9 @@ pub async fn skills_hub_install(skill_id: String) -> Result<String, String> {
     let skills_dir = axinvest_home().join("skills");
     std::fs::create_dir_all(&skills_dir).map_err(|e| format!("创建 skills 目录失败: {e}"))?;
 
+    let hub_base = axinvest_home().join("skills").join(".hub");
+    std::fs::create_dir_all(&hub_base).map_err(|e| format!("创建 .hub 目录失败: {e}"))?;
+
     let q_dir = hub_base.join("quarantine").join(&axagent_skill.name);
     if q_dir.exists() {
         std::fs::remove_dir_all(&q_dir).map_err(|e| format!("清理旧隔离目录失败: {e}"))?;
@@ -134,7 +137,7 @@ pub async fn skills_hub_review(
     name: String,
     action: Option<String>,
 ) -> Result<SkillsHubReviewResult, String> {
-    let hub_base = axagent_home().join("skills").join(".hub");
+    let hub_base = axinvest_home().join("skills").join(".hub");
     let q_dir = hub_base.join("quarantine").join(&name);
 
     if !q_dir.exists() {
@@ -145,7 +148,7 @@ pub async fn skills_hub_review(
 
     match action_str {
         "approve" => {
-            let skills_dir = axagent_home().join("skills");
+            let skills_dir = axinvest_home().join("skills");
             std::fs::create_dir_all(&skills_dir)
                 .map_err(|e| format!("创建 skills 目录失败: {e}"))?;
 

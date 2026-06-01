@@ -279,11 +279,11 @@ async fn seed_stock_analysis_workflow_template(
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
         AgentNode, AgentNodeConfig, Branch, ConditionNode, ConditionNodeConfig, EdgeType,
-        ErrorConfig, JsonSchema, JsonSchemaProperty, LogicalOperator, OnFailureAction, OutputMode,
-        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
-        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
-        ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode,
-        WorkflowNodeBase,
+        ErrorConfig, JsonSchema, JsonSchemaProperty, LogicalOperator, MergeNode, MergeNodeConfig,
+        MergeStrategy, OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position,
+        RetryConfig, RetryPolicy, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
+        TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable,
+        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -1019,7 +1019,6 @@ async fn seed_stock_analysis_workflow_template(
             let analyst_id = a_ids[i];
             // 每个分支内部：ToolNode → AgentNode
             nodes.push(tool_node(tool_id, "获取数据", tool_name, tool_id, arg_key));
-            edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
             edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
             Branch {
                 id: analyst_id.to_string(),
@@ -1057,11 +1056,6 @@ async fn seed_stock_analysis_workflow_template(
         nodes.push(an);
     }
 
-    // 分析师节点 → c-need-debate 的出边（编辑器可视化 + 运行时依赖）
-    for aid in &a_ids {
-        edges.push(edge(&format!("e-{aid}-c-debate"), aid, "c-need-debate"));
-    }
-
     // ParallelNode: 将 9 组分析师封装为统一并行节点
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
@@ -1077,10 +1071,30 @@ async fn seed_stock_analysis_workflow_template(
             branches: analyst_branches,
             wait_for_all: true,
             timeout: Some(600),
-            aggregation: Some("all".into()),
+            aggregation: Some(MergeStrategy::All),
+            auto_input_from_parent: true,
         },
     }));
     edges.push(edge("e-trigger-p-analysts", "trigger", "p-analysts"));
+
+    // MergeNode: 聚合所有分支的输出
+    nodes.push(WorkflowNode::Merge(MergeNode {
+        base: WorkflowNodeBase {
+            id: "m-analysts-merge".into(),
+            title: "分析师结果聚合".into(),
+            description: Some("聚合9位分析师的分析结果".into()),
+            position: Position { x: 300.0, y: 250.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+        },
+        config: MergeNodeConfig {
+            merge_type: MergeStrategy::All,
+            inputs: vec![],
+            auto_inputs_from_branches: true,
+        },
+    }));
+    edges.push(edge("e-p-analysts-m-merge", "p-analysts", "m-analysts-merge"));
 
     // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
     nodes.push(WorkflowNode::Condition(ConditionNode {
@@ -1101,7 +1115,7 @@ async fn seed_stock_analysis_workflow_template(
             routing_model: None,
         },
     }));
-    edges.push(edge("e-p-analysts-c-debate", "p-analysts", "c-need-debate"));
+    edges.push(edge("e-m-merge-c-debate", "m-analysts-merge", "c-need-debate"));
 
     // 辩论 6 轮 — 线性执行，ConditionNode 记录判断结果但不路由分支
     let debate_pairs = [

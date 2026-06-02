@@ -821,7 +821,12 @@ export function useChatViewMessages({
 
       if (msg.role === "system" && msg.content.startsWith("<!-- workflow-")) {
         const data = parseWorkflowCardInline(msg.content);
-        const signature = `workflow:${data?.type ?? "unknown"}:${msg.id}`;
+        // signature 必须包含内容变化因子，否则缓存会阻止卡片实时更新
+        // completed/total 字段随每个 workflow-step-done 事件变化
+        const progressKey = data?.completed != null
+          ? `${data.completed}/${data.total ?? "?"}/${data.status ?? ""}`
+          : `${msg.content.length}`;
+        const signature = `workflow:${data?.type ?? "unknown"}:${msg.id}:${progressKey}`;
         const cached = cache.get(msg.id);
         const item = cached?.signature === signature
           ? cached.item

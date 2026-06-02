@@ -408,8 +408,8 @@ function AppRoot() {
   );
 
   return (
-    <GlobalErrorBoundary>
-      <BrowserRouter>
+    <BrowserRouter>
+      <RouteAwareErrorBoundary>
         <ConfigProvider
           locale={antdLocale}
           theme={themeConfig}
@@ -424,9 +424,16 @@ function AppRoot() {
             </AppInitializer>
           </AntdApp>
         </ConfigProvider>
-      </BrowserRouter>
-    </GlobalErrorBoundary>
+      </RouteAwareErrorBoundary>
+    </BrowserRouter>
   );
+}
+
+/** 路由感知的错误边界 — 路由变化时自动重置 GlobalErrorBoundary 的错误状态 */
+function RouteAwareErrorBoundary({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const resetKey = `${location.pathname}${location.search}`;
+  return <GlobalErrorBoundary resetKey={resetKey}>{children}</GlobalErrorBoundary>;
 }
 
 export { AppRoot };

@@ -32,11 +32,27 @@ export function getNodeSize(type: string): { width: number; height: number } {
   return NODE_SIZE[type] || DEFAULT_SIZE;
 }
 
+/** 将节点均匀展开到网格中，用于 dagre 布局失败时的兜底 */
+function spreadGrid(
+  nodes: Node[],
+  cols: number,
+  cellW: number,
+  cellH: number,
+  startX = MARGIN_X,
+  startY = MARGIN_Y,
+): void {
+  nodes.forEach((n, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    n.position = { x: startX + col * cellW, y: startY + row * cellH };
+  });
+}
+
 /** 间距常量 */
-const RANK_SEP = 80; // 层间垂直间距
-const NODE_SEP = 50; // 同层节点水平间距
-const MARGIN_X = 60; // 左边距
-const MARGIN_Y = 60; // 上边距
+const RANK_SEP = 140; // 层间垂直间距
+const NODE_SEP = 80; // 同层节点水平间距
+const MARGIN_X = 80; // 左边距
+const MARGIN_Y = 80; // 上边距
 
 /**
  * 使用 Dagre 对工作流节点进行自动布局。
@@ -81,7 +97,10 @@ export function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges
   // 应用位置
   const layoutedNodes = nodes.map((node) => {
     const dagreNode = g.node(node.id);
-    if (!dagreNode) { return node; }
+    if (!dagreNode) {
+      // 兜底：dagre 未返回位置的节点（如重复 ID），保留原点并标记
+      return { ...node, position: { x: node.position.x || 60, y: node.position.y || 60 } };
+    }
 
     const nodeType = (node.data?.type || node.type || "") as string;
     const size = NODE_SIZE[nodeType] || DEFAULT_SIZE;
@@ -94,6 +113,15 @@ export function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges
       },
     };
   });
+
+  // 安全检查：如果 >40% 节点仍在原点(0±5,0±5)，dagre 可能因无效边/缺失边而失败，采用网格展开
+  const atOrigin = layoutedNodes.filter(
+    (n) => Math.abs(n.position.x) < 5 && Math.abs(n.position.y) < 5,
+  );
+  if (atOrigin.length > 0 && atOrigin.length >= layoutedNodes.length * 0.4) {
+    const GRID_COLS = Math.ceil(Math.sqrt(layoutedNodes.length));
+    spreadGrid(layoutedNodes, GRID_COLS, 240, 180);
+  }
 
   return { nodes: layoutedNodes, edges };
 }
@@ -196,14 +224,40 @@ export function autoLayoutWorkflow(
   }
 
   // 1. 反算每个节点的当前绝对坐标（input 是 ReactFlow 坐标系，子节点为相对父）
+  // 使用拓扑排序保证父节点总在子节点之前处理
   const currentAbs: Record<string, { x: number; y: number }> = {};
+
+  // 先处理无父节点（顶层节点）
+  const sorted: string[] = [];
   for (const n of nodes) {
-    const pid = childOf[n.id];
-    if (pid && currentAbs[pid]) {
-      currentAbs[n.id] = { x: n.position.x + currentAbs[pid].x, y: n.position.y + currentAbs[pid].y };
-    } else {
+    if (!childOf[n.id]) {
+      sorted.push(n.id);
       currentAbs[n.id] = { x: n.position.x, y: n.position.y };
     }
+  }
+
+  // 再处理子节点（已保证父节点 currentAbs 可用）
+  const remaining = new Set(nodes.map((n) => n.id).filter((id) => childOf[id]));
+  let prevSize = remaining.size + 1;
+  while (remaining.size > 0 && remaining.size < prevSize) {
+    prevSize = remaining.size;
+    for (const id of [...remaining]) {
+      const pid = childOf[id];
+      if (pid && currentAbs[pid]) {
+        const n = nodes.find((x) => x.id === id);
+        if (n) {
+          currentAbs[id] = { x: n.position.x + currentAbs[pid].x, y: n.position.y + currentAbs[pid].y };
+        } else {
+          currentAbs[id] = { x: 0, y: 0 };
+        }
+        remaining.delete(id);
+      }
+    }
+  }
+  // 兜底：仍在 remaining 中的（孤儿引用/循环引用），使用原始位置
+  for (const id of remaining) {
+    const n = nodes.find((x) => x.id === id);
+    currentAbs[id] = n ? { x: n.position.x, y: n.position.y } : { x: 0, y: 0 };
   }
 
   // 2. 对每个 parallel 容器：单独 dagre 排子节点 + 量 bbox + 归一化到原点
@@ -247,6 +301,12 @@ export function autoLayoutWorkflow(
   }
 
   // 3. 主 dagre：只放顶层节点（容器节点 + 无父孤立节点）
+  //
+  // 关键：跨容器边界的边（子节点 → 容器外节点）必须反映到主 dagre 图中，
+  // 否则 dagre 不知道容器之间的先后关系，布局会乱。
+  // 策略：对每条跨边界边，补一条"代理边"——
+  //   子节点 src 在容器 C 内、target 是顶层节点 T → 加边 C → T
+  //   子节点 target 在容器 C 内、source 是顶层节点 T → 加边 T → C
   const topLevelIds = new Set<string>();
   for (const n of nodes) {
     if (CONTAINER_TYPES.has(n.type || "") || !childOf[n.id]) {
@@ -254,7 +314,33 @@ export function autoLayoutWorkflow(
     }
   }
   const topLevelNodes = nodes.filter((n) => topLevelIds.has(n.id));
-  const topLevelEdges = edges.filter((e) => topLevelIds.has(e.source) && topLevelIds.has(e.target));
+
+  const proxyEdges = new Set<string>(); // "src->tgt" 去重
+  const interEdges: Array<{ source: string; target: string }> = [];
+
+  for (const e of edges) {
+    const srcInContainer = childOf[e.source];
+    const tgtInContainer = childOf[e.target];
+    if (topLevelIds.has(e.source) && topLevelIds.has(e.target)) {
+      // 两端都是顶层：直接保留
+      interEdges.push({ source: e.source, target: e.target });
+    } else if (srcInContainer && topLevelIds.has(e.target)) {
+      // 源在容器内，目标是顶层 → 代理边：容器 → 目标
+      const key = `${srcInContainer}->${e.target}`;
+      if (!proxyEdges.has(key)) {
+        proxyEdges.add(key);
+        interEdges.push({ source: srcInContainer, target: e.target });
+      }
+    } else if (tgtInContainer && topLevelIds.has(e.source)) {
+      // 目标在容器内，源是顶层 → 代理边：源 → 容器
+      const key = `${e.source}->${tgtInContainer}`;
+      if (!proxyEdges.has(key)) {
+        proxyEdges.add(key);
+        interEdges.push({ source: e.source, target: tgtInContainer });
+      }
+    }
+    // 两端都在容器内（可能不同容器）：忽略，子图布局已独立处理
+  }
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
@@ -273,7 +359,7 @@ export function autoLayoutWorkflow(
       : getNodeSize(t);
     g.setNode(n.id, { width: size.width, height: size.height });
   }
-  for (const e of topLevelEdges) {
+  for (const e of interEdges) {
     g.setEdge(e.source, e.target);
   }
   dagre.layout(g);

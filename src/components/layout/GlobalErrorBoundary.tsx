@@ -134,6 +134,8 @@ interface GlobalErrorBoundaryState {
 interface GlobalErrorBoundaryProps {
   children: React.ReactNode;
   FallbackComponent?: React.ComponentType<ErrorFallbackProps>;
+  /** 当此值变化时自动重置错误状态（用于路由变化时恢复） */
+  resetKey?: string;
 }
 
 class GlobalErrorBoundary extends React.Component<
@@ -154,6 +156,18 @@ class GlobalErrorBoundary extends React.Component<
     error: Error,
   ): Partial<GlobalErrorBoundaryState> {
     return { hasError: true, error };
+  }
+
+  componentDidUpdate(prevProps: Readonly<GlobalErrorBoundaryProps>) {
+    // 当 resetKey 变化时自动重置错误状态（路由切换恢复）
+    if (this.props.resetKey !== prevProps.resetKey && this.state.hasError) {
+      this.setState({
+        hasError: false,
+        error: null,
+        errorInfo: null,
+        retryKey: this.state.retryKey + 1,
+      });
+    }
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {

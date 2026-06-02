@@ -27,7 +27,7 @@ const TOOL_NODE_TO_LABEL: Record<string, string> = {
   "t-money-flow": "资金流向",
   "t-sentiment-data": "市场情绪",
   "t-policy-data": "政策数据",
-  "t-hot-money-data": "游资数据",
+  "t-hotmoney-data": "游资数据",
   "t-lockup-data": "解禁数据",
   "t-research-data": "研报数据",
   "t-sector-data": "板块数据",
@@ -215,7 +215,20 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     error?: string,
   ) => {
     const analysts = Array.from(analystsMap.values());
-    const debates = Array.from(debatesMap.values());
+    // 转换 debatesMap 为 WorkflowCardData 期望的 round/bull/bear/status 格式
+    const bullEntry = debatesMap.get("bull-researcher");
+    const bearEntry = debatesMap.get("bear-researcher");
+    const maxRounds = Math.max(bullEntry?.rounds.length ?? 0, bearEntry?.rounds.length ?? 0, 1);
+    const debates = Array.from({ length: maxRounds }, (_, i) => ({
+      round: i + 1,
+      bull: bullEntry?.rounds[i],
+      bear: bearEntry?.rounds[i],
+      status: (bullEntry?.rounds[i] || bearEntry?.rounds[i])
+        ? "done" as const
+        : (bullEntry?.status === "running" || bearEntry?.status === "running")
+        ? "running" as const
+        : "pending" as const,
+    }));
     const risks = Array.from(risksMap.values());
     const dataSources = Array.from(dataSourcesMap.values());
     const extraNodes = Array.from(extraNodesMap.values());

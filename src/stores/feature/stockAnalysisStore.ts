@@ -81,11 +81,13 @@ function parseWorkflowResults(results: Record<string, unknown>) {
 
     if (stepId.startsWith("a-") && !stepId.includes("bull") && !stepId.includes("bear")) {
       analystReports[stepId.slice(2)] = output;
-    } else if (stepId.startsWith("bull-r")) {
-      const round = parseInt(stepId.slice(6), 10);
-      const bearKey = `bear-r${round}`;
-      debateRounds.push({ round, bull: output, bear: extractContent(results[bearKey] ?? "") });
-    } else if (stepId.startsWith("bear-r")) {
+    } else if (stepId === "bull-researcher" || (stepId.startsWith("bull-r") && stepId !== "bull-researcher")) {
+      // 辩论子节点: 实际 nodeId 为 "bull-researcher" (DAG 引擎单次执行)
+      // 兼容未来多轮模式: bull-r1, bull-r2...
+      const round = stepId === "bull-researcher" ? 1 : parseInt(stepId.slice(6), 10);
+      const bearKey = stepId === "bull-researcher" ? "bear-researcher" : `bear-r${round}`;
+      debateRounds.push({ round: round - 1, bull: output, bear: extractContent(results[bearKey] ?? "") });
+    } else if (stepId === "bear-researcher" || (stepId.startsWith("bear-r") && stepId !== "bear-researcher")) {
       continue;
     } else if (stepId.startsWith("risk-") || stepId === "research-mgr") {
       riskAssessments[stepId] = output;
@@ -450,8 +452,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const s = get();
         if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
           set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });
-        } else if (nodeId.startsWith("bull-r")) {
-          const round = parseInt(nodeId.slice(6), 10);
+        } else if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
+          // 辩论子节点: 实际 nodeId 为 "bull-researcher" (DAG 引擎单次执行)
+          // 兼容未来多轮模式: bull-r1, bull-r2...
+          const round = nodeId === "bull-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
           const debates = [...s.debateRounds];
           const idx = debates.findIndex((d) => d.round === round - 1);
           if (idx >= 0) {
@@ -461,8 +465,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }
           debates.sort((a, b) => a.round - b.round);
           set({ debateRounds: debates });
-        } else if (nodeId.startsWith("bear-r")) {
-          const round = parseInt(nodeId.slice(6), 10);
+        } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
+          const round = nodeId === "bear-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
           const debates = [...s.debateRounds];
           const idx = debates.findIndex((d) => d.round === round - 1);
           if (idx >= 0) {
@@ -556,7 +560,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 /** 从节点 ID 推断当前管线阶段 */
 function inferStage(nodeId: string): number {
   if (nodeId.startsWith("a-")) { return 1; }
-  if (nodeId.startsWith("bull-r") || nodeId.startsWith("bear-r")) { return 2; }
+  if (
+    nodeId === "bull-researcher" || nodeId === "bear-researcher" || nodeId.startsWith("bull-r")
+    || nodeId.startsWith("bear-r")
+  ) { return 2; }
   if (nodeId.startsWith("risk-") || nodeId === "research-mgr") { return 3; }
   if (nodeId === "trader" || nodeId === "portfolio-mgr") { return 4; }
   return -1;

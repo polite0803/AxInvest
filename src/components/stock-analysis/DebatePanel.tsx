@@ -3,6 +3,7 @@ import { Card, Collapse, Tag } from "antd";
 import NodeRenderer from "markstream-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { cleanToolCallTags } from "./utils";
 
 export function DebatePanel() {
   const { t } = useTranslation();
@@ -91,13 +92,13 @@ export function DebatePanel() {
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
                 <Tag color="red">{t("stockAnalysis.bull")}</Tag>
                 <div className="sa-markdown-content text-xs mt-1">
-                  <NodeRenderer content={r.bull} isDark={isDark} />
+                  <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
                 </div>
               </div>
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
                 <Tag color="green">{t("stockAnalysis.bear")}</Tag>
                 <div className="sa-markdown-content text-xs mt-1">
-                  <NodeRenderer content={r.bear} isDark={isDark} />
+                  <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
                 </div>
               </div>
             </div>

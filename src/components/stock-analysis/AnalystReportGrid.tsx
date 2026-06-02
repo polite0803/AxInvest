@@ -2,13 +2,7 @@ import { useStockAnalysisStore } from "@/stores";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AnalystReportCard } from "./AnalystReportCard";
-
-/** 清理 LLM 工具调用标签，提取实际分析文本 */
-function cleanToolTags(text: string): string {
-  let cleaned = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
-  cleaned = cleaned.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
-  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
-}
+import { cleanToolCallTags } from "./utils";
 
 export function AnalystReportGrid() {
   const { t } = useTranslation();
@@ -21,7 +15,7 @@ export function AnalystReportGrid() {
     let bearish = 0;
     let neutral = 0;
     for (const rawReport of entries) {
-      const report = cleanToolTags(rawReport);
+      const report = cleanToolCallTags(rawReport);
       const lower = report.toLowerCase();
       if (lower.includes("买入") || lower.includes("增持") || lower.includes("看多") || lower.includes("推荐")) {
         bullish++;

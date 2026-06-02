@@ -324,7 +324,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       console.error("[StockAnalysis] Failed to start workflow:", e);
       set({
         status: "error",
-        error: typeof e === "string" ? e : (e as Error)?.message ?? "工作流启动失败",
+        error: typeof e === "string" ? e : (e as Error)?.message ?? i18n.t("stockAnalysis.workflow.startFailed"),
         progressPct: 0,
       });
     }

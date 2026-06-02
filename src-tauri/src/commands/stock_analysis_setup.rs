@@ -290,7 +290,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 1;
+    const TEMPLATE_VERSION: i32 = 2;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -333,7 +333,7 @@ async fn seed_stock_analysis_workflow_template(
                     },
                     timeout: Some(120),
                     enabled: true,
-                    parent_id: None,
+                    parent_id: Some("p-analysts".into()),
                 },
                 config: ToolNodeConfig {
                     tool_name: tool_name.into(),
@@ -1041,8 +1041,10 @@ async fn seed_stock_analysis_workflow_template(
         let fixed_tool_name = tool_assignments[i].2;
         let mut an = agent(id, title, _expert);
         if let WorkflowNode::Agent(ref mut a) = an {
+            a.base.parent_id = Some("p-analysts".into());
             a.config.context_sources = vec![tool_id.to_string()];
             a.config.max_tool_rounds = Some(2);
+            a.config.model_role = Some("stock-analyst".into());
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| **k == **_expert)
@@ -1300,7 +1302,8 @@ async fn seed_stock_analysis_workflow_template(
         "research-manager",
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
-        a.config.context_sources = vec!["t-scoring".into(), "t-valuation".into(), "t-risk".into()];
+        a.config.context_sources = vec!["t-scoring".into(), "t-valuation".into(), "t-risk".into(), "risk-aggregated".into(), "risk-level".into()];
+        a.config.model_role = Some("decision-maker".into());
         a.config.tools = vec![
             td_score.clone(),
             td_val.clone(),
@@ -1369,6 +1372,7 @@ async fn seed_stock_analysis_workflow_template(
     );
     if let WorkflowNode::Agent(ref mut a) = trader {
         a.config.context_sources = vec!["research-mgr".into()];
+        a.config.model_role = Some("trader".into());
         a.config.tools = vec![
             td_quote.clone(),
             td_kline.clone(),
@@ -1396,6 +1400,7 @@ async fn seed_stock_analysis_workflow_template(
     );
     if let WorkflowNode::Agent(ref mut a) = pm {
         a.config.context_sources = vec!["trader".into(), "research-mgr".into()];
+        a.config.model_role = Some("decision-maker".into());
         a.config.tools = vec![
             td_quote.clone(),
             td_kline.clone(),
@@ -1427,6 +1432,30 @@ async fn seed_stock_analysis_workflow_template(
     nodes.push(pm);
     edges.push(edge("e-trader-portfolio-mgr", "trader", "portfolio-mgr"));
     edges.push(edge("e-research-mgr-portfolio-mgr", "research-mgr", "portfolio-mgr"));
+
+    // ── NotificationNode: 分析完成通知 ──
+    nodes.push(WorkflowNode::Notification(NotificationNode {
+        base: WorkflowNodeBase {
+            id: "notify-result".into(),
+            title: "分析完成通知".into(),
+            description: Some("股票分析完成后发送通知".into()),
+            position: Position { x: 300.0, y: 1300.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(10),
+            enabled: true,
+            parent_id: None,
+        },
+        config: NotificationNodeConfig {
+            channel: "system".into(),
+            message: "股票分析已完成，请查看决策结果".into(),
+            webhook_url: None,
+            recipients: vec![],
+            subject: Some("股票分析完成".into()),
+            enabled: true,
+            output_var: "notification".into(),
+        },
+    }));
+    edges.push(edge("e-portfolio-mgr-notify", "portfolio-mgr", "notify-result"));
 
     // 构建 input_schema / output_schema / variables
     let mut input_props = std::collections::HashMap::new();

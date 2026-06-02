@@ -2,7 +2,8 @@ import { useWorkflowEditorStore } from "@/stores";
 import { Tag, theme, Tooltip } from "antd";
 import React, { memo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Handle, type NodeProps, Position } from "reactflow";
+import { Handle, Position } from "reactflow";
+import type { NodeProps } from "reactflow";
 
 const BLUE_BASE = "#1890ff";
 const BLUE_VAR = `var(--blue, ${BLUE_BASE})`;
@@ -108,6 +109,7 @@ const DebateNodeComponent: React.FC<NodeProps<DebateNodeData>> = ({
           : t("workflow.debateNode.collapse", { defaultValue: "Collapse" })}
       >
         <span
+          className="react-flow__nodrag"
           onClick={toggleCollapse}
           style={{
             position: "absolute",
@@ -137,8 +139,17 @@ const DebateNodeComponent: React.FC<NodeProps<DebateNodeData>> = ({
           ▼
         </span>
       </Tooltip>
-      <Handle type="target" position={Position.Top} style={{ background: BLUE_VAR }} />
-      <Handle type="source" position={Position.Bottom} style={{ background: BLUE_VAR }} />
+      {/* 折叠态 Handle：始终挂载但视觉不可见，供边重定向到容器自身 */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ background: "transparent", border: "none", width: 1, height: 1, top: 0 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{ background: "transparent", border: "none", width: 1, height: 1, bottom: 0 }}
+      />
     </div>
   );
 };

@@ -92,13 +92,17 @@ export function DebatePanel() {
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
                 <Tag color="red">{t("stockAnalysis.bull")}</Tag>
                 <div className="sa-markdown-content text-xs mt-1">
-                  <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
+                  {cleanToolCallTags(r.bull)
+                    ? <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
+                    : <span style={{ color: "var(--muted)" }}>暂无数据</span>}
                 </div>
               </div>
               <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
                 <Tag color="green">{t("stockAnalysis.bear")}</Tag>
                 <div className="sa-markdown-content text-xs mt-1">
-                  <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
+                  {cleanToolCallTags(r.bear)
+                    ? <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
+                    : <span style={{ color: "var(--muted)" }}>暂无数据</span>}
                 </div>
               </div>
             </div>

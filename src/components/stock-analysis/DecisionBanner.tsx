@@ -182,7 +182,9 @@ export function DecisionBanner() {
         className="sa-markdown-content text-xs mb-3 p-2 rounded"
         style={{ background: "var(--surface)" }}
       >
-        <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
+        {cleanToolCallTags(decision.reasoning || "")
+          ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
+          : <span style={{ color: "var(--muted)" }}>暂无决策推理内容</span>}
       </div>
 
       {/* 核心指标网格 — 固定3列、窄屏2列，防止侧栏坍塌 */}

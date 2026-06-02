@@ -7480,5 +7480,14 @@
   "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
   "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
   "stockAnalysis.workflow.bullCase": "Bull Case",
-  "stockAnalysis.workflow.bearCase": "Bear Case"
+  "stockAnalysis.workflow.bearCase": "Bear Case",
+  "stockAnalysis.workflow.bullAnalyst": "Bull Analyst",
+  "stockAnalysis.workflow.bearAnalyst": "Bear Analyst",
+  "stockAnalysis.workflow.riskAggressive": "Aggressive Assessment",
+  "stockAnalysis.workflow.riskConservative": "Conservative Assessment",
+  "stockAnalysis.workflow.riskNeutral": "Neutral Assessment",
+  "stockAnalysis.workflow.riskAggregation": "Risk Aggregation",
+  "stockAnalysis.workflow.riskClassification": "Risk Classification",
+  "stockAnalysis.workflow.notification": "Notification",
+  "stockAnalysis.workflow.fetchFailed": "Failed to fetch data"
 }

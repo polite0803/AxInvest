@@ -1151,7 +1151,7 @@ async fn seed_stock_analysis_workflow_template(
         label: Some("辩论".into()),
     });
 
-    // 风险评估（3 个并行，均依赖 bear-r3）
+    // 风险评估（3 个并行，均依赖辩论结果）
     for (rid, rtitle, rexpert, rtools) in &[
         (
             "risk-agg",
@@ -1201,10 +1201,32 @@ async fn seed_stock_analysis_workflow_template(
             a.config.system_prompt = format!("{}{}", a.config.system_prompt, tool_prompt(rtools));
         }
         nodes.push(an);
-        edges.push(edge(&format!("e-bear-r3-{rid}"), "bear-r3", rid));
+        edges.push(edge(&format!("e-debate-{rid}"), "debate-bull-bear", rid));
     }
 
-    // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控 ——
+    // ── AggregatorNode: 聚合三种风险偏好评估结果 ──
+    nodes.push(WorkflowNode::Aggregator(AggregatorNode {
+        base: WorkflowNodeBase {
+            id: "agg-risk".into(),
+            title: "风险偏好聚合".into(),
+            description: Some("聚合激进/保守/中性三种风险偏好评估".into()),
+            position: Position { x: 300.0, y: 700.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(60),
+            enabled: true,
+            parent_id: None,
+        },
+        config: AggregatorNodeConfig {
+            strategy: "all".into(),
+            input_sources: vec!["risk-agg".into(), "risk-con".into(), "risk-neu".into()],
+            output_var: "risk-aggregated".into(),
+        },
+    }));
+    for rid in &["risk-agg", "risk-con", "risk-neu"] {
+        edges.push(edge(&format!("e-{rid}-agg-risk"), rid, "agg-risk"));
+    }
+
+    // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控 ──
     let algo_tools: &[(&str, &str, &str, &str)] = &[
         ("t-scoring", "技术评分", "compute_scoring", "stock_code"),
         ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
@@ -1213,11 +1235,35 @@ async fn seed_stock_analysis_workflow_template(
     for (tool_id, title, tool_name, arg_key) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
     }
-    for rid in &["risk-agg", "risk-con", "risk-neu"] {
-        edges.push(edge(&format!("e-{rid}-t-scoring"), rid, "t-scoring"));
-    }
+    edges.push(edge("e-agg-risk-t-scoring", "agg-risk", "t-scoring"));
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
+
+    // ── LlmClassifierNode: 风险等级分类 ──
+    nodes.push(WorkflowNode::LlmClassifier(LlmClassifierNode {
+        base: WorkflowNodeBase {
+            id: "cls-risk-level".into(),
+            title: "风险等级分类".into(),
+            description: Some("基于算法评分结果自动分类风险等级".into()),
+            position: Position { x: 300.0, y: 950.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+        },
+        config: LlmClassifierNodeConfig {
+            categories: vec!["低风险".into(), "中风险".into(), "高风险".into()],
+            prompt: "根据技术评分、估值计算和风险评估的输出结果，判断该股票的整体风险等级。\
+                     低风险：评分>70、估值合理、风险指标正常；\
+                     中风险：评分40-70或部分指标异常；\
+                     高风险：评分<40或多个风险指标触发"
+                .into(),
+            model: None,
+            input_var: "t-risk.output".into(),
+            output_var: "risk-level".into(),
+        },
+    }));
+    edges.push(edge("e-t-risk-cls-risk", "t-risk", "cls-risk-level"));
 
     // ── Validation: 结果完整性校验 ──
     nodes.push(WorkflowNode::Validation(ValidationNode {
@@ -1245,7 +1291,7 @@ async fn seed_stock_analysis_workflow_template(
             max_retries: 1,
         },
     }));
-    edges.push(edge("e-t-risk-v-validate", "t-risk", "v-validate"));
+    edges.push(edge("e-cls-risk-v-validate", "cls-risk-level", "v-validate"));
 
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(

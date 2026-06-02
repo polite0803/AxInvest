@@ -1158,7 +1158,6 @@ impl WorkEngine {
                     continue;
                 }
 
-
                 let deps_results = {
                     let workflows = self.workflows.read().await;
                     workflows

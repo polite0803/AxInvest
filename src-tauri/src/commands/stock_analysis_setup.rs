@@ -289,7 +289,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 4;
+    const TEMPLATE_VERSION: i32 = 5;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -325,7 +325,7 @@ async fn seed_stock_analysis_workflow_template(
                      y: f64|
      -> WorkflowNode {
         let mut input_mapping = std::collections::HashMap::new();
-        input_mapping.insert(arg_key.to_string(), "trigger.stock_code".to_string());
+        input_mapping.insert(arg_key.to_string(), "stock_code".to_string());
         WorkflowNode::Tool(ToolNode {
             base: WorkflowNodeBase {
                 id: id.into(),
@@ -1046,14 +1046,16 @@ async fn seed_stock_analysis_workflow_template(
     // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
     // 分析师节点已直接连接 DebateNode（无中间条件节点）
 
-    // 辩论 — 使用上游 DebateNode 容器替代 6 个线性 Agent 节点
-    // DebateNode 是容器节点，debater_steps 引用的子节点必须存在于 nodes 中，
-    // 且 parentId 指向 DebateNode，前端据此将子节点渲染在容器内部。
+    // ── 辩论轮数（DAG 展开为 max_rounds 轮顺序执行） ──
+    let debate_max_rounds: usize = 3;
+
     nodes.push(WorkflowNode::Debate(DebateNode {
         base: WorkflowNodeBase {
             id: "debate-bull-bear".into(),
             title: "多空辩论".into(),
-            description: Some("3 轮多空辩论：多方构建论点 → 空方反驳 → 循环".into()),
+            description: Some(
+                format!("{debate_max_rounds} 轮多空辩论：多方构建论点 → 空方反驳 → 循环").into(),
+            ),
             position: Position {
                 x: 300.0,
                 y: 1280.0,
@@ -1068,8 +1070,10 @@ async fn seed_stock_analysis_workflow_template(
             parent_id: None,
         },
         config: DebateNodeConfig {
-            debater_steps: vec!["bull-researcher".into(), "bear-researcher".into()],
-            max_rounds: 3,
+            debater_steps: (0..debate_max_rounds)
+                .flat_map(|r| vec![format!("bull-r{}", r + 1), format!("bear-r{}", r + 1)])
+                .collect(),
+            max_rounds: debate_max_rounds as u32,
             convergence_prompt: Some(
                 "综合多空双方全部论点，提炼最坚固的3个看涨核心逻辑和3个最大风险点，\
                  对每个逻辑给出置信度评分（0-100），给出该股票的风险综合评分（0-100）"
@@ -1081,9 +1085,8 @@ async fn seed_stock_analysis_workflow_template(
             output_var: "debate-result".into(),
         },
     }));
-    // 删除 — 分析师已通过 9 条边直接连接 DebateNode
 
-    // DebateNode 的子节点：多方辩手和空方辩手
+    // DebateNode 的子节点：按轮次展开多方辩手和空方辩手
     // parentId 指向容器节点，前端将它们渲染在 DebateNode 内部
     let bull_tools = vec![
         td_quote.clone(),
@@ -1104,30 +1107,66 @@ async fn seed_stock_analysis_workflow_template(
         td_pledge.clone(),
         td_corr.clone(),
     ];
-    for (i, (debater_id, debater_title, debater_expert, debater_tools)) in [
-        ("bull-researcher", "多方研究员", "bull-researcher", &bull_tools),
-        ("bear-researcher", "空方研究员", "bear-researcher", &bear_tools),
-    ]
-    .iter()
-    .enumerate()
-    {
-        let debater_y = 40.0 + i as f64 * 80.0;
-        let mut an = agent(
-            debater_id,
-            debater_title,
-            debater_expert,
-            Some("debate-bull-bear"),
-            20.0,
-            debater_y,
-        );
-        if let WorkflowNode::Agent(ref mut a) = an {
-            a.config.tools = (*debater_tools).clone();
+
+    for round in 0..debate_max_rounds {
+        let round_num = round + 1;
+        let bull_id = format!("bull-r{round_num}");
+        let bear_id = format!("bear-r{round_num}");
+        let bull_title = format!("多方研究员·第{round_num}轮");
+        let bear_title = format!("空方研究员·第{round_num}轮");
+        let bull_y = 40.0 + (round * 2) as f64 * 80.0;
+        let bear_y = 40.0 + (round * 2 + 1) as f64 * 80.0;
+
+        // 多方辩手：首轮无前置辩论上下文，后续轮次引用所有前序辩论输出
+        let mut bull_an =
+            agent(&bull_id, &bull_title, "bull-researcher", Some("debate-bull-bear"), 20.0, bull_y);
+        if let WorkflowNode::Agent(ref mut a) = bull_an {
+            a.config.tools = bull_tools.clone();
             a.config.max_tool_rounds = Some(2);
             a.config.system_prompt =
-                format!("{}{}", a.config.system_prompt, tool_prompt(debater_tools));
+                format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
             a.config.model_role = Some("debater".into());
+            // 注入前序轮次辩论输出作为上下文
+            let mut ctx: Vec<String> = Vec::new();
+            for r in 1..round_num {
+                ctx.push(format!("bull-r{r}"));
+                ctx.push(format!("bear-r{r}"));
+            }
+            a.config.context_sources = ctx;
         }
-        nodes.push(an);
+        nodes.push(bull_an);
+
+        // 空方辩手：引用本轮多方输出 + 前序轮次辩论输出
+        let mut bear_an =
+            agent(&bear_id, &bear_title, "bear-researcher", Some("debate-bull-bear"), 20.0, bear_y);
+        if let WorkflowNode::Agent(ref mut a) = bear_an {
+            a.config.tools = bear_tools.clone();
+            a.config.max_tool_rounds = Some(2);
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&bear_tools));
+            a.config.model_role = Some("debater".into());
+            // 注入前序轮次 + 本轮多方输出作为上下文
+            let mut ctx: Vec<String> = Vec::new();
+            for r in 1..round_num {
+                ctx.push(format!("bull-r{r}"));
+                ctx.push(format!("bear-r{r}"));
+            }
+            ctx.push(bull_id.clone());
+            a.config.context_sources = ctx;
+        }
+        nodes.push(bear_an);
+
+        // ── 轮次依赖边 ──
+        if round == 0 {
+            // 首轮：从 DebateNode 容器出发
+            edges.push(edge(&format!("e-debate-bull-r{round_num}"), "debate-bull-bear", &bull_id));
+        } else {
+            // 后续轮次：上一轮空方完成后启动本轮多方
+            let prev_bear = format!("bear-r{}", round);
+            edges.push(edge(&format!("e-r{round}-bull-r{round_num}"), &prev_bear, &bull_id));
+        }
+        // 每轮：多方 → 空方（空方看到多方论点后反驳）
+        edges.push(edge(&format!("e-bull-r{round_num}-bear-r{round_num}"), &bull_id, &bear_id));
     }
 
     // 风险评估 — 使用 ParallelNode 容器包裹 3 个并行 Agent
@@ -1169,10 +1208,11 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(600),
         },
     }));
-    edges.push(edge("e-debate-p-risk-assess", "debate-bull-bear", "p-risk-assess"));
-    // debate 容器 → 子节点依赖边：防止子节点在 debate 完成前被独立调度
-    edges.push(edge("e-debate-bull", "debate-bull-bear", "bull-researcher"));
-    edges.push(edge("e-debate-bear", "debate-bull-bear", "bear-researcher"));
+    edges.push(edge(
+        "e-debate-p-risk-assess",
+        &format!("bear-r{debate_max_rounds}"),
+        "p-risk-assess",
+    ));
 
     for (i, (rid, rtitle, rexpert, rtools)) in [
         (

@@ -7480,6 +7480,8 @@
   "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
   "stockAnalysis.workflow.bullCase": "Bull Case",
   "stockAnalysis.workflow.bearCase": "Bear Case",
+
+  "stockAnalysis.expandView": "Expand View",
   "stockAnalysis.workflow.bullAnalyst": "Bull Analyst",
   "stockAnalysis.workflow.bearAnalyst": "Bear Analyst",
   "stockAnalysis.workflow.riskAggressive": "Aggressive Assessment",

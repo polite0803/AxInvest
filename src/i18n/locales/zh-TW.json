@@ -7479,6 +7479,8 @@
   "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
   "stockAnalysis.workflow.bullCase": "多方論點",
   "stockAnalysis.workflow.bearCase": "空方論點",
+
+  "stockAnalysis.expandView": "大屏查看",
   "stockAnalysis.workflow.bullAnalyst": "多方研究員",
   "stockAnalysis.workflow.bearAnalyst": "空方研究員",
   "stockAnalysis.workflow.riskAggressive": "激進評估",

@@ -7,6 +7,9 @@ src-tauri/gen/android/app/release.jks
 .npm-cache/
 _npx/
 
+# Reasonix cache
+.reasonix/
+
 # Windows specific
 nul
 logs

@@ -38,13 +38,23 @@ export function AnalystReportCard({ expertId, report }: Props) {
   const name = ANALYST_NAMES[expertId] || expertId;
   const cleanedReport = cleanToolCallTags(report);
   const parsed = tryParse(cleanedReport);
+  // 显示内容：优先清理后内容，清理后为空则回退到原始内容，都为空则显示提示
+  const displayContent = cleanedReport || report;
 
   if (!parsed) {
     return (
       <Card size="small" title={name} styles={{ body: { maxHeight: 320, overflow: "auto" } }}>
-        <div className="sa-markdown-content">
-          <NodeRenderer content={cleanedReport || report} isDark={isDark} />
-        </div>
+        {displayContent
+          ? (
+            <div className="sa-markdown-content">
+              <NodeRenderer content={displayContent} isDark={isDark} />
+            </div>
+          )
+          : (
+            <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "center", padding: "16px 0" }}>
+              暂无分析报告
+            </div>
+          )}
       </Card>
     );
   }

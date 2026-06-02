@@ -155,7 +155,9 @@ export function RiskMatrix() {
                 className="sa-markdown-content text-xs leading-relaxed"
                 style={{ maxHeight: 160, overflow: "auto" }}
               >
-                <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
+                {cleanToolCallTags(report)
+                  ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
+                  : <span style={{ color: "var(--muted)" }}>暂无风险评估数据</span>}
               </div>
             </div>
           );

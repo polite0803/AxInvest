@@ -279,13 +279,12 @@ async fn seed_stock_analysis_workflow_template(
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
         AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, DebateNode,
-        DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema,
-        JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig,
-        MergeStrategy, NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode,
-        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
-        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
-        ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode,
-        WorkflowNodeBase,
+        DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode,
+        LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
+        OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
+        RetryPolicy, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
+        ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
+        WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 

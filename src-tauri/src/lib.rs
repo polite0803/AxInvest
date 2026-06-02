@@ -1269,15 +1269,10 @@ pub fn run() {
                             std::process::exit(1);
                         });
                     rt.block_on(async {
-                        match engine.full_sync().await {
-                            Ok(result) => {
-                                let dl = result.pending_downloads.len();
-                                let ul = result.pending_uploads.len();
-                                tracing::info!("[mobile] Initial sync complete: {} pending downloads, {} pending uploads", dl, ul);
-                            },
-                            Err(e) => {
-                                tracing::warn!("[mobile] Initial sync failed (non-critical): {}", e);
-                            },
+                        match engine.backend.check_connection().await {
+                            Ok(true) => tracing::info!("[mobile] Cloud sync backend connected"),
+                            Ok(false) => tracing::warn!("[mobile] Cloud sync backend unreachable"),
+                            Err(e) => tracing::warn!("[mobile] Cloud sync connection check failed: {}", e),
                         }
                     });
                 }).join().unwrap_or_else(|e| {

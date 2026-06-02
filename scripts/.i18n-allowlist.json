@@ -1,8 +1,8 @@
 {
   "version": "1",
-  "generated": "2026-05-29",
-  "total_entries": 150,
-  "total_files": 150,
+  "generated": "2026-06-02",
+  "total_entries": 2829,
+  "total_files": 176,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -342,15 +342,17 @@
     },
     {
       "file": "src/components/stock-analysis/AnalystReportCard.tsx",
-      "lines": "77,79,80,82",
+      "lines": "65,77,79,80,82,87,119,121,175,177",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 10
     },
     {
       "file": "src/components/stock-analysis/AnalystReportGrid.tsx",
-      "lines": "18,20",
+      "lines": "18,20,22",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 3
     },
     {
       "file": "src/components/stock-analysis/CompareView.tsx",
@@ -366,9 +368,10 @@
     },
     {
       "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "8,9,10,11,12,27,28,29,30,31,45,46,47,48,49,50,51,52,53,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,86,87,88,111,112,113,114,115,116,117,118,119,120,135,137,139,140,142,144,230,232,235,237",
+      "lines": "8,9,10,11,12,27,28,29,30,31,45,46,47,48,49,50,51,52,53,54,55,56,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,86,87,88,89,90,91,111,112,113,114,115,116,117,118,119,120,121,122,123,135,137,139,140,142,144,146,148,196,230,232,235,237,246,248,283,285,287,364,366,382",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 78
     },
     {
       "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
@@ -390,9 +393,10 @@
     },
     {
       "file": "src/components/stock-analysis/RiskMatrix.tsx",
-      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,39,40,41",
+      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,39,40,41,43,223,263",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 19
     },
     {
       "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
@@ -822,9 +826,10 @@
     },
     {
       "file": "src/stores/feature/stockAnalysisStore.ts",
-      "lines": "34,97,295,483",
+      "lines": "34,40,97,105,295,483,493",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 7
     },
     {
       "file": "src/stores/feature/topicGroupStore.ts",
@@ -882,9 +887,10 @@
     },
     {
       "file": "src/types/stock-analysis.ts",
-      "lines": "82,83,84,85,86,87,88,89,90,91,92,93,94,95",
+      "lines": "82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 26
     },
     {
       "file": "src/components/workflow/WorkflowEditor.tsx",
@@ -900,9 +906,10 @@
     },
     {
       "file": "src/stores/feature/stockWorkflowChatBridge.ts",
-      "lines": "23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,103,107,109,114,116,117,118,121,282",
+      "lines": "23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,103,107,109,111,114,115,116,117,118,121,124,132,134,135,136,139,282",
       "reason": "硬编码中文字符串",
-      "phase": 3
+      "phase": 3,
+      "total_lines": 42
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/CodePropertyPanel.tsx",
@@ -1052,6 +1059,12 @@
       "file": "src/components/chat/RightPanelContainer.tsx",
       "lines": "511",
       "reason": "JSX 注释文本，非 UI 渲染内容",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DebatePanel.tsx",
+      "lines": "111,119,181,189",
+      "reason": "硬编码中文字符串",
       "phase": 3
     }
   ]

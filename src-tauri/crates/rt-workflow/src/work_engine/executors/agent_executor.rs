@@ -237,25 +237,23 @@ impl NodeExecutorTrait for AgentExecutor {
         };
 
         // 2. 解析 provider + key + model（带缓存）
-        // 优先级：context.__workflow_provider_id__ > profile.suggested_provider_id > 系统默认
-        // 优先级：context.__workflow_model__ > profile 默认 model > 系统默认
+        // 优先级：节点 config.model > 会话 __workflow_model__/__workflow_provider_id__ > profile.suggested_provider_id > 项目默认
+        let node_model = an.config.model.as_deref().filter(|m| !m.is_empty());
         let session_model = context
             .variables
             .get("__workflow_model__")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .and_then(|v| v.as_str());
         let session_provider_id = context
             .variables
             .get("__workflow_provider_id__")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let (prov, key, default_model) = self
-            .resolve_provider(profile.as_ref(), session_provider_id.as_deref())
-            .await
-            .map_err(|e| {
-                tracing::error!(%node_id, "Agent resolve_provider失败: {e:?}");
-                e
-            })?;
+            .and_then(|v| v.as_str());
+        let profile_suggested = profile
+            .as_ref()
+            .and_then(|p| p.suggested_provider_id.as_deref());
+
+        let (prov, key, model) = self
+            .resolve_provider(node_model, session_model, session_provider_id, profile_suggested)
+            .await?;
         let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, &self.master_key)
             .map_err(|e| {
                 NodeError::exec_failed(
@@ -432,7 +430,6 @@ impl NodeExecutorTrait for AgentExecutor {
         ];
 
         let base_url = resolve_base_url_for_type(&prov.api_host, &prov.provider_type);
-        let model = session_model.unwrap_or(default_model);
 
         if an.config.execution_mode.as_deref() == Some("plan") {
             return self
@@ -999,17 +996,17 @@ impl AgentExecutor {
     /// 仅对"无 profile"或"profile 无 provider 偏好"的分辨结果做缓存。
     async fn resolve_provider(
         &self,
-        profile: Option<&axagent_core::entity::agent_profiles::Model>,
-        context_provider_id: Option<&str>,
+        node_model: Option<&str>,
+        session_model: Option<&str>,
+        session_provider_id: Option<&str>,
+        profile_suggested_provider: Option<&str>,
     ) -> Result<
         (axagent_core::types::ProviderConfig, axagent_core::types::ProviderKey, String),
         NodeError,
     > {
-        // 仅当无 profile 指定 provider 且无上下文 provider 时使用缓存
-        let has_override = profile
-            .and_then(|p| p.suggested_provider_id.as_ref())
-            .is_some()
-            || context_provider_id.is_some();
+        let has_override = session_provider_id.is_some()
+            || profile_suggested_provider.is_some()
+            || node_model.is_some();
         if !has_override {
             let cache = self.default_provider_cache.lock().await;
             if let Some(ref cached) = *cache {
@@ -1017,50 +1014,16 @@ impl AgentExecutor {
             }
         }
 
-        // 优先级：上下文 provider_id > profile.suggested_provider_id > 系统默认
-        let target_provider_id = context_provider_id
-            .or_else(|| profile.and_then(|p| p.suggested_provider_id.as_deref()));
+        let result = axagent_core::repo::provider::resolve_model_for_node(
+            &self.db,
+            node_model,
+            session_model,
+            session_provider_id,
+            profile_suggested_provider,
+        )
+        .await
+        .map_err(|e| NodeError::exec_failed(error_code::PROVIDER_QUERY_FAILED, e))?;
 
-        let result = if let Some(target_id) = target_provider_id {
-            let all = axagent_core::repo::provider::list_providers(&self.db)
-                .await
-                .map_err(|e| {
-                    NodeError::exec_failed(
-                        error_code::AGENT_PROFILE_NOT_FOUND,
-                        format!("Provider query failed: {e}"),
-                    )
-                })?;
-            if let Some(sp) = all.into_iter().find(|pr| pr.id == target_id && pr.enabled) {
-                let key = sp.keys.iter().find(|k| k.enabled).cloned().ok_or_else(|| {
-                    NodeError::exec_failed(
-                        error_code::AGENT_PROFILE_NOT_FOUND,
-                        "指定的 provider 无可用 key".to_string(),
-                    )
-                })?;
-                let sm = sp
-                    .models
-                    .iter()
-                    .find(|m| m.enabled)
-                    .map(|m| m.model_id.clone());
-                let model = sm.ok_or_else(|| {
-                    NodeError::exec_failed(
-                        error_code::AGENT_PROFILE_NOT_FOUND,
-                        "指定的 provider 无可用模型".to_string(),
-                    )
-                })?;
-                Ok::<_, NodeError>((sp, key, model))
-            } else {
-                axagent_core::repo::provider::resolve_default_provider(&self.db)
-                    .await
-                    .map_err(|e| NodeError::exec_failed(error_code::PROVIDER_QUERY_FAILED, e))
-            }
-        } else {
-            axagent_core::repo::provider::resolve_default_provider(&self.db)
-                .await
-                .map_err(|e| NodeError::exec_failed(error_code::PROVIDER_QUERY_FAILED, e))
-        }?;
-
-        // 仅将"默认 provider"结果写入缓存（有指定 provider 时不缓存）
         if !has_override {
             let mut cache = self.default_provider_cache.lock().await;
             *cache = Some(result.clone());

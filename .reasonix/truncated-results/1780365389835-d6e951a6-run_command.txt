@@ -1,0 +1,434 @@
+$ git log --oneline 4c7a0c1b..master
+[exit 0]
+0f1b8e0e 🔀 Merge upstream/master — zh-CN冲突解决 + post-merge
+0529dc4d 🔀 Merge upstream/master
+f691d492 🐛 fix: i18n CI 通过 + deep merge + rust fmt
+9a890682 🐛 fix: 重复字段+冲突残留清理
+49292f5b 🐛 fix: 合并冲突文件提交
+e7230b46 🔀 Merge upstream/master
+4be5abe5 🌐 i18n: post-merge模板永久加入workflow键
+e9074e8d 🔀 Merge upstream/master
+e9f6a099 🌐 i18n: 补全全部缺失键(bullBearDebate/group.workflow/vendor.*)
+8f96dd54 🌐 i18n: 新增stockAnalysis.workflow.* 9个键(11语言)
+35f6e05a 🐛 fix: skills_hub.rs hub_base缺失 + axagent_home→axinvest_home
+ab258a35 📝 i18n: allowlist 行号漂移更新
+298cc9d4 🎨 style: Cargo.lock行尾 LF 归一化
+93bbc416 🔀 Merge upstream/master (10 commits) — clippy+用户模块更新
+c04c59a3 🐛 fix: tool同时依赖trigger+panalysts，stock_code正确传递
+f119f053 🐛 fix: 工具节点入边回trigger + input_mapping回trigger.config.stock_code
+0c618420 🐛 fix: KLineChart 回原始init+requestAnimationFrame resize
+fc7af6eb 🐛 fix: KLineChart用ResizeObserver等容器有尺寸后再init ECharts
+1572695f Revert "🐛 fix: KLineChart ECharts 容器0×0时跳过init"
+f99ae8e6 🐛 fix: stockAnalysis.progress.fetchingData 扁平键格式修复
+d5f870bb 🐛 fix: tool_node input_mapping指向__workflow_input__而非不存在的stock_code
+814a1e81 ✨ feat: 股票分析页桌面侧边栏支持拖拽调整宽度
+2d3e87e7 🐛 fix: KLineChart ECharts 容器0×0时跳过init
+ef6de696 🐛 fix: clippy filter_map→map + i18n allowlist
+662a204e 🔀 Merge upstream/master (6 commits) — v2.4.6
+4d095659 🔀 Merge upstream/master — Mutex→RwLock + 冲突解决
+48e9279b 🔀 Merge upstream/master (2 commits) — 禁用WorkflowMigrator(Tool→Agent根因)
+6928ea43 🐛 fix: stepRunning i18n嵌套→扁平键，匹配现有progress.*格式
+ad12cd49 🔀 Merge upstream/master (2 commits) — Tool→Agent反序列化修复
+947b4923 🔀 Merge upstream/master (2 commits) — Tool→Agent 反序列化修复
+60877ec8 debug: seed时dump前5个节点JSON，验证type字段
+dda33e31 Merge remote-tracking branch 'upstream/master'
+0c155301 🐛 fix: 编译错误 wf_id_ret → wf_id + workflow-error 附带 results
+1e8f5eb9 🐛 fix: 进度区分 running/retrying/completed + 新增 stepRunning i18n
+474311b5 🎨 style: 桌面右侧面板宽度 300→360px
+b2a40b4e 🐛 fix: sina新闻API已失效 + 工具节点retry降为0 + Agent错误日志
+687c011c 🐛 fix: 模板始终重建 + WorkflowNode类型小写归一化
+dc14912f 🐛 fix: 龙虎榜改用THS同花顺数据源（Eastmoney API已失效）
+959fbba2 🐛 fix: THS同花顺API字段适配 — data.info + change_rate + 断点移除
+fbc7719d 🔀 Merge upstream/master (1 commit) — debug_run_workflow参数名修复
+70fdb286 🐛 fix: 移除 set_breakpoints — p-analysts 断点阻塞工作流
+70e99448 🔀 Merge upstream/master (4 commits) — clippy/test/DebugPanel修复
+1b845b47 🎨 style: dprint 格式化
+e23979ea 🐛 fix: clippy collapsible_if + 测试适配上游 IPC 参数名 jsonData→json_data
+258ec80a 📝 i18n: allowlist browserMock.ts mock数据 — 模拟后端API响应，非UI标签
+c4abbf7e 🔀 Merge upstream/master — 解决 index.css 冲突
+31a2d54d 🐛 fix: 移除 Conditional 多路径边，改为线性 DAG
+44fb2fff 🐛 fix: 引擎死锁修复 + 浏览器 Mock 数据补全
+3ae34a83 🐛 fix: 工作流进度消息 {{name}} 参数不匹配 — {node}→{name}
+da89e77b 📝 i18n: allowlist 更新 browserMock.ts 文件操作/gateway/股票分析 mock 行号
+234e2323 🔀 Merge upstream/master — 解决 allowlist 冲突
+a471cb34 🐛 fix: clippy 修复 + i18n allowlist 补全
+639406e0 📦 Cargo.toml 版本同步: 2.4.0 → 2.4.5
+9ac9e3bd 🐛 fix: tauri.conf.json identifier/productName 移至顶层 (Tauri v2 格式)
+10023ed9 📝 i18n: 恢复上游合并丢失的 allowlist — AIPanel/WorkflowEditor/测试
+ae9cfdc4 🐛 fix: 适配上游 NodeExecutionRecord 类型 + ExecutionStatusResponse 更新
+0660060d 🔀 Merge upstream/master (23 commits) — v2.4.5 大量修复
+f9087419 🐛 fix: 清理 SubWorkflow 死节点 + 移除未使用 import
+01036f22 🐛 fix: 分析师节点 → c-need-debate 添加出边，修复编辑器 DAG 可视化断裂
+54fb045a 📝 i18n: allowlist 更新 — stockAnalysisStore 测试 mock 数据字符串
+1c477888 🔀 Merge upstream/master — 解决 tauri.conf.json 版本冲突 (AxInvest v2.4.1)
+1c486ef5 🐛 fix: clippy + test 修复 — useless_format / set_breakpoints await / dryRun mock
+f61471e4 🔀 Merge upstream/master (4 commits) — CI 磁盘+测试+UI修复
+80993770 📝 i18n: allowlist 更新 — DataVendorsTab/ConfigPanel/Screener 内部配置字符串
+0957beba 🔀 Merge upstream/master (2 commits) — CHANGELOG 自动生成 + 测试修复
+c46cee7a 🔥 reset: 工作流模板版本 21→1，首次完整DAG运行验证
+6ce12ada ✨ feat: 数据源默认全开 + 健康检测失败自动关闭
+7f7121d4 🔀 Merge upstream/master (2 commits) — Skill 工具型+流程型双支持 + 编译修复
+079d582b 🐛 fix: sina 健康检测改用 get_quote + iwencai/mootdx 增加使用说明
+f81d0540 ✨ feat: 执行历史可视化回放面板 — 工作流12项新功能全部适配
+ae2ae0dd 🚀 feat: 工作流 v19→v20 — Cron/RAG/断点/审批/子模板 5 项适配
+29777f1b 🚀 feat: 工作流 v18→v19 — ConditionTrue/False 边路由 + SubWorkflow辩论 + Validation校验
+d51d6391 🔀 Merge upstream/master (6 commits) — Condition 边路由+Plan/Approve+Agent/Skill 修复
+c7dd68ea ✨ feat: 股票分析增加干跑测试模式
+e72443a5 🚀 feat: 股票分析工作流升级 (v17→v18) — ParallelNode/ConditionNode/Rhai/ErrorConfig
+082b6a20 ✨ feat: 荐股面板因子增加默认值，启用即可筛选无需手动输入
+76ed3565 ✨ feat: 数据源未启用/连接失败 提示区分 + checkVendorEnabled 重构
+019eda5b 🐛 fix: JsonSchema Option 字段加 skip_serializing_if, 防止 null 序列化导致 jsonschema 校验失败
+e7e4cffc 🔀 Merge upstream/master (1 commit) — E2E CI playwright install 修复
+5c6b239b 🔀 Merge upstream/master (1 commit) — agentStore 测试 mock 修复
+fd182f69 🐛 fix: 修复上游合并后 3 个 Rust 编译错误
+cb4b1596 🌐 i18n: 修复 62 个硬编码中文字符串 — 3 个 UI 字符串 t() 化 + 59 个 mock/日志白名单
+0237c20c Merge remote-tracking branch 'upstream/master'
+f98c36b6 🐛 fix: MonacoEditor/DiffViewer 改为动态 import 避免 window.monaco 依赖 🔨 refactor: useGlobalShortcutManager 用 useRef 避免 settings 全量依赖导致频繁重注册 🎨 style: dprint 格式化
+ae29c12d 🔀 Merge upstream/master (3 commits) — Plan/Skill 系统修复 + clippy 修复
+1c88ef4c 🔀 Merge upstream/master (21 commits) — 工作流引擎+Rhai脚本+规划架构重构
+12ba445f 🎨 style: 右侧面板tabs改为垂直布局, 防止水平截断
+64e4e4a9 🌐 i18n: chatRightPanel 补全 title/expand/collapse 键
+7e371092 🐛 fix: 模板nodes为空时自动re-seed + $600519对话页插入启动提示消息
+6f873c1d 🐛 fix: DataVendorsTab保存时补全模板必填字段, 防止空值覆盖nodes/edges
+c8d460bd 🎨 style: 侧栏移除overflow-x:hidden, Collapse内容允许横向滚动
+858d648d 🎨 style: 桌面侧栏宽度 240→260px, Collapse内容边距缩小, word-break防截断
+4d5f42dd 🐛 fix: clippy unused_variables in value.rs
+a77a95ab 🎨 style: cargo fmt
+12a52d1f 🔧 chore: i18n allowlist StockScreenerPanel 加43,52行(unit万元数据标识符)
+e1b4c08e 🌐 i18n: unit检测改用布尔标记 unitI18n, 消除比较字符串
+4e59b6ca 🌐 i18n: StockScreenerPanel unit改用i18nKey
+89a5ce81 🌐 i18n: StockScreenerPanel FACTOR_DEFS标签改用i18nKey+t()
+0467be92 🐛 fix: afterEach flushSync 清空 React scheduler 队列, 防止 jsdom 销毁后 window 访问报错
+5f1c6d41 🐛 fix: clippy manual_clamp in value_investing.rs
+881726f4 🌐 i18n: StockScreenerPanel + vendorCheck 全部UI字符串改用t()
+1e143f2c Merge remote-tracking branch 'upstream/master'
+81d2d211 ✨ feat: 工作流完成时回填分析师报告内容到对话页analyst卡片
+de421193 🔨 refactor: $600519 触发时移除直接LLM调用,对话页仅通过工作流桥接获取分析结果
+6d8324a5 🐛 fix: setupEventListener 移到 run_stock_workflow 之前, 防止竞态丢失进度事件
+989e14bf ✨ feat: 面板刷新时检查数据源开关, 未开启弹 message.warning 提示
+3d609957 🐛 fix: 数据源保存时先加载全量变量再合并，避免覆盖评分/规则等参数
+955ee4da 🎨 style: 桌面侧栏隐藏水平滚动条 overflow-x:hidden
+17e80d9f 🎨 style: 数据源健康状态从小圆点Badge改为文字Tag(已连接/未连接/检测中/未检测)
+91a5541d 🐛 fix: setup.ts configurable:true + setter 拦截 undefined — 兼容 Vitest teardown delete
+d4f86894 🐛 fix: clippy — clamp/if_same_then_else in risk/screener/signals
+7a3c2437 📦 chore: 合并本地开发改动
+5431bdf1 🐛 fix: astock-data borrow checker 修复 — collect keys before mutate
+23cb0026 🌐 i18n: 修复全部 23 条剩余违规 — ConfigPanel + sheet 标签 + allowlist
+5f88ec08 🐛 fix: setup.ts window/document getter configurable:false — 防止 jsdom 销毁时删除属性
+7b0d216a 🐛 fix: clippy — clamp/range_contains/collapsible_if 修复
+f74c640d 🐛 fix: report.rs 无效格式化字符 {:1f} → {:.1}
+f7699f6f 🌐 i18n: 6 个新面板组件 UI 字符串改为 t() 调用
+bc1733d3 🎨 style: cargo fmt
+619f0734 🔀 Merge upstream/master (2 commits) — 测试修复
+0c3a1391 Merge remote-tracking branch 'upstream/master'
+06d39b1e 🐛 fix: tablet布局与mobile统一使用底部滑出面板
+74c818fc 🐛 fix: 移除未使用 import + dead_code 标记 — stock_analysis 旧编排器遗留
+d8ff95d4 🎨 style: 移动端"更多"改为Dropdown菜单，删除双行tab
+a003b663 🚀 feat: A股5大分析面板 — 涨停板/龙虎榜/板块轮动/北向资金/事件日历
+a97a3b8f Merge remote-tracking branch 'upstream/master'
+b72ece23 🔀 Merge upstream/master — cargo fmt + engine.rs 冲突解决
+80b53721 Merge remote-tracking branch 'upstream/master'
+3d8fb570 🎨 style: 桌面侧栏改为 Collapse 折叠面板，7个面板默认仅展开荐股，节省空间
+89a89693 🎨 style: 移动端底部面板 tab 缩小内边距 (5px→4px, 10px→6px) 确保7个面板完全可见
+8c92cee9 🔨 refactor: 定时分析从本地 StockScheduler 迁移到上游 CronJobStore
+521628a5 🔀 Merge upstream/master (3 commits) — CronJobStore + allowlist
+70e9b0ee 🚀 feat: 接入后端未连接功能 — 回测/复盘/定时/评分优化/市场状态
+7bcccab9 🎨 style: 荐股因子改为用户可选Tag模式，按需勾选+输入阈值
+80054ceb 🚀 feat: 荐股筛选面板补全全部7个维度条件
+c177a93a 🚀 feat: 新增智能荐股面板，对接后端 screen_stocks/discover_stock_candidates
+47b74944 🚀 feat: 增强 WatchlistPanel/TradePanel/Historical/Prices/CompareView 五大面板
+4a49bbb0 🐛 fix: vitest 启用 pool:forks 防止 React 19 scheduler 在 jsdom 销毁后 window 访问报错
+ad75fbe6 Revert "fix: vitest setup 中固化 globalThis.window"
+bb33ef18 🐛 fix: vitest setup 中固化 globalThis.window，防止 React scheduler 在 jsdom teardown 后访问 window 报错
+72a454f9 🐛 fix: clippy unused_variables in workflow_template.rs match arm
+8c505275 🔧 chore: i18n allowlist 新增 AgentProfileList/DataVendors/ConfigPanel 静态映射表
+01c4ef74 🐛 fix: clippy unnecessary_cast in eastmoney.rs line 682
+544c837d 🌐 i18n: DataVendors 固定/暴露工具标题国际化 + vendor 依赖路径区分展示
+38ea5cea 🌐 i18n: AgentProfileList/DataVendors 内联 UI 改为 t() 调用
+f3a566ec 🎨 style: cargo fmt
+e0b88819 🎨 style: dprint 格式化
+bb2d4410 🔀 Merge upstream/master (6 commits) — v2.4.0 + clippy 修复
+83d53e7a 🎨 style: cargo fmt
+3787f110 🎨 style: dprint 格式化
+0ddd2ccb 🐛 fix: 解决 stash 恢复时的 agent_executor 冲突 — 保留 upstream exposed_tools
+834eb465 🔀 Merge upstream/master (12 commits) — exposed_tools + n8n + CSS 修复
+c37b01b7 🎨 style: cargo fmt
+9ea883bc 🐛 fix: 17个profile全部加上 search_stock 工具
+c4c9e6f8 🔨 refactor: 工具分配单一化 — 仅从 AgentProfile.recommended_tools 来
+53d4a081 ✨ feat: AgentProfile recommended_tools 驱动工具分配
+f7282ce2 🔨 refactor: 13个股票工具→ToolResolver自动注册 + 模板v14
+fd938634 🐛 fix: 实现 eastmoney/sina get_quote + Tencent HTTP→HTTPS
+f4794aff 🐛 fix: HTTP 超时 30s→10s + 空结果跳过下一 vendor
+0fbfc70f 🐛 fix: 设置页模板不存在时渲染默认变量（浏览器模式兜底）
+5fe2aacf 🐛 fix: 分析页设置 Drawer 复用 StockAnalysisSettings 统一专家/角色/参数
+e9fb2912 🐛 fix: allowlist 补充 ConfigPanel line 52 (monitor_turnoverThreshold)
+c2ea28d8 🐛 fix: StockAnalysisSettings 缺少 useTranslation import
+fb061b8a 🐛 fix: StockAnalysisSettings tab 标签改为 t() + ConfigPanel allowlist 更新
+69520ec8 🐛 fix: 修复 index.css @media 块丢失闭合花括号导致 vite build CSS 语法错误
+0208c204 🔀 Merge upstream/master (7 commits) — CSS 文本截断修复
+3de96196 🐛 fix: post-merge-stock 加入 noExperts/noRoles，防止上游更新时丢失
+921ea16d 🐛 fix: 设置页首次加载自动初始化 44 个默认参数变量
+ddcd4fbf ✨ feat: 股票分析设置页重构 — 专家/角色/参数 三 Tab AgentProfile 对齐
+c6568cc4 🐛 fix: 设置页数据源检测 + 工作流数据节点超时/路由修复
+4be0c38f Merge remote-tracking branch 'upstream/master'
+cf84f6ee 🔀 Merge upstream/master (3 commits) — clippy + InvokeRecord + AgentPropertyPanel
+5534fe14 🔀 Merge upstream/master — 删除对话页快捷入口卡片
+8d917467 Merge remote-tracking branch 'upstream/master'
+d0a93bf7 🔀 Merge upstream/master (2 commits) — clippy 修复 + env-filter
+c719c08a Merge remote-tracking branch 'upstream/master'
+62be8f46 🐛 fix: 修复 i18n allowlist 过期行号 — 65 处违规全部覆盖
+5f5d3f7c 🐛 fix: 适配上游 AgentProfile 重构 — 移除 role/agent_role_override/system_prompt
+d112e9d6 🔀 Merge upstream/master (7 commits) — AgentProfile 架构重构 + DDL 迁移
+b68e5e5a 🔀 Merge upstream/master (25 commits) — UI 缺陷修复 + 工作流编辑器自动保存
+ae0b268a 🔥 refactor: 移除旧的 axagent_home() deprecated shim — 零调用方
+75294587 🏠 refactor: 数据目录从 .axagent 改为 .axinvest — 上游隔离
+4b38279a 🔥 chore: 移除孤立工具 search_stock
+812c377c 🐛 fix: ToolDef parameters 从 None 改为空 JSON Schema
+48f9f1fc 🐛 fix: clippy needless_borrow + i18n browserMock descriptions
+e7ae79fe 🚀 feat: agent system prompt 追加工具使用指令
+f6dfc109 Merge remote-tracking branch 'upstream/master'
+31d36012 🐛 fix: 审查修复 — 辩论 agent 工具 + td_news 恢复 + 变量连线 + i18n
+960a0a23 🐛 fix: 修复 engine.rs 合并冲突语法错误 + cargo fmt
+bec5f23a 🔀 Merge upstream/master — 工作流模板变量注入引擎
+596b4191 🔀 Merge upstream/master — MCP 服务器列表增强 + ConfigPanel i18n 补全
+68b34194 Merge remote-tracking branch 'upstream/master'
+da4bd927 Merge remote-tracking branch 'upstream/master'
+ca47b3ca 🐛 fix: cargo-deny — MIT-0 许可 + RUSTSEC-2025-0012 豁免
+08cca99f 🌐 i18n: WorkflowAgentCard + 桥接全国际化 + workflow.* 键 (11 语言)
+aac81c3a 🎨 style: cargo fmt
+b548383d 🐛 fix: 恢复 AxInvest SettingsPage stockAnalysis 入口
+3775c1d1 🐛 fix: 修复工作流卡片 8 项审查缺陷
+9b94cf69 ✨ feat: 工作流事件双端消费 — 对话页卡片 + 分析页面板
+fb62eebb 🚀 feat: P2 数据驱动配置面板 + 响应式布局 + clippy/i18n 修复
+7660206f ✨ feat: 算法工具化 + 工作流模板变量持久化
+91ab57a7 🎨 style: cargo fmt (mod.rs 长行拆分)
+fca2ba47 🔀 Merge upstream/master (11 commits) — v2.3.0 工作流泛化 + mock 守卫
+9a4038d3 🔥 revert: 移除 stock_analysis_configs 持久化表
+7d92a255 🎨 style: dprint 格式化 verify-axinvest-integrity.mjs
+70e5e969 🛡️ feat: AxInvest 代码完整性自动化检查守卫
+6f72b042 🐛 fix: 补回 Sidebar 丢失的 stock-analysis 导航入口 + i18n 硬编码修复
+938a1065 🎨 style: cargo fmt
+7ebb2a3f 🐛 fix: 双向审计修复 — JSON路径对齐 + 全配置传递
+70a23ee0 🎨 style: cargo fmt
+229db4d5 ✨ feat: 股票分析完整设置页 — 版本化配置 + 8 维度可调参数
+9f2047d6 🎨 style: cargo fmt 格式化 (stock_workflow.rs + mod.rs)
+3a206024 🎨 style: dprint 格式化 SettingsPage.tsx
+907e11d2 🐛 fix: 修复 cargo check unused variable warning (stock_workflow.rs #124)
+668bf4df 🔀 Merge upstream/master (23 commits) — 设置侧栏重构 + i18n + 响应式修复
+40d26393 Merge upstream/master — 两阶段 Prompt 模板引擎 + 小屏响应式
+58a5453a 🎨 style: cargo fmt 格式化
+e05442b3 🎨 style: dprint 格式化 StockAnalysisSettings
+be2ac575 ✨ feat: 股票分析设置接入全部 9 个数据源 + 连接健康检测
+f43def8a 🐛 fix: 设置页股票分析显示资源键 + PriceAlertPanel 表格列宽
+2c72756a Merge upstream/master — min-width:0 布局修复 + 英文注释 CI 适配
+cb2b849b Merge upstream/master — 设置页 lazy-load + stockAnalysis 懒加载适配
+d36c6517 🐛 fix: KLineChart 硬编码中文字符串替换为 t() 国际化
+1b0ff108 🎨 style: dprint 格式化 — if 语句加大括号
+3d189c03 🐛 fix: 股票分析底部面板按钮与 BuddyWidget 重叠
+02d66478 🐛 fix: 股票分析页隐藏 ContentArea 通用 AppHeader
+08eddfb4 🐛 fix: 股票分析页 idle 状态下侧边栏入口不可见
+26d22fe0 🐛 fix: 股票分析组件 invoke 返回 undefined 导致浏览器模式崩溃
+d4c8fc7a 🐛 fix: WatchlistPanel 浏览器模式崩溃 — invoke 返回 undefined
+02c69d13 🐛 fix: 股票分析页面布局响应式 — 侧边栏自适应 + ECharts ResizeObserver
+481ba4b4 Merge remote-tracking branch 'upstream/master'
+6c1e158a fix: 移除误提交的临时图片
+f90635b4 Merge remote-tracking branch 'upstream/master'
+1cb0ffd5 Merge upstream/master — 设置页折叠导航 + 导航图标 CSS 修复
+9f377ad2 fix: DecisionBanner test 断言适配 i18n mock (键名而非值)
+426e181c fix: i18n allowlist 补全遗漏行号
+a24193d4 fix: i18n allowlist 行号更新 (DecisionBanner/KLineChart/StockAnalysisPage重构)
+7f465a90 chore: 提交本地修改
+35bdcdd7 Merge remote-tracking branch 'upstream/master'
+383e717a fix: 修复 3 个前端测试 — DecisionBanner Router 包装 + feedback class 更新
+b67476ee fix: #[ignore] sandbox_executor 测试 (CI 环境不可用)
+51c94f46 fix: i18n allowlist InputArea.tsx +line222 (LLM提示词)
+b7e2e82a Merge upstream/master — 设计系统对齐 + ChatView 关键词常量化
+596f1c36 fix: i18n allowlist 更新 (59 违规 — 内部常量/内容匹配/导出文本)
+45ed9ee0 fix: 补全 AxInvest 新增 i18n 键 (views/turnoverRate/exported 等 19 键)
+2cda7631 Merge remote-tracking branch 'upstream/master'
+bf150db4 Merge upstream/master (v2.2.0) — 前端大改版 + 响应式布局 + 主题增强
+9bf6e676 Merge upstream/master (v2.1.3) — setup-protoc→apt + 右侧面板i18n整理
+16648415 fix: release.yml Android 上传 continue-on-error (arm64-v8a 速率限制)
+18906efb fix: release.yml build-android 添加 contents: write 权限
+130a6fbf fix: release.yml 移除 git-cliff GITHUB_TOKEN (公开下载无需认证)
+c9de6076 fix: release.yml 移除 job 级 permissions (恢复 workflow 级), 恢复 secrets.GITHUB_TOKEN
+cea66f4e fix: setup-protoc repo-token 改用 github.token
+b909f1e7 fix: release.yml 各 build job 添加显式 permissions
+500d035c fix: release.yml 移除无效的 metadata 权限
+94d34908 fix: release.yml git-cliff job 添加 pull-requests + metadata 权限
+a0bb7e28 Merge remote-tracking branch 'upstream/master'
+bec20f08 fix: 删除废弃的 start_stock_analysis + 恢复 stock_scheduler 模块注册
+c53ccf12 Merge remote-tracking branch 'upstream/master'
+beac6085 fix: 恢复 lib.rs 中股票分析命令注册 + 种子化调用
+323b1f2d fix: i18n allowlist DecisionBanner.tsx +line32
+1387915f Merge upstream/master — Dagre 自动布局 + ReportViewer + SessionShare
+e2acfd2e 🐛 fix: 股票分析工作流模板持久化 — seed + template load 路径
+82990c62 fix: paths.rs 恢复 AxInvest Android 包名
+8a47f24f Merge upstream/master — AXAGENT_DIR回退 + dead_code修复 (与本地相同)
+9862129c fix: #[allow(dead_code)] get_node_dependency_results
+5977658e fix: riskLevel 国际化 + i18n allowlist 更新
+6d6ec17e Merge upstream/master (v2.1.2) — 后端 ErrorCode+i18n 重构 + workflow 升级
+bb8f0960 Merge remote-tracking branch 'upstream/master'
+ecc3df59 Merge remote-tracking branch 'upstream/master'
+e296d990 Merge upstream/master (v2.1.1) — WorkflowNode统一 + Android CSP + i18n fallback
+105e4bad Merge upstream/master (v2.1.0) — ReAct修复 + 执行进度追踪 + CSP重写
+231f4965 fix: CancelAwareRunner 单次 LLM 调用增加 5 分钟超时保护
+3be332fb fix: 分析页导航离开不 reset — 切换页面再回来保留分析状态
+9b94af8e Merge remote-tracking branch 'upstream/master'
+3e9cdf45 fix: InputArea LLM 分析提示词模板加入 allowlist
+6917436b Merge remote-tracking branch 'upstream/master'
+0ccf6d5e feat: @600519 双通道 — agent_query(对话) + startAnalysis(分析页) 并行
+6cd06f94 fix: KLineChart 工具箱中文 → t() 国际化, 清理 allowing 条目
+73f51fa2 fix: settings 双重兼容 — 平铺键 + 嵌套对象 + sidebar 菜单共存
+dd68ae13 fix: post-merge-stock 重新生成
+b97ba232 fix: settings 平铺键→嵌套对象 — 修复全部 11 种语言的设置页资源键
+3404a630 feat: K线图增加 dataZoom 缩放/toolbox 工具/axisPointer 十字线/自适应高度/成交量红绿着色
+a568b2c4 fix: release.yml Linux 依赖安装添加 retry + --fix-missing 防镜像 404
+8ffa8b97 Merge remote-tracking branch 'upstream/master'
+6d61b559 fix: 对话页 @600519 触发后自动导航 + 自动加载行情数据
+08d80f23 fix: 种子化用 include_str! 嵌入 .md — 打包后不再依赖文件路径
+d4173b72 fix: post-merge-stock 补全 14 个缺失键
+f54a14a1 fix: 设置页 7 个资源键 — settings.* 平铺键移入嵌套 settings 对象
+c0d39e33 fix: dprint 格式化 StockAnalysisPage
+ea4296e7 fix: 设置 temperature/maxTokens 生效 + config 声明顺序修正 + URL ?code= 参数读取
+e0825364 feat: 三层防护防止合并上游时丢失 AxInvest locale 键
+4eefa9bb fix: 补全 24 个缺失 stockAnalysis 键 (settings.*/retry/completed/viewDetails/error/loadingHint)
+e1b36c45 fix: 恢复缺失的 trade(16键) + nav.stockAnalysis 到全部 11 种语言
+e845f9e0 fix: 从 git 历史恢复完整 stockAnalysis 98 键到全部 11 种语言
+69bb38f9 fix: 补回所有 122 个缺失的 stockAnalysis i18n 键到 11 种语言
+63df07a2 fix: StockAnalysisChatIndicator + stockAnalysisStore 硬编码中文 → i18n.t()
+76b612ab Merge upstream/master — CacheIndicator i18n + Android 安全区适配
+0680c027 chore: 合并后提交 AxInvest 本地修改
+ae0609c1 Merge remote-tracking branch 'upstream/master'
+98e705cf Merge remote-tracking branch 'upstream/master'
+989d8b12 Merge remote-tracking branch 'upstream/master'
+16edd82b Merge remote-tracking branch 'upstream/master'
+4c3bb13a Merge remote-tracking branch 'upstream/master'
+250d3435 fix: 恢复 axagent-astock-data + axagent-stock-analysis 到 workspace + tauri + zeroize 依赖
+76dee750 Merge upstream/master (v2.0.1) — 安全加固 + Mobile 底部导航/Drawer + 架构优化
+784622ac fix: ContentArea 缺失 /stock-analysis 路由导致全平台 404
+9387c4db Merge remote-tracking branch 'upstream/master'
+087496a4 feat: 股票分析页响应式适配 — Tailwind 4 断点 + 移动端/平板/桌面三档布局
+5d77ad8b chore: 版本号升级 1.5.9 → 2.0.0
+f2ed4103 fix: 从 git 恢复 stockAnalysis i18n 原始 75 键 — 之前 node 脚本 JSON.stringify 写回时丢失了几乎所有键
+236ef32f fix: Android 路径硬编码 top.axagent.desktop → top.axinvest.desktop
+60da5636 fix: vendor_integration_tests StockQuote pre_close + StockRawData 4 missing fields
+c44788f6 Merge upstream/master — 图标系统升级 (Iconify/Fluent) + Android CSP + i18n 修复
+928709ed fix: 第二轮审计 16项缺陷修复 — cron wildcard/月字段/并发顺序/信号保持/FScore对齐/动态分析师
+71df9ec1 fix: 数据源品牌名国际化 — 腾讯财经/东方财富/新浪财经 → t()
+5814449d Merge remote-tracking branch 'upstream/master'
+74dc3f66 Merge upstream/master — i18n checker 跳过 JSX 注释 + allowlist 从 269→117 清理
+0b82dbec fix: parsing_tests StockQuote 缺少 pre_close 字段
+0a69bef0 fix: StockScheduler dead_code clippy warning
+79991c48 fix: test AppState 添加 trading_engine 字段
+55829d2d fix: Rust 2024 edition 生命周期 + gateway astock_client 字段修复
+5043c261 fix: gateway 缺失 axagent-astock-data + chrono 依赖
+993f6c4f fix: clippy if_same_then_else + i18n allowlist 完整合并 (上游269+AxInvest)
+b2e6146f fix: 合并后修复 — clippy lint + i18n allowlist 合并 88 违规
+42ab433b Merge upstream/master (v2.0.0) — Rust 2024 edition + 安全审计 + i18n 重建
+8ba62f89 fix: N6 N7 N9 — 调度器并发保护/代码去重/TradingEngine单例化
+dc85301e fix: N1-N10 新发现缺陷修复 — 硬编码股本/双引擎统一/report过滤/review量比/key_levels/cron语义
+1b5c798b style: cargo fmt + dprint fmt
+cc1b9261 fix: 完成遗留项 — screener动态选股/optimize_weights自适应/monitor桥接/vendor日志/设置接入管线
+aa8d4a7d style: cargo fmt + dprint fmt
+182f51e5 fix: dprint 格式化 StockAnalysisSettings
+ce09380f feat: 股票分析设置页 — 数据源/AI参数/交易/模型四大类配置项
+26f53069 fix: 审计报告14项问题修复 — 定时分析/股本/涨跌停/cron/缓存/FScore/回测/规则引擎
+4b8bb4ea feat: 国际化 DecisionBanner + TradePanel 硬编码中文，清理 allowlist
+c20276f7 fix: i18n allowlist — DecisionBanner +11-12, TradePanel 新增行, AnalysisProgress 合并重复
+6133a804 feat: 四大缺陷修复 — 取消令牌/CancelAwareRunner/分析联动/DB复合索引/i18n
+c4a5c495 Merge upstream/master (v1.6.0) — 多模型接入全面修复
+fb4ff31c fix: 按影响级别修复全部股票分析缺陷 — JSON渲染/防抖/风险标签/子进度/重试
+0e70b224 fix: i18n allowlist 添加 AnalysisProgress.tsx:33 + stockAnalysisStore.ts:286
+b8d67d66 fix: i18n allowlist 添加 stockAnalysisStore.ts:260 (JSDoc 注释)
+8e9325ea fix: 历史分析页面补全行情/K线加载 + startAnalysis重置currentStage
+81acc60e fix: P2 历史分析恢复 — loadAnalysis 从 blackboardSnapshot 还原报告/辩论/风控
+fe332016 fix: P1 进度条实时跟随管线阶段 — AnalystProgress 事件驱动 currentStage
+0df50e4c fix: P0 编译修复 — 恢复 agent_session/event_adapter/种子化模块及依赖
+997519dc feat: 自动生成 Android PKCS12 keystore + 配置 Secrets + 恢复阻塞模式
+22bd951e fix: Android 构建改为 continue-on-error (fork 缺少 signing secrets)
+c2401333 fix: 对话页触发股票分析时 providerId 为空导致永远走占位模式
+763829ce fix: Android keystore JKS → PKCS12 转换修复 "Tag number over 30" 错误
+eaf5d33e fix: 股票分析页事件类型大小写不匹配导致前端卡死
+8d6aba82 fix: Android 构建 JDK 21 (Temurin) → JDK 23 (Zulu) 尝试修复 keystore 兼容性
+7e255e46 fix: 侧边栏股票分析导航显示资源键而非翻译文本
+e89b5a77 fix: release.yml — Windows 二进制路径 (AxAgent.exe) + Android JDK 21 升级
+ee41a6d8 fix: 修复 PR CI — AppState 缺少 plugin_manager 字段 + i18n allowlist 更新
+f579b117 fix: release.yml 品牌名 AxAgent → AxInvest
+c381f8e3 chore: 更新 Cargo.lock 和 tauri.conf.json 版本到 v1.5.9
+5f389468 Merge upstream/master (v1.5.9) — 插件系统重构 + npm安装支持
+32994166 style: dprint format TradePanel
+63a8547e fix: 行业暴露填充(sector_name) + 前端持仓风险摘要栏(总市值/浮动盈亏/集中度)
+16228c06 fix: 仓位上限集成到交易校验 + 示例模板禁止加载(disabled:true)
+ef5e70c6 feat: 巴菲特价值投资模块（DCF+F-Score+护城河量化+安全边际+所有者收益）
+bebd043d fix: clippy doc comment warning
+54e4dcba fix: 审计12项问题修复（边界检查+InvestmentPlan+数据消费+基本面评分+TS字段+交易日历+零持仓风险）
+fd8a4e31 style: dprint + cargo fmt
+2a32b3aa test: astock-data单元测试 + E2E流水线测试 + 数据源降级链
+937995b6 feat: 交易面板分析一致性提示 + 交易日历动态获取
+af106e97 feat: 组合风险指标 + 仓位上限限制
+2a1c79b5 style: cargo fmt — 修复 2 个新文件的格式问题
+14beadc5 fix: 图标 RGB → RGBA 格式转换 — 修复 Tauri generate_context! proc macro panic
+07651d58 feat: 交易出场价 vs 分析预测对比（target/stop偏离度）
+c58803e2 feat: 交易vs分析一致性校验 + 告警联动操作建议 + 告警沉淀复盘
+3a0e05de style: cargo fmt
+b5843bbe fix: clippy 问题 — screener sort_by (f64) + trading too_many_arguments + i18n allowlist
+f6263e85 feat: 选股器全市场热门候选发现（沪深300成分股扫描）
+63ca847d feat: 可配置评分权重 + 回测反馈优化接口
+2d6527b6 style: cargo fmt — 修复 stock_analysis.rs 格式问题
+5956ddad style: dprint format
+91aca237 fix: clippy 问题修复 (key_levels) + i18n allowlist 更新
+22bf63fc fix: 完整黑板快照持久化 + 历史分析回溯面板
+25c850d9 style: cargo fmt — 修复 orchestrator/quality 格式问题
+d685840a fix: CI 失败修复 — package-lock.json 同步 + AppState 测试构造补齐 stock_monitor
+55b98ca5 fix: LLM 静默失败 → 显式占位标记 + 离线模式提示
+e605a089 docs: 投资闭环修复计划（16个Task，P0/P1/P2三批）
+29e395a7 feat: AxInvest 品牌标识 — 应用名称/图标与上游 AxAgent 分离
+176c041b feat: 实时监控引擎 + 关键价位追踪回测 + 股票筛选 + 交易日历 + 收盘复盘
+74c723a7 feat: 交易日志系统（手动记录+自动聚合持仓+盈亏跟踪+开关控制）
+1d376439 Merge upstream/master — Tauri 2.11.1 + i18n 修复 + 工作流组件 useTranslation 修正
+3121c6b9 feat: 技术指标计算 + 100分评分引擎 + 严进规则引擎 + HTML报告生成
+3caedcac feat: 补齐Trader交易员 + 北向/行业/增减持/除权vendor实现 + CSI300基准 + 质量测试
+71fe5e41 feat: 补齐A股交易规则（涨跌停/ST/T+1/手数/市场类型/质量门控）+ 14个markdown重写
+576c4b61 fix: 测试中 AppState 构造缺少 astock_client 字段导致 CI clippy 编译失败
+35b94741 fix: 修复 i18n 硬编码违规 — 上游 i18n CI 检查适配
+fddaec8a style: cargo fmt — 修复 Cargo.toml 及 stock-analysis 格式问题
+4a2bcbef Merge upstream/master — i18n 大清理 + 迁移系统重构
+f49e086d Merge upstream/master — 全面强制 LF 行尾 + 清理跟踪文件
+6a9b7222 fix: .gitattributes 设置 *.rs eol=lf 匹配 rustfmt newline_style=Unix
+449a9fb5 Merge remote-tracking branch 'upstream/master'
+94a8f1db Merge upstream/master (v1.5.8) — 技能入口移至设置
+2122c1da style: dprint format fix
+d1174e03 fix: AnalysisEvent camelCase字段名匹配 + 风险评估ID统一 + 重复启动防护 + 事件清理
+ff23c332 fix: clippy warning + gateway test + scheduler wiring + serde analysis_schedules
+d730fb69 style: dprint format stock-cli.mjs
+0484495a style: fix CLI formatting for dprint
+afa73143 style: dprint + cargo fmt 格式化修复
+66777f86 feat: Stock CLI工具 + 自定义分析师插件机制
+cea0b199 feat: 渐进披露UI + 多股对比 + 价格告警 + 测试覆盖
+fa532f8e feat: Gateway股票API + 定时分析调度器 + 缺失数据类型 + 多周期K线
+9305a7d8 Merge remote-tracking branch 'upstream/master'
+670aa7f8 feat: AStockClient缓存+单例 + Expert提示词加载 + 辩论引擎集成
+9f3e72ba feat: AgentRunner LLM 接线 — SessionManagerRunner 接入 ProviderAdapter
+d6ba4eda feat: 编排器 Agent LLM 集成框架 + cancel token
+2b134fa9 fix: 前端组件问题修复（内存泄漏+空状态+provider_id+ANALYST_NAMES+DatePicker+validation）
+f36fa405 fix: serde camelCase + HTTP超时复用 + fetch_all容错 + 事件日志
+dc3e174a style: cargo fmt 格式化修复（换行符统一）
+f576feff style: dprint 格式化修复（换行符统一）
+d64ce19b fix: 修复 TypeScript 类型转换 + Rust dead_code 警告
+e7277b69 feat: 聊天输入支持 @股票代码 触发股票分析
+67e665d8 feat: 添加14个股票分析 Expert markdown 定义
+f07ab496 feat: 添加股票分析路由、侧栏入口、agent类型注册、i18n（11种语言）
+4f703a42 feat: 添加股票分析前端组件（看板+搜索+进度+行情+K线+报告+辩论+风险+决策）
+75a63dd6 feat: 添加股票分析 Zustand store
+fb8a6341 feat: 添加股票分析前端类型定义
+6332a478 feat: 添加股票分析 Tauri commands（搜索/行情/K线/分析/历史）
+8fc8f1f7 feat: add stock_analyses table entity + migration
+ddda4221 feat: 创建 stock-analysis crate（编排器 + 决策 + 管道）
+e57ec021 Merge remote-tracking branch 'upstream/master'
+bb8e7e2a feat: 实现新浪财经 vendor（新闻）
+c1b899b9 feat: 实现东方财富 vendor（K线/财务/资金流向/龙虎榜/解禁/搜索）
+d0ceab05 feat: 实现腾讯财经 vendor（实时行情）
+d62c55b8 feat: 添加 astock-data crate 骨架（类型定义 + Vendor trait + AStockClient）
+b8ce712f docs: 股票分析模块实施计划（15个Task，53个文件）
+ce9724c5 docs: 股票分析模块移植设计文档

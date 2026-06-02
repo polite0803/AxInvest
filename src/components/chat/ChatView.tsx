@@ -58,8 +58,7 @@ import { ExtractMemoriesModal } from "./ExtractMemoriesModal";
 import { InputArea } from "./InputArea";
 import { PermissionModal } from "./PermissionModal";
 import { PlanCard } from "./PlanCard";
-import { QuickCommandBar } from "./QuickCommandBar";
-import { SteerInput } from "./SteerInput";
+// QuickCommandBar removed: /clear, /compact, /model are covered by bottom toolbar & header ModelSelector
 import { WorkflowEndMarker } from "./WorkflowEndMarker";
 import { WorkflowProgressPanel } from "./WorkflowProgressPanel";
 import { WorkflowSuggestionCard } from "./WorkflowSuggestionCard";
@@ -766,12 +765,10 @@ function ChatViewInner({
           <AgentProgressBar conversationId={activeConversationId} />
           <WorkflowProgressPanel conversationId={activeConversationId} />
           <PlanCardWrapper conversationId={activeConversationId} />
-          <QuickCommandBar />
-          {streaming && <SteerInput conversationId={activeConversationId} />}
         </div>
       )}
 
-      {activeConversation?.mode !== "agent" && <QuickCommandBar />}
+      {/* QuickCommandBar removed */}
 
       <StockAnalysisChatIndicator />
 

@@ -141,9 +141,12 @@ pub async fn create_workflow_template(
 pub async fn update_workflow_template(
     state: State<'_, AppState>,
     id: String,
-    input: WorkflowTemplateInput,
+    mut input: WorkflowTemplateInput,
 ) -> Result<bool, String> {
     let db = &state.sea_db;
+
+    // 保存前提取 tool_defs（确保移动后仍可引用）
+    let tool_defs = input.tool_defs.take();
 
     let updated = db_repo::update_workflow_template(
         db,
@@ -159,12 +162,13 @@ pub async fn update_workflow_template(
         input.output_schema,
         input.variables,
         input.error_config,
+        tool_defs.clone(),
     )
     .await
     .map_err(|e| e.to_string())?;
 
     // 保存后立即预编译 Rhai 工具，Agent 节点可即时引用
-    if let Some(ref tds) = input.tool_defs {
+    if let Some(ref tds) = tool_defs {
         state.work_engine.precompile_tool_defs(&id, tds).await;
     }
 
@@ -338,6 +342,19 @@ pub async fn validate_workflow_template(
             WorkflowNode::SubWorkflow(t) => Some(t.base.id.clone()),
             WorkflowNode::DocumentParser(t) => Some(t.base.id.clone()),
             WorkflowNode::VectorRetrieve(t) => Some(t.base.id.clone()),
+            WorkflowNode::HttpRequest(t) => Some(t.base.id.clone()),
+            WorkflowNode::Switch(t) => Some(t.base.id.clone()),
+            WorkflowNode::DatabaseQuery(t) => Some(t.base.id.clone()),
+            WorkflowNode::Notification(t) => Some(t.base.id.clone()),
+            WorkflowNode::Approval(t) => Some(t.base.id.clone()),
+            WorkflowNode::FileOperation(t) => Some(t.base.id.clone()),
+            WorkflowNode::DataTransformer(t) => Some(t.base.id.clone()),
+            WorkflowNode::WebhookSend(t) => Some(t.base.id.clone()),
+            WorkflowNode::Logging(t) => Some(t.base.id.clone()),
+            WorkflowNode::LlmClassifier(t) => Some(t.base.id.clone()),
+            WorkflowNode::Aggregator(t) => Some(t.base.id.clone()),
+            WorkflowNode::Email(t) => Some(t.base.id.clone()),
+            WorkflowNode::Debate(t) => Some(t.base.id.clone()),
             WorkflowNode::End(t) => Some(t.base.id.clone()),
         })
         .collect();
@@ -465,6 +482,204 @@ pub async fn validate_workflow_template(
                 "Remove loops in the workflow graph or use a Loop node for iteration".to_string(),
             ),
         });
+    }
+
+    // ── ConditionNode 专项校验 ──
+    for node in &nodes {
+        if let WorkflowNode::Condition(c) = node {
+            // 1. 无 conditions 且未启用 LLM 路由
+            if c.config.conditions.is_empty() && !c.config.judge_by_llm.unwrap_or(false) {
+                errors.push(ValidationError {
+                    error_type: "empty_conditions".to_string(),
+                    node_id: Some(c.base.id.clone()),
+                    message: format!(
+                        "Condition node '{}' has no conditions and LLM routing is not enabled",
+                        c.base.id
+                    ),
+                    suggestion: Some(
+                        "Add at least one condition or enable LLM routing".to_string(),
+                    ),
+                });
+            }
+
+            // 2. 检查出边类型：condition 节点的出边必须是 conditionTrue/conditionFalse
+            //    不允许 direct 类型出边
+            for edge in &edges {
+                if edge.source != c.base.id {
+                    continue;
+                }
+                match &edge.edge_type {
+                    EdgeType::ConditionTrue | EdgeType::ConditionFalse => {},
+                    _ => {
+                        warnings.push(ValidationWarning {
+                            warning_type: "invalid_condition_edge".to_string(),
+                            node_id: Some(c.base.id.clone()),
+                            message: format!(
+                                "Condition node '{}' has an edge with type '{:?}'. Condition edges should be 'conditionTrue' (✓) or 'conditionFalse' (✗).",
+                                c.base.id, edge.edge_type
+                            ),
+                        });
+                    },
+                }
+            }
+
+            // 3. 检查是否缺少 conditionTrue 或 conditionFalse 出边
+            let has_true = edges
+                .iter()
+                .any(|e| e.source == c.base.id && e.edge_type == EdgeType::ConditionTrue);
+            let has_false = edges
+                .iter()
+                .any(|e| e.source == c.base.id && e.edge_type == EdgeType::ConditionFalse);
+            if !has_true {
+                warnings.push(ValidationWarning {
+                    warning_type: "missing_true_branch".to_string(),
+                    node_id: Some(c.base.id.clone()),
+                    message: format!(
+                        "Condition node '{}' is missing a 'true' branch edge (✓ handle)",
+                        c.base.id
+                    ),
+                });
+            }
+            if !has_false {
+                warnings.push(ValidationWarning {
+                    warning_type: "missing_false_branch".to_string(),
+                    node_id: Some(c.base.id.clone()),
+                    message: format!(
+                        "Condition node '{}' is missing a 'false' branch edge (✗ handle)",
+                        c.base.id
+                    ),
+                });
+            }
+        }
+    }
+
+    // ── 节点配置字段校验 ──
+    for node in &nodes {
+        match node {
+            WorkflowNode::Agent(a) if a.config.system_prompt.is_empty() => {
+                warnings.push(ValidationWarning {
+                    warning_type: "invalid_config".to_string(),
+                    node_id: Some(a.base.id.clone()),
+                    message: format!("Agent node '{}' has an empty system_prompt", a.base.id),
+                });
+            },
+            WorkflowNode::Llm(l) => {
+                if l.config.model.is_empty() {
+                    warnings.push(ValidationWarning {
+                        warning_type: "invalid_config".to_string(),
+                        node_id: Some(l.base.id.clone()),
+                        message: format!("LLM node '{}' has an empty model field", l.base.id),
+                    });
+                }
+                if l.config.prompt.is_empty() {
+                    warnings.push(ValidationWarning {
+                        warning_type: "invalid_config".to_string(),
+                        node_id: Some(l.base.id.clone()),
+                        message: format!("LLM node '{}' has an empty prompt field", l.base.id),
+                    });
+                }
+            },
+            WorkflowNode::Switch(s) if s.config.cases.is_empty() => {
+                warnings.push(ValidationWarning {
+                    warning_type: "invalid_config".to_string(),
+                    node_id: Some(s.base.id.clone()),
+                    message: format!("Switch node '{}' has empty cases", s.base.id),
+                });
+            },
+            WorkflowNode::Loop(lp) if lp.config.body_steps.is_empty() => {
+                warnings.push(ValidationWarning {
+                    warning_type: "invalid_config".to_string(),
+                    node_id: Some(lp.base.id.clone()),
+                    message: format!("Loop node '{}' has empty body_steps", lp.base.id),
+                });
+            },
+            WorkflowNode::Parallel(p) if p.config.branches.is_empty() => {
+                warnings.push(ValidationWarning {
+                    warning_type: "invalid_config".to_string(),
+                    node_id: Some(p.base.id.clone()),
+                    message: format!("Parallel node '{}' has empty branches", p.base.id),
+                });
+            },
+            WorkflowNode::Condition(c)
+                if c.config.conditions.is_empty() && c.config.judge_by_llm.unwrap_or(false) =>
+            {
+                warnings.push(ValidationWarning {
+                    warning_type: "invalid_config".to_string(),
+                    node_id: Some(c.base.id.clone()),
+                    message: format!(
+                        "Condition node '{}' has empty conditions (LLM routing is enabled)",
+                        c.base.id
+                    ),
+                });
+            },
+            _ => {},
+        }
+    }
+
+    // ── 边类型校验：特定边类型必须源自对应节点类型 ──
+    let node_type_map: std::collections::HashMap<String, &str> = nodes
+        .iter()
+        .map(|n| (n.base_id().to_string(), node_type_name(n)))
+        .collect();
+
+    for edge in &edges {
+        match &edge.edge_type {
+            EdgeType::ConditionTrue | EdgeType::ConditionFalse => {
+                if let Some(&ntype) = node_type_map.get(&edge.source) {
+                    if ntype != "condition" {
+                        errors.push(ValidationError {
+                            error_type: "invalid_edge".to_string(),
+                            node_id: Some(edge.id.clone()),
+                            message: format!(
+                                "{:?} edge '{}' must originate from a Condition node, but source '{}' is a '{}' node",
+                                edge.edge_type, edge.id, edge.source, ntype
+                            ),
+                            suggestion: Some(
+                                "Change the source node to a Condition node or change the edge type"
+                                    .to_string(),
+                            ),
+                        });
+                    }
+                }
+            },
+            EdgeType::DebateRound => {
+                if let Some(&ntype) = node_type_map.get(&edge.source) {
+                    if ntype != "debate" {
+                        errors.push(ValidationError {
+                            error_type: "invalid_edge".to_string(),
+                            node_id: Some(edge.id.clone()),
+                            message: format!(
+                                "debateRound edge '{}' must originate from a Debate node, but source '{}' is a '{}' node",
+                                edge.id, edge.source, ntype
+                            ),
+                            suggestion: Some(
+                                "Change the source node to a Debate node or change the edge type"
+                                    .to_string(),
+                            ),
+                        });
+                    }
+                }
+            },
+            EdgeType::ParallelBranch => {
+                if let Some(&ntype) = node_type_map.get(&edge.source) {
+                    if ntype != "parallel" {
+                        errors.push(ValidationError {
+                            error_type: "invalid_edge".to_string(),
+                            node_id: Some(edge.id.clone()),
+                            message: format!(
+                                "parallelBranch edge '{}' must originate from a Parallel node, but source '{}' is a '{}' node",
+                                edge.id, edge.source, ntype
+                            ),
+                            suggestion: Some(
+                                "Change the source node to a Parallel node or change the edge type"
+                                    .to_string(),
+                            ),
+                        });
+                    }
+                }
+            },
+            _ => {},
+        }
     }
 
     let is_valid = errors.is_empty();
@@ -1134,6 +1349,7 @@ fn extract_config_from_n8n(n8n_node: &serde_json::Value, node_id: &str) -> Agent
         max_tool_rounds: None,
         execution_mode: None,
         rag_source_ids: vec![],
+        model_role: None,
     }
 }
 
@@ -1172,6 +1388,7 @@ async fn convert_n8n_to_axagent(
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         },
         config: TriggerConfig {
             trigger_type: TriggerType::Manual,
@@ -1219,6 +1436,7 @@ async fn convert_n8n_to_axagent(
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         };
 
         if n8n_type_lower.contains("if") || n8n_type_lower.contains("switch") {
@@ -1292,6 +1510,7 @@ async fn convert_n8n_to_axagent(
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         };
 
         let agent_node = WorkflowNode::Agent(AgentNode {
@@ -1319,6 +1538,19 @@ async fn convert_n8n_to_axagent(
             WorkflowNode::SubWorkflow(t) => t.base.position.clone(),
             WorkflowNode::DocumentParser(t) => t.base.position.clone(),
             WorkflowNode::VectorRetrieve(t) => t.base.position.clone(),
+            WorkflowNode::HttpRequest(t) => t.base.position.clone(),
+            WorkflowNode::Switch(t) => t.base.position.clone(),
+            WorkflowNode::DatabaseQuery(t) => t.base.position.clone(),
+            WorkflowNode::Notification(t) => t.base.position.clone(),
+            WorkflowNode::Approval(t) => t.base.position.clone(),
+            WorkflowNode::FileOperation(t) => t.base.position.clone(),
+            WorkflowNode::DataTransformer(t) => t.base.position.clone(),
+            WorkflowNode::WebhookSend(t) => t.base.position.clone(),
+            WorkflowNode::Logging(t) => t.base.position.clone(),
+            WorkflowNode::LlmClassifier(t) => t.base.position.clone(),
+            WorkflowNode::Aggregator(t) => t.base.position.clone(),
+            WorkflowNode::Email(t) => t.base.position.clone(),
+            WorkflowNode::Debate(t) => t.base.position.clone(),
             WorkflowNode::End(t) => t.base.position.clone(),
         })
         .next_back()
@@ -1336,6 +1568,7 @@ async fn convert_n8n_to_axagent(
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         },
         config: EndNodeConfig {
             output_var: Some("final_output".to_string()),

@@ -903,6 +903,7 @@ fn step_to_agent_node(step: &PresetStep, index: usize) -> WorkflowNode {
         retry: RetryConfig::default(),
         timeout: Some(300),
         enabled: true,
+        parent_id: None,
     };
 
     WorkflowNode::Agent(AgentNode {
@@ -921,6 +922,7 @@ fn step_to_agent_node(step: &PresetStep, index: usize) -> WorkflowNode {
             max_tool_rounds: None,
             execution_mode: None,
             rag_source_ids: vec![],
+            model_role: None,
         },
     })
 }
@@ -1031,6 +1033,7 @@ fn build_workflow_nodes(steps: &[PresetStep], start_y: f64) -> Vec<WorkflowNode>
                 retry: RetryConfig::default(),
                 timeout: Some(600),
                 enabled: true,
+                parent_id: None,
             },
             config: ParallelNodeConfig {
                 branches: group
@@ -1061,6 +1064,7 @@ fn build_workflow_nodes(steps: &[PresetStep], start_y: f64) -> Vec<WorkflowNode>
                 retry: RetryConfig::default(),
                 timeout: None,
                 enabled: true,
+                parent_id: None,
             },
             config: MergeNodeConfig {
                 merge_type: MergeStrategy::All,
@@ -1086,6 +1090,7 @@ fn build_stock_analysis_nodes(_steps: &[PresetStep], start_y: f64) -> Vec<Workfl
             retry: RetryConfig::default(),
             timeout: Some(600),
             enabled: true,
+            parent_id: None,
         },
         config: ParallelNodeConfig {
             branches: vec![
@@ -1159,6 +1164,7 @@ fn build_stock_analysis_nodes(_steps: &[PresetStep], start_y: f64) -> Vec<Workfl
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         },
         config: MergeNodeConfig {
             merge_type: MergeStrategy::All,
@@ -1188,6 +1194,7 @@ fn build_stock_analysis_nodes(_steps: &[PresetStep], start_y: f64) -> Vec<Workfl
             retry: RetryConfig::default(),
             timeout: Some(60),
             enabled: true,
+                parent_id: None,
         },
         config: ConditionNodeConfig {
             conditions: vec![],
@@ -1211,6 +1218,7 @@ fn build_stock_analysis_nodes(_steps: &[PresetStep], start_y: f64) -> Vec<Workfl
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         },
         config: EndNodeConfig { output_var: None },
     }));
@@ -1233,6 +1241,7 @@ pub fn convert_preset_to_workflow_template(preset: &PresetTemplate) -> WorkflowT
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         },
         config: TriggerConfig {
             trigger_type: TriggerType::Manual,
@@ -1307,6 +1316,7 @@ pub fn convert_preset_to_workflow_template(preset: &PresetTemplate) -> WorkflowT
                 retry: RetryConfig::default(),
                 timeout: None,
                 enabled: true,
+                parent_id: None,
             },
             config: EndNodeConfig { output_var: None },
         }));

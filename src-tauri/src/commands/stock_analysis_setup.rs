@@ -1176,18 +1176,8 @@ async fn seed_stock_analysis_workflow_template(
         td_corr.clone(),
     ];
     for (debater_id, debater_title, debater_expert, debater_tools) in &[
-        (
-            "bull-researcher",
-            "多方研究员",
-            "bull-researcher",
-            &bull_tools,
-        ),
-        (
-            "bear-researcher",
-            "空方研究员",
-            "bear-researcher",
-            &bear_tools,
-        ),
+        ("bull-researcher", "多方研究员", "bull-researcher", &bull_tools),
+        ("bear-researcher", "空方研究员", "bear-researcher", &bear_tools),
     ] {
         let mut an = agent(debater_id, debater_title, debater_expert);
         if let WorkflowNode::Agent(ref mut a) = an {

@@ -101,9 +101,13 @@ impl FileStore {
         #[cfg(mobile)]
         if let Some(ref engine) = self.sync_engine {
             let rt = tokio::runtime::Handle::current();
-            let fetch_result = rt.block_on(engine.fetch_file(storage_path, &path));
-            if fetch_result.is_ok() {
-                return Ok(std::fs::read(&path)?);
+            let fetch_result = rt.block_on(engine.backend.get(storage_path));
+            if let Ok(obj) = fetch_result {
+                if let Some(parent) = std::path::Path::new(&path).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&path, &obj.data);
+                return Ok(obj.data);
             }
         }
 

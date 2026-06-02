@@ -2251,7 +2251,7 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const DEBATE_ID: &str = "stock-debate";
-    const DEBATE_VERSION: i32 = 1;
+    const DEBATE_VERSION: i32 = 2;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(DEBATE_ID)
         .one(db)

@@ -92,7 +92,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       // 兼容未来多轮模式: bull-r1, bull-r2...
       const round = stepId === "bull-researcher" ? 1 : parseInt(stepId.slice(6), 10);
       const bearKey = stepId === "bull-researcher" ? "bear-researcher" : `bear-r${round}`;
-      debateRounds.push({ round: round - 1, bull: output, bear: extractContent(results[bearKey] ?? "") });
+      debateRounds.push({ round, bull: output, bear: extractContent(results[bearKey] ?? "") });
     } else if (stepId === "bear-researcher" || (stepId.startsWith("bear-r") && stepId !== "bear-researcher")) {
       continue;
     } else if (stepId.startsWith("risk-") || stepId === "research-mgr") {
@@ -362,7 +362,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           } else if (key.startsWith("debate.bull.round_")) {
             const round = parseInt(key.slice("debate.bull.round_".length));
             const bearKey = `debate.bear.round_${round}`;
-            debates.push({ round: round - 1, bull: value, bear: snap[bearKey] ?? "" });
+            debates.push({ round, bull: value, bear: snap[bearKey] ?? "" });
           } else if (key.startsWith("risk.")) {
             risks[key.slice(5)] = value;
           }
@@ -463,22 +463,22 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           // 兼容未来多轮模式: bull-r1, bull-r2...
           const round = nodeId === "bull-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
           const debates = [...s.debateRounds];
-          const idx = debates.findIndex((d) => d.round === round - 1);
+          const idx = debates.findIndex((d) => d.round === round);
           if (idx >= 0) {
             debates[idx] = { ...debates[idx], bull: text };
           } else {
-            debates.push({ round: round - 1, bull: text, bear: "" });
+            debates.push({ round, bull: text, bear: "" });
           }
           debates.sort((a, b) => a.round - b.round);
           set({ debateRounds: debates });
         } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
           const round = nodeId === "bear-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
           const debates = [...s.debateRounds];
-          const idx = debates.findIndex((d) => d.round === round - 1);
+          const idx = debates.findIndex((d) => d.round === round);
           if (idx >= 0) {
             debates[idx] = { ...debates[idx], bear: text };
           } else {
-            debates.push({ round: round - 1, bull: "", bear: text });
+            debates.push({ round, bull: "", bear: text });
           }
           debates.sort((a, b) => a.round - b.round);
           set({ debateRounds: debates });

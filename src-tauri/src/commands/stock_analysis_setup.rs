@@ -331,6 +331,7 @@ async fn seed_stock_analysis_workflow_template(
                     },
                     timeout: Some(120),
                     enabled: true,
+                    parent_id: None,
                 },
                 config: ToolNodeConfig {
                     tool_name: tool_name.into(),
@@ -895,6 +896,7 @@ async fn seed_stock_analysis_workflow_template(
                 },
                 timeout: Some(300),
                 enabled: true,
+                parent_id: None,
             },
             config: AgentNodeConfig {
                 // inline system_prompt 只放任务指令，专家 prompt 由 agent_profile 自动加载，
@@ -912,6 +914,7 @@ async fn seed_stock_analysis_workflow_template(
                 max_tool_rounds: None,
                 execution_mode: None,
                 rag_source_ids: vec![],
+                model_role: None,
             },
         })
     };
@@ -941,6 +944,7 @@ async fn seed_stock_analysis_workflow_template(
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
+            parent_id: None,
         },
         config: TriggerConfig {
             trigger_type: TriggerType::Manual,
@@ -1072,6 +1076,7 @@ async fn seed_stock_analysis_workflow_template(
             retry: RetryConfig::default(),
             timeout: Some(600),
             enabled: true,
+            parent_id: None,
         },
         config: ParallelNodeConfig {
             branches: analyst_branches,
@@ -1092,6 +1097,7 @@ async fn seed_stock_analysis_workflow_template(
             retry: RetryConfig::default(),
             timeout: Some(60),
             enabled: true,
+            parent_id: None,
         },
         config: ConditionNodeConfig {
             conditions: vec![],
@@ -1266,6 +1272,7 @@ async fn seed_stock_analysis_workflow_template(
             retry: RetryConfig::default(),
             timeout: Some(60),
             enabled: true,
+            parent_id: None,
         },
         config: ValidationNodeConfig {
             assertions: vec![ValidationAssertion {
@@ -2255,6 +2262,7 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
                 },
                 timeout: Some(300),
                 enabled: true,
+                parent_id: None,
             },
             config: AgentNodeConfig {
                 system_prompt: format!("你的任务: {title}\n工具: {}", tool_names.join(", ")),
@@ -2270,6 +2278,7 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
                 max_tool_rounds: Some(2),
                 execution_mode: None,
                 rag_source_ids: vec![],
+                model_role: None,
             },
         });
         let edges: Vec<WorkflowEdge> = deps

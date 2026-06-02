@@ -1,4 +1,8 @@
 import type {
+  AiChatAction,
+  DiagnosticFix,
+  DiagnosticIssue,
+  DiagnosticReport,
   ErrorConfig,
   JsonSchema,
   SemanticCheckResult,
@@ -12,6 +16,15 @@ import type {
   WorkflowTemplateInput,
   WorkflowTemplateResponse,
 } from "@/components/workflow/types";
+
+export interface ExpandedSubWorkflowData {
+  /** 子工作流内部节点（ID 已 prefixed 避免冲突） */
+  nodes: WorkflowNode[];
+  /** 子工作流内部边（ID 已 prefixed 避免冲突） */
+  edges: WorkflowEdge[];
+  /** 是否正在加载 */
+  isLoading: boolean;
+}
 import { invoke, logIpcError } from "@/lib/invoke";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -24,11 +37,6 @@ export interface AiChatMessage {
   isStreaming?: boolean;
   actions?: AiChatAction[];
   rawContent?: string;
-}
-
-export interface AiChatAction {
-  action_type: string;
-  data: Record<string, unknown>;
 }
 
 export interface SimilarWorkflow {
@@ -72,6 +80,9 @@ interface WorkflowEditorState {
   isSaving: boolean;
   isDirty: boolean;
   validationResult: ValidationResult | null;
+  diagnoseReport: DiagnosticReport | null;
+  diagnoseLoading: boolean;
+  diagnoseDrawerVisible: boolean;
   filter: TemplateFilter;
   error: string | null;
   past: Array<HistoryEntry>;
@@ -106,6 +117,11 @@ interface WorkflowEditorState {
 
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  // 容器父子关系（childId → parentId），独立于 nodes 数组以避免污染 WorkflowNode 联合类型。
+  // 渲染时反查此表为 ReactFlow 节点注入 parentId，保存时摊平到 nodes.parentId 字段。
+  parentRefs: Record<string, string>;
+  setParentRef: (childId: string, parentId: string | null) => void;
+  clearParentRefs: () => void;
 
   loadTemplates: () => Promise<void>;
   loadTemplate: (id: string) => Promise<void>;
@@ -187,6 +203,12 @@ interface WorkflowEditorState {
   ) => void;
   clearSimilarWorkflowsForReview: () => void;
 
+  llmDiagnoseWorkflow: (
+    nodes: WorkflowNode[],
+    workflowName: string,
+    description?: string,
+  ) => Promise<any>;
+
   generateWorkflowFromPrompt: (
     prompt: string,
     mergeMode?: boolean,
@@ -209,15 +231,63 @@ interface WorkflowEditorState {
     }> | null
   >;
   applyOptimizedPromptToNode: (nodeId: string, optimizedPrompt: string) => void;
+  /**
+   * 将 AI 生成结果应用到节点的指定字段。
+   * 用于 Phase 1 节点级 AI 辅助（如 LLM.prompt、Agent.system_prompt、HttpRequest.url、Email.body 等）。
+   * - kind = "string" 时，value 必须是字符串，写入 config[field]
+   * - kind = "object" 时，value 是任意 JSON 兼容对象，写入 config[field]
+   */
+  applyAIAssistToNodeField: (
+    nodeId: string,
+    field: string,
+    value: unknown,
+    kind?: "string" | "object",
+  ) => boolean;
+
+  runWorkflowDiagnose: () => Promise<DiagnosticReport | null>;
+  clearDiagnoseReport: () => void;
+  setDiagnoseDrawerVisible: (visible: boolean) => void;
+  applyDiagnoseFix: (issueId: string) => boolean;
 
   aiChatMessages: AiChatMessage[];
   aiChatSessionId: string;
   aiChatStreaming: boolean;
   aiChatStreamingMessageId: string | null;
+  /** AI 聊天 listener 清理函数，由 aiChatSend 设置、aiChatCancel 调用 */
+  _aiChatCleanup: (() => void) | null;
   aiChatSend: (message: string) => Promise<void>;
   aiChatCancel: () => void;
   aiChatClear: () => void;
   applyAiChatAction: (action: AiChatAction) => void;
+  /**
+   * 事务性 AI action 批处理：一组 actions 要么全部应用、要么一键回滚。
+   * - beginAiActionTransaction  拍快照（保存当前 nodes/edges 副本）
+   * - applyAiChatAction         在事务内逐个应用
+   * - commitAiActionTransaction 成功完成，丢弃快照
+   * - rollbackAiActionTransaction 回滚到事务开始前的状态
+   */
+  aiActionTransactions: Array<{
+    id: string;
+    timestamp: number;
+    appliedCount: number;
+    beforeNodes: WorkflowNode[];
+    beforeEdges: WorkflowEdge[];
+  }>;
+  beginAiActionTransaction: () => string;
+  applyAiChatActionInTransaction: (txId: string, action: AiChatAction) => void;
+  commitAiActionTransaction: (txId: string) => void;
+  rollbackAiActionTransaction: (txId: string) => void;
+  rollbackLastAiActionTransaction: () => void;
+
+  /**
+   * 待用户在 Diff 预览中确认的 AI action 队列。
+   * 为 null 表示 DiffPreview 弹窗关闭；非空时显示在 ActionDiffPreview 中。
+   * 用户确认 apply 走 applyAiChatAction；cancel 走 clearPendingAiChatActions。
+   */
+  pendingAiChatActions: AiChatAction[] | null;
+  pendingAiChatMessageId: string | null;
+  setPendingAiChatActions: (messageId: string, actions: AiChatAction[]) => void;
+  clearPendingAiChatActions: () => void;
 
   semanticCheckResult: SemanticCheckResult | null;
   pendingReplacements: Map<
@@ -239,6 +309,16 @@ interface WorkflowEditorState {
   clearSemanticCheckResult: () => void;
 
   loadConversationWorkflowPreview: (conversationId: string) => Promise<void>;
+
+  /** 已展开的子工作流（keyed by 子工作流节点 ID），null = 未展开/已折叠 */
+  expandedSubWorkflows: Record<string, ExpandedSubWorkflowData | null>;
+  /** 切换子工作流节点的展开/折叠状态 */
+  toggleExpandSubWorkflow: (nodeId: string, subWorkflowId: string | undefined) => Promise<void>;
+
+  /** 已折叠的 parallel 容器 ID 集合（会话内 UI 状态，不持久化到后端） */
+  collapsedParallelContainers: Set<string>;
+  /** 切换 parallel 容器的展开/折叠状态 */
+  toggleParallelContainerCollapse: (parallelId: string) => void;
 }
 
 interface ConversationWorkflowPreviewResponse {
@@ -283,6 +363,19 @@ const buildHistoryEntry = (state: WorkflowEditorState): HistoryEntry => ({
   trigger_config: state.currentTemplate?.trigger_config,
 });
 
+// 从 nodes 中已有的 (as any).parentId 字段重建父子关系映射。
+// 后端目前不感知 parentRefs，所以老工作流的父子关系以 nodes 字段为准持久化。
+function rebuildParentRefsFromNodes(nodes: WorkflowNode[]): Record<string, string> {
+  const refs: Record<string, string> = {};
+  for (const n of nodes) {
+    const pid = (n as { parentId?: string }).parentId;
+    if (typeof pid === "string" && pid.length > 0) {
+      refs[n.id] = pid;
+    }
+  }
+  return refs;
+}
+
 function parseActionsFromContent(content: string): AiChatAction[] {
   const actions: AiChatAction[] = [];
   const regex = /:::action\s*\n([\s\S]*?)\n:::/g;
@@ -290,10 +383,25 @@ function parseActionsFromContent(content: string): AiChatAction[] {
   while ((match = regex.exec(content)) !== null) {
     try {
       const parsed = JSON.parse(match[1].trim());
-      actions.push({
-        action_type: parsed.action_type || "unknown",
-        data: parsed.data || {},
-      });
+      const actionType = parsed.action_type;
+      const data = parsed.data ?? {};
+      // 只接受已知的 action_type；未知类型丢弃（避免下游 switch 出现"幽灵分支"）
+      const known: ReadonlyArray<AiChatAction["action_type"]> = [
+        "generate_workflow",
+        "add_node",
+        "add_nodes",
+        "update_node",
+        "modify_node",
+        "delete_node",
+        "delete_nodes",
+        "add_edge",
+        "update_edge",
+        "delete_edge",
+        "optimize_prompt",
+      ];
+      if (known.includes(actionType)) {
+        actions.push({ action_type: actionType, data } as AiChatAction);
+      }
     } catch {
       // skip invalid JSON
     }
@@ -314,6 +422,70 @@ function stripPartialActionBlocks(content: string): string {
   return result.trim();
 }
 
+function mergeReports(ruleReport: DiagnosticReport, llmReport: DiagnosticReport): DiagnosticReport {
+  const seen = new Set<string>();
+  const issues: DiagnosticIssue[] = [];
+  for (const iss of ruleReport.issues) {
+    const key = `${iss.id}:${iss.node_ids.join(",")}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      issues.push(iss);
+    }
+  }
+  for (const iss of llmReport.issues) {
+    const key = `${iss.id}:${iss.node_ids?.join(",") ?? ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      issues.push(iss);
+    }
+  }
+  const summary = { error: 0, warning: 0, info: 0 };
+  for (const iss of issues) { summary[iss.severity]++; }
+  return {
+    issues,
+    summary,
+    generated_at: Date.now(),
+    duration_ms: ruleReport.duration_ms + (llmReport.duration_ms ?? 0),
+  };
+}
+
+interface LlmDiagnoseRaw {
+  summary: string;
+  issues: Array<{
+    severity: string;
+    category: string;
+    node_id: string | null;
+    title: string;
+    detail: string;
+    suggestion: string;
+  }>;
+  suggestions: string[];
+}
+
+function transformLlmResult(raw: LlmDiagnoseRaw): DiagnosticReport {
+  const validSeverities = new Set(["error", "warning", "info"]);
+  const issues: DiagnosticIssue[] = (raw.issues ?? []).map((iss, idx) => ({
+    id: `llm_${idx}_${iss.category}`,
+    severity: (validSeverities.has(iss.severity) ? iss.severity : "info") as DiagnosticIssue["severity"],
+    category: iss.category as DiagnosticIssue["category"],
+    title_key: "",
+    message_key: "",
+    node_ids: iss.node_id ? [iss.node_id] : [],
+    auto_fixable: false,
+    title_override: iss.title,
+    detail_override: iss.detail,
+    suggestion_override: iss.suggestion,
+  }));
+  const summary = { error: 0, warning: 0, info: 0 };
+  for (const iss of issues) { summary[iss.severity]++; }
+  return {
+    issues,
+    summary,
+    generated_at: Date.now(),
+    duration_ms: 0,
+  };
+}
+
 export const useWorkflowEditorStore = create<WorkflowEditorState>()(
   immer((set, get) => ({
     currentTemplate: null,
@@ -324,6 +496,9 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     isSaving: false,
     isDirty: false,
     validationResult: null,
+    diagnoseReport: null,
+    diagnoseLoading: false,
+    diagnoseDrawerVisible: false,
     filter: {},
     error: null,
     importedWorkflowData: null,
@@ -333,10 +508,16 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     pendingWorkflowData: null,
     nodes: [],
     edges: [],
+    parentRefs: {},
     aiChatMessages: [],
     aiChatSessionId: `ai-session-${Date.now()}`,
     aiChatStreaming: false,
     aiChatStreamingMessageId: null,
+    _aiChatCleanup: null,
+    pendingAiChatActions: null,
+    pendingAiChatMessageId: null,
+    expandedSubWorkflows: {},
+    collapsedParallelContainers: new Set<string>(),
     past: [],
     future: [],
     _lastUndoRecordTime: 0,
@@ -440,6 +621,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             type: typeof n.type === "string" ? n.type.toLowerCase() : n.type,
           }));
           state.edges = template.edges;
+          state.parentRefs = rebuildParentRefsFromNodes(template.nodes);
           state.isLoading = false;
           state.isDirty = false;
           state.past = [];
@@ -481,8 +663,13 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
       try {
         await invoke<boolean>("update_workflow_template", { id, input });
-        // 仅刷新侧栏模板列表，不重新加载当前模板（避免覆盖本地编辑中的位置/配置）
-        await get().loadTemplates();
+        // 刷新侧栏列表，同时刷新当前模板（确保 version 等元数据同步）
+        const { currentTemplate } = get();
+        if (currentTemplate?.id === id) {
+          await get().loadTemplate(id);
+        } else {
+          await get().loadTemplates();
+        }
         set((state) => {
           state.isSaving = false;
           state.isDirty = false;
@@ -651,6 +838,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             state.currentTemplate = template;
             state.nodes = template.nodes || [];
             state.edges = template.edges || [];
+            state.parentRefs = rebuildParentRefsFromNodes(state.nodes);
             state.isLoading = false;
             state.isDirty = false;
           });
@@ -701,6 +889,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
     },
 
+    /** 从联合类型 WorkflowNode 中无损提取 config/retry 做深合并。
+     *  各变体 config 类型不同，通过 'unknown' 中转避免 'as any' 扩散。 */
     updateNode: (nodeId: string, updates: Partial<WorkflowNode>) => {
       set((state) => {
         const now = Date.now();
@@ -715,20 +905,23 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         const index = state.nodes.findIndex((n) => n.id === nodeId);
         if (index !== -1) {
           const existing = state.nodes[index];
-          // 深合并嵌套对象（config / position / retry），避免浅合并覆盖未传入的字段
+          // 深合并嵌套对象：联合类型各变体 config/retry 类型不同，
+          // 通过 unknown 中转精确读取共有字段，避免 as any 扩散到整行
+          const ext = existing as unknown as { config: Record<string, unknown>; retry: Record<string, unknown> };
+          const upd = updates as unknown as { config?: Record<string, unknown>; retry?: Record<string, unknown> };
           const merged = {
             ...existing,
             ...updates,
             position: updates.position
               ? { ...existing.position, ...updates.position }
               : existing.position,
-            config: updates.config
-              ? { ...(existing as any).config, ...(updates as any).config }
-              : (existing as any).config,
-            retry: (updates as any).retry
-              ? { ...(existing as any).retry, ...(updates as any).retry }
-              : (existing as any).retry,
-          } as WorkflowNode;
+            config: upd.config
+              ? { ...ext.config, ...upd.config, conditions: upd.config.conditions ?? ext.config.conditions }
+              : ext.config,
+            retry: upd.retry
+              ? { ...ext.retry, ...upd.retry }
+              : ext.retry,
+          } as unknown as WorkflowNode;
           state.nodes[index] = merged;
           state.isDirty = true;
         }
@@ -743,10 +936,45 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           state.past = state.past.slice(-50);
         }
         state._lastUndoRecordTime = Date.now();
-        state.nodes = state.nodes.filter((n) => n.id !== nodeId);
+
+        // 级联删除：若被删节点是 parallel 容器，需一并删除所有 parentRefs 登记为它的子节点
+        const toDelete = new Set<string>([nodeId]);
+        for (const [cid, pid] of Object.entries(state.parentRefs)) {
+          if (pid === nodeId) { toDelete.add(cid); }
+        }
+
+        state.nodes = state.nodes.filter((n) => !toDelete.has(n.id));
         state.edges = state.edges.filter(
-          (e) => e.source !== nodeId && e.target !== nodeId,
+          (e) => !toDelete.has(e.source) && !toDelete.has(e.target),
         );
+
+        // 清理 parentRefs 中被删节点作为子或作为父的登记项
+        const nextParentRefs: Record<string, string> = {};
+        for (const [k, v] of Object.entries(state.parentRefs)) {
+          if (!toDelete.has(k) && !toDelete.has(v)) {
+            nextParentRefs[k] = v;
+          }
+        }
+        state.parentRefs = nextParentRefs;
+
+        // 清理被删节点的折叠状态（含级联删除的子节点）
+        if (toDelete.size === 1 && toDelete.has(nodeId)) {
+          if (state.collapsedParallelContainers.has(nodeId)) {
+            const next = new Set(state.collapsedParallelContainers);
+            next.delete(nodeId);
+            state.collapsedParallelContainers = next;
+          }
+        } else if (toDelete.size > 0) {
+          const next = new Set(state.collapsedParallelContainers);
+          let changed = false;
+          for (const id of toDelete) {
+            if (next.delete(id)) { changed = true; }
+          }
+          if (changed) {
+            state.collapsedParallelContainers = next;
+          }
+        }
+
         if (state.selectedNodeId === nodeId) {
           state.selectedNodeId = null;
         }
@@ -832,6 +1060,25 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
     },
 
+    // 写入/清除容器父子关系。不进撤销栈（避免每次回填都被用户撤销一次）。
+    setParentRef: (childId: string, parentId: string | null) => {
+      set((state) => {
+        if (parentId === null) {
+          delete state.parentRefs[childId];
+        } else {
+          state.parentRefs[childId] = parentId;
+        }
+        state.isDirty = true;
+      });
+    },
+
+    clearParentRefs: () => {
+      set((state) => {
+        state.parentRefs = {};
+        state.isDirty = true;
+      });
+    },
+
     updateTemplateMetadata: (metadata) => {
       set((state) => {
         if (state.currentTemplate) {
@@ -892,6 +1139,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         } as WorkflowTemplateResponse;
         state.nodes = importedData?.nodes || [];
         state.edges = importedData?.edges || [];
+        state.parentRefs = rebuildParentRefsFromNodes(state.nodes);
         state.isDirty = !!(
           importedData?.nodes && importedData.nodes.length > 0
         );
@@ -1117,6 +1365,17 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
     },
 
+    llmDiagnoseWorkflow: async (nodes: WorkflowNode[], workflowName: string, description?: string) => {
+      try {
+        const { invoke } = await import("@/lib/invoke");
+        return await invoke("llm_diagnose_workflow", {
+          request: { nodes, workflow_name: workflowName, workflow_description: description || null },
+        });
+      } catch (e) {
+        return null;
+      }
+    },
+
     generateWorkflowFromPrompt: async (prompt: string, mergeMode?: boolean) => {
       set((state) => {
         state.isLoading = true;
@@ -1243,6 +1502,158 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           ...agentNode,
           config: { ...agentNode.config, system_prompt: optimizedPrompt },
         });
+      } else if (node.type === "llm") {
+        const llmNode = node as import("@/components/workflow/types").LLMNode;
+        get().updateNode(nodeId, {
+          ...llmNode,
+          config: { ...llmNode.config, prompt: optimizedPrompt },
+        });
+      } else if (node.type === "email") {
+        const emailNode = node as import("@/components/workflow/types").EmailNode;
+        get().updateNode(nodeId, {
+          ...emailNode,
+          config: { ...emailNode.config, body: optimizedPrompt },
+        });
+      }
+    },
+
+    applyAIAssistToNodeField: (
+      nodeId: string,
+      field: string,
+      value: unknown,
+      kind: "string" | "object" = "string",
+    ) => {
+      const { nodes } = get();
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) { return false; }
+      const currentConfig = (node as unknown as { config?: Record<string, unknown> }).config ?? {};
+      const sanitized = kind === "string" && typeof value === "string"
+        ? value
+        : kind === "string"
+        ? String(value ?? "")
+        : value;
+      get().updateNode(nodeId, {
+        ...node,
+        config: { ...currentConfig, [field]: sanitized },
+      } as unknown as Partial<import("@/components/workflow/types").WorkflowNode>);
+      return true;
+    },
+
+    runWorkflowDiagnose: async () => {
+      const { nodes, edges } = get();
+      if (nodes.length === 0) {
+        set((s) => {
+          s.diagnoseReport = {
+            issues: [],
+            summary: { error: 0, warning: 0, info: 0 },
+            generated_at: Date.now(),
+            duration_ms: 0,
+          };
+          s.diagnoseLoading = false;
+        });
+        return null;
+      }
+      set((s) => {
+        s.diagnoseLoading = true;
+        s.diagnoseDrawerVisible = true;
+      });
+
+      const { runDiagnosticRules } = await import(
+        "@/components/workflow/Diagnostic/diagnosticRules"
+      );
+      const ruleReport = runDiagnosticRules(nodes, edges);
+
+      try {
+        const workflowName = get().currentTemplate?.name ?? "Untitled";
+        const llmRaw = await invoke<{
+          summary: string;
+          issues: Array<{
+            severity: string;
+            category: string;
+            node_id: string | null;
+            title: string;
+            detail: string;
+            suggestion: string;
+          }>;
+          suggestions: string[];
+        }>("llm_diagnose_workflow", {
+          request: {
+            nodes,
+            workflow_name: workflowName,
+            workflow_description: null,
+          },
+        });
+        const llmReport = transformLlmResult(llmRaw);
+        const merged = mergeReports(ruleReport, llmReport);
+        set((s) => {
+          s.diagnoseReport = merged;
+          s.diagnoseLoading = false;
+        });
+        return merged;
+      } catch (_err) {
+        set((s) => {
+          s.diagnoseReport = ruleReport;
+          s.diagnoseLoading = false;
+        });
+        return ruleReport;
+      }
+    },
+
+    clearDiagnoseReport: () => {
+      set((s) => {
+        s.diagnoseReport = null;
+        s.diagnoseDrawerVisible = false;
+      });
+    },
+
+    setDiagnoseDrawerVisible: (visible: boolean) => {
+      set((s) => {
+        s.diagnoseDrawerVisible = visible;
+      });
+    },
+
+    applyDiagnoseFix: (issueId: string) => {
+      const { diagnoseReport, nodes, edges } = get();
+      if (!diagnoseReport) { return false; }
+      const issue = diagnoseReport.issues.find((i) => i.id === issueId);
+      if (!issue || !issue.auto_fixable || !issue.fix) { return false; }
+      const fix: DiagnosticFix = issue.fix;
+      switch (fix.action_type) {
+        case "delete_node": {
+          if (!nodes.find((n) => n.id === fix.node_id)) { return false; }
+          get().deleteNode(fix.node_id);
+          return true;
+        }
+        case "delete_edge": {
+          if (!edges.find((e) => e.id === fix.edge_id)) { return false; }
+          get().deleteEdge(fix.edge_id);
+          return true;
+        }
+        case "set_node_field": {
+          return get().applyAIAssistToNodeField(fix.node_id, fix.field, fix.value, "string");
+        }
+        case "set_timeout": {
+          get().updateNode(
+            fix.node_id,
+            { timeout: fix.timeout_ms } as unknown as Partial<WorkflowNode>,
+          );
+          return true;
+        }
+        case "enable_retry": {
+          get().updateNode(
+            fix.node_id,
+            {
+              retry: {
+                max_retries: fix.max_retries,
+                backoff: "exponential",
+                initial_interval_ms: 1000,
+              },
+            } as unknown as Record<string, unknown>,
+          );
+          return true;
+        }
+        default:
+          return false;
       }
     },
 
@@ -1336,6 +1747,11 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             cleanupListeners();
           },
         );
+        // 将 cleanup 挂到 store 上，供 aiChatCancel 调用
+        set((state) => {
+          state._aiChatCleanup = cleanupListeners;
+        });
+
         await invoke("workflow_ai_chat_stream", {
           message,
           history,
@@ -1359,9 +1775,12 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     },
 
     aiChatCancel: () => {
-      const { aiChatSessionId, aiChatStreamingMessageId } = get();
+      const { aiChatSessionId, aiChatStreamingMessageId, _aiChatCleanup } = get();
+      // 先取消后端流，再清理 listener
       invoke("workflow_ai_chat_cancel", { session_id: aiChatSessionId }).catch(logIpcError("AI Chat Cancel"));
+      _aiChatCleanup?.();
       set((state) => {
+        state._aiChatCleanup = null;
         state.aiChatMessages = state.aiChatMessages.map((m) =>
           m.id === aiChatStreamingMessageId
             ? { ...m, isStreaming: false }
@@ -1380,60 +1799,71 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     },
 
     applyAiChatAction: (action: AiChatAction) => {
-      const { nodes } = get();
+      const { nodes, edges } = get();
       switch (action.action_type) {
         case "generate_workflow": {
-          const data = action.data as { nodes: WorkflowNode[]; edges: WorkflowEdge[] };
-          if (data.nodes && data.edges) {
-            set((state) => {
-              state.nodes = data.nodes;
-              state.edges = data.edges;
-            });
-          }
+          set((state) => {
+            state.nodes = action.data.nodes;
+            state.edges = action.data.edges;
+          });
+          break;
+        }
+        case "add_node": {
+          const newNode = action.data.node;
+          const existingIds = new Set(nodes.map(n => n.id));
+          const finalId = existingIds.has(newNode.id) ? `ai-${Date.now()}-${newNode.id}` : newNode.id;
+          const offset = action.data.position ?? { x: 50, y: 50 };
+          set((state) => {
+            state.nodes = [...state.nodes, {
+              ...newNode,
+              id: finalId,
+              position: { x: newNode.position.x + offset.x, y: newNode.position.y + offset.y },
+            }];
+          });
           break;
         }
         case "add_nodes": {
-          const data = action.data as { nodes: WorkflowNode[] };
-          if (data.nodes) {
-            const existingIds = new Set(nodes.map(n => n.id));
-            const newNodes = data.nodes.map(n => ({
-              ...n,
-              id: existingIds.has(n.id) ? `ai-${Date.now()}-${n.id}` : n.id,
-              position: { x: n.position.x + 50, y: n.position.y + 50 },
-            }));
-            set((state) => {
-              state.nodes = [...state.nodes, ...newNodes];
-            });
-          }
+          const existingIds = new Set(nodes.map(n => n.id));
+          const newNodes = action.data.nodes.map(n => ({
+            ...n,
+            id: existingIds.has(n.id) ? `ai-${Date.now()}-${n.id}` : n.id,
+            position: { x: n.position.x + 50, y: n.position.y + 50 },
+          }));
+          set((state) => {
+            state.nodes = [...state.nodes, ...newNodes];
+          });
           break;
         }
+        case "update_node":
         case "modify_node": {
-          const data = action.data as { node_id: string; changes: Record<string, unknown> };
-          if (data.node_id) {
+          const { node_id, changes } = action.data;
+          if (node_id) {
             set((state) => {
               state.nodes = state.nodes.map(n => {
-                if (n.id !== data.node_id) { return n; }
-                const changes = { ...data.changes };
-                if (changes.config && typeof changes.config === "object" && n.config) {
-                  changes.config = { ...n.config, ...changes.config };
+                if (n.id !== node_id) { return n; }
+                const merged: Record<string, unknown> = { ...changes };
+                if (merged.config && typeof merged.config === "object" && n.config) {
+                  merged.config = { ...n.config, ...merged.config };
                 }
-                return { ...n, ...changes };
+                return { ...n, ...merged } as WorkflowNode;
               });
             });
           }
           break;
         }
-        case "optimize_prompt": {
-          const data = action.data as { node_id: string; optimized_prompt: string };
-          if (data.node_id && data.optimized_prompt) {
-            get().applyOptimizedPromptToNode(data.node_id, data.optimized_prompt);
+        case "delete_node": {
+          const id = action.data.node_id;
+          if (id) {
+            set((state) => {
+              state.nodes = state.nodes.filter(n => n.id !== id);
+              state.edges = state.edges.filter(e => e.source !== id && e.target !== id);
+            });
           }
           break;
         }
         case "delete_nodes": {
-          const data = action.data as { node_ids: string[] };
-          if (data.node_ids) {
-            const idsToDelete = new Set(data.node_ids);
+          const idsToDelete = new Set(action.data.node_ids);
+          if (idsToDelete.size > 0) {
             set((state) => {
               state.nodes = state.nodes.filter(n => !idsToDelete.has(n.id));
               state.edges = state.edges.filter(e => !idsToDelete.has(e.source) && !idsToDelete.has(e.target));
@@ -1441,6 +1871,114 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           }
           break;
         }
+        case "add_edge": {
+          const newEdge = action.data.edge;
+          const exists = edges.some(e => e.id === newEdge.id);
+          if (!exists) {
+            set((state) => {
+              state.edges = [...state.edges, newEdge];
+            });
+          }
+          break;
+        }
+        case "update_edge": {
+          const { edge_id, changes } = action.data;
+          if (edge_id) {
+            set((state) => {
+              state.edges = state.edges.map(e => (e.id === edge_id ? { ...e, ...changes } : e));
+            });
+          }
+          break;
+        }
+        case "delete_edge": {
+          const id = action.data.edge_id;
+          if (id) {
+            set((state) => {
+              state.edges = state.edges.filter(e => e.id !== id);
+            });
+          }
+          break;
+        }
+        case "optimize_prompt": {
+          const { node_id, optimized_prompt } = action.data;
+          if (node_id && optimized_prompt) {
+            get().applyOptimizedPromptToNode(node_id, optimized_prompt);
+          }
+          break;
+        }
+      }
+    },
+
+    setPendingAiChatActions: (messageId: string, actions: AiChatAction[]) => {
+      set((state) => {
+        state.pendingAiChatActions = actions;
+        state.pendingAiChatMessageId = messageId;
+      });
+    },
+
+    clearPendingAiChatActions: () => {
+      set((state) => {
+        state.pendingAiChatActions = null;
+        state.pendingAiChatMessageId = null;
+      });
+    },
+
+    aiActionTransactions: [],
+
+    beginAiActionTransaction: () => {
+      const { nodes, edges } = get();
+      const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      set((state) => {
+        state.aiActionTransactions = [
+          ...state.aiActionTransactions,
+          {
+            id: txId,
+            timestamp: Date.now(),
+            appliedCount: 0,
+            beforeNodes: JSON.parse(JSON.stringify(nodes)) as WorkflowNode[],
+            beforeEdges: JSON.parse(JSON.stringify(edges)) as WorkflowEdge[],
+          },
+        ];
+      });
+      return txId;
+    },
+
+    applyAiChatActionInTransaction: (txId: string, action: AiChatAction) => {
+      const tx = get().aiActionTransactions.find((t) => t.id === txId);
+      if (!tx) {
+        get().applyAiChatAction(action);
+        return;
+      }
+      get().applyAiChatAction(action);
+      set((state) => {
+        state.aiActionTransactions = state.aiActionTransactions.map((t) =>
+          t.id === txId ? { ...t, appliedCount: t.appliedCount + 1 } : t
+        );
+      });
+    },
+
+    commitAiActionTransaction: (txId: string) => {
+      set((state) => {
+        state.aiActionTransactions = state.aiActionTransactions.filter((t) => t.id !== txId);
+      });
+    },
+
+    rollbackAiActionTransaction: (txId: string) => {
+      const tx = get().aiActionTransactions.find((t) => t.id === txId);
+      if (!tx) { return; }
+      const snapshotNodes = JSON.parse(JSON.stringify(tx.beforeNodes)) as WorkflowNode[];
+      const snapshotEdges = JSON.parse(JSON.stringify(tx.beforeEdges)) as WorkflowEdge[];
+      set((state) => {
+        state.nodes = snapshotNodes;
+        state.edges = snapshotEdges;
+        state.aiActionTransactions = state.aiActionTransactions.filter((t) => t.id !== txId);
+      });
+    },
+
+    rollbackLastAiActionTransaction: () => {
+      const last = get().aiActionTransactions[get().aiActionTransactions.length - 1];
+      if (last) {
+        get().rollbackAiActionTransaction(last.id);
       }
     },
 
@@ -1541,6 +2079,99 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         });
         throw error;
       }
+    },
+
+    toggleExpandSubWorkflow: async (nodeId: string, subWorkflowId: string | undefined) => {
+      const { expandedSubWorkflows } = get();
+
+      // 已展开 → 折叠
+      if (expandedSubWorkflows[nodeId]) {
+        set((state) => {
+          // 清理 parentRefs 中子工作流内部节点的引用
+          const sub = state.expandedSubWorkflows[nodeId];
+          if (sub?.nodes) {
+            for (const n of sub.nodes) {
+              delete state.parentRefs[n.id];
+            }
+            // 清理子节点与主画布的连接边
+            const subNodeIds = new Set(sub.nodes.map((n) => n.id));
+            state.edges = state.edges.filter(
+              (e) => !subNodeIds.has(e.source) && !subNodeIds.has(e.target),
+            );
+          }
+          delete state.expandedSubWorkflows[nodeId];
+        });
+        return;
+      }
+
+      // 折叠 → 展开
+      if (!subWorkflowId) { return; }
+
+      set((state) => {
+        state.expandedSubWorkflows[nodeId] = { nodes: [], edges: [], isLoading: true };
+      });
+
+      try {
+        const template = await invoke<WorkflowTemplateResponse>(
+          "get_workflow_template",
+          { id: subWorkflowId },
+        );
+        if (!template) {
+          set((state) => {
+            delete state.expandedSubWorkflows[nodeId];
+          });
+          return;
+        }
+
+        // 为内部节点 IDs 添加前缀避免与主画布冲突
+        const prefix = `sw_${nodeId}_`;
+        const idMap = new Map<string, string>();
+        const subNodes: WorkflowNode[] = (template.nodes || []).map((n: WorkflowNode) => {
+          const oldId = (n as any).id || "";
+          const newId = `${prefix}${oldId}`;
+          idMap.set(oldId, newId);
+          return { ...n, id: newId } as unknown as WorkflowNode;
+        });
+        const subEdges: WorkflowEdge[] = (template.edges || []).map((e: WorkflowEdge) => ({
+          ...e,
+          id: `${prefix}${e.id}`,
+          source: idMap.get(e.source) || e.source,
+          target: idMap.get(e.target) || e.target,
+        }));
+
+        set((state) => {
+          state.expandedSubWorkflows[nodeId] = { nodes: subNodes, edges: subEdges, isLoading: false };
+          // 将子节点注册到 parentRefs
+          for (const n of subNodes) {
+            state.parentRefs[n.id] = nodeId;
+          }
+          // 展开的子工作流内部边也加入主边列表（带 sw_ 前缀）
+          for (const e of subEdges) {
+            state.edges.push(e);
+          }
+        });
+      } catch (error) {
+        set((state) => {
+          delete state.expandedSubWorkflows[nodeId];
+        });
+      }
+    },
+
+    /**
+     * 切换 parallel 容器的折叠状态。折叠时容器内的子节点会从画布上隐藏（hidden=true），
+     * 边会随子节点隐藏。仅会话内 UI 状态，不写入后端模板，不进撤销栈。
+     * 重新生成 Set 引用以触发订阅方基于引用的依赖比较。
+     */
+    toggleParallelContainerCollapse: (parallelId: string) => {
+      set((state) => {
+        const next = new Set(state.collapsedParallelContainers);
+        if (next.has(parallelId)) {
+          next.delete(parallelId);
+        } else {
+          next.add(parallelId);
+        }
+        state.collapsedParallelContainers = next;
+      });
     },
   })),
 );

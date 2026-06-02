@@ -2331,6 +2331,8 @@ fn spawn_stream_task(
                         tokens_per_second: Set(None),
                         first_token_latency_ms: Set(None),
                         parts: Set(None),
+                        cache_creation_tokens: Set(None),
+                        cache_read_tokens: Set(None),
                     })
                     .insert(&db)
                     .await
@@ -4219,6 +4221,8 @@ pub async fn regenerate_with_model(
             tokens_per_second: Set(None),
             first_token_latency_ms: Set(None),
             parts: Set(None),
+            cache_creation_tokens: Set(None),
+            cache_read_tokens: Set(None),
         })
         .insert(&state.sea_db)
         .await
@@ -4712,6 +4716,8 @@ mod tests_conversation {
                 token_count: None,
                 prompt_tokens: None,
                 completion_tokens: None,
+                cache_creation_tokens: None,
+                cache_read_tokens: None,
                 attachments: vec![Attachment {
                     id: "att-1".into(),
                     file_type: "image/png".into(),
@@ -4770,6 +4776,8 @@ mod tests_conversation {
                 token_count: None,
                 prompt_tokens: None,
                 completion_tokens: None,
+                cache_creation_tokens: None,
+                cache_read_tokens: None,
                 attachments: vec![Attachment {
                     id: String::new(),
                     file_type: "image/png".into(),

@@ -1302,7 +1302,13 @@ async fn seed_stock_analysis_workflow_template(
         "research-manager",
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
-        a.config.context_sources = vec!["t-scoring".into(), "t-valuation".into(), "t-risk".into(), "risk-aggregated".into(), "risk-level".into()];
+        a.config.context_sources = vec![
+            "t-scoring".into(),
+            "t-valuation".into(),
+            "t-risk".into(),
+            "risk-aggregated".into(),
+            "risk-level".into(),
+        ];
         a.config.model_role = Some("decision-maker".into());
         a.config.tools = vec![
             td_score.clone(),
@@ -1439,7 +1445,10 @@ async fn seed_stock_analysis_workflow_template(
             id: "notify-result".into(),
             title: "分析完成通知".into(),
             description: Some("股票分析完成后发送通知".into()),
-            position: Position { x: 300.0, y: 1300.0 },
+            position: Position {
+                x: 300.0,
+                y: 1300.0,
+            },
             retry: RetryConfig::default(),
             timeout: Some(10),
             enabled: true,

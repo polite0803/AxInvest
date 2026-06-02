@@ -203,11 +203,11 @@ async function handleStockAnalysisTrigger(
       content: t("stockAnalysis.workflowStarting", { stockCode }),
     }).catch(() => {});
 
-    // 工作流→对话桥接
+    // 工作流→对话桥接（必须 await，确保事件监听注册完成后再启动工作流）
     const { startStockWorkflowChatBridge } = await import(
       "@/stores/feature/stockWorkflowChatBridge"
     );
-    startStockWorkflowChatBridge(conv.id);
+    await startStockWorkflowChatBridge(conv.id);
 
     // 启动工作流
     const { startAnalysis } = useStockAnalysisStore.getState();

@@ -289,7 +289,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 3;
+    const TEMPLATE_VERSION: i32 = 4;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -315,119 +315,175 @@ async fn seed_stock_analysis_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
 
-    let tool_node =
-        |id: &str, title: &str, tool_name: &str, output_var: &str, arg_key: &str| -> WorkflowNode {
-            let mut input_mapping = std::collections::HashMap::new();
-            input_mapping.insert(arg_key.to_string(), "trigger.stock_code".to_string());
-            WorkflowNode::Tool(ToolNode {
-                base: WorkflowNodeBase {
-                    id: id.into(),
-                    title: title.into(),
-                    description: Some(format!("获取数据: {tool_name}")),
-                    position: Position { x: 0.0, y: 0.0 },
-                    retry: RetryConfig {
-                        enabled: false,
-                        max_retries: 0,
-                        ..Default::default()
-                    },
-                    timeout: Some(120),
+    let tool_node = |id: &str,
+                     title: &str,
+                     tool_name: &str,
+                     output_var: &str,
+                     arg_key: &str,
+                     parent_id: Option<&str>,
+                     x: f64,
+                     y: f64|
+     -> WorkflowNode {
+        let mut input_mapping = std::collections::HashMap::new();
+        input_mapping.insert(arg_key.to_string(), "trigger.stock_code".to_string());
+        WorkflowNode::Tool(ToolNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: title.into(),
+                description: Some(format!("获取数据: {tool_name}")),
+                position: Position { x, y },
+                retry: RetryConfig {
                     enabled: true,
-                    parent_id: Some("p-analysts".into()),
+                    max_retries: 2,
+                    ..Default::default()
                 },
-                config: ToolNodeConfig {
-                    tool_name: tool_name.into(),
-                    input_mapping,
-                    output_var: output_var.into(),
-                },
-            })
-        };
+                timeout: Some(120),
+                enabled: true,
+                parent_id: parent_id.map(String::from),
+            },
+            config: ToolNodeConfig {
+                tool_name: tool_name.into(),
+                input_mapping,
+                output_var: output_var.into(),
+            },
+        })
+    };
 
-    // 常用工具定义
-    let td_quote = ToolDef {
-        name: "get_stock_quote".into(),
-        description: Some("获取股票实时行情：现价、涨跌幅、PE、PB、市值".into()),
-        parameters: Some(JsonSchema {
+    // ── ToolDef 参数 schema 辅助构建 ──
+    fn sc_prop(desc: &str) -> JsonSchemaProperty {
+        JsonSchemaProperty {
+            schema_type: "string".into(),
+            description: Some(desc.into()),
+            default: None,
+            enum_values: None,
+            format: None,
+        }
+    }
+    fn sc_prop_default(desc: &str, default: &str) -> JsonSchemaProperty {
+        JsonSchemaProperty {
+            schema_type: "string".into(),
+            description: Some(desc.into()),
+            default: Some(serde_json::Value::String(default.into())),
+            enum_values: None,
+            format: None,
+        }
+    }
+    fn int_prop(desc: &str, default: Option<i64>) -> JsonSchemaProperty {
+        JsonSchemaProperty {
+            schema_type: "integer".into(),
+            description: Some(desc.into()),
+            default: default.map(|v| serde_json::json!(v)),
+            enum_values: None,
+            format: None,
+        }
+    }
+    fn stock_code_params() -> Option<JsonSchema> {
+        let mut props = std::collections::HashMap::new();
+        props.insert("stock_code".into(), sc_prop("6位股票代码，如 600519"));
+        Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(props),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        })
+    }
+    fn no_params() -> Option<JsonSchema> {
+        Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
             properties: Some(std::collections::HashMap::new()),
             required: None,
             items: None,
-        }),
+        })
+    }
+    fn data_params() -> Option<JsonSchema> {
+        let mut props = std::collections::HashMap::new();
+        props.insert(
+            "data".into(),
+            JsonSchemaProperty {
+                schema_type: "string".into(),
+                description: Some("JSON 格式的数值数组或数据序列".into()),
+                default: None,
+                enum_values: None,
+                format: None,
+            },
+        );
+        Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(props),
+            required: None,
+            items: None,
+        })
+    }
+
+    // 常用工具定义
+    let td_quote = ToolDef {
+        name: "get_stock_quote".into(),
+        description: Some("获取股票实时行情：现价、涨跌幅、PE、PB、市值".into()),
+        parameters: stock_code_params(),
     };
+    let mut kline_props = std::collections::HashMap::new();
+    kline_props.insert("stock_code".into(), sc_prop("6位股票代码"));
+    kline_props.insert("period".into(), sc_prop_default("周期: daily/weekly/monthly", "daily"));
+    kline_props.insert("limit".into(), int_prop("K线数量", Some(120)));
     let td_kline = ToolDef {
         name: "get_stock_kline".into(),
         description: Some("获取K线数据：OHLCV，可指定周期和数量".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
+            properties: Some(kline_props),
+            required: Some(vec!["stock_code".into()]),
             items: None,
         }),
     };
     let td_fin = ToolDef {
         name: "get_stock_financials".into(),
         description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
+    let mut news_props = std::collections::HashMap::new();
+    news_props.insert("stock_code".into(), sc_prop("6位股票代码"));
+    news_props.insert("limit".into(), int_prop("新闻数量", Some(30)));
     let td_news = ToolDef {
         name: "get_stock_news".into(),
         description: Some("获取近期新闻公告".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
+            properties: Some(news_props),
+            required: Some(vec!["stock_code".into()]),
             items: None,
         }),
     };
     let td_mf = ToolDef {
         name: "get_stock_money_flow".into(),
         description: Some("获取资金流向：主力/超大单/大单/中单/小单净流入".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_score = ToolDef {
         name: "compute_scoring".into(),
         description: Some("计算技术评分：基于趋势、偏离度、MACD、成交量、RSI、支撑阻力".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_val = ToolDef {
         name: "compute_valuation".into(),
         description: Some("计算估值指标：DCF、F-Score、护城河量化、安全边际".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
+    let mut risk_props = std::collections::HashMap::new();
+    risk_props.insert("stock_codes".into(), sc_prop("逗号分隔的股票代码列表"));
+    risk_props.insert("weights".into(), sc_prop("逗号分隔的持仓权重(0-1)，不填则等权"));
     let td_risk = ToolDef {
         name: "compute_portfolio_risk".into(),
         description: Some("计算组合风险：总市值、集中度、风险等级".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
+            properties: Some(risk_props),
+            required: Some(vec!["stock_codes".into()]),
             items: None,
         }),
     };
@@ -435,254 +491,134 @@ async fn seed_stock_analysis_workflow_template(
     let td_maxdd = ToolDef {
         name: "calc_max_drawdown".into(),
         description: Some("计算最大回撤比例".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_sharpe = ToolDef {
         name: "calc_sharpe_ratio".into(),
         description: Some("计算夏普比率".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_var = ToolDef {
         name: "calc_var".into(),
         description: Some("历史模拟法 VaR 计算".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_pe_pct = ToolDef {
         name: "calc_pe_percentile".into(),
         description: Some("PE 历史分位数".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_peg = ToolDef {
         name: "calc_peg".into(),
         description: Some("PEG 估值指标".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_ma_cross = ToolDef {
         name: "detect_ma_cross".into(),
         description: Some("MA 金叉死叉检测".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_breakout = ToolDef {
         name: "detect_breakout".into(),
         description: Some("支撑阻力突破检测".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_kelly = ToolDef {
         name: "calc_kelly".into(),
         description: Some("凯利公式仓位计算".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_rp = ToolDef {
         name: "calc_risk_parity".into(),
         description: Some("风险平价权重计算".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_outliers = ToolDef {
         name: "clean_outliers".into(),
         description: Some("异常值剔除 (zscore/iqr)".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_fill = ToolDef {
         name: "clean_fill_missing".into(),
         description: Some("缺失值填充 (forward/linear)".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     let td_adjust = ToolDef {
         name: "adjust_prices".into(),
         description: Some("前复权价格调整".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: data_params(),
     };
     // ── 新增 9 个数据 API ToolDef ──
     let td_research = ToolDef {
         name: "get_research_reports".into(),
         description: Some("获取券商研报".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_consensus = ToolDef {
         name: "get_consensus_eps".into(),
         description: Some("获取一致性预期EPS".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_concepts = ToolDef {
         name: "get_concept_blocks".into(),
         description: Some("获取概念板块归属".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_announce = ToolDef {
         name: "get_announcements".into(),
         description: Some("获取公司公告".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_north = ToolDef {
         name: "get_north_bound_flow".into(),
         description: Some("获取北向资金流向".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: no_params(),
     };
     let td_dragon = ToolDef {
         name: "get_market_dragon_tiger".into(),
         description: Some("获取龙虎榜数据".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: no_params(),
     };
     let td_hot = ToolDef {
         name: "get_hot_stocks".into(),
         description: Some("获取市场热门股".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: no_params(),
     };
     let td_industry = ToolDef {
         name: "get_industry_ranking".into(),
         description: Some("获取行业涨跌排名".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: no_params(),
     };
     let td_cls = ToolDef {
         name: "get_cls_flash".into(),
         description: Some("获取财联社实时快讯".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: no_params(),
     };
     // ── P1: 4 个技术指标 ToolDef ──
+    let mut atr_props = std::collections::HashMap::new();
+    atr_props.insert("klines_json".into(), sc_prop("K线JSON(含high/low/close)"));
+    atr_props.insert("period".into(), int_prop("ATR周期", Some(14)));
     let td_atr = ToolDef {
         name: "compute_atr".into(),
         description: Some("计算 ATR 平均真实波幅".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(atr_props),
             required: None,
             items: None,
         }),
     };
+    let mut kdj_props = std::collections::HashMap::new();
+    kdj_props.insert("klines_json".into(), sc_prop("K线JSON(含high/low/close)"));
+    kdj_props.insert("n".into(), int_prop("KDJ周期N", Some(9)));
     let td_kdj = ToolDef {
         name: "compute_kdj".into(),
         description: Some("计算 KDJ 随机指标".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(kdj_props),
             required: None,
             items: None,
         }),
@@ -690,44 +626,58 @@ async fn seed_stock_analysis_workflow_template(
     let td_obv = ToolDef {
         name: "compute_obv".into(),
         description: Some("计算 OBV 能量潮".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: {
+            let mut p = std::collections::HashMap::new();
+            p.insert("klines_json".into(), sc_prop("K线JSON(含close/volume)"));
+            Some(JsonSchema {
+                schema_type: "object".into(),
+                description: None,
+                properties: Some(p),
+                required: None,
+                items: None,
+            })
+        },
     };
+    let mut beta_props = std::collections::HashMap::new();
+    beta_props.insert("stock_returns_json".into(), sc_prop("个股收益率JSON数组"));
+    beta_props.insert("market_returns_json".into(), sc_prop("大盘收益率JSON数组"));
     let td_beta = ToolDef {
         name: "calc_beta".into(),
         description: Some("计算 Beta 系数".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(beta_props),
             required: None,
             items: None,
         }),
     };
     // ── P2: 事件检测 + 组合分析 ToolDef ──
+    let mut earn_props = std::collections::HashMap::new();
+    earn_props.insert("actual_eps".into(), sc_prop("实际EPS"));
+    earn_props.insert("consensus_eps".into(), sc_prop("一致预期EPS"));
     let td_earnings = ToolDef {
         name: "detect_earnings_surprise".into(),
         description: Some("检测业绩超预期/低于预期".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(earn_props),
             required: None,
             items: None,
         }),
     };
+    let mut pledge_props = std::collections::HashMap::new();
+    pledge_props.insert("pledge_pct".into(), sc_prop("质押比例(%)"));
+    pledge_props.insert("warning_line".into(), sc_prop("预警线(默认50)"));
+    pledge_props.insert("liquidation_line".into(), sc_prop("平仓线(默认70)"));
     let td_pledge = ToolDef {
         name: "detect_pledge_risk".into(),
         description: Some("检测大股东质押风险".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(pledge_props),
             required: None,
             items: None,
         }),
@@ -735,44 +685,62 @@ async fn seed_stock_analysis_workflow_template(
     let td_corr = ToolDef {
         name: "calc_correlation_matrix".into(),
         description: Some("计算收益率相关系数矩阵".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: {
+            let mut p = std::collections::HashMap::new();
+            p.insert("returns_matrix_json".into(), sc_prop("收益率矩阵JSON(二维数组)"));
+            Some(JsonSchema {
+                schema_type: "object".into(),
+                description: None,
+                properties: Some(p),
+                required: None,
+                items: None,
+            })
+        },
     };
     // ── P3: 独立新能力 ToolDef ──
+    let mut mc_props = std::collections::HashMap::new();
+    mc_props.insert("current_price".into(), sc_prop("当前价格"));
+    mc_props.insert("annual_return".into(), sc_prop("年化收益率(默认0.08)"));
+    mc_props.insert("annual_volatility".into(), sc_prop("年化波动率(默认0.3)"));
+    mc_props.insert("days".into(), int_prop("模拟天数", Some(30)));
+    mc_props.insert("simulations".into(), int_prop("模拟次数", Some(1000)));
     let td_mc = ToolDef {
         name: "run_monte_carlo".into(),
         description: Some("蒙特卡洛模拟价格路径".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(mc_props),
             required: None,
             items: None,
         }),
     };
+    let mut ind_props = std::collections::HashMap::new();
+    ind_props.insert("stock_pe".into(), sc_prop("个股PE"));
+    ind_props.insert("stock_growth".into(), sc_prop("个股增长率"));
+    ind_props.insert("industry_avg_pe".into(), sc_prop("行业平均PE"));
+    ind_props.insert("industry_avg_growth".into(), sc_prop("行业平均增长率"));
     let td_ind = ToolDef {
         name: "analyze_industry_position".into(),
         description: Some("行业内估值/增长对比分析".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(ind_props),
             required: None,
             items: None,
         }),
     };
+    let mut lup_props = std::collections::HashMap::new();
+    lup_props.insert("klines_json".into(), sc_prop("K线JSON(含close/high/volume)"));
+    lup_props.insert("market_type".into(), sc_prop("板块: main/star/chinext/bj"));
     let td_lup = ToolDef {
         name: "detect_limit_up_potential".into(),
         description: Some("涨停潜力评估".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
-            properties: Some(std::collections::HashMap::new()),
+            properties: Some(lup_props),
             required: None,
             items: None,
         }),
@@ -780,57 +748,27 @@ async fn seed_stock_analysis_workflow_template(
     let td_block = ToolDef {
         name: "get_block_trades".into(),
         description: Some("获取大宗交易记录：成交价、成交量、买卖方营业部、折价率".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_visit = ToolDef {
         name: "get_institutional_visits".into(),
         description: Some("获取机构调研记录：调研日期、机构数量、调研内容".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_idx = ToolDef {
         name: "get_index_quotes".into(),
         description: Some("获取大盘指数行情（上证指数、深证成指、创业板指）".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: no_params(),
     };
     let td_peers = ToolDef {
         name: "get_stock_peers".into(),
         description: Some("获取同行业可比公司估值（PE/PB/ROE/涨跌幅/市值）".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
     let td_pcr = ToolDef {
         name: "get_stock_option_pcr".into(),
         description: Some("获取期权PCR（看跌/看涨比率和持仓量比率，市场情绪前瞻指标）".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::new()),
-            required: None,
-            items: None,
-        }),
+        parameters: stock_code_params(),
     };
 
     // 工具名 → ToolDef 映射（用于按名查找，给节点填充 config.tools）
@@ -883,13 +821,19 @@ async fn seed_stock_analysis_workflow_template(
         )
     }
 
-    let agent = |id: &str, title: &str, expert_id: &str| -> WorkflowNode {
+    let agent = |id: &str,
+                 title: &str,
+                 expert_id: &str,
+                 parent_id: Option<&str>,
+                 x: f64,
+                 y: f64|
+     -> WorkflowNode {
         WorkflowNode::Agent(AgentNode {
             base: WorkflowNodeBase {
                 id: id.into(),
                 title: title.into(),
                 description: Some(format!("股票分析: {expert_id}")),
-                position: Position { x: 0.0, y: 0.0 },
+                position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
                     max_retries: 2,
@@ -897,7 +841,7 @@ async fn seed_stock_analysis_workflow_template(
                 },
                 timeout: Some(300),
                 enabled: true,
-                parent_id: None,
+                parent_id: parent_id.map(String::from),
             },
             config: AgentNodeConfig {
                 // inline system_prompt 只放任务指令，专家 prompt 由 agent_profile 自动加载，
@@ -1016,31 +960,40 @@ async fn seed_stock_analysis_workflow_template(
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
-    // ── Phase 1: ParallelNode 作为视觉分组，包裹 9 个数据获取 Tool 节点 ──
-    let analyst_branches: Vec<Branch> = tool_assignments
-        .iter()
-        .enumerate()
-        .map(|(i, (tool_id, tool_title, tool_name, arg_key))| {
-            let analyst_id = a_ids[i];
-            // ToolNode → AgentNode 通过边连接；ParallelNode 仅分组包裹 Tool
-            nodes.push(tool_node(tool_id, "获取数据", tool_name, tool_id, arg_key));
-            edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
-            edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
-            Branch {
-                id: tool_id.to_string(),
-                title: tool_title.to_string(),
-                steps: vec![tool_id.to_string()],
-            }
-        })
-        .collect();
+    // ── Phase 1: ParallelNode 作为视觉分组，包裹 9 组 Tool + Agent ──
+    // 布局：2 列 9 行网格（tool 左列、agent 右列）
+    //   - tool 列 x = 20，agent 列 x = 240（容器内边距 + 节点宽度 + 间距）
+    //   - 行起始 y = 40，行高 80（节点高度 + 间距）
+    let mut analyst_branches: Vec<Branch> = Vec::with_capacity(tool_assignments.len());
+    for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {
+        let analyst_id = a_ids[i];
+        let row_y = 40.0 + i as f64 * 80.0;
+        nodes.push(tool_node(
+            tool_id,
+            "获取数据",
+            tool_name,
+            tool_id,
+            arg_key,
+            Some("p-analysts"),
+            20.0,
+            row_y,
+        ));
+        edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
+        edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
+        analyst_branches.push(Branch {
+            id: format!("branch-{analyst_id}"),
+            title: tool_title.to_string(),
+            steps: vec![tool_id.to_string(), analyst_id.to_string()],
+        });
+    }
 
     // 工具由模板节点 config.tools 统一管理
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
         let fixed_tool_name = tool_assignments[i].2;
-        let mut an = agent(id, title, _expert);
+        let row_y = 40.0 + i as f64 * 80.0;
+        let mut an = agent(id, title, _expert, Some("p-analysts"), 240.0, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
-            a.base.parent_id = Some("p-analysts".into());
             a.config.context_sources = vec![tool_id.to_string()];
             a.config.max_tool_rounds = Some(2);
             a.config.model_role = Some("stock-analyst".into());
@@ -1075,9 +1028,9 @@ async fn seed_stock_analysis_workflow_template(
             id: "p-analysts".into(),
             title: "9 维度分析师分组".into(),
             description: Some("行情/情绪/新闻/基本面/政策/游资/解禁/研报/行业".into()),
-            position: Position { x: 300.0, y: 100.0 },
+            position: Position { x: 300.0, y: 200.0 },
             retry: RetryConfig::default(),
-            timeout: Some(600),
+            timeout: Some(120),
             enabled: true,
             parent_id: None,
         },
@@ -1101,7 +1054,10 @@ async fn seed_stock_analysis_workflow_template(
             id: "debate-bull-bear".into(),
             title: "多空辩论".into(),
             description: Some("3 轮多空辩论：多方构建论点 → 空方反驳 → 循环".into()),
-            position: Position { x: 300.0, y: 450.0 },
+            position: Position {
+                x: 300.0,
+                y: 1280.0,
+            },
             retry: RetryConfig {
                 enabled: true,
                 max_retries: 1,
@@ -1148,13 +1104,23 @@ async fn seed_stock_analysis_workflow_template(
         td_pledge.clone(),
         td_corr.clone(),
     ];
-    for (debater_id, debater_title, debater_expert, debater_tools) in &[
+    for (i, (debater_id, debater_title, debater_expert, debater_tools)) in [
         ("bull-researcher", "多方研究员", "bull-researcher", &bull_tools),
         ("bear-researcher", "空方研究员", "bear-researcher", &bear_tools),
-    ] {
-        let mut an = agent(debater_id, debater_title, debater_expert);
+    ]
+    .iter()
+    .enumerate()
+    {
+        let debater_y = 40.0 + i as f64 * 80.0;
+        let mut an = agent(
+            debater_id,
+            debater_title,
+            debater_expert,
+            Some("debate-bull-bear"),
+            20.0,
+            debater_y,
+        );
         if let WorkflowNode::Agent(ref mut a) = an {
-            a.base.parent_id = Some("debate-bull-bear".into());
             a.config.tools = (*debater_tools).clone();
             a.config.max_tool_rounds = Some(2);
             a.config.system_prompt =
@@ -1170,7 +1136,10 @@ async fn seed_stock_analysis_workflow_template(
             id: "p-risk-assess".into(),
             title: "风险评估".into(),
             description: Some("三种风险偏好并行评估".into()),
-            position: Position { x: 300.0, y: 650.0 },
+            position: Position {
+                x: 300.0,
+                y: 1800.0,
+            },
             retry: RetryConfig::default(),
             timeout: Some(600),
             enabled: true,
@@ -1201,8 +1170,11 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
     edges.push(edge("e-debate-p-risk-assess", "debate-bull-bear", "p-risk-assess"));
+    // debate 容器 → 子节点依赖边：防止子节点在 debate 完成前被独立调度
+    edges.push(edge("e-debate-bull", "debate-bull-bear", "bull-researcher"));
+    edges.push(edge("e-debate-bear", "debate-bull-bear", "bear-researcher"));
 
-    for (rid, rtitle, rexpert, rtools) in &[
+    for (i, (rid, rtitle, rexpert, rtools)) in [
         (
             "risk-agg",
             "以最激进的风险偏好评估该股票",
@@ -1243,16 +1215,21 @@ async fn seed_stock_analysis_workflow_template(
                 td_ind.clone(),
             ],
         ),
-    ] {
-        let mut an = agent(rid, rtitle, rexpert);
+    ]
+    .iter()
+    .enumerate()
+    {
+        let risk_y = 40.0 + i as f64 * 80.0;
+        let mut an = agent(rid, rtitle, rexpert, Some("p-risk-assess"), 20.0, risk_y);
         if let WorkflowNode::Agent(ref mut a) = an {
-            a.base.parent_id = Some("p-risk-assess".into());
             a.config.tools = rtools.clone();
             a.config.max_tool_rounds = Some(2);
             a.config.system_prompt = format!("{}{}", a.config.system_prompt, tool_prompt(rtools));
             a.config.model_role = Some("risk-assessor".into());
         }
         nodes.push(an);
+        // p-risk-assess 容器 → 子节点依赖边：防止子节点被独立调度
+        edges.push(edge(&format!("e-p-risk-{rid}"), "p-risk-assess", rid));
     }
 
     // ── AggregatorNode: 聚合三种风险偏好评估结果 ──
@@ -1261,7 +1238,10 @@ async fn seed_stock_analysis_workflow_template(
             id: "agg-risk".into(),
             title: "风险偏好聚合".into(),
             description: Some("聚合激进/保守/中性三种风险偏好评估".into()),
-            position: Position { x: 300.0, y: 700.0 },
+            position: Position {
+                x: 300.0,
+                y: 2400.0,
+            },
             retry: RetryConfig::default(),
             timeout: Some(60),
             enabled: true,
@@ -1277,14 +1257,15 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{rid}-agg-risk"), rid, "agg-risk"));
     }
 
-    // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控 ──
-    let algo_tools: &[(&str, &str, &str, &str)] = &[
-        ("t-scoring", "技术评分", "compute_scoring", "stock_code"),
-        ("t-valuation", "估值计算", "compute_valuation", "stock_code"),
-        ("t-risk", "风险评估", "compute_portfolio_risk", "stock_codes"),
+    // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控（独立画布节点，parent_id = None）──
+    // 位置：agg-risk 节点 (300, 2400) 之后横排，间距 180
+    let algo_tools: &[(&str, &str, &str, &str, f64, f64)] = &[
+        ("t-scoring", "技术评分", "compute_scoring", "stock_code", 300.0, 2700.0),
+        ("t-valuation", "估值计算", "compute_valuation", "stock_code", 480.0, 2700.0),
+        ("t-risk", "风险评估", "compute_portfolio_risk", "stock_codes", 660.0, 2700.0),
     ];
-    for (tool_id, title, tool_name, arg_key) in algo_tools {
-        nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key));
+    for (tool_id, title, tool_name, arg_key, x, y) in algo_tools {
+        nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key, None, *x, *y));
     }
     edges.push(edge("e-agg-risk-t-scoring", "agg-risk", "t-scoring"));
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
@@ -1296,7 +1277,10 @@ async fn seed_stock_analysis_workflow_template(
             id: "cls-risk-level".into(),
             title: "风险等级分类".into(),
             description: Some("基于算法评分结果自动分类风险等级".into()),
-            position: Position { x: 300.0, y: 950.0 },
+            position: Position {
+                x: 300.0,
+                y: 3000.0,
+            },
             retry: RetryConfig::default(),
             timeout: Some(30),
             enabled: true,
@@ -1324,7 +1308,7 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("确保分析报告包含必要字段，缺失时降级处理".into()),
             position: Position {
                 x: 300.0,
-                y: 1000.0,
+                y: 3300.0,
             },
             retry: RetryConfig::default(),
             timeout: Some(60),
@@ -1349,6 +1333,9 @@ async fn seed_stock_analysis_workflow_template(
         "research-mgr",
         "综合三种风险偏好的评估结果，给出该股票的总体风险评级（低/中/高）及主要风险点清单",
         "research-manager",
+        None,
+        240.0,
+        3600.0,
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
         a.config.context_sources = vec![
@@ -1424,6 +1411,9 @@ async fn seed_stock_analysis_workflow_template(
         "trader",
         "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则",
         "trader",
+        None,
+        240.0,
+        3900.0,
     );
     if let WorkflowNode::Agent(ref mut a) = trader {
         a.config.context_sources = vec!["research-mgr".into()];
@@ -1452,9 +1442,16 @@ async fn seed_stock_analysis_workflow_template(
         "portfolio-mgr",
         "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。输出JSON格式：{ action: 买入/增持/持有/减持/卖出, positionPct: 仓位百分比, targetPrice: 目标价, stopLoss: 止损价, reasoning: 决策理由(300字以内), riskLevel: 风险等级(低/中/高), confidence: 置信度(0-100) }",
         "portfolio-manager",
+        None,
+        240.0,
+        4200.0,
     );
     if let WorkflowNode::Agent(ref mut a) = pm {
-        a.config.context_sources = vec!["trader".into(), "research-mgr".into()];
+        a.config.context_sources = vec![
+            "trader".into(),
+            "research-mgr".into(),
+            "debate-bull-bear".into(),
+        ];
         a.config.model_role = Some("decision-maker".into());
         a.config.tools = vec![
             td_quote.clone(),
@@ -1496,7 +1493,7 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("股票分析完成后发送通知".into()),
             position: Position {
                 x: 300.0,
-                y: 1300.0,
+                y: 4500.0,
             },
             retry: RetryConfig::default(),
             timeout: Some(10),

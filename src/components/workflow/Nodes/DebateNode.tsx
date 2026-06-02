@@ -2,7 +2,7 @@ import { useWorkflowEditorStore } from "@/stores";
 import { Tag, theme, Tooltip } from "antd";
 import React, { memo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import type { NodeProps } from "reactflow";
+import { Handle, type NodeProps, Position } from "reactflow";
 
 const BLUE_BASE = "#1890ff";
 const BLUE_VAR = `var(--blue, ${BLUE_BASE})`;
@@ -137,6 +137,8 @@ const DebateNodeComponent: React.FC<NodeProps<DebateNodeData>> = ({
           ▼
         </span>
       </Tooltip>
+      <Handle type="target" position={Position.Top} style={{ background: BLUE_VAR }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: BLUE_VAR }} />
     </div>
   );
 };

@@ -2,7 +2,7 @@ import { useWorkflowEditorStore } from "@/stores";
 import { Tag, theme, Tooltip } from "antd";
 import React, { memo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import type { NodeProps } from "reactflow";
+import { Handle, type NodeProps, Position } from "reactflow";
 
 const ORANGE_BASE = "#fa8c16";
 const ORANGE_VAR = `var(--orange, ${ORANGE_BASE})`;
@@ -158,6 +158,8 @@ const LoopNodeComponent: React.FC<NodeProps<LoopNodeData>> = ({
         </span>
       </Tooltip>
 
+      <Handle type="target" position={Position.Top} style={{ background: "#722ed1" }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: "#722ed1" }} />
       {/* 子节点由 ReactFlow 根据 parentId 自动绘制在此容器内；折叠时父节点的 style.width/height 由编辑器设为紧凑尺寸 */}
     </div>
   );

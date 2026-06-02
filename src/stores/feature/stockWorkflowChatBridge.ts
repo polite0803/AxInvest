@@ -168,20 +168,25 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     ]),
   );
 
-  const debatesMap = new Map([
-    ["bull-researcher", {
-      key: "bull-researcher",
-      label: i18next.t("stockAnalysis.workflow.bullAnalyst"),
-      status: "pending" as "pending" | "running" | "done" | "failed",
-      rounds: [] as string[],
-    }],
-    ["bear-researcher", {
-      key: "bear-researcher",
-      label: i18next.t("stockAnalysis.workflow.bearAnalyst"),
-      status: "pending" as "pending" | "running" | "done" | "failed",
-      rounds: [] as string[],
-    }],
-  ]);
+  const DEBATE_ROUNDS = 3;
+  const debatesMap = new Map<
+    string,
+    { key: string; label: string; status: "pending" | "running" | "done" | "failed"; rounds: string[] }
+  >();
+  for (let r = 1; r <= DEBATE_ROUNDS; r++) {
+    debatesMap.set(`bull-r${r}`, {
+      key: `bull-r${r}`,
+      label: `${i18next.t("stockAnalysis.workflow.bullAnalyst")}·${r}`,
+      status: "pending",
+      rounds: [],
+    });
+    debatesMap.set(`bear-r${r}`, {
+      key: `bear-r${r}`,
+      label: `${i18next.t("stockAnalysis.workflow.bearAnalyst")}·${r}`,
+      status: "pending",
+      rounds: [],
+    });
+  }
 
   const risksMap = new Map([
     ["risk-agg", {
@@ -234,19 +239,21 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   ) => {
     const analysts = Array.from(analystsMap.values());
     // 转换 debatesMap 为 WorkflowCardData 期望的 round/bull/bear/status 格式
-    const bullEntry = debatesMap.get("bull-researcher");
-    const bearEntry = debatesMap.get("bear-researcher");
-    const maxRounds = Math.max(bullEntry?.rounds.length ?? 0, bearEntry?.rounds.length ?? 0, 1);
-    const debates = Array.from({ length: maxRounds }, (_, i) => ({
-      round: i + 1,
-      bull: bullEntry?.rounds[i],
-      bear: bearEntry?.rounds[i],
-      status: (bullEntry?.rounds[i] || bearEntry?.rounds[i])
-        ? "done" as const
-        : (bullEntry?.status === "running" || bearEntry?.status === "running")
-        ? "running" as const
-        : "pending" as const,
-    }));
+    const debates: { round: number; bull?: string; bear?: string; status: "running" | "done" | "pending" }[] = [];
+    for (let r = 1; r <= DEBATE_ROUNDS; r++) {
+      const bullEntry = debatesMap.get(`bull-r${r}`);
+      const bearEntry = debatesMap.get(`bear-r${r}`);
+      debates.push({
+        round: r,
+        bull: bullEntry?.rounds[0],
+        bear: bearEntry?.rounds[0],
+        status: (bullEntry?.rounds[0] || bearEntry?.rounds[0])
+          ? "done" as const
+          : (bullEntry?.status === "running" || bearEntry?.status === "running")
+          ? "running" as const
+          : "pending" as const,
+      });
+    }
     const risks = Array.from(risksMap.values());
     const dataSources = Array.from(dataSourcesMap.values());
     const extraNodes = Array.from(extraNodesMap.values());

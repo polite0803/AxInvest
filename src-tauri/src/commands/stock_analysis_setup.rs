@@ -1112,8 +1112,9 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
 
-    // 辩论 — 使用上游 DebateNode 替代 6 个线性 Agent 节点
-    // DebateNode 作为容器节点，由 DAG 引擎根据 debater_steps 和 max_rounds 驱动多轮辩论
+    // 辩论 — 使用上游 DebateNode 容器替代 6 个线性 Agent 节点
+    // DebateNode 是容器节点，debater_steps 引用的子节点必须存在于 nodes 中，
+    // 且 parentId 指向 DebateNode，前端据此将子节点渲染在容器内部。
     nodes.push(WorkflowNode::Debate(DebateNode {
         base: WorkflowNodeBase {
             id: "debate-bull-bear".into(),
@@ -1153,7 +1154,91 @@ async fn seed_stock_analysis_workflow_template(
         label: Some("辩论".into()),
     });
 
-    // 风险评估（3 个并行，均依赖辩论结果）
+    // DebateNode 的子节点：多方辩手和空方辩手
+    // parentId 指向容器节点，前端将它们渲染在 DebateNode 内部
+    let bull_tools = vec![
+        td_quote.clone(),
+        td_kline.clone(),
+        td_fin.clone(),
+        td_news.clone(),
+        td_score.clone(),
+        td_earnings.clone(),
+        td_ma_cross.clone(),
+    ];
+    let bear_tools = vec![
+        td_quote.clone(),
+        td_kline.clone(),
+        td_fin.clone(),
+        td_news.clone(),
+        td_var.clone(),
+        td_maxdd.clone(),
+        td_pledge.clone(),
+        td_corr.clone(),
+    ];
+    for (debater_id, debater_title, debater_expert, debater_tools) in &[
+        (
+            "bull-researcher",
+            "多方研究员",
+            "bull-researcher",
+            &bull_tools,
+        ),
+        (
+            "bear-researcher",
+            "空方研究员",
+            "bear-researcher",
+            &bear_tools,
+        ),
+    ] {
+        let mut an = agent(debater_id, debater_title, debater_expert);
+        if let WorkflowNode::Agent(ref mut a) = an {
+            a.base.parent_id = Some("debate-bull-bear".into());
+            a.config.tools = (*debater_tools).clone();
+            a.config.max_tool_rounds = Some(2);
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(debater_tools));
+            a.config.model_role = Some("debater".into());
+        }
+        nodes.push(an);
+    }
+
+    // 风险评估 — 使用 ParallelNode 容器包裹 3 个并行 Agent
+    nodes.push(WorkflowNode::Parallel(ParallelNode {
+        base: WorkflowNodeBase {
+            id: "p-risk-assess".into(),
+            title: "风险评估".into(),
+            description: Some("三种风险偏好并行评估".into()),
+            position: Position { x: 300.0, y: 650.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(600),
+            enabled: true,
+            parent_id: None,
+        },
+        config: ParallelNodeConfig {
+            branches: vec![
+                Branch {
+                    id: "risk-agg".into(),
+                    title: "激进评估".into(),
+                    steps: vec!["risk-agg".into()],
+                },
+                Branch {
+                    id: "risk-con".into(),
+                    title: "保守评估".into(),
+                    steps: vec!["risk-con".into()],
+                },
+                Branch {
+                    id: "risk-neu".into(),
+                    title: "中性评估".into(),
+                    steps: vec!["risk-neu".into()],
+                },
+            ],
+            wait_for_all: true,
+            aggregation: Some(MergeStrategy::All),
+            auto_input_from_parent: false,
+            timeout: Some(600),
+        },
+    }));
+    edges.push(edge("e-debate-p-risk-assess", "debate-bull-bear", "p-risk-assess"));
+
     for (rid, rtitle, rexpert, rtools) in &[
         (
             "risk-agg",
@@ -1198,12 +1283,13 @@ async fn seed_stock_analysis_workflow_template(
     ] {
         let mut an = agent(rid, rtitle, rexpert);
         if let WorkflowNode::Agent(ref mut a) = an {
+            a.base.parent_id = Some("p-risk-assess".into());
             a.config.tools = rtools.clone();
             a.config.max_tool_rounds = Some(2);
             a.config.system_prompt = format!("{}{}", a.config.system_prompt, tool_prompt(rtools));
+            a.config.model_role = Some("risk-assessor".into());
         }
         nodes.push(an);
-        edges.push(edge(&format!("e-debate-{rid}"), "debate-bull-bear", rid));
     }
 
     // ── AggregatorNode: 聚合三种风险偏好评估结果 ──
@@ -1227,6 +1313,7 @@ async fn seed_stock_analysis_workflow_template(
     for rid in &["risk-agg", "risk-con", "risk-neu"] {
         edges.push(edge(&format!("e-{rid}-agg-risk"), rid, "agg-risk"));
     }
+    edges.push(edge("e-p-risk-assess-agg-risk", "p-risk-assess", "agg-risk"));
 
     // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控 ──
     let algo_tools: &[(&str, &str, &str, &str)] = &[

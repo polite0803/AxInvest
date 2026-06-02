@@ -7489,5 +7489,7 @@
   "stockAnalysis.workflow.riskAggregation": "風險聚合",
   "stockAnalysis.workflow.riskClassification": "風險分級",
   "stockAnalysis.workflow.notification": "結果通知",
-  "stockAnalysis.workflow.fetchFailed": "數據獲取失敗"
+  "stockAnalysis.workflow.fetchFailed": "數據獲取失敗",
+
+  "stockAnalysis.workflow.startFailed": "工作流啟動失敗"
 }

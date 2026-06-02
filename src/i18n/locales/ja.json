@@ -7497,5 +7497,7 @@
   "stockAnalysis.workflow.riskAggregation": "Risk Aggregation",
   "stockAnalysis.workflow.riskClassification": "Risk Classification",
   "stockAnalysis.workflow.notification": "Notification",
-  "stockAnalysis.workflow.fetchFailed": "Failed to fetch data"
+  "stockAnalysis.workflow.fetchFailed": "Failed to fetch data",
+
+  "stockAnalysis.workflow.startFailed": "Workflow start failed"
 }

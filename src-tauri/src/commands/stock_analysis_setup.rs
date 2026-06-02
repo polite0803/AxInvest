@@ -1053,9 +1053,9 @@ async fn seed_stock_analysis_workflow_template(
         base: WorkflowNodeBase {
             id: "debate-bull-bear".into(),
             title: "多空辩论".into(),
-            description: Some(
-                format!("{debate_max_rounds} 轮多空辩论：多方构建论点 → 空方反驳 → 循环"),
-            ),
+            description: Some(format!(
+                "{debate_max_rounds} 轮多空辩论：多方构建论点 → 空方反驳 → 循环"
+            )),
             position: Position {
                 x: 300.0,
                 y: 1280.0,

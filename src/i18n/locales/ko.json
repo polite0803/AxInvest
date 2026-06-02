@@ -7444,8 +7444,7 @@
       "medium": "중간",
       "low": "낮음"
     },
-    "workflowStarting": "⏳ {{stockCode}} 주식 분석 워크플로 시작 중...",
-    "progress": {}
+    "workflowStarting": "⏳ {{stockCode}} 주식 분석 워크플로 시작 중..."
   },
   "trade": {
     "title": "Trading Log",

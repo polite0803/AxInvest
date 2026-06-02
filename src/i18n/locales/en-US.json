@@ -7512,8 +7512,7 @@
       "medium": "Medium",
       "low": "Low"
     },
-    "workflowStarting": "⏳ Starting {{stockCode}} stock analysis workflow...",
-    "progress": {}
+    "workflowStarting": "⏳ Starting {{stockCode}} stock analysis workflow..."
   },
   "trade": {
     "title": "Trading Log",

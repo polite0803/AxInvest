@@ -7444,8 +7444,7 @@
       "medium": "Medio",
       "low": "Bajo"
     },
-    "workflowStarting": "⏳ Iniciando flujo de análisis de {{stockCode}}...",
-    "progress": {}
+    "workflowStarting": "⏳ Iniciando flujo de análisis de {{stockCode}}..."
   },
   "trade": {
     "title": "Trading Log",

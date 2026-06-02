@@ -7444,8 +7444,7 @@
       "medium": "متوسط",
       "low": "منخفض"
     },
-    "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}...",
-    "progress": {}
+    "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}..."
   },
   "trade": {
     "title": "Trading Log",

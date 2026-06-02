@@ -150,38 +150,57 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     ]),
   );
 
-  const debatesMap = new Map(
-    [1, 2, 3].map((round) => [
-      round,
-      {
-        round,
-        bull: undefined as string | undefined,
-        bear: undefined as string | undefined,
-        status: "pending" as "pending" | "running" | "done" | "failed",
-      },
-    ]),
-  );
+  const debatesMap = new Map([
+    ["bull-researcher", {
+      key: "bull-researcher",
+      label: "多方研究员",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+      rounds: [] as string[],
+    }],
+    ["bear-researcher", {
+      key: "bear-researcher",
+      label: "空方研究员",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+      rounds: [] as string[],
+    }],
+  ]);
 
   const risksMap = new Map([
-    ["risk-macro", {
-      key: "risk-macro",
+    ["risk-agg", {
+      key: "risk-agg",
+      label: "激进评估",
       status: "pending" as "pending" | "running" | "done" | "failed",
       content: undefined as string | undefined,
     }],
-    ["risk-industry", {
-      key: "risk-industry",
+    ["risk-con", {
+      key: "risk-con",
+      label: "保守评估",
       status: "pending" as "pending" | "running" | "done" | "failed",
       content: undefined as string | undefined,
     }],
-    ["risk-company", {
-      key: "risk-company",
+    ["risk-neu", {
+      key: "risk-neu",
+      label: "中性评估",
       status: "pending" as "pending" | "running" | "done" | "failed",
       content: undefined as string | undefined,
     }],
-    ["research-mgr", {
-      key: "research-mgr",
+  ]);
+
+  const extraNodesMap = new Map([
+    ["agg-risk", {
+      key: "agg-risk",
+      label: "风险聚合",
       status: "pending" as "pending" | "running" | "done" | "failed",
-      content: undefined as string | undefined,
+    }],
+    ["cls-risk-level", {
+      key: "cls-risk-level",
+      label: "风险分级",
+      status: "pending" as "pending" | "running" | "done" | "failed",
+    }],
+    ["notify-result", {
+      key: "notify-result",
+      label: "结果通知",
+      status: "pending" as "pending" | "running" | "done" | "failed",
     }],
   ]);
 
@@ -199,6 +218,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     const debates = Array.from(debatesMap.values());
     const risks = Array.from(risksMap.values());
     const dataSources = Array.from(dataSourcesMap.values());
+    const extraNodes = Array.from(extraNodesMap.values());
     const count = completedNodes.size;
     return wf(
       "aggregate",
@@ -209,6 +229,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         analysts,
         debates,
         risks,
+        extraNodes,
         dataSources,
         status,
         error,
@@ -299,32 +320,22 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       }
     }
 
-    // ── 辩论节点 (bull-r*/bear-r*) ──
-    const bullMatch = nodeId.match(/^bull-r(\d+)$/);
-    const bearMatch = nodeId.match(/^bear-r(\d+)$/);
-    if (bullMatch || bearMatch) {
-      const roundStr = bullMatch ? bullMatch[1] : bearMatch![1];
-      const roundNum = parseInt(roundStr);
-      const debate = debatesMap.get(roundNum);
-      if (debate) {
-        if (status === "running") {
-          debate.status = "running";
-        } else if (status === "completed") {
-          if (bullMatch) {
-            debate.bull = extractContent(output);
-          } else {
-            debate.bear = extractContent(output);
-          }
-          if (debate.bull && debate.bear) {
-            debate.status = "done";
-          }
-        } else if (status === "failed") {
-          debate.status = "failed";
+    // ── 辩论节点 (DebateNode 子节点: bull-researcher / bear-researcher) ──
+    if (debatesMap.has(nodeId)) {
+      const debater = debatesMap.get(nodeId)!;
+      if (status === "running") {
+        debater.status = "running";
+      } else if (status === "completed") {
+        debater.status = "done";
+        if (output != null) {
+          debater.rounds.push(extractContent(output));
         }
+      } else if (status === "failed") {
+        debater.status = "failed";
       }
     }
 
-    // ── 风险评估节点 ──
+    // ── 风险评估节点 (ParallelNode 子节点) ──
     if (risksMap.has(nodeId)) {
       const risk = risksMap.get(nodeId)!;
       if (status === "running") {
@@ -336,6 +347,18 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         }
       } else if (status === "failed") {
         risk.status = "failed";
+      }
+    }
+
+    // ── 新增节点 (Aggregator / LlmClassifier / Notification) ──
+    if (extraNodesMap.has(nodeId)) {
+      const node = extraNodesMap.get(nodeId)!;
+      if (status === "running") {
+        node.status = "running";
+      } else if (status === "completed") {
+        node.status = "done";
+      } else if (status === "failed") {
+        node.status = "failed";
       }
     }
 

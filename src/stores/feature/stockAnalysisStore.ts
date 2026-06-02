@@ -297,28 +297,37 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     });
 
     // 先注册事件监听，再触发工作流
-    await get().setupEventListener();
+    try {
+      await get().setupEventListener();
 
-    const dryRun = await get().getDryRun();
-    const result = await invoke<{
-      analysisId: string;
-      workflowId: string;
-      stockCode: string;
-      stockName: string;
-    }>("run_stock_workflow", { stockCode, dryRun });
+      const dryRun = await get().getDryRun();
+      const result = await invoke<{
+        analysisId: string;
+        workflowId: string;
+        stockCode: string;
+        stockName: string;
+      }>("run_stock_workflow", { stockCode, dryRun });
 
-    set({
-      analysisId: result.analysisId,
-      workflowId: result.workflowId,
-      stockCode: result.stockCode,
-      stockName: result.stockName,
-      status: "running",
-      progressMessage: i18n.t("stockAnalysis.progress.started"),
-      progressPct: 5,
-    });
+      set({
+        analysisId: result.analysisId,
+        workflowId: result.workflowId,
+        stockCode: result.stockCode,
+        stockName: result.stockName,
+        status: "running",
+        progressMessage: i18n.t("stockAnalysis.progress.started"),
+        progressPct: 5,
+      });
 
-    get().getStockQuote(result.stockCode);
-    get().getStockKline(result.stockCode, "daily", 120);
+      get().getStockQuote(result.stockCode);
+      get().getStockKline(result.stockCode, "daily", 120);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to start workflow:", e);
+      set({
+        status: "error",
+        error: typeof e === "string" ? e : (e as Error)?.message ?? "工作流启动失败",
+        progressPct: 0,
+      });
+    }
   },
 
   cancelAnalysis: async () => {

@@ -76,14 +76,22 @@ function updateMessageInStore(messageId: string, content: string) {
   }));
 }
 
+/** 从 AgentExecutor 输出中提取纯文本内容（与 stockAnalysisStore 保持一致）*/
 function extractContent(output: unknown): string {
-  if (output == null) { return ""; }
-  if (typeof output === "string") { return output; }
-  try {
-    return JSON.stringify(output, null, 2);
-  } catch {
-    return String(output);
+  let text = "";
+  if (typeof output === "string") { text = output; }
+  else if (output && typeof output === "object") {
+    const r = output as Record<string, unknown>;
+    if (typeof r.content === "string" && (r.content as string).length > 0) { text = r.content as string; }
+    else if (r.content != null && typeof r.content === "object") { text = JSON.stringify(r.content); }
+    else { text = JSON.stringify(output); }
+  } else {
+    text = String(output ?? "");
   }
+  // 清理 LLM 工具调用 XML 标签（如 <minimax:tool_call>...</minimax:tool_call>）
+  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
+  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function summarizeToolResult(result: unknown): string {
@@ -110,6 +118,16 @@ function summarizeParsed(v: unknown): string {
   }
   if (v && typeof v === "object") {
     const obj = v as Record<string, unknown>;
+    // 解包 {"content": "..."} 包装
+    if (typeof obj.content === "string" && Object.keys(obj).length <= 3) {
+      const inner = obj.content;
+      if (inner === "null" || inner === "[]" || inner === "") { return "无数据"; }
+      try {
+        return summarizeParsed(JSON.parse(inner));
+      } catch {
+        return inner.length > 120 ? inner.slice(0, 120) + "..." : inner;
+      }
+    }
     if (obj.stockName && obj.price) { return `${obj.stockName} ¥${obj.price}`; }
     if (obj.stockCode && obj.totalScore) { return `评分 ${obj.totalScore}`; }
     if (obj.stockCode && obj.dcf) { return `DCF ¥${(obj.dcf as Record<string, unknown>)?.intrinsicValue ?? "N/A"}`; }

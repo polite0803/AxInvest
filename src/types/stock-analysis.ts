@@ -79,6 +79,7 @@ export interface AnalysisEvent {
 export type AnalysisStatus = "idle" | "loading" | "running" | "completed" | "error";
 
 export const ANALYST_NAMES: Record<string, string> = {
+  // 完整节点名 (a- 前缀去除后)
   "market-analyst": "市场技术分析师",
   "sentiment-analyst": "情绪面分析师",
   "news-analyst": "消息面分析师",
@@ -93,4 +94,15 @@ export const ANALYST_NAMES: Record<string, string> = {
   "neutral-debator": "中性风险评估师",
   "research-manager": "研究经理",
   "portfolio-manager": "投资组合经理",
+  // 工作流模板短名称 (a- 前缀去除后, 对应 stock_analysis_setup.rs 中节点 ID)
+  "sector": "行业分析师",
+  "sentiment": "情绪面分析师",
+  "news": "消息面分析师",
+  "fundamentals": "基本面分析师",
+  "policy": "政策面分析师",
+  "hot-money": "资金面追踪者",
+  "lockup": "筹码面观察者",
+  "research": "研报分析师",
+  "trader": "交易规划师",
+  "investment-plan": "投资计划",
 };

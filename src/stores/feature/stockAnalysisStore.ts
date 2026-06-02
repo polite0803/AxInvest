@@ -19,14 +19,20 @@ interface AgentResult {
 
 /** 从 AgentExecutor 输出中提取纯文本内容 */
 function extractContent(value: unknown): string {
-  if (typeof value === "string") { return value; }
-  if (value && typeof value === "object") {
+  let text = "";
+  if (typeof value === "string") { text = value; }
+  else if (value && typeof value === "object") {
     const r = value as AgentResult;
-    if (typeof r.content === "string" && r.content.length > 0) { return r.content; }
-    if (r.content != null && typeof r.content === "object") { return JSON.stringify(r.content); }
-    return JSON.stringify(value);
+    if (typeof r.content === "string" && r.content.length > 0) { text = r.content; }
+    else if (r.content != null && typeof r.content === "object") { text = JSON.stringify(r.content); }
+    else { text = JSON.stringify(value); }
+  } else {
+    text = String(value ?? "");
   }
-  return String(value ?? "");
+  // 清理 LLM 工具调用 XML 标签（如 <minimax:tool_call>...</minimax:tool_call>）
+  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
+  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** 规范化 decision 对象：兼容 snake_case/camelCase、confidence 0-1 vs 0-100、空值保护 */

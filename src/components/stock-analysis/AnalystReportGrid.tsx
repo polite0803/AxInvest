@@ -3,17 +3,25 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AnalystReportCard } from "./AnalystReportCard";
 
+/** 清理 LLM 工具调用标签，提取实际分析文本 */
+function cleanToolTags(text: string): string {
+  let cleaned = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
+  cleaned = cleaned.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
+  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function AnalystReportGrid() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
 
-  // Aggregate sentiment from reports
+  // Aggregate sentiment from reports (clean tool_call tags first)
   const sentiment = useMemo(() => {
     const entries = Object.values(analystReports);
     let bullish = 0;
     let bearish = 0;
     let neutral = 0;
-    for (const report of entries) {
+    for (const rawReport of entries) {
+      const report = cleanToolTags(rawReport);
       const lower = report.toLowerCase();
       if (lower.includes("买入") || lower.includes("增持") || lower.includes("看多") || lower.includes("推荐")) {
         bullish++;

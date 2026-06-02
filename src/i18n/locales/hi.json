@@ -7437,8 +7437,7 @@
       "medium": "मध्यम",
       "low": "निम्न"
     },
-    "workflowStarting": "⏳ {{stockCode}} स्टॉक विश्लेषण वर्कफ़्लो शुरू कर रहा है...",
-    "progress": {}
+    "workflowStarting": "⏳ {{stockCode}} स्टॉक विश्लेषण वर्कफ़्लो शुरू कर रहा है..."
   },
   "trade": {
     "title": "Trading Log",

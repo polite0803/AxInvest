@@ -7436,8 +7436,7 @@
       "medium": "中",
       "low": "低"
     },
-    "workflowStarting": "⏳ 正在啟動 {{stockCode}} 股票分析工作流程...",
-    "progress": {}
+    "workflowStarting": "⏳ 正在啟動 {{stockCode}} 股票分析工作流程..."
   },
   "trade": {
     "title": "交易日志",

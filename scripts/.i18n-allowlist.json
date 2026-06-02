@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-06-02",
-  "total_entries": 2829,
+  "total_entries": 2831,
   "total_files": 176,
   "entries": [
     {
@@ -826,10 +826,10 @@
     },
     {
       "file": "src/stores/feature/stockAnalysisStore.ts",
-      "lines": "34,40,97,105,295,483,493",
+      "lines": "34,40,97,105,295,327,483,493,502",
       "reason": "硬编码中文字符串",
       "phase": 3,
-      "total_lines": 7
+      "total_lines": 9
     },
     {
       "file": "src/stores/feature/topicGroupStore.ts",

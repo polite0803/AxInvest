@@ -278,12 +278,14 @@ async fn seed_stock_analysis_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
-        AgentNode, AgentNodeConfig, Branch, ConditionNode, ConditionNodeConfig, EdgeType,
-        ErrorConfig, JsonSchema, JsonSchemaProperty, LogicalOperator, MergeStrategy,
-        OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
-        RetryPolicy, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
-        ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
-        WorkflowNode, WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, ConditionNode,
+        ConditionNodeConfig, DebateNode, DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema,
+        JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig, LogicalOperator,
+        MergeStrategy, NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode,
+        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
+        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
+        ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -1108,88 +1110,46 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
 
-    // 辩论 6 轮 — 线性执行，ConditionNode 记录判断结果但不路由分支
-    let debate_pairs = [
-        (
-            "bull-r1",
-            "基于9位分析师的报告和是否辩论的判断，构建该股票的买入论点",
-            "bull-researcher",
-            &["c-need-debate"][..],
-            "bear-r1",
-        ),
-        (
-            "bear-r1",
-            "针对多方论点逐条反驳。结合分析师报告中的风险信号，列出该股票3-5个看跌理由，指出多方论点中的数据漏洞",
-            "bear-researcher",
-            &["bull-r1"],
-            "bull-r2",
-        ),
-        (
-            "bull-r2",
-            "对空方论点进行二次反击。补充新的看涨证据，修正被空方成功攻击的弱论点，强化剩余论点的数据支撑",
-            "bull-researcher",
-            &["bear-r1"],
-            "bear-r2",
-        ),
-        (
-            "bear-r2",
-            "深入挖掘该股票的隐藏风险。不仅反驳多方新论点，还要提出多方未覆盖的风险维度（如流动性风险、汇率风险等）",
-            "bear-researcher",
-            &["bull-r2"],
-            "bull-r3",
-        ),
-        (
-            "bull-r3",
-            "终极多方辩护。综合前两轮交锋，提炼最坚固的3个看涨核心逻辑，对每个逻辑给出置信度评分（0-100）",
-            "bull-researcher",
-            &["bear-r2"],
-            "bear-r3",
-        ),
-        (
-            "bear-r3",
-            "终极空方陈词。给出该股票的风险综合评分（0-100），明确指出如果持仓应在什么条件下止损",
-            "bear-researcher",
-            &["bull-r3"],
-            "",
-        ),
-    ];
-    let bull_tools = vec![
-        td_quote.clone(),
-        td_kline.clone(),
-        td_fin.clone(),
-        td_news.clone(),
-        td_score.clone(),
-        td_earnings.clone(),
-        td_ma_cross.clone(),
-    ];
-    let bear_tools = vec![
-        td_quote.clone(),
-        td_kline.clone(),
-        td_fin.clone(),
-        td_news.clone(),
-        td_var.clone(),
-        td_maxdd.clone(),
-        td_pledge.clone(),
-        td_corr.clone(),
-    ];
-    for (id, title, expert, deps, _next) in &debate_pairs {
-        let mut an = agent(id, title, expert);
-        let is_bull = expert.contains("bull");
-        if let WorkflowNode::Agent(ref mut a) = an {
-            a.config.tools = if is_bull {
-                bull_tools.clone()
-            } else {
-                bear_tools.clone()
-            };
-            a.config.max_tool_rounds = Some(2);
-            a.config.system_prompt =
-                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
-        }
-        nodes.push(an);
-        for dep in *deps {
-            edges.push(edge(&format!("e-{dep}-{id}"), dep, id));
-        }
-    }
+    // 辩论 — 使用上游 DebateNode 替代 6 个线性 Agent 节点
+    // DebateNode 作为容器节点，由 DAG 引擎根据 debater_steps 和 max_rounds 驱动多轮辩论
+    nodes.push(WorkflowNode::Debate(DebateNode {
+        base: WorkflowNodeBase {
+            id: "debate-bull-bear".into(),
+            title: "多空辩论".into(),
+            description: Some("3 轮多空辩论：多方构建论点 → 空方反驳 → 循环".into()),
+            position: Position { x: 300.0, y: 450.0 },
+            retry: RetryConfig {
+                enabled: true,
+                max_retries: 1,
+                ..Default::default()
+            },
+            timeout: Some(900),
+            enabled: true,
+            parent_id: None,
+        },
+        config: DebateNodeConfig {
+            debater_steps: vec!["bull-researcher".into(), "bear-researcher".into()],
+            max_rounds: 3,
+            convergence_prompt: Some(
+                "综合多空双方全部论点，提炼最坚固的3个看涨核心逻辑和3个最大风险点，\
+                 对每个逻辑给出置信度评分（0-100），给出该股票的风险综合评分（0-100）"
+                    .into(),
+            ),
+            convergence_model: None,
+            convergence_model_role: Some("decision-maker".into()),
+            topic_var: "c-need-debate.output".into(),
+            output_var: "debate-result".into(),
+        },
+    }));
+    edges.push(WorkflowEdge {
+        id: "e-c-need-debate-debate".into(),
+        source: "c-need-debate".into(),
+        source_handle: None,
+        target: "debate-bull-bear".into(),
+        target_handle: None,
+        edge_type: EdgeType::DebateRound,
+        label: Some("辩论".into()),
+    });
 
     // 风险评估（3 个并行，均依赖 bear-r3）
     for (rid, rtitle, rexpert, rtools) in &[

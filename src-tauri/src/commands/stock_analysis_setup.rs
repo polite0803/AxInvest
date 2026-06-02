@@ -266,7 +266,7 @@ pub async fn ensure_stock_analysis_experts_seeded(
     seed_agent_roles(db).await?;
     seed_agent_profiles(db).await?;
     seed_stock_analysis_workflow_template(db).await?;
-    seed_debate_subworkflow(db).await?;
+    // seed_debate_subworkflow(db).await?;  // 辩论子工作流未引用，暂不种子化
     Ok(())
 }
 
@@ -278,9 +278,9 @@ async fn seed_stock_analysis_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
-        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, ConditionNode,
-        ConditionNodeConfig, DebateNode, DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema,
-        JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig, LogicalOperator,
+        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, DebateNode,
+        DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema,
+        JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig,
         MergeStrategy, NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode,
         ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, ToolDef, ToolNode,
         ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
@@ -290,7 +290,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 2;
+    const TEMPLATE_VERSION: i32 = 3;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -1067,7 +1067,7 @@ async fn seed_stock_analysis_workflow_template(
 
     // 分析师节点 → c-need-debate 的出边（编辑器可视化 + 运行时依赖）
     for aid in &a_ids {
-        edges.push(edge(&format!("e-{aid}-c-debate"), aid, "c-need-debate"));
+        edges.push(edge(&format!("e-{aid}-debate"), aid, "debate-bull-bear"));
     }
 
     // ParallelNode: 仅作为视觉分组包裹 9 组 Tool+Agent，不参与实际流程控制
@@ -1092,25 +1092,7 @@ async fn seed_stock_analysis_workflow_template(
     }));
 
     // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
-    nodes.push(WorkflowNode::Condition(ConditionNode {
-        base: WorkflowNodeBase {
-            id: "c-need-debate".into(),
-            title: "分析师检查点".into(),
-            description: Some("确认9位分析师已全部完成，是否需辩论由后续流程决定".into()),
-            position: Position { x: 300.0, y: 350.0 },
-            retry: RetryConfig::default(),
-            timeout: Some(60),
-            enabled: true,
-            parent_id: None,
-        },
-        config: ConditionNodeConfig {
-            conditions: vec![],
-            logical_op: LogicalOperator::And,
-            judge_by_llm: None,
-            routing_prompt: None,
-            routing_model: None,
-        },
-    }));
+    // 分析师节点已直接连接 DebateNode（无中间条件节点）
 
     // 辩论 — 使用上游 DebateNode 容器替代 6 个线性 Agent 节点
     // DebateNode 是容器节点，debater_steps 引用的子节点必须存在于 nodes 中，
@@ -1140,19 +1122,11 @@ async fn seed_stock_analysis_workflow_template(
             ),
             convergence_model: None,
             convergence_model_role: Some("decision-maker".into()),
-            topic_var: "c-need-debate.output".into(),
+            topic_var: "trigger.output".into(),
             output_var: "debate-result".into(),
         },
     }));
-    edges.push(WorkflowEdge {
-        id: "e-c-need-debate-debate".into(),
-        source: "c-need-debate".into(),
-        source_handle: None,
-        target: "debate-bull-bear".into(),
-        target_handle: None,
-        edge_type: EdgeType::DebateRound,
-        label: Some("辩论".into()),
-    });
+    // 删除 — 分析师已通过 9 条边直接连接 DebateNode
 
     // DebateNode 的子节点：多方辩手和空方辩手
     // parentId 指向容器节点，前端将它们渲染在 DebateNode 内部
@@ -1303,7 +1277,6 @@ async fn seed_stock_analysis_workflow_template(
     for rid in &["risk-agg", "risk-con", "risk-neu"] {
         edges.push(edge(&format!("e-{rid}-agg-risk"), rid, "agg-risk"));
     }
-    edges.push(edge("e-p-risk-assess-agg-risk", "p-risk-assess", "agg-risk"));
 
     // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控 ──
     let algo_tools: &[(&str, &str, &str, &str)] = &[
@@ -2328,16 +2301,17 @@ fn role_id_to_display(id: &str) -> String {
 }
 
 /// 种子化多空辩论子工作流模板，供 stock-analysis 主模板的 SubWorkflowNode 调用。
+#[allow(dead_code)]
 pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_core::workflow_types::{
-        AgentNode, AgentNodeConfig, EdgeType, OutputMode, Position, RetryConfig, WorkflowEdge,
-        WorkflowNode, WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, DebateNode, DebateNodeConfig, OutputMode, Position,
+        RetryConfig, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const DEBATE_ID: &str = "stock-debate";
-    const DEBATE_VERSION: i32 = 2;
+    const DEBATE_VERSION: i32 = 3;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(DEBATE_ID)
         .one(db)
@@ -2362,19 +2336,49 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
     }
 
     let now = chrono::Utc::now().timestamp_millis();
-    let agent = |id: &str,
-                 title: &str,
-                 expert_id: &str,
-                 tools: Vec<&str>,
-                 deps: Vec<&str>,
-                 _next: &str|
-     -> (WorkflowNode, Vec<WorkflowEdge>) {
-        let tool_names = tools.iter().map(|&n| n.to_string()).collect::<Vec<_>>();
-        let n = WorkflowNode::Agent(AgentNode {
+
+    let mut nodes: Vec<WorkflowNode> = Vec::new();
+    let edges: Vec<WorkflowEdge> = Vec::new();
+
+    nodes.push(WorkflowNode::Debate(DebateNode {
+        base: WorkflowNodeBase {
+            id: "debate-bull-bear".into(),
+            title: "多空辩论".into(),
+            description: Some("3 轮多空辩论：多方构建论点 → 空方反驳 → 循环".into()),
+            position: Position { x: 0.0, y: 0.0 },
+            retry: RetryConfig {
+                enabled: true,
+                max_retries: 1,
+                ..Default::default()
+            },
+            timeout: Some(900),
+            enabled: true,
+            parent_id: None,
+        },
+        config: DebateNodeConfig {
+            debater_steps: vec!["bull-researcher".into(), "bear-researcher".into()],
+            max_rounds: 3,
+            convergence_prompt: Some(
+                "综合多空双方全部论点，提炼最坚固的3个看涨核心逻辑和3个最大风险点，\
+                 对每个逻辑给出置信度评分（0-100），给出该股票的风险综合评分（0-100）"
+                    .into(),
+            ),
+            convergence_model: None,
+            convergence_model_role: Some("decision-maker".into()),
+            topic_var: "trigger.output".into(),
+            output_var: "debate-result".into(),
+        },
+    }));
+
+    for (debater_id, debater_title, debater_expert) in &[
+        ("bull-researcher", "多方研究员", "bull-researcher"),
+        ("bear-researcher", "空方研究员", "bear-researcher"),
+    ] {
+        nodes.push(WorkflowNode::Agent(AgentNode {
             base: WorkflowNodeBase {
-                id: id.into(),
-                title: title.into(),
-                description: Some(format!("辩论: {expert_id}")),
+                id: (*debater_id).into(),
+                title: (*debater_title).into(),
+                description: Some(format!("辩论: {debater_expert}")),
                 position: Position { x: 0.0, y: 0.0 },
                 retry: RetryConfig {
                     enabled: true,
@@ -2383,97 +2387,25 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
                 },
                 timeout: Some(300),
                 enabled: true,
-                parent_id: None,
+                parent_id: Some("debate-bull-bear".into()),
             },
             config: AgentNodeConfig {
-                system_prompt: format!("你的任务: {title}\n工具: {}", tool_names.join(", ")),
+                system_prompt: format!("你的任务: {debater_title}\n工具: compute_scoring"),
                 context_sources: vec![],
-                output_var: id.into(),
+                output_var: (*debater_id).into(),
                 model: None,
                 temperature: Some(0.3),
                 max_tokens: Some(4096),
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Text,
-                agent_profile_id: Some(format!("stock-{expert_id}")),
+                agent_profile_id: Some(format!("stock-{debater_expert}")),
                 max_tool_rounds: Some(2),
                 execution_mode: None,
                 rag_source_ids: vec![],
-                model_role: None,
+                model_role: Some("debater".into()),
             },
-        });
-        let edges: Vec<WorkflowEdge> = deps
-            .iter()
-            .map(|dep| WorkflowEdge {
-                id: format!("e-{dep}-{id}"),
-                source: dep.to_string(),
-                source_handle: None,
-                target: id.to_string(),
-                target_handle: None,
-                edge_type: EdgeType::Direct,
-                label: None,
-            })
-            .collect();
-        (n, edges)
-    };
-
-    let pairs = [
-        (
-            "bull-r1",
-            "构建买入论点",
-            "bull-researcher",
-            vec!["compute_scoring"],
-            vec![],
-            "bear-r1",
-        ),
-        (
-            "bear-r1",
-            "反驳多方论点",
-            "bear-researcher",
-            vec!["compute_scoring"],
-            vec!["bull-r1"],
-            "bull-r2",
-        ),
-        (
-            "bull-r2",
-            "二次反击",
-            "bull-researcher",
-            vec!["compute_scoring"],
-            vec!["bear-r1"],
-            "bear-r2",
-        ),
-        (
-            "bear-r2",
-            "挖掘隐藏风险",
-            "bear-researcher",
-            vec!["compute_scoring"],
-            vec!["bull-r2"],
-            "bull-r3",
-        ),
-        (
-            "bull-r3",
-            "终极多方辩护",
-            "bull-researcher",
-            vec!["compute_scoring"],
-            vec!["bear-r2"],
-            "bear-r3",
-        ),
-        (
-            "bear-r3",
-            "终极空方陈词",
-            "bear-researcher",
-            vec!["compute_scoring"],
-            vec!["bull-r3"],
-            "",
-        ),
-    ];
-
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-    for (id, title, expert, tools, deps, _next) in &pairs {
-        let (n, e) = agent(id, title, expert, tools.clone(), deps.to_vec(), "");
-        nodes.push(n);
-        edges.extend(e);
+        }));
     }
 
     let nodes_json =
@@ -2484,7 +2416,7 @@ pub async fn seed_debate_subworkflow(db: &sea_orm::DatabaseConnection) -> Result
         id: Set(DEBATE_ID.to_string()),
         name: Set("多空辩论".to_string()),
         description: Set(Some(
-            "6 轮多空辩论：bull-r1→bear-r1→bull-r2→bear-r2→bull-r3→bear-r3".into(),
+            "DebateNode 容器：3 轮多空辩论，多方研究员 vs 空方研究员".into(),
         )),
         icon: Set("swords".into()),
         tags: Set(Some(serde_json::to_string(&["debate", "stock"]).unwrap())),

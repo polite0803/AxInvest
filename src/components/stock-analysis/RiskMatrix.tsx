@@ -1,8 +1,9 @@
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
-import { Card, Tag } from "antd";
+import { ExpandOutlined } from "@ant-design/icons";
+import { Button, Card, Modal, Tag } from "antd";
 import * as echarts from "echarts";
 import NodeRenderer from "markstream-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags } from "./utils";
 
@@ -64,6 +65,9 @@ export function RiskMatrix() {
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const expandedChartRef = useRef<HTMLDivElement>(null);
+  const expandedInstanceRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
     if (!chartRef.current) { return; }
@@ -123,46 +127,146 @@ export function RiskMatrix() {
     });
   }, [riskAssessments, t]);
 
+  // Render expanded chart when modal opens
+  useEffect(() => {
+    if (!expanded || !expandedChartRef.current || Object.keys(riskAssessments).length === 0) {
+      expandedInstanceRef.current?.dispose();
+      expandedInstanceRef.current = null;
+      return;
+    }
+    const chart = echarts.init(expandedChartRef.current, undefined, { renderer: "canvas" });
+    expandedInstanceRef.current = chart;
+    const dimensions = Object.keys(riskAssessments).slice(0, 6).map((type) => {
+      const key = RISK_LABEL_KEYS[type];
+      return key ? t(`stockAnalysis.${key}`) : type;
+    });
+    const scores = Object.entries(riskAssessments).slice(0, 6).map(([, text]) => computeRiskScore(text));
+    if (dimensions.length >= 3) {
+      chart.setOption({
+        animation: true,
+        radar: {
+          indicator: dimensions.map((name) => ({ name, max: 100 })),
+          center: ["50%", "50%"],
+          radius: "65%",
+          axisName: { color: "var(--muted)", fontSize: 13 },
+          splitArea: {
+            areaStyle: { color: ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)", "rgba(22,119,255,0.06)"] },
+          },
+          splitLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
+          axisLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
+        },
+        series: [{
+          type: "radar",
+          data: [{ value: scores, name: t("stockAnalysis.riskAssessment") }],
+          symbol: "circle",
+          symbolSize: 6,
+          areaStyle: { color: "oklch(55% 0.20 28 / 0.15)" },
+          lineStyle: { color: "oklch(55% 0.20 28)", width: 2 },
+          itemStyle: { color: "oklch(55% 0.20 28)" },
+        }],
+      });
+    }
+    const handleResize = () => chart.resize();
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.dispose();
+      expandedInstanceRef.current = null;
+    };
+  }, [expanded, riskAssessments, t]);
+
   if (Object.keys(riskAssessments).length === 0) { return null; }
 
   const entries = Object.entries(riskAssessments);
 
   return (
-    <Card size="small" title={t("stockAnalysis.riskAssessment")} styles={{ body: { padding: 8 } }}>
-      {/* 雷达图 */}
-      {entries.length >= 3 && <div ref={chartRef} style={{ width: "100%", height: 220, marginBottom: 8 }} />}
-      {/* 风险详情列表 */}
-      <div className="flex flex-col gap-1.5">
-        {entries.map(([type, report]) => {
-          const color = RISK_COLORS[type]
-            || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
-          const label = RISK_LABEL_KEYS[type]
-            ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`)
-            : type;
-          const score = computeRiskScore(report);
-          return (
-            <div key={type} className="p-1.5 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-sm font-medium mb-0.5 flex items-center justify-between">
-                <Tag color={color} style={{ marginRight: 4 }}>{label}</Tag>
-                <span
-                  className="text-xs font-mono"
-                  style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
+    <>
+      <Card
+        size="small"
+        title={t("stockAnalysis.riskAssessment")}
+        extra={
+          <Button
+            type="text"
+            size="small"
+            icon={<ExpandOutlined />}
+            onClick={() => setExpanded(true)}
+          />
+        }
+        styles={{ body: { padding: 8 } }}
+      >
+        {entries.length >= 3 && <div ref={chartRef} style={{ width: "100%", height: 220, marginBottom: 8 }} />}
+        <div className="flex flex-col gap-1.5">
+          {entries.map(([type, report]) => {
+            const color = RISK_COLORS[type]
+              || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
+            const label = RISK_LABEL_KEYS[type]
+              ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`)
+              : type;
+            const score = computeRiskScore(report);
+            return (
+              <div key={type} className="p-1.5 rounded" style={{ background: "var(--surface)" }}>
+                <div className="text-sm font-medium mb-0.5 flex items-center justify-between">
+                  <Tag color={color} style={{ marginRight: 4 }}>{label}</Tag>
+                  <span
+                    className="text-xs font-mono"
+                    style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
+                  >
+                    {t("stockAnalysis.riskScore", { score })}
+                  </span>
+                </div>
+                <div
+                  className="sa-markdown-content text-xs leading-relaxed"
+                  style={{ maxHeight: 160, overflow: "auto" }}
                 >
-                  {t("stockAnalysis.riskScore", { score })}
-                </span>
+                  {cleanToolCallTags(report)
+                    ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
+                    : <span style={{ color: "var(--muted)" }}>暂无风险评估数据</span>}
+                </div>
               </div>
-              <div
-                className="sa-markdown-content text-xs leading-relaxed"
-                style={{ maxHeight: 160, overflow: "auto" }}
-              >
-                {cleanToolCallTags(report)
-                  ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
-                  : <span style={{ color: "var(--muted)" }}>暂无风险评估数据</span>}
+            );
+          })}
+        </div>
+      </Card>
+
+      <Modal
+        title={t("stockAnalysis.riskAssessment")}
+        open={expanded}
+        onCancel={() => setExpanded(false)}
+        footer={null}
+        width="80vw"
+        style={{ top: 20 }}
+        styles={{ body: { maxHeight: "80vh", overflow: "auto" } }}
+      >
+        {entries.length >= 3 && <div ref={expandedChartRef} style={{ width: "100%", height: 320, marginBottom: 16 }} />}
+        <div className="flex flex-col gap-3">
+          {entries.map(([type, report]) => {
+            const color = RISK_COLORS[type]
+              || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
+            const label = RISK_LABEL_KEYS[type]
+              ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`)
+              : type;
+            const score = computeRiskScore(report);
+            return (
+              <div key={type} className="p-3 rounded" style={{ background: "var(--surface)" }}>
+                <div className="text-base font-medium mb-1 flex items-center justify-between">
+                  <Tag color={color}>{label}</Tag>
+                  <span
+                    className="font-mono"
+                    style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
+                  >
+                    {t("stockAnalysis.riskScore", { score })}
+                  </span>
+                </div>
+                <div className="sa-markdown-content text-sm leading-relaxed">
+                  {cleanToolCallTags(report)
+                    ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
+                    : <span style={{ color: "var(--muted)" }}>暂无风险评估数据</span>}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
+            );
+          })}
+        </div>
+      </Modal>
+    </>
   );
 }

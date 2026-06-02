@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
-import { Button, Card, message, Tag } from "antd";
+import { ExpandOutlined } from "@ant-design/icons";
+import { Button, Card, message, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,6 +24,7 @@ export function DecisionBanner() {
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const [adding, setAdding] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   // stockCode 变化时同步自选状态
   useEffect(() => {
@@ -132,140 +134,273 @@ export function DecisionBanner() {
   if (!decision) { return null; }
 
   return (
-    <Card
-      size="small"
-      title={
-        <div className="flex items-center gap-2">
-          <span>{t("stockAnalysis.finalDecision")}</span>
-          <Tag
-            color={decision.action === "买入" || decision.action === "增持"
-              ? "red"
-              : decision.action === "持有"
-              ? "blue"
-              : decision.action === "减持"
-              ? "orange"
-              : "green"}
-          >
-            {actionLabel[decision.action] || decision.action}
-          </Tag>
-        </div>
-      }
-      styles={{ body: { padding: "12px 16px" } }}
-      style={{ borderLeft: "4px solid var(--accent)" }}
-    >
-      {/* 信心仪表 */}
-      <div className="mb-3">
-        <div className="flex justify-between text-xs mb-1">
-          <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
-          <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 15 }}>
-            {confidencePct}%
-          </span>
-        </div>
-        <div
-          className="relative"
-          style={{ height: 10, borderRadius: 5, background: "var(--surface)", overflow: "hidden" }}
-        >
-          <div
-            style={{
-              width: `${confidencePct}%`,
-              height: "100%",
-              borderRadius: 5,
-              background: `linear-gradient(to right, ${meterColor}88, ${meterColor})`,
-              transition: "width 0.6s ease",
-            }}
-          />
-        </div>
-      </div>
-
-      {/* 推理摘要 */}
-      <div
-        className="sa-markdown-content text-xs mb-3 p-2 rounded"
-        style={{ background: "var(--surface)" }}
-      >
-        {cleanToolCallTags(decision.reasoning || "")
-          ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
-          : <span style={{ color: "var(--muted)" }}>暂无决策推理内容</span>}
-      </div>
-
-      {/* 核心指标网格 — 固定3列、窄屏2列，防止侧栏坍塌 */}
-      <div
-        className="grid gap-2 mb-3"
-        style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
-      >
-        {decision.targetPrice && (
-          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.targetPrice")}
-            </div>
-            <div className="text-sm font-semibold font-mono">
-              ¥{decision.targetPrice}
-            </div>
-          </div>
-        )}
-        {decision.stopLoss && (
-          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.stopLoss")}
-            </div>
-            <div className="text-sm font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
-              ¥{decision.stopLoss}
-            </div>
-          </div>
-        )}
-        <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-          <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
-          <div className="text-sm font-semibold font-mono">{decision.positionPct}%</div>
-        </div>
-        {upside != null && (
-          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.expectedUpside")}
-            </div>
-            <div
-              className="text-sm font-semibold font-mono"
-              style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+    <>
+      <Card
+        size="small"
+        title={
+          <div className="flex items-center gap-2">
+            <span>{t("stockAnalysis.finalDecision")}</span>
+            <Tag
+              color={decision.action === "买入" || decision.action === "增持"
+                ? "red"
+                : decision.action === "持有"
+                ? "blue"
+                : decision.action === "减持"
+                ? "orange"
+                : "green"}
             >
-              {upside >= 0 ? "+" : ""}
-              {upside.toFixed(1)}%
-            </div>
+              {actionLabel[decision.action] || decision.action}
+            </Tag>
           </div>
-        )}
-        <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-          <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
+        }
+        extra={
+          <Button
+            type="text"
+            size="small"
+            icon={<ExpandOutlined />}
+            onClick={() => setExpanded(true)}
+          />
+        }
+        styles={{ body: { padding: "12px 16px" } }}
+        style={{ borderLeft: "4px solid var(--accent)" }}
+      >
+        <div className="mb-3">
+          <div className="flex justify-between text-xs mb-1">
+            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
+            <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 15 }}>
+              {confidencePct}%
+            </span>
+          </div>
           <div
-            className="text-sm font-semibold"
-            style={{
-              color: String(decision.riskLevel ?? "").includes("高")
-                ? "var(--sa-red)"
-                : String(decision.riskLevel ?? "").includes("低")
-                ? "var(--sa-green)"
-                : "var(--sa-amber)",
-            }}
+            className="relative"
+            style={{ height: 10, borderRadius: 5, background: "var(--surface)", overflow: "hidden" }}
           >
-            {decision.riskLevel}
+            <div
+              style={{
+                width: `${confidencePct}%`,
+                height: "100%",
+                borderRadius: 5,
+                background: `linear-gradient(to right, ${meterColor}88, ${meterColor})`,
+                transition: "width 0.6s ease",
+              }}
+            />
           </div>
         </div>
-      </div>
 
-      {/* 操作按钮 */}
-      <div className="flex gap-2 items-center flex-wrap">
-        {stockCode && !watchlisted && (
-          <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>
-            ⭐ {t("stockAnalysis.addToWatchlist")}
-          </Button>
-        )}
-        {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
-        {stockCode && (
-          <>
-            <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
-              {t("stockAnalysis.askAI")}
+        <div
+          className="sa-markdown-content text-xs mb-3 p-2 rounded"
+          style={{ background: "var(--surface)" }}
+        >
+          {cleanToolCallTags(decision.reasoning || "")
+            ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
+            : <span style={{ color: "var(--muted)" }}>暂无决策推理内容</span>}
+        </div>
+
+        <div
+          className="grid gap-2 mb-3"
+          style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
+        >
+          {decision.targetPrice && (
+            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.targetPrice")}
+              </div>
+              <div className="text-sm font-semibold font-mono">
+                ¥{decision.targetPrice}
+              </div>
+            </div>
+          )}
+          {decision.stopLoss && (
+            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.stopLoss")}
+              </div>
+              <div className="text-sm font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
+                ¥{decision.stopLoss}
+              </div>
+            </div>
+          )}
+          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
+            <div className="text-sm font-semibold font-mono">{decision.positionPct}%</div>
+          </div>
+          {upside != null && (
+            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.expectedUpside")}
+              </div>
+              <div
+                className="text-sm font-semibold font-mono"
+                style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+              >
+                {upside >= 0 ? "+" : ""}
+                {upside.toFixed(1)}%
+              </div>
+            </div>
+          )}
+          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
+            <div
+              className="text-sm font-semibold"
+              style={{
+                color: String(decision.riskLevel ?? "").includes("高")
+                  ? "var(--sa-red)"
+                  : String(decision.riskLevel ?? "").includes("低")
+                  ? "var(--sa-green)"
+                  : "var(--sa-amber)",
+              }}
+            >
+              {decision.riskLevel}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 items-center flex-wrap">
+          {stockCode && !watchlisted && (
+            <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>
+              ⭐ {t("stockAnalysis.addToWatchlist")}
             </Button>
-            <Button size="small" icon={<span>📥</span>} onClick={handleExport}>
-              {t("stockAnalysis.exportReport")}
+          )}
+          {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
+          {stockCode && (
+            <>
+              <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
+                {t("stockAnalysis.askAI")}
+              </Button>
+              <Button size="small" icon={<span>📥</span>} onClick={handleExport}>
+                {t("stockAnalysis.exportReport")}
+              </Button>
+            </>
+          )}
+        </div>
+      </Card>
+
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <span>{t("stockAnalysis.finalDecision")}</span>
+            <Tag
+              color={decision.action === "买入" || decision.action === "增持"
+                ? "red"
+                : decision.action === "持有"
+                ? "blue"
+                : decision.action === "减持"
+                ? "orange"
+                : "green"}
+            >
+              {actionLabel[decision.action] || decision.action}
+            </Tag>
+          </div>
+        }
+        open={expanded}
+        onCancel={() => setExpanded(false)}
+        footer={null}
+        width="80vw"
+        style={{ top: 20 }}
+        styles={{ body: { maxHeight: "80vh", overflow: "auto" } }}
+      >
+        <div className="mb-4">
+          <div className="flex justify-between mb-1">
+            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
+            <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 20 }}>
+              {confidencePct}%
+            </span>
+          </div>
+          <div
+            className="relative"
+            style={{ height: 14, borderRadius: 7, background: "var(--surface)", overflow: "hidden" }}
+          >
+            <div
+              style={{
+                width: `${confidencePct}%`,
+                height: "100%",
+                borderRadius: 7,
+                background: `linear-gradient(to right, ${meterColor}88, ${meterColor})`,
+                transition: "width 0.6s ease",
+              }}
+            />
+          </div>
+        </div>
+
+        <div
+          className="grid gap-3 mb-4"
+          style={{ gridTemplateColumns: "repeat(5, 1fr)" }}
+        >
+          {decision.targetPrice && (
+            <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</div>
+              <div className="text-lg font-semibold font-mono">¥{decision.targetPrice}</div>
+            </div>
+          )}
+          {decision.stopLoss && (
+            <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</div>
+              <div className="text-lg font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
+                ¥{decision.stopLoss}
+              </div>
+            </div>
+          )}
+          <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
+            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
+            <div className="text-lg font-semibold font-mono">{decision.positionPct}%</div>
+          </div>
+          {upside != null && (
+            <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedUpside")}</div>
+              <div
+                className="text-lg font-semibold font-mono"
+                style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
+              >
+                {upside >= 0 ? "+" : ""}
+                {upside.toFixed(1)}%
+              </div>
+            </div>
+          )}
+          <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
+            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
+            <div
+              className="text-lg font-semibold"
+              style={{
+                color: String(decision.riskLevel ?? "").includes("高")
+                  ? "var(--sa-red)"
+                  : String(decision.riskLevel ?? "").includes("低")
+                  ? "var(--sa-green)"
+                  : "var(--sa-amber)",
+              }}
+            >
+              {decision.riskLevel}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="sa-markdown-content text-sm mb-4 p-4 rounded"
+          style={{ background: "var(--surface)" }}
+        >
+          {cleanToolCallTags(decision.reasoning || "")
+            ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
+            : <span style={{ color: "var(--muted)" }}>暂无决策推理内容</span>}
+        </div>
+
+        <div className="flex gap-2 items-center flex-wrap">
+          {stockCode && !watchlisted && (
+            <Button type="dashed" loading={adding} onClick={addToWatchlist}>
+              ⭐ {t("stockAnalysis.addToWatchlist")}
             </Button>
-          </>
-        )}
-      </div>
-    </Card>
+          )}
+          {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
+          {stockCode && (
+            <>
+              <Button icon={<span>💬</span>} onClick={handleAskAI}>
+                {t("stockAnalysis.askAI")}
+              </Button>
+              <Button icon={<span>📥</span>} onClick={handleExport}>
+                {t("stockAnalysis.exportReport")}
+              </Button>
+            </>
+          )}
+        </div>
+      </Modal>
+    </>
   );
 }

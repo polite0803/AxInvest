@@ -4,6 +4,7 @@ import * as echarts from "echarts";
 import NodeRenderer from "markstream-react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { cleanToolCallTags } from "./utils";
 
 /** 风险类型 → 颜色映射（匹配后端 risk_type 字段，OKLch 值与 index.css --sa-* 同步） */
 const RISK_COLORS: Record<string, string> = {
@@ -154,7 +155,7 @@ export function RiskMatrix() {
                 className="sa-markdown-content text-xs leading-relaxed"
                 style={{ maxHeight: 160, overflow: "auto" }}
               >
-                <NodeRenderer content={report} isDark={isDark} />
+                <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
               </div>
             </div>
           );

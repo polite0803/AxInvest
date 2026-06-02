@@ -153,13 +153,13 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const debatesMap = new Map([
     ["bull-researcher", {
       key: "bull-researcher",
-      label: "多方研究员",
+      label: i18next.t("stockAnalysis.workflow.bullAnalyst"),
       status: "pending" as "pending" | "running" | "done" | "failed",
       rounds: [] as string[],
     }],
     ["bear-researcher", {
       key: "bear-researcher",
-      label: "空方研究员",
+      label: i18next.t("stockAnalysis.workflow.bearAnalyst"),
       status: "pending" as "pending" | "running" | "done" | "failed",
       rounds: [] as string[],
     }],
@@ -168,19 +168,19 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const risksMap = new Map([
     ["risk-agg", {
       key: "risk-agg",
-      label: "激进评估",
+      label: i18next.t("stockAnalysis.workflow.riskAggressive"),
       status: "pending" as "pending" | "running" | "done" | "failed",
       content: undefined as string | undefined,
     }],
     ["risk-con", {
       key: "risk-con",
-      label: "保守评估",
+      label: i18next.t("stockAnalysis.workflow.riskConservative"),
       status: "pending" as "pending" | "running" | "done" | "failed",
       content: undefined as string | undefined,
     }],
     ["risk-neu", {
       key: "risk-neu",
-      label: "中性评估",
+      label: i18next.t("stockAnalysis.workflow.riskNeutral"),
       status: "pending" as "pending" | "running" | "done" | "failed",
       content: undefined as string | undefined,
     }],
@@ -189,17 +189,17 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const extraNodesMap = new Map([
     ["agg-risk", {
       key: "agg-risk",
-      label: "风险聚合",
+      label: i18next.t("stockAnalysis.workflow.riskAggregation"),
       status: "pending" as "pending" | "running" | "done" | "failed",
     }],
     ["cls-risk-level", {
       key: "cls-risk-level",
-      label: "风险分级",
+      label: i18next.t("stockAnalysis.workflow.riskClassification"),
       status: "pending" as "pending" | "running" | "done" | "failed",
     }],
     ["notify-result", {
       key: "notify-result",
-      label: "结果通知",
+      label: i18next.t("stockAnalysis.workflow.notification"),
       status: "pending" as "pending" | "running" | "done" | "failed",
     }],
   ]);
@@ -300,7 +300,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         if (output != null) {
           ds.error = typeof output === "string" ? output : JSON.stringify(output);
         } else {
-          ds.error = "数据获取失败";
+          ds.error = i18next.t("stockAnalysis.workflow.fetchFailed");
         }
       }
     }

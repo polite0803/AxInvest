@@ -7479,5 +7479,14 @@
   "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
   "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
   "stockAnalysis.workflow.bullCase": "多方論點",
-  "stockAnalysis.workflow.bearCase": "空方論點"
+  "stockAnalysis.workflow.bearCase": "空方論點",
+  "stockAnalysis.workflow.bullAnalyst": "多方研究員",
+  "stockAnalysis.workflow.bearAnalyst": "空方研究員",
+  "stockAnalysis.workflow.riskAggressive": "激進評估",
+  "stockAnalysis.workflow.riskConservative": "保守評估",
+  "stockAnalysis.workflow.riskNeutral": "中性評估",
+  "stockAnalysis.workflow.riskAggregation": "風險聚合",
+  "stockAnalysis.workflow.riskClassification": "風險分級",
+  "stockAnalysis.workflow.notification": "結果通知",
+  "stockAnalysis.workflow.fetchFailed": "數據獲取失敗"
 }

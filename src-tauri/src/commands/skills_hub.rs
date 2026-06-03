@@ -234,7 +234,7 @@ pub async fn skills_hub_review(
                         updated_at: Set(now),
                     };
                     if let Err(e) = axagent_core::repo::workflow_template::upsert_workflow_template(
-                        &state.sea_db,
+                        state.harness.db(),
                         tmpl,
                     )
                     .await

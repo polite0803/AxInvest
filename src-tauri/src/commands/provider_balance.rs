@@ -26,7 +26,7 @@ pub async fn fetch_provider_balance(
     state: State<'_, AppState>,
     provider_id: Option<String>,
 ) -> Result<ProviderBalanceResponse, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
     let providers = provider::list_providers(db)
         .await
         .map_err(|e| format!("Failed to list providers: {e}"))?;
@@ -60,7 +60,7 @@ pub async fn fetch_provider_balance(
         .map_err(|e| format!("Database error: {e}"))?
         .ok_or_else(|| "No enabled API key found for the provider.".to_string())?;
 
-    let api_key = decrypt_key(&key.key_encrypted, &state.master_key)
+    let api_key = decrypt_key(&key.key_encrypted, state.harness.master_key())
         .map_err(|e| format!("Failed to decrypt API key: {e}"))?;
 
     let balance = fetch_deepseek_balance(&api_key)

@@ -40,6 +40,7 @@ sha2 = { workspace = true }
 lazy_static = { workspace = true }
 axagent-core = { path = "../core" }
 axagent-astock-data = { path = "../astock-data" }
+axagent-harness = { path = "../harness" }
 axagent-runtime-core = { path = "../runtime-core" }
 axagent-plugins = { path = "../plugins" }
 axagent-migration = { path = "../migration" }

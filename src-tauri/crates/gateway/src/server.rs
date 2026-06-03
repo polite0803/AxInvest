@@ -22,7 +22,10 @@ pub struct GatewayAppState {
     pub db: DatabaseConnection,
     pub master_key: [u8; 32],
     pub started_at: i64,
+    /// AStock 客户端（AxInvest 股票数据）
     pub astock_client: std::sync::Arc<axagent_astock_data::AStockClient>,
+    /// 由 Harness 注入的 Provider 注册表（start_with_registry 使用）
+    pub provider_registry: Arc<dyn axagent_harness::registry::ProviderRegistry>,
 }
 
 /// TLS certificate material.
@@ -114,10 +117,12 @@ pub struct GatewayServer {
 }
 
 impl GatewayServer {
-    pub async fn start(
+    /// Start the gateway with a pre-built ProviderRegistry (from RuntimeHarness)
+    pub async fn start_with_registry(
         pool: DatabaseConnection,
         master_key: [u8; 32],
         config: GatewayStartConfig,
+        provider_registry: Arc<dyn axagent_harness::registry::ProviderRegistry>,
     ) -> Result<Self> {
         let started_at = axagent_core::utils::now_ts();
         let app_state = GatewayAppState {
@@ -125,8 +130,13 @@ impl GatewayServer {
             master_key,
             started_at,
             astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            provider_registry,
         };
+        Self::start_inner(app_state, config).await
+    }
 
+    /// Shared HTTP/HTTPS startup logic
+    async fn start_inner(app_state: GatewayAppState, config: GatewayStartConfig) -> Result<Self> {
         // ── Bind HTTP listener ──────────────────────────────────────────
         let http_bind: SocketAddr = format!("{}:{}", config.listen_address, config.http_port)
             .parse()

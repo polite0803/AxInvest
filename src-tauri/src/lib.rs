@@ -1102,7 +1102,12 @@ pub fn run() {
             let state = match std::thread::spawn(move || {
                 init::state::create_app_state(db_result)
             }).join() {
-                Ok(s) => s,
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
+                    tracing::error!("App state init returned error: {}", e);
+                    android_utils::report_fatal_error(&format!("App state init failed: {}", e));
+                    return Ok(());
+                }
                 Err(e) => {
                     tracing::error!("App state init thread panicked: {:?}", e);
                     android_utils::report_fatal_error(&format!("App state init thread panicked: {:?}", e));
@@ -1115,7 +1120,7 @@ pub fn run() {
             app.manage(state);
 
             let state = app.state::<AppState>();
-            let sea_db = state.sea_db.clone();
+            let sea_db = state.harness.db().clone();
 
             let sea_db2 = sea_db.clone();
             std::thread::spawn(move || {
@@ -1283,7 +1288,7 @@ pub fn run() {
             let state = app.state::<AppState>();
             #[cfg(not(mobile))]
             let tray_language = {
-                let db = state.sea_db.clone();
+                let db = state.harness.db().clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| {
                                 android_utils::report_fatal_error(&format!("Failed to create tokio runtime: {}", e));

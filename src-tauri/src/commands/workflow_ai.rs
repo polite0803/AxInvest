@@ -7,7 +7,6 @@ use axagent_core::types::{
     ProviderType,
 };
 use axagent_core::workflow_types::*;
-use axagent_providers::registry::ProviderRegistry;
 use axagent_providers::{ProviderRequestContext, resolve_base_url_for_type};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -52,7 +51,7 @@ struct ResolvedProvider {
 }
 
 async fn resolve_ai_provider(state: &AppState) -> Result<ResolvedProvider, String> {
-    let providers = axagent_core::repo::provider::list_providers(&state.sea_db)
+    let providers = axagent_core::repo::provider::list_providers(state.harness.db())
         .await
         .map_err(|e| format!("Failed to list providers: {}", e))?;
 
@@ -60,11 +59,12 @@ async fn resolve_ai_provider(state: &AppState) -> Result<ResolvedProvider, Strin
         "No enabled provider found. Please configure a provider in settings.".to_string()
     })?;
 
-    let provider_key = axagent_core::repo::provider::get_active_key(&state.sea_db, &provider.id)
-        .await
-        .map_err(|e| format!("Failed to get provider key: {}", e))?;
+    let provider_key =
+        axagent_core::repo::provider::get_active_key(state.harness.db(), &provider.id)
+            .await
+            .map_err(|e| format!("Failed to get provider key: {}", e))?;
 
-    let decrypted_key = decrypt_key(&provider_key.key_encrypted, &state.master_key)
+    let decrypted_key = decrypt_key(&provider_key.key_encrypted, state.harness.master_key())
         .map_err(|e| format!("Failed to decrypt API key: {}", e))?;
 
     let base_url = resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
@@ -1185,14 +1185,18 @@ pub async fn generate_workflow_from_prompt(
     current_edges: Option<Vec<serde_json::Value>>,
 ) -> Result<WorkflowGenerationResult, String> {
     let resolved = resolve_ai_provider(&state).await?;
-    let registry = ProviderRegistry::create_default();
+
     let registry_key = provider_type_to_registry_key(&resolved.provider_type);
-    let adapter = registry.get(registry_key).ok_or_else(|| {
-        ErrorResponse::err_with_detail(
-            provider_err::ADAPTER_NOT_FOUND,
-            format!("Provider adapter not found for type: {}", registry_key),
-        )
-    })?;
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(registry_key)
+        .ok_or_else(|| {
+            ErrorResponse::err_with_detail(
+                provider_err::ADAPTER_NOT_FOUND,
+                format!("Provider adapter not found for type: {}", registry_key),
+            )
+        })?;
 
     let mut context_section = String::new();
     if let Some(nodes) = &current_nodes {
@@ -1336,14 +1340,18 @@ pub async fn optimize_agent_prompt(
     prompt: String,
 ) -> Result<String, String> {
     let resolved = resolve_ai_provider(&state).await?;
-    let registry = ProviderRegistry::create_default();
+
     let registry_key = provider_type_to_registry_key(&resolved.provider_type);
-    let adapter = registry.get(registry_key).ok_or_else(|| {
-        ErrorResponse::err_with_detail(
-            provider_err::ADAPTER_NOT_FOUND,
-            format!("Provider adapter not found for type: {}", registry_key),
-        )
-    })?;
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(registry_key)
+        .ok_or_else(|| {
+            ErrorResponse::err_with_detail(
+                provider_err::ADAPTER_NOT_FOUND,
+                format!("Provider adapter not found for type: {}", registry_key),
+            )
+        })?;
 
     let system_prompt = r#"You are an expert prompt engineer. Your task is to optimize the given agent prompt to make it more effective, clear, and structured.
 
@@ -1415,14 +1423,18 @@ pub async fn recommend_nodes(
     current_node_types: Option<Vec<String>>,
 ) -> Result<Vec<NodeRecommendation>, String> {
     let resolved = resolve_ai_provider(&state).await?;
-    let registry = ProviderRegistry::create_default();
+
     let registry_key = provider_type_to_registry_key(&resolved.provider_type);
-    let adapter = registry.get(registry_key).ok_or_else(|| {
-        ErrorResponse::err_with_detail(
-            provider_err::ADAPTER_NOT_FOUND,
-            format!("Provider adapter not found for type: {}", registry_key),
-        )
-    })?;
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(registry_key)
+        .ok_or_else(|| {
+            ErrorResponse::err_with_detail(
+                provider_err::ADAPTER_NOT_FOUND,
+                format!("Provider adapter not found for type: {}", registry_key),
+            )
+        })?;
 
     let system_prompt = r#"You are a workflow design assistant. Based on the user's description of their workflow needs, recommend the most suitable node types.
 
@@ -1741,14 +1753,18 @@ pub async fn workflow_ai_chat_stream(
     session_id: String,
 ) -> Result<(), String> {
     let resolved = resolve_ai_provider(&state).await?;
-    let registry = ProviderRegistry::create_default();
+
     let registry_key = provider_type_to_registry_key(&resolved.provider_type);
-    let adapter = registry.get(registry_key).ok_or_else(|| {
-        ErrorResponse::err_with_detail(
-            provider_err::ADAPTER_NOT_FOUND,
-            format!("Provider adapter not found for type: {}", registry_key),
-        )
-    })?;
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(registry_key)
+        .ok_or_else(|| {
+            ErrorResponse::err_with_detail(
+                provider_err::ADAPTER_NOT_FOUND,
+                format!("Provider adapter not found for type: {}", registry_key),
+            )
+        })?;
 
     let mut canvas_section = String::new();
     if let Some(nodes) = &current_nodes {

@@ -7,7 +7,6 @@ use axagent_plugins::PluginManager;
 use axagent_runtime::dashboard_registry::DashboardRegistry;
 use axagent_runtime::webhook_subscription::WebhookSubscriptionManager;
 use axagent_runtime_core::prompt_cache::PromptCache;
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -173,13 +172,21 @@ pub struct ShareParticipant {
 pub type SessionShareStore =
     Arc<TokioRwLock<std::collections::HashMap<String, ShareSessionRecord>>>;
 
+// ── AppState 字段迁移计划 ──────────────────────────────────────────
+//
+// Harness 架构目标已完成 Step 14：原 `sea_db` / `master_key` / `db_path` 三个
+// `RuntimeHarness` 镜像字段已全部移除，所有调用方统一走 `state.harness.xxx()`。
+//
+// 仍由 `AppState` 持有的非镜像字段（路由层薄壳）：
+//   - `gateway` / `close_to_tray` / `app_data_dir` / `task handles`
+//   - `vector_store` / `indexing_semaphore` / `stream_cancel_flags`
+//   - `agent_*`（权限 / 取消 / 会话 / 反思等 agent 运行时状态）
+//   - `memory_service` / `shared_memory` / `sub_agent_registry` / `trajectory_*`
+//   - 其它领域服务（pattern_learner / rl_engine / cron_job_store / ...）
 pub struct AppState {
-    pub sea_db: DatabaseConnection,
-    pub master_key: [u8; 32],
     pub gateway: Arc<Mutex<Option<axagent_gateway::server::GatewayServer>>>,
     pub close_to_tray: Arc<AtomicBool>,
     pub app_data_dir: PathBuf,
-    pub db_path: String,
     pub auto_backup_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub webdav_sync_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     pub api_server_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -238,6 +245,8 @@ pub struct AppState {
     pub webhook_subscription_manager: Option<Arc<WebhookSubscriptionManager>>,
     pub semantic_cache: Arc<tokio::sync::Mutex<SemanticCacheState>>,
     pub prompt_cache: Arc<PromptCache>,
+    /// Harness 容器（统一管理核心基础设施注入）
+    pub harness: axagent_runtime::harness::RuntimeHarness,
     // Tree of Thoughts state
     pub tot_sessions: Arc<tokio::sync::Mutex<HashMap<String, TotSession>>>,
     // Replanning state
@@ -268,7 +277,7 @@ pub struct AppState {
     pub stock_monitor: Option<Arc<axagent_stock_analysis::monitor::RealtimeMonitor>>,
     /// 手动交易引擎（单例，避免每次命令调用重新创建）
     pub trading_engine: Arc<TokioRwLock<axagent_stock_analysis::trading::TradingEngine>>,
-    pub plugin_manager: std::sync::RwLock<PluginManager>,
+    pub plugin_manager: Arc<tokio::sync::RwLock<PluginManager>>,
     pub file_authorizer: Arc<FileAuthorizer>,
     pub session_share_manager: SessionShareStore,
 }

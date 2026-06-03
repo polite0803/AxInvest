@@ -8,8 +8,7 @@ use axagent_core::repo::conversation as conversation_repo;
 use axagent_core::repo::message as message_repo;
 use axagent_core::repo::provider::{self as provider_repo, get_active_key};
 use axagent_core::types::{ChatContent, ChatMessage, ChatRequest, MessageRole};
-use axagent_providers::registry::ProviderRegistry;
-use axagent_providers::resolve_base_url_for_type;
+use axagent_harness::resolve_base_url_for_type;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -153,7 +152,7 @@ pub async fn generate_research_report(
     conversation_id: String,
     topic: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     // 1. 加载对话信息和消息列表
     let conversation = conversation_repo::get_conversation(db, &conversation_id)
@@ -177,13 +176,15 @@ pub async fn generate_research_report(
         .await
         .map_err(|e| format!("无活跃密钥: {}", e))?;
 
-    let api_key = decrypt_key(&key_row.key_encrypted, &state.master_key)
+    let api_key = decrypt_key(&key_row.key_encrypted, state.harness.master_key())
         .map_err(|e| format!("密钥解密失败: {}", e))?;
 
     // 3. 创建 ProviderAdapter
     let registry_key = format!("{:?}", provider_config.provider_type).to_lowercase();
-    let registry = ProviderRegistry::create_default();
-    let adapter = registry
+
+    let adapter = state
+        .harness
+        .provider_registry()
         .get(&registry_key)
         .ok_or_else(|| format!("未找到供应商适配器: {}", registry_key))?;
 

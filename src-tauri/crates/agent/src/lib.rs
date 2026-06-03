@@ -151,16 +151,14 @@ pub use hierarchical_planner::{
 };
 pub use insight_generator::{Insight, InsightCategory, InsightGenerator, InsightStats};
 pub use recovery_strategies::{ClassifiedError, ErrorClassifier, ErrorType};
-// 所有工具相关类型已统一在 axagent-tools，此处重导出保持兼容
-pub use axagent_tools::registry::UnifiedToolRegistry as ToolRegistry;
-pub use axagent_tools::registry::{McpServerConfig, McpToolConfig};
-pub use axagent_tools::{ToolContext, ToolError, ToolExecutionRecorder, ToolResult};
+// 工具相关类型来自 axagent-harness 契约层，消费方请直接 `use axagent_harness::Tool` 等。
+// 历史上本模块曾 `pub use axagent_harness::{...}`，已删除以避免双导出导致 crate 边界模糊。
 
 // LocalToolRegistry / LocalToolDef / LocalToolGroup 已删除 — 直接使用 axagent_tools::registry::UnifiedToolRegistry
 // McpRegistry 已删除 — 直接使用 axagent_tools::registry::UnifiedToolRegistry
 
 pub use axagent_runtime_core::AgentExecutionProgressSnapshot;
-pub use llm_bridge::{ProviderLlmBridge, build_llm_bridge_from_db, build_llm_bridge_from_db_with};
+pub use llm_bridge::ProviderLlmBridge;
 pub use metrics::{
     MetricType, MetricValue, MetricsCollector, StructuredLogEntry, TimedGuard, TimingStats,
     log_with_fields, record_timing_async,

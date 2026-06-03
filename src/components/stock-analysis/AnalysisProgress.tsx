@@ -22,7 +22,7 @@ export function AnalysisProgress() {
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const error = useStockAnalysisStore((s) => s.error);
-    const llmStatus = useStockAnalysisStore((s) => s.llmStatus);
+  const llmStatus = useStockAnalysisStore((s) => s.llmStatus);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const progressMessage = useStockAnalysisStore((s) => s.progressMessage);
   const progressPct = useStockAnalysisStore((s) => s.progressPct);

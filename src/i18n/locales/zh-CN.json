@@ -7665,5 +7665,7 @@
   "stockAnalysis.export.reasoning": "推理摘要:",
   "stockAnalysis.export.analystReports": "分析师报告: {{count}} 篇",
   "stockAnalysis.export.debateRounds": "辩论轮次: {{count}} 轮",
-  "stockAnalysis.export.riskAssessments": "风险评估: {{count}} 项"
+  "stockAnalysis.export.riskAssessments": "风险评估: {{count}} 项",
+  "stockAnalysis.workflow.partialFailed": "{{count}} 个步骤执行失败",
+  "stockAnalysis.workflow.failedSteps": "失败步骤"
 }

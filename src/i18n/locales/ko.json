@@ -7541,6 +7541,9 @@
   "stockAnalysis.export.analystReports": "Analyst Reports: {{count}}",
   "stockAnalysis.export.debateRounds": "Debate Rounds: {{count}}",
   "stockAnalysis.export.riskAssessments": "Risk Assessments: {{count}}",
+
+  "stockAnalysis.workflow.partialFailed": "{{count}} step(s) failed",
+  "stockAnalysis.workflow.failedSteps": "Failed Steps",
   "stockAnalysis.workflow.bullAnalyst": "Bull Analyst",
   "stockAnalysis.workflow.bearAnalyst": "Bear Analyst",
   "stockAnalysis.workflow.riskAggressive": "Aggressive Assessment",

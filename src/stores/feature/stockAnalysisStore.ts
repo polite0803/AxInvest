@@ -118,6 +118,7 @@ interface StockAnalysisState {
   decision: StockDecision | null;
   error: string | null;
   errorCode: string | null;
+  failedNodes: string[];
 
   history: AnalysisSummary[];
 
@@ -185,6 +186,7 @@ const initialState = {
   decision: null,
   error: null,
   errorCode: null,
+  failedNodes: [],
   history: [],
   currentStage: 0,
   progressMessage: "",
@@ -276,6 +278,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       status: "loading",
       error: null,
       errorCode: null,
+      failedNodes: [],
       currentStage: 0,
       workflowId: null,
       progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
@@ -476,6 +479,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           : status === "failed"
           ? i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId })
           : i18n.t("stockAnalysis.progress.stepRunning", { name: nodeId }),
+        failedNodes: status === "failed"
+          ? [...get().failedNodes, nodeId]
+          : get().failedNodes,
       });
 
       if (status === "completed" && output != null) {

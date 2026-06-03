@@ -671,7 +671,7 @@ impl StockAnalysisOrchestrator {
                 r.run_agent(BULL_ID, &sys_bull, &bull_context).await?
             } else {
                 format!(
-                    r#"{{"round":{round},"role":"bull","argument":"多方辩论占位 — 第{round}轮","key_points":["技术面支持","基本面良好"],"confidence":0.6}}"#
+                    r#"{{"round":{round},"role":"bull","argument":"多方辩论占位 — 第{round}轮","key_points":["技术面支持","基本面良好"],"confidence":60}}"#
                 )
             };
             bull_prev = bull_arg.clone();
@@ -691,7 +691,7 @@ impl StockAnalysisOrchestrator {
                 r.run_agent(BEAR_ID, &sys_bear, &bear_context).await?
             } else {
                 format!(
-                    r#"{{"round":{round},"role":"bear","argument":"空方辩论占位 — 第{round}轮","key_points":["估值偏高","政策不确定性"],"confidence":0.5}}"#
+                    r#"{{"round":{round},"role":"bear","argument":"空方辩论占位 — 第{round}轮","key_points":["估值偏高","政策不确定性"],"confidence":50}}"#
                 )
             };
             bear_prev = bear_arg.clone();
@@ -954,7 +954,7 @@ impl StockAnalysisOrchestrator {
             r.run_agent(PORTFOLIO_MANAGER_ID, &sys_prompt, &user_prompt)
                 .await?
         } else {
-            r#"{"action":"持有","position_pct":0,"target_price":null,"stop_loss":null,"reasoning":"分析框架已完成，待 AgentRunner 注入后生成真实 LLM 决策。","risk_level":"中","confidence":0.0}"#.to_string()
+            r#"{"action":"持有","position_pct":0,"target_price":null,"stop_loss":null,"reasoning":"分析框架已完成，待 AgentRunner 注入后生成真实 LLM 决策。","risk_level":"中","confidence":80}"#.to_string()
         };
 
         let decision = Self::parse_decision(&decision_text).unwrap_or_else(|e| {
@@ -969,7 +969,7 @@ impl StockAnalysisOrchestrator {
                     &decision_text[..200.min(decision_text.len())]
                 ),
                 risk_level: "中".into(),
-                confidence: 0.0,
+                confidence: 0,
             }
         });
 

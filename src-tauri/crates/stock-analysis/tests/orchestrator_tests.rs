@@ -33,14 +33,14 @@ fn test_stock_decision_defaults() {
         stop_loss: Some(1580.0),
         reasoning: "测试".into(),
         risk_level: "中".into(),
-        confidence: 0.8,
+        confidence: 80,
     };
     let json = serde_json::to_string(&decision).unwrap();
     let parsed: StockDecision = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.action, "买入");
     // camelCase after serde rename
     assert_eq!(parsed.position_pct, 10.0);
-    assert_eq!(parsed.confidence, 0.8);
+    assert_eq!(parsed.confidence, 80.0);
     assert_eq!(parsed.target_price, Some(1850.0));
     assert!(json.contains("positionPct"));
 }
@@ -105,7 +105,7 @@ fn test_stock_decision_roundtrip() {
         stop_loss: None,
         reasoning: "基本面稳健，技术面震荡，建议持有观望".into(),
         risk_level: "低".into(),
-        confidence: 0.65,
+        confidence: 65,
     };
     let json = serde_json::to_string(&decision).unwrap();
     let parsed: StockDecision = serde_json::from_str(&json).unwrap();
@@ -113,5 +113,5 @@ fn test_stock_decision_roundtrip() {
     assert_eq!(parsed.position_pct, 30.0);
     assert_eq!(parsed.target_price, None);
     assert_eq!(parsed.stop_loss, None);
-    assert_eq!(parsed.confidence, 0.65);
+    assert_eq!(parsed.confidence, 65.0);
 }

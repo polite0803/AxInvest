@@ -34,7 +34,7 @@ pub fn start_background_services(
 }
 
 fn start_auto_backup(_app: &tauri::AppHandle, state: &AppState, app_dir: std::path::PathBuf) {
-    let db = state.sea_db.clone();
+    let db = state.harness.db().clone();
     let app_data = app_dir.clone();
     let handle = state.auto_backup_handle.clone();
     let shutdown_token = state.shutdown_token.clone();
@@ -143,7 +143,7 @@ fn start_memory_maintenance_tick(state: &AppState) {
 
 fn start_platform_adapters(state: &AppState) {
     let platform_manager = state.platform_manager.clone();
-    let db = state.sea_db.clone();
+    let db = state.harness.db().clone();
 
     tauri::async_runtime::spawn(async move {
         let config = axagent_core::repo::platform_config::get_platform_config(&db).await;
@@ -173,8 +173,8 @@ fn start_platform_adapters(state: &AppState) {
 }
 
 fn start_webdav_sync(_app: &tauri::AppHandle, state: &AppState, app_dir: std::path::PathBuf) {
-    let db = state.sea_db.clone();
-    let master_key = state.master_key;
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
     let app_data_dir = app_dir.clone();
     let handle = state.webdav_sync_handle.clone();
     let shutdown_token = state.shutdown_token.clone();
@@ -225,7 +225,7 @@ fn start_tray(app: &tauri::AppHandle, tray_language: &str) {
 }
 
 fn start_closed_loop_service(_app: &tauri::AppHandle, state: &AppState) {
-    let db = state.sea_db.clone();
+    let db = state.harness.db().clone();
     let closed_loop = state.closed_loop_service.clone();
     let nudge_service = state.nudge_service.clone();
     tauri::async_runtime::spawn(async move {
@@ -412,10 +412,12 @@ fn start_rl_reward_computation(state: &AppState) {
     let rl_engine = state.rl_engine.clone();
     let insight_system = state.insight_system.clone();
     let process_reward_model = state.process_reward_model.clone();
-    let db = state.sea_db.clone();
-    let master_key = state.master_key;
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
     tauri::async_runtime::spawn(async move {
-        if let Some(bridge) = axagent_agent::build_llm_bridge_from_db(&db, &master_key).await {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
             {
                 let mut rl = rl_engine.write().await;
                 rl.set_llm_judge(Box::new(bridge.clone()));
@@ -631,10 +633,12 @@ fn start_skill_evolution(state: &AppState) {
     let constitution = state.constitution.clone();
     let intrinsic_motivation = state.intrinsic_motivation.clone();
     let coevolution_env = state.coevolution_env.clone();
-    let db = state.sea_db.clone();
-    let master_key = state.master_key;
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
     tauri::async_runtime::spawn(async move {
-        if let Some(bridge) = axagent_agent::build_llm_bridge_from_db(&db, &master_key).await {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
             let mut engine = skill_evolution_engine.lock().await;
             engine.set_llm_provider(std::sync::Arc::new(bridge));
             drop(engine);
@@ -902,10 +906,12 @@ fn start_memory_decay_tick(state: &AppState) {
 fn start_auto_tool_observation(state: &AppState) {
     let trajectory_storage = state.trajectory_storage.clone();
     let auto_tool_creator = state.auto_tool_creator.clone();
-    let db = state.sea_db.clone();
-    let master_key = state.master_key;
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
     tauri::async_runtime::spawn(async move {
-        if let Some(bridge) = axagent_agent::build_llm_bridge_from_db(&db, &master_key).await {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
             let mut atc = auto_tool_creator.lock().await;
             atc.set_llm_provider(Box::new(bridge));
             drop(atc);
@@ -976,10 +982,12 @@ fn start_auto_tool_observation(state: &AppState) {
 fn start_text_grad_analysis(state: &AppState) {
     let trajectory_storage = state.trajectory_storage.clone();
     let text_grad_engine = state.text_grad_engine.clone();
-    let db = state.sea_db.clone();
-    let master_key = state.master_key;
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
     tauri::async_runtime::spawn(async move {
-        if let Some(bridge) = axagent_agent::build_llm_bridge_from_db(&db, &master_key).await {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
             let mut engine = text_grad_engine.lock().await;
             engine.set_provider(bridge);
             drop(engine);
@@ -1150,8 +1158,8 @@ fn start_cron_scheduler(state: &AppState) {
 
     // 设置 RAG 知识源检索回调（供工作流 Agent 节点从知识库/记忆/Wiki 检索上下文）
     {
-        let db = state.sea_db.clone();
-        let master_key = state.master_key;
+        let db = state.harness.db().clone();
+        let master_key = state.harness.master_key_owned();
         let vector_store = state.vector_store.clone();
         let rag_callback: axagent_rt_workflow::work_engine::RagCallback = std::sync::Arc::new(
             move |kb_ids: Vec<String>,

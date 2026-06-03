@@ -232,10 +232,9 @@ async fn generate_plan_via_llm(
     user_message_id: &str,
 ) -> Result<Plan, String> {
     use axagent_core::repo::provider::{self, get_active_key};
-    use axagent_providers::registry::ProviderRegistry;
-    use axagent_providers::resolve_base_url_for_type;
+    use axagent_harness::resolve_base_url_for_type;
 
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     // Load provider config
     let provider_config = provider::get_provider(db, provider_id)
@@ -244,26 +243,31 @@ async fn generate_plan_via_llm(
 
     // Resolve provider adapter
     let registry_key = format!("{:?}", provider_config.provider_type).to_lowercase();
-    let registry = ProviderRegistry::create_default();
-    let adapter = registry.get(&registry_key).ok_or_else(|| {
-        ErrorResponse::err_with_detail(
-            provider_err::ADAPTER_NOT_FOUND,
-            format!("Provider adapter not found for: {}", registry_key),
-        )
-    })?;
+
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(&registry_key)
+        .ok_or_else(|| {
+            ErrorResponse::err_with_detail(
+                provider_err::ADAPTER_NOT_FOUND,
+                format!("Provider adapter not found for: {}", registry_key),
+            )
+        })?;
 
     // Get active key and decrypt
     let key_row = get_active_key(db, provider_id)
         .await
         .map_err(|e| format!("No active provider key: {}", e))?;
 
-    let api_key = axagent_core::crypto::decrypt_key(&key_row.key_encrypted, &state.master_key)
-        .map_err(|e| format!("Failed to decrypt provider key: {}", e))?;
+    let api_key =
+        axagent_core::crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
+            .map_err(|e| format!("Failed to decrypt provider key: {}", e))?;
 
     // Parse proxy config from the provider
     let proxy_config = provider_config.proxy_config.clone();
 
-    let ctx = axagent_providers::ProviderRequestContext {
+    let ctx = axagent_harness::ProviderRequestContext {
         api_key,
         key_id: key_row.id.clone(),
         provider_id: provider_id.to_string(),
@@ -460,8 +464,8 @@ fn find_matching_brace(s: &str) -> Result<usize, String> {
 /// Holds the reusable parts of agent context (adapter + credentials).
 /// The `api_client` and `tool_registry` are rebuilt per-step.
 struct AgentContext {
-    adapter: Arc<dyn axagent_providers::ProviderAdapter>,
-    ctx: axagent_providers::ProviderRequestContext,
+    adapter: Arc<dyn axagent_harness::ProviderAdapter>,
+    ctx: axagent_harness::ProviderRequestContext,
     provider_id: String,
     model_id: String,
     enabled_mcp_server_ids: Vec<String>,
@@ -476,7 +480,7 @@ async fn build_agent_context(
 ) -> Result<AgentContext, String> {
     use axagent_providers::{ProviderAdapter, resolve_base_url_for_type};
 
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     let prov = axagent_core::repo::provider::get_provider(db, provider_id)
         .await
@@ -488,14 +492,14 @@ async fn build_agent_context(
         .find(|k| k.enabled)
         .ok_or_else(|| "No active API key for provider".to_string())?;
 
-    let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, &state.master_key)
+    let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, state.harness.master_key())
         .map_err(|e| e.to_string())?;
 
     let settings = axagent_core::repo::settings::get_settings(db)
         .await
         .unwrap_or_default();
 
-    let ctx = axagent_providers::ProviderRequestContext {
+    let ctx = axagent_harness::ProviderRequestContext {
         api_key,
         key_id: key.id.clone(),
         provider_id: prov.id.clone(),
@@ -553,8 +557,8 @@ async fn build_agent_context(
 async fn build_step_tools(
     agent_ctx: &AgentContext,
     db: &sea_orm::DatabaseConnection,
-) -> (axagent_agent::AxAgentApiClient, axagent_agent::ToolRegistry) {
-    let mut tool_registry = axagent_agent::ToolRegistry::new();
+) -> (axagent_agent::AxAgentApiClient, axagent_tools::registry::UnifiedToolRegistry) {
+    let mut tool_registry = axagent_tools::registry::UnifiedToolRegistry::new();
     let mut chat_tools: Vec<ChatTool> = Vec::new();
 
     for server_id in &agent_ctx.enabled_mcp_server_ids {
@@ -587,7 +591,7 @@ async fn build_step_tools(
                     td.name,
                     td.description,
                     parameters,
-                    axagent_agent::McpServerConfig {
+                    axagent_tools::registry::McpServerConfig {
                         server_id: server.id.clone(),
                         server_name: server.name.clone(),
                         transport: server.transport.clone(),
@@ -618,7 +622,7 @@ async fn build_step_tools(
     }
 
     tool_registry = tool_registry
-        .with_recorder(axagent_agent::ToolExecutionRecorder::new(Arc::new(db.clone())));
+        .with_recorder(axagent_tools::ToolExecutionRecorder::new(Arc::new(db.clone())));
 
     let api_client = if chat_tools.is_empty() {
         axagent_agent::AxAgentApiClient::new(agent_ctx.adapter.clone(), agent_ctx.ctx.clone())
@@ -675,7 +679,7 @@ async fn execute_step_with_agent(
     );
 
     // Build fresh api_client + tool_registry for this step
-    let (api_client, tool_registry) = build_step_tools(agent_ctx, &state.sea_db).await;
+    let (api_client, tool_registry) = build_step_tools(agent_ctx, state.harness.db()).await;
 
     let result = session_manager
         .run_turn_with_tools(
@@ -764,7 +768,7 @@ pub async fn plan_generate(
     app: tauri::AppHandle,
     request: PlanGenerateRequest,
 ) -> Result<Plan, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     // Load conversation to get provider/model info
     let conversation =
@@ -851,7 +855,7 @@ pub async fn plan_execute(
     app: tauri::AppHandle,
     request: PlanExecuteRequest,
 ) -> Result<(), String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     // Load plan from database
     let plan_row = axagent_core::entity::plans::Entity::find_by_id(&request.plan_id)
@@ -1197,7 +1201,7 @@ pub async fn plan_cancel(
     app: tauri::AppHandle,
     request: PlanCancelRequest,
 ) -> Result<(), String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     // 尝试取消正在运行的 DAG 工作流
     if let Some(wf_id) = RUNNING_PLAN_WORKFLOWS.lock().await.remove(&request.plan_id) {
@@ -1240,7 +1244,7 @@ pub async fn plan_activate(
     state: tauri::State<'_, AppState>,
     request: PlanActivateRequest,
 ) -> Result<Plan, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     // Deactivate all other active plans for this conversation
     let existing = axagent_core::entity::plans::Entity::find()
@@ -1299,7 +1303,7 @@ pub async fn plan_get(
     state: tauri::State<'_, AppState>,
     request: PlanGetRequest,
 ) -> Result<Option<Plan>, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     let row = axagent_core::entity::plans::Entity::find_by_id(&request.plan_id)
         .one(db)
@@ -1342,7 +1346,7 @@ pub async fn plan_list(
     state: tauri::State<'_, AppState>,
     request: PlanListRequest,
 ) -> Result<Vec<Plan>, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     let mut query = axagent_core::entity::plans::Entity::find()
         .filter(axagent_core::entity::plans::Column::ConversationId.eq(&request.conversation_id));
@@ -1395,7 +1399,7 @@ pub async fn plan_modify_step(
     state: tauri::State<'_, AppState>,
     request: PlanModifyStepRequest,
 ) -> Result<Option<Plan>, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
 
     let row = axagent_core::entity::plans::Entity::find_by_id(&request.plan_id)
         .one(db)

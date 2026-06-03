@@ -14,7 +14,11 @@ use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
 use tokio_util::sync::CancellationToken;
 
-pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
+/// 构造 AppState。
+///
+/// 失败时返回结构化错误，由调用方决定如何处理（错误展示 / 重试 / 退出）。
+/// 不再 `process::exit(1)`——harness 架构要求启动错误可被前端感知。
+pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, String> {
     let DatabaseInitResult {
         db_handle,
         master_key,
@@ -23,6 +27,9 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
         ..
     } = db_result;
 
+    // db_handle 进入 harness（Step 4）；同时克隆 conn 给其它需要 DatabaseConnection 的
+    // 旧式组件（vector_store / trajectory_storage / cron / semantic_cache 等）。
+    // 这些组件后续在 Step 5/6 也会迁到 harness 内部。
     let sea_db = db_handle.conn.clone();
 
     let vector_store = axagent_core::vector_store::VectorStore::new(sea_db.clone());
@@ -60,14 +67,14 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
             tracing::warn!("Failed to create multi-threaded runtime for state init: {} — falling back to current-thread", e);
             tokio::runtime::Builder::new_current_thread().enable_all().build()
         })
-        .unwrap_or_else(|e| {
+        .map_err(|e| {
             tracing::error!("Failed to create init runtime in state: {}", e);
             crate::android_utils::report_fatal_error(&format!(
                 "Init runtime creation failed in state: {}",
                 e
             ));
-            std::process::exit(1);
-        });
+            format!("Init runtime creation failed in state: {}", e)
+        })?;
     // ensure_preset_servers / migrate_hardcoded_paths / migrate_legacy_keys
     // 已合并到 axagent_core::db::create_pool() 中，无需在此重复调用
 
@@ -100,46 +107,52 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
     };
 
     let memory_service = {
-        let ms = axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone())
-            .unwrap_or_else(|e| {
+        let ms = match axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone()) {
+            Ok(ms) => ms,
+            Err(e) => {
                 tracing::error!("Failed to create MemoryService: {} — retrying once", e);
-                axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone())
-                    .unwrap_or_else(|e2| {
+                match axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone()) {
+                    Ok(ms) => ms,
+                    Err(e2) => {
                         tracing::error!(
                             "MemoryService creation failed after retry: {} — creating with fresh storage",
                             e2
                         );
                         // 用新 TrajectoryStorage 兜底，避免 panic 导致 Android 静默崩溃
-                        let fallback_storage = std::sync::Arc::new(
-                            axagent_trajectory::TrajectoryStorage::new(
+                        let fallback_storage =
+                            std::sync::Arc::new(axagent_trajectory::TrajectoryStorage::new(
                                 std::sync::Arc::new(sea_db.clone()),
-                            ),
-                        );
-                        axagent_trajectory::MemoryService::new(fallback_storage)
-                            .unwrap_or_else(|e3| {
-                                crate::android_utils::report_fatal_error(&format!(
-                                    "MemoryService unreachable path reached: {}",
-                                    e3,
-                                ));
-                                std::process::exit(1);
-                            })
-                    })
-            });
+                            ));
+                        match axagent_trajectory::MemoryService::new(fallback_storage) {
+                            Ok(ms) => ms,
+                            Err(e3) => {
+                                let msg = format!("MemoryService unreachable path reached: {}", e3);
+                                crate::android_utils::report_fatal_error(&msg);
+                                return Err(msg);
+                            },
+                        }
+                    },
+                }
+            },
+        };
         if let Err(e) = ms.initialize() {
             tracing::warn!("Failed to initialize MemoryService: {}", e);
         }
         Arc::new(TokioRwLock::new(ms))
     };
 
+    // ── 初始化 Harness 容器（统一管理核心基础设施注入） ──
+    let harness =
+        axagent_runtime::harness::RuntimeHarness::new(axagent_runtime::harness::HarnessDeps {
+            persistence: Arc::new(db_handle) as axagent_harness::SharedPersistence,
+            master_key,
+        });
+    let harness_registry = harness.provider_registry().clone();
+
     let platform_manager =
         Arc::new(axagent_runtime::message_gateway::platform_manager::PlatformManager::new());
 
-    let platform_bridge =
-        Arc::new(axagent_runtime::message_gateway::platform_bridge::PlatformBridge::new(
-            sea_db.clone(),
-            master_key,
-            platform_manager.clone(),
-        ));
+    let platform_bridge = harness.build_platform_bridge(platform_manager.clone());
 
     rt.block_on(platform_manager.set_message_callback(platform_bridge.clone()));
 
@@ -161,15 +174,13 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
     let config_home = home.join(".claw");
     let mut plugin_config = PluginManagerConfig::new(config_home.clone());
     plugin_config.external_dirs = axagent_core::skill_dirs::all_skills_dirs();
-    let plugin_manager = std::sync::RwLock::new(PluginManager::new(plugin_config));
+    let plugin_manager = Arc::new(tokio::sync::RwLock::new(PluginManager::new(plugin_config)));
 
-    AppState {
-        sea_db: sea_db.clone(),
-        master_key,
+    Ok(AppState {
+        harness,
         gateway: Arc::new(Mutex::new(None)),
         close_to_tray: Arc::new(AtomicBool::new(false)),
         app_data_dir: app_dir.clone(),
-        db_path,
         auto_backup_handle: Arc::new(Mutex::new(None)),
         webdav_sync_handle: Arc::new(Mutex::new(None)),
         api_server_handle: Arc::new(Mutex::new(None)),
@@ -235,34 +246,41 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
             axagent_trajectory::SkillProposalService::new(shared_trajectory_storage.clone()),
         )),
         auto_memory_extractor: {
-            let auto_ms = axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone())
-                .unwrap_or_else(|e| {
+            let auto_ms = match axagent_trajectory::MemoryService::new(
+                shared_trajectory_storage.clone(),
+            ) {
+                Ok(ms) => ms,
+                Err(e) => {
                     tracing::warn!(
                         "Failed to create MemoryService for AutoMemory: {} — falling back to primary memory service",
                         e
                     );
                     // 回退到主 memory_service（克隆引用），避免 panic 导致 Android 静默崩溃
-                    axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone())
-                        .unwrap_or_else(|e2| {
+                    match axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone())
+                    {
+                        Ok(ms) => ms,
+                        Err(e2) => {
                             tracing::error!(
                                 "AutoMemory MemoryService fallback also failed: {} — creating with fresh storage",
                                 e2
                             );
-                            let fallback_storage = std::sync::Arc::new(
-                                axagent_trajectory::TrajectoryStorage::new(
+                            let fallback_storage =
+                                std::sync::Arc::new(axagent_trajectory::TrajectoryStorage::new(
                                     std::sync::Arc::new(sea_db.clone()),
-                                ),
-                            );
-                            axagent_trajectory::MemoryService::new(fallback_storage)
-                                .unwrap_or_else(|e3| {
-                                    crate::android_utils::report_fatal_error(&format!(
-                                        "AutoMemory MemoryService unreachable: {}",
-                                        e3,
-                                    ));
-                                    std::process::exit(1);
-                                })
-                        })
-                });
+                                ));
+                            match axagent_trajectory::MemoryService::new(fallback_storage) {
+                                Ok(ms) => ms,
+                                Err(e3) => {
+                                    let msg =
+                                        format!("AutoMemory MemoryService unreachable: {}", e3,);
+                                    crate::android_utils::report_fatal_error(&msg);
+                                    return Err(msg);
+                                },
+                            }
+                        },
+                    }
+                },
+            };
             if let Err(e) = auto_ms.initialize() {
                 tracing::warn!("Failed to initialize MemoryService for AutoMemory: {}", e);
             }
@@ -295,6 +313,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
             let engine = Arc::new(axagent_runtime::work_engine::WorkEngine::new(
                 Arc::new(sea_db.clone()),
                 master_key,
+                Some(harness_registry.clone()),
             ));
             // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
             rt.block_on(engine.inject_into_agent_executor(engine.clone()));
@@ -338,19 +357,20 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
                             match fallback_db {
                                 Ok(mem_db) => rt
                                     .block_on(SemanticCache::new(mem_db, CacheConfig::default()))
-                                    .unwrap_or_else(|e3| {
+                                    .map_err(|e3| {
                                         crate::android_utils::report_fatal_error(&format!(
                                             "SemanticCache in-memory fallback failed: {}",
                                             e3,
                                         ));
-                                        std::process::exit(1);
-                                    }),
+                                        format!("SemanticCache in-memory fallback failed: {}", e3)
+                                    })?,
                                 Err(e3) => {
-                                    crate::android_utils::report_fatal_error(&format!(
+                                    let msg = format!(
                                         "SemanticCache in-memory DB connect failed: {}",
                                         e3,
-                                    ));
-                                    std::process::exit(1);
+                                    );
+                                    crate::android_utils::report_fatal_error(&msg);
+                                    return Err(msg);
                                 },
                             }
                         },
@@ -424,7 +444,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> AppState {
         plugin_manager,
         file_authorizer: Arc::new(axagent_core::file_authorizer::FileAuthorizer::new()),
         session_share_manager: Arc::new(TokioRwLock::new(std::collections::HashMap::new())),
-    }
+    })
 }
 
 fn create_sync_engine(

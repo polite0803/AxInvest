@@ -146,7 +146,7 @@ pub async fn list_skills(state: State<'_, AppState>) -> Result<Vec<SkillInfo>, S
     }
     let plugins = report.into_registry_allowing_failures();
 
-    let disabled = axagent_core::repo::skill::get_disabled_skills(&state.sea_db)
+    let disabled = axagent_core::repo::skill::get_disabled_skills(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -228,7 +228,7 @@ pub async fn get_skill(state: State<'_, AppState>, name: String) -> Result<Skill
         .find(|p| p.metadata.name == name)
         .ok_or_else(|| format!("Skill '{}' not found", name))?;
 
-    let disabled = axagent_core::repo::skill::get_disabled_skills(&state.sea_db)
+    let disabled = axagent_core::repo::skill::get_disabled_skills(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -332,7 +332,7 @@ pub async fn toggle_skill(
     name: String,
     enabled: bool,
 ) -> Result<(), String> {
-    axagent_core::repo::skill::set_skill_enabled(&state.sea_db, &name, enabled)
+    axagent_core::repo::skill::set_skill_enabled(state.harness.db(), &name, enabled)
         .await
         .map_err(|e| e.to_string())?;
     let _ = app.emit(
@@ -1876,7 +1876,7 @@ pub async fn skill_analyze_frontend(
     }
 
     // 获取默认 Provider 配置
-    let settings = axagent_core::repo::settings::get_settings(&state.sea_db)
+    let settings = axagent_core::repo::settings::get_settings(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
     let provider_id = settings.default_provider_id.as_ref().ok_or_else(|| {
@@ -1888,16 +1888,15 @@ pub async fn skill_analyze_frontend(
             .with_detail("未配置默认模型".to_string())
     })?;
 
-    let provider = axagent_core::repo::provider::get_provider(&state.sea_db, provider_id)
+    let provider = axagent_core::repo::provider::get_provider(state.harness.db(), provider_id)
         .await
         .map_err(|e| e.to_string())?;
-    let key_row = axagent_core::repo::provider::get_active_key(&state.sea_db, &provider.id)
+    let key_row = axagent_core::repo::provider::get_active_key(state.harness.db(), &provider.id)
         .await
         .map_err(|e| e.to_string())?;
-    let decrypted_key =
-        decrypt_key(&key_row.key_encrypted, &state.master_key).map_err(|e| e.to_string())?;
+    let decrypted_key = decrypt_key(&key_row.key_encrypted, state.harness.master_key())
+        .map_err(|e| e.to_string())?;
 
-    let registry = axagent_providers::registry::ProviderRegistry::create_default();
     let registry_key = match provider.provider_type {
         ProviderType::OpenAI => "openai",
         ProviderType::OpenAIResponses => "openai_responses",
@@ -1907,7 +1906,9 @@ pub async fn skill_analyze_frontend(
         ProviderType::Hermes => "hermes",
         ProviderType::Ollama => "ollama",
     };
-    let adapter = registry
+    let adapter = state
+        .harness
+        .provider_registry()
         .get(registry_key)
         .ok_or_else(|| format!("未找到 Provider adapter: {}", registry_key))?;
 
@@ -2005,8 +2006,8 @@ componentType 可选: "Sandbox" (沙箱页面) 或 "Markdown" (纯文档)。
     );
 
     let base_url =
-        axagent_providers::resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
-    let ctx = axagent_providers::ProviderRequestContext {
+        axagent_harness::resolve_base_url_for_type(&provider.api_host, &provider.provider_type);
+    let ctx = axagent_harness::ProviderRequestContext {
         api_key: decrypted_key,
         key_id: key_row.id,
         provider_id: provider.id.clone(),

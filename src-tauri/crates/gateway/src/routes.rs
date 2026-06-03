@@ -134,6 +134,7 @@ mod tests {
             master_key: [7u8; 32],
             started_at: 0,
             astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            provider_registry: axagent_harness::test_support::empty_provider_registry(),
         }
     }
 

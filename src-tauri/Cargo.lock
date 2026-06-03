@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "axagent"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "android_logger",
  "async-trait",
@@ -811,6 +811,7 @@ dependencies = [
  "axagent-astock-data",
  "axagent-core",
  "axagent-gateway",
+ "axagent-harness",
  "axagent-migration",
  "axagent-plugins",
  "axagent-prompt-guard",
@@ -876,13 +877,13 @@ dependencies = [
 
 [[package]]
 name = "axagent-agent"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "async-trait",
  "axagent-core",
+ "axagent-harness",
  "axagent-migration",
  "axagent-prompt-guard",
- "axagent-providers",
  "axagent-runtime-core",
  "axagent-tools",
  "axagent-trajectory",
@@ -934,7 +935,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-core"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -992,11 +993,12 @@ dependencies = [
 
 [[package]]
 name = "axagent-gateway"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "async-trait",
  "axagent-astock-data",
  "axagent-core",
+ "axagent-harness",
  "axagent-providers",
  "axum",
  "axum-server",
@@ -1018,8 +1020,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axagent-harness"
+version = "2.5.1"
+dependencies = [
+ "async-trait",
+ "axagent-core",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "axagent-migration"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "axagent-core",
  "chrono",
@@ -1035,7 +1050,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-npm"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "flate2",
  "reqwest 0.13.4",
@@ -1050,7 +1065,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-plugins"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "axagent-npm",
  "axagent-runtime-core",
@@ -1064,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-prompt-guard"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "regex",
  "serde",
@@ -1075,11 +1090,12 @@ dependencies = [
 
 [[package]]
 name = "axagent-providers"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
  "axagent-core",
+ "axagent-harness",
  "futures",
  "reqwest 0.13.4",
  "serde",
@@ -1093,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-dashboard"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -1105,12 +1121,12 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-messaging"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
  "axagent-core",
- "axagent-providers",
+ "axagent-harness",
  "axum",
  "chrono",
  "flate2",
@@ -1135,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-theme"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1145,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-webhook"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "async-trait",
  "axagent-rt-messaging",
@@ -1164,12 +1180,12 @@ dependencies = [
 
 [[package]]
 name = "axagent-rt-workflow"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "async-trait",
  "axagent-agent",
  "axagent-core",
- "axagent-providers",
+ "axagent-harness",
  "axagent-tools",
  "chrono",
  "futures",
@@ -1189,12 +1205,13 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
  "axagent-agent",
  "axagent-core",
+ "axagent-harness",
  "axagent-plugins",
  "axagent-prompt-guard",
  "axagent-providers",
@@ -1241,11 +1258,12 @@ dependencies = [
 
 [[package]]
 name = "axagent-runtime-core"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
  "axagent-core",
+ "axagent-harness",
  "axagent-prompt-guard",
  "axagent-telemetry",
  "reqwest 0.13.4",
@@ -1284,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-telemetry"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "axagent-core",
  "chrono",
@@ -1302,12 +1320,13 @@ dependencies = [
 
 [[package]]
 name = "axagent-tools"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
  "axagent-astock-data",
  "axagent-core",
+ "axagent-harness",
  "axagent-migration",
  "axagent-plugins",
  "axagent-runtime-core",
@@ -1352,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "axagent-trajectory"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -20,7 +20,8 @@ pub async fn session_search(
     let max = limit.unwrap_or(10);
 
     let rows = state
-        .sea_db
+        .harness
+        .db()
         .query_all_raw(sea_orm::Statement::from_sql_and_values(
             sea_orm::DatabaseBackend::Sqlite,
             "SELECT \
@@ -47,12 +48,14 @@ pub async fn session_search(
         let snippet: String = row.try_get("", "snippet").map_err(|e| e.to_string())?;
         let rank: f64 = row.try_get("", "rank").map_err(|e| e.to_string())?;
 
-        let title =
-            axagent_core::repo::conversation::get_conversation(&state.sea_db, &conversation_id)
-                .await
-                .ok()
-                .map(|c| c.title)
-                .unwrap_or_else(|| "Unknown".to_string());
+        let title = axagent_core::repo::conversation::get_conversation(
+            state.harness.db(),
+            &conversation_id,
+        )
+        .await
+        .ok()
+        .map(|c| c.title)
+        .unwrap_or_else(|| "Unknown".to_string());
 
         results.push(SessionSearchResult {
             conversation_id,

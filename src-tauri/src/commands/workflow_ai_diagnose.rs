@@ -116,7 +116,7 @@ Respond ONLY with valid JSON.",
     );
 
     // 查找默认 provider 调用 LLM
-    let db = &state.sea_db;
+    let db = state.harness.db();
     let providers = provider::list_providers(db)
         .await
         .map_err(|e| e.to_string())?;
@@ -131,7 +131,8 @@ Respond ONLY with valid JSON.",
         .await
         .map_err(|e| e.to_string())?
         .ok_or("No enabled API key found")?;
-    let api_key = decrypt_key(&key.key_encrypted, &state.master_key).map_err(|e| e.to_string())?;
+    let api_key =
+        decrypt_key(&key.key_encrypted, state.harness.master_key()).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))

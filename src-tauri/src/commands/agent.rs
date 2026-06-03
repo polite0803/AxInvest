@@ -3,9 +3,7 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::agent as agent_err;
 use crate::commands::error_code::agent_status as agent_status_err;
 use crate::commands::error_code::steer as steer_err;
-use axagent_agent::{
-    AgentExecutionProgressSnapshot, AxAgentApiClient, McpServerConfig, ToolRegistry,
-};
+use axagent_agent::{AgentExecutionProgressSnapshot, AxAgentApiClient};
 use axagent_core::cloud_workspace::CloudWorkspace;
 use axagent_core::repo::{conversation, message, provider, search_provider};
 use axagent_core::types::{
@@ -13,8 +11,9 @@ use axagent_core::types::{
     ProviderProxyConfig,
 };
 use axagent_core::workspace_uri::WorkspaceUri;
-use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
+use axagent_harness::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
 use axagent_tools::context_keys;
+use axagent_tools::registry::{McpServerConfig, UnifiedToolRegistry};
 use base64::Engine;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
@@ -604,7 +603,7 @@ pub async fn agent_query(
         Some(agent_status_err::INITIALIZING),
     );
 
-    let conversation = conversation::get_conversation(&app_state.sea_db, &conversation_id)
+    let conversation = conversation::get_conversation(app_state.harness.db(), &conversation_id)
         .await
         .map_err(|e| e.to_string())?;
     let conversation_scenario = conversation.scenario.clone();
@@ -620,14 +619,16 @@ pub async fn agent_query(
 
     if let Some(ref profile_id) = request.agent_profile_id {
         if let Ok(profile) =
-            axagent_core::repo::agent_profile::get_agent_profile(&app_state.sea_db, profile_id)
+            axagent_core::repo::agent_profile::get_agent_profile(app_state.harness.db(), profile_id)
                 .await
         {
             // Layer 1: AgentRole system_prompt（岗位）
             if let Some(ref role_name) = profile.agent_role {
-                if let Some(resolved) =
-                    axagent_runtime::agent_roles::AgentRole::resolve(&app_state.sea_db, role_name)
-                        .await
+                if let Some(resolved) = axagent_runtime::agent_roles::AgentRole::resolve(
+                    app_state.harness.db(),
+                    role_name,
+                )
+                .await
                 {
                     effective_agent_role =
                         axagent_runtime::agent_roles::AgentRole::from_str_opt(&resolved.name);
@@ -641,7 +642,7 @@ pub async fn agent_query(
             if let Some(ref expert_id) = profile.expert_id {
                 if let Ok(Some(expert)) =
                     axagent_core::entity::agency_experts::Entity::find_by_id(expert_id)
-                        .one(&app_state.sea_db)
+                        .one(app_state.harness.db())
                         .await
                         .map_err(|e| e.to_string())
                 {
@@ -712,7 +713,7 @@ pub async fn agent_query(
     // Set workflow_status to "running" for workflow-type sessions
     if conversation.session_type == "workflow" {
         let _ = axagent_core::repo::conversation::update_conversation(
-            &app_state.sea_db,
+            app_state.harness.db(),
             &conversation_id,
             axagent_core::types::UpdateConversationInput {
                 workflow_status: Some(Some("running".to_string())),
@@ -725,7 +726,7 @@ pub async fn agent_query(
     info!("[agent_query] Got provider: {}", request.provider_id);
 
     // Get provider
-    let prov = provider::get_provider(&app_state.sea_db, &request.provider_id)
+    let prov = provider::get_provider(app_state.harness.db(), &request.provider_id)
         .await
         .map_err(|e| e.to_string())?;
     info!("[agent_query] Got provider keys count: {}", prov.keys.len());
@@ -739,12 +740,13 @@ pub async fn agent_query(
     info!("[agent_query] Found active key");
 
     // Decrypt key
-    let api_key = axagent_core::crypto::decrypt_key(&key.key_encrypted, &app_state.master_key)
-        .map_err(|e| e.to_string())?;
+    let api_key =
+        axagent_core::crypto::decrypt_key(&key.key_encrypted, app_state.harness.master_key())
+            .map_err(|e| e.to_string())?;
     info!("[agent_query] Decrypted API key");
 
     // Get settings from database
-    let settings = axagent_core::repo::settings::get_settings(&app_state.sea_db)
+    let settings = axagent_core::repo::settings::get_settings(app_state.harness.db())
         .await
         .unwrap_or_default();
 
@@ -768,7 +770,7 @@ pub async fn agent_query(
 
     // Get model info for param overrides
     let resolved_model = axagent_core::repo::provider::get_model(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &request.provider_id,
         &request.model_id,
     )
@@ -835,11 +837,13 @@ pub async fn agent_query(
 
     // Load MCP tools for enabled servers (same logic as Q&A mode)
     let mcp_ids = request.enabled_mcp_server_ids.clone().unwrap_or_default();
-    let mut tool_registry = ToolRegistry::new();
+    let mut tool_registry = UnifiedToolRegistry::new();
     let mut chat_tools: Vec<ChatTool> = Vec::new();
 
     // Load enabled state for the unified tool registry
-    tool_registry.load_enabled_state(&app_state.sea_db).await;
+    tool_registry
+        .load_enabled_state(app_state.harness.db())
+        .await;
 
     // Build all_server_ids from remote MCP servers only (no builtin)
     let all_server_ids: Vec<String> = mcp_ids
@@ -851,7 +855,7 @@ pub async fn agent_query(
     info!("[agent] all_server_ids (remote MCP only): {:?}", all_server_ids);
 
     // Phase 1: 并发加载所有 MCP 服务器配置和工具描述
-    let db = &app_state.sea_db;
+    let db = app_state.harness.db();
     struct ServerTools {
         server: McpServer,
         chat_tools: Vec<ChatTool>,
@@ -1012,31 +1016,33 @@ pub async fn agent_query(
 
     // Configure tool execution recorder and context
     let mut tool_registry = tool_registry
-        .with_recorder(axagent_agent::ToolExecutionRecorder::new(Arc::new(
-            app_state.sea_db.clone(),
+        .with_recorder(axagent_tools::ToolExecutionRecorder::new(Arc::new(
+            app_state.harness.db().clone(),
         )))
         .with_execution_context(conversation_id.clone(), None);
 
     // ── 加载搜索提供商配置，注入到 tool_extra ──
     // 优先使用请求中指定的 search_provider_id，否则取第一个已启用的提供商
     let search_provider_used = if let Some(ref sp_id) = request.search_provider_id {
-        search_provider::get_search_provider(&app_state.sea_db, sp_id)
+        search_provider::get_search_provider(app_state.harness.db(), sp_id)
             .await
             .ok()
     } else {
-        search_provider::list_search_providers(&app_state.sea_db)
+        search_provider::list_search_providers(app_state.harness.db())
             .await
             .ok()
             .and_then(|providers| providers.into_iter().find(|p| p.enabled))
     };
     if let Some(ref sp) = search_provider_used {
         let api_key = axagent_core::entity::search_providers::Entity::find_by_id(&sp.id)
-            .one(&app_state.sea_db)
+            .one(app_state.harness.db())
             .await
             .ok()
             .flatten()
             .and_then(|e| e.api_key_ref)
-            .and_then(|enc| axagent_core::crypto::decrypt_key(&enc, &app_state.master_key).ok())
+            .and_then(|enc| {
+                axagent_core::crypto::decrypt_key(&enc, app_state.harness.master_key()).ok()
+            })
             .unwrap_or_default();
         tool_registry = tool_registry
             .with_tool_extra(context_keys::SEARCH_PROVIDER_TYPE, &sp.provider_type)
@@ -1087,7 +1093,7 @@ pub async fn agent_query(
                 tool_name.clone(),
                 Box::new(move |input: &str| {
                     execute_skill_sync(&skill_id, &skill_name, &skill_content, input, &ctx)
-                        .map_err(axagent_agent::ToolError::new)
+                        .map_err(axagent_harness::ToolError::new)
                 }),
             );
         }
@@ -1264,7 +1270,7 @@ pub async fn agent_query(
 
     // Persist user message to DB (with attachments)
     let _user_message = message::create_message(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &conversation_id,
         MessageRole::User,
         &request.input,
@@ -1276,9 +1282,12 @@ pub async fn agent_query(
     .map_err(|e| e.to_string())?;
 
     // Increment the persisted message count
-    axagent_core::repo::conversation::increment_message_count(&app_state.sea_db, &conversation_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    axagent_core::repo::conversation::increment_message_count(
+        app_state.harness.db(),
+        &conversation_id,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Use the long-lived SessionManager from AppState (persists sessions across queries)
     let session_manager = &app_state.agent_session_manager;
@@ -1377,7 +1386,7 @@ pub async fn agent_query(
     } else {
         // Fallback: load enabled memory namespaces from the conversation's settings
         match axagent_core::repo::conversation::get_conversation(
-            &app_state.sea_db,
+            app_state.harness.db(),
             &conversation_id,
         )
         .await
@@ -1388,8 +1397,8 @@ pub async fn agent_query(
     };
     let wiki_ids = request.enabled_wiki_ids.clone().unwrap_or_default();
     let rag_result = crate::indexing::collect_rag_context(
-        &app_state.sea_db,
-        &app_state.master_key,
+        app_state.harness.db(),
+        app_state.harness.master_key(),
         &app_state.vector_store,
         &kb_ids,
         &mem_ids,
@@ -1587,7 +1596,7 @@ pub async fn agent_query(
 
     // Retrieve workspace root from agent session DB record before building system prompt
     let db_session = axagent_core::repo::agent_session::get_agent_session_by_conversation_id(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &conversation_id,
     )
     .await
@@ -1603,7 +1612,7 @@ pub async fn agent_query(
         }
     }
 
-    let app_language = axagent_core::repo::settings::get_settings(&app_state.sea_db)
+    let app_language = axagent_core::repo::settings::get_settings(app_state.harness.db())
         .await
         .ok()
         .map(|s| s.language);
@@ -1870,7 +1879,7 @@ pub async fn agent_query(
 
             // Create assistant message in DB
             let assistant_message = message::create_message_with_parts(
-                &app_state.sea_db,
+                app_state.harness.db(),
                 &conversation_id,
                 MessageRole::Assistant,
                 &text,
@@ -1884,7 +1893,7 @@ pub async fn agent_query(
 
             // Update token usage stats on the assistant message
             if let Err(e) = message::update_message_usage(
-                &app_state.sea_db,
+                app_state.harness.db(),
                 &assistant_message.id,
                 Some(summary.usage.input_tokens as i64),
                 Some(summary.usage.output_tokens as i64),
@@ -1899,7 +1908,7 @@ pub async fn agent_query(
             // Persist thinking content to the message record
             if !summary.thinking.is_empty() {
                 if let Err(e) = message::update_message_thinking(
-                    &app_state.sea_db,
+                    app_state.harness.db(),
                     &assistant_message.id,
                     Some(&summary.thinking),
                 )
@@ -2005,7 +2014,7 @@ pub async fn agent_query(
             // Set workflow_status to "completed" for workflow-type sessions
             if conversation.session_type == "workflow" {
                 let _ = axagent_core::repo::conversation::update_conversation(
-                    &app_state.sea_db,
+                    app_state.harness.db(),
                     &conversation_id,
                     axagent_core::types::UpdateConversationInput {
                         workflow_status: Some(Some("completed".to_string())),
@@ -2019,7 +2028,7 @@ pub async fn agent_query(
             // After the first agent response, check if user input matches any preset template
             if conversation.session_type == "conversation" {
                 let _ = check_and_suggest_workflow_match(
-                    &app_state.sea_db,
+                    app_state.harness.db(),
                     &app,
                     &conversation_id,
                     &request.input,
@@ -2276,7 +2285,7 @@ pub async fn agent_query(
             // Set workflow_status to "failed" for workflow-type sessions
             if conversation.session_type == "workflow" {
                 let _ = axagent_core::repo::conversation::update_conversation(
-                    &app_state.sea_db,
+                    app_state.harness.db(),
                     &conversation_id,
                     axagent_core::types::UpdateConversationInput {
                         workflow_status: Some(Some("failed".to_string())),
@@ -2470,10 +2479,11 @@ async fn load_enabled_skill_contents(
     scenario: Option<&str>,
     enabled_skill_ids: &[String],
 ) -> Vec<(String, String)> {
-    let disabled = match axagent_core::repo::skill::get_disabled_skills(&app_state.sea_db).await {
-        Ok(d) => d,
-        Err(_) => return Vec::new(),
-    };
+    let disabled =
+        match axagent_core::repo::skill::get_disabled_skills(app_state.harness.db()).await {
+            Ok(d) => d,
+            Err(_) => return Vec::new(),
+        };
 
     let home = match dirs::home_dir() {
         Some(h) => h,
@@ -2556,10 +2566,11 @@ async fn load_skill_tools(
     scenario: Option<&str>,
     enabled_skill_ids: &[String],
 ) -> (Vec<ChatTool>, HashMap<String, axagent_trajectory::Skill>) {
-    let disabled = match axagent_core::repo::skill::get_disabled_skills(&app_state.sea_db).await {
-        Ok(d) => d,
-        Err(_) => return (Vec::new(), HashMap::new()),
-    };
+    let disabled =
+        match axagent_core::repo::skill::get_disabled_skills(app_state.harness.db()).await {
+            Ok(d) => d,
+            Err(_) => return (Vec::new(), HashMap::new()),
+        };
 
     let trajectory_storage = &app_state.trajectory_storage;
     let all_skills = match trajectory_storage.get_skills() {
@@ -2730,7 +2741,7 @@ impl SkillExecutionContext {
         _message_id: String,
     ) -> Self {
         Self {
-            sea_db: app_state.sea_db.clone(),
+            sea_db: app_state.harness.db().clone(),
             conversation_id,
         }
     }
@@ -3594,7 +3605,7 @@ pub async fn agent_update_session(
 ) -> Result<AgentUpdateSessionResponse, String> {
     // Get or create agent session
     let session = axagent_core::repo::agent_session::upsert_agent_session(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &request.conversation_id,
         request.cwd.as_deref(),
         request.permission_mode.as_deref(),
@@ -3619,7 +3630,7 @@ pub async fn agent_get_session(
 ) -> Result<AgentGetSessionResponse, String> {
     // Get agent session from database
     let session = axagent_core::repo::agent_session::get_agent_session_by_conversation_id(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &request.conversation_id,
     )
     .await
@@ -3645,7 +3656,7 @@ pub async fn agent_get_session(
     } else {
         // Create a new session if none exists
         let new_session = axagent_core::repo::agent_session::upsert_agent_session(
-            &app_state.sea_db,
+            app_state.harness.db(),
             &request.conversation_id,
             None,
             Some("default"),
@@ -3684,7 +3695,7 @@ pub async fn agent_ensure_workspace(
     let workspace_uri_str = if let Some(ref uri) = _request.workspace_uri {
         Some(uri.clone())
     } else {
-        axagent_core::repo::settings::get_settings(&app_state.sea_db)
+        axagent_core::repo::settings::get_settings(app_state.harness.db())
             .await
             .ok()
             .and_then(|s| s.workspace_uri)
@@ -3782,7 +3793,7 @@ pub async fn agent_backup_and_clear_sdk_context(
     conversation_id: String,
 ) -> Result<(), String> {
     axagent_core::repo::agent_session::backup_and_clear_sdk_context_by_conversation_id(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &conversation_id,
     )
     .await
@@ -3796,7 +3807,7 @@ pub async fn agent_restore_sdk_context_from_backup(
     conversation_id: String,
 ) -> Result<(), String> {
     axagent_core::repo::agent_session::restore_sdk_context_from_backup_by_conversation_id(
-        &app_state.sea_db,
+        app_state.harness.db(),
         &conversation_id,
     )
     .await
@@ -4080,7 +4091,7 @@ pub async fn get_conversation_workflow_preview(
     app_state: State<'_, AppState>,
     conversation_id: String,
 ) -> Result<ConversationWorkflowPreview, String> {
-    let db = &app_state.sea_db;
+    let db = app_state.harness.db();
 
     let executions = axagent_core::repo::tool_execution::list_tool_executions(db, &conversation_id)
         .await

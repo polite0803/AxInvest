@@ -44,11 +44,34 @@ pub fn check_report_quality(
         return QualityGrade::F;
     }
 
+    // 硬检查 1.5: 纯重复检测（同一行连续重复 >= 3 次通常代表 LLM 输出循环/截断）
+    let mut last_sentence = "";
+    let mut repeat_count = 0;
+    let mut max_repeat = 0;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed == last_sentence && !trimmed.is_empty() {
+            repeat_count += 1;
+            if repeat_count > max_repeat {
+                max_repeat = repeat_count;
+            }
+        } else {
+            repeat_count = 0;
+        }
+        last_sentence = trimmed;
+    }
+    if max_repeat >= 3 {
+        return QualityGrade::F;
+    }
+
     // 硬检查 1: 报告是否为空或过短
     if report_text.trim().is_empty() {
         return QualityGrade::F;
     }
-    if report_text.len() < 100 {
+    if report_text.len() < 50 {
+        return QualityGrade::F;
+    }
+    if report_text.len() < 200 {
         return QualityGrade::D;
     }
 
@@ -82,8 +105,30 @@ pub fn check_report_quality(
     }
 
     let ratio = covered as f64 / total as f64;
+
+    // 实质分析启发式：除了"提到"关键词，至少要有数字/百分号/明确结论
+    // 防止 LLM 用一句"趋势向上"刷满所有必采项
+    let has_substance = report_text
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .count()
+        >= 3
+        || report_text.contains('%')
+        || report_text.contains("看多")
+        || report_text.contains("看空")
+        || report_text.contains("建议")
+        || report_text.contains("买入")
+        || report_text.contains("卖出")
+        || report_text.contains("持有")
+        || report_text.contains("增持")
+        || report_text.contains("减持");
+
     if ratio >= 0.8 {
-        QualityGrade::A
+        if has_substance {
+            QualityGrade::A
+        } else {
+            QualityGrade::B
+        }
     } else if ratio >= 0.6 {
         QualityGrade::B
     } else if ratio >= 0.4 {

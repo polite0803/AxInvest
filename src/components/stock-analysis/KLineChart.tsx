@@ -1,7 +1,21 @@
 import { useStockAnalysisStore } from "@/stores";
+import type { KLine } from "@/types";
 import * as echarts from "echarts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+/** 模块级 LRU 缓存：按 (stockCode, period, limit) 缓存 K 线结果 */
+interface CachedKline {
+  data: KLine[];
+  ts: number;
+}
+const klineCache = new Map<string, CachedKline>();
+const KLINE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+const KLINE_CACHE_MAX = 20; // 最多缓存 20 个组合
+
+function getKlineCacheKey(stockCode: string, period: string, limit: number): string {
+  return `${stockCode}|${period}|${limit}`;
+}
 
 /** 计算移动平均线 */
 function calcMA(data: number[], window: number): (number | null)[] {
@@ -43,10 +57,32 @@ export function KLineChart() {
 
   const handlePeriodChange = useCallback((key: string, limit: number, periodType: string) => {
     setKlinePeriod(key);
-    if (stockCode) {
-      getStockKline(stockCode, periodType, limit);
+    if (!stockCode) { return; }
+    const cacheKey = getKlineCacheKey(stockCode, periodType, limit);
+    const cached = klineCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < KLINE_CACHE_TTL_MS) {
+      // 命中缓存：先 delete 再 set，把该 key 移到 Map 末尾（真正的 LRU）
+      klineCache.delete(cacheKey);
+      klineCache.set(cacheKey, cached);
+      // 立即把数据塞回 store，避免重复请求
+      useStockAnalysisStore.setState({ klineData: cached.data });
     }
+    // 后台请求最新数据（store 内部 set klineData；下方 useEffect 同步写入缓存）
+    getStockKline(stockCode, periodType, limit);
   }, [stockCode, getStockKline, setKlinePeriod]);
+
+  // klineData 变化时把结果写入缓存（含 TTL/LRU 淘汰）
+  useEffect(() => {
+    if (klineData.length === 0 || !stockCode) { return; }
+    const opt = PERIOD_OPTIONS.find((o) => o.key === klinePeriod);
+    if (!opt) { return; }
+    const cacheKey = getKlineCacheKey(stockCode, opt.periodType, opt.limit);
+    klineCache.set(cacheKey, { data: klineData, ts: Date.now() });
+    if (klineCache.size > KLINE_CACHE_MAX) {
+      const firstKey = klineCache.keys().next().value;
+      if (firstKey) { klineCache.delete(firstKey); }
+    }
+  }, [klineData, stockCode, klinePeriod]);
 
   useEffect(() => {
     if (!chartRef.current) { return; }

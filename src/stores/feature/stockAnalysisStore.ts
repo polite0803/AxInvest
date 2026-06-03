@@ -1,4 +1,5 @@
 import i18n from "@/i18n";
+import { extractContent } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import type { AnalysisStatus, AnalysisSummary, KLine, StockDecision, StockQuote, StockSearchResult } from "@/types";
@@ -6,35 +7,6 @@ import { parseAction, parseRiskLevel, StockAction, StockRiskLevel } from "@/type
 import { create } from "zustand";
 
 // ── 工作流结果解析 ──
-
-/** AgentExecutor 输出的 JSON 结构 */
-interface AgentResult {
-  role?: string;
-  model?: string;
-  content?: string;
-  thinking?: string;
-  usage?: { input_tokens?: number; output_tokens?: number };
-  node_id?: string;
-  tool_calls_made?: unknown[];
-}
-
-/** 从 AgentExecutor 输出中提取纯文本内容 */
-function extractContent(value: unknown): string {
-  let text = "";
-  if (typeof value === "string") { text = value; }
-  else if (value && typeof value === "object") {
-    const r = value as AgentResult;
-    if (typeof r.content === "string" && r.content.length > 0) { text = r.content; }
-    else if (r.content != null && typeof r.content === "object") { text = JSON.stringify(r.content); }
-    else { text = JSON.stringify(value); }
-  } else {
-    text = String(value ?? "");
-  }
-  // 清理 LLM 工具调用 XML 标签（如 <minimax:tool_call>...</minimax:tool_call>）
-  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
-  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
-  return text.replace(/\n{3,}/g, "\n\n").trim();
-}
 
 /** 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护 */
 function normalizeDecision(raw: Record<string, unknown>): StockDecision {
@@ -118,6 +90,10 @@ function parseWorkflowResults(results: Record<string, unknown>) {
 
 // ── Store ──
 
+/** getDryRun 模块级缓存 (60s TTL) */
+let dryRunCache: { value: boolean; ts: number } | null = null;
+const DRY_RUN_TTL_MS = 60_000;
+
 interface StockAnalysisState {
   searchKeyword: string;
   searchResults: StockSearchResult[];
@@ -134,8 +110,14 @@ interface StockAnalysisState {
   analystReports: Record<string, string>;
   debateRounds: Array<{ round: number; bull: string; bear: string }>;
   riskAssessments: Record<string, string>;
+  // 决策后处理阶段新增字段（修复 #7）
+  valueAssessments: Record<string, string>;
+  ruleCheckResults: Record<string, string>;
+  dataQualitySummary: string;
+  rawData: Record<string, string>;
   decision: StockDecision | null;
   error: string | null;
+  errorCode: string | null;
 
   history: AnalysisSummary[];
 
@@ -196,8 +178,13 @@ const initialState = {
   analystReports: {},
   debateRounds: [],
   riskAssessments: {},
+  valueAssessments: {},
+  ruleCheckResults: {},
+  dataQualitySummary: "",
+  rawData: {},
   decision: null,
   error: null,
+  errorCode: null,
   history: [],
   currentStage: 0,
   progressMessage: "",
@@ -257,13 +244,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  /** 读取 analysis_dry_run 模板变量 */
+  /** 读取 analysis_dry_run 模板变量 (60s 模块级缓存) */
   getDryRun: async () => {
+    const now = Date.now();
+    if (dryRunCache && now - dryRunCache.ts < DRY_RUN_TTL_MS) {
+      return dryRunCache.value;
+    }
     try {
       const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
       const vars: any[] = tmpl?.variables ?? [];
       const v = vars.find((x: any) => x.name === "analysis_dry_run");
-      return !!v?.value;
+      const value = !!v?.value;
+      dryRunCache = { value, ts: now };
+      return value;
     } catch {
       return false;
     }
@@ -282,6 +275,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({
       status: "loading",
       error: null,
+      errorCode: null,
       currentStage: 0,
       workflowId: null,
       progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
@@ -290,6 +284,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       analystReports: {},
       debateRounds: [],
       riskAssessments: {},
+      valueAssessments: {},
+      ruleCheckResults: {},
+      dataQualitySummary: "",
+      rawData: {},
       decision: null,
       _unlisten: null,
     });
@@ -363,6 +361,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const reports: Record<string, string> = {};
         const debates: Array<{ round: number; bull: string; bear: string }> = [];
         const risks: Record<string, string> = {};
+        const values: Record<string, string> = {};
+        const ruleChecks: Record<string, string> = {};
+        const raws: Record<string, string> = {};
+        let dataQuality = "";
         for (const [key, value] of Object.entries(snap)) {
           if (key.startsWith("report.")) {
             reports[key.slice(7)] = value;
@@ -372,9 +374,25 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             debates.push({ round, bull: value, bear: snap[bearKey] ?? "" });
           } else if (key.startsWith("risk.")) {
             risks[key.slice(5)] = value;
+          } else if (key.startsWith("value.")) {
+            values[key.slice(6)] = value;
+          } else if (key.startsWith("rule_check.")) {
+            ruleChecks[key.slice("rule_check.".length)] = value;
+          } else if (key === "data_quality_summary") {
+            dataQuality = value;
+          } else if (key.startsWith("raw.")) {
+            raws[key.slice(4)] = value;
           }
         }
-        set({ analystReports: reports, debateRounds: debates, riskAssessments: risks });
+        set({
+          analystReports: reports,
+          debateRounds: debates,
+          riskAssessments: risks,
+          valueAssessments: values,
+          ruleCheckResults: ruleChecks,
+          dataQualitySummary: dataQuality,
+          rawData: raws,
+        });
       } catch (e) {
         console.error("[StockAnalysis] Failed to restore blackboard snapshot:", e);
       }
@@ -538,21 +556,26 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const unlistenError = await listen<{
       workflowId: string;
       error: string;
+      errorCode?: string;
       results?: Record<string, unknown>;
       output?: StockDecision | null;
     }>("workflow-error", (event) => {
       const msg = event.payload.error;
       // 即使失败也尝试解析已有的部分结果
-      const { results, output } = event.payload;
+      const { results, output, errorCode } = event.payload;
       if (results) {
         const parsed = parseWorkflowResults(results);
         set({ ...parsed, decision: output ?? parsed.decision });
       }
+      // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
+      const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR");
+      const isLlmError = effectiveErrorCode.startsWith("LLM_");
       set({
         error: msg,
-        status: msg.includes("LLM") ? "running" : "error",
-        llmStatus: msg.includes("LLM") ? "placeholder" : get().llmStatus,
-        progressMessage: msg.includes("LLM")
+        errorCode: effectiveErrorCode,
+        status: isLlmError ? "running" : "error",
+        llmStatus: isLlmError ? "placeholder" : get().llmStatus,
+        progressMessage: isLlmError
           ? i18n.t("stockAnalysis.progress.llmFallback")
           : msg,
         progressPct: 100,
@@ -579,6 +602,9 @@ function inferStage(nodeId: string): number {
   ) { return 2; }
   if (nodeId.startsWith("risk-") || nodeId === "research-mgr") { return 3; }
   if (nodeId === "trader" || nodeId === "portfolio-mgr") { return 4; }
+  if (nodeId === "agg-risk" || nodeId === "cls-risk-level" || nodeId === "v-validate" || nodeId === "notify-result") {
+    return 4; // 决策后处理阶段
+  }
   return -1;
 }
 

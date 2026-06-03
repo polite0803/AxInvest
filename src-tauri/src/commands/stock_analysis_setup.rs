@@ -533,21 +533,6 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("风险平价权重计算".into()),
         parameters: data_params(),
     };
-    let td_outliers = ToolDef {
-        name: "clean_outliers".into(),
-        description: Some("异常值剔除 (zscore/iqr)".into()),
-        parameters: data_params(),
-    };
-    let td_fill = ToolDef {
-        name: "clean_fill_missing".into(),
-        description: Some("缺失值填充 (forward/linear)".into()),
-        parameters: data_params(),
-    };
-    let td_adjust = ToolDef {
-        name: "adjust_prices".into(),
-        description: Some("前复权价格调整".into()),
-        parameters: data_params(),
-    };
     // ── 新增 9 个数据 API ToolDef ──
     let td_research = ToolDef {
         name: "get_research_reports".into(),

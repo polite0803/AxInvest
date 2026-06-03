@@ -415,7 +415,7 @@ impl StockAnalysisOrchestrator {
                             force, original_action, decision.reasoning
                         );
                         decision.position_pct = 0.0;
-                        decision.confidence = (decision.confidence * 0.5).min(30);
+                        decision.confidence = (decision.confidence * 0.5).min(30.0_f64);
                     }
                 }
             }
@@ -986,7 +986,7 @@ impl StockAnalysisOrchestrator {
                     &decision_text[..200.min(decision_text.len())]
                 ),
                 risk_level: "中".into(),
-                confidence: 0,
+                confidence: 0.0,
             }
         });
 

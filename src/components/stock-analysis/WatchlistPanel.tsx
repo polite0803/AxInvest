@@ -174,7 +174,7 @@ export function WatchlistPanel() {
         startAnalysis(item.stockCode);
       } catch { /* 继续 */ }
     }
-    message.info(`已启动 ${sorted.length} 只股票分析`);
+    message.info(t("stockAnalysis.watchlist.analysisStarted", { count: sorted.length }));
   };
 
   const addGroup = () => {
@@ -197,7 +197,7 @@ export function WatchlistPanel() {
           className="cursor-pointer m-0 text-xs"
           onClick={() => setActiveGroup(DEFAULT_GROUP)}
         >
-          全部 ({items.length})
+          {t("stockAnalysis.watchlist.all", { count: items.length })}
         </Tag>
         {groups.map((g) => (
           <Tag
@@ -218,7 +218,7 @@ export function WatchlistPanel() {
         ))}
         <Input
           size="small"
-          placeholder="新分组"
+          placeholder={t("stockAnalysis.watchlist.newGroup")}
           style={{ width: 80 }}
           value={newGroup}
           onChange={(e) => setNewGroup(e.target.value)}
@@ -234,7 +234,7 @@ export function WatchlistPanel() {
             {t("stockAnalysis.addToWatchlist")}
           </Button>
           <Button size="small" loading={refreshing} onClick={refreshQuotes}>
-            刷新行情
+            {t("stockAnalysis.watchlist.refreshQuotes")}
           </Button>
         </Space>
         <Space size={4}>
@@ -244,14 +244,14 @@ export function WatchlistPanel() {
             value={sortKey}
             onChange={(v) => setSortKey(v)}
             options={[
-              { value: "change", label: "按涨跌" },
-              { value: "code", label: "按代码" },
-              { value: "name", label: "按名称" },
+              { value: "change", label: t("stockAnalysis.watchlist.sortByChange") },
+              { value: "code", label: t("stockAnalysis.watchlist.sortByCode") },
+              { value: "name", label: t("stockAnalysis.watchlist.sortByName") },
             ]}
           />
           {sorted.length > 1 && (
             <Button size="small" type="primary" onClick={analyzeAll}>
-              分析全部
+              {t("stockAnalysis.watchlist.analyzeAll")}
             </Button>
           )}
         </Space>
@@ -277,13 +277,15 @@ export function WatchlistPanel() {
                         key="move"
                         menu={{
                           items: [
-                            { key: DEFAULT_GROUP, label: "移回全部" },
+                            { key: DEFAULT_GROUP, label: t("stockAnalysis.watchlist.moveToAll") },
                             ...groups.filter((g) => g !== activeGroup).map((g) => ({ key: g, label: g })),
                           ],
                           onClick: ({ key }) => moveToGroup(item, key),
                         }}
                       >
-                        <Button size="small" type="text" className="text-xs">移动</Button>
+                        <Button size="small" type="text" className="text-xs">
+                          {t("stockAnalysis.watchlist.move")}
+                        </Button>
                       </Dropdown>
                     ),
                     <Popconfirm

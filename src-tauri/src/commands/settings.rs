@@ -48,7 +48,7 @@ pub async fn get_setting(
     state: State<'_, AppState>,
     key: String,
 ) -> Result<Option<String>, String> {
-    axagent_core::repo::settings::get_setting(&state.sea_db, &key)
+    axagent_core::repo::settings::get_setting(state.harness.db(), &key)
         .await
         .map_err(|e| e.to_string())
 }
@@ -60,7 +60,7 @@ pub async fn set_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
-    axagent_core::repo::settings::set_setting(&state.sea_db, &key, &value)
+    axagent_core::repo::settings::set_setting(state.harness.db(), &key, &value)
         .await
         .map_err(|e| e.to_string())
 }

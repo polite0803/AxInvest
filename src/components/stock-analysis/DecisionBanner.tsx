@@ -123,8 +123,8 @@ export function DecisionBanner() {
   const handleAskAI = useCallback(() => {
     if (!stockCode || !stockName) { return; }
     const context = [
-      `请分析 ${stockName} (${stockCode}) 的投资前景。`,
-      decision ? `最新决策: ${decision.action}, 置信度 ${confidencePct}%。` : "",
+      t("stockAnalysis.askAi.prompt", { stockName, stockCode }),
+      decision ? t("stockAnalysis.askAi.decision", { action: decision.action, confidence: confidencePct }) : "",
       t("stockAnalysis.export.price", { price: currentPrice.toFixed(2) }),
       upside != null ? t("stockAnalysis.export.upside", { pct: (upside >= 0 ? "+" : "") + upside.toFixed(1) }) : "",
       `${t(getRiskTKey(decision?.riskLevel ?? ""))}`,

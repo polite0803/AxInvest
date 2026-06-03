@@ -92,7 +92,7 @@ pub async fn list_stock_analyses(
         .order_by_desc(stock_analyses::Column::CreatedAt)
         .limit(Some(limit as u64))
         .offset(Some(offset as u64))
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())
 }
@@ -104,7 +104,7 @@ pub async fn get_stock_analysis(
     analysis_id: String,
 ) -> Result<stock_analyses::Model, String> {
     stock_analyses::Entity::find_by_id(&analysis_id)
-        .one(&state.sea_db)
+        .one(state.harness.db())
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("分析记录不存在: {}", analysis_id))
@@ -128,14 +128,17 @@ pub async fn add_to_watchlist(
         created_at: Set(now),
         updated_at: Set(now),
     };
-    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+    model
+        .insert(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 移除自选股
 #[tauri::command]
 pub async fn remove_from_watchlist(state: State<'_, AppState>, id: String) -> Result<(), String> {
     watchlist_items::Entity::delete_by_id(id)
-        .exec(&state.sea_db)
+        .exec(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -148,7 +151,7 @@ pub async fn list_watchlist(
 ) -> Result<Vec<watchlist_items::Model>, String> {
     watchlist_items::Entity::find()
         .order_by_desc(watchlist_items::Column::CreatedAt)
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())
 }
@@ -175,7 +178,10 @@ pub async fn add_portfolio_holding(
         created_at: Set(now),
         updated_at: Set(now),
     };
-    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+    model
+        .insert(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 更新持仓
@@ -192,7 +198,7 @@ pub async fn update_portfolio_holding(
         .col_expr(portfolio_holdings::Column::AvgCost, Expr::value(avg_cost))
         .col_expr(portfolio_holdings::Column::UpdatedAt, Expr::value(now))
         .filter(portfolio_holdings::Column::Id.eq(id))
-        .exec(&state.sea_db)
+        .exec(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -205,7 +211,7 @@ pub async fn remove_portfolio_holding(
     id: String,
 ) -> Result<(), String> {
     portfolio_holdings::Entity::delete_by_id(id)
-        .exec(&state.sea_db)
+        .exec(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -215,7 +221,7 @@ pub async fn remove_portfolio_holding(
 #[tauri::command]
 pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let holdings = portfolio_holdings::Entity::find()
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -484,7 +490,7 @@ pub async fn backtest_all_history(
 ) -> Result<BacktestStats, String> {
     let analyses = stock_analyses::Entity::find()
         .filter(stock_analyses::Column::Status.eq("completed"))
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -538,7 +544,10 @@ pub async fn create_price_alert(
         created_at: Set(now),
         updated_at: Set(now),
     };
-    model.insert(&state.sea_db).await.map_err(|e| e.to_string())
+    model
+        .insert(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 查询价格告警列表
@@ -548,7 +557,7 @@ pub async fn list_price_alerts(
 ) -> Result<Vec<price_alerts::Model>, String> {
     price_alerts::Entity::find()
         .order_by_desc(price_alerts::Column::CreatedAt)
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())
 }
@@ -557,7 +566,7 @@ pub async fn list_price_alerts(
 #[tauri::command]
 pub async fn delete_price_alert(state: State<'_, AppState>, id: String) -> Result<(), String> {
     price_alerts::Entity::delete_by_id(id)
-        .exec(&state.sea_db)
+        .exec(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -580,7 +589,7 @@ pub async fn generate_stock_report(
     analysis_id: String,
 ) -> Result<String, String> {
     let record = stock_analyses::Entity::find_by_id(&analysis_id)
-        .one(&state.sea_db)
+        .one(state.harness.db())
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "分析记录不存在".to_string())?;
@@ -753,7 +762,7 @@ pub async fn toggle_trading_enabled(
 ) -> Result<(), String> {
     tracing::info!("Trading system {}abled", if enabled { "en" } else { "dis" });
     axagent_core::repo::settings::set_setting(
-        &state.sea_db,
+        state.harness.db(),
         "trading_enabled",
         &enabled.to_string(),
     )
@@ -788,7 +797,7 @@ pub async fn compare_trade_with_analysis(
     trade_id: String,
 ) -> Result<TradePredictionComparison, String> {
     let trade = trades::Entity::find_by_id(&trade_id)
-        .one(&state.sea_db)
+        .one(state.harness.db())
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "交易记录不存在".to_string())?;
@@ -805,7 +814,8 @@ pub async fn backtest_key_levels(
     state: State<'_, AppState>,
     lookback_days: u32,
 ) -> Result<KeyLevelBacktestStats, String> {
-    let tracker = KeyLevelTracker::new(Arc::new(state.sea_db.clone()), state.astock_client.clone());
+    let tracker =
+        KeyLevelTracker::new(Arc::new(state.harness.db().clone()), state.astock_client.clone());
     tracker.backtest_key_levels(lookback_days).await
 }
 
@@ -818,7 +828,7 @@ pub async fn screen_stocks(
     criteria: ScreenCriteria,
 ) -> Result<Vec<ScreenResult>, String> {
     let watchlist: Vec<(String, String)> = axagent_core::entity::watchlist_items::Entity::find()
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())?
         .iter()
@@ -863,7 +873,7 @@ pub async fn refresh_trading_calendar() -> Result<Vec<String>, String> {
 #[tauri::command]
 pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyReview, String> {
     let watchlist: Vec<(String, String)> = axagent_core::entity::watchlist_items::Entity::find()
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())?
         .iter()
@@ -873,7 +883,7 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
     // 查询当日已触发的价格告警
     let triggered_alerts_result = price_alerts::Entity::find()
         .filter(price_alerts::Column::IsTriggered.eq(true))
-        .all(&state.sea_db)
+        .all(state.harness.db())
         .await;
 
     let mut triggered_alerts: std::collections::HashMap<String, Vec<String>> =
@@ -913,7 +923,8 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
 pub async fn optimize_scoring_weights(
     state: State<'_, AppState>,
 ) -> Result<axagent_stock_analysis::decision::ScoringWeights, String> {
-    axagent_stock_analysis::backtest::optimize_weights(&state.astock_client, &state.sea_db).await
+    axagent_stock_analysis::backtest::optimize_weights(&state.astock_client, state.harness.db())
+        .await
 }
 
 // ── Portfolio Risk ──
@@ -952,7 +963,7 @@ pub async fn get_value_assessment(
             None
         }
     });
-    let full_config = load_full_config(&state.sea_db).await;
+    let full_config = load_full_config(state.harness.db()).await;
     Ok(match shares {
         Some(s) if s > 0.0 => axagent_stock_analysis::value::ValueEngine::assess(
             quote.price,
@@ -991,7 +1002,7 @@ pub async fn compute_value_metrics(
             None
         }
     });
-    let full_config = load_full_config(&state.sea_db).await;
+    let full_config = load_full_config(state.harness.db()).await;
     Ok(axagent_stock_analysis::value_investing::ValueInvestingEngine::compute(
         &stock_code,
         quote.price,

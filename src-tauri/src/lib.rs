@@ -1308,7 +1308,7 @@ pub fn run() {
 
             // Seed stock analysis experts/roles/profiles
             {
-                let seed_db = state.sea_db.clone();
+                let seed_db = state.harness.db().clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) = commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(&seed_db).await {
                         tracing::warn!("[stock_analysis_setup] 种子化失败: {e}");

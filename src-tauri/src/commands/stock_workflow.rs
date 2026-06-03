@@ -164,11 +164,11 @@ pub async fn run_stock_workflow(
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }
-    .insert(&state.sea_db)
+    .insert(state.harness.db())
     .await
     .map_err(|e| format!("DB 写入失败: {e}"))?;
 
-    let loaded = load_and_inject_template(&state.sea_db, &stock_code).await?;
+    let loaded = load_and_inject_template(state.harness.db(), &stock_code).await?;
 
     if let Some(ref vars) = loaded.variables {
         for v in vars {
@@ -192,7 +192,7 @@ pub async fn run_stock_workflow(
     let wf_id = workflow.id.clone();
     let wf_id_ret = wf_id.clone();
     let app_h = app.clone();
-    let db = state.sea_db.clone();
+    let db = state.harness.db().clone();
     let aid = analysis_id.clone();
 
     let progress_app = app.clone();

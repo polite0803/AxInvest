@@ -91,7 +91,7 @@ export function TradePanel() {
       direction: action === StockAction.SELL ? "sell" : "buy",
       price: targetPrice || 0,
       quantity: positionPct ? Math.round((positionPct / 100) * 1000) : 100,
-      notes: stopLoss ? `止损: ${stopLoss}` : "",
+      notes: stopLoss ? t("stockAnalysis.trade.stopLoss", { price: stopLoss }) : "",
     }));
   }, [storeDecision, storeStockCode, storeStockName]);
 
@@ -144,7 +144,7 @@ export function TradePanel() {
     { title: t("trade.shares"), dataIndex: "totalShares", width: 44, render: (v: number) => v.toFixed(0) },
     { title: t("trade.cost"), dataIndex: "avgCost", width: 50, render: (v: number) => v.toFixed(2) },
     {
-      title: "盈亏%",
+      title: t("stockAnalysis.trade.pnlPercent"),
       dataIndex: "unrealizedPnlPct",
       width: 50,
       render: (v: number | null) =>
@@ -210,10 +210,19 @@ export function TradePanel() {
       {/* 绩效统计 */}
       {trades.length > 0 && (
         <div className="grid grid-cols-3 gap-1 mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>
-          <Statistic title="总交易" value={stats.totalTrades} valueStyle={{ fontSize: 14 }} />
-          <Statistic title="胜率" value={stats.winRate} suffix="%" valueStyle={{ fontSize: 14 }} />
           <Statistic
-            title="累计盈亏"
+            title={t("stockAnalysis.trade.totalTrades")}
+            value={stats.totalTrades}
+            valueStyle={{ fontSize: 14 }}
+          />
+          <Statistic
+            title={t("stockAnalysis.trade.winRate")}
+            value={stats.winRate}
+            suffix="%"
+            valueStyle={{ fontSize: 14 }}
+          />
+          <Statistic
+            title={t("stockAnalysis.trade.totalPnl")}
             value={stats.totalPnl.toFixed(0)}
             valueStyle={{ fontSize: 14, color: stats.totalPnl >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
           />
@@ -280,7 +289,9 @@ export function TradePanel() {
           >
             {(storeDecision as any).action}
           </Tag>
-          <Button size="small" type="link" className="text-xs px-1" onClick={quickRecord}>录入</Button>
+          <Button size="small" type="link" className="text-xs px-1" onClick={quickRecord}>
+            {t("stockAnalysis.trade.quickRecord")}
+          </Button>
         </div>
       )}
 

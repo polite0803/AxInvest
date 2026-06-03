@@ -2214,7 +2214,7 @@ pub async fn update_workflow_template_node(
     node_id: String,
     input: UpdateWorkflowTemplateNodeInput,
 ) -> Result<bool, String> {
-    let db = &state.sea_db;
+    let db = state.harness.db();
     use axagent_core::entity::workflow_template;
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 

@@ -1,6 +1,7 @@
+import { List } from "@/components/common/AntdList";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { BacklinkInfo } from "@/types";
-import { Empty, List, Spin, theme, Typography } from "antd";
+import { Empty, Spin, theme, Typography } from "antd";
 import { ArrowLeftRight, ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

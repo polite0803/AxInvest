@@ -1,6 +1,7 @@
+import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Card, Empty, List, Spin, Tag } from "antd";
+import { Button, Card, Empty, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { checkVendorEnabled } from "./vendorCheck";

@@ -1,6 +1,7 @@
+import { List } from "@/components/common/AntdList";
 import { usePromptTemplateStore } from "@/stores";
 import type { PromptTemplate } from "@/types";
-import { Input, List, Modal, Spin, Tag } from "antd";
+import { Input, Modal, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

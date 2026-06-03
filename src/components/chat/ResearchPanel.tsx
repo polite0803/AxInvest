@@ -1,3 +1,4 @@
+import { List } from "@/components/common/AntdList";
 import { useCitationStore } from "@/stores/feature/citationStore";
 import type { Citation } from "@/types";
 import {
@@ -8,7 +9,7 @@ import {
   SearchOutlined,
   StopOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Card, Divider, Input, List, Space, Tag, theme, Typography } from "antd";
+import { Alert, Button, Card, Divider, Input, Space, Tag, theme, Typography } from "antd";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CredibilityBadge } from "./CredibilityBadge";

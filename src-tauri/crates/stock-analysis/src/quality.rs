@@ -108,11 +108,7 @@ pub fn check_report_quality(
 
     // 实质分析启发式：除了"提到"关键词，至少要有数字/百分号/明确结论
     // 防止 LLM 用一句"趋势向上"刷满所有必采项
-    let has_substance = report_text
-        .chars()
-        .filter(|c| c.is_ascii_digit())
-        .count()
-        >= 3
+    let has_substance = report_text.chars().filter(|c| c.is_ascii_digit()).count() >= 3
         || report_text.contains('%')
         || report_text.contains("看多")
         || report_text.contains("看空")

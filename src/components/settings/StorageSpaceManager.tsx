@@ -1,6 +1,7 @@
+import { List } from "@/components/common/AntdList";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
-import { App, Button, List, Space, Spin, Typography } from "antd";
+import { App, Button, Space, Spin, Typography } from "antd";
 import { CloudUpload, FileText, FolderEdit, FolderOpen, Image, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

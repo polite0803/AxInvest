@@ -1,5 +1,6 @@
+import { List } from "@/components/common/AntdList";
 import { useArtifactStore, useConversationStore } from "@/stores";
-import { Descriptions, Empty, List, Tabs, Tag, theme, Typography } from "antd";
+import { Descriptions, Empty, Tabs, Tag, theme, Typography } from "antd";
 import { FileText, Info, Paperclip, Search, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

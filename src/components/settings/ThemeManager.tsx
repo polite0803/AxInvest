@@ -1,5 +1,6 @@
+import { List } from "@/components/common/AntdList";
 import { Theme, ThemeColors, useThemeStore } from "@/stores/feature/themeStore";
-import { Button, Card, Form, Input, List, message, Modal, Popconfirm, Space, Typography } from "antd";
+import { Button, Card, Form, Input, message, Modal, Popconfirm, Space, Typography } from "antd";
 import { Check, Copy, Delete, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

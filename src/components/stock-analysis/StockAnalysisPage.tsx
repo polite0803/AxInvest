@@ -2,7 +2,7 @@ import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettin
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
-import { Collapse, Dropdown } from "antd";
+import { Button, Collapse, Dropdown } from "antd";
 import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,6 +52,9 @@ export function StockAnalysisPage() {
   const analysisId = useStockAnalysisStore((s) => s.analysisId);
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const status = useStockAnalysisStore((s) => s.status);
+  const error = useStockAnalysisStore((s) => s.error);
+  const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const klinePeriod = useStockAnalysisStore((s) => s.klinePeriod);
@@ -70,9 +73,11 @@ export function StockAnalysisPage() {
     invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    useStockAnalysisStore.getState().setupEventListener();
-  }, []);
+  // 注意：setupEventListener 改为仅在 startAnalysis 内调用。
+  // 之前 L76-78 在页面挂载时也调用，与 startAnalysis 的 await setupEventListener
+  // 存在竞态——两组 listen 会同时进行，后一次 set({_unlisten}) 覆盖前一次，
+  // 前一次的 3 个监听句柄变成孤儿（永远不会被 unlisten）。
+  // 现在挂载时不再注册，只在用户点击"开始分析"时由 startAnalysis 负责注册。
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -148,7 +153,10 @@ export function StockAnalysisPage() {
     { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
     { key: "replay", label: t("workEngine.executionHistory"), element: <ExecutionReplayPanel /> },
   ];
-  // 桌面全部显示，移动端前7个核心面板 + 其余通过 tag 切换
+  // 桌面全部显示，移动端前7个核心面板 + 其余通过"更多"下拉菜单访问
+  // 移动端只直接显示 7 个核心面板（满足股市日常扫盘需求），其余 6 个面板
+  // （alerts, compare, history, review, events, replay）通过"更多"下拉菜单访问。
+  // 总面板数 = 7 + 6 = 13。
   const mobileCoreKeys = ["screener", "limitup", "dragontiger", "sectors", "north", "watchlist", "trade"];
   const sheetPanels = isMobile ? allSheetPanels.filter((p) => mobileCoreKeys.includes(p.key)) : allSheetPanels;
 
@@ -212,7 +220,33 @@ export function StockAnalysisPage() {
                       </div>
                     )}
 
-                    {status !== "loading" && status !== "idle" && (
+                    {status === "error" && (
+                      <div
+                        style={{
+                          padding: 16,
+                          margin: 16,
+                          border: "1px solid var(--sa-red)",
+                          borderRadius: 8,
+                          background: "var(--surface)",
+                        }}
+                      >
+                        <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-red)" }}>
+                          {t("stockAnalysis.workflow.startFailed", "分析失败")}
+                        </h3>
+                        <p style={{ margin: "0 0 12px 0", color: "var(--muted)" }}>
+                          {error ?? t("common.unknownError", "未知错误")}
+                        </p>
+                        <Button
+                          type="primary"
+                          disabled={!stockCode}
+                          onClick={() => stockCode && startAnalysis(stockCode)}
+                        >
+                          {t("common.retry", "重试")}
+                        </Button>
+                      </div>
+                    )}
+
+                    {status !== "loading" && status !== "idle" && status !== "error" && (
                       <>
                         <AnalysisProgress />
 

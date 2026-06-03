@@ -23,16 +23,29 @@ export function DecisionBanner() {
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
+  const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
   const [adding, setAdding] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  // stockCode 变化时同步自选状态
+  // stockCode 或自选列表变化时同步自选状态
   useEffect(() => {
-    if (typeof window !== "undefined" && stockCode) {
-      setWatchlisted(window.localStorage.getItem("ax_watchlisted") === stockCode);
-    }
-  }, [stockCode]);
+    if (!stockCode) { return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await invoke<{ stockCode: string }[]>("list_watchlist");
+        if (!cancelled) {
+          setWatchlisted(list.some((w) => w.stockCode === stockCode));
+        }
+      } catch {
+        if (!cancelled) { setWatchlisted(false); }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stockCode, watchlistVersion]);
 
   const addToWatchlist = useCallback(async () => {
     if (!stockCode || !stockName) { return; }
@@ -40,7 +53,6 @@ export function DecisionBanner() {
     try {
       await invoke("add_to_watchlist", { stockCode, stockName });
       setWatchlisted(true);
-      if (typeof window !== "undefined") { window.localStorage.setItem("ax_watchlisted", stockCode); }
       bumpWatchlistVersion();
       message.success(t("stockAnalysis.addedToWatchlist"));
     } catch {

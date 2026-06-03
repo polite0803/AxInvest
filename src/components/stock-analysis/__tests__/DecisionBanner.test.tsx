@@ -41,7 +41,7 @@ describe("DecisionBanner", () => {
 
   it("renders decision info when decision exists", () => {
     storeState.decision = {
-      action: "买入",
+      action: "BUY",
       positionPct: 10.0,
       reasoning: "技术面突破",
       riskLevel: "中",

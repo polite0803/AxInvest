@@ -60,7 +60,7 @@ export function StockAnalysisChatIndicator() {
           <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {stockName && (
-              <Tag bordered={false} color="blue" style={{ marginRight: 4, fontSize: 12 }}>
+              <Tag variant="filled" color="blue" style={{ marginRight: 4, fontSize: 12 }}>
                 {stockName}
               </Tag>
             )}
@@ -79,13 +79,13 @@ export function StockAnalysisChatIndicator() {
         <>
           <span style={{ color: token.colorSuccess }}>✅</span>
           <span style={{ flex: 1, minWidth: 0 }}>
-            <Tag bordered={false} color="success" style={{ marginRight: 4, fontSize: 12 }}>
+            <Tag variant="filled" color="success" style={{ marginRight: 4, fontSize: 12 }}>
               {stockName || stockCode}
             </Tag>
             {t("stockAnalysis.completed")}
             {" · "}
             <Tag
-              bordered={false}
+              variant="filled"
               color={getActionColor(decision.action)}
               style={{ fontSize: 12 }}
             >
@@ -118,7 +118,7 @@ export function StockAnalysisChatIndicator() {
         <>
           <span style={{ color: token.colorSuccess }}>✅</span>
           <span style={{ flex: 1 }}>
-            <Tag bordered={false} color="success" style={{ marginRight: 4, fontSize: 12 }}>
+            <Tag variant="filled" color="success" style={{ marginRight: 4, fontSize: 12 }}>
               {stockName || stockCode}
             </Tag>
             {t("stockAnalysis.completed")}
@@ -134,7 +134,7 @@ export function StockAnalysisChatIndicator() {
         <>
           <span style={{ color: token.colorError }}>❌</span>
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            <Tag bordered={false} color="error" style={{ marginRight: 4, fontSize: 12 }}>
+            <Tag variant="filled" color="error" style={{ marginRight: 4, fontSize: 12 }}>
               {stockName || stockCode}
             </Tag>
             {error || t("stockAnalysis.error")}

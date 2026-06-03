@@ -1,4 +1,5 @@
 import { makeWorkflowContent, type WorkflowCardData } from "@/components/chat/WorkflowAgentCard";
+import { extractContent } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { useConversationStore } from "@/stores/domain/conversationStore";
@@ -76,24 +77,6 @@ function updateMessageInStore(messageId: string, content: string) {
   }));
 }
 
-/** 从 AgentExecutor 输出中提取纯文本内容（与 stockAnalysisStore 保持一致）*/
-function extractContent(output: unknown): string {
-  let text = "";
-  if (typeof output === "string") { text = output; }
-  else if (output && typeof output === "object") {
-    const r = output as Record<string, unknown>;
-    if (typeof r.content === "string" && (r.content as string).length > 0) { text = r.content as string; }
-    else if (r.content != null && typeof r.content === "object") { text = JSON.stringify(r.content); }
-    else { text = JSON.stringify(output); }
-  } else {
-    text = String(output ?? "");
-  }
-  // 清理 LLM 工具调用 XML 标签（如 <minimax:tool_call>...</minimax:tool_call>）
-  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
-  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
-  return text.replace(/\n{3,}/g, "\n\n").trim();
-}
-
 function summarizeToolResult(result: unknown): string {
   if (result == null) { return ""; }
   if (typeof result === "string") {
@@ -164,6 +147,25 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
 
   const unlisteners: UnlistenFn[] = [];
   let aggregateMsgId: string | null = null;
+
+  // ── 节流：每 200ms 最多 flush 一次聚合卡片更新，避免每节点都打 IPC ──
+  let updateTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingContent: string | null = null;
+  const flushUpdate = () => {
+    if (updateTimer) {
+      clearTimeout(updateTimer);
+      updateTimer = null;
+    }
+    if (!aggregateMsgId || pendingContent == null) { return; }
+    invoke("update_message_content", { id: aggregateMsgId, content: pendingContent }).catch(() => {});
+    updateMessageInStore(aggregateMsgId, pendingContent);
+    pendingContent = null;
+  };
+  const scheduleUpdate = (content: string) => {
+    pendingContent = content;
+    if (updateTimer) { return; }
+    updateTimer = setTimeout(flushUpdate, 200);
+  };
 
   const analystsMap = new Map(
     Object.entries(ANALYST_NODE_TO_NAME).map(([nodeId, name]) => [
@@ -256,7 +258,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
         round: r,
         bull: bullEntry?.rounds[0],
         bear: bearEntry?.rounds[0],
-        status: (bullEntry?.rounds[0] || bearEntry?.rounds[0])
+        status: (bullEntry?.rounds[0] && bearEntry?.rounds[0])
           ? "done" as const
           : (bullEntry?.status === "running" || bearEntry?.status === "running")
           ? "running" as const
@@ -411,12 +413,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
 
     // ── 更新聚合卡片 ──
     if (aggregateMsgId) {
-      const newContent = buildAggregateContent(nodeId, "running", totalNodes);
-      invoke("update_message_content", {
-        id: aggregateMsgId,
-        content: newContent,
-      }).catch(() => {});
-      updateMessageInStore(aggregateMsgId, newContent);
+      scheduleUpdate(buildAggregateContent(nodeId, "running", totalNodes));
     }
   });
   unlisteners.push(u1);
@@ -442,12 +439,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     }
 
     if (aggregateMsgId) {
-      const newContent = buildAggregateContent("done", "done", completedNodes.size);
-      invoke("update_message_content", {
-        id: aggregateMsgId,
-        content: newContent,
-      }).catch(() => {});
-      updateMessageInStore(aggregateMsgId, newContent);
+      scheduleUpdate(buildAggregateContent("done", "done", completedNodes.size));
     }
 
     stopStockWorkflowChatBridge(conversationId);
@@ -458,17 +450,22 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     "workflow-error",
     async (event) => {
       if (aggregateMsgId) {
-        const newContent = buildAggregateContent("error", "error", completedNodes.size, event.payload.error);
-        invoke("update_message_content", {
-          id: aggregateMsgId,
-          content: newContent,
-        }).catch(() => {});
-        updateMessageInStore(aggregateMsgId, newContent);
+        scheduleUpdate(buildAggregateContent("error", "error", completedNodes.size, event.payload.error));
       }
       stopStockWorkflowChatBridge(conversationId);
     },
   );
   unlisteners.push(u3);
+
+  // 清理：bridge 停止时 flush 一次 pending，并清理 timer
+  unlisteners.push(() => {
+    flushUpdate();
+    if (updateTimer) {
+      clearTimeout(updateTimer);
+      updateTimer = null;
+      pendingContent = null;
+    }
+  });
 
   activeBridges.set(conversationId, unlisteners);
 }

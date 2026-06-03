@@ -13,6 +13,35 @@ use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
+/// 仅保留需要持久化的黑板键，剔除 K线/财务/新闻等大体积数据
+/// 当前新工作流路径不写入 BlackboardSnapshot，保留为防御性工具函数
+#[allow(dead_code)]
+fn filter_blackboard_snapshot(snapshot: &serde_json::Value) -> serde_json::Value {
+    const PERSIST_PREFIXES: &[&str] = &[
+        "report.",
+        "debate.",
+        "risk.",
+        "decision.",
+        "value.",
+        "rule_check.",
+        "objective_score",
+        "data_quality_summary",
+    ];
+    if let Some(obj) = snapshot.as_object() {
+        let mut filtered = serde_json::Map::new();
+        for (k, v) in obj {
+            if PERSIST_PREFIXES
+                .iter()
+                .any(|p| k == p || k.starts_with(p))
+            {
+                filtered.insert(k.clone(), v.clone());
+            }
+        }
+        return serde_json::Value::Object(filtered);
+    }
+    snapshot.clone()
+}
+
 struct LoadedTemplate {
     nodes: Vec<WorkflowNode>,
     edges: Vec<WorkflowEdge>,

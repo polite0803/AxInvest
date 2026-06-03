@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-02",
-  "total_entries": 2827,
-  "total_files": 175,
+  "total_entries": 2701,
+  "total_files": 172,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -360,13 +360,6 @@
       "phase": 3
     },
     {
-      "file": "src/components/stock-analysis/DecisionBanner.tsx",
-      "lines": "8,9,10,11,12,27,28,29,30,31,45,46,47,48,49,50,51,52,53,54,55,56,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,86,87,88,89,90,91,111,112,113,114,115,116,117,118,119,120,121,122,123,135,137,139,140,142,144,146,148,196,230,232,235,237,246,248,283,285,287,364,366,382",
-      "reason": "硬编码中文字符串",
-      "phase": 3,
-      "total_lines": 78
-    },
-    {
       "file": "src/components/stock-analysis/HistoricalAnalysisPanel.tsx",
       "lines": "69,80,149,151,153,158,167,172,177,185,190,199,206,212,219,237,254",
       "reason": "硬编码中文字符串",
@@ -386,10 +379,10 @@
     },
     {
       "file": "src/components/stock-analysis/RiskMatrix.tsx",
-      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,39,40,41,43,223,263",
+      "lines": "5,14,28,29,30,31,32,33,34,35,36,37,38,39,40,41,43",
       "reason": "硬编码中文字符串",
       "phase": 3,
-      "total_lines": 19
+      "total_lines": 17
     },
     {
       "file": "src/components/stock-analysis/StockAnalysisChatIndicator.tsx",
@@ -898,13 +891,6 @@
       "phase": 3
     },
     {
-      "file": "src/stores/feature/stockWorkflowChatBridge.ts",
-      "lines": "23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,103,107,109,111,114,115,116,117,118,121,124,132,134,135,136,139,282",
-      "reason": "硬编码中文字符串",
-      "phase": 3,
-      "total_lines": 42
-    },
-    {
       "file": "src/components/workflow/Panels/PropertyPanels/CodePropertyPanel.tsx",
       "lines": "41,47,53,59,173,263,326",
       "reason": "Rhai 代码模板内容/注释，非 UI 字符串",
@@ -1052,12 +1038,6 @@
       "file": "src/components/chat/RightPanelContainer.tsx",
       "lines": "511",
       "reason": "JSX 注释文本，非 UI 渲染内容",
-      "phase": 3
-    },
-    {
-      "file": "src/components/stock-analysis/DebatePanel.tsx",
-      "lines": "111,119,181,189",
-      "reason": "硬编码中文字符串",
       "phase": 3
     }
   ]

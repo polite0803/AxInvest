@@ -7482,6 +7482,9 @@
   "stockAnalysis.workflow.bearCase": "Bear Case",
 
   "stockAnalysis.expandView": "Expand View",
+  "stockAnalysis.riskHigh": "High Risk",
+  "stockAnalysis.riskMid": "Medium Risk",
+  "stockAnalysis.riskLow": "Low Risk",
   "stockAnalysis.workflow.bullAnalyst": "Bull Analyst",
   "stockAnalysis.workflow.bearAnalyst": "Bear Analyst",
   "stockAnalysis.workflow.riskAggressive": "Aggressive Assessment",

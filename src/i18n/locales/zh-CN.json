@@ -7614,5 +7614,8 @@
   "stockAnalysis.workflow.notification": "结果通知",
   "stockAnalysis.workflow.fetchFailed": "数据获取失败",
 
-  "stockAnalysis.workflow.startFailed": "工作流启动失败"
+  "stockAnalysis.workflow.startFailed": "工作流启动失败",
+  "stockAnalysis.riskHigh": "高风险",
+  "stockAnalysis.riskMid": "中风险",
+  "stockAnalysis.riskLow": "低风险"
 }

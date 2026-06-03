@@ -95,6 +95,63 @@ export function getActionColor(action: string): "red" | "green" | "orange" | "bl
   }
 }
 
+/** 风险等级枚举 */
+export const StockRiskLevel = {
+  HIGH: "HIGH",
+  MID: "MID",
+  LOW: "LOW",
+} as const;
+
+export type StockRiskLevelType = (typeof StockRiskLevel)[keyof typeof StockRiskLevel];
+
+/** 中文风险等级 → 枚举映射 */
+export const STOCK_RISK_LABELS: Record<string, StockRiskLevelType> = {
+  "高": StockRiskLevel.HIGH,
+  "中": StockRiskLevel.MID,
+  "低": StockRiskLevel.LOW,
+  "high": StockRiskLevel.HIGH,
+  "mid": StockRiskLevel.MID,
+  "low": StockRiskLevel.LOW,
+};
+
+/** 解析风险等级 */
+export function parseRiskLevel(raw: unknown): StockRiskLevelType {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (s.includes("高") || s === "high") { return StockRiskLevel.HIGH; }
+  if (s.includes("低") || s === "low") { return StockRiskLevel.LOW; }
+  return StockRiskLevel.MID;
+}
+
+/** riskLevel → i18n key */
+export function getRiskTKey(level: string): string {
+  const map: Record<string, string> = {
+    HIGH: "stockAnalysis.riskHigh",
+    MID: "stockAnalysis.riskMid",
+    LOW: "stockAnalysis.riskLow",
+  };
+  return map[level] ?? "stockAnalysis.riskMid";
+}
+
+/** riskLevel → CSS 颜色变量 */
+export function getRiskColor(level: string): string {
+  switch (level) {
+    case StockRiskLevel.HIGH:
+      return "var(--sa-red)";
+    case StockRiskLevel.LOW:
+      return "var(--sa-green)";
+    default:
+      return "var(--sa-amber)";
+  }
+}
+
+/** 信号标签 → Tag 颜色（启发式子串匹配，信号为 LLM 自由文本） */
+export function getSignalColor(signal: string): "green" | "red" | "blue" {
+  const s = signal.toLowerCase();
+  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) { return "green"; }
+  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) { return "red"; }
+  return "blue";
+}
+
 /** 解析可能的中文/英文 action 为 StockActionType */
 export function parseAction(raw: unknown): StockActionType {
   const s = String(raw ?? "").trim();
@@ -107,7 +164,7 @@ export interface StockDecision {
   targetPrice: number | null;
   stopLoss: number | null;
   reasoning: string;
-  riskLevel: string;
+  riskLevel: StockRiskLevelType;
   confidence: number;
 }
 

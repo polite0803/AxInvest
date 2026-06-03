@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
-import { getActionColor, getActionTKey } from "@/types/stock-analysis";
+import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, message, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
@@ -75,7 +75,7 @@ export function DecisionBanner() {
       `当前价: ¥${currentPrice.toFixed(2)}`,
       `决策: ${decision.action} | 置信度: ${confidencePct}%`,
       `目标价: ¥${decision.targetPrice ?? "-"} | 止损: ¥${decision.stopLoss ?? "-"}`,
-      `仓位: ${decision.positionPct}% | 风险等级: ${decision.riskLevel}`,
+      `仓位: ${decision.positionPct}% | ${t(getRiskTKey(decision.riskLevel))}`,
       upside != null ? `预期涨幅: ${upside >= 0 ? "+" : ""}${upside.toFixed(1)}%` : "",
       ``,
       `推理摘要:`,
@@ -115,7 +115,7 @@ export function DecisionBanner() {
       decision ? `最新决策: ${decision.action}, 置信度 ${confidencePct}%。` : "",
       `当前价格: ¥${currentPrice.toFixed(2)}`,
       upside != null ? `预期涨幅: ${upside >= 0 ? "+" : ""}${upside.toFixed(1)}%` : "",
-      `风险等级: ${decision?.riskLevel ?? "未知"}`,
+      `${t(getRiskTKey(decision?.riskLevel ?? ""))}`,
     ].filter(Boolean).join("\n");
 
     navigator.clipboard.writeText(context).then(() => {
@@ -232,14 +232,10 @@ export function DecisionBanner() {
             <div
               className="text-sm font-semibold"
               style={{
-                color: String(decision.riskLevel ?? "").includes("高")
-                  ? "var(--sa-red)"
-                  : String(decision.riskLevel ?? "").includes("低")
-                  ? "var(--sa-green)"
-                  : "var(--sa-amber)",
+                color: getRiskColor(decision.riskLevel),
               }}
             >
-              {decision.riskLevel}
+              {t(getRiskTKey(decision.riskLevel))}
             </div>
           </div>
         </div>
@@ -344,14 +340,10 @@ export function DecisionBanner() {
             <div
               className="text-lg font-semibold"
               style={{
-                color: String(decision.riskLevel ?? "").includes("高")
-                  ? "var(--sa-red)"
-                  : String(decision.riskLevel ?? "").includes("低")
-                  ? "var(--sa-green)"
-                  : "var(--sa-amber)",
+                color: getRiskColor(decision.riskLevel),
               }}
             >
-              {decision.riskLevel}
+              {t(getRiskTKey(decision.riskLevel))}
             </div>
           </div>
         </div>

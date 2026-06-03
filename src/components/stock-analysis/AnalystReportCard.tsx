@@ -1,5 +1,6 @@
 import { useSettingsStore } from "@/stores";
 import { ANALYST_NAMES } from "@/types";
+import { getSignalColor } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
@@ -116,11 +117,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
                 {parsed.signals.map((s, i) => (
                   <Tag
                     key={i}
-                    color={s.includes("买") || s.includes("多")
-                      ? "green"
-                      : s.includes("卖") || s.includes("空")
-                      ? "red"
-                      : "blue"}
+                    color={getSignalColor(s)}
                   >
                     {s}
                   </Tag>
@@ -172,11 +169,7 @@ function ParsedReportModalContent(
           {parsed.signals.map((s, i) => (
             <Tag
               key={i}
-              color={s.includes("买") || s.includes("多")
-                ? "green"
-                : s.includes("卖") || s.includes("空")
-                ? "red"
-                : "blue"}
+              color={getSignalColor(s)}
             >
               {s}
             </Tag>

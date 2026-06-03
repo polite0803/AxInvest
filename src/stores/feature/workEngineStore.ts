@@ -58,7 +58,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     set({ loading: true });
     try {
       const executionId = await invoke<string>("start_workflow_execution", {
-        workflow_id: workflowId,
+        workflowId: workflowId,
         input,
       });
       set({ executionId, isDebugRunning: true });
@@ -84,9 +84,9 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
         templateId: templateId,
         input: options?.input ?? null,
         breakpoints: options?.breakpoints ?? null,
-        dry_run: options?.dryRun ?? get().dryRun,
-        model_id: options?.modelId ?? null,
-        provider_id: options?.providerId ?? null,
+        dryRun: options?.dryRun ?? get().dryRun,
+        modelId: options?.modelId ?? null,
+        providerId: options?.providerId ?? null,
       });
       set({ executionId, isDebugRunning: true, lastDebugError: null });
       return executionId;
@@ -104,7 +104,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     const { executionId } = get();
     if (!executionId) { return; }
     await invoke<boolean>("pause_workflow_execution", {
-      execution_id: executionId,
+      executionId: executionId,
     });
   },
 
@@ -112,7 +112,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     const { executionId } = get();
     if (!executionId) { return; }
     await invoke<boolean>("resume_workflow_execution", {
-      execution_id: executionId,
+      executionId: executionId,
     });
   },
 
@@ -120,7 +120,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     const { executionId } = get();
     if (!executionId) { return; }
     await invoke<boolean>("cancel_workflow_execution", {
-      execution_id: executionId,
+      executionId: executionId,
     });
     set({ isDebugRunning: false });
   },
@@ -128,8 +128,8 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
   setBreakpoints: async (nodeIds: string[]) => {
     const { executionId } = get();
     await invoke<boolean>("set_workflow_breakpoints", {
-      node_ids: nodeIds,
-      execution_id: executionId ?? null,
+      nodeIds: nodeIds,
+      executionId: executionId ?? null,
     });
     set({ breakpoints: nodeIds });
   },
@@ -138,7 +138,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     const { executionId } = get();
     if (!executionId) { return; }
     await invoke<boolean>("resume_workflow_breakpoint", {
-      execution_id: executionId,
+      executionId: executionId,
     });
   },
 
@@ -146,7 +146,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     const { executionId } = get();
     if (!executionId) { return; }
     await invoke<boolean>("step_workflow_breakpoint", {
-      execution_id: executionId,
+      executionId: executionId,
     });
   },
 
@@ -160,8 +160,8 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
     if (get().isDebugRunning) {
       try {
         await invoke<boolean>("set_workflow_breakpoints", {
-          node_ids: next,
-          execution_id: executionId ?? null,
+          nodeIds: next,
+          executionId: executionId ?? null,
         });
       } catch {
         set({ breakpoints: prev });
@@ -176,7 +176,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
   loadHistory: async (workflowId: string) => {
     const history = await invoke<ExecutionSummary[]>(
       "list_workflow_executions",
-      { workflow_id: workflowId },
+      { workflowId: workflowId },
     );
     set({ executionHistory: history });
   },
@@ -184,7 +184,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
   getStatus: async (executionId: string) => {
     const status = await invoke<ExecutionStatusResponse>(
       "get_workflow_execution_status",
-      { execution_id: executionId },
+      { executionId: executionId },
     );
     const nodeStatusesFromRecords: Record<string, string> = {};
     for (const r of status.node_records ?? []) {

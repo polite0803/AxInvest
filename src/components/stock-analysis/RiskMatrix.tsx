@@ -220,7 +220,7 @@ export function RiskMatrix() {
                 >
                   {cleanToolCallTags(report)
                     ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>暂无风险评估数据</span>}
+                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>}
                 </div>
               </div>
             );
@@ -260,7 +260,7 @@ export function RiskMatrix() {
                 <div className="sa-markdown-content text-sm leading-relaxed">
                   {cleanToolCallTags(report)
                     ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>暂无风险评估数据</span>}
+                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>}
                 </div>
               </div>
             );

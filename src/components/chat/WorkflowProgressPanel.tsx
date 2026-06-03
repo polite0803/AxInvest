@@ -721,10 +721,10 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
     }
     setCancelling(true);
     try {
-      await invoke("workflow_cancel", { workflow_id: workflowId });
+      await invoke("workflow_cancel", { workflowId: workflowId });
       message.success(t("chat.workflow.cancelled"));
       const data = await invoke<WorkflowData>("workflow_get_status", {
-        workflow_id: workflowId,
+        workflowId: workflowId,
       });
       setWorkflow(data);
       setError(null);

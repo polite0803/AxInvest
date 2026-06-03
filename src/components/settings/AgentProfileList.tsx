@@ -218,7 +218,7 @@ export function AgentProfileList() {
     setSaving(`prompt-${editPrompt.id}`);
     try {
       if (editPrompt.type === "expert") {
-        await invoke("update_agency_expert", { request: { id: editPrompt.id, system_prompt: editPrompt.text } });
+        await invoke("update_agency_expert", { request: { id: editPrompt.id, systemPrompt: editPrompt.text } });
         setExpertMap((prev) => ({ ...prev, [editPrompt.id]: { ...prev[editPrompt.id], prompt: editPrompt.text } }));
       } else {
         await invoke("update_agent_role", { id: editPrompt.id, systemPrompt: editPrompt.text });

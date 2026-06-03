@@ -20,31 +20,31 @@ const ANALYST_NODE_TO_NAME: Record<string, string> = {
 };
 
 const TOOL_NODE_TO_LABEL: Record<string, string> = {
-  "t-market-data": "市场行情",
-  "t-kline-data": "K线数据",
-  "t-financial-data": "财务数据",
-  "t-news-data": "新闻资讯",
-  "t-money-flow": "资金流向",
-  "t-sentiment-data": "市场情绪",
-  "t-policy-data": "政策数据",
-  "t-hotmoney-data": "游资数据",
-  "t-lockup-data": "解禁数据",
-  "t-research-data": "研报数据",
-  "t-sector-data": "板块数据",
-  "t-scoring": "技术评分",
-  "t-valuation": "估值计算",
-  "t-portfolio-risk": "组合风险",
-  "t-peers-data": "同业可比",
-  "t-option-data": "期权数据",
-  "t-index-data": "大盘指数",
-  "t-announcement-data": "公司公告",
-  "t-northbound-data": "北向资金",
-  "t-dragon-tiger-data": "龙虎榜",
-  "t-cls-flash-data": "财联社快讯",
-  "t-block-trade-data": "大宗交易",
-  "t-institutional-data": "机构调研",
-  "t-consensus-data": "一致预期",
-  "t-concept-data": "概念板块",
+  "t-market-data": i18next.t("stockAnalysis.tool.marketData"),
+  "t-kline-data": i18next.t("stockAnalysis.tool.klineData"),
+  "t-financial-data": i18next.t("stockAnalysis.tool.financialData"),
+  "t-news-data": i18next.t("stockAnalysis.tool.newsData"),
+  "t-money-flow": i18next.t("stockAnalysis.tool.moneyFlow"),
+  "t-sentiment-data": i18next.t("stockAnalysis.tool.sentimentData"),
+  "t-policy-data": i18next.t("stockAnalysis.tool.policyData"),
+  "t-hotmoney-data": i18next.t("stockAnalysis.tool.hotMoneyData"),
+  "t-lockup-data": i18next.t("stockAnalysis.tool.lockupData"),
+  "t-research-data": i18next.t("stockAnalysis.tool.researchData"),
+  "t-sector-data": i18next.t("stockAnalysis.tool.sectorData"),
+  "t-scoring": i18next.t("stockAnalysis.tool.scoring"),
+  "t-valuation": i18next.t("stockAnalysis.tool.valuation"),
+  "t-portfolio-risk": i18next.t("stockAnalysis.tool.portfolioRisk"),
+  "t-peers-data": i18next.t("stockAnalysis.tool.peersData"),
+  "t-option-data": i18next.t("stockAnalysis.tool.optionData"),
+  "t-index-data": i18next.t("stockAnalysis.tool.indexData"),
+  "t-announcement-data": i18next.t("stockAnalysis.tool.announcement"),
+  "t-northbound-data": i18next.t("stockAnalysis.tool.northbound"),
+  "t-dragon-tiger-data": i18next.t("stockAnalysis.tool.dragonTiger"),
+  "t-cls-flash-data": i18next.t("stockAnalysis.tool.clsFlash"),
+  "t-block-trade-data": i18next.t("stockAnalysis.tool.blockTrade"),
+  "t-institutional-data": i18next.t("stockAnalysis.tool.institutional"),
+  "t-consensus-data": i18next.t("stockAnalysis.tool.consensus"),
+  "t-concept-data": i18next.t("stockAnalysis.tool.concept"),
 };
 
 function wf(type: string, data: Record<string, unknown>, fallback: string): string {
@@ -108,20 +108,23 @@ function summarizeToolResult(result: unknown): string {
 
 function summarizeParsed(v: unknown): string {
   if (Array.isArray(v)) {
-    if (v.length === 0) { return "0 条记录"; }
+    if (v.length === 0) { return i18next.t("stockAnalysis.summary.records", { count: 0 }); }
     const first = v[0];
     if (first && typeof first === "object") {
       const keys = Object.keys(first as Record<string, unknown>);
-      return `${v.length} 条记录 (${keys.slice(0, 3).join(", ")}${keys.length > 3 ? "..." : ""})`;
+      return i18next.t("stockAnalysis.summary.recordsWithKeys", {
+        count: v.length,
+        keys: keys.slice(0, 3).join(", ") + (keys.length > 3 ? "..." : ""),
+      });
     }
-    return `${v.length} 条记录`;
+    return i18next.t("stockAnalysis.summary.records", { count: v.length });
   }
   if (v && typeof v === "object") {
     const obj = v as Record<string, unknown>;
     // 解包 {"content": "..."} 包装
     if (typeof obj.content === "string" && Object.keys(obj).length <= 3) {
       const inner = obj.content;
-      if (inner === "null" || inner === "[]" || inner === "") { return "无数据"; }
+      if (inner === "null" || inner === "[]" || inner === "") { return i18next.t("stockAnalysis.summary.noData"); }
       try {
         return summarizeParsed(JSON.parse(inner));
       } catch {
@@ -129,14 +132,20 @@ function summarizeParsed(v: unknown): string {
       }
     }
     if (obj.stockName && obj.price) { return `${obj.stockName} ¥${obj.price}`; }
-    if (obj.stockCode && obj.totalScore) { return `评分 ${obj.totalScore}`; }
+    if (obj.stockCode && obj.totalScore) { return i18next.t("stockAnalysis.summary.score", { score: obj.totalScore }); }
     if (obj.stockCode && obj.dcf) { return `DCF ¥${(obj.dcf as Record<string, unknown>)?.intrinsicValue ?? "N/A"}`; }
-    if (obj.items && Array.isArray(obj.items)) { return `${(obj.items as unknown[]).length} 条记录`; }
-    if (obj.news && Array.isArray(obj.news)) { return `${(obj.news as unknown[]).length} 条新闻`; }
-    if (obj.data && Array.isArray(obj.data)) { return `${(obj.data as unknown[]).length} 条数据`; }
+    if (obj.items && Array.isArray(obj.items)) {
+      return i18next.t("stockAnalysis.summary.records", { count: (obj.items as unknown[]).length });
+    }
+    if (obj.news && Array.isArray(obj.news)) {
+      return i18next.t("stockAnalysis.summary.news", { count: (obj.news as unknown[]).length });
+    }
+    if (obj.data && Array.isArray(obj.data)) {
+      return i18next.t("stockAnalysis.summary.dataItems", { count: (obj.data as unknown[]).length });
+    }
     const keys = Object.keys(obj);
     if (keys.length <= 4) { return keys.map((k) => `${k}: ${JSON.stringify(obj[k]).slice(0, 30)}`).join(", "); }
-    return `${keys.length} 个字段`;
+    return i18next.t("stockAnalysis.summary.fields", { count: keys.length });
   }
   return String(v).slice(0, 80);
 }

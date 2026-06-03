@@ -108,7 +108,7 @@ export function DebatePanel() {
                   <div className="sa-markdown-content text-xs mt-1">
                     {cleanToolCallTags(r.bull)
                       ? <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
-                      : <span style={{ color: "var(--muted)" }}>暂无数据</span>}
+                      : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
                   </div>
                 </div>
                 <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
@@ -116,7 +116,7 @@ export function DebatePanel() {
                   <div className="sa-markdown-content text-xs mt-1">
                     {cleanToolCallTags(r.bear)
                       ? <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
-                      : <span style={{ color: "var(--muted)" }}>暂无数据</span>}
+                      : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
                   </div>
                 </div>
               </div>
@@ -178,7 +178,7 @@ export function DebatePanel() {
                 <div className="sa-markdown-content text-sm mt-2">
                   {cleanToolCallTags(r.bull)
                     ? <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>暂无数据</span>}
+                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
                 </div>
               </div>
               <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
@@ -186,7 +186,7 @@ export function DebatePanel() {
                 <div className="sa-markdown-content text-sm mt-2">
                   {cleanToolCallTags(r.bear)
                     ? <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>暂无数据</span>}
+                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
                 </div>
               </div>
             </div>

@@ -68,7 +68,7 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
       const r = await invoke<BacktestResult>("backtest_analysis", { analysisId: record.id });
       setBtResult(r);
     } catch {
-      message.error("回测失败");
+      message.error(t("stockAnalysis.backtest.failed"));
     }
     setBtLoading(false);
   };
@@ -79,7 +79,7 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
       const r = await invoke<BacktestResult[]>("backtest_all_history");
       if (Array.isArray(r)) { setBtAllResults(r); }
     } catch {
-      message.error("全量回测失败");
+      message.error(t("stockAnalysis.backtest.allFailed"));
     }
     setBtLoading(false);
   };
@@ -148,16 +148,21 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
 
       {/* 全量回测汇总 */}
       {btStats && (
-        <Card size="small" title="回测汇总" styles={{ body: { padding: "4px 8px" } }}>
+        <Card size="small" title={t("stockAnalysis.backtest.summary")} styles={{ body: { padding: "4px 8px" } }}>
           <div className="grid grid-cols-3 gap-1 text-center">
-            <Statistic title="总数" value={btStats.total} valueStyle={{ fontSize: 14 }} />
+            <Statistic title={t("stockAnalysis.backtest.total")} value={btStats.total} valueStyle={{ fontSize: 14 }} />
             <Statistic
-              title="正确率"
+              title={t("stockAnalysis.backtest.accuracy")}
               value={btStats.correct}
               suffix={`/${btStats.total}`}
               valueStyle={{ fontSize: 14, color: "var(--sa-green)" }}
             />
-            <Statistic title="平均收益" value={btStats.avgReturn} suffix="%" valueStyle={{ fontSize: 14 }} />
+            <Statistic
+              title={t("stockAnalysis.backtest.avgReturn")}
+              value={btStats.avgReturn}
+              suffix="%"
+              valueStyle={{ fontSize: 14 }}
+            />
           </div>
         </Card>
       )}
@@ -166,17 +171,17 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
       {btResult && (
         <Card
           size="small"
-          title={`回测: ${btResult.stockCode} ${btResult.decisionAction}`}
+          title={t("stockAnalysis.backtest.title", { code: btResult.stockCode, action: btResult.decisionAction })}
           styles={{ body: { padding: "4px 8px" } }}
         >
           <div className="grid grid-cols-3 gap-1 text-center text-xs">
             <div>
-              <span className="text-gray-400">持有天数</span>
+              <span className="text-gray-400">{t("stockAnalysis.backtest.holdingDays")}</span>
               <br />
               <b>{btResult.holdingDays}</b>
             </div>
             <div>
-              <span className="text-gray-400">收益率</span>
+              <span className="text-gray-400">{t("stockAnalysis.backtest.returnRate")}</span>
               <br />
               <b className={btResult.returnPct >= 0 ? "text-red-500" : "text-green-500"}>
                 {btResult.returnPct >= 0 ? "+" : ""}
@@ -184,12 +189,14 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
               </b>
             </div>
             <div>
-              <span className="text-gray-400">最大回撤</span>
+              <span className="text-gray-400">{t("stockAnalysis.backtest.maxDrawdown")}</span>
               <br />
               <b>{btResult.maxDrawdown.toFixed(2)}%</b>
             </div>
             <div className="col-span-3 mt-1">
-              <Tag color={btResult.wasCorrect ? "green" : "red"}>{btResult.wasCorrect ? "✓ 正确" : "✗ 错误"}</Tag>
+              <Tag color={btResult.wasCorrect ? "green" : "red"}>
+                {btResult.wasCorrect ? t("stockAnalysis.backtest.correct") : t("stockAnalysis.backtest.wrong")}
+              </Tag>
             </div>
           </div>
         </Card>
@@ -198,27 +205,29 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
       {/* 历史列表 */}
       <Card
         size="small"
-        title="历史记录"
+        title={t("stockAnalysis.history")}
         styles={{ body: { padding: "6px 8px" } }}
         extra={
           <div className="flex gap-1">
             <Input
               size="small"
               prefix={<SearchOutlined />}
-              placeholder="搜索"
+              placeholder={t("stockAnalysis.search")}
               style={{ width: 100 }}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               allowClear
             />
-            <Button size="small" loading={btLoading} onClick={runBacktestAll}>回测全部</Button>
+            <Button size="small" loading={btLoading} onClick={runBacktestAll}>
+              {t("stockAnalysis.backtest.runAll")}
+            </Button>
           </div>
         }
       >
         {loading
           ? <Spin size="small" />
           : filtered.length === 0
-          ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无记录" />
+          ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.noRecords")} />
           : (
             <List
               size="small"
@@ -253,7 +262,7 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
                           runBacktest(r);
                         }}
                       >
-                        回测
+                        {t("stockAnalysis.backtest.run")}
                       </Button>,
                     ]}
                   >

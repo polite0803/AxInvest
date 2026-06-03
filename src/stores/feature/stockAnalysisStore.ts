@@ -2,7 +2,7 @@ import i18n from "@/i18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import type { AnalysisStatus, AnalysisSummary, KLine, StockDecision, StockQuote, StockSearchResult } from "@/types";
-import { parseAction, StockAction } from "@/types";
+import { parseAction, parseRiskLevel, StockAction, StockRiskLevel } from "@/types";
 import { create } from "zustand";
 
 // ── 工作流结果解析 ──
@@ -45,7 +45,7 @@ function normalizeDecision(raw: Record<string, unknown>): StockDecision {
     : (raw.target_price != null ? Number(raw.target_price) : null);
   const stopLoss = raw.stopLoss != null ? Number(raw.stopLoss) : (raw.stop_loss != null ? Number(raw.stop_loss) : null);
   const reasoning = String(raw.reasoning ?? "");
-  const riskLevel = String(raw.riskLevel ?? raw.risk_level ?? i18n.t("stockAnalysis.riskUnknown"));
+  const riskLevel = parseRiskLevel(raw.riskLevel ?? raw.risk_level);
   let confidence = Number(raw.confidence ?? 0);
   if (confidence > 0 && confidence <= 1) { confidence = Math.round(confidence * 100); }
   confidence = Math.round(Math.max(0, Math.min(100, confidence)));
@@ -108,7 +108,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
         targetPrice: null,
         stopLoss: null,
         reasoning: output,
-        riskLevel: i18n.t("stockAnalysis.riskUnknown"),
+        riskLevel: StockRiskLevel.MID,
         confidence: 0,
       };
     }
@@ -505,7 +505,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
               targetPrice: null,
               stopLoss: null,
               reasoning: text,
-              riskLevel: i18n.t("stockAnalysis.riskUnknown"),
+              riskLevel: StockRiskLevel.MID,
               confidence: 0,
             },
           });

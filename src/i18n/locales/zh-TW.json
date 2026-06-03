@@ -7481,6 +7481,9 @@
   "stockAnalysis.workflow.bearCase": "空方論點",
 
   "stockAnalysis.expandView": "大屏查看",
+  "stockAnalysis.riskHigh": "高風險",
+  "stockAnalysis.riskMid": "中風險",
+  "stockAnalysis.riskLow": "低風險",
   "stockAnalysis.workflow.bullAnalyst": "多方研究員",
   "stockAnalysis.workflow.bearAnalyst": "空方研究員",
   "stockAnalysis.workflow.riskAggressive": "激進評估",

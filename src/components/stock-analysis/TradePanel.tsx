@@ -1,12 +1,11 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
+import { getActionColor, StockAction } from "@/types/stock-analysis";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Button, Card, Input, InputNumber, message, Select, Space, Statistic, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-
-const A = { BUY: "买入", SELL: "卖出" } as const;
 
 interface TradeRecord {
   id: string;
@@ -75,7 +74,7 @@ export function TradePanel() {
   // 同步分析页代码
   useEffect(() => {
     if (storeStockCode && !form.stockCode) {
-      const dir = storeDecision?.action === A.SELL ? "sell" : "buy";
+      const dir = storeDecision?.action === StockAction.SELL ? "sell" : "buy";
       setForm((f) => ({ ...f, stockCode: storeStockCode, stockName: storeStockName, direction: dir }));
     }
   }, [storeStockCode, storeStockName, storeDecision]);
@@ -84,12 +83,12 @@ export function TradePanel() {
   const quickRecord = useCallback(() => {
     if (!storeDecision) { return; }
     const { action, positionPct, targetPrice, stopLoss } = storeDecision as any;
-    if (!action || action === "持有" || action === "减持") { return; }
+    if (!action || action === StockAction.HOLD || action === StockAction.REDUCE) { return; }
     setForm((f) => ({
       ...f,
       stockCode: storeStockCode,
       stockName: storeStockName,
-      direction: action === "卖出" ? "sell" : "buy",
+      direction: action === StockAction.SELL ? "sell" : "buy",
       price: targetPrice || 0,
       quantity: positionPct ? Math.round((positionPct / 100) * 1000) : 100,
       notes: stopLoss ? `止损: ${stopLoss}` : "",
@@ -277,11 +276,7 @@ export function TradePanel() {
         <div className="text-xs p-1 rounded mb-2" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
           <Tag
-            color={(storeDecision as any).action === "买入"
-              ? "green"
-              : (storeDecision as any).action === "卖出"
-              ? "red"
-              : "blue"}
+            color={getActionColor((storeDecision as any).action)}
           >
             {(storeDecision as any).action}
           </Tag>

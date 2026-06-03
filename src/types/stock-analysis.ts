@@ -42,8 +42,67 @@ export interface AnalysisConfig {
   newsLimit: number;
 }
 
+/** 股票操作动作枚举 — 内部统一用英文标识，展示时通过 i18n 翻译 */
+export const StockAction = {
+  BUY: "BUY",
+  INCREASE: "INCREASE",
+  HOLD: "HOLD",
+  REDUCE: "REDUCE",
+  SELL: "SELL",
+} as const;
+
+export type StockActionType = (typeof StockAction)[keyof typeof StockAction];
+
+/** 中文标签映射（给 LLM 输出兼容 + 解析用） */
+export const STOCK_ACTION_LABELS: Record<string, StockActionType> = {
+  "买入": StockAction.BUY,
+  "增持": StockAction.INCREASE,
+  "持有": StockAction.HOLD,
+  "减持": StockAction.REDUCE,
+  "卖出": StockAction.SELL,
+  "BUY": StockAction.BUY,
+  "INCREASE": StockAction.INCREASE,
+  "HOLD": StockAction.HOLD,
+  "REDUCE": StockAction.REDUCE,
+  "SELL": StockAction.SELL,
+};
+
+/** Action → i18n key */
+export function getActionTKey(action: string): string {
+  const map: Record<string, string> = {
+    BUY: "stockAnalysis.actionBuy",
+    INCREASE: "stockAnalysis.actionIncrease",
+    HOLD: "stockAnalysis.actionHold",
+    REDUCE: "stockAnalysis.actionReduce",
+    SELL: "stockAnalysis.actionSell",
+  };
+  return map[action] ?? "stockAnalysis.actionHold";
+}
+
+/** Action → Ant Design Tag 颜色 */
+export function getActionColor(action: string): "red" | "green" | "orange" | "blue" | "default" {
+  switch (action) {
+    case StockAction.BUY:
+    case StockAction.INCREASE:
+      return "red";
+    case StockAction.SELL:
+    case StockAction.REDUCE:
+      return "green";
+    case StockAction.HOLD:
+      return "blue";
+    default:
+      return "default";
+  }
+}
+
+/** 解析可能的中文/英文 action 为 StockActionType */
+export function parseAction(raw: unknown): StockActionType {
+  const s = String(raw ?? "").trim();
+  return STOCK_ACTION_LABELS[s] ?? StockAction.HOLD;
+}
+
 export interface StockDecision {
-  action: string;
+  action: StockActionType;
   positionPct: number;
   targetPrice: number | null;
   stopLoss: number | null;

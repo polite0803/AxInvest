@@ -1,5 +1,4 @@
 use crate::AppState;
-use axagent_agent::shared_blackboard::SharedBlackboard;
 use axagent_core::entity::{
     portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
@@ -8,9 +7,8 @@ use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_ur
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
-use axagent_stock_analysis::decision::{AgentRunner, AnalysisEvent, StockAnalysisFullConfig};
+use axagent_stock_analysis::decision::{AgentRunner, StockAnalysisFullConfig};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
-use axagent_stock_analysis::orchestrator::StockAnalysisOrchestrator;
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
 use axagent_stock_analysis::position_limits::PositionLimits;
@@ -23,8 +21,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{Emitter, Manager, State};
-use tokio::sync::RwLock;
+use tauri::State;
 use zeroize::Zeroizing;
 
 /// 搜索股票

@@ -63,7 +63,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
       <div className="sa-markdown-content">
         {displayContent
           ? <NodeRenderer content={displayContent} isDark={isDark} />
-          : <div style={{ color: "var(--muted)", textAlign: "center" }}>暂无分析报告</div>}
+          : <div style={{ color: "var(--muted)", textAlign: "center" }}>{t("stockAnalysis.noReport")}</div>}
       </div>
     );
 
@@ -85,7 +85,6 @@ export function AnalystReportCard({ expertId, report }: Props) {
               )
               : (
                 <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "center", padding: "16px 0" }}>
-                  暂无分析报告
                 </div>
               )}
           </Card>

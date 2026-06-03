@@ -245,6 +245,7 @@ impl StockAnalysisOrchestrator {
             &prompts,
             &cancel_token,
             &all_analyst_ids,
+            config.max_concurrent,
         )
         .await?;
 
@@ -339,7 +340,15 @@ impl StockAnalysisOrchestrator {
         )
         .await?;
 
-        Self::phase_4_risk(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
+        Self::phase_4_risk(
+            &runner,
+            &blackboard,
+            &events,
+            &prompts,
+            &cancel_token,
+            config.max_concurrent,
+        )
+        .await?;
 
         Self::phase_4b_trader(&runner, &blackboard, &events, &prompts, &cancel_token).await?;
 
@@ -406,7 +415,7 @@ impl StockAnalysisOrchestrator {
                             force, original_action, decision.reasoning
                         );
                         decision.position_pct = 0.0;
-                        decision.confidence = (decision.confidence * 0.5).min(0.3);
+                        decision.confidence = (decision.confidence * 0.5).min(30);
                     }
                 }
             }
@@ -544,8 +553,10 @@ impl StockAnalysisOrchestrator {
         prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
         analyst_ids: &[String],
+        max_concurrent: u32,
     ) -> Result<(), String> {
         let mut handles = Vec::new();
+        let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1) as usize));
 
         for id in analyst_ids {
             let id = id.clone();
@@ -554,8 +565,10 @@ impl StockAnalysisOrchestrator {
             let r = runner.clone();
             let p = prompts.clone();
             let ct = cancel_token.clone();
+            let permit = sem.clone().acquire_owned().await.unwrap();
 
             handles.push(tokio::spawn(async move {
+                let _permit = permit;
                 Self::run_single_analyst(&r, &id, &bb, &ev, &p, &ct).await
             }));
         }
@@ -768,8 +781,10 @@ impl StockAnalysisOrchestrator {
         events: &tokio::sync::broadcast::Sender<AnalysisEvent>,
         prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
+        max_concurrent: u32,
     ) -> Result<(), String> {
         let mut handles = Vec::new();
+        let sem = Arc::new(tokio::sync::Semaphore::new(max_concurrent.max(1) as usize));
         for &risk_id in RISK_IDS {
             let id = risk_id.to_string();
             let bb = blackboard.clone();
@@ -779,8 +794,10 @@ impl StockAnalysisOrchestrator {
             let sys = prompts::get_analyst_context(risk_id, &p)
                 .unwrap_or_else(|| fallback_prompt(risk_id));
             let ct = cancel_token.clone();
+            let permit = sem.clone().acquire_owned().await.unwrap();
 
             handles.push(tokio::spawn(async move {
+                let _permit = permit;
                 if Self::is_cancelled(&ct) {
                     return Err("已取消".into());
                 }

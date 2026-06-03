@@ -39,7 +39,7 @@ export function ExecutionReplayPanel() {
     setFetchError(false);
     try {
       const list = await invoke<ExecutionSummary[]>("list_workflow_executions", {
-        workflow_id: "stock-analysis",
+        workflowId: "stock-analysis",
       });
       setExecutions(list ?? []);
     } catch {

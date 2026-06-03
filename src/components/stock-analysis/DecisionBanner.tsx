@@ -69,21 +69,21 @@ export function DecisionBanner() {
   const handleExport = useCallback(() => {
     if (!decision || !stockCode || !stockName) { return; }
     const lines = [
-      `=== AxInvest 投资分析报告 ===`,
-      `股票: ${stockName} (${stockCode})`,
-      `分析日期: ${new Date().toLocaleDateString("zh-CN")}`,
-      `当前价: ¥${currentPrice.toFixed(2)}`,
-      `决策: ${decision.action} | 置信度: ${confidencePct}%`,
-      `目标价: ¥${decision.targetPrice ?? "-"} | 止损: ¥${decision.stopLoss ?? "-"}`,
-      `仓位: ${decision.positionPct}% | ${t(getRiskTKey(decision.riskLevel))}`,
-      upside != null ? `预期涨幅: ${upside >= 0 ? "+" : ""}${upside.toFixed(1)}%` : "",
+      t("stockAnalysis.export.title"),
+      t("stockAnalysis.export.stock", { name: stockName, code: stockCode }),
+      t("stockAnalysis.export.date", { date: new Date().toLocaleDateString() }),
+      t("stockAnalysis.export.price", { price: currentPrice.toFixed(2) }),
+      t("stockAnalysis.export.decision", { action: decision.action, confidence: confidencePct }),
+      t("stockAnalysis.export.target", { target: decision.targetPrice ?? "-", stopLoss: decision.stopLoss ?? "-" }),
+      t("stockAnalysis.export.position", { pct: decision.positionPct, risk: t(getRiskTKey(decision.riskLevel)) }),
+      upside != null ? t("stockAnalysis.export.upside", { pct: (upside >= 0 ? "+" : "") + upside.toFixed(1) }) : "",
       ``,
-      `推理摘要:`,
+      t("stockAnalysis.export.reasoning"),
       decision.reasoning,
       ``,
-      `分析师报告: ${Object.keys(analystReports).length} 篇`,
-      `辩论轮次: ${debateRounds.length} 轮`,
-      `风险评估: ${Object.keys(riskAssessments).length} 项`,
+      t("stockAnalysis.export.analystReports", { count: Object.keys(analystReports).length }),
+      t("stockAnalysis.export.debateRounds", { count: debateRounds.length }),
+      t("stockAnalysis.export.riskAssessments", { count: Object.keys(riskAssessments).length }),
     ].filter(Boolean).join("\n");
 
     const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
@@ -113,8 +113,8 @@ export function DecisionBanner() {
     const context = [
       `请分析 ${stockName} (${stockCode}) 的投资前景。`,
       decision ? `最新决策: ${decision.action}, 置信度 ${confidencePct}%。` : "",
-      `当前价格: ¥${currentPrice.toFixed(2)}`,
-      upside != null ? `预期涨幅: ${upside >= 0 ? "+" : ""}${upside.toFixed(1)}%` : "",
+      t("stockAnalysis.export.price", { price: currentPrice.toFixed(2) }),
+      upside != null ? t("stockAnalysis.export.upside", { pct: (upside >= 0 ? "+" : "") + upside.toFixed(1) }) : "",
       `${t(getRiskTKey(decision?.riskLevel ?? ""))}`,
     ].filter(Boolean).join("\n");
 
@@ -182,7 +182,7 @@ export function DecisionBanner() {
         >
           {cleanToolCallTags(decision.reasoning || "")
             ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
-            : <span style={{ color: "var(--muted)" }}>暂无决策推理内容</span>}
+            : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noDecisionReasoning")}</span>}
         </div>
 
         <div
@@ -354,7 +354,7 @@ export function DecisionBanner() {
         >
           {cleanToolCallTags(decision.reasoning || "")
             ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
-            : <span style={{ color: "var(--muted)" }}>暂无决策推理内容</span>}
+            : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noDecisionReasoning")}</span>}
         </div>
 
         <div className="flex gap-2 items-center flex-wrap">

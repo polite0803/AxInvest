@@ -276,7 +276,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       return;
     }
 
-    // 先注册事件监听再启动工作流，防止竞态丢失事件
     const { _unlisten } = get();
     if (_unlisten) { _unlisten(); }
 

@@ -30,10 +30,7 @@ fn filter_blackboard_snapshot(snapshot: &serde_json::Value) -> serde_json::Value
     if let Some(obj) = snapshot.as_object() {
         let mut filtered = serde_json::Map::new();
         for (k, v) in obj {
-            if PERSIST_PREFIXES
-                .iter()
-                .any(|p| k == p || k.starts_with(p))
-            {
+            if PERSIST_PREFIXES.iter().any(|p| k == p || k.starts_with(p)) {
                 filtered.insert(k.clone(), v.clone());
             }
         }

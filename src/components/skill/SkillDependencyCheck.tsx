@@ -6,8 +6,9 @@
  * @module components/skill/SkillDependencyCheck
  */
 
+import { List } from "@/components/common/AntdList";
 import { useSkillStore } from "@/stores";
-import { Alert, Badge, Button, List, Space, Tag, Typography } from "antd";
+import { Alert, Badge, Button, Space, Tag, Typography } from "antd";
 import { AlertTriangle, CheckCircle, RefreshCw, XCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

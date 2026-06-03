@@ -1,5 +1,6 @@
+import { List } from "@/components/common/AntdList";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, List, message, Modal, Spin, Tag, theme } from "antd";
+import { Button, message, Modal, Spin, Tag, theme } from "antd";
 import { History, RotateCcw } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

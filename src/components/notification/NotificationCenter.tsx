@@ -1,4 +1,5 @@
-import { Badge, Button, Empty, List, Popover, Space, Typography } from "antd";
+import { List } from "@/components/common/AntdList";
+import { Badge, Button, Empty, Popover, Space, Typography } from "antd";
 import { AlertTriangle, Bell, Check, CheckCheck, Info, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

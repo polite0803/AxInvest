@@ -1,5 +1,6 @@
+import { List } from "@/components/common/AntdList";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Input, List } from "antd";
+import { Button, Input } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 

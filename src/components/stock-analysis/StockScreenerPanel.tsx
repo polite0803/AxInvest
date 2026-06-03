@@ -1,7 +1,8 @@
+import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, InputNumber, List, Spin, Tag } from "antd";
+import { Button, Card, Empty, InputNumber, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { checkVendorEnabled } from "./vendorCheck";

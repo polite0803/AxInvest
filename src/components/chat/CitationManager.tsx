@@ -1,7 +1,8 @@
+import { List } from "@/components/common/AntdList";
 import { useCitationStore } from "@/stores/feature/citationStore";
 import type { Citation, CitationStatsData } from "@/types";
 import { CheckCircleOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, List, Space, Tag, Typography } from "antd";
+import { Button, Space, Tag, Typography } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CredibilityBadge } from "./CredibilityBadge";

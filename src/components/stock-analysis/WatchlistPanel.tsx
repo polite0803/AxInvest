@@ -1,7 +1,8 @@
+import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Empty, Input, List, message, Popconfirm, Select, Space, Spin, Tag } from "antd";
+import { Button, Dropdown, Empty, Input, message, Popconfirm, Select, Space, Spin, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 

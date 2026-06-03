@@ -1,6 +1,7 @@
+import { List } from "@/components/common/AntdList";
 import { useTracerStore } from "@/stores/devtools/tracerStore";
 import type { TraceSummary } from "@/types";
-import { Card, DatePicker, Input, List, Space, Tag, Typography } from "antd";
+import { Card, DatePicker, Input, Space, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";

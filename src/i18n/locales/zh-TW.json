@@ -7533,6 +7533,9 @@
   "stockAnalysis.export.analystReports": "分析師報告: {{count}} 篇",
   "stockAnalysis.export.debateRounds": "辯論輪次: {{count}} 輪",
   "stockAnalysis.export.riskAssessments": "風險評估: {{count}} 項",
+
+  "stockAnalysis.workflow.partialFailed": "{{count}} 個步驟執行失敗",
+  "stockAnalysis.workflow.failedSteps": "失敗步驟",
   "stockAnalysis.workflow.bullAnalyst": "多方研究員",
   "stockAnalysis.workflow.bearAnalyst": "空方研究員",
   "stockAnalysis.workflow.riskAggressive": "激進評估",

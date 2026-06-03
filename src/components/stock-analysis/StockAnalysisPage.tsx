@@ -53,6 +53,7 @@ export function StockAnalysisPage() {
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const status = useStockAnalysisStore((s) => s.status);
   const error = useStockAnalysisStore((s) => s.error);
+  const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -231,17 +232,42 @@ export function StockAnalysisPage() {
                         }}
                       >
                         <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-red)" }}>
-                          {t("stockAnalysis.workflow.startFailed", "分析失败")}
+                          {failedNodes.length > 0
+                            ? t("stockAnalysis.workflow.partialFailed", { count: failedNodes.length })
+                            : t("stockAnalysis.workflow.startFailed")}
                         </h3>
-                        <p style={{ margin: "0 0 12px 0", color: "var(--muted)" }}>
-                          {error ?? t("common.unknownError", "未知错误")}
+                        <p style={{ margin: "0 0 12px 0", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
+                          {error ?? t("common.unknownError")}
                         </p>
+                        {failedNodes.length > 0 && (
+                          <div style={{ marginBottom: 12 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--sa-red)", marginBottom: 4 }}>
+                              {t("stockAnalysis.workflow.failedSteps")}
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {failedNodes.map((id) => (
+                                <span
+                                  key={id}
+                                  style={{
+                                    fontSize: 11,
+                                    padding: "2px 6px",
+                                    borderRadius: 4,
+                                    background: "var(--sa-red-bg)",
+                                    color: "var(--sa-red)",
+                                  }}
+                                >
+                                  {id}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <Button
                           type="primary"
                           disabled={!stockCode}
                           onClick={() => stockCode && startAnalysis(stockCode)}
                         >
-                          {t("common.retry", "重试")}
+                          {t("common.retry")}
                         </Button>
                       </div>
                     )}

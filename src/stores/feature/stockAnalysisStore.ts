@@ -2,6 +2,7 @@ import i18n from "@/i18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import type { AnalysisStatus, AnalysisSummary, KLine, StockDecision, StockQuote, StockSearchResult } from "@/types";
+import { parseAction, StockAction } from "@/types";
 import { create } from "zustand";
 
 // ── 工作流结果解析 ──
@@ -37,7 +38,7 @@ function extractContent(value: unknown): string {
 
 /** 规范化 decision 对象：兼容 snake_case/camelCase、confidence 0-1 vs 0-100、空值保护 */
 function normalizeDecision(raw: Record<string, unknown>): StockDecision {
-  const action = String(raw.action ?? raw["action"] ?? "持有");
+  const action = parseAction(raw.action ?? raw["action"]);
   const positionPct = Number(raw.positionPct ?? raw.position_pct ?? 0);
   const targetPrice = raw.targetPrice != null
     ? Number(raw.targetPrice)
@@ -102,7 +103,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     } else if (stepId === "portfolio-mgr") {
       const parsed = tryParseDecision(output);
       decision = parsed ?? {
-        action: "持有",
+        action: StockAction.HOLD,
         positionPct: 0,
         targetPrice: null,
         stopLoss: null,
@@ -499,7 +500,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           const parsed = tryParseDecision(text);
           set({
             decision: parsed ?? {
-              action: "持有",
+              action: StockAction.HOLD,
               positionPct: 0,
               targetPrice: null,
               stopLoss: null,

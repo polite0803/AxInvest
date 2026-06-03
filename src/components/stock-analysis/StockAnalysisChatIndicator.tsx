@@ -1,10 +1,10 @@
 import { useStockAnalysisStore } from "@/stores";
+import { getActionColor } from "@/types/stock-analysis";
 import { Button, Progress, Tag, theme } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 /** 后端返回的分析动作常量（用于比较，不做 UI 展示） */
-const A = { BUY: "买入", INCREASE: "增持", HOLD: "持有", REDUCE: "减持", SELL: "卖出" } as const;
 
 /**
  * ChatView 中嵌入的股票分析状态指示器
@@ -86,11 +86,7 @@ export function StockAnalysisChatIndicator() {
             {" · "}
             <Tag
               bordered={false}
-              color={decision.action === A.BUY || decision.action === A.INCREASE
-                ? "red"
-                : decision.action === A.SELL || decision.action === A.REDUCE
-                ? "green"
-                : "default"}
+              color={getActionColor(decision.action)}
               style={{ fontSize: 12 }}
             >
               {decision.action}

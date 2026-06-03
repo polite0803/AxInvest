@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { getActionColor } from "@/types/stock-analysis";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Input, List, message, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -234,7 +235,7 @@ export function HistoricalAnalysisPanel({ analysisId }: Props) {
                       decision && (
                         <Tag
                           key="act"
-                          color={decision.action === "买入" ? "green" : decision.action === "卖出" ? "red" : "blue"}
+                          color={getActionColor(decision.action)}
                           className="text-xs m-0"
                         >
                           {decision.action}

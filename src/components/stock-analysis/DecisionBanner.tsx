@@ -1,5 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
+import { getActionColor, getActionTKey } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, message, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
@@ -48,13 +49,7 @@ export function DecisionBanner() {
     setAdding(false);
   }, [stockCode, stockName, t, bumpWatchlistVersion]);
 
-  const actionLabel: Record<string, string> = {
-    "买入": t("stockAnalysis.actionBuy"),
-    "增持": t("stockAnalysis.actionIncrease"),
-    "持有": t("stockAnalysis.actionHold"),
-    "减持": t("stockAnalysis.actionReduce"),
-    "卖出": t("stockAnalysis.actionSell"),
-  };
+  const actionLabel = (action: string) => t(getActionTKey(action));
 
   const confidencePct = useMemo(() => Math.round(decision?.confidence ?? 0), [decision]);
   const meterColor = confidencePct >= 70
@@ -141,15 +136,9 @@ export function DecisionBanner() {
           <div className="flex items-center gap-2">
             <span>{t("stockAnalysis.finalDecision")}</span>
             <Tag
-              color={decision.action === "买入" || decision.action === "增持"
-                ? "red"
-                : decision.action === "持有"
-                ? "blue"
-                : decision.action === "减持"
-                ? "orange"
-                : "green"}
+              color={getActionColor(decision.action)}
             >
-              {actionLabel[decision.action] || decision.action}
+              {actionLabel(decision.action)}
             </Tag>
           </div>
         }
@@ -280,15 +269,9 @@ export function DecisionBanner() {
           <div className="flex items-center gap-2">
             <span>{t("stockAnalysis.finalDecision")}</span>
             <Tag
-              color={decision.action === "买入" || decision.action === "增持"
-                ? "red"
-                : decision.action === "持有"
-                ? "blue"
-                : decision.action === "减持"
-                ? "orange"
-                : "green"}
+              color={getActionColor(decision.action)}
             >
-              {actionLabel[decision.action] || decision.action}
+              {actionLabel(decision.action)}
             </Tag>
           </div>
         }

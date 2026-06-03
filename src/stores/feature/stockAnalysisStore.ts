@@ -36,7 +36,7 @@ function extractContent(value: unknown): string {
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** 规范化 decision 对象：兼容 snake_case/camelCase、confidence 0-1 vs 0-100、空值保护 */
+/** 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护 */
 function normalizeDecision(raw: Record<string, unknown>): StockDecision {
   const action = parseAction(raw.action ?? raw["action"]);
   const positionPct = Number(raw.positionPct ?? raw.position_pct ?? 0);
@@ -46,9 +46,7 @@ function normalizeDecision(raw: Record<string, unknown>): StockDecision {
   const stopLoss = raw.stopLoss != null ? Number(raw.stopLoss) : (raw.stop_loss != null ? Number(raw.stop_loss) : null);
   const reasoning = String(raw.reasoning ?? "");
   const riskLevel = parseRiskLevel(raw.riskLevel ?? raw.risk_level);
-  let confidence = Number(raw.confidence ?? 0);
-  if (confidence > 0 && confidence <= 1) { confidence = Math.round(confidence * 100); }
-  confidence = Math.round(Math.max(0, Math.min(100, confidence)));
+  const confidence = Math.round(Math.max(0, Math.min(100, Number(raw.confidence ?? 0))));
   return {
     action,
     positionPct: isNaN(positionPct) ? 0 : positionPct,
@@ -584,3 +582,6 @@ function inferStage(nodeId: string): number {
   if (nodeId === "trader" || nodeId === "portfolio-mgr") { return 4; }
   return -1;
 }
+
+// 暴露给单元测试使用
+export { inferStage };

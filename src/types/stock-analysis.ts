@@ -144,6 +144,16 @@ export function getRiskColor(level: string): string {
   }
 }
 
+/** 分析师报告情感分类（启发式子串匹配，报告为 LLM 中文输出） */
+export function classifySentiment(report: string): "bullish" | "bearish" | "neutral" {
+  const lower = report.toLowerCase();
+  const bullishWords = ["买入", "增持", "看多", "推荐", "看好", "乐观", "上涨"];
+  const bearishWords = ["卖出", "减持", "看空", "回避", "看跌", "悲观", "下跌"];
+  for (const w of bullishWords) { if (lower.includes(w)) { return "bullish"; } }
+  for (const w of bearishWords) { if (lower.includes(w)) { return "bearish"; } }
+  return "neutral";
+}
+
 /** 信号标签 → Tag 颜色（启发式子串匹配，信号为 LLM 自由文本） */
 export function getSignalColor(signal: string): "green" | "red" | "blue" {
   const s = signal.toLowerCase();

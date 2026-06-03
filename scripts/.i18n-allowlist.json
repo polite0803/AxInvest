@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-02",
-  "total_entries": 2830,
-  "total_files": 176,
+  "total_entries": 2827,
+  "total_files": 175,
   "entries": [
     {
       "file": "src/App.tsx",
@@ -346,13 +346,6 @@
       "reason": "硬编码中文字符串",
       "phase": 3,
       "total_lines": 10
-    },
-    {
-      "file": "src/components/stock-analysis/AnalystReportGrid.tsx",
-      "lines": "18,20,22",
-      "reason": "硬编码中文字符串",
-      "phase": 3,
-      "total_lines": 3
     },
     {
       "file": "src/components/stock-analysis/CompareView.tsx",

@@ -17,7 +17,7 @@ pub struct StockDecision {
     pub reasoning: String,
     /// 风险等级: 低/中/高
     pub risk_level: String,
-    /// 置信度 (0-1)
+    /// 置信度 (0-100)
     pub confidence: f64,
 }
 

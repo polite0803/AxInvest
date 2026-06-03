@@ -1,4 +1,5 @@
 import { useStockAnalysisStore } from "@/stores";
+import { classifySentiment } from "@/types/stock-analysis";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AnalystReportCard } from "./AnalystReportCard";
@@ -16,14 +17,10 @@ export function AnalystReportGrid() {
     let neutral = 0;
     for (const rawReport of entries) {
       const report = cleanToolCallTags(rawReport);
-      const lower = report.toLowerCase();
-      if (lower.includes("买入") || lower.includes("增持") || lower.includes("看多") || lower.includes("推荐")) {
-        bullish++;
-      } else if (lower.includes("卖出") || lower.includes("减持") || lower.includes("看空") || lower.includes("回避")) {
-        bearish++;
-      } else {
-        neutral++;
-      }
+      const sentiment = classifySentiment(report);
+      if (sentiment === "bullish") { bullish++; }
+      else if (sentiment === "bearish") { bearish++; }
+      else { neutral++; }
     }
     const total = bullish + bearish + neutral;
     return { bullish, bearish, neutral, total };

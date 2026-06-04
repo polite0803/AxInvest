@@ -38,6 +38,7 @@ export interface WorkflowCardData {
   decision?: WorkflowCardData;
   status?: "running" | "done" | "error";
   error?: string;
+  failedSteps?: Array<{ nodeId: string; error?: string }>;
 }
 
 const TOOL_NAME_LABELS: Record<string, string> = {
@@ -273,270 +274,314 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
           )}
         </div>
 
-        {data.status !== "error" && (
-          <>
-            <Progress
-              percent={pct}
-              size="small"
-              status={data.status === "done" ? "success" : "active"}
-              style={{ marginBottom: 12 }}
-            />
-            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
-              {t("stockAnalysis.workflow.currentPhase")}: {phaseLabel} ({data.completed ?? 0}/{data.total ?? "?"})
+        <>
+          <Progress
+            percent={pct}
+            size="small"
+            status={data.status === "done" ? "success" : "active"}
+            style={{ marginBottom: 12 }}
+          />
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+            {t("stockAnalysis.workflow.currentPhase")}: {phaseLabel} ({data.completed ?? 0}/{data.total ?? "?"})
+          </div>
+
+          {dataSources.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  marginBottom: 8,
+                  color: "var(--text)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                🔗 数据源
+                {successCount > 0 && <Tag color="success" style={{ fontSize: 10, margin: 0 }}>{successCount} 成功</Tag>}
+                {failedCount > 0 && <Tag color="error" style={{ fontSize: 10, margin: 0 }}>{failedCount} 失败</Tag>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {dataSources.map((ds) => (
+                  <div
+                    key={ds.nodeId}
+                    style={{
+                      padding: "6px 10px",
+                      background: ds.status === "failed"
+                        ? "var(--error-glass, rgba(255,77,79,0.06))"
+                        : ds.status === "success"
+                        ? "var(--accent-glass)"
+                        : "var(--bg-glass)",
+                      borderRadius: 6,
+                      border: ds.status === "failed"
+                        ? "1px solid var(--error-soft, rgba(255,77,79,0.2))"
+                        : ds.status === "success"
+                        ? "1px solid var(--accent-soft)"
+                        : "1px solid var(--border)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 12, fontWeight: 500 }}>
+                        {ds.status === "success"
+                          ? "✅"
+                          : ds.status === "failed"
+                          ? "❌"
+                          : ds.status === "fetching"
+                          ? "🔄"
+                          : "⏳"} {ds.label || getToolLabel(ds.toolName)}
+                      </span>
+                      <Tag
+                        color={ds.status === "success"
+                          ? "success"
+                          : ds.status === "failed"
+                          ? "error"
+                          : ds.status === "fetching"
+                          ? "processing"
+                          : "default"}
+                        style={{ fontSize: 10 }}
+                      >
+                        {ds.status === "success"
+                          ? "已获取"
+                          : ds.status === "failed"
+                          ? "失败"
+                          : ds.status === "fetching"
+                          ? "获取中"
+                          : "等待"}
+                      </Tag>
+                    </div>
+                    {ds.status === "success" && ds.summary && (
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+                        {ds.summary}
+                      </div>
+                    )}
+                    {ds.status === "failed" && ds.error && (
+                      <div style={{ fontSize: 11, color: "var(--error, #ff4d4f)", marginTop: 2, lineHeight: 1.4 }}>
+                        {ds.error}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
+          )}
 
-            {dataSources.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    marginBottom: 8,
-                    color: "var(--text)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  🔗 数据源
-                  {successCount > 0 && (
-                    <Tag color="success" style={{ fontSize: 10, margin: 0 }}>{successCount} 成功</Tag>
-                  )}
-                  {failedCount > 0 && <Tag color="error" style={{ fontSize: 10, margin: 0 }}>{failedCount} 失败</Tag>}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {dataSources.map((ds) => (
-                    <div
-                      key={ds.nodeId}
-                      style={{
-                        padding: "6px 10px",
-                        background: ds.status === "failed"
-                          ? "var(--error-glass, rgba(255,77,79,0.06))"
-                          : ds.status === "success"
-                          ? "var(--accent-glass)"
-                          : "var(--bg-glass)",
-                        borderRadius: 6,
-                        border: ds.status === "failed"
-                          ? "1px solid var(--error-soft, rgba(255,77,79,0.2))"
-                          : ds.status === "success"
-                          ? "1px solid var(--accent-soft)"
-                          : "1px solid var(--border)",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: 12, fontWeight: 500 }}>
-                          {ds.status === "success"
-                            ? "✅"
-                            : ds.status === "failed"
-                            ? "❌"
-                            : ds.status === "fetching"
-                            ? "🔄"
-                            : "⏳"} {ds.label || getToolLabel(ds.toolName)}
-                        </span>
-                        <Tag
-                          color={ds.status === "success"
-                            ? "success"
-                            : ds.status === "failed"
-                            ? "error"
-                            : ds.status === "fetching"
-                            ? "processing"
-                            : "default"}
-                          style={{ fontSize: 10 }}
-                        >
-                          {ds.status === "success"
-                            ? "已获取"
-                            : ds.status === "failed"
-                            ? "失败"
-                            : ds.status === "fetching"
-                            ? "获取中"
-                            : "等待"}
-                        </Tag>
-                      </div>
-                      {ds.status === "success" && ds.summary && (
-                        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
-                          {ds.summary}
-                        </div>
-                      )}
-                      {ds.status === "failed" && ds.error && (
-                        <div style={{ fontSize: 11, color: "var(--error, #ff4d4f)", marginTop: 2, lineHeight: 1.4 }}>
-                          {ds.error}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+          {analysts.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                📊 {t("stockAnalysis.workflow.analystReports")}
               </div>
-            )}
-
-            {analysts.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
-                  📊 {t("stockAnalysis.workflow.analystReports")}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {analysts.map((a) => (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {analysts.map((a) => (
+                  <div
+                    key={a.nodeId}
+                    style={{
+                      padding: "8px 10px",
+                      background: a.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                      borderRadius: 6,
+                      border: a.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                    }}
+                  >
                     <div
-                      key={a.nodeId}
                       style={{
-                        padding: "8px 10px",
-                        background: a.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
-                        borderRadius: 6,
-                        border: a.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 4,
                       }}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 4,
-                        }}
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>
+                        {a.status === "done" ? "✅" : a.status === "running" ? "⚙️" : "⏳"}{" "}
+                        {getAnalystDisplayName(a.name)}
+                      </span>
+                      <Tag
+                        color={a.status === "done" ? "success" : a.status === "running" ? "processing" : "default"}
+                        style={{ fontSize: 10 }}
                       >
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>
-                          {a.status === "done" ? "✅" : a.status === "running" ? "⚙️" : "⏳"}{" "}
-                          {getAnalystDisplayName(a.name)}
-                        </span>
-                        <Tag
-                          color={a.status === "done" ? "success" : a.status === "running" ? "processing" : "default"}
-                          style={{ fontSize: 10 }}
-                        >
-                          {a.status === "done"
-                            ? t("stockAnalysis.workflow.completed")
-                            : a.status === "running"
-                            ? t("stockAnalysis.workflow.running")
-                            : t("stockAnalysis.workflow.pending")}
-                        </Tag>
-                      </div>
-                      {a.status === "done" && a.report && (
-                        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                          {a.report.length > 500 ? a.report.slice(0, 500) + "..." : a.report}
-                        </div>
-                      )}
+                        {a.status === "done"
+                          ? t("stockAnalysis.workflow.completed")
+                          : a.status === "running"
+                          ? t("stockAnalysis.workflow.running")
+                          : t("stockAnalysis.workflow.pending")}
+                      </Tag>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {data.debates && data.debates.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
-                  🎯 {t("stockAnalysis.workflow.bullBearDebate")}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {data.debates.map((d) => (
-                    <div
-                      key={`debate-${d.round}`}
-                      style={{
-                        padding: "8px 10px",
-                        background: d.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
-                        borderRadius: 6,
-                        border: d.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
-                      }}
-                    >
-                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-                        {d.status === "done" ? "✅" : d.status === "running" ? "⚙️" : "⏳"}{" "}
-                        {t("stockAnalysis.workflow.debateRound")} {d.round}
+                    {a.status === "done" && a.report && (
+                      <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                        {a.report.length > 500 ? a.report.slice(0, 500) + "..." : a.report}
                       </div>
-                      {d.status === "done" && d.bull && d.bear && (
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <div
-                            style={{
-                              flex: 1,
-                              background: "var(--sa-red-glass)",
-                              padding: 8,
-                              borderRadius: 6,
-                              border: "1px solid var(--sa-red-soft)",
-                            }}
-                          >
-                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
-                              🐂 {t("stockAnalysis.workflow.bullCase")}
-                            </div>
-                            <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                              {d.bull.length > 200 ? d.bull.slice(0, 200) + "..." : d.bull}
-                            </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.debates && data.debates.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                🎯 {t("stockAnalysis.workflow.bullBearDebate")}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {data.debates.map((d) => (
+                  <div
+                    key={`debate-${d.round}`}
+                    style={{
+                      padding: "8px 10px",
+                      background: d.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                      borderRadius: 6,
+                      border: d.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                      {d.status === "done" ? "✅" : d.status === "running" ? "⚙️" : "⏳"}{" "}
+                      {t("stockAnalysis.workflow.debateRound")} {d.round}
+                    </div>
+                    {d.status === "done" && d.bull && d.bear && (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <div
+                          style={{
+                            flex: 1,
+                            background: "var(--sa-red-glass)",
+                            padding: 8,
+                            borderRadius: 6,
+                            border: "1px solid var(--sa-red-soft)",
+                          }}
+                        >
+                          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
+                            🐂 {t("stockAnalysis.workflow.bullCase")}
                           </div>
-                          <div
-                            style={{
-                              flex: 1,
-                              background: "var(--sa-green-glass)",
-                              padding: 8,
-                              borderRadius: 6,
-                              border: "1px solid var(--sa-green-soft)",
-                            }}
-                          >
-                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
-                              🐻 {t("stockAnalysis.workflow.bearCase")}
-                            </div>
-                            <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                              {d.bear.length > 200 ? d.bear.slice(0, 200) + "..." : d.bear}
-                            </div>
+                          <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
+                            {d.bull.length > 200 ? d.bull.slice(0, 200) + "..." : d.bull}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                        <div
+                          style={{
+                            flex: 1,
+                            background: "var(--sa-green-glass)",
+                            padding: 8,
+                            borderRadius: 6,
+                            border: "1px solid var(--sa-green-soft)",
+                          }}
+                        >
+                          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
+                            🐻 {t("stockAnalysis.workflow.bearCase")}
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
+                            {d.bear.length > 200 ? d.bear.slice(0, 200) + "..." : d.bear}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {data.risks && data.risks.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
-                  ⚠️ {t("stockAnalysis.workflow.riskAssessment")}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {data.risks.map((r) => (
+          {data.risks && data.risks.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                ⚠️ {t("stockAnalysis.workflow.riskAssessment")}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {data.risks.map((r) => (
+                  <div
+                    key={`risk-${r.key}`}
+                    style={{
+                      padding: "8px 10px",
+                      background: r.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
+                      borderRadius: 6,
+                      border: r.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                    }}
+                  >
                     <div
-                      key={`risk-${r.key}`}
                       style={{
-                        padding: "8px 10px",
-                        background: r.status === "done" ? "var(--accent-glass)" : "var(--bg-glass)",
-                        borderRadius: 6,
-                        border: r.status === "done" ? "1px solid var(--accent-soft)" : "1px solid var(--border)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 4,
                       }}
                     >
-                      <div
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>
+                        {r.status === "done" ? "✅" : r.status === "running" ? "⚙️" : "⏳"}{" "}
+                        {r.key.startsWith("risk-") ? r.key.slice(5) : r.key}
+                      </span>
+                      <Tag
+                        color={r.status === "done" ? "success" : r.status === "running" ? "processing" : "default"}
+                        style={{ fontSize: 10 }}
+                      >
+                        {r.status === "done"
+                          ? t("stockAnalysis.workflow.completed")
+                          : r.status === "running"
+                          ? t("stockAnalysis.workflow.running")
+                          : t("stockAnalysis.workflow.pending")}
+                      </Tag>
+                    </div>
+                    {r.status === "done" && r.content && (
+                      <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                        {r.content.length > 400 ? r.content.slice(0, 400) + "..." : r.content}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.decision && <WorkflowAgentCard data={data.decision} />}
+        </>
+
+        {(data.status === "error" || data.failedSteps) && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              background: "var(--error-glass, rgba(255,77,79,0.06))",
+              borderRadius: 6,
+              border: "1px solid var(--error-soft, rgba(255,77,79,0.2))",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--error, #ff4d4f)", marginBottom: 8 }}>
+              ❌ {data.error || t("stockAnalysis.workflow.startFailed")}
+            </div>
+            {data.failedSteps && data.failedSteps.length > 0 && (
+              <div style={{ fontSize: 11 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                  {t("stockAnalysis.workflow.failedSteps")}（{data.failedSteps.length} 步）
+                </div>
+                {data.failedSteps.map((fs) => (
+                  <details key={fs.nodeId} style={{ marginBottom: 4 }}>
+                    <summary
+                      style={{
+                        cursor: "pointer",
+                        color: "var(--error, #ff4d4f)",
+                        padding: "2px 0",
+                      }}
+                    >
+                      ❌ {fs.nodeId}
+                    </summary>
+                    {fs.error && (
+                      <pre
                         style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 4,
+                          margin: "4px 0 0 0",
+                          padding: 8,
+                          background: "var(--bg-glass)",
+                          borderRadius: 4,
+                          fontSize: 10,
+                          whiteSpace: "pre-wrap",
+                          lineHeight: 1.5,
+                          color: "var(--muted)",
+                          maxHeight: 160,
+                          overflow: "auto",
                         }}
                       >
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>
-                          {r.status === "done" ? "✅" : r.status === "running" ? "⚙️" : "⏳"}{" "}
-                          {r.key.startsWith("risk-") ? r.key.slice(5) : r.key}
-                        </span>
-                        <Tag
-                          color={r.status === "done" ? "success" : r.status === "running" ? "processing" : "default"}
-                          style={{ fontSize: 10 }}
-                        >
-                          {r.status === "done"
-                            ? t("stockAnalysis.workflow.completed")
-                            : r.status === "running"
-                            ? t("stockAnalysis.workflow.running")
-                            : t("stockAnalysis.workflow.pending")}
-                        </Tag>
-                      </div>
-                      {r.status === "done" && r.content && (
-                        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                          {r.content.length > 400 ? r.content.slice(0, 400) + "..." : r.content}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                        {fs.error}
+                      </pre>
+                    )}
+                  </details>
+                ))}
               </div>
             )}
-
-            {data.decision && data.status === "done" && <WorkflowAgentCard data={data.decision} />}
-          </>
-        )}
-
-        {data.status === "error" && data.error && (
-          <div style={{ fontSize: 12, color: "var(--error)" }}>
-            ❌ {data.error}
           </div>
         )}
       </div>

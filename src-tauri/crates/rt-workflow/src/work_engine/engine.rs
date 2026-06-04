@@ -126,6 +126,7 @@ pub struct StepProgressEvent {
     pub completed_nodes: usize,
     pub execution_id: Option<String>,
     pub output: Option<serde_json::Value>,
+    pub error: Option<String>,
 }
 
 /// 步骤进度回调：`&self` 不可用时使用独立函数签名
@@ -1366,6 +1367,7 @@ impl WorkEngine {
                         completed_nodes: completed,
                         execution_id: Some(execution_id.clone()),
                         output: None,
+                        error: None,
                     })
                     .await;
                 }
@@ -1638,6 +1640,7 @@ impl WorkEngine {
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
                                 output: Some(output_value.clone()),
+                                error: None,
                             })
                             .await;
                         }
@@ -1708,7 +1711,7 @@ impl WorkEngine {
                                 input: Some(nr.input_snapshot.clone()),
                                 output: None,
                                 execution_time_ms: Some(nr.elapsed_ms),
-                                error: Some(err_msg),
+                                error: Some(err_msg.clone()),
                                 started_at: nr.started_at,
                                 completed_at: Some(Utc::now().timestamp_millis()),
                                 parent_execution_id: current_parent_execution_id.clone(),
@@ -1752,6 +1755,7 @@ impl WorkEngine {
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
                                 output: None,
+                                error: Some(err_msg.clone()),
                             })
                             .await;
                         }
@@ -1822,7 +1826,7 @@ impl WorkEngine {
                                 input: Some(nr.input_snapshot.clone()),
                                 output: None,
                                 execution_time_ms: Some(nr.elapsed_ms),
-                                error: Some(err_msg),
+                                error: Some(err_msg.clone()),
                                 started_at: nr.started_at,
                                 completed_at: Some(Utc::now().timestamp_millis()),
                                 parent_execution_id: current_parent_execution_id.clone(),
@@ -1866,6 +1870,7 @@ impl WorkEngine {
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
                                 output: None,
+                                error: Some("Node execution timeout".to_string()),
                             })
                             .await;
                         }

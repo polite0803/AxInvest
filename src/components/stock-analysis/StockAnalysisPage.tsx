@@ -54,6 +54,7 @@ export function StockAnalysisPage() {
   const status = useStockAnalysisStore((s) => s.status);
   const error = useStockAnalysisStore((s) => s.error);
   const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
+  const failedNodeErrors = useStockAnalysisStore((s) => s.failedNodeErrors);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -69,6 +70,7 @@ export function StockAnalysisPage() {
   const [sheetTab, setSheetTab] = useState("trade");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [marketStatus, setMarketStatus] = useState("");
+  const [expandedFailedNode, setExpandedFailedNode] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
@@ -246,18 +248,42 @@ export function StockAnalysisPage() {
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                               {failedNodes.map((id) => (
-                                <span
-                                  key={id}
-                                  style={{
-                                    fontSize: 11,
-                                    padding: "2px 6px",
-                                    borderRadius: 4,
-                                    background: "var(--sa-red-bg)",
-                                    color: "var(--sa-red)",
-                                  }}
-                                >
-                                  {id}
-                                </span>
+                                <div key={id}>
+                                  <span
+                                    onClick={() =>
+                                      setExpandedFailedNode(
+                                        expandedFailedNode === id ? null : id,
+                                      )}
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "2px 6px",
+                                      borderRadius: 4,
+                                      background: "var(--sa-red-bg)",
+                                      color: "var(--sa-red)",
+                                      cursor: "pointer",
+                                      display: "inline-block",
+                                    }}
+                                  >
+                                    {id} {expandedFailedNode === id ? "▲" : "▼"}
+                                  </span>
+                                  {expandedFailedNode === id && (
+                                    <div
+                                      style={{
+                                        marginTop: 4,
+                                        padding: 8,
+                                        background: "var(--surface)",
+                                        borderRadius: 6,
+                                        border: "1px solid var(--sa-red)",
+                                        fontSize: 11,
+                                        color: "var(--muted)",
+                                        whiteSpace: "pre-wrap",
+                                        lineHeight: 1.5,
+                                      }}
+                                    >
+                                      {failedNodeErrors[id] || error || t("common.unknownError")}
+                                    </div>
+                                  )}
+                                </div>
                               ))}
                             </div>
                           </div>

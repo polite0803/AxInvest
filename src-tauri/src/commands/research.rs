@@ -7,7 +7,7 @@ use axagent_core::crypto::decrypt_key;
 use axagent_core::repo::conversation as conversation_repo;
 use axagent_core::repo::message as message_repo;
 use axagent_core::repo::provider::{self as provider_repo, get_active_key};
-use axagent_core::types::{ChatContent, ChatMessage, ChatRequest, MessageRole};
+use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, MessageRole};
 use axagent_harness::resolve_base_url_for_type;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -180,7 +180,7 @@ pub async fn generate_research_report(
         .map_err(|e| format!("密钥解密失败: {}", e))?;
 
     // 3. 创建 ProviderAdapter
-    let registry_key = format!("{:?}", provider_config.provider_type).to_lowercase();
+    let registry_key = provider_config.provider_type.registry_key();
 
     let adapter = state
         .harness

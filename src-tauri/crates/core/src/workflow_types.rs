@@ -1,7 +1,14 @@
 //! Workflow type definitions
 //!
-//! This module defines the core types used in workflow execution,
-//! including nodes, variables, triggers, and execution states.
+//! 由 `axagent-harness` 提供定义，本模块仅做 re-export。
+//! 附加类型（依赖 `axagent-entities` 的 From impl）在此定义。
+
+pub use axagent_harness::workflow_types::*;
+
+use axagent_entities::workflow_template;
+
+// ── 模板相关的 From impl ──────────────────────
+// 需要 entity 类型，不能在 harness 中定义。
 
 use serde::{Deserialize, Serialize};
 
@@ -1185,14 +1192,14 @@ pub struct WorkflowTemplateInput {
     pub description: Option<String>,
     pub icon: String,
     pub tags: Vec<String>,
-    pub trigger_config: Option<TriggerConfig>,
-    pub nodes: Vec<WorkflowNode>,
-    pub edges: Vec<WorkflowEdge>,
-    pub input_schema: Option<JsonSchema>,
-    pub output_schema: Option<JsonSchema>,
-    pub variables: Vec<Variable>,
-    pub error_config: Option<ErrorConfig>,
-    pub tool_defs: Option<Vec<RhaiToolDef>>,
+    pub trigger_config: Option<super::workflow_types::TriggerConfig>,
+    pub nodes: Vec<super::workflow_types::WorkflowNode>,
+    pub edges: Vec<super::workflow_types::WorkflowEdge>,
+    pub input_schema: Option<super::workflow_types::JsonSchema>,
+    pub output_schema: Option<super::workflow_types::JsonSchema>,
+    pub variables: Vec<super::workflow_types::Variable>,
+    pub error_config: Option<super::workflow_types::ErrorConfig>,
+    pub tool_defs: Option<Vec<super::workflow_types::RhaiToolDef>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1206,81 +1213,52 @@ pub struct WorkflowTemplateResponse {
     pub is_preset: bool,
     pub is_editable: bool,
     pub is_public: bool,
-    pub trigger_config: Option<TriggerConfig>,
-    pub nodes: Vec<WorkflowNode>,
-    pub edges: Vec<WorkflowEdge>,
-    pub input_schema: Option<JsonSchema>,
-    pub output_schema: Option<JsonSchema>,
-    pub variables: Vec<Variable>,
-    pub error_config: Option<ErrorConfig>,
-    pub tool_defs: Option<Vec<RhaiToolDef>>,
+    pub trigger_config: Option<super::workflow_types::TriggerConfig>,
+    pub nodes: Vec<super::workflow_types::WorkflowNode>,
+    pub edges: Vec<super::workflow_types::WorkflowEdge>,
+    pub input_schema: Option<super::workflow_types::JsonSchema>,
+    pub output_schema: Option<super::workflow_types::JsonSchema>,
+    pub variables: Vec<super::workflow_types::Variable>,
+    pub error_config: Option<super::workflow_types::ErrorConfig>,
+    pub tool_defs: Option<Vec<super::workflow_types::RhaiToolDef>>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-impl From<WorkflowTemplateData> for WorkflowTemplateResponse {
-    fn from(data: WorkflowTemplateData) -> Self {
-        Self {
-            id: data.id,
-            name: data.name,
-            description: data.description,
-            icon: data.icon,
-            tags: data.tags,
-            version: data.version,
-            is_preset: data.is_preset,
-            is_editable: data.is_editable,
-            is_public: data.is_public,
-            trigger_config: data.trigger_config,
-            nodes: data.nodes,
-            edges: data.edges,
-            input_schema: data.input_schema,
-            output_schema: data.output_schema,
-            variables: data.variables,
-            error_config: data.error_config,
-            tool_defs: Some(data.tool_defs),
-            created_at: data.created_at,
-            updated_at: data.updated_at,
-        }
-    }
-}
-
-impl From<crate::entity::workflow_template::Model> for WorkflowTemplateResponse {
-    fn from(model: crate::entity::workflow_template::Model) -> Self {
+impl From<workflow_template::Model> for WorkflowTemplateResponse {
+    fn from(model: workflow_template::Model) -> Self {
         let tags: Vec<String> = model
             .tags
             .as_ref()
             .and_then(|t| serde_json::from_str(t).ok())
             .unwrap_or_default();
 
-        let trigger_config: Option<TriggerConfig> = model
+        let trigger_config: Option<super::workflow_types::TriggerConfig> = model
             .trigger_config
             .as_ref()
             .and_then(|t| serde_json::from_str(t).ok());
 
-        let nodes: Vec<WorkflowNode> = serde_json::from_str(&model.nodes).unwrap_or_default();
-        let edges: Vec<WorkflowEdge> = serde_json::from_str(&model.edges).unwrap_or_default();
-        let variables: Vec<Variable> = model
+        let nodes: Vec<super::workflow_types::WorkflowNode> =
+            serde_json::from_str(&model.nodes).unwrap_or_default();
+        let edges: Vec<super::workflow_types::WorkflowEdge> =
+            serde_json::from_str(&model.edges).unwrap_or_default();
+        let input_schema: Option<super::workflow_types::JsonSchema> = model
+            .input_schema
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
+        let output_schema: Option<super::workflow_types::JsonSchema> = model
+            .output_schema
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
+        let variables_vec: Vec<super::workflow_types::Variable> = model
             .variables
             .as_ref()
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
-        let input_schema: Option<JsonSchema> = model
-            .input_schema
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
-        let output_schema: Option<JsonSchema> = model
-            .output_schema
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
-        let error_config: Option<ErrorConfig> = model
+        let error_config: Option<super::workflow_types::ErrorConfig> = model
             .error_config
             .as_ref()
             .and_then(|e| serde_json::from_str(e).ok());
-
-        let tool_defs: Option<Vec<RhaiToolDef>> = model
-            .tool_defs
-            .as_ref()
-            .and_then(|t| serde_json::from_str(t).ok());
 
         Self {
             id: model.id,
@@ -1297,352 +1275,11 @@ impl From<crate::entity::workflow_template::Model> for WorkflowTemplateResponse 
             edges,
             input_schema,
             output_schema,
-            variables,
+            variables: variables_vec,
             error_config,
-            tool_defs,
+            tool_defs: None,
             created_at: model.created_at,
             updated_at: model.updated_at,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TemplateFilter {
-    pub is_preset: Option<bool>,
-    pub tags: Option<Vec<String>>,
-    pub search: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationError {
-    pub error_type: String,
-    pub node_id: Option<String>,
-    pub message: String,
-    pub suggestion: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationWarning {
-    pub warning_type: String,
-    pub node_id: Option<String>,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationResult {
-    pub is_valid: bool,
-    pub errors: Vec<ValidationError>,
-    pub warnings: Vec<ValidationWarning>,
-}
-
-// ── 自定义反序列化 ──
-
-/// 向后兼容的 ToolDef 反序列化：支持 `["name1", "name2"]`（旧）和 `[{name: "x"}]`（新）
-fn deserialize_tool_defs<'de, D>(deserializer: D) -> Result<Vec<ToolDef>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de;
-    let values: Vec<serde_json::Value> = Vec::deserialize(deserializer)?;
-    values
-        .into_iter()
-        .map(|v| {
-            if let Some(s) = v.as_str() {
-                Ok(ToolDef {
-                    name: s.to_string(),
-                    description: None,
-                    parameters: None,
-                })
-            } else {
-                ToolDef::deserialize(v).map_err(de::Error::custom)
-            }
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tool_node_roundtrip_preserves_type() {
-        let tool = WorkflowNode::Tool(ToolNode {
-            base: WorkflowNodeBase {
-                id: "t-test".to_string(),
-                title: "Test Tool".to_string(),
-                description: None,
-                position: Position { x: 0.0, y: 0.0 },
-                retry: RetryConfig::default(),
-                timeout: None,
-                enabled: true,
-                parent_id: None,
-            },
-            config: ToolNodeConfig {
-                tool_name: "Bash".to_string(),
-                input_mapping: std::collections::HashMap::new(),
-                output_var: "r_test".to_string(),
-            },
-        });
-
-        let json = serde_json::to_string(&tool).unwrap();
-        assert!(json.contains(r#""type":"tool""#), "Tool JSON should have type=tool: {json}");
-
-        let roundtrip: WorkflowNode = serde_json::from_str(&json).unwrap();
-        match &roundtrip {
-            WorkflowNode::Tool(t) => assert_eq!(t.config.tool_name, "Bash"),
-            other => panic!("Expected Tool, got {:?}", std::mem::discriminant(other)),
-        }
-    }
-
-    #[test]
-    fn agent_node_roundtrip_preserves_type() {
-        let agent = WorkflowNode::Agent(AgentNode {
-            base: WorkflowNodeBase {
-                id: "a-test".to_string(),
-                title: "Test Agent".to_string(),
-                description: None,
-                position: Position { x: 0.0, y: 0.0 },
-                retry: RetryConfig::default(),
-                timeout: None,
-                enabled: true,
-                parent_id: None,
-            },
-            config: AgentNodeConfig {
-                system_prompt: "test prompt".to_string(),
-                context_sources: vec![],
-                output_var: "r_test".to_string(),
-                model: None,
-                temperature: None,
-                max_tokens: None,
-                tools: vec![],
-                exposed_tools: vec![],
-                output_mode: OutputMode::Text,
-                agent_profile_id: None,
-                max_tool_rounds: None,
-                execution_mode: None,
-                rag_source_ids: vec![],
-                model_role: None,
-            },
-        });
-
-        let json = serde_json::to_string(&agent).unwrap();
-        assert!(json.contains(r#""type":"agent""#), "Agent JSON should have type=agent: {json}");
-
-        let roundtrip: WorkflowNode = serde_json::from_str(&json).unwrap();
-        match &roundtrip {
-            WorkflowNode::Agent(a) => assert_eq!(a.config.system_prompt, "test prompt"),
-            other => panic!("Expected Agent, got {:?}", std::mem::discriminant(other)),
-        }
-    }
-
-    fn make_agent_node(id: &str, title: &str) -> WorkflowNode {
-        WorkflowNode::Agent(AgentNode {
-            base: WorkflowNodeBase {
-                id: id.to_string(),
-                title: title.to_string(),
-                description: None,
-                position: Position { x: 0.0, y: 0.0 },
-                retry: RetryConfig::default(),
-                timeout: None,
-                enabled: true,
-                parent_id: None,
-            },
-            config: AgentNodeConfig {
-                system_prompt: format!("prompt for {id}"),
-                context_sources: vec![],
-                output_var: format!("r_{id}"),
-                model: None,
-                temperature: None,
-                max_tokens: None,
-                tools: vec![],
-                exposed_tools: vec![],
-                output_mode: OutputMode::Text,
-                agent_profile_id: None,
-                max_tool_rounds: None,
-                execution_mode: None,
-                rag_source_ids: vec![],
-                model_role: None,
-            },
-        })
-    }
-
-    fn make_tool_node(id: &str, title: &str, tool_name: &str) -> WorkflowNode {
-        WorkflowNode::Tool(ToolNode {
-            base: WorkflowNodeBase {
-                id: id.to_string(),
-                title: title.to_string(),
-                description: None,
-                position: Position { x: 100.0, y: 100.0 },
-                retry: RetryConfig::default(),
-                timeout: None,
-                enabled: true,
-                parent_id: None,
-            },
-            config: ToolNodeConfig {
-                tool_name: tool_name.to_string(),
-                input_mapping: std::collections::HashMap::new(),
-                output_var: format!("r_{id}"),
-            },
-        })
-    }
-
-    #[test]
-    fn vec_bulk_deserialize_preserves_tool_variant() {
-        let nodes = vec![
-            make_agent_node("a1", "Agent 1"),
-            make_tool_node("t1", "Tool 1", "Bash"),
-            make_agent_node("a2", "Agent 2"),
-            make_tool_node("t2", "Tool 2", "Search"),
-        ];
-
-        let json = serde_json::to_string(&nodes).unwrap();
-        eprintln!("Serialized Vec<WorkflowNode>:\n{json}");
-
-        let roundtrip: Vec<WorkflowNode> = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(roundtrip.len(), 4, "should have 4 nodes");
-
-        match &roundtrip[0] {
-            WorkflowNode::Agent(a) => assert_eq!(a.base.id, "a1"),
-            other => panic!("node[0] expected Agent, got {:?}", std::mem::discriminant(other)),
-        }
-
-        match &roundtrip[1] {
-            WorkflowNode::Tool(t) => {
-                assert_eq!(t.base.id, "t1");
-                assert_eq!(t.config.tool_name, "Bash");
-            },
-            other => panic!("node[1] expected Tool, got {:?}", std::mem::discriminant(other)),
-        }
-
-        match &roundtrip[2] {
-            WorkflowNode::Agent(a) => assert_eq!(a.base.id, "a2"),
-            other => panic!("node[2] expected Agent, got {:?}", std::mem::discriminant(other)),
-        }
-
-        match &roundtrip[3] {
-            WorkflowNode::Tool(t) => {
-                assert_eq!(t.base.id, "t2");
-                assert_eq!(t.config.tool_name, "Search");
-            },
-            other => panic!("node[3] expected Tool, got {:?}", std::mem::discriminant(other)),
-        }
-    }
-
-    #[test]
-    fn vec_bulk_deserialize_from_raw_json() {
-        let raw_json = r#"[
-            {"type":"agent","id":"a1","title":"Agent 1","description":null,"position":{"x":0.0,"y":0.0},"retry":{"enabled":false,"max_retries":3,"backoff_type":"Exponential","base_delay_ms":1000,"max_delay_ms":30000},"timeout":null,"enabled":true,"config":{"system_prompt":"prompt","context_sources":[],"output_var":"r_a1","model":null,"temperature":null,"max_tokens":null,"tools":[],"exposed_tools":[],"output_mode":"text","agent_profile_id":null,"max_tool_rounds":null,"execution_mode":null,"rag_source_ids":[]}},
-            {"type":"tool","id":"t1","title":"Tool 1","description":null,"position":{"x":100.0,"y":100.0},"retry":{"enabled":false,"max_retries":3,"backoff_type":"Exponential","base_delay_ms":1000,"max_delay_ms":30000},"timeout":null,"enabled":true,"config":{"tool_name":"Bash","input_mapping":{},"output_var":"r_t1"}}
-        ]"#;
-
-        let roundtrip: Vec<WorkflowNode> = serde_json::from_str(raw_json).unwrap();
-
-        assert_eq!(roundtrip.len(), 2);
-
-        match &roundtrip[0] {
-            WorkflowNode::Agent(a) => assert_eq!(a.base.id, "a1"),
-            other => panic!("node[0] expected Agent, got {:?}", std::mem::discriminant(other)),
-        }
-
-        match &roundtrip[1] {
-            WorkflowNode::Tool(t) => {
-                assert_eq!(t.base.id, "t1");
-                assert_eq!(t.config.tool_name, "Bash");
-            },
-            other => panic!("node[1] expected Tool, got {:?}", std::mem::discriminant(other)),
-        }
-    }
-
-    #[test]
-    fn vec_bulk_deserialize_frontend_style_tool_node() {
-        let raw_json = r#"[
-            {"type":"agent","id":"a1","title":"Agent 1","description":null,"position":{"x":0.0,"y":0.0},"retry":{"enabled":false,"max_retries":3,"backoff_type":"Exponential","base_delay_ms":1000,"max_delay_ms":30000},"timeout":null,"enabled":true,"config":{"system_prompt":"prompt","context_sources":[],"output_var":"r_a1","tools":[],"exposed_tools":[],"output_mode":"text","agentProfileId":null,"max_tool_rounds":null,"execution_mode":null,"rag_source_ids":[]}},
-            {"type":"tool","id":"t1","title":"Tool 1","description":null,"position":{"x":100.0,"y":100.0},"retry":{"enabled":false,"max_retries":3,"backoff_type":"Exponential","base_delay_ms":1000,"max_delay_ms":30000},"timeout":null,"enabled":true,"config":{"tool_name":"Bash","input_mapping":{},"output_var":"r_t1"}}
-        ]"#;
-
-        let result: Result<Vec<WorkflowNode>, _> = serde_json::from_str(raw_json);
-        match result {
-            Ok(nodes) => {
-                for (i, n) in nodes.iter().enumerate() {
-                    let typ = match n {
-                        WorkflowNode::Agent(_) => "Agent",
-                        WorkflowNode::Tool(_) => "Tool",
-                        _ => "Other",
-                    };
-                    eprintln!("node[{i}]: type={}", typ);
-                }
-                match &nodes[1] {
-                    WorkflowNode::Tool(t) => {
-                        assert_eq!(t.base.id, "t1");
-                        assert_eq!(t.config.tool_name, "Bash");
-                    },
-                    other => panic!(
-                        "node[1] expected Tool, got {:?} — Tool node was mis-parsed as another variant!",
-                        std::mem::discriminant(other)
-                    ),
-                }
-            },
-            Err(e) => {
-                panic!("Deserialization failed: {e}");
-            },
-        }
-    }
-
-    #[test]
-    fn tool_node_missing_config_field() {
-        let raw_json = r#"{"type":"tool","id":"t1","title":"Tool 1","description":null,"position":{"x":100.0,"y":100.0},"retry":{"enabled":false,"max_retries":3,"backoff_type":"Exponential","base_delay_ms":1000,"max_delay_ms":30000},"timeout":null,"enabled":true}"#;
-
-        let result: Result<WorkflowNode, _> = serde_json::from_str(raw_json);
-        match result {
-            Ok(node) => {
-                let typ = match &node {
-                    WorkflowNode::Agent(_) => "Agent",
-                    WorkflowNode::Tool(_) => "Tool",
-                    _ => "Other",
-                };
-                panic!(
-                    "Expected deserialization to fail for missing config, but got variant: {typ}"
-                );
-            },
-            Err(e) => {
-                eprintln!("As expected, missing config causes error: {e}");
-            },
-        }
-    }
-
-    #[test]
-    fn tool_node_config_fields_at_top_level() {
-        let raw_json = r#"{"type":"tool","id":"t1","title":"Tool 1","description":null,"position":{"x":100.0,"y":100.0},"retry":{"enabled":false,"max_retries":3,"backoff_type":"Exponential","base_delay_ms":1000,"max_delay_ms":30000},"timeout":null,"enabled":true,"tool_name":"Bash","input_mapping":{},"output_var":"r_t1"}"#;
-
-        let result: Result<WorkflowNode, _> = serde_json::from_str(raw_json);
-        match result {
-            Ok(node) => {
-                let typ = match &node {
-                    WorkflowNode::Agent(a) => {
-                        eprintln!(
-                            "Tool node was parsed as Agent! system_prompt='{}', output_var='{}'",
-                            a.config.system_prompt, a.config.output_var
-                        );
-                        "Agent"
-                    },
-                    WorkflowNode::Tool(t) => {
-                        eprintln!(
-                            "Tool node correctly parsed as Tool! tool_name='{}'",
-                            t.config.tool_name
-                        );
-                        "Tool"
-                    },
-                    other => {
-                        eprintln!("Tool node parsed as: {:?}", std::mem::discriminant(other));
-                        "Other"
-                    },
-                };
-                eprintln!("Result variant: {typ}");
-            },
-            Err(e) => {
-                eprintln!("Deserialization failed: {e}");
-            },
         }
     }
 }

@@ -3,7 +3,7 @@
 use crate::storage::TrajectoryStorage;
 use crate::trajectory::{
     ExportFormat, RLTrainingEntry, RewardSignal, Trajectory, TrajectoryExportOptions,
-    TrajectoryOutcome, TrajectoryQuery,
+    TrajectoryOutcome,
 };
 use anyhow::Result;
 use itertools::Itertools;
@@ -492,10 +492,4 @@ pub struct BatchAnalysis {
     pub avg_value: f64,
     pub top_patterns: Vec<PatternStat>,
     pub quality_distribution: QualityDistribution,
-}
-
-impl TrajectoryQuery {
-    pub fn execute(&self, storage: &TrajectoryStorage) -> Result<Vec<Trajectory>> {
-        storage.query_trajectories(self)
-    }
 }

@@ -5,7 +5,7 @@ use axagent_core::repo::louvain::{self, LouvainResult};
 use axagent_core::repo::note::{CreateNoteInput, GraphData, Note, NoteLink, UpdateNoteInput};
 use axagent_core::repo::note_graph::LinkGraph;
 use axagent_core::repo::wiki::{self, CreateWikiTemplateInput, NoteVersion, WikiTemplate};
-use axagent_core::types::NoteSearchResult;
+use axagent_harness::types::NoteSearchResult;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
@@ -427,7 +427,7 @@ async fn wiki_notes_search_hybrid(
         let score = hybrid_result.combined_score as f64;
 
         results.push(NoteSearchResult {
-            note,
+            note: note.into(),
             snippet,
             score,
         });
@@ -479,7 +479,7 @@ async fn wiki_notes_search_keyword(
         let snippet = extract_highlight_snippet(&note.content, query, 50, 150);
 
         results.push(NoteSearchResult {
-            note,
+            note: note.into(),
             snippet,
             score,
         });

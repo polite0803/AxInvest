@@ -4,7 +4,7 @@ use crate::commands::error_code::expert as expert_err;
 use axagent_core::entity::agency_experts;
 use axagent_core::repo::provider::{self as provider_repo, get_active_key};
 use axagent_core::repo::settings::get_settings;
-use axagent_core::types::{ChatContent, ChatMessage, ChatRequest};
+use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_harness::resolve_base_url_for_type;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
@@ -593,7 +593,7 @@ pub async fn extract_expert_structure(
                 ErrorResponse::new(expert_err::KEY_DECRYPT_FAILED).with_detail(e.to_string())
             })?;
 
-    let registry_key = format!("{:?}", provider_config.provider_type).to_lowercase();
+    let registry_key = provider_config.provider_type.registry_key();
 
     let adapter = state
         .harness

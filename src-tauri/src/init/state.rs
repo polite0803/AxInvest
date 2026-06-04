@@ -146,6 +146,10 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         axagent_runtime::harness::RuntimeHarness::new(axagent_runtime::harness::HarnessDeps {
             persistence: Arc::new(db_handle) as axagent_harness::SharedPersistence,
             master_key,
+            provider_registry: Arc::new(
+                axagent_providers::registry::ProviderRegistry::create_default(),
+            )
+                as Arc<dyn axagent_harness::registry::ProviderRegistry>,
         });
     let harness_registry = harness.provider_registry().clone();
 
@@ -233,11 +237,13 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             axagent_trajectory::BatchConfig::default(),
         )),
         #[cfg(not(target_os = "android"))]
-        skill_evolution_engine: Arc::new(tokio::sync::Mutex::new(
-            axagent_trajectory::SkillEvolutionEngine::new().with_sandbox(Arc::new(
+        skill_evolution_engine: Arc::new(tokio::sync::Mutex::new({
+            let mut engine = axagent_trajectory::SkillEvolutionEngine::new();
+            engine.set_sandbox(Arc::new(
                 axagent_trajectory::SkillSandboxExecutor::with_default_policy(),
-            )),
-        )),
+            ));
+            engine
+        })),
         #[cfg(target_os = "android")]
         skill_evolution_engine: Arc::new(tokio::sync::Mutex::new(
             axagent_trajectory::SkillEvolutionEngine::new(),
@@ -313,7 +319,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             let engine = Arc::new(axagent_runtime::work_engine::WorkEngine::new(
                 Arc::new(sea_db.clone()),
                 master_key,
-                Some(harness_registry.clone()),
+                harness_registry.clone(),
             ));
             // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
             rt.block_on(engine.inject_into_agent_executor(engine.clone()));
@@ -449,7 +455,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
 
 fn create_sync_engine(
     _sea_db: &sea_orm::DatabaseConnection,
-    _app_settings: &axagent_core::types::AppSettings,
+    _app_settings: &axagent_harness::types::AppSettings,
     rt_handle: &tokio::runtime::Handle,
 ) -> Option<Arc<SyncEngine>> {
     let cloud_config = load_cloud_storage_config(_sea_db, _app_settings, rt_handle)?;
@@ -461,7 +467,7 @@ fn create_sync_engine(
 
 fn load_cloud_storage_config(
     sea_db: &sea_orm::DatabaseConnection,
-    _app_settings: &axagent_core::types::AppSettings,
+    _app_settings: &axagent_harness::types::AppSettings,
     rt_handle: &tokio::runtime::Handle,
 ) -> Option<CloudStorageConfig> {
     use axagent_core::cloud_storage::{BackendType, S3Config, S3ProviderPreset, SyncMode};
@@ -482,6 +488,7 @@ fn load_cloud_storage_config(
     let cloud_config = CloudStorageConfig {
         provider_preset: settings
             .s3_provider_preset
+            .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or(S3ProviderPreset::Custom),
         backend_type,
         sync_enabled: true,

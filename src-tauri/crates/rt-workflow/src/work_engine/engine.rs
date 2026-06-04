@@ -1,6 +1,6 @@
 //! 统一工作流引擎 —— DAG 管理 + 并发执行 + DB 持久化。
 //!
-//! 节点类型统一为 axagent_harness::workflow_types::WorkflowNode（28 种），
+//! 节点类型统一为 axagent_core::workflow_types::WorkflowNode（28 种），
 //! 执行通过 NodeDispatcher 分发到对应执行器。
 
 use std::collections::{HashMap, HashSet};
@@ -12,8 +12,8 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use axagent_harness::workflow_types::{
-    BackoffType, EdgeType, JsonSchema, Variable, WorkflowEdge, WorkflowNode,
+use axagent_core::workflow_types::{
+    BackoffType, CompensationStrategy, EdgeType, JsonSchema, Variable, WorkflowEdge, WorkflowNode,
 };
 
 use axagent_harness::RhaiEngineAdapter;
@@ -125,8 +125,6 @@ pub struct StepProgressEvent {
     pub total_nodes: usize,
     pub completed_nodes: usize,
     pub execution_id: Option<String>,
-    pub output: Option<serde_json::Value>,
-    pub error: Option<String>,
 }
 
 /// 步骤进度回调：`&self` 不可用时使用独立函数签名
@@ -196,18 +194,6 @@ impl RunOptions {
     }
     pub fn with_progress_callback(mut self, cb: ProgressCallback) -> Self {
         self.progress_callback = Some(cb);
-        self
-    }
-    pub fn with_input(mut self, input: serde_json::Value) -> Self {
-        self.input = Some(input);
-        self
-    }
-    pub fn with_input_schema(mut self, schema: JsonSchema) -> Self {
-        self.input_schema = Some(schema);
-        self
-    }
-    pub fn with_output_schema(mut self, schema: JsonSchema) -> Self {
-        self.output_schema = Some(schema);
         self
     }
     /// 注入模板级变量列表，运行时写入 ExecutionState.variables
@@ -321,6 +307,11 @@ pub struct WorkEngine {
     ///   无需 async 锁；后续 `domain_constraints()` getter 在 agent 节点执行
     ///   时取 Arc clone，持有时间极短。
     domain_constraints: Arc<std::sync::Mutex<Option<DomainConstraintsFn>>>,
+    /// 业务规则引擎（可选，None = 不执行任何业务规则检查）。
+    /// 硬约束，在执行层直接拦截违规操作。
+    /// 通过 `set_business_rule_engine` 注入。
+    business_rule_engine:
+        Arc<std::sync::Mutex<Option<Arc<axagent_harness::business_rules::BusinessRuleEngine>>>>,
     /// Agent executor 共享缓存（跨节点复用，每次 run_workflow 开始时清空）
     agent_provider_cache: Arc<tokio::sync::Mutex<ProviderCache>>,
     agent_profile_cache: Arc<tokio::sync::Mutex<ProfileCache>>,
@@ -335,6 +326,10 @@ pub struct WorkEngine {
     /// master_key / provider_registry 由 AgentExecutor / LlmExecutor / ConditionExecutor /
     /// LlmClassifierExecutor 各自持有，WorkEngine 不再冗余存储。
     agent_executor: Arc<AgentExecutor>,
+    /// 审计记录器（可选，None = 不记录审计日志）
+    pub audit_recorder: Arc<std::sync::Mutex<Option<Arc<dyn axagent_harness::AuditRecorder>>>>,
+    /// 工具注册表（可选，设置后 tool_executor 优先通过 ToolRegistry.execute_tool() 执行工具）
+    tool_registry: Arc<std::sync::Mutex<Option<Arc<dyn axagent_harness::ToolRegistry>>>>,
 }
 
 const _: fn() = || {
@@ -399,7 +394,7 @@ impl WorkEngine {
     pub async fn precompile_tool_defs(
         &self,
         workflow_id: &str,
-        tool_defs: &[axagent_harness::workflow_types::RhaiToolDef],
+        tool_defs: &[axagent_core::workflow_types::RhaiToolDef],
     ) {
         if tool_defs.is_empty() {
             return;
@@ -546,6 +541,48 @@ impl WorkEngine {
             .expect("domain_constraints mutex poisoned")
             .clone()
     }
+
+    /// 注册业务规则引擎。
+    ///
+    /// 注入后，在执行 agent / tool / httpRequest 等节点时，
+    /// 会在 dispatch 之前自动进行规则评估。
+    ///
+    /// 多次调用：后者覆盖前者（标准 setter 语义）。
+    pub async fn set_business_rule_engine(
+        &self,
+        engine: Arc<axagent_harness::business_rules::BusinessRuleEngine>,
+    ) {
+        *self
+            .business_rule_engine
+            .lock()
+            .expect("business_rule_engine mutex poisoned") = Some(engine);
+    }
+
+    /// 取出当前注册的业务规则引擎（用于在执行节点时注入到 ExecutionState）。
+    fn business_rule_engine(
+        &self,
+    ) -> Option<Arc<axagent_harness::business_rules::BusinessRuleEngine>> {
+        self.business_rule_engine
+            .lock()
+            .expect("business_rule_engine mutex poisoned")
+            .clone()
+    }
+
+    /// 注册工具注册表（可选，设置后 tool_executor 优先走 ToolRegistry 中心化路径）
+    pub async fn set_tool_registry(&self, registry: Arc<dyn axagent_harness::ToolRegistry>) {
+        *self
+            .tool_registry
+            .lock()
+            .expect("tool_registry mutex poisoned") = Some(registry);
+    }
+
+    /// 取出当前注册的工具注册表（用于在执行节点时注入到 ExecutionState）
+    fn tool_registry(&self) -> Option<Arc<dyn axagent_harness::ToolRegistry>> {
+        self.tool_registry
+            .lock()
+            .expect("tool_registry mutex poisoned")
+            .clone()
+    }
 }
 
 impl WorkEngine {
@@ -599,11 +636,14 @@ impl WorkEngine {
             tool_resolver: Arc::new(Mutex::new(None)),
             rag_callback: Arc::new(Mutex::new(None)),
             domain_constraints: Arc::new(std::sync::Mutex::new(None)),
+            business_rule_engine: Arc::new(std::sync::Mutex::new(None)),
             agent_provider_cache,
             agent_profile_cache,
             breakpoints: Arc::new(Mutex::new(HashSet::new())),
             node_breakers: Arc::new(Mutex::new(HashMap::new())),
             agent_executor: agent_exec,
+            audit_recorder: Arc::new(std::sync::Mutex::new(None)),
+            tool_registry: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -732,9 +772,7 @@ impl WorkEngine {
         let done_or_skipped: HashSet<&str> = workflow
             .node_states
             .iter()
-            .filter(|(_, s)| {
-                matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped | NodeStatus::Failed)
-            })
+            .filter(|(_, s)| matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped))
             .map(|(id, _)| id.as_str())
             .collect();
 
@@ -868,6 +906,48 @@ impl WorkEngine {
         if let Some(e) = error {
             state.error = Some(e);
             state.attempts += 1;
+        }
+
+        // ── 回滚补偿：节点标记为 Failed 时，根据补偿策略执行操作 ──
+        if status == NodeStatus::Failed
+            && let Some(node) = workflow.nodes.iter().find(|n| n.base_id() == node_id)
+            && let Some(ref comp) = node.base().compensation
+        {
+            match comp.strategy {
+                CompensationStrategy::SkipWithWarning => {
+                    // 删除该节点输出
+                    workflow.results.remove(node_id);
+                    tracing::info!("[补偿] 节点 {} (SkipWithWarning): 已移除失败输出", node_id);
+                },
+                CompensationStrategy::Rollback => {
+                    // 删除该节点输出
+                    workflow.results.remove(node_id);
+                    // 收集所有下游 Pending/Ready 节点并标记为 Skipped
+                    let downstream_ids: Vec<String> = workflow
+                        .edges
+                        .iter()
+                        .filter(|e| e.source == node_id)
+                        .map(|e| e.target.clone())
+                        .collect();
+                    for dep_id in &downstream_ids {
+                        if let Some(dep_state) = workflow.node_states.get_mut(dep_id)
+                            && matches!(dep_state.status, NodeStatus::Pending | NodeStatus::Ready)
+                        {
+                            dep_state.status = NodeStatus::Skipped;
+                        }
+                        // 同时清理下游结果
+                        workflow.results.remove(dep_id.as_str());
+                    }
+                    tracing::info!(
+                        "[补偿] 节点 {} (Rollback): 已移除输出并跳过 {} 个下游节点",
+                        node_id,
+                        downstream_ids.len()
+                    );
+                },
+                CompensationStrategy::Escalate => {
+                    tracing::warn!("[补偿] 节点 {} 需要人工处理 (Escalate)", node_id);
+                },
+            }
         }
 
         // 判定工作流终端状态
@@ -1047,29 +1127,6 @@ impl WorkEngine {
                 if options.parent_execution_id.is_some() {
                     state.parent_execution_id = options.parent_execution_id.clone();
                 }
-            }
-        }
-
-        // 将 options.input 以 __workflow_input__ 为 key 注入变量表，
-        // 使得 input_mapping 中 "xxx": "__workflow_input__.field" 形式的路径可被解析
-        if let Some(ref input) = options.input {
-            let mut executions = self.executions.lock().await;
-            if let Some(state) = executions.get_mut(&execution_id) {
-                state
-                    .variables
-                    .insert("__workflow_input__".to_string(), input.clone());
-            }
-        }
-        if options.plan_callbacks.is_some() {
-            let mut executions = self.executions.lock().await;
-            if let Some(state) = executions.get_mut(&execution_id) {
-                state.plan_callbacks = options.plan_callbacks.clone();
-            }
-        }
-        if options.parent_execution_id.is_some() {
-            let mut executions = self.executions.lock().await;
-            if let Some(state) = executions.get_mut(&execution_id) {
-                state.parent_execution_id = options.parent_execution_id.clone();
             }
         }
 
@@ -1302,21 +1359,6 @@ impl WorkEngine {
                         wf.status = WorkflowStatus::PartiallyCompleted;
                         wf.completed_at = Some(current_timestamp());
                     }
-                } else {
-                    // 全部节点已完成/失败/跳过，正常结束
-                    let mut workflows = self.workflows.write().await;
-                    if let Some(wf) = workflows.get_mut(workflow_id) {
-                        let has_failure = wf
-                            .node_states
-                            .values()
-                            .any(|s| matches!(s.status, NodeStatus::Failed));
-                        wf.status = if has_failure {
-                            WorkflowStatus::PartiallyCompleted
-                        } else {
-                            WorkflowStatus::Completed
-                        };
-                        wf.completed_at = Some(current_timestamp());
-                    }
                 }
                 break;
             };
@@ -1364,13 +1406,6 @@ impl WorkEngine {
                         .map(|wf| Self::get_node_dependency_results(wf, node_id))
                         .unwrap_or_default()
                 };
-                let workflow_vars = {
-                    let executions = self.executions.lock().await;
-                    executions
-                        .get(&execution_id)
-                        .map(|s| s.variables.clone())
-                        .unwrap_or_default()
-                };
                 let input_snapshot =
                     serde_json::to_value(&deps_results).unwrap_or(serde_json::json!({}));
                 let started_at = Utc::now().timestamp_millis();
@@ -1412,8 +1447,6 @@ impl WorkEngine {
                         total_nodes,
                         completed_nodes: completed,
                         execution_id: Some(execution_id.clone()),
-                        output: None,
-                        error: None,
                     })
                     .await;
                 }
@@ -1427,18 +1460,17 @@ impl WorkEngine {
                     workflow_id.to_string(),
                     serde_json::json!({}),
                 );
-                for (k, v) in workflow_vars {
-                    exec_ctx.variables.entry(k).or_insert(v);
-                }
-                for (k, v) in deps_results {
-                    exec_ctx.variables.insert(k, v);
-                }
+                exec_ctx.variables = deps_results;
                 exec_ctx.cancel_token = Some(cancel_token.clone());
                 exec_ctx.dry_run = options.dry_run;
                 {
                     let bp = self.breakpoints.lock().await;
                     exec_ctx.breakpoints = bp.clone();
                 }
+                // 注入业务规则引擎（可选），在执行节点前进行硬约束检查
+                exec_ctx.business_rule_engine = self.business_rule_engine();
+                // 注入工具注册表（可选），tool_executor 优先走中心化路径
+                exec_ctx.tool_registry = self.tool_registry();
 
                 let exec_pause_signal = {
                     let mut executions = self.executions.lock().await;
@@ -1612,7 +1644,6 @@ impl WorkEngine {
                             .record_success();
 
                         let out_var = output.output_var.clone();
-                        let output_value = output.output.clone();
                         self.update_node_status(
                             workflow_id,
                             &nr.node_id,
@@ -1639,7 +1670,7 @@ impl WorkEngine {
                                 node_name,
                                 status: "completed".to_string(),
                                 input: Some(nr.input_snapshot.clone()),
-                                output: Some(output.output),
+                                output: Some(output.output.clone()),
                                 execution_time_ms: Some(nr.elapsed_ms),
                                 error: None,
                                 started_at: nr.started_at,
@@ -1651,44 +1682,21 @@ impl WorkEngine {
                         .await
                         .ok();
 
+                        self.record_audit(
+                            &nr.node_id,
+                            workflow_id,
+                            "completed",
+                            &nr.input_snapshot,
+                            Some(&output.output),
+                            None,
+                            nr.elapsed_ms,
+                        );
+
                         if matches!(nr.node, WorkflowNode::Condition(_)) {
                             let mut workflows = self.workflows.write().await;
                             if let Some(wf) = workflows.get_mut(workflow_id) {
                                 skip_disabled_branch_nodes(wf, &wf.edges.clone(), &nr.node_id);
                             }
-                        }
-
-                        // 向前端推送"步骤完成"进度事件
-                        if let Some(ref cb) = progress_cb {
-                            let completed = {
-                                let workflows = self.workflows.read().await;
-                                workflows
-                                    .get(workflow_id)
-                                    .map(|w| {
-                                        w.node_states
-                                            .values()
-                                            .filter(|s| {
-                                                matches!(
-                                                    s.status,
-                                                    NodeStatus::Completed
-                                                        | NodeStatus::Failed
-                                                        | NodeStatus::Skipped
-                                                )
-                                            })
-                                            .count()
-                                    })
-                                    .unwrap_or(0)
-                            };
-                            cb(StepProgressEvent {
-                                node_id: nr.node_id.clone(),
-                                status: "completed".to_string(),
-                                total_nodes,
-                                completed_nodes: completed,
-                                execution_id: Some(execution_id.clone()),
-                                output: Some(output_value.clone()),
-                                error: None,
-                            })
-                            .await;
                         }
                     },
                     Ok(Err(err)) => {
@@ -1771,40 +1779,15 @@ impl WorkEngine {
                         .await
                         .ok();
 
-                        // 向前端推送"步骤失败"进度事件（仅在重试耗尽后）
-                        if current_attempts >= retry_cfg.max_retries
-                            && let Some(ref cb) = progress_cb
-                        {
-                            let completed = {
-                                let workflows = self.workflows.read().await;
-                                workflows
-                                    .get(workflow_id)
-                                    .map(|w| {
-                                        w.node_states
-                                            .values()
-                                            .filter(|s| {
-                                                matches!(
-                                                    s.status,
-                                                    NodeStatus::Completed
-                                                        | NodeStatus::Failed
-                                                        | NodeStatus::Skipped
-                                                )
-                                            })
-                                            .count()
-                                    })
-                                    .unwrap_or(0)
-                            };
-                            cb(StepProgressEvent {
-                                node_id: nr.node_id.clone(),
-                                status: "failed".to_string(),
-                                total_nodes,
-                                completed_nodes: completed,
-                                execution_id: Some(execution_id.clone()),
-                                output: None,
-                                error: Some(err_msg.clone()),
-                            })
-                            .await;
-                        }
+                        self.record_audit(
+                            &nr.node_id,
+                            workflow_id,
+                            "failed",
+                            &nr.input_snapshot,
+                            None,
+                            Some(err_msg.clone()),
+                            nr.elapsed_ms,
+                        );
                     },
                     Err(_) => {
                         breakers
@@ -1886,40 +1869,15 @@ impl WorkEngine {
                         .await
                         .ok();
 
-                        // 向前端推送"步骤超时失败"进度事件（仅在重试耗尽后）
-                        if current_attempts >= retry_cfg.max_retries
-                            && let Some(ref cb) = progress_cb
-                        {
-                            let completed = {
-                                let workflows = self.workflows.read().await;
-                                workflows
-                                    .get(workflow_id)
-                                    .map(|w| {
-                                        w.node_states
-                                            .values()
-                                            .filter(|s| {
-                                                matches!(
-                                                    s.status,
-                                                    NodeStatus::Completed
-                                                        | NodeStatus::Failed
-                                                        | NodeStatus::Skipped
-                                                )
-                                            })
-                                            .count()
-                                    })
-                                    .unwrap_or(0)
-                            };
-                            cb(StepProgressEvent {
-                                node_id: nr.node_id.clone(),
-                                status: "failed".to_string(),
-                                total_nodes,
-                                completed_nodes: completed,
-                                execution_id: Some(execution_id.clone()),
-                                output: None,
-                                error: Some("Node execution timeout".to_string()),
-                            })
-                            .await;
-                        }
+                        self.record_audit(
+                            &nr.node_id,
+                            workflow_id,
+                            "timeout",
+                            &nr.input_snapshot,
+                            None,
+                            Some(err_msg),
+                            nr.elapsed_ms,
+                        );
                     },
                 }
 
@@ -1973,6 +1931,18 @@ impl WorkEngine {
             let end_output = extract_end_output(&wf.nodes, &wf.results);
             wf.output =
                 build_workflow_output(&wf.results, end_output, options.output_schema.as_ref());
+
+            // 若配置了 output_schema，校验输出并记录警告
+            if let Some(ref schema) = options.output_schema
+                && let Some(ref output) = wf.output
+                && let Err(errors) = validate_input(output, schema)
+            {
+                tracing::warn!(
+                    workflow_id = %workflow_id,
+                    "Output schema validation failed: {:?}",
+                    errors
+                );
+            }
 
             let persist_output = wf.output.clone().unwrap_or_else(|| {
                 serde_json::to_value(&wf.results).unwrap_or(serde_json::json!(null))
@@ -2079,8 +2049,10 @@ impl WorkEngine {
         preset_execution_id: Option<String>,
     ) -> Result<String, WorkEngineError> {
         let execution_id = preset_execution_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let state =
+        let mut state =
             ExecutionState::new(execution_id.clone(), workflow_id.to_string(), input.clone());
+        state.business_rule_engine = self.business_rule_engine();
+        state.tool_registry = self.tool_registry();
         let input_params = serde_json::to_string(&input).ok();
         axagent_core::repo::workflow_execution::create_workflow_execution(
             &self.db,
@@ -2184,6 +2156,50 @@ impl WorkEngine {
             Ok(())
         } else {
             Err(WorkEngineError::NotFound(execution_id.to_string()))
+        }
+    }
+
+    /// 记录审计日志（若已注入 AuditRecorder）
+    #[allow(clippy::too_many_arguments)]
+    fn record_audit(
+        &self,
+        node_id: &str,
+        workflow_id: &str,
+        status: &str,
+        input_val: &serde_json::Value,
+        output_val: Option<&serde_json::Value>,
+        error: Option<String>,
+        duration_ms: u64,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let input_str = serde_json::to_string(input_val).unwrap_or_default();
+        let output_str = output_val
+            .and_then(|o| serde_json::to_string(o).ok())
+            .unwrap_or_default();
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        input_str.hash(&mut hasher);
+        let input_hash = hasher.finish().to_string();
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        output_str.hash(&mut hasher);
+        let output_hash = hasher.finish().to_string();
+
+        if let Some(ref recorder) = *self.audit_recorder.lock().unwrap() {
+            recorder.record(axagent_harness::AuditEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                timestamp: current_timestamp(),
+                execution_type: "node".to_string(),
+                session_id: None,
+                tool_name: None,
+                node_id: Some(node_id.to_string()),
+                workflow_id: Some(workflow_id.to_string()),
+                input_hash,
+                output_hash,
+                duration_ms,
+                status: status.to_string(),
+                error,
+            });
         }
     }
 
@@ -2355,20 +2371,14 @@ fn validate_input(input: &serde_json::Value, schema: &JsonSchema) -> Result<(), 
     }
 }
 
-/// 扫描工作流节点，收集所有 AgentNode 和 ToolNode 中引用的工具名。
+/// 扫描工作流节点，收集所有 AgentNode 中引用的工具名。
 fn collect_workflow_tool_names(nodes: &[WorkflowNode]) -> Vec<String> {
     let mut names = std::collections::HashSet::new();
     for node in nodes {
-        match node {
-            WorkflowNode::Agent(an) => {
-                for tool in &an.config.tools {
-                    names.insert(tool.name.clone());
-                }
-            },
-            WorkflowNode::Tool(tn) => {
-                names.insert(tn.config.tool_name.clone());
-            },
-            _ => {},
+        if let WorkflowNode::Agent(an) = node {
+            for tool in &an.config.tools {
+                names.insert(tool.name.clone());
+            }
         }
     }
     names.into_iter().collect()

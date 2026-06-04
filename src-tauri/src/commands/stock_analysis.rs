@@ -17,6 +17,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tauri::State;
 
 /// 搜索股票

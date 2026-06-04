@@ -364,6 +364,7 @@ async fn seed_stock_analysis_workflow_template(
                 timeout: Some(120),
                 enabled: true,
                 parent_id: parent_id.map(String::from),
+                compensation: None,
             },
             config: ToolNodeConfig {
                 tool_name: tool_name.into(),
@@ -851,6 +852,7 @@ async fn seed_stock_analysis_workflow_template(
                 timeout: Some(300),
                 enabled: true,
                 parent_id: parent_id.map(String::from),
+                compensation: None,
             },
             config: AgentNodeConfig {
                 // inline system_prompt 只放任务指令，专家 prompt 由 agent_profile 自动加载，
@@ -869,6 +871,8 @@ async fn seed_stock_analysis_workflow_template(
                 execution_mode: None,
                 rag_source_ids: vec![],
                 model_role: None,
+                consistency_check: None,
+                hallucination_guard: None,
             },
         })
     };
@@ -899,6 +903,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: None,
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: TriggerConfig {
             trigger_type: TriggerType::Manual,
@@ -1042,6 +1047,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(120),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: ParallelNodeConfig {
             branches: analyst_branches,
@@ -1077,6 +1083,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(900),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: DebateNodeConfig {
             debater_steps: (0..debate_max_rounds)
@@ -1193,7 +1200,7 @@ async fn seed_stock_analysis_workflow_template(
             a.config.max_tool_rounds = Some(2);
             let tool_names = PROFILE_TOOLS
                 .iter()
-                .find(|(k, _)| **k == "value-investor")
+                .find(|(k, _)| *k == "value-investor")
                 .map(|(_, v)| *v)
                 .unwrap_or(&[]);
             a.config.tools = tool_names
@@ -1222,6 +1229,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(600),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: ParallelNodeConfig {
             branches: vec![
@@ -1325,6 +1333,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(60),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: AggregatorNodeConfig {
             strategy: "all".into(),
@@ -1364,6 +1373,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(30),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: LlmClassifierNodeConfig {
             categories: vec!["低风险".into(), "中风险".into(), "高风险".into()],
@@ -1375,6 +1385,9 @@ async fn seed_stock_analysis_workflow_template(
             model: None,
             input_var: "t-risk.output".into(),
             output_var: "risk-level".into(),
+            confidence_threshold: None,
+            fallback_label: None,
+            consistency_check: None,
         },
     }));
     edges.push(edge("e-t-risk-cls-risk", "t-risk", "cls-risk-level"));
@@ -1393,6 +1406,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(60),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: ValidationNodeConfig {
             assertions: vec![ValidationAssertion {
@@ -1551,6 +1565,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(10),
             enabled: true,
             parent_id: None,
+            compensation: None,
         },
         config: NotificationNodeConfig {
             channel: "system".into(),

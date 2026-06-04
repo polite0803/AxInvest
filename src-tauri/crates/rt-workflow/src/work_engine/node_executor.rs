@@ -1,4 +1,4 @@
-use axagent_core::workflow_types::WorkflowNode;
+use axagent_harness::workflow_types::WorkflowNode;
 
 use super::dispatcher::NodeDispatcher;
 use super::execution_state::ExecutionState;

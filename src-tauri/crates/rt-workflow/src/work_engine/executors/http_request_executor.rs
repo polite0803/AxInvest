@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use axagent_core::workflow_types::WorkflowNode;
+use axagent_harness::workflow_types::WorkflowNode;
 use std::time::Duration;
 
 use crate::work_engine::execution_state::ExecutionState;

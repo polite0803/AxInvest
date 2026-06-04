@@ -999,7 +999,7 @@ pub use axagent_core::plan_compiler::compile_plan_to_dag;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axagent_core::workflow_types::WorkflowNode;
+    use axagent_harness::workflow_types::WorkflowNode;
 
     #[test]
     fn test_create_plan() {

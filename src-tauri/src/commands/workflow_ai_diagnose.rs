@@ -2,7 +2,7 @@ use crate::AppState;
 use axagent_core::crypto::decrypt_key;
 use axagent_core::entity::provider_keys;
 use axagent_core::repo::provider;
-use axagent_core::workflow_types::WorkflowNode;
+use axagent_harness::workflow_types::WorkflowNode;
 use axagent_rt_workflow::work_engine::node_executor_trait::node_type_name;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};

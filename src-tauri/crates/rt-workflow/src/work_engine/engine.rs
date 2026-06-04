@@ -1,6 +1,6 @@
 //! 统一工作流引擎 —— DAG 管理 + 并发执行 + DB 持久化。
 //!
-//! 节点类型统一为 axagent_core::workflow_types::WorkflowNode（28 种），
+//! 节点类型统一为 axagent_harness::workflow_types::WorkflowNode（28 种），
 //! 执行通过 NodeDispatcher 分发到对应执行器。
 
 use std::collections::{HashMap, HashSet};
@@ -12,7 +12,7 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use axagent_core::workflow_types::{
+use axagent_harness::workflow_types::{
     BackoffType, EdgeType, JsonSchema, Variable, WorkflowEdge, WorkflowNode,
 };
 
@@ -399,7 +399,7 @@ impl WorkEngine {
     pub async fn precompile_tool_defs(
         &self,
         workflow_id: &str,
-        tool_defs: &[axagent_core::workflow_types::RhaiToolDef],
+        tool_defs: &[axagent_harness::workflow_types::RhaiToolDef],
     ) {
         if tool_defs.is_empty() {
             return;

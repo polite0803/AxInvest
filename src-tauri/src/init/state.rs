@@ -323,6 +323,16 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             ));
             // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
             rt.block_on(engine.inject_into_agent_executor(engine.clone()));
+            // 注册股票分析领域约束回调（A 股头部/尾部锚定）
+            rt.block_on(engine.set_domain_constraints(Arc::new(|role_name: &str| {
+                if axagent_stock_analysis::prompts::is_stock_role(role_name) {
+                    axagent_runtime::work_engine::ConstraintBlocks::default()
+                        .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
+                        .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
+                } else {
+                    axagent_runtime::work_engine::ConstraintBlocks::default()
+                }
+            })));
             engine
         },
         skill_decomposer: Arc::new(tokio::sync::RwLock::new(

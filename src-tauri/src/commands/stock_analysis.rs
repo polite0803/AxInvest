@@ -2,13 +2,9 @@ use crate::AppState;
 use axagent_core::entity::{
     portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
-use axagent_harness::types::ProviderProxyConfig;
-use axagent_harness::types::ProviderType;
-use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
-use axagent_stock_analysis::decision::{AgentRunner, StockAnalysisFullConfig};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
@@ -21,9 +17,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
-use zeroize::Zeroizing;
 
 /// 搜索股票
 #[tauri::command]
@@ -275,170 +269,20 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
     Ok(enriched)
 }
 
-// ── Helper: 构建 SessionManagerRunner ──
-
-/// 构建带取消令牌的 AgentRunner（封装 SessionManagerRunner）。
-/// 任何步骤失败都会返回 `Err`，调用方可回退到占位报告模式。
-#[allow(dead_code)]
-async fn build_cancel_aware_runner(
-    db: &sea_orm::DatabaseConnection,
-    master_key: &[u8; 32],
-    provider_id: &str,
-    cancel_token: Arc<AtomicBool>,
-    temperature: f64,
-    max_tokens: u32,
-    timeout_secs: u64,
-) -> Result<impl AgentRunner + use<>, String> {
-    let prov = axagent_core::repo::provider::get_provider(db, provider_id)
-        .await
-        .map_err(|e| format!("Provider 查询失败: {}", e))?;
-    if !prov.enabled {
-        return Err("Provider 已禁用".into());
-    }
-    let key = prov
-        .keys
-        .iter()
-        .find(|k| k.enabled)
-        .ok_or_else(|| "没有启用的 API key".to_string())?;
-    let api_key = Zeroizing::new(
-        axagent_core::crypto::decrypt_key(&key.key_encrypted, master_key)
-            .map_err(|e| format!("密钥解密失败: {}", e))?,
-    );
-    let settings = axagent_core::repo::settings::get_settings(db)
-        .await
-        .unwrap_or_default();
-    let custom_headers: Option<std::collections::HashMap<String, String>> = prov
-        .custom_headers
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let ctx = ProviderRequestContext {
-        // 密钥移入上游 ProviderRequestContext（String 类型，受限于上游 API 无法 zeroize）
-        // 本地 Zeroizing 副本在离开此作用域后自动清零
-        api_key: api_key.to_string(),
-        key_id: key.id.clone(),
-        provider_id: prov.id.clone(),
-        base_url: Some(resolve_base_url_for_type(&prov.api_host, &prov.provider_type)),
-        api_path: prov.api_path.clone(),
-        proxy_config: ProviderProxyConfig::resolve(&prov.proxy_config, &settings),
-        custom_headers,
-        api_mode: None,
-        conversation: None,
-        previous_response_id: None,
-        store_response: None,
-    };
-    let adapter: Arc<dyn ProviderAdapter> = match prov.provider_type {
-        ProviderType::OpenAI => {
-            Arc::new(axagent_providers::openai::OpenAIAdapter::new())
-        },
-        ProviderType::OpenAIResponses => {
-            Arc::new(axagent_providers::openai_responses::OpenAIResponsesAdapter::new())
-        },
-        ProviderType::Anthropic => {
-            Arc::new(axagent_providers::anthropic::AnthropicAdapter::new())
-        },
-        ProviderType::Gemini => {
-            Arc::new(axagent_providers::gemini::GeminiAdapter::new())
-        },
-        ProviderType::OpenClaw => {
-            Arc::new(axagent_providers::openclaw::OpenClawAdapter::new())
-        },
-        ProviderType::Hermes => {
-            Arc::new(axagent_providers::hermes::HermesAdapter::new())
-        },
-        ProviderType::Ollama => {
-            Arc::new(axagent_providers::ollama::OllamaAdapter::new())
-        },
-    };
-    let model_id = prov
-        .models
-        .iter()
-        .find(|m| m.enabled)
-        .map(|m| m.model_id.clone())
-        .ok_or_else(|| "没有可用的模型".to_string())?;
-    let inner = axagent_stock_analysis::runner::SessionManagerRunner::new(adapter, ctx, model_id)
-        .with_temperature(Some(temperature))
-        .with_max_tokens(Some(max_tokens));
-    Ok(CancelAwareRunner {
-        inner,
-        token: cancel_token,
-        timeout_secs,
-    })
-}
-
-#[allow(dead_code)]
-struct CancelAwareRunner {
-    inner: axagent_stock_analysis::runner::SessionManagerRunner,
-    token: Arc<AtomicBool>,
-    timeout_secs: u64,
-}
-
-#[async_trait::async_trait]
-impl AgentRunner for CancelAwareRunner {
-    async fn run_agent(
-        &self,
-        expert_id: &str,
-        sys_prompt: &str,
-        user_prompt: &str,
-    ) -> Result<String, String> {
-        if self.token.load(Ordering::Relaxed) {
-            return Err("已取消".into());
-        }
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(self.timeout_secs),
-            self.inner.run_agent(expert_id, sys_prompt, user_prompt),
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_) => Err(format!("[{expert_id}] LLM 调用超时 ({}秒)", self.timeout_secs)),
-        }
-    }
-}
-
-/// 从 DB 的 agency_experts 表加载股票分析专家系统提示词
-#[allow(dead_code)]
-pub(crate) async fn load_stock_analysis_prompts(
-    db: &sea_orm::DatabaseConnection,
-) -> std::collections::HashMap<String, String> {
-    use axagent_core::entity::agency_experts;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    let mut prompts = std::collections::HashMap::new();
-    let rows = match agency_experts::Entity::find()
-        .filter(agency_experts::Column::SourceDir.eq("stock-analysis"))
-        .all(db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::warn!("[stock_analysis] DB 加载专家提示词失败: {e}");
-            return prompts;
-        },
-    };
-    for row in rows {
-        let expert_id = row
-            .id
-            .strip_prefix("agency-stock-analysis-")
-            .unwrap_or(&row.id);
-        prompts.insert(expert_id.to_string(), row.system_prompt);
-    }
-    tracing::info!("[stock_analysis] 从 DB 加载了 {} 个专家提示词", prompts.len());
-    prompts
-}
-
-/// 从 settings 表加载完整分析配置，合并默认值
-#[allow(dead_code)]
-async fn load_full_config(db: &sea_orm::DatabaseConnection) -> StockAnalysisFullConfig {
-    let mut cfg = StockAnalysisFullConfig::default();
+/// 从 settings 表加载估值参数（ValueConfig），仅提取需要的部分
+async fn load_value_config(db: &sea_orm::DatabaseConnection) -> axagent_stock_analysis::decision::ValueConfig {
     if let Ok(Some(v)) =
         axagent_core::repo::settings::get_setting(db, "stock_analysis_config").await
     {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&v) {
-            if let Ok(c) = serde_json::from_value::<StockAnalysisFullConfig>(parsed) {
-                cfg = c;
+            if let Some(value_section) = parsed.get("value") {
+                if let Ok(cfg) = serde_json::from_value::<axagent_stock_analysis::decision::ValueConfig>(value_section.clone()) {
+                    return cfg;
+                }
             }
         }
     }
-    cfg
+    axagent_stock_analysis::decision::ValueConfig::default()
 }
 
 // ── MCP Stock Data Tools ──
@@ -964,18 +808,18 @@ pub async fn get_value_assessment(
             None
         }
     });
-    let full_config = load_full_config(state.harness.db()).await;
+    let value_config = load_value_config(state.harness.db()).await;
     Ok(match shares {
         Some(s) if s > 0.0 => axagent_stock_analysis::value::ValueEngine::assess(
             quote.price,
             &financials,
             s,
-            Some(&full_config.value),
+            Some(&value_config),
         ),
         _ => axagent_stock_analysis::value::ValueEngine::assess_no_shares(
             quote.price,
             &financials,
-            Some(&full_config.value),
+            Some(&value_config),
         ),
     })
 }
@@ -1003,7 +847,7 @@ pub async fn compute_value_metrics(
             None
         }
     });
-    let full_config = load_full_config(state.harness.db()).await;
+    let value_config = load_value_config(state.harness.db()).await;
     Ok(axagent_stock_analysis::value_investing::ValueInvestingEngine::compute(
         &stock_code,
         quote.price,
@@ -1011,7 +855,7 @@ pub async fn compute_value_metrics(
         &financials,
         quote.pe,
         quote.pb,
-        Some(&full_config.value),
+        Some(&value_config),
     ))
 }
 

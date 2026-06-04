@@ -1,12 +1,12 @@
-use axagent_core::types::{ChatContent, ChatMessage, ChatRequest};
-use axagent_harness::{ProviderAdapter, ProviderRequestContext};
+use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 #[cfg(test)]
-use axagent_trajectory::ProcedureStep;
-use axagent_trajectory::{
+use axagent_harness::trajectory_types::ProcedureStep;
+use axagent_harness::trajectory_types::{
     GeneratedTool, LlmEvolutionProvider, LlmJudge, LlmJudgeFuture, LlmMutationRequest,
     LlmMutationResponse, LlmTextGradProvider, LlmToolProvider, PrmLlmProvider, RewardCategory,
     StepReward, ToolCreationRequest,
 };
+use axagent_harness::{ProviderAdapter, ProviderRequestContext};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -173,7 +173,7 @@ impl LlmEvolutionProvider for ProviderLlmBridge {
     fn generate_mutation(
         &self,
         request: &LlmMutationRequest,
-    ) -> axagent_trajectory::LlmMutationFuture<'_> {
+    ) -> axagent_harness::trajectory_types::LlmMutationFuture<'_> {
         let steps_json = serde_json::to_string(&request.current_steps).unwrap_or_default();
         let failures = request.failure_evidence.join("\n");
         let successes = request.success_evidence.join("\n");

@@ -1,6 +1,6 @@
 use crate::AppState;
 use axagent_core::rag::KnowledgeContainer;
-use axagent_core::types::*;
+use axagent_harness::types::*;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -235,6 +235,7 @@ pub async fn rebuild_knowledge_index(
     let master_key = state.harness.master_key_owned();
     let vector_store = state.vector_store.clone();
     let ep = embedding_provider.clone();
+    let provider_registry = state.harness.provider_registry().clone();
 
     tokio::spawn(async move {
         // Process each document individually so status updates per-doc
@@ -283,7 +284,16 @@ pub async fn rebuild_knowledge_index(
                 .collect();
             let rowids: Vec<i64> = chunks.iter().map(|(rid, _, _)| *rid).collect();
 
-            match crate::indexing::generate_embeddings(&db, &master_key, &ep, texts, None).await {
+            match crate::indexing::generate_embeddings(
+                &db,
+                &master_key,
+                &provider_registry,
+                &ep,
+                texts,
+                None,
+            )
+            .await
+            {
                 Ok(embed_response) => {
                     let entries: Vec<(i64, Vec<f32>)> =
                         rowids.into_iter().zip(embed_response.embeddings).collect();
@@ -391,7 +401,7 @@ pub async fn list_knowledge_containers(
 pub async fn list_knowledge_entities(
     state: State<'_, AppState>,
     base_id: String,
-) -> Result<Vec<axagent_core::types::KnowledgeEntity>, String> {
+) -> Result<Vec<axagent_harness::types::KnowledgeEntity>, String> {
     axagent_core::repo::knowledge_graph::list_knowledge_entities(state.harness.db(), &base_id)
         .await
         .map_err(|e| e.to_string())
@@ -400,8 +410,8 @@ pub async fn list_knowledge_entities(
 #[tauri::command]
 pub async fn create_knowledge_entity(
     state: State<'_, AppState>,
-    input: axagent_core::types::CreateKnowledgeEntityInput,
-) -> Result<axagent_core::types::KnowledgeEntity, String> {
+    input: axagent_harness::types::CreateKnowledgeEntityInput,
+) -> Result<axagent_harness::types::KnowledgeEntity, String> {
     axagent_core::repo::knowledge_graph::create_knowledge_entity(state.harness.db(), input)
         .await
         .map_err(|e| e.to_string())
@@ -411,7 +421,7 @@ pub async fn create_knowledge_entity(
 pub async fn list_knowledge_attributes(
     state: State<'_, AppState>,
     entity_id: String,
-) -> Result<Vec<axagent_core::types::KnowledgeAttribute>, String> {
+) -> Result<Vec<axagent_harness::types::KnowledgeAttribute>, String> {
     axagent_core::repo::knowledge_graph::list_knowledge_attributes(state.harness.db(), &entity_id)
         .await
         .map_err(|e| e.to_string())
@@ -420,8 +430,8 @@ pub async fn list_knowledge_attributes(
 #[tauri::command]
 pub async fn create_knowledge_attribute(
     state: State<'_, AppState>,
-    input: axagent_core::types::CreateKnowledgeAttributeInput,
-) -> Result<axagent_core::types::KnowledgeAttribute, String> {
+    input: axagent_harness::types::CreateKnowledgeAttributeInput,
+) -> Result<axagent_harness::types::KnowledgeAttribute, String> {
     axagent_core::repo::knowledge_graph::create_knowledge_attribute(state.harness.db(), input)
         .await
         .map_err(|e| e.to_string())
@@ -431,7 +441,7 @@ pub async fn create_knowledge_attribute(
 pub async fn list_knowledge_relations(
     state: State<'_, AppState>,
     base_id: String,
-) -> Result<Vec<axagent_core::types::KnowledgeRelation>, String> {
+) -> Result<Vec<axagent_harness::types::KnowledgeRelation>, String> {
     axagent_core::repo::knowledge_graph::list_knowledge_relations(state.harness.db(), &base_id)
         .await
         .map_err(|e| e.to_string())
@@ -440,8 +450,8 @@ pub async fn list_knowledge_relations(
 #[tauri::command]
 pub async fn create_knowledge_relation(
     state: State<'_, AppState>,
-    input: axagent_core::types::CreateKnowledgeRelationInput,
-) -> Result<axagent_core::types::KnowledgeRelation, String> {
+    input: axagent_harness::types::CreateKnowledgeRelationInput,
+) -> Result<axagent_harness::types::KnowledgeRelation, String> {
     axagent_core::repo::knowledge_graph::create_knowledge_relation(state.harness.db(), input)
         .await
         .map_err(|e| e.to_string())
@@ -451,7 +461,7 @@ pub async fn create_knowledge_relation(
 pub async fn list_knowledge_flows(
     state: State<'_, AppState>,
     base_id: String,
-) -> Result<Vec<axagent_core::types::KnowledgeFlow>, String> {
+) -> Result<Vec<axagent_harness::types::KnowledgeFlow>, String> {
     axagent_core::repo::knowledge_graph::list_knowledge_flows(state.harness.db(), &base_id)
         .await
         .map_err(|e| e.to_string())
@@ -460,8 +470,8 @@ pub async fn list_knowledge_flows(
 #[tauri::command]
 pub async fn create_knowledge_flow(
     state: State<'_, AppState>,
-    input: axagent_core::types::CreateKnowledgeFlowInput,
-) -> Result<axagent_core::types::KnowledgeFlow, String> {
+    input: axagent_harness::types::CreateKnowledgeFlowInput,
+) -> Result<axagent_harness::types::KnowledgeFlow, String> {
     axagent_core::repo::knowledge_graph::create_knowledge_flow(state.harness.db(), input)
         .await
         .map_err(|e| e.to_string())
@@ -471,7 +481,7 @@ pub async fn create_knowledge_flow(
 pub async fn list_knowledge_interfaces(
     state: State<'_, AppState>,
     base_id: String,
-) -> Result<Vec<axagent_core::types::KnowledgeInterface>, String> {
+) -> Result<Vec<axagent_harness::types::KnowledgeInterface>, String> {
     axagent_core::repo::knowledge_graph::list_knowledge_interfaces(state.harness.db(), &base_id)
         .await
         .map_err(|e| e.to_string())
@@ -480,8 +490,8 @@ pub async fn list_knowledge_interfaces(
 #[tauri::command]
 pub async fn create_knowledge_interface(
     state: State<'_, AppState>,
-    input: axagent_core::types::CreateKnowledgeInterfaceInput,
-) -> Result<axagent_core::types::KnowledgeInterface, String> {
+    input: axagent_harness::types::CreateKnowledgeInterfaceInput,
+) -> Result<axagent_harness::types::KnowledgeInterface, String> {
     axagent_core::repo::knowledge_graph::create_knowledge_interface(state.harness.db(), input)
         .await
         .map_err(|e| e.to_string())
@@ -568,6 +578,7 @@ pub async fn update_knowledge_chunk(
     if let Some(embedding_provider) = kb.embedding_provider {
         let db = state.harness.db().clone();
         let master_key = state.harness.master_key_owned();
+        let provider_registry = state.harness.provider_registry().clone();
         let vector_store = state.vector_store.clone();
         let cid = chunk_id.clone();
         let chunk_content = content.clone();
@@ -577,6 +588,7 @@ pub async fn update_knowledge_chunk(
                 let embed_response = crate::indexing::generate_embeddings(
                     &db,
                     &master_key,
+                    &provider_registry,
                     &embedding_provider,
                     vec![chunk_content],
                     None,
@@ -632,11 +644,13 @@ pub async fn add_knowledge_chunk(
     let vector_store = state.vector_store.clone();
     let doc_id = document_id.clone();
     let chunk_content = content.clone();
+    let provider_registry = state.harness.provider_registry().clone();
 
     let chunk_id_result = tokio::spawn(async move {
         let embed_response = crate::indexing::generate_embeddings(
             &db,
             &master_key,
+            &provider_registry,
             &embedding_provider,
             vec![chunk_content.clone()],
             None,
@@ -711,6 +725,7 @@ pub async fn reindex_knowledge_chunk(
     // Embed the single chunk
     let db = state.harness.db().clone();
     let master_key = state.harness.master_key_owned();
+    let provider_registry = state.harness.provider_registry().clone();
     let vector_store = state.vector_store.clone();
     let cid = chunk_id.clone();
 
@@ -719,6 +734,7 @@ pub async fn reindex_knowledge_chunk(
             let embed_response = crate::indexing::generate_embeddings(
                 &db,
                 &master_key,
+                &provider_registry,
                 &embedding_provider,
                 vec![chunk_content],
                 None,
@@ -792,6 +808,7 @@ pub async fn rebuild_knowledge_document(
     let vector_store = state.vector_store.clone();
     let ep = embedding_provider.clone();
     let doc_id = document_id.clone();
+    let provider_registry = state.harness.provider_registry().clone();
 
     tokio::spawn(async move {
         let texts: Vec<String> = chunks
@@ -800,7 +817,15 @@ pub async fn rebuild_knowledge_document(
             .collect();
         let rowids: Vec<i64> = chunks.iter().map(|(rid, _, _)| *rid).collect();
 
-        let result = crate::indexing::generate_embeddings(&db, &master_key, &ep, texts, None).await;
+        let result = crate::indexing::generate_embeddings(
+            &db,
+            &master_key,
+            &provider_registry,
+            &ep,
+            texts,
+            None,
+        )
+        .await;
 
         match result {
             Ok(embed_response) => {

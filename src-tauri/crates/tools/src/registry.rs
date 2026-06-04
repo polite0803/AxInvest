@@ -455,6 +455,16 @@ impl UnifiedToolRegistry {
         self
     }
 
+    /// 便利方法：从 `&DatabaseConnection` 直接构建 `ToolExecutionRecorder`。
+    ///
+    /// 之前在 `commands/agent.rs`、`commands/plan.rs` 都有
+    /// `with_recorder(ToolExecutionRecorder::new(Arc::new(db.clone())))` 的 2 步链重复。
+    /// 收敛为单步。
+    pub fn with_recorder_from_db(mut self, db: &sea_orm::DatabaseConnection) -> Self {
+        self.recorder = Some(ToolExecutionRecorder::new(Arc::new(db.clone())));
+        self
+    }
+
     pub fn with_context(mut self, conversation_id: String, message_id: Option<String>) -> Self {
         self.conversation_id = Some(conversation_id);
         self.message_id = message_id;
@@ -482,12 +492,12 @@ impl UnifiedToolRegistry {
     }
 
     /// 将所有已注册工具转为 ChatTool 格式（供 LLM 使用）
-    pub fn get_chat_tools(&self) -> Vec<axagent_core::types::ChatTool> {
+    pub fn get_chat_tools(&self) -> Vec<axagent_harness::types::ChatTool> {
         let mut out = Vec::new();
         for info in self.tools.list_all() {
-            out.push(axagent_core::types::ChatTool {
+            out.push(axagent_harness::types::ChatTool {
                 r#type: "function".into(),
-                function: axagent_core::types::ChatToolFunction {
+                function: axagent_harness::types::ChatToolFunction {
                     name: info.name.clone(),
                     description: Some(info.description.clone()),
                     parameters: Some(info.input_schema.clone()),
@@ -501,7 +511,7 @@ impl UnifiedToolRegistry {
     pub fn get_chat_tools_filtered(
         &self,
         mode: &crate::permissions::PermissionMode,
-    ) -> Vec<axagent_core::types::ChatTool> {
+    ) -> Vec<axagent_harness::types::ChatTool> {
         let mut out = Vec::new();
         for info in self.tools.list_all() {
             let allowed = match mode {
@@ -512,9 +522,9 @@ impl UnifiedToolRegistry {
                 crate::permissions::PermissionMode::Prompt => true,
             };
             if allowed {
-                out.push(axagent_core::types::ChatTool {
+                out.push(axagent_harness::types::ChatTool {
                     r#type: "function".into(),
-                    function: axagent_core::types::ChatToolFunction {
+                    function: axagent_harness::types::ChatToolFunction {
                         name: info.name.clone(),
                         description: Some(info.description.clone()),
                         parameters: Some(info.input_schema.clone()),

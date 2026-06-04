@@ -10,13 +10,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axagent_harness::workflow_types::WorkflowNode;
+use axagent_core::workflow_types::WorkflowNode;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use futures::StreamExt;
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
 use tokio::sync::Mutex;
-use tracing;
 
 use crate::work_engine::WorkEngine;
 use crate::work_engine::execution_state::ExecutionState;
@@ -24,8 +23,7 @@ use crate::work_engine::node_executor_trait::{
     NodeError, NodeExecutorTrait, NodeOutput, error_code,
 };
 use crate::work_engine::prompt_template::{
-    CompiledPrompt, ConstraintBlocks, DomainConstraintsFn, INLINE_SCOPE_MARKER, TemplateSegment,
-    compile_prompt, render_prompt,
+    CompiledPrompt, DomainConstraintsFn, TemplateSegment, compile_prompt, render_prompt,
 };
 
 // 缓存类型（pub(crate) 供 WorkEngine 引用）
@@ -39,6 +37,7 @@ pub(crate) type ProviderCache = Option<(
     String,
 )>;
 pub(crate) type ProfileCache = HashMap<String, axagent_core::entity::agent_profiles::Model>;
+
 pub type RagCallback = Arc<
     dyn Fn(
             Vec<String>,
@@ -218,18 +217,6 @@ impl AgentExecutor {
         self.domain_constraints = Some(f);
     }
 
-    /// 通过 self.engine 获取 WorkEngine，调用领域约束回调。
-    /// 用于 4a-pre / 4f 段的 head/tail 锚定注入。
-    /// 回调不存在或返回 None 时，不注入任何约束（行为与之前一致）。
-    fn resolve_domain_constraints(&self, role_name: &str) -> Option<ConstraintBlocks> {
-        self.engine
-            .lock()
-            .expect("agent_executor.engine mutex poisoned")
-            .as_ref()
-            .and_then(|eng| eng.domain_constraints())
-            .and_then(|f| f(role_name))
-    }
-
     /// 构造使用共享缓存的 executor（WorkEngine 内部使用，跨执行复用缓存）。
     pub fn with_shared_caches(
         db: Arc<DatabaseConnection>,
@@ -276,9 +263,6 @@ impl NodeExecutorTrait for AgentExecutor {
                 super::node_type_name(node).to_string(),
             ));
         };
-
-        let node_id = node.base_id().to_string();
-        tracing::info!(%node_id, agent_profile_id = ?an.config.agent_profile_id, "Agent: 开始执行");
 
         // 1. 加载 agent profile（带缓存）
         use axagent_core::entity::agent_profiles;
@@ -334,22 +318,8 @@ impl NodeExecutorTrait for AgentExecutor {
         let role_desc = resolve_role(&an.config, profile.as_ref());
         let mut all_segments: Vec<TemplateSegment> = Vec::new();
 
-        // 解析领域约束回调（如果有注册），用于 4a-pre HEAD 与 4f TAIL 锚定。
-        let constraints: Option<ConstraintBlocks> = profile
-            .as_ref()
-            .and_then(|p| p.agent_role.as_ref())
-            .and_then(|role_name| self.resolve_domain_constraints(role_name));
-
         // 4a. 角色前缀
         all_segments.push(TemplateSegment::Static(format!("你是 {role_desc}。\n")));
-
-        // 4a-pre. 领域约束 HEAD 锚定（primacy 效应）
-        // 由上游 WorkEngine.set_domain_constraints 注册的回调提供
-        if let Some(ref c) = constraints {
-            if let Some(ref head) = c.head {
-                all_segments.push(TemplateSegment::Static(head.clone()));
-            }
-        }
 
         // 4b. AgentRole system_prompt（岗位）+ Expert system_prompt（技能）
         if let Some(ref p) = profile {
@@ -373,9 +343,7 @@ impl NodeExecutorTrait for AgentExecutor {
         }
 
         // 4c. 行内 system_prompt 追加（从 pre-compiled 缓存取或现场编译）
-        // 前置 INLINE_SCOPE_MARKER：明示该段为 soft override，不得违反上文硬约束
         if !an.config.system_prompt.is_empty() {
-            all_segments.push(TemplateSegment::Static(INLINE_SCOPE_MARKER.to_string()));
             if let Some(ref compiled_map) = context.compiled_prompts {
                 if let Some(inline_compiled) = compiled_map.get(&an.base.id) {
                     all_segments.extend(inline_compiled.segments.clone());
@@ -436,12 +404,12 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
-        // 4f. 领域约束 TAIL 锚定（recency 效应）
-        // 由上游 WorkEngine.set_domain_constraints 注册的回调提供
-        if let Some(ref c) = constraints {
-            if let Some(ref tail) = c.tail {
-                all_segments.push(TemplateSegment::Static(tail.clone()));
-            }
+        // 4f. 严格模式约束（当 tool_permissions.strict_mode = true 时注入尾部）
+        if let Some(ref perms) = context.tool_permissions
+            && perms.strict_mode
+        {
+            all_segments.push(TemplateSegment::Static(STRICT_MODE_INSTRUCTIONS.to_string()));
+            tracing::warn!("Agent node {} strict_mode enabled", an.base.id);
         }
 
         let compiled = CompiledPrompt {
@@ -456,37 +424,24 @@ impl NodeExecutorTrait for AgentExecutor {
             )
         })?;
 
-        // 5. 构建 user_prompt：context_sources 控制上游数据注入，
-        //    但 stock_code / stock_name 等核心标识变量始终前置，确保 Agent 不会搞错分析对象
-        let mut user_prompt_parts: Vec<String> = Vec::new();
-
-        let core_id_keys = ["stock_code", "stock_name"];
-        for key in &core_id_keys {
-            if let Some(val) = context.variables.get(*key) {
-                user_prompt_parts.push(format!("{key}: {val}"));
-            }
-        }
-
-        if an.config.context_sources.is_empty() {
-            let rest: Vec<String> = context
+        // 5. 构建 user_prompt：仅包含 context_sources 的变量（更精准，减少噪声）
+        let user_prompt = if an.config.context_sources.is_empty() {
+            // 向后兼容：无 context_sources 时包含所有变量
+            context
                 .variables
                 .iter()
-                .filter(|(k, _)| !k.starts_with("__") && !core_id_keys.contains(&k.as_str()))
+                .filter(|(k, _)| !k.starts_with("__"))
                 .map(|(k, v)| format!("{k}: {v}"))
-                .collect();
-            user_prompt_parts.extend(rest);
+                .collect::<Vec<_>>()
+                .join("\n")
         } else {
-            let rest: Vec<String> = an
-                .config
+            an.config
                 .context_sources
                 .iter()
-                .filter(|s| !core_id_keys.contains(&s.as_str()))
                 .filter_map(|s| context.variables.get(s).map(|v| format!("{s}: {v}")))
-                .collect();
-            user_prompt_parts.extend(rest);
-        }
-
-        let user_prompt = user_prompt_parts.join("\n");
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
 
         let mut messages: Vec<ChatMessage> = vec![
             ChatMessage {
@@ -529,7 +484,7 @@ impl NodeExecutorTrait for AgentExecutor {
         // 构建暴露给 LLM 的工具定义
         // 固定工具（上游 ToolNode 结果已注入 context_sources）不暴露
         // 向后兼容：exposed_tools 为空时暴露全部工具
-        let exposed_list: Vec<&axagent_harness::workflow_types::ToolDef> =
+        let exposed_list: Vec<&axagent_core::workflow_types::ToolDef> =
             if an.config.exposed_tools.is_empty() {
                 an.config.tools.iter().collect()
             } else {
@@ -699,6 +654,53 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
+        // ── strict_mode 输出格式校验 ──
+        if let Some(ref perms) = context.tool_permissions
+            && perms.strict_mode
+        {
+            validate_strict_mode_output(&final_content, &an.config.output_mode)?;
+        }
+
+        // ── 防幻觉锚定检查 ──
+        if let Some(ref hg_config) = an.config.hallucination_guard
+            && hg_config.enabled
+            && !final_content.is_empty()
+        {
+            // 构建源上下文：从 context_sources 变量提取
+            let source_context: String = if an.config.context_sources.is_empty() {
+                context
+                    .variables
+                    .iter()
+                    .filter(|(k, _)| !k.starts_with("__"))
+                    .map(|(_, v)| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                an.config
+                    .context_sources
+                    .iter()
+                    .filter_map(|s| context.variables.get(s).map(|v| v.to_string()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+
+            if !source_context.is_empty() {
+                use axagent_harness::hallucination_guard::check_anchor;
+                let anchor_result =
+                    check_anchor(&final_content, &source_context, hg_config.match_threshold);
+                if !anchor_result.passed {
+                    tracing::warn!(
+                        node_id = %node.base_id(),
+                        node_type = "agent",
+                        score = %anchor_result.score,
+                        threshold = %hg_config.match_threshold,
+                        unverified_count = %anchor_result.unverified_claims.len(),
+                        "防幻觉锚定检查未通过: {}", anchor_result.details
+                    );
+                }
+            }
+        }
+
         Ok(NodeOutput {
             output: serde_json::json!({
                 "role": role_desc, "model": model_for_output,
@@ -718,7 +720,7 @@ impl AgentExecutor {
     #[allow(clippy::too_many_arguments)]
     async fn execute_plan_mode(
         &self,
-        an: &axagent_harness::workflow_types::AgentNode,
+        an: &axagent_core::workflow_types::AgentNode,
         _context: &ExecutionState,
         prov: &axagent_harness::types::ProviderConfig,
         api_key: &str,
@@ -1094,6 +1096,23 @@ async fn execute_tool(
     tool_name: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    // ── 权限校验（基于 ToolPermissions） ──
+    if let Some(ref perms) = context.tool_permissions {
+        // 工具名黑/白名单校验（无需 category，先做名称级检查）
+        if perms.forbidden_tools.iter().any(|t| t == tool_name) {
+            let reason = format!("权限拒绝: 工具 '{tool_name}' 在禁止调用列表中");
+            tracing::warn!("{reason}");
+            return Err(reason);
+        }
+        if let Some(ref allowed) = perms.allowed_tools
+            && !allowed.iter().any(|t| t == tool_name)
+        {
+            let reason = format!("权限拒绝: 工具 '{tool_name}' 不在允许调用列表中");
+            tracing::warn!("{reason}");
+            return Err(reason);
+        }
+    }
+
     let cb = context
         .callbacks
         .as_ref()
@@ -1171,7 +1190,7 @@ impl AgentExecutor {
 
 /// 解析角色描述：从 AgentProfile 获取，无 Profile 时默认 "executor"
 fn resolve_role(
-    _config: &axagent_harness::workflow_types::AgentNodeConfig,
+    _config: &axagent_core::workflow_types::AgentNodeConfig,
     profile: Option<&axagent_core::entity::agent_profiles::Model>,
 ) -> String {
     if let Some(p) = profile
@@ -1232,7 +1251,7 @@ fn parse_rag_source_ids(ids: &[String]) -> (Vec<String>, Vec<String>, Vec<String
 }
 
 fn user_prompt_for_rag(
-    config: &axagent_harness::workflow_types::AgentNodeConfig,
+    config: &axagent_core::workflow_types::AgentNodeConfig,
     variables: &std::collections::HashMap<String, Value>,
 ) -> String {
     if !config.context_sources.is_empty() {
@@ -1250,4 +1269,49 @@ fn user_prompt_for_rag(
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+
+/// 严格模式 system prompt 约束指令 —— 当 ToolPermissions.strict_mode = true 时追加到 prompt 尾部。
+///
+/// 约束 LLM 仅输出结构化 JSON、不反问、不发散、不自由发挥。
+const STRICT_MODE_INSTRUCTIONS: &str = r#"
+
+## 严格模式约束
+
+你当前处于严格执行模式，必须遵守以下规则：
+
+1. **仅输出符合目标 schema 的 JSON**，不添加任何解释、说明或额外文本
+2. **不允许反问用户** — 不要询问确认意见、不要征求许可、不要请求更多信息
+3. **不允许输出与当前步骤无关的内容** — 专注于完成指定任务
+4. **如果无法完成任务**，输出 `{"error": "详细原因"}`，不要自由发挥、猜测或填充缺失信息
+5. **不要做额外假设** — 只基于给定的输入数据执行操作
+"#;
+
+/// strict_mode 下的输出格式校验：
+/// - 当 output_mode 为 Json 时，验证 final_content 是否为合法 JSON
+/// - 若格式不合法，返回错误阻止结果传递给下游
+fn validate_strict_mode_output(
+    final_content: &str,
+    output_mode: &axagent_harness::workflow_types::OutputMode,
+) -> Result<(), NodeError> {
+    use axagent_harness::workflow_types::OutputMode;
+    if matches!(output_mode, OutputMode::Json) {
+        let trimmed = final_content.trim();
+        if trimmed.is_empty() {
+            tracing::warn!("strict_mode: LLM 输出为空，期望 JSON");
+            return Err(NodeError::exec_failed(
+                error_code::VALIDATION_FAILED,
+                "严格模式: LLM 输出为空，期望 JSON 格式",
+            ));
+        }
+        if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
+            let preview = &trimmed[..200.min(trimmed.len())];
+            tracing::warn!("strict_mode: LLM 输出不是合法 JSON: {preview}");
+            return Err(NodeError::exec_failed(
+                error_code::VALIDATION_FAILED,
+                format!("严格模式: LLM 输出不是合法 JSON（前 200 字符: {preview}）"),
+            ));
+        }
+    }
+    Ok(())
 }

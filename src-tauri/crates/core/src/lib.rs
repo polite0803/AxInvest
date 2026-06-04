@@ -93,6 +93,8 @@ pub use axagent_search::vector_store;
 pub use axagent_storage::storage_inventory;
 pub use axagent_storage::storage_migration;
 pub use axagent_storage::storage_paths;
+// workflow_types 由 axagent-harness 定义，core 做 re-export 以保证上游 rt-workflow/agent 的引用路径兼容
+pub use axagent_harness::workflow_types;
 pub use axagent_storage::sync_conflict;
 pub use axagent_storage::webdav;
 #[cfg(not(target_os = "android"))]

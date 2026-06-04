@@ -1409,6 +1409,8 @@ fn extract_config_from_n8n(n8n_node: &serde_json::Value, node_id: &str) -> Agent
         execution_mode: None,
         rag_source_ids: vec![],
         model_role: None,
+        consistency_check: None,
+        hallucination_guard: None,
     }
 }
 
@@ -1440,6 +1442,7 @@ async fn convert_n8n_to_axagent(
 
     let trigger_node = WorkflowNode::Trigger(TriggerNode {
         base: WorkflowNodeBase {
+            compensation: None,
             id: "trigger_imported".to_string(),
             title: "Trigger".to_string(),
             description: Some("Auto-created trigger from n8n import".to_string()),
@@ -1488,6 +1491,7 @@ async fn convert_n8n_to_axagent(
             .unwrap_or(Position { x: 0.0, y: 0.0 });
 
         let base = WorkflowNodeBase {
+            compensation: None,
             id: node_id.clone(),
             title: node_name.clone(),
             description: None,
@@ -1507,6 +1511,7 @@ async fn convert_n8n_to_axagent(
                     judge_by_llm: None,
                     routing_prompt: None,
                     routing_model: None,
+                    confidence_threshold: None,
                 },
             });
             ax_nodes.push(condition_node);
@@ -1562,6 +1567,7 @@ async fn convert_n8n_to_axagent(
         agent_config.context_sources = Vec::new(); // 暂不自动关联上游节点
 
         let base = WorkflowNodeBase {
+            compensation: None,
             id: node_id.clone(),
             title: node_name,
             description: Some(goal),
@@ -1617,6 +1623,7 @@ async fn convert_n8n_to_axagent(
 
     let end_node = WorkflowNode::End(EndNode {
         base: WorkflowNodeBase {
+            compensation: None,
             id: "end_imported".to_string(),
             title: "End".to_string(),
             description: Some("Auto-created end node from n8n import".to_string()),

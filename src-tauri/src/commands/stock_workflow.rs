@@ -219,8 +219,11 @@ pub async fn run_stock_workflow(
                 "analysis_id": analysis_id,
             }));
         },
-        QualityPrecheckResult::Pass | QualityPrecheckResult::Partial(_) => {
-            // Partial 数据仍可继续，质量信息将在上下文中传入
+        QualityPrecheckResult::Pass => {
+            // 数据充分，正常执行
+        },
+        QualityPrecheckResult::Partial(reason) => {
+            tracing::info!("stock_workflow] 数据质量部分缺失，继续分析: {reason}");
         },
     }
 
@@ -257,19 +260,14 @@ pub async fn run_stock_workflow(
         let app = progress_app.clone();
         let wf_id = progress_wf_id.clone();
         Box::pin(async move {
-            let mut payload = serde_json::json!({
+            let payload = serde_json::json!({
                 "workflowId": wf_id,
                 "nodeId": event.node_id,
                 "status": event.status,
                 "totalNodes": event.total_nodes,
                 "completedNodes": event.completed_nodes,
+                "executionId": event.execution_id,
             });
-            if let Some(output) = event.output {
-                payload["output"] = output;
-            }
-            if let Some(error) = event.error {
-                payload["error"] = serde_json::Value::String(error);
-            }
             let _ = app.emit("workflow-step-done", payload);
         })
     });
@@ -282,20 +280,16 @@ pub async fn run_stock_workflow(
     let sc_name = quote.name.clone();
     let sc_name_for_spawn = sc_name.clone();
     tokio::spawn(async move {
-        let mut opts = RunOptions::default()
-            .with_max_concurrent(9)
-            .with_step_timeout(std::time::Duration::from_secs(300))
-            .with_progress_callback(progress_cb)
-            .with_input(json!({"stock_code": &stock_code}));
-        if let Some(s) = input_schema {
-            opts = opts.with_input_schema(s);
-        }
-        if let Some(s) = output_schema {
-            opts = opts.with_output_schema(s);
-        }
-        if dry_run.unwrap_or(false) {
-            opts.dry_run = true;
-        }
+        let mut opts = RunOptions {
+            max_concurrent: 9,
+            step_timeout: std::time::Duration::from_secs(300),
+            progress_callback: Some(progress_cb),
+            input: Some(json!({"stock_code": &stock_code})),
+            input_schema: input_schema.clone(),
+            output_schema: output_schema.clone(),
+            dry_run: dry_run.unwrap_or(false),
+            ..Default::default()
+        };
         let mut merged_vars: Vec<axagent_harness::workflow_types::Variable> = vec![
             axagent_harness::workflow_types::Variable {
                 name: "stock_code".into(),
@@ -319,7 +313,7 @@ pub async fn run_stock_workflow(
                 }
             }
         }
-        opts = opts.with_variables(merged_vars);
+        opts.variables = Some(merged_vars);
 
         match engine.run_workflow(&wf_id, opts).await {
             Ok(result) => {

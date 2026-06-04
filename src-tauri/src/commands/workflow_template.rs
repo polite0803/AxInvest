@@ -3,7 +3,7 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::workflow as workflow_err;
 use axagent_core::entity::workflow_template as entity;
 use axagent_core::repo::workflow_template as db_repo;
-use axagent_core::workflow_types::*;
+use axagent_harness::workflow_types::*;
 use axagent_runtime::work_engine::node_executor_trait::node_type_name;
 use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use serde::Deserialize;
@@ -1416,8 +1416,8 @@ fn extract_config_from_n8n(n8n_node: &serde_json::Value, node_id: &str) -> Agent
 async fn convert_n8n_to_axagent(
     db: &DatabaseConnection,
     json: &serde_json::Value,
-) -> Result<axagent_core::workflow_types::WorkflowTemplateData, String> {
-    use axagent_core::workflow_types::*;
+) -> Result<axagent_harness::workflow_types::WorkflowTemplateData, String> {
+    use axagent_harness::workflow_types::*;
 
     let name = json
         .get("name")
@@ -2283,7 +2283,7 @@ pub async fn update_workflow_template_node(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("模板 {} 不存在", template_id))?;
 
-    let mut nodes: Vec<axagent_core::workflow_types::WorkflowNode> =
+    let mut nodes: Vec<axagent_harness::workflow_types::WorkflowNode> =
         serde_json::from_str(&row.nodes).map_err(|e| format!("解析节点失败: {e}"))?;
 
     let mut found = false;
@@ -2292,11 +2292,11 @@ pub async fn update_workflow_template_node(
             let nid = node.base_id().to_string();
             found = true;
             match node {
-                axagent_core::workflow_types::WorkflowNode::Agent(an) => {
+                axagent_harness::workflow_types::WorkflowNode::Agent(an) => {
                     if let Some(ref tools) = input.tools {
                         an.config.tools = tools
                             .iter()
-                            .map(|tn| axagent_core::workflow_types::ToolDef {
+                            .map(|tn| axagent_harness::workflow_types::ToolDef {
                                 name: tn.clone(),
                                 description: None,
                                 parameters: None,

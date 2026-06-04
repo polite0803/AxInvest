@@ -3828,12 +3828,12 @@ pub async fn workflow_create(
     app_state: State<'_, AppState>,
     request: WorkflowCreateRequest,
 ) -> Result<WorkflowCreateResponse, String> {
-    let nodes: Vec<axagent_core::workflow_types::WorkflowNode> = request
+    let nodes: Vec<axagent_harness::workflow_types::WorkflowNode> = request
         .nodes
         .into_iter()
         .filter_map(|n| serde_json::from_value(n).ok())
         .collect();
-    let edges: Vec<axagent_core::workflow_types::WorkflowEdge> = request
+    let edges: Vec<axagent_harness::workflow_types::WorkflowEdge> = request
         .edges
         .into_iter()
         .filter_map(|e| serde_json::from_value(e).ok())
@@ -3859,7 +3859,7 @@ pub async fn workflow_execute(
     workflow_id: String,
     model_id: Option<String>,
     provider_id: Option<String>,
-    variables: Option<Vec<axagent_core::workflow_types::Variable>>,
+    variables: Option<Vec<axagent_harness::workflow_types::Variable>>,
 ) -> Result<String, String> {
     // 验证工作流存在
     let _ = app_state

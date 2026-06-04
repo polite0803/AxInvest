@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axagent_core::workflow_types::WorkflowNode;
+use axagent_harness::workflow_types::WorkflowNode;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use futures::StreamExt;
 use sea_orm::DatabaseConnection;
@@ -24,7 +24,8 @@ use crate::work_engine::node_executor_trait::{
     NodeError, NodeExecutorTrait, NodeOutput, error_code,
 };
 use crate::work_engine::prompt_template::{
-    CompiledPrompt, DomainConstraintsFn, TemplateSegment, compile_prompt, render_prompt,
+    CompiledPrompt, ConstraintBlocks, DomainConstraintsFn, INLINE_SCOPE_MARKER, TemplateSegment,
+    compile_prompt, render_prompt,
 };
 
 // 缓存类型（pub(crate) 供 WorkEngine 引用）
@@ -38,28 +39,6 @@ pub(crate) type ProviderCache = Option<(
     String,
 )>;
 pub(crate) type ProfileCache = HashMap<String, axagent_core::entity::agent_profiles::Model>;
-
-/// 股票分析共享硬约束（HEAD 锚定）：
-/// 利用 LLM 的 primacy 效应，把"禁止编造/禁止预测"等关键约束放在 system prompt 头部，
-/// 而不是被埋在中间段被 lost-in-the-middle 效应忽略。
-/// 内容经过极度精简：~150 字符，避免挤占 40 req/min 免费模型的 token 配额。
-const STOCK_HARD_CONSTRAINTS: &str = "\
-## 关键约束（最高优先级，必须遵守）
-1. **反幻觉**：所有数字必须能在\"上游节点输出\"找到来源；缺失必须写 `信息缺失` 或 `\"data_gaps\"`，**禁止编造**。
-2. **禁预测大盘点位 / 个股目标价 / 目标涨幅**。仅描述\"在何种条件下偏向哪个方向\"及其所需证据。";
-
-/// 股票分析共享软约束（TAIL 锚定）：
-/// 利用 LLM 的 recency 效应，在 system prompt 末尾复述协作与自检要求。
-/// 同样精简：~100 字符。
-const STOCK_COLLAB_REMINDER: &str = "\
-## 协作与自检（输出前必过）
-- 你的输出会被辩论 / 风险 / 决策节点引用：论点要具体、引用要可查、立场要明确。
-- 输出前自查 3 项：① 数字有来源？② 论点前后一致？③ 是否回避了关键风险？";
-
-/// 行内 system_prompt 的 scope 标注（防"野卡"覆盖关键约束）：
-/// 把节点配置的 system_prompt 显式标记为 soft override，让模型明白它不能违反上文的硬约束。
-const INLINE_SCOPE_MARKER: &str = "## 节点配置补充（soft override，不得违反上文硬约束）\n";
-
 pub type RagCallback = Arc<
     dyn Fn(
             Vec<String>,
@@ -239,6 +218,18 @@ impl AgentExecutor {
         self.domain_constraints = Some(f);
     }
 
+    /// 通过 self.engine 获取 WorkEngine，调用领域约束回调。
+    /// 用于 4a-pre / 4f 段的 head/tail 锚定注入。
+    /// 回调不存在或返回 None 时，不注入任何约束（行为与之前一致）。
+    fn resolve_domain_constraints(&self, role_name: &str) -> Option<ConstraintBlocks> {
+        self.engine
+            .lock()
+            .expect("agent_executor.engine mutex poisoned")
+            .as_ref()
+            .and_then(|eng| eng.domain_constraints())
+            .and_then(|f| f(role_name))
+    }
+
     /// 构造使用共享缓存的 executor（WorkEngine 内部使用，跨执行复用缓存）。
     pub fn with_shared_caches(
         db: Arc<DatabaseConnection>,
@@ -343,19 +334,20 @@ impl NodeExecutorTrait for AgentExecutor {
         let role_desc = resolve_role(&an.config, profile.as_ref());
         let mut all_segments: Vec<TemplateSegment> = Vec::new();
 
+        // 解析领域约束回调（如果有注册），用于 4a-pre HEAD 与 4f TAIL 锚定。
+        let constraints: Option<ConstraintBlocks> = profile
+            .as_ref()
+            .and_then(|p| p.agent_role.as_ref())
+            .and_then(|role_name| self.resolve_domain_constraints(role_name));
+
         // 4a. 角色前缀
         all_segments.push(TemplateSegment::Static(format!("你是 {role_desc}。\n")));
 
-        // 4a-pre. 股票分析硬约束：HEAD 锚定（利用 primacy 效应）
-        // 覆盖所有 5 个 stock-analysis 角色下的 18 个 expert
-        if let Some(ref p) = profile {
-            if let Some(ref role_name) = p.agent_role
-                && matches!(
-                    role_name.as_str(),
-                    "stock-analyst" | "debater" | "risk-evaluator" | "trader" | "decision-maker"
-                )
-            {
-                all_segments.push(TemplateSegment::Static(STOCK_HARD_CONSTRAINTS.to_string()));
+        // 4a-pre. 领域约束 HEAD 锚定（primacy 效应）
+        // 由上游 WorkEngine.set_domain_constraints 注册的回调提供
+        if let Some(ref c) = constraints {
+            if let Some(ref head) = c.head {
+                all_segments.push(TemplateSegment::Static(head.clone()));
             }
         }
 
@@ -381,7 +373,9 @@ impl NodeExecutorTrait for AgentExecutor {
         }
 
         // 4c. 行内 system_prompt 追加（从 pre-compiled 缓存取或现场编译）
+        // 前置 INLINE_SCOPE_MARKER：明示该段为 soft override，不得违反上文硬约束
         if !an.config.system_prompt.is_empty() {
+            all_segments.push(TemplateSegment::Static(INLINE_SCOPE_MARKER.to_string()));
             if let Some(ref compiled_map) = context.compiled_prompts {
                 if let Some(inline_compiled) = compiled_map.get(&an.base.id) {
                     all_segments.extend(inline_compiled.segments.clone());
@@ -442,16 +436,11 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
-        // 4f. 股票分析软约束：TAIL 锚定（利用 recency 效应）
-        // 复述协作与自检要求，避免被 4b 的长 .md 主体"挤掉"
-        if let Some(ref p) = profile {
-            if let Some(ref role_name) = p.agent_role
-                && matches!(
-                    role_name.as_str(),
-                    "stock-analyst" | "debater" | "risk-evaluator" | "trader" | "decision-maker"
-                )
-            {
-                all_segments.push(TemplateSegment::Static(STOCK_COLLAB_REMINDER.to_string()));
+        // 4f. 领域约束 TAIL 锚定（recency 效应）
+        // 由上游 WorkEngine.set_domain_constraints 注册的回调提供
+        if let Some(ref c) = constraints {
+            if let Some(ref tail) = c.tail {
+                all_segments.push(TemplateSegment::Static(tail.clone()));
             }
         }
 
@@ -540,7 +529,7 @@ impl NodeExecutorTrait for AgentExecutor {
         // 构建暴露给 LLM 的工具定义
         // 固定工具（上游 ToolNode 结果已注入 context_sources）不暴露
         // 向后兼容：exposed_tools 为空时暴露全部工具
-        let exposed_list: Vec<&axagent_core::workflow_types::ToolDef> =
+        let exposed_list: Vec<&axagent_harness::workflow_types::ToolDef> =
             if an.config.exposed_tools.is_empty() {
                 an.config.tools.iter().collect()
             } else {
@@ -729,7 +718,7 @@ impl AgentExecutor {
     #[allow(clippy::too_many_arguments)]
     async fn execute_plan_mode(
         &self,
-        an: &axagent_core::workflow_types::AgentNode,
+        an: &axagent_harness::workflow_types::AgentNode,
         _context: &ExecutionState,
         prov: &axagent_harness::types::ProviderConfig,
         api_key: &str,
@@ -1182,7 +1171,7 @@ impl AgentExecutor {
 
 /// 解析角色描述：从 AgentProfile 获取，无 Profile 时默认 "executor"
 fn resolve_role(
-    _config: &axagent_core::workflow_types::AgentNodeConfig,
+    _config: &axagent_harness::workflow_types::AgentNodeConfig,
     profile: Option<&axagent_core::entity::agent_profiles::Model>,
 ) -> String {
     if let Some(p) = profile
@@ -1243,7 +1232,7 @@ fn parse_rag_source_ids(ids: &[String]) -> (Vec<String>, Vec<String>, Vec<String
 }
 
 fn user_prompt_for_rag(
-    config: &axagent_core::workflow_types::AgentNodeConfig,
+    config: &axagent_harness::workflow_types::AgentNodeConfig,
     variables: &std::collections::HashMap<String, Value>,
 ) -> String {
     if !config.context_sources.is_empty() {

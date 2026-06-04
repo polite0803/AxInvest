@@ -1,7 +1,7 @@
 //! 触发器执行器 —— 解析触发配置（manual/schedule/webhook/event）并初始化工作流入口变量。
 
 use async_trait::async_trait;
-use axagent_core::workflow_types::{TriggerType, WorkflowNode};
+use axagent_harness::workflow_types::{TriggerType, WorkflowNode};
 
 use crate::work_engine::execution_state::ExecutionState;
 use crate::work_engine::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};

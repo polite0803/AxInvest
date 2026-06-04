@@ -5,7 +5,7 @@
 
 use crate::AppState;
 use axagent_core::entity::stock_analyses;
-use axagent_core::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
+use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
@@ -13,30 +13,46 @@ use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
-/// 仅保留需要持久化的黑板键，剔除 K线/财务/新闻等大体积数据
-/// 当前新工作流路径不写入 BlackboardSnapshot，保留为防御性工具函数
-#[allow(dead_code)]
-fn filter_blackboard_snapshot(snapshot: &serde_json::Value) -> serde_json::Value {
-    const PERSIST_PREFIXES: &[&str] = &[
-        "report.",
-        "debate.",
-        "risk.",
-        "decision.",
-        "value.",
-        "rule_check.",
-        "objective_score",
-        "data_quality_summary",
-    ];
-    if let Some(obj) = snapshot.as_object() {
-        let mut filtered = serde_json::Map::new();
-        for (k, v) in obj {
-            if PERSIST_PREFIXES.iter().any(|p| k == p || k.starts_with(p)) {
-                filtered.insert(k.clone(), v.clone());
-            }
-        }
-        return serde_json::Value::Object(filtered);
+/// 数据质量预检结果
+enum QualityPrecheckResult {
+    /// 数据充分，可以执行
+    Pass,
+    /// 部分数据缺失但可继续
+    Partial(String),
+    /// 数据不足，跳过
+    Insufficient(String),
+}
+
+/// 在启动 DAG 前执行快速数据质量检查。
+/// 仅查 quote + financials（最关键的两种数据），2 次 API 调用 vs 15~20 次 LLM 调用。
+async fn data_quality_precheck(
+    client: &axagent_astock_data::AStockClient,
+    stock_code: &str,
+    quote: &axagent_astock_data::StockQuote,
+) -> QualityPrecheckResult {
+    // 1. 检查行情数据
+    if quote.price <= 0.0 && quote.name.is_empty() {
+        return QualityPrecheckResult::Insufficient("行情数据无效（价格为空、股票代码不存在或未上市）".into());
     }
-    snapshot.clone()
+
+    // 2. 检查财务数据
+    let fin_result = client.get_financials(stock_code).await;
+    match fin_result {
+        Ok(financials) => {
+            let has_revenue = financials.iter().any(|f| f.revenue.unwrap_or(0.0) > 0.0);
+            let has_profit = financials.iter().any(|f| f.net_profit.unwrap_or(0.0) > 0.0);
+            if !has_revenue && !has_profit {
+                // 有行情但无财务数据（可能是新股或数据源限制）
+                QualityPrecheckResult::Partial("有行情数据，但财务数据不完整（营收/利润缺失），分析置信度受限".into())
+            } else {
+                QualityPrecheckResult::Pass
+            }
+        },
+        Err(e) => {
+            // 财务数据获取失败但行情可读，可能是少量缺失，允许继续
+            QualityPrecheckResult::Partial(format!("财务数据获取失败: {e}，分析将基于行情数据") )
+        },
+    }
 }
 
 struct LoadedTemplate {
@@ -168,6 +184,46 @@ pub async fn run_stock_workflow(
     .await
     .map_err(|e| format!("DB 写入失败: {e}"))?;
 
+    // ── 数据质量预检：在发起 DAG 执行前检查关键数据是否完整 ──
+    let stock_code_for_check = stock_code.clone();
+    let quality_check = data_quality_precheck(
+        &state.astock_client,
+        &stock_code_for_check,
+        &quote,
+    )
+    .await;
+    match quality_check {
+        QualityPrecheckResult::Insufficient(reason) => {
+            tracing::warn!(
+                "[stock_workflow] 数据质量不足，跳过 DAG 执行: {reason} ({}",
+                stock_code_for_check
+            );
+            // 更新 stock_analyses 状态
+            let _ = stock_analyses::Entity::update(
+                stock_analyses::ActiveModel {
+                    id: Set(analysis_id.clone()),
+                    status: Set("failed".into()),
+                    decision_json: Set(Some(json!({
+                        "action": "skip",
+                        "reasoning": format!("数据不足，跳过分析: {reason}"),
+                    }).to_string())),
+                    updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                    ..Default::default()
+                },
+            )
+            .exec(state.harness.db())
+            .await;
+            return Ok(json!({
+                "status": "skipped",
+                "reason": reason,
+                "analysis_id": analysis_id,
+            }));
+        },
+        QualityPrecheckResult::Pass | QualityPrecheckResult::Partial(_) => {
+            // Partial 数据仍可继续，质量信息将在上下文中传入
+        },
+    }
+
     let loaded = load_and_inject_template(state.harness.db(), &stock_code).await?;
 
     if let Some(ref vars) = loaded.variables {
@@ -240,15 +296,15 @@ pub async fn run_stock_workflow(
         if dry_run.unwrap_or(false) {
             opts.dry_run = true;
         }
-        let mut merged_vars: Vec<axagent_core::workflow_types::Variable> = vec![
-            axagent_core::workflow_types::Variable {
+        let mut merged_vars: Vec<axagent_harness::workflow_types::Variable> = vec![
+            axagent_harness::workflow_types::Variable {
                 name: "stock_code".into(),
                 var_type: "string".into(),
                 value: serde_json::Value::String(stock_code.clone()),
                 description: Some("当前分析的股票代码".into()),
                 is_secret: false,
             },
-            axagent_core::workflow_types::Variable {
+            axagent_harness::workflow_types::Variable {
                 name: "stock_name".into(),
                 var_type: "string".into(),
                 value: serde_json::Value::String(sc_name_for_spawn.clone()),

@@ -3,7 +3,7 @@
 //! 当前返回代码摘要（语言 + 行数 + 输出变量），后续可接入沙箱执行。
 
 use async_trait::async_trait;
-use axagent_core::workflow_types::WorkflowNode;
+use axagent_harness::workflow_types::WorkflowNode;
 
 use crate::work_engine::execution_state::ExecutionState;
 use crate::work_engine::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput};

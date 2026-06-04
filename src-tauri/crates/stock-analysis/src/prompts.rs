@@ -1,12 +1,10 @@
-//! 从 Markdown 文件加载专家系统提示词。
+//! 专家 ID 注册表 + 股票分析约束文本。
 //!
 //! 各专家提示词定义在 `agency_experts/stock-analysis/*.md`，
 //! 格式为 YAML frontmatter + Markdown body。
+//! 实际加载由 `stock_analysis_setup.rs` 的 `include_str!` 编译期嵌入完成。
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-/// 17 个专家 ID（对应 17 个 .md 文件）
+/// 20 个专家 ID（对应 20 个 .md 文件）
 pub const EXPERT_IDS: &[&str] = &[
     "market-analyst",
     "sentiment-analyst",
@@ -27,83 +25,28 @@ pub const EXPERT_IDS: &[&str] = &[
     "research-manager",
     "trader",
     "portfolio-manager",
+    "value-investor",
 ];
 
-/// 从指定目录加载所有专家系统提示词。
-///
-/// `base_dir` 应为包含 `*.md` 文件的目录路径。
-/// 返回从 expert_id 到 body（去掉 YAML frontmatter）的映射。
-pub fn load_expert_prompts(base_dir: &str) -> HashMap<String, String> {
-    let mut prompts = HashMap::new();
+/// 股票分析硬约束文本（HEAD 锚定——利用 LLM primacy 效应）。
+/// 置于 system prompt 头部，确保"禁编造/禁预测"被模型优先关注。
+pub const STOCK_HARD_CONSTRAINTS: &str = "\
+## 关键约束（最高优先级，必须遵守）
+1. **反幻觉**：所有数字必须能在\"上游节点输出\"找到来源；缺失必须写 `信息缺失` 或 `\"data_gaps\"`，**禁止编造**。
+2. **禁预测大盘点位 / 个股目标价 / 目标涨幅**。仅描述\"在何种条件下偏向哪个方向\"及其所需证据。";
 
-    for id in EXPERT_IDS {
-        let path = PathBuf::from(base_dir).join(format!("{id}.md"));
-        match std::fs::read_to_string(&path) {
-            Ok(content) => {
-                let body = extract_body(&content);
-                prompts.insert(id.to_string(), body);
-                tracing::trace!("已加载专家提示词: {}", id);
-            },
-            Err(e) => {
-                tracing::warn!("未能加载专家提示词文件 {}: {}", path.display(), e);
-            },
-        }
-    }
+/// 股票分析软约束文本（TAIL 锚定——利用 LLM recency 效应）。
+/// 置于 system prompt 尾部，确保按协作/自检标准输出。
+pub const STOCK_COLLAB_REMINDER: &str = "\
+## 协作与自检（输出前必过）
+- 你的输出会被辩论 / 风险 / 决策节点引用：论点要具体、引用要可查、立场要明确。
+- 输出前自查 3 项：① 数字有来源？② 论点前后一致？③ 是否回避了关键风险？";
 
-    tracing::info!("从 {} 加载了 {} 个专家提示词", base_dir, prompts.len());
-    prompts
-}
-
-/// 从 Markdown 中提取 body（跳过 YAML frontmatter）。
-///
-/// Frontmatter 由开头的 `---` 行和结尾的 `---` 行界定。
-/// 如果没有 frontmatter，则返回整个内容。
-fn extract_body(content: &str) -> String {
-    if let Some(rest) = content.strip_prefix("---") {
-        if let Some(end) = rest.find("\n---") {
-            return rest[end + 4..].trim().to_string();
-        }
-    }
-    content.to_string()
-}
-
-/// 从已加载的提示词中获取指定专家的分析上下文。
-///
-/// 如果未找到匹配的 expert_id，返回 `None`，调用方应提供回退。
-pub fn get_analyst_context(expert_id: &str, prompts: &HashMap<String, String>) -> Option<String> {
-    prompts.get(expert_id).cloned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_body_with_frontmatter() {
-        let input = "---\nname: test\ndescription: desc\n---\n\n# Body content\n\nHello world";
-        let result = extract_body(input);
-        assert_eq!(result, "# Body content\n\nHello world");
-    }
-
-    #[test]
-    fn test_extract_body_without_frontmatter() {
-        let input = "# Just a heading\nSome content";
-        let result = extract_body(input);
-        assert_eq!(result, "# Just a heading\nSome content");
-    }
-
-    #[test]
-    fn test_get_analyst_context_found() {
-        let mut prompts = HashMap::new();
-        prompts.insert("test-expert".to_string(), "你是测试专家".to_string());
-        let ctx = get_analyst_context("test-expert", &prompts);
-        assert_eq!(ctx, Some("你是测试专家".to_string()));
-    }
-
-    #[test]
-    fn test_get_analyst_context_not_found() {
-        let prompts = HashMap::new();
-        let ctx = get_analyst_context("unknown", &prompts);
-        assert_eq!(ctx, None);
-    }
+/// 判断角色名是否为 stock-analysis 工作流下注入了 A 股约束的 5 个角色。
+/// 与 `agent_executor.rs` 4a-pre 的 matches! 完全一致。
+pub fn is_stock_role(role: &str) -> bool {
+    matches!(
+        role,
+        "stock-analyst" | "debater" | "risk-evaluator" | "trader" | "decision-maker"
+    )
 }

@@ -72,6 +72,10 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "portfolio-manager",
         include_str!("../../agency_experts/stock-analysis/portfolio-manager.md"),
     ),
+    (
+        "value-investor",
+        include_str!("../../agency_experts/stock-analysis/custom/value-investor.md"),
+    ),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -94,6 +98,7 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("research-manager", "decision-maker"),
     ("trader", "trader"),
     ("portfolio-manager", "decision-maker"),
+    ("value-investor", "stock-analyst"),
 ];
 
 struct StockRoleDef {
@@ -261,6 +266,17 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "search_stock",
         ],
     ),
+    (
+        "value-investor",
+        &[
+            "get_stock_financials",
+            "compute_valuation",
+            "get_consensus_eps",
+            "get_institutional_visits",
+            "get_stock_peers",
+            "search_stock",
+        ],
+    ),
 ];
 
 pub async fn ensure_stock_analysis_experts_seeded(
@@ -281,7 +297,7 @@ async fn seed_stock_analysis_workflow_template(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
-    use axagent_core::workflow_types::{
+    use axagent_harness::workflow_types::{
         AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, DebateNode,
         DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode,
         LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
@@ -293,7 +309,10 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 5;
+    const TEMPLATE_VERSION: i32 = 6;
+
+    // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
+    let mut old_variables = String::new();
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -311,6 +330,7 @@ async fn seed_stock_analysis_workflow_template(
             "[stock_analysis_setup] 更新股票分析工作流模板 v{} → v{TEMPLATE_VERSION}",
             existing.version
         );
+        old_variables = existing.variables.clone().unwrap_or_default();
         workflow_template::Entity::delete_by_id(TEMPLATE_ID)
             .exec(db)
             .await
@@ -1156,6 +1176,38 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-bull-r{round_num}-bear-r{round_num}"), &bull_id, &bear_id));
     }
 
+    // ── value-investor（巴菲特框架）：在辩论之后、与风险评估并行运行 ──
+    {
+        let vi_id = "value-investor";
+        let vi_title = "以巴菲特-芒格价值投资理念评估该标的，分析护城河、财务健康度、管理层、安全边际，输出结构化估值框架";
+        let vi_y = 1540.0;
+        let mut vi = agent(vi_id, vi_title, "value-investor", None, 20.0, vi_y);
+        if let WorkflowNode::Agent(ref mut a) = vi {
+            a.config.context_sources = vec![
+                "a-fundamentals".into(),
+                "a-research".into(),
+                "a-sector".into(),
+                "debate-bull-bear".into(),
+            ];
+            a.config.model_role = Some("stock-analyst".into());
+            a.config.max_tool_rounds = Some(2);
+            let tool_names = PROFILE_TOOLS
+                .iter()
+                .find(|(k, _)| **k == "value-investor")
+                .map(|(_, v)| *v)
+                .unwrap_or(&[]);
+            a.config.tools = tool_names
+                .iter()
+                .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                .collect();
+            a.config.exposed_tools = tool_names.iter().map(|&tn| tn.to_string()).collect();
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+        }
+        nodes.push(vi);
+        edges.push(edge("e-debate-value-investor", "debate-bull-bear", vi_id));
+    }
+
     // 风险评估 — 使用 ParallelNode 容器包裹 3 个并行 Agent
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
@@ -1366,6 +1418,7 @@ async fn seed_stock_analysis_workflow_template(
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
         a.config.context_sources = vec![
+            "value-investor".into(),
             "t-scoring".into(),
             "t-valuation".into(),
             "t-risk".into(),
@@ -1402,6 +1455,7 @@ async fn seed_stock_analysis_workflow_template(
             .collect();
     }
     nodes.push(rm);
+    edges.push(edge("e-value-investor-research-mgr", "value-investor", "research-mgr"));
     edges.push(edge("e-v-validate-research-mgr", "v-validate", "research-mgr"));
 
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
@@ -1998,8 +2052,16 @@ async fn seed_stock_analysis_workflow_template(
     let variables_val =
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;
 
+    // ── 合并旧版本的变量值（保留用户自定义的评分权重/阈值等）──
+    let variables_val = if !old_variables.is_empty() {
+        merge_variable_values(&variables_val, &old_variables)
+            .unwrap_or_else(|_| variables_val.clone())
+    } else {
+        variables_val
+    };
+
     // ── Phase 3/4: Rhai 综合评分工具 + ErrorConfig ──
-    use axagent_core::workflow_types::RhaiToolDef;
+    use axagent_harness::workflow_types::RhaiToolDef;
     let stock_score_rhai = r##"
 // 综合评分脚本：技术面(30%) + 基本面(25%) + 情绪面(20%) + 资金面(15%) + 政策面(10%)
 let w_tech = ctx.variables.weight_technical ?? 30.0;
@@ -2064,7 +2126,7 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         id: Set(TEMPLATE_ID.to_string()),
         name: Set("A股多维度分析".to_string()),
         description: Set(Some(
-            "9 维度分析师 → LLM 智能辩论 → 3 风险维度 → Rhai 评分 → 交易方案 → 投资决策"
+            "9 维度分析师 → LLM 智能辩论 → 价值投资（巴菲特框架）→ 3 风险维度 → Rhai 评分 → 交易方案 → 投资决策"
                 .to_string(),
         )),
         icon: Set("chart-bar".into()),
@@ -2279,6 +2341,7 @@ fn expert_id_to_display(id: &str) -> String {
         "research-manager" => "研究经理".to_string(),
         "trader" => "交易员".to_string(),
         "portfolio-manager" => "投资组合经理".to_string(),
+        "value-investor" => "价值投资者（巴菲特框架）".to_string(),
         o => o.to_string(),
     }
 }
@@ -2292,6 +2355,44 @@ fn role_id_to_display(id: &str) -> String {
         "decision-maker" => "决策者".to_string(),
         o => o.to_string(),
     }
+}
+
+/// 合并新模板变量与旧模板变量的值。
+/// 对于同名的变量，保留旧变量的 value（用户的修改），字段定义以新模板为准。
+fn merge_variable_values(
+    new_variables_json: &str,
+    old_variables_json: &str,
+) -> Result<String, String> {
+    let new_vars: Vec<serde_json::Value> = serde_json::from_str(new_variables_json)
+        .map_err(|e| format!("解析新变量失败: {e}"))?;
+    let old_vars: Vec<serde_json::Value> = serde_json::from_str(old_variables_json)
+        .map_err(|e| format!("解析旧变量失败: {e}"))?;
+
+    // 构建旧变量名 → value 的映射
+    let old_values: std::collections::HashMap<String, serde_json::Value> = old_vars
+        .into_iter()
+        .filter_map(|v| {
+            Some((
+                v.get("name")?.as_str()?.to_string(),
+                v.get("value")?.clone(),
+            ))
+        })
+        .collect();
+
+    // 合并：新变量定义 + 旧变量值（如有）
+    let merged: Vec<serde_json::Value> = new_vars
+        .into_iter()
+        .map(|mut v| {
+            if let Some(name) = v.get("name").and_then(|n| n.as_str()) {
+                if let Some(old_val) = old_values.get(name) {
+                    v["value"] = old_val.clone();
+                }
+            }
+            v
+        })
+        .collect();
+
+    serde_json::to_string(&merged).map_err(|e| format!("序列化合变量失败: {e}"))
 }
 
 // seed_debate_subworkflow: 辩论已通过 DebateNode 容器直接嵌入主模板，旧独立模板已移除

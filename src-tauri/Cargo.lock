@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "axagent"
-version = "2.5.1"
+version = "2.6.0"
 dependencies = [
  "android_logger",
  "async-trait",
@@ -1143,6 +1143,7 @@ dependencies = [
  "enigo",
  "image",
  "keyring",
+ "libc",
  "regex",
  "reqwest 0.13.4",
  "scraper",

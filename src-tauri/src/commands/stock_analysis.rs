@@ -2,7 +2,8 @@ use crate::AppState;
 use axagent_core::entity::{
     portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
-use axagent_core::types::ProviderProxyConfig;
+use axagent_harness::types::ProviderProxyConfig;
+use axagent_harness::types::ProviderType;
 use axagent_providers::{ProviderAdapter, ProviderRequestContext, resolve_base_url_for_type};
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
@@ -326,25 +327,25 @@ async fn build_cancel_aware_runner(
         store_response: None,
     };
     let adapter: Arc<dyn ProviderAdapter> = match prov.provider_type {
-        axagent_core::types::ProviderType::OpenAI => {
+        ProviderType::OpenAI => {
             Arc::new(axagent_providers::openai::OpenAIAdapter::new())
         },
-        axagent_core::types::ProviderType::OpenAIResponses => {
+        ProviderType::OpenAIResponses => {
             Arc::new(axagent_providers::openai_responses::OpenAIResponsesAdapter::new())
         },
-        axagent_core::types::ProviderType::Anthropic => {
+        ProviderType::Anthropic => {
             Arc::new(axagent_providers::anthropic::AnthropicAdapter::new())
         },
-        axagent_core::types::ProviderType::Gemini => {
+        ProviderType::Gemini => {
             Arc::new(axagent_providers::gemini::GeminiAdapter::new())
         },
-        axagent_core::types::ProviderType::OpenClaw => {
+        ProviderType::OpenClaw => {
             Arc::new(axagent_providers::openclaw::OpenClawAdapter::new())
         },
-        axagent_core::types::ProviderType::Hermes => {
+        ProviderType::Hermes => {
             Arc::new(axagent_providers::hermes::HermesAdapter::new())
         },
-        axagent_core::types::ProviderType::Ollama => {
+        ProviderType::Ollama => {
             Arc::new(axagent_providers::ollama::OllamaAdapter::new())
         },
     };

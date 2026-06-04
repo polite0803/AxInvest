@@ -1,12 +1,71 @@
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::workflow as workflow_err;
+use axagent_core::entity::workflow_template as entity;
 use axagent_core::repo::workflow_template as db_repo;
 use axagent_core::workflow_types::*;
 use axagent_runtime::work_engine::node_executor_trait::node_type_name;
 use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use serde::Deserialize;
 use tauri::State;
+
+/// 将 DB Model 转为响应 DTO。
+fn model_to_response(model: entity::Model) -> WorkflowTemplateResponse {
+    let tags: Vec<String> = model
+        .tags
+        .as_ref()
+        .and_then(|t| serde_json::from_str(t).ok())
+        .unwrap_or_default();
+
+    let trigger_config: Option<TriggerConfig> = model
+        .trigger_config
+        .as_ref()
+        .and_then(|t| serde_json::from_str(t).ok());
+
+    let nodes: Vec<WorkflowNode> =
+        serde_json::from_str(&model.nodes).unwrap_or_default();
+    let edges: Vec<WorkflowEdge> =
+        serde_json::from_str(&model.edges).unwrap_or_default();
+    let input_schema: Option<JsonSchema> = model
+        .input_schema
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let output_schema: Option<JsonSchema> = model
+        .output_schema
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let variables_vec: Vec<Variable> = model
+        .variables
+        .as_ref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+    let error_config: Option<ErrorConfig> = model
+        .error_config
+        .as_ref()
+        .and_then(|e| serde_json::from_str(e).ok());
+
+    WorkflowTemplateResponse {
+        id: model.id,
+        name: model.name,
+        description: model.description,
+        icon: model.icon,
+        tags,
+        version: model.version,
+        is_preset: model.is_preset,
+        is_editable: model.is_editable,
+        is_public: model.is_public,
+        trigger_config,
+        nodes,
+        edges,
+        input_schema,
+        output_schema,
+        variables: variables_vec,
+        error_config,
+        tool_defs: None,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+    }
+}
 
 fn model_to_active_model(
     template: &WorkflowTemplateData,
@@ -65,7 +124,7 @@ pub async fn list_workflow_templates(
 
     Ok(templates
         .into_iter()
-        .map(WorkflowTemplateResponse::from)
+        .map(model_to_response)
         .collect())
 }
 
@@ -79,7 +138,7 @@ pub async fn get_workflow_template(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(template.map(WorkflowTemplateResponse::from))
+    Ok(template.map(model_to_response))
 }
 
 #[tauri::command]
@@ -201,7 +260,7 @@ pub async fn duplicate_workflow_template(
     let template = template.ok_or_else(|| {
         ErrorResponse::err_with_detail(workflow_err::NOT_FOUND, "Template not found")
     })?;
-    let response = WorkflowTemplateResponse::from(template);
+    let response = model_to_response(template);
 
     let now = chrono::Utc::now().timestamp_millis();
     let new_template = WorkflowTemplateData {
@@ -306,7 +365,7 @@ pub async fn get_template_by_version(
     let template = db_repo::get_template_by_version(db, &id, version)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(template.map(WorkflowTemplateResponse::from))
+    Ok(template.map(model_to_response))
 }
 
 #[derive(Debug, Deserialize)]
@@ -704,7 +763,7 @@ pub async fn export_workflow_template(
     let template = template.ok_or_else(|| {
         ErrorResponse::err_with_detail(workflow_err::NOT_FOUND, "Template not found")
     })?;
-    let response = WorkflowTemplateResponse::from(template);
+    let response = model_to_response(template);
 
     serde_json::to_string_pretty(&response).map_err(|e| e.to_string())
 }

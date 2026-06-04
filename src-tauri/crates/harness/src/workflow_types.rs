@@ -593,7 +593,7 @@ pub struct SwitchCase {
 }
 
 /// 工具列表反序列化，支持向后兼容旧格式 `["name1", "name2"]`
-fn deserialize_tool_defs<'de, D: serde::Deserializer<'de>>(
+pub fn deserialize_tool_defs<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Vec<ToolDef>, D::Error> {
     use serde::de;

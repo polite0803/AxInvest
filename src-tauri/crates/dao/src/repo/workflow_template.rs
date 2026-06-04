@@ -3,7 +3,7 @@ use sea_query::OnConflict;
 
 use axagent_entities::workflow_template;
 use axagent_entities::workflow_template_version;
-use axagent_harness::core_error::Result;
+use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::workflow_types::{
     ErrorConfig, JsonSchema, RhaiToolDef, TriggerConfig, Variable, WorkflowEdge, WorkflowNode,
 };
@@ -123,7 +123,7 @@ pub async fn update_workflow_template(
             }
         }
         if visited != nodes.len() {
-            return Err(crate::error::AxAgentError::Validation(
+            return Err(AxAgentError::Validation(
                 "工作流包含循环依赖，请检查节点的连接关系后重试".into(),
             ));
         }

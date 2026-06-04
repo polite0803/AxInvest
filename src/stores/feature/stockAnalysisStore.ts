@@ -119,6 +119,7 @@ interface StockAnalysisState {
   error: string | null;
   errorCode: string | null;
   failedNodes: string[];
+  failedNodeErrors: Record<string, string>;
 
   history: AnalysisSummary[];
 
@@ -187,6 +188,7 @@ const initialState = {
   error: null,
   errorCode: null,
   failedNodes: [],
+  failedNodeErrors: {},
   history: [],
   currentStage: 0,
   progressMessage: "",
@@ -279,6 +281,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       error: null,
       errorCode: null,
       failedNodes: [],
+      failedNodeErrors: {},
       currentStage: 0,
       workflowId: null,
       progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
@@ -465,8 +468,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       totalNodes: number;
       completedNodes: number;
       output?: unknown;
+      error?: string;
     }>("workflow-step-done", (event) => {
-      const { nodeId, status, totalNodes, completedNodes, output } = event.payload;
+      const { nodeId, status, totalNodes, completedNodes, output, error } = event.payload;
       const stage = inferStage(nodeId);
       if (stage >= 0) { set({ currentStage: stage }); }
       const pct = totalNodes > 0
@@ -482,6 +486,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         failedNodes: status === "failed"
           ? [...get().failedNodes, nodeId]
           : get().failedNodes,
+        failedNodeErrors: status === "failed" && error
+          ? { ...get().failedNodeErrors, [nodeId]: error }
+          : get().failedNodeErrors,
       });
 
       if (status === "completed" && output != null) {

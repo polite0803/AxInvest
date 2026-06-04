@@ -1,13 +1,6 @@
 {
-<<<<<<< HEAD
   "pid": 8708,
   "version": "0.9.7",
   "socketPath": "\\\\.\\pipe\\codegraph-ec854e10f450e823",
   "startedAt": 1780496094182
-=======
-  "pid": 76760,
-  "version": "0.9.7",
-  "socketPath": "\\\\.\\pipe\\codegraph-59205ab4185b9868",
-  "startedAt": 1780555583239
->>>>>>> upstream/master
 }

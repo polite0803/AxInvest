@@ -10,12 +10,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use axagent_core::workflow_types::WorkflowNode;
+use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use futures::StreamExt;
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tracing;
 
 use crate::work_engine::WorkEngine;
 use crate::work_engine::execution_state::ExecutionState;
@@ -37,6 +38,27 @@ pub(crate) type ProviderCache = Option<(
     String,
 )>;
 pub(crate) type ProfileCache = HashMap<String, axagent_core::entity::agent_profiles::Model>;
+
+/// 股票分析共享硬约束（HEAD 锚定）：
+/// 利用 LLM 的 primacy 效应，把"禁止编造/禁止预测"等关键约束放在 system prompt 头部，
+/// 而不是被埋在中间段被 lost-in-the-middle 效应忽略。
+/// 内容经过极度精简：~150 字符，避免挤占 40 req/min 免费模型的 token 配额。
+const STOCK_HARD_CONSTRAINTS: &str = "\
+## 关键约束（最高优先级，必须遵守）
+1. **反幻觉**：所有数字必须能在\"上游节点输出\"找到来源；缺失必须写 `信息缺失` 或 `\"data_gaps\"`，**禁止编造**。
+2. **禁预测大盘点位 / 个股目标价 / 目标涨幅**。仅描述\"在何种条件下偏向哪个方向\"及其所需证据。";
+
+/// 股票分析共享软约束（TAIL 锚定）：
+/// 利用 LLM 的 recency 效应，在 system prompt 末尾复述协作与自检要求。
+/// 同样精简：~100 字符。
+const STOCK_COLLAB_REMINDER: &str = "\
+## 协作与自检（输出前必过）
+- 你的输出会被辩论 / 风险 / 决策节点引用：论点要具体、引用要可查、立场要明确。
+- 输出前自查 3 项：① 数字有来源？② 论点前后一致？③ 是否回避了关键风险？";
+
+/// 行内 system_prompt 的 scope 标注（防"野卡"覆盖关键约束）：
+/// 把节点配置的 system_prompt 显式标记为 soft override，让模型明白它不能违反上文的硬约束。
+const INLINE_SCOPE_MARKER: &str = "## 节点配置补充（soft override，不得违反上文硬约束）\n";
 
 pub type RagCallback = Arc<
     dyn Fn(
@@ -300,6 +322,19 @@ impl NodeExecutorTrait for AgentExecutor {
         // 4a. 角色前缀
         all_segments.push(TemplateSegment::Static(format!("你是 {role_desc}。\n")));
 
+        // 4a-pre. 股票分析硬约束：HEAD 锚定（利用 primacy 效应）
+        // 覆盖所有 5 个 stock-analysis 角色下的 18 个 expert
+        if let Some(ref p) = profile {
+            if let Some(ref role_name) = p.agent_role
+                && matches!(
+                    role_name.as_str(),
+                    "stock-analyst" | "debater" | "risk-evaluator" | "trader" | "decision-maker"
+                )
+            {
+                all_segments.push(TemplateSegment::Static(STOCK_HARD_CONSTRAINTS.to_string()));
+            }
+        }
+
         // 4b. AgentRole system_prompt（岗位）+ Expert system_prompt（技能）
         if let Some(ref p) = profile {
             // 解析 Role 的提示词
@@ -380,6 +415,19 @@ impl NodeExecutorTrait for AgentExecutor {
                     "Agent node {} has rag_source_ids but no RAG callback configured, skipping",
                     an.base.id
                 );
+            }
+        }
+
+        // 4f. 股票分析软约束：TAIL 锚定（利用 recency 效应）
+        // 复述协作与自检要求，避免被 4b 的长 .md 主体"挤掉"
+        if let Some(ref p) = profile {
+            if let Some(ref role_name) = p.agent_role
+                && matches!(
+                    role_name.as_str(),
+                    "stock-analyst" | "debater" | "risk-evaluator" | "trader" | "decision-maker"
+                )
+            {
+                all_segments.push(TemplateSegment::Static(STOCK_COLLAB_REMINDER.to_string()));
             }
         }
 

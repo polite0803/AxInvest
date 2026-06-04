@@ -671,6 +671,19 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
             clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
           }
+          // 工作流完成后自动展开所有失败步骤
+          const stepsData = toStepLike(data);
+          const failedIds = stepsData
+            .filter((s) => s.status === "failed")
+            .map((s) => s.id);
+          if (failedIds.length > 0) {
+            setExpandedSteps((prev) => {
+              const next = new Set(prev);
+              for (const id of failedIds) { next.add(id); }
+              return next;
+            });
+          }
+          setDagCollapsed(false);
         }
       } catch (e) {
         if (fetchIdRef.current !== requestId) {
@@ -888,7 +901,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
             </div>
           )
           : (
-            <div className="max-h-64 overflow-auto">
+            <div className={workflow && TERMINAL_STATUSES.has(workflow.status) ? "" : "max-h-64 overflow-auto"}>
               {steps.map((step) => (
                 <StepRow
                   key={step.id}

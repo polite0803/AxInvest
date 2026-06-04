@@ -49,6 +49,8 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "bear-researcher",
         include_str!("../../agency_experts/stock-analysis/bear-researcher.md"),
     ),
+    ("bull-r2", include_str!("../../agency_experts/stock-analysis/bull-r2.md")),
+    ("bear-r2", include_str!("../../agency_experts/stock-analysis/bear-r2.md")),
     (
         "aggressive-debator",
         include_str!("../../agency_experts/stock-analysis/aggressive-debator.md"),
@@ -84,6 +86,8 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("sector-analyst", "stock-analyst"),
     ("bull-researcher", "debater"),
     ("bear-researcher", "debater"),
+    ("bull-r2", "debater"),
+    ("bear-r2", "debater"),
     ("aggressive-debator", "risk-evaluator"),
     ("conservative-debator", "risk-evaluator"),
     ("neutral-debator", "risk-evaluator"),

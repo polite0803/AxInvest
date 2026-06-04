@@ -27,6 +27,21 @@ pub const ANALYST_IDS: &[&str] = &[
 
 const BULL_ID: &str = "bull-researcher";
 const BEAR_ID: &str = "bear-researcher";
+const BULL_R2_ID: &str = "bull-r2";
+const BEAR_R2_ID: &str = "bear-r2";
+
+/// 股票分析共享硬约束（HEAD 锚定）：与 agent_executor.rs 保持完全一致
+/// 利用 primacy 效应让"禁编造/禁预测"在 prompt 头部出现。
+const DEBATE_HARD_CONSTRAINTS: &str = "\
+## 关键约束（最高优先级，必须遵守）
+1. **反幻觉**：所有数字必须能在\"上游节点输出\"找到来源；缺失必须写 `信息缺失` 或 `\"data_gaps\"`，**禁止编造**。
+2. **禁预测大盘点位 / 个股目标价 / 目标涨幅**。仅描述\"在何种条件下偏向哪个方向\"及其所需证据。";
+
+/// 股票分析共享软约束（TAIL 锚定）：与 agent_executor.rs 保持完全一致
+const DEBATE_COLLAB_REMINDER: &str = "\
+## 协作与自检（输出前必过）
+- 你的输出会被辩论 / 风险 / 决策节点引用：论点要具体、引用要可查、立场要明确。
+- 输出前自查 3 项：① 数字有来源？② 论点前后一致？③ 是否回避了关键风险？";
 
 const RISK_IDS: &[&str] = &[
     "aggressive-debator",
@@ -214,6 +229,8 @@ impl StockAnalysisOrchestrator {
         let non_analyst_ids: std::collections::HashSet<&str> = [
             "bull-researcher",
             "bear-researcher",
+            "bull-r2",
+            "bear-r2",
             "aggressive-debator",
             "conservative-debator",
             "neutral-debator",
@@ -654,10 +671,34 @@ impl StockAnalysisOrchestrator {
         prompts: &Arc<HashMap<String, String>>,
         cancel_token: &Option<Arc<AtomicBool>>,
     ) -> Result<(), String> {
-        let sys_bull = prompts::get_analyst_context(BULL_ID, prompts)
+        // 预加载 R1 + R2 的 system prompt：R1 用于"组织论据 + 反驳预防"，
+        // R2 用于"质询对方 R1 的最薄弱点"。expert_id 仅用于日志，
+        // 实际 prompt 走 system_prompt 切换（见 runner.rs:69）。
+        let sys_bull_r1 = prompts::get_analyst_context(BULL_ID, prompts)
             .unwrap_or_else(|| fallback_prompt(BULL_ID));
-        let sys_bear = prompts::get_analyst_context(BEAR_ID, prompts)
+        let sys_bear_r1 = prompts::get_analyst_context(BEAR_ID, prompts)
             .unwrap_or_else(|| fallback_prompt(BEAR_ID));
+        let sys_bull_r2 = prompts::get_analyst_context(BULL_R2_ID, prompts)
+            .unwrap_or_else(|| fallback_prompt(BULL_R2_ID));
+        let sys_bear_r2 = prompts::get_analyst_context(BEAR_R2_ID, prompts)
+            .unwrap_or_else(|| fallback_prompt(BEAR_R2_ID));
+
+        // 用头/尾锚定包一层 system_prompt（primacy/recency 效应）：
+        // HARD 在头 → 反幻觉/禁预测立刻被关注
+        // REMINDER 在尾 → 协作/自检不会被 R1 主体挤掉
+        // 这与 agent_executor.rs 的 4a-pre/4f 保持完全一致
+        let wrap_debate_sys = |sys: &str| -> String {
+            format!(
+                "{hard}\n\n---\n\n{sys}\n\n---\n\n{reminder}",
+                hard = DEBATE_HARD_CONSTRAINTS,
+                sys = sys,
+                reminder = DEBATE_COLLAB_REMINDER,
+            )
+        };
+        let sys_bull_r1 = wrap_debate_sys(&sys_bull_r1);
+        let sys_bear_r1 = wrap_debate_sys(&sys_bear_r1);
+        let sys_bull_r2 = wrap_debate_sys(&sys_bull_r2);
+        let sys_bear_r2 = wrap_debate_sys(&sys_bear_r2);
 
         let mut bull_prev = String::new();
         let mut bear_prev = String::new();
@@ -673,15 +714,28 @@ impl StockAnalysisOrchestrator {
                 progress_pct: (round * 100 / max_rounds).min(100) as u8,
             });
 
+            // R1 → bull/bear-researcher (R1 prompt)
+            // R>=2 → bull-r2 / bear-r2 (cross-examination prompt)
+            let (bull_id, sys_bull) = if round == 1 {
+                (BULL_ID, &sys_bull_r1)
+            } else {
+                (BULL_R2_ID, &sys_bull_r2)
+            };
+            let (bear_id, sys_bear) = if round == 1 {
+                (BEAR_ID, &sys_bear_r1)
+            } else {
+                (BEAR_R2_ID, &sys_bear_r2)
+            };
+
             let bull_context = Self::build_debate_context(
-                BULL_ID,
+                bull_id,
                 blackboard,
                 if round == 1 { None } else { Some(&bear_prev) },
             )
             .await;
 
             let bull_arg = if let Some(ref r) = runner {
-                r.run_agent(BULL_ID, &sys_bull, &bull_context).await?
+                r.run_agent(bull_id, sys_bull, &bull_context).await?
             } else {
                 format!(
                     r#"{{"round":{round},"role":"bull","argument":"多方辩论占位 — 第{round}轮","key_points":["技术面支持","基本面良好"],"confidence":60}}"#
@@ -698,10 +752,10 @@ impl StockAnalysisOrchestrator {
             }
 
             let bear_context =
-                Self::build_debate_context(BEAR_ID, blackboard, Some(&bull_arg)).await;
+                Self::build_debate_context(bear_id, blackboard, Some(&bull_arg)).await;
 
             let bear_arg = if let Some(ref r) = runner {
-                r.run_agent(BEAR_ID, &sys_bear, &bear_context).await?
+                r.run_agent(bear_id, sys_bear, &bear_context).await?
             } else {
                 format!(
                     r#"{{"round":{round},"role":"bear","argument":"空方辩论占位 — 第{round}轮","key_points":["估值偏高","政策不确定性"],"confidence":50}}"#
@@ -729,8 +783,15 @@ impl StockAnalysisOrchestrator {
         {
             let mut bb = blackboard.write().await;
             bb.set_state("debate.summary", &summary);
+            // 保存"最后一轮"的论据到标准 report key（兼容下游 convergence / risk 节点）
+            // R1/R2 中间产物已逐轮存到 debate.bull.round_{N} / debate.bear.round_{N}
             bb.set_state("report.bull-researcher", &bull_prev);
             bb.set_state("report.bear-researcher", &bear_prev);
+            // 兼容：若最后一轮是 R2，额外存到 R2 专用 key 供前端区分
+            if max_rounds >= 2 {
+                bb.set_state("report.bull-r2", &bull_prev);
+                bb.set_state("report.bear-r2", &bear_prev);
+            }
         }
 
         Ok(())

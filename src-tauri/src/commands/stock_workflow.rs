@@ -211,6 +211,9 @@ pub async fn run_stock_workflow(
             if let Some(output) = event.output {
                 payload["output"] = output;
             }
+            if let Some(error) = event.error {
+                payload["error"] = serde_json::Value::String(error);
+            }
             let _ = app.emit("workflow-step-done", payload);
         })
     });

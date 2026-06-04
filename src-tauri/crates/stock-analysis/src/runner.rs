@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axagent_core::types::{ChatContent, ChatMessage, ChatRequest};
+use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_providers::{ProviderAdapter, ProviderRequestContext};
 
 use crate::decision::AgentRunner;

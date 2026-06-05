@@ -299,8 +299,16 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                 }}
               >
                 🔗 {t("stockAnalysis.dataSource")}
-                {successCount > 0 && <Tag color="success" style={{ fontSize: 10, margin: 0 }}>{successCount} {t("stockAnalysis.success")}</Tag>}
-                {failedCount > 0 && <Tag color="error" style={{ fontSize: 10, margin: 0 }}>{failedCount} {t("stockAnalysis.failure")}</Tag>}
+                {successCount > 0 && (
+                  <Tag color="success" style={{ fontSize: 10, margin: 0 }}>
+                    {successCount} {t("stockAnalysis.success")}
+                  </Tag>
+                )}
+                {failedCount > 0 && (
+                  <Tag color="error" style={{ fontSize: 10, margin: 0 }}>
+                    {failedCount} {t("stockAnalysis.failure")}
+                  </Tag>
+                )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {dataSources.map((ds) => (

@@ -7680,14 +7680,21 @@
         "research-mgr": "研究经理综合",
         "trader": "交易方案制定",
         "portfolio-mgr": "最终决策生成"
-      }
+      },
+      "failedStepsWithCount": "失败步骤（{{count}} 步）"
     },
     "risk": {
       "high": "高",
       "medium": "中",
       "low": "低"
     },
-    "workflowStarting": "⏳ 正在启动 {{stockCode}} 股票分析工作流..."
+    "workflowStarting": "⏳ 正在启动 {{stockCode}} 股票分析工作流...",
+    "success": "成功",
+    "failure": "失败",
+    "dataSource": "数据源",
+    "dataFetched": "已获取",
+    "dataFetching": "获取中",
+    "dataWaiting": "等待"
   },
   "trade": {
     "title": "交易日志",
@@ -7739,7 +7746,6 @@
   "stockAnalysis.workflow.riskClassification": "风险分级",
   "stockAnalysis.workflow.notification": "结果通知",
   "stockAnalysis.workflow.fetchFailed": "数据获取失败",
-
   "stockAnalysis.workflow.startFailed": "工作流启动失败",
   "stockAnalysis.riskHigh": "高风险",
   "stockAnalysis.riskMid": "中风险",

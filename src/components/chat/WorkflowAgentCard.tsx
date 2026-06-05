@@ -298,9 +298,9 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                   gap: 6,
                 }}
               >
-                🔗 数据源
-                {successCount > 0 && <Tag color="success" style={{ fontSize: 10, margin: 0 }}>{successCount} 成功</Tag>}
-                {failedCount > 0 && <Tag color="error" style={{ fontSize: 10, margin: 0 }}>{failedCount} 失败</Tag>}
+                🔗 {t("stockAnalysis.dataSource")}
+                {successCount > 0 && <Tag color="success" style={{ fontSize: 10, margin: 0 }}>{successCount} {t("stockAnalysis.success")}</Tag>}
+                {failedCount > 0 && <Tag color="error" style={{ fontSize: 10, margin: 0 }}>{failedCount} {t("stockAnalysis.failure")}</Tag>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {dataSources.map((ds) => (
@@ -342,12 +342,12 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                         style={{ fontSize: 10 }}
                       >
                         {ds.status === "success"
-                          ? "已获取"
+                          ? t("stockAnalysis.dataFetched")
                           : ds.status === "failed"
-                          ? "失败"
+                          ? t("stockAnalysis.failure")
                           : ds.status === "fetching"
-                          ? "获取中"
-                          : "等待"}
+                          ? t("stockAnalysis.dataFetching")
+                          : t("stockAnalysis.dataWaiting")}
                       </Tag>
                     </div>
                     {ds.status === "success" && ds.summary && (
@@ -547,7 +547,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
             {data.failedSteps && data.failedSteps.length > 0 && (
               <div style={{ fontSize: 11 }}>
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                  {t("stockAnalysis.workflow.failedSteps")}（{data.failedSteps.length} 步）
+                  {t("stockAnalysis.workflow.failedStepsWithCount", { count: data.failedSteps.length })}
                 </div>
                 {data.failedSteps.map((fs) => (
                   <details key={fs.nodeId} style={{ marginBottom: 4 }}>

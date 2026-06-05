@@ -7686,14 +7686,21 @@
         "research-mgr": "Research Synthesis",
         "trader": "Trading Plan",
         "portfolio-mgr": "Final Decision"
-      }
+      },
+      "failedStepsWithCount": "Failed Steps ({{count}})"
     },
     "risk": {
       "high": "High",
       "medium": "Medium",
       "low": "Low"
     },
-    "workflowStarting": "⏳ Starting {{stockCode}} stock analysis workflow..."
+    "workflowStarting": "⏳ Starting {{stockCode}} stock analysis workflow...",
+    "success": "Succeeded",
+    "failure": "Failed",
+    "dataSource": "Data Source",
+    "dataFetched": "Fetched",
+    "dataFetching": "Fetching",
+    "dataWaiting": "Waiting"
   },
   "trade": {
     "title": "Trading Log",
@@ -7745,7 +7752,6 @@
   "stockAnalysis.workflow.riskClassification": "Risk Classification",
   "stockAnalysis.workflow.notification": "Notification",
   "stockAnalysis.workflow.fetchFailed": "Failed to fetch data",
-
   "stockAnalysis.workflow.startFailed": "Workflow start failed",
   "stockAnalysis.riskHigh": "High Risk",
   "stockAnalysis.riskMid": "Medium Risk",

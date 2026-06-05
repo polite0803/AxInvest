@@ -12,6 +12,7 @@ pub mod report;
 pub mod review;
 pub mod risk;
 pub mod rules;
+pub mod schema_serde_regression;
 pub mod scoring;
 pub mod screener;
 pub mod signals;

@@ -33,10 +33,10 @@ import { useExpertStore } from "@/stores/feature/expertStore";
 import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { usePromptTemplateStore } from "@/stores/feature/promptTemplateStore";
 import type { PromptTemplate } from "@/types";
-import type { AttachmentInput, Model, ProviderConfig, RealtimeConfig } from "@/types";
+import type { AttachmentInput, CreateMcpServerInput, McpServer, Model, ProviderConfig, RealtimeConfig } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
 import { open } from "@tauri-apps/plugin-dialog";
-import { App, Badge, Button, Checkbox, Image, Popover, Radio, Select, Tag, theme } from "antd";
+import { App, Badge, Button, Checkbox, Form, Image, Input, Modal, Popover, Radio, Select, Tag, theme } from "antd";
 import {
   ArrowUp,
   Atom,
@@ -64,7 +64,6 @@ import {
   Paperclip,
   Play,
   Plug,
-  Route,
   Scissors,
   Shield,
   ShieldAlert,
@@ -282,6 +281,29 @@ export function InputArea() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // const [modelRoutingOpen, setModelRoutingOpen] = useState(false); // removed
   const [mcpPopoverOpen, setMcpPopoverOpen] = useState(false);
+  const [connectorModalOpen, setConnectorModalOpen] = useState(false);
+  const [editingMcpServer, setEditingMcpServer] = useState<McpServer | null>(null);
+  const [mcpForm] = Form.useForm();
+
+  // 连接器 modal 打开时设置初始值
+  useEffect(() => {
+    if (connectorModalOpen) {
+      if (editingMcpServer) {
+        mcpForm.setFieldsValue({
+          name: editingMcpServer.name,
+          transport: editingMcpServer.transport,
+          command: editingMcpServer.command || "",
+          args: editingMcpServer.argsJson
+            ? editingMcpServer.argsJson.split(/\s+/).filter(Boolean).join(" ")
+            : "",
+          endpoint: editingMcpServer.endpoint || "",
+        });
+      } else {
+        mcpForm.resetFields();
+      }
+    }
+  }, [connectorModalOpen, editingMcpServer, mcpForm]);
+
   const [searchDropdownOpen, setSearchDropdownOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -390,6 +412,8 @@ export function InputArea() {
   // MCP state
   const mcpServers = useMcpStore((s) => s.servers);
   const loadMcpServers = useMcpStore((s) => s.loadServers);
+  const createMcpServer = useMcpStore((s) => s.createServer);
+  const updateMcpServer = useMcpStore((s) => s.updateServer);
   const enabledMcpServerIds = useConversationStore(
     (s) => s.enabledMcpServerIds,
   );
@@ -427,7 +451,7 @@ export function InputArea() {
   const toggleKnowledgeBase = useConversationStore(
     (s) => s.toggleKnowledgeBase,
   );
-  const [sourcePopoverOpen, setSourcePopoverOpen] = useState(false);
+  const [sourceModalOpen, setSourceModalOpen] = useState(false);
 
   // Memory state
   const memoryNamespaces = useMemoryStore((s) => s.namespaces);
@@ -860,8 +884,8 @@ export function InputArea() {
             style={{ padding: 0, fontSize: 12 }}
             onClick={() => {
               setMcpPopoverOpen(false);
-              setSettingsSection("mcpServers");
-              navigate("/settings");
+              setEditingMcpServer(null);
+              setConnectorModalOpen(true);
             }}
           >
             {t("chat.connector.add")}
@@ -872,8 +896,9 @@ export function InputArea() {
             style={{ padding: 0, fontSize: 12 }}
             onClick={() => {
               setMcpPopoverOpen(false);
-              setSettingsSection("mcpServers");
-              navigate("/settings");
+              const customServer = customServers.length > 0 ? customServers[0] : null;
+              setEditingMcpServer(customServer);
+              setConnectorModalOpen(true);
             }}
           >
             {t("chat.connector.custom")}
@@ -1278,7 +1303,7 @@ export function InputArea() {
             size="small"
             style={{ padding: 0, fontSize: 12 }}
             onClick={() => {
-              setSourcePopoverOpen(false);
+              setSourceModalOpen(false);
               navigate("/knowledge");
             }}
           >
@@ -2671,7 +2696,7 @@ export function InputArea() {
         {/* Bottom action bar */}
         <div className="chat-input-tools">
           <div className="flex items-center gap-0.5">
-            <SkillToolbar position="left" />
+            <SkillToolbar />
             {searchEnabled
               ? (
                 <Tooltip title={t("chat.search.title")}>
@@ -2702,9 +2727,11 @@ export function InputArea() {
                   />
                 </DropdownMenu>
               )}
-            {!activeConversationId && (
+            {unifiedMode === "action" && activeConversation?.session_type !== "workflow" && (
               <DropdownMenu items={expertMenuItems}>
-                <Button type="text" size="small" icon={<Bot size={14} />} />
+                <Tooltip title={t("expertBadge.selectExpert")}>
+                  <Button type="text" size="small" icon={<Bot size={14} />} />
+                </Tooltip>
               </DropdownMenu>
             )}
             {hasReasoning && (
@@ -2713,16 +2740,18 @@ export function InputArea() {
                 open={thinkingDropdownOpen}
                 onOpenChange={setThinkingDropdownOpen}
               >
-                <Button
-                  type="text"
-                  size="small"
-                  icon={thinkingIcon}
-                  style={thinkingBudget === 0
-                    ? { color: token.colorError }
-                    : thinkingBudget !== null
-                    ? { color: token.colorPrimary }
-                    : undefined}
-                />
+                <Tooltip title={t("chat.thinkingIntensity")}>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={thinkingIcon}
+                    style={thinkingBudget === 0
+                      ? { color: token.colorError }
+                      : thinkingBudget !== null
+                      ? { color: token.colorPrimary }
+                      : undefined}
+                  />
+                </Tooltip>
               </DropdownMenu>
             )}
             {hasVision && (
@@ -2754,7 +2783,9 @@ export function InputArea() {
                   },
                 ]}
               >
-                <Button type="text" size="small" icon={<Paperclip size={14} />} />
+                <Tooltip title={t("chat.attachFile")}>
+                  <Button type="text" size="small" icon={<Paperclip size={14} />} />
+                </Tooltip>
               </DropdownMenu>
             )}
             <Popover
@@ -2786,40 +2817,29 @@ export function InputArea() {
                 </Badge>
               </Tooltip>
             </Popover>
-            <Popover
-              trigger="click"
-              placement="topLeft"
-              content={sourcePopoverContent}
-              arrow={false}
-              open={sourcePopoverOpen}
-              onOpenChange={setSourcePopoverOpen}
-            >
-              <Tooltip
-                title={t("chat.sources.title")}
-                open={sourcePopoverOpen ? false : undefined}
+            <Tooltip title={t("chat.sources.title")}>
+              <Badge
+                count={enabledKnowledgeBaseIds.length
+                  + (activeMemoryNamespaceId ? 1 : 0)
+                  + enabledWikiIds.length}
+                size="small"
+                offset={[-4, 4]}
+                color={token.colorPrimary}
               >
-                <Badge
-                  count={enabledKnowledgeBaseIds.length
-                    + (activeMemoryNamespaceId ? 1 : 0)
-                    + enabledWikiIds.length}
+                <Button
+                  type="text"
                   size="small"
-                  offset={[-4, 4]}
-                  color={token.colorPrimary}
-                >
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Database size={14} />}
-                    style={enabledKnowledgeBaseIds.length
-                          + (activeMemoryNamespaceId ? 1 : 0)
-                          + enabledWikiIds.length
-                        > 0
-                      ? { color: token.colorPrimary }
-                      : undefined}
-                  />
-                </Badge>
-              </Tooltip>
-            </Popover>
+                  icon={<Database size={14} />}
+                  onClick={() => setSourceModalOpen(true)}
+                  style={enabledKnowledgeBaseIds.length
+                        + (activeMemoryNamespaceId ? 1 : 0)
+                        + enabledWikiIds.length
+                      > 0
+                    ? { color: token.colorPrimary }
+                    : undefined}
+                />
+              </Badge>
+            </Tooltip>
             <Popover
               trigger="click"
               placement="topLeft"
@@ -2894,16 +2914,18 @@ export function InputArea() {
                 },
               ]}
             >
-              <Button
-                type="text"
-                size="small"
-                icon={<Zap size={14} />}
-                loading={compressing}
-                disabled={!activeConversationId}
-                style={activeConversation?.context_compression
-                  ? { color: token.colorPrimary }
-                  : undefined}
-              />
+              <Tooltip title={t("chat.contextCompression")}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<Zap size={14} />}
+                  loading={compressing}
+                  disabled={!activeConversationId}
+                  style={activeConversation?.context_compression
+                    ? { color: token.colorPrimary }
+                    : undefined}
+                />
+              </Tooltip>
             </DropdownMenu>
             <Tooltip
               title={shortcutHint(t("chat.clearContext"), "clearContext")}
@@ -2958,17 +2980,19 @@ export function InputArea() {
             </Tooltip>
             {activeConversation?.session_type !== "workflow" && (
               <DropdownMenu items={unifiedModeMenuItems}>
-                <Button
-                  type="text"
-                  size="small"
-                  data-tutorial="agent-mode"
-                  icon={unifiedMode === "ask"
-                    ? <MessageSquare size={14} />
-                    : unifiedMode === "plan"
-                    ? <ClipboardList size={14} />
-                    : <Play size={14} />}
-                  style={{ display: "flex", alignItems: "center", gap: 4 }}
-                />
+                <Tooltip title={t("chat.mode.title")}>
+                  <Button
+                    type="text"
+                    size="small"
+                    data-tutorial="agent-mode"
+                    icon={unifiedMode === "ask"
+                      ? <MessageSquare size={14} />
+                      : unifiedMode === "plan"
+                      ? <ClipboardList size={14} />
+                      : <Play size={14} />}
+                    style={{ display: "flex", alignItems: "center", gap: 4 }}
+                  />
+                </Tooltip>
               </DropdownMenu>
             )}
             <ContextHelp helpKey="agent" section="agent" />
@@ -3009,18 +3033,6 @@ export function InputArea() {
                 </Button>
               </Tooltip>
             )}
-            {currentMode === "agent"
-              && activeConversationId
-              && activeConversation?.session_type !== "workflow" && (
-              <Tooltip title={t("chat.modelRouting")}>
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<Route size={14} />}
-                  onClick={undefined}
-                />
-              </Tooltip>
-            )}
             {hasRealtimeVoice && (
               <Tooltip
                 title={t("voice.startCall") + " - " + t("common.comingSoon")}
@@ -3033,9 +3045,6 @@ export function InputArea() {
                 />
               </Tooltip>
             )}
-          </div>
-          <div className="flex items-center gap-2">
-            <SkillToolbar position="right" />
           </div>
         </div>
       </div>
@@ -3148,6 +3157,112 @@ export function InputArea() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+
+      <Modal
+        title={editingMcpServer
+          ? t("chat.connector.custom")
+          : t("chat.connector.add")}
+        open={connectorModalOpen}
+        onCancel={() => setConnectorModalOpen(false)}
+        onOk={async () => {
+          try {
+            const values = await mcpForm.validateFields();
+            const input: CreateMcpServerInput = {
+              name: values.name,
+              transport: values.transport as "stdio" | "http" | "sse",
+              command: values.command,
+              args: values.args
+                ? values.args.split(/\s+/).filter(Boolean)
+                : undefined,
+              endpoint: values.endpoint,
+              enabled: false,
+            };
+            if (editingMcpServer) {
+              await updateMcpServer(editingMcpServer.id, input);
+              messageApi.success(t("common.saved"));
+            } else {
+              await createMcpServer(input);
+              messageApi.success(t("common.saved"));
+            }
+            mcpForm.resetFields();
+            setConnectorModalOpen(false);
+            setEditingMcpServer(null);
+          } catch {
+            // validation error, form will show errors
+          }
+        }}
+        destroyOnClose
+      >
+        <Form
+          form={mcpForm}
+          layout="vertical"
+          size="small"
+          initialValues={{
+            transport: "stdio",
+          }}
+        >
+          <Form.Item
+            name="name"
+            label={t("common.name")}
+            rules={[{ required: true }]}
+          >
+            <Input placeholder="e.g. my-connector" />
+          </Form.Item>
+          <Form.Item
+            name="transport"
+            label={t("common.type")}
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                { label: "stdio", value: "stdio" },
+                { label: "HTTP", value: "http" },
+                { label: "SSE", value: "sse" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="command"
+            label="Command"
+            rules={[{ required: true }]}
+          >
+            <Input placeholder="e.g. npx @modelcontextprotocol/server-filesystem" />
+          </Form.Item>
+          <Form.Item name="args" label="Args">
+            <Input placeholder="e.g. /path/to/dir (space-separated)" />
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, cur) => prev.transport !== cur.transport}
+          >
+            {({ getFieldValue }) =>
+              getFieldValue("transport") !== "stdio" && (
+                <Form.Item
+                  name="endpoint"
+                  label="Endpoint"
+                  rules={[{ required: true }]}
+                >
+                  <Input placeholder="e.g. http://localhost:3000/sse" />
+                </Form.Item>
+              )}
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t("chat.sources.title")}
+        open={sourceModalOpen}
+        onCancel={() => setSourceModalOpen(false)}
+        footer={
+          <Button type="primary" onClick={() => setSourceModalOpen(false)}>
+            {t("common.confirm")}
+          </Button>
+        }
+        width={420}
+        destroyOnClose
+      >
+        {sourcePopoverContent}
+      </Modal>
 
       {/* ModelRoutingConfigPanel removed */}
 

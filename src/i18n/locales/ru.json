@@ -7437,14 +7437,21 @@
         "research-mgr": "Синтез исследований",
         "trader": "Торговый план",
         "portfolio-mgr": "Итоговое решение"
-      }
+      },
+      "failedStepsWithCount": "Failed Steps ({{count}})"
     },
     "risk": {
       "high": "Высокий",
       "medium": "Средний",
       "low": "Низкий"
     },
-    "workflowStarting": "⏳ Запуск рабочего процесса анализа {{stockCode}}..."
+    "workflowStarting": "⏳ Запуск рабочего процесса анализа {{stockCode}}...",
+    "success": "Succeeded",
+    "failure": "Failed",
+    "dataSource": "Data Source",
+    "dataFetched": "Fetched",
+    "dataFetching": "Fetching",
+    "dataWaiting": "Waiting"
   },
   "trade": {
     "title": "Trading Log",
@@ -7487,12 +7494,10 @@
   "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
   "stockAnalysis.workflow.bullCase": "Bull Case",
   "stockAnalysis.workflow.bearCase": "Bear Case",
-
   "stockAnalysis.expandView": "Expand View",
   "stockAnalysis.riskHigh": "High Risk",
   "stockAnalysis.riskMid": "Medium Risk",
   "stockAnalysis.riskLow": "Low Risk",
-
   "stockAnalysis.noReport": "No analysis report",
   "stockAnalysis.noData": "No data",
   "stockAnalysis.noDecisionReasoning": "No decision reasoning",
@@ -7541,7 +7546,6 @@
   "stockAnalysis.export.analystReports": "Analyst Reports: {{count}}",
   "stockAnalysis.export.debateRounds": "Debate Rounds: {{count}}",
   "stockAnalysis.export.riskAssessments": "Risk Assessments: {{count}}",
-
   "stockAnalysis.workflow.partialFailed": "{{count}} step(s) failed",
   "stockAnalysis.workflow.failedSteps": "Failed Steps",
   "stockAnalysis.workflow.bullAnalyst": "Bull Analyst",
@@ -7553,7 +7557,6 @@
   "stockAnalysis.workflow.riskClassification": "Risk Classification",
   "stockAnalysis.workflow.notification": "Notification",
   "stockAnalysis.workflow.fetchFailed": "Failed to fetch data",
-
   "stockAnalysis.workflow.startFailed": "Workflow start failed",
   "stockAnalysis.askAi.prompt": "Analyze {{stockName}} ({{stockCode}}) investment outlook.",
   "stockAnalysis.askAi.decision": "Latest Decision: {{action}}, Confidence {{confidence}}%.",

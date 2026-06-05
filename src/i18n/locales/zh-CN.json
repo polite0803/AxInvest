@@ -7694,7 +7694,10 @@
     "dataSource": "数据源",
     "dataFetched": "已获取",
     "dataFetching": "获取中",
-    "dataWaiting": "等待"
+    "dataWaiting": "等待",
+    "tool": {
+      "fundamentalsData": "基本面数据"
+    }
   },
   "trade": {
     "title": "交易日志",

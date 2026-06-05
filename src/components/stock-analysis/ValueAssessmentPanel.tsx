@@ -85,13 +85,19 @@ export function ValueAssessmentPanel() {
             children: (
               <div className="space-y-2 text-sm">
                 {hasRuleCheck && (
-                  <FieldBlock title={t("stockAnalysis.valueAssessment.ruleCheck")} content={JSON.stringify(ruleCheckResults, null, 2)} />
+                  <FieldBlock
+                    title={t("stockAnalysis.valueAssessment.ruleCheck")}
+                    content={JSON.stringify(ruleCheckResults, null, 2)}
+                  />
                 )}
                 {hasDataQuality && (
                   <FieldBlock title={t("stockAnalysis.valueAssessment.dataQuality")} content={dataQualitySummary} />
                 )}
                 {hasRawData && (
-                  <FieldBlock title={t("stockAnalysis.valueAssessment.rawData")} content={JSON.stringify(rawData, null, 2)} />
+                  <FieldBlock
+                    title={t("stockAnalysis.valueAssessment.rawData")}
+                    content={JSON.stringify(rawData, null, 2)}
+                  />
                 )}
               </div>
             ),

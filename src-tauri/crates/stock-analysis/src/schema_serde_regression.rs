@@ -65,10 +65,7 @@ mod tests {
             schema_type: "object".to_string(),
             description: Some("股票分析最终决策输出".to_string()),
             properties: Some(props),
-            required: Some(vec![
-                "action".to_string(),
-                "positionPct".to_string(),
-            ]),
+            required: Some(vec!["action".to_string(), "positionPct".to_string()]),
             items: None,
         }
     }
@@ -108,10 +105,7 @@ mod tests {
         assert_eq!(json["required"], serde_json::json!(["stock_code"]));
 
         // 顶层 None 字段不应出现（防止下游 jsonschema 校验失败）
-        assert!(
-            json.get("items").is_none(),
-            "items 字段为 None，序列化时不应出现该 key"
-        );
+        assert!(json.get("items").is_none(), "items 字段为 None，序列化时不应出现该 key");
     }
 
     #[test]
@@ -128,18 +122,9 @@ mod tests {
         // property 自身的 None 字段也不应出现
         assert_eq!(prop_json["type"], "string");
         assert_eq!(prop_json["description"], "股票代码，如 000001、600519");
-        assert!(
-            prop_json.get("default").is_none(),
-            "default 字段为 None，不应出现"
-        );
-        assert!(
-            prop_json.get("enumValues").is_none(),
-            "enumValues 字段为 None，不应出现"
-        );
-        assert!(
-            prop_json.get("format").is_none(),
-            "format 字段为 None，不应出现"
-        );
+        assert!(prop_json.get("default").is_none(), "default 字段为 None，不应出现");
+        assert!(prop_json.get("enumValues").is_none(), "enumValues 字段为 None，不应出现");
+        assert!(prop_json.get("format").is_none(), "format 字段为 None，不应出现");
     }
 
     #[test]
@@ -176,10 +161,7 @@ mod tests {
             build_tool_parameters_like_seed(),
         ] {
             let s = serde_json::to_string(&schema).unwrap();
-            assert!(
-                !s.contains("\"items\""),
-                "schema 序列化结果中不应出现 items key，实际：\n{s}"
-            );
+            assert!(!s.contains("\"items\""), "schema 序列化结果中不应出现 items key，实际：\n{s}");
         }
     }
 
@@ -206,10 +188,7 @@ mod tests {
             .expect("旧数据（含 null 字段）应能反序列化，不应破坏向后兼容");
 
         assert_eq!(schema.schema_type, "object");
-        assert_eq!(
-            schema.description.as_deref(),
-            Some("股票分析运行时输入")
-        );
+        assert_eq!(schema.description.as_deref(), Some("股票分析运行时输入"));
         assert!(schema.items.is_none(), "items 字段为 null 应反序列化为 None");
 
         let prop = schema

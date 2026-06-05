@@ -228,6 +228,10 @@ mod tests {
             parameters: Some(build_tool_parameters_like_seed()),
         };
         let s = serde_json::to_string(&tool).unwrap();
-        assert!(!s.contains("description"), "description 为 None 时不应出现该 key");
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(
+            v.get("description").is_none(),
+            "description 为 None 时不应出现该 key"
+        );
     }
 }

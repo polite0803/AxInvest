@@ -300,7 +300,8 @@
     "mode": {
       "ask": "Ask",
       "plan": "Plan",
-      "action": "Action"
+      "action": "Action",
+      "title": "Switch Mode"
     },
     "connector": {
       "title": "Connector",

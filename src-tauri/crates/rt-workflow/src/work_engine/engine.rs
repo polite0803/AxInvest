@@ -786,7 +786,9 @@ impl WorkEngine {
         let done_or_skipped_or_failed: HashSet<&str> = workflow
             .node_states
             .iter()
-            .filter(|(_, s)| matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped | NodeStatus::Failed))
+            .filter(|(_, s)| {
+                matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped | NodeStatus::Failed)
+            })
             .map(|(id, _)| id.as_str())
             .collect();
 
@@ -2661,12 +2663,10 @@ mod tests {
     //       让单点失败不再冻结依赖图。
     //
     // 以下测试断言"Failed 不阻塞依赖图"这一不变量，确保未来不会回退。
-    use crate::workflow_engine::{
-        NodeRuntimeState, NodeStatus, Workflow, WorkflowStatus,
-    };
+    use crate::workflow_engine::{NodeRuntimeState, NodeStatus, Workflow, WorkflowStatus};
     use axagent_harness::workflow_types::{
-        EdgeType, EndNode, EndNodeConfig, Position, RetryConfig, TriggerConfig,
-        TriggerNode, TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        EdgeType, EndNode, EndNodeConfig, Position, RetryConfig, TriggerConfig, TriggerNode,
+        TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
 
     /// 构造一个最小 Workflow，nodes/edges 由调用方决定。
@@ -2762,10 +2762,7 @@ mod tests {
             "Failed 上游不应冻结 B 的依赖图，实际 ready = {ready:?}"
         );
         // C 依赖 B，B 还 Pending，C 不应 ready
-        assert!(
-            !ready.contains(&"C".to_string()),
-            "C 应等 B 完成，实际 ready = {ready:?}"
-        );
+        assert!(!ready.contains(&"C".to_string()), "C 应等 B 完成，实际 ready = {ready:?}");
     }
 
     /// Fan-in：M1 → Merge, M2 → Merge，M1 Failed + M2 Completed 时 Merge 应当 ready

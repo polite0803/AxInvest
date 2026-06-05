@@ -7343,7 +7343,19 @@
     "klineChart": "K-line",
     "emptyHint": "Search stock code to start",
     "emptyHintDetail": "Shanghai/Shenzhen A-shares supported",
-    "watchlist": "Watchlist",
+    "watchlist": {
+      "_default": "Watchlist",
+      "all": "All ({{count}})",
+      "newGroup": "New group name...",
+      "move": "Move to group",
+      "moveToAll": "Move to All",
+      "refreshQuotes": "Refresh Quotes",
+      "sortByChange": "Sort by Change",
+      "sortByCode": "Sort by Code",
+      "sortByName": "Sort by Name",
+      "analyzeAll": "Analyze All",
+      "analysisStarted": "Started analysis for {{count}} stocks"
+    },
     "watchlistEmpty": "Нет отслеживаемых акций. Поищите и нажмите +",
     "loadHistory": "Click to load history",
     "history": "History",
@@ -7491,7 +7503,8 @@
         "monitor": "Monitor",
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
-        "toolRuntime": "Tool Runtime"
+        "toolRuntime": "Tool Runtime",
+        "workflow": "Workflow"
       },
       "panels": {
         "refresh": "Refresh",

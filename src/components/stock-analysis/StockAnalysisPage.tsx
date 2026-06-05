@@ -150,7 +150,7 @@ export function StockAnalysisPage() {
     { key: "dragontiger", label: t("stockAnalysis.settings.sheet.dragonTiger"), element: <DragonTigerPanel /> },
     { key: "sectors", label: t("stockAnalysis.settings.sheet.sectors"), element: <SectorHeatmapPanel /> },
     { key: "north", label: t("stockAnalysis.settings.sheet.north"), element: <NorthBoundPanel /> },
-    { key: "watchlist", label: t("stockAnalysis.watchlist"), element: <WatchlistPanel /> },
+    { key: "watchlist", label: t("stockAnalysis.watchlist._default"), element: <WatchlistPanel /> },
     { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
     { key: "alerts", label: t("stockAnalysis.alert.title"), element: <PriceAlertPanel /> },
     { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },

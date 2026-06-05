@@ -32,7 +32,9 @@ async fn data_quality_precheck(
 ) -> QualityPrecheckResult {
     // 1. 检查行情数据
     if quote.price <= 0.0 && quote.name.is_empty() {
-        return QualityPrecheckResult::Insufficient("行情数据无效（价格为空、股票代码不存在或未上市）".into());
+        return QualityPrecheckResult::Insufficient(
+            "行情数据无效（价格为空、股票代码不存在或未上市）".into(),
+        );
     }
 
     // 2. 检查财务数据
@@ -43,14 +45,16 @@ async fn data_quality_precheck(
             let has_profit = financials.iter().any(|f| f.net_profit.unwrap_or(0.0) > 0.0);
             if !has_revenue && !has_profit {
                 // 有行情但无财务数据（可能是新股或数据源限制）
-                QualityPrecheckResult::Partial("有行情数据，但财务数据不完整（营收/利润缺失），分析置信度受限".into())
+                QualityPrecheckResult::Partial(
+                    "有行情数据，但财务数据不完整（营收/利润缺失），分析置信度受限".into(),
+                )
             } else {
                 QualityPrecheckResult::Pass
             }
         },
         Err(e) => {
             // 财务数据获取失败但行情可读，可能是少量缺失，允许继续
-            QualityPrecheckResult::Partial(format!("财务数据获取失败: {e}，分析将基于行情数据") )
+            QualityPrecheckResult::Partial(format!("财务数据获取失败: {e}，分析将基于行情数据"))
         },
     }
 }
@@ -186,12 +190,8 @@ pub async fn run_stock_workflow(
 
     // ── 数据质量预检：在发起 DAG 执行前检查关键数据是否完整 ──
     let stock_code_for_check = stock_code.clone();
-    let quality_check = data_quality_precheck(
-        &state.astock_client,
-        &stock_code_for_check,
-        &quote,
-    )
-    .await;
+    let quality_check =
+        data_quality_precheck(&state.astock_client, &stock_code_for_check, &quote).await;
     match quality_check {
         QualityPrecheckResult::Insufficient(reason) => {
             tracing::warn!(
@@ -199,18 +199,19 @@ pub async fn run_stock_workflow(
                 stock_code_for_check
             );
             // 更新 stock_analyses 状态
-            let _ = stock_analyses::Entity::update(
-                stock_analyses::ActiveModel {
-                    id: Set(analysis_id.clone()),
-                    status: Set("failed".into()),
-                    decision_json: Set(Some(json!({
+            let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
+                id: Set(analysis_id.clone()),
+                status: Set("failed".into()),
+                decision_json: Set(Some(
+                    json!({
                         "action": "skip",
                         "reasoning": format!("数据不足，跳过分析: {reason}"),
-                    }).to_string())),
-                    updated_at: Set(chrono::Utc::now().timestamp_millis()),
-                    ..Default::default()
-                },
-            )
+                    })
+                    .to_string(),
+                )),
+                updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                ..Default::default()
+            })
             .exec(state.harness.db())
             .await;
             return Ok(json!({

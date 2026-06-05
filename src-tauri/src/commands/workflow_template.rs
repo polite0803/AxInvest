@@ -22,10 +22,8 @@ fn model_to_response(model: entity::Model) -> WorkflowTemplateResponse {
         .as_ref()
         .and_then(|t| serde_json::from_str(t).ok());
 
-    let nodes: Vec<WorkflowNode> =
-        serde_json::from_str(&model.nodes).unwrap_or_default();
-    let edges: Vec<WorkflowEdge> =
-        serde_json::from_str(&model.edges).unwrap_or_default();
+    let nodes: Vec<WorkflowNode> = serde_json::from_str(&model.nodes).unwrap_or_default();
+    let edges: Vec<WorkflowEdge> = serde_json::from_str(&model.edges).unwrap_or_default();
     let input_schema: Option<JsonSchema> = model
         .input_schema
         .as_ref()
@@ -122,10 +120,7 @@ pub async fn list_workflow_templates(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(templates
-        .into_iter()
-        .map(model_to_response)
-        .collect())
+    Ok(templates.into_iter().map(model_to_response).collect())
 }
 
 #[tauri::command]

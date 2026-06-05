@@ -2378,20 +2378,15 @@ fn merge_variable_values(
     new_variables_json: &str,
     old_variables_json: &str,
 ) -> Result<String, String> {
-    let new_vars: Vec<serde_json::Value> = serde_json::from_str(new_variables_json)
-        .map_err(|e| format!("解析新变量失败: {e}"))?;
-    let old_vars: Vec<serde_json::Value> = serde_json::from_str(old_variables_json)
-        .map_err(|e| format!("解析旧变量失败: {e}"))?;
+    let new_vars: Vec<serde_json::Value> =
+        serde_json::from_str(new_variables_json).map_err(|e| format!("解析新变量失败: {e}"))?;
+    let old_vars: Vec<serde_json::Value> =
+        serde_json::from_str(old_variables_json).map_err(|e| format!("解析旧变量失败: {e}"))?;
 
     // 构建旧变量名 → value 的映射
     let old_values: std::collections::HashMap<String, serde_json::Value> = old_vars
         .into_iter()
-        .filter_map(|v| {
-            Some((
-                v.get("name")?.as_str()?.to_string(),
-                v.get("value")?.clone(),
-            ))
-        })
+        .filter_map(|v| Some((v.get("name")?.as_str()?.to_string(), v.get("value")?.clone())))
         .collect();
 
     // 合并：新变量定义 + 旧变量值（如有）

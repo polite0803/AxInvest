@@ -125,6 +125,12 @@ pub struct StepProgressEvent {
     pub total_nodes: usize,
     pub completed_nodes: usize,
     pub execution_id: Option<String>,
+    /// 节点完成时的输出（仅 completed 时有值）
+    pub output: Option<serde_json::Value>,
+    /// 节点失败/超时时的错误信息
+    pub error: Option<String>,
+    /// 节点执行耗时（毫秒）
+    pub elapsed_ms: Option<u64>,
 }
 
 /// 步骤进度回调：`&self` 不可用时使用独立函数签名
@@ -769,10 +775,18 @@ impl WorkEngine {
 
     /// 根据 edges 构建邻接表，返回就绪节点（入度为 0 的节点）。
     fn compute_ready_nodes(workflow: &Workflow) -> Vec<String> {
-        let done_or_skipped: HashSet<&str> = workflow
+        // 节点"已结束"包含三种终止态：Completed / Skipped / Failed。
+        //   - Completed: 正常完成，下游可消费其结果
+        //   - Skipped: 显式跳过，下游不应再等
+        //   - Failed: 任务失败，下游必须能继续推进（依赖图不能因单点失败而冻结）
+        // 历史 bug：原实现只把 Completed|Skipped 视作"已结束"，Failed 节点被卡在
+        // 未完成状态，导致其下游所有节点的 deps 永远 > 0，触发"假死锁"
+        // → 引擎在 deadlock detection 中把所有 Pending 标 Skipped + PartiallyCompleted
+        // → 表现为"分析师没跑完就显示工作流完成"。
+        let done_or_skipped_or_failed: HashSet<&str> = workflow
             .node_states
             .iter()
-            .filter(|(_, s)| matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped))
+            .filter(|(_, s)| matches!(s.status, NodeStatus::Completed | NodeStatus::Skipped | NodeStatus::Failed))
             .map(|(id, _)| id.as_str())
             .collect();
 
@@ -783,7 +797,7 @@ impl WorkEngine {
         }
         for edge in &workflow.edges {
             // source 未完成 → target 有未满足的依赖
-            if !done_or_skipped.contains(edge.source.as_str()) {
+            if !done_or_skipped_or_failed.contains(edge.source.as_str()) {
                 *remaining_deps.entry(edge.target.as_str()).or_insert(0) += 1;
                 continue;
             }
@@ -1447,6 +1461,9 @@ impl WorkEngine {
                         total_nodes,
                         completed_nodes: completed,
                         execution_id: Some(execution_id.clone()),
+                        output: None,
+                        error: None,
+                        elapsed_ms: None,
                     })
                     .await;
                 }
@@ -1692,6 +1709,41 @@ impl WorkEngine {
                             nr.elapsed_ms,
                         );
 
+                        // 修复 P0 #1: 节点完成时补发"completed"事件，
+                        // 让前端 stockAnalysisStore 能实时拿到该节点的输出。
+                        if let Some(cb) = progress_cb.as_ref() {
+                            let completed_count = {
+                                let workflows = self.workflows.read().await;
+                                workflows
+                                    .get(workflow_id)
+                                    .map(|w| {
+                                        w.node_states
+                                            .values()
+                                            .filter(|s| {
+                                                matches!(
+                                                    s.status,
+                                                    NodeStatus::Completed
+                                                        | NodeStatus::Failed
+                                                        | NodeStatus::Skipped
+                                                )
+                                            })
+                                            .count()
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            cb(StepProgressEvent {
+                                node_id: nr.node_id.clone(),
+                                status: "completed".to_string(),
+                                total_nodes,
+                                completed_nodes: completed_count,
+                                execution_id: Some(execution_id.clone()),
+                                output: Some(output.output.clone()),
+                                error: None,
+                                elapsed_ms: Some(nr.elapsed_ms),
+                            })
+                            .await;
+                        }
+
                         if matches!(nr.node, WorkflowNode::Condition(_)) {
                             let mut workflows = self.workflows.write().await;
                             if let Some(wf) = workflows.get_mut(workflow_id) {
@@ -1788,6 +1840,40 @@ impl WorkEngine {
                             Some(err_msg.clone()),
                             nr.elapsed_ms,
                         );
+
+                        // 修复 P0 #1: 节点失败时补发"failed"事件
+                        if let Some(cb) = progress_cb.as_ref() {
+                            let completed_count = {
+                                let workflows = self.workflows.read().await;
+                                workflows
+                                    .get(workflow_id)
+                                    .map(|w| {
+                                        w.node_states
+                                            .values()
+                                            .filter(|s| {
+                                                matches!(
+                                                    s.status,
+                                                    NodeStatus::Completed
+                                                        | NodeStatus::Failed
+                                                        | NodeStatus::Skipped
+                                                )
+                                            })
+                                            .count()
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            cb(StepProgressEvent {
+                                node_id: nr.node_id.clone(),
+                                status: "failed".to_string(),
+                                total_nodes,
+                                completed_nodes: completed_count,
+                                execution_id: Some(execution_id.clone()),
+                                output: None,
+                                error: Some(err_msg.clone()),
+                                elapsed_ms: Some(nr.elapsed_ms),
+                            })
+                            .await;
+                        }
                     },
                     Err(_) => {
                         breakers
@@ -1875,9 +1961,43 @@ impl WorkEngine {
                             "timeout",
                             &nr.input_snapshot,
                             None,
-                            Some(err_msg),
+                            Some(err_msg.clone()),
                             nr.elapsed_ms,
                         );
+
+                        // 修复 P0 #1: 节点超时时补发"timeout"事件
+                        if let Some(cb) = progress_cb.as_ref() {
+                            let completed_count = {
+                                let workflows = self.workflows.read().await;
+                                workflows
+                                    .get(workflow_id)
+                                    .map(|w| {
+                                        w.node_states
+                                            .values()
+                                            .filter(|s| {
+                                                matches!(
+                                                    s.status,
+                                                    NodeStatus::Completed
+                                                        | NodeStatus::Failed
+                                                        | NodeStatus::Skipped
+                                                )
+                                            })
+                                            .count()
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            cb(StepProgressEvent {
+                                node_id: nr.node_id.clone(),
+                                status: "timeout".to_string(),
+                                total_nodes,
+                                completed_nodes: completed_count,
+                                execution_id: Some(execution_id.clone()),
+                                output: None,
+                                error: Some(err_msg.clone()),
+                                elapsed_ms: Some(nr.elapsed_ms),
+                            })
+                            .await;
+                        }
                     },
                 }
 
@@ -2528,5 +2648,244 @@ mod tests {
         let stored = engine.domain_constraints().expect("应已注册");
         // 通过指针等价性确认最新注册的是 cb2（cb1 已被覆盖）
         assert!(Arc::ptr_eq(&stored, &cb2));
+    }
+
+    // ── compute_ready_nodes 回归测试 ─────────────────────────────────────
+    // 回归背景（2026-06）：
+    //   历史 bug：`done_or_skipped` 集合只包含 Completed|Skipped，
+    //   遗漏 Failed 终止态 → 任一上游 Failed 时下游 deps 永远 > 0
+    //   → 引擎 deadlock detection 把所有 Pending 标 Skipped
+    //   → 工作流标 PartiallyCompleted
+    //   → 表现为"分析师没跑完就显示工作流完成"。
+    // 修复：把 Failed 视为"已结束"（与 Completed|Skipped 等价），
+    //       让单点失败不再冻结依赖图。
+    //
+    // 以下测试断言"Failed 不阻塞依赖图"这一不变量，确保未来不会回退。
+    use crate::workflow_engine::{
+        NodeRuntimeState, NodeStatus, Workflow, WorkflowStatus,
+    };
+    use axagent_harness::workflow_types::{
+        EdgeType, EndNode, EndNodeConfig, Position, RetryConfig, TriggerConfig,
+        TriggerNode, TriggerType, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+    };
+
+    /// 构造一个最小 Workflow，nodes/edges 由调用方决定。
+    /// 初始所有节点状态为 Pending，由调用方在测试体中调整。
+    fn make_workflow(nodes: Vec<WorkflowNode>, edges: Vec<WorkflowEdge>) -> Workflow {
+        let mut node_states = std::collections::HashMap::new();
+        for n in &nodes {
+            node_states.insert(n.base_id().to_string(), NodeRuntimeState::default());
+        }
+        Workflow {
+            id: "wf_test".into(),
+            name: "test".into(),
+            nodes,
+            edges,
+            status: WorkflowStatus::Running,
+            created_at: 0,
+            completed_at: None,
+            results: Default::default(),
+            node_states,
+            output: None,
+        }
+    }
+
+    fn trigger_node(id: &str) -> WorkflowNode {
+        WorkflowNode::Trigger(TriggerNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: id.into(),
+                description: None,
+                position: Position::default(),
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({}),
+            },
+        })
+    }
+
+    fn end_node(id: &str) -> WorkflowNode {
+        WorkflowNode::End(EndNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: id.into(),
+                description: None,
+                position: Position::default(),
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: EndNodeConfig { output_var: None },
+        })
+    }
+
+    fn edge(id: &str, source: &str, target: &str) -> WorkflowEdge {
+        WorkflowEdge {
+            id: id.into(),
+            source: source.into(),
+            source_handle: None,
+            target: target.into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        }
+    }
+
+    fn set_state(wf: &mut Workflow, id: &str, status: NodeStatus) {
+        wf.node_states.get_mut(id).unwrap().status = status;
+    }
+
+    /// 核心回归：链 A → B → C，A 失败时 B 必须 ready（否则触发"假死锁"清理）
+    #[test]
+    fn failed_upstream_does_not_freeze_downstream_chain() {
+        // A (失败) → B → C
+        let nodes = vec![trigger_node("A"), trigger_node("B"), end_node("C")];
+        let edges = vec![edge("e_ab", "A", "B"), edge("e_bc", "B", "C")];
+        let mut wf = make_workflow(nodes, edges);
+
+        set_state(&mut wf, "A", NodeStatus::Failed);
+        set_state(&mut wf, "B", NodeStatus::Pending);
+        set_state(&mut wf, "C", NodeStatus::Pending);
+
+        let ready = WorkEngine::compute_ready_nodes(&wf);
+        // 关键断言：A 已结束（Failed），B 的 deps = 0，B 应当 ready
+        assert!(
+            ready.contains(&"B".to_string()),
+            "Failed 上游不应冻结 B 的依赖图，实际 ready = {ready:?}"
+        );
+        // C 依赖 B，B 还 Pending，C 不应 ready
+        assert!(
+            !ready.contains(&"C".to_string()),
+            "C 应等 B 完成，实际 ready = {ready:?}"
+        );
+    }
+
+    /// Fan-in：M1 → Merge, M2 → Merge，M1 Failed + M2 Completed 时 Merge 应当 ready
+    #[test]
+    fn failed_in_fan_in_does_not_freeze_merge() {
+        // M1 → Merge, M2 → Merge
+        let nodes = vec![
+            trigger_node("M1"),
+            trigger_node("M2"),
+            trigger_node("Merge"),
+        ];
+        let edges = vec![edge("e_m1", "M1", "Merge"), edge("e_m2", "M2", "Merge")];
+        let mut wf = make_workflow(nodes, edges);
+
+        set_state(&mut wf, "M1", NodeStatus::Failed);
+        set_state(&mut wf, "M2", NodeStatus::Completed);
+        set_state(&mut wf, "Merge", NodeStatus::Pending);
+
+        let ready = WorkEngine::compute_ready_nodes(&wf);
+        assert!(
+            ready.contains(&"Merge".to_string()),
+            "Fan-in 中一条边 Failed 不应冻结 Merge，实际 ready = {ready:?}"
+        );
+    }
+
+    /// 混合：两条依赖边分别 Completed/Failed → 下游必须 ready
+    #[test]
+    fn mixed_completed_and_failed_sources_activate_downstream() {
+        // A → C, B → C；A Completed + B Failed → C 应当 ready
+        let nodes = vec![trigger_node("A"), trigger_node("B"), trigger_node("C")];
+        let edges = vec![edge("e_ac", "A", "C"), edge("e_bc", "B", "C")];
+        let mut wf = make_workflow(nodes, edges);
+
+        set_state(&mut wf, "A", NodeStatus::Completed);
+        set_state(&mut wf, "B", NodeStatus::Failed);
+        set_state(&mut wf, "C", NodeStatus::Pending);
+
+        let ready = WorkEngine::compute_ready_nodes(&wf);
+        assert!(
+            ready.contains(&"C".to_string()),
+            "A Completed + B Failed 时 C 应当 ready，实际 ready = {ready:?}"
+        );
+    }
+
+    /// 健全性：所有节点都 Pending 时，只 ready 那些"无入边"的源节点
+    /// （确保上面的"Failed 不冻结"不是把任何节点都错误地标 ready）
+    #[test]
+    fn all_pending_only_root_nodes_are_ready() {
+        // A → B, A → C, B → D
+        let nodes = vec![
+            trigger_node("A"),
+            trigger_node("B"),
+            trigger_node("C"),
+            trigger_node("D"),
+        ];
+        let edges = vec![
+            edge("e_ab", "A", "B"),
+            edge("e_ac", "A", "C"),
+            edge("e_bd", "B", "D"),
+        ];
+        let wf = make_workflow(nodes, edges);
+        // 全部 Pending
+        let ready = WorkEngine::compute_ready_nodes(&wf);
+        assert_eq!(
+            ready,
+            vec!["A".to_string()],
+            "全 Pending 时只有 A（无入边的源节点）应当 ready，实际 ready = {ready:?}"
+        );
+    }
+
+    // ── StepProgressEvent 实时进度回归测试 ─────────────────────────────
+    // 回归背景（2026-06）：
+    //   历史 bug：StepProgressEvent 只有 5 个字段（node_id/status/total_nodes/
+    //   completed_nodes/execution_id），且 progress_cb 只在节点开始时
+    //   发"running"事件，节点完成时不再补发。结果前端 stockAnalysisStore
+    //   的 `if (status === "completed" && output != null)` 分支永远不触发，
+    //   对话页/分析页的中间内容（分析师报告/辩论/风控）始终为空。
+    // 修复：StepProgressEvent 增加 output/error/elapsed_ms 三个 Option 字段；
+    //       engine.rs 在 Completed/Failed/Timeout 三个分支末尾补发
+    //       "completed"/"failed"/"timeout" 事件，载荷包含节点 output 或 error。
+    //
+    // 以下两个测试断言"事件结构携带 output 载荷"这一不变量，确保未来
+    // 不会有人为了"精简事件"误删 output 字段。
+    use super::StepProgressEvent;
+
+    /// 节点完成事件必须能携带 output / elapsed_ms，前端依赖 status==completed
+    /// 且 output != null 来更新分析页内容
+    #[test]
+    fn step_progress_event_completed_carries_output() {
+        let evt = StepProgressEvent {
+            node_id: "a-fundamentals".into(),
+            status: "completed".into(),
+            total_nodes: 20,
+            completed_nodes: 5,
+            execution_id: Some("exec-1".into()),
+            output: Some(serde_json::json!({"report": "营收同比增长 12%"})),
+            error: None,
+            elapsed_ms: Some(1500),
+        };
+        assert_eq!(evt.status, "completed");
+        assert!(evt.output.is_some(), "completed 事件必须携带 output");
+        assert!(evt.error.is_none(), "completed 事件的 error 应为 None");
+        assert_eq!(evt.elapsed_ms, Some(1500));
+    }
+
+    /// 节点失败事件必须能携带 error，前端用它标记 failedNodes / 展示错误
+    #[test]
+    fn step_progress_event_failed_carries_error() {
+        let evt = StepProgressEvent {
+            node_id: "a-technicals".into(),
+            status: "failed".into(),
+            total_nodes: 20,
+            completed_nodes: 5,
+            execution_id: Some("exec-1".into()),
+            output: None,
+            error: Some("LLM 调用超时".into()),
+            elapsed_ms: Some(60_000),
+        };
+        assert_eq!(evt.status, "failed");
+        assert!(evt.error.is_some(), "failed 事件必须携带 error");
+        assert!(evt.output.is_none(), "failed 事件的 output 应为 None");
     }
 }

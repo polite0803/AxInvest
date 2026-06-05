@@ -51,6 +51,15 @@ function parseWorkflowResults(results: Record<string, unknown>) {
   const analystReports: Record<string, string> = {};
   const debateRounds: Array<{ round: number; bull: string; bear: string }> = [];
   const riskAssessments: Record<string, string> = {};
+  // 修复 Bug #2: 补充 value-investor / rule-check / data-quality / raw-data
+  // 四个节点的解析分支。这四个节点类型在前端 store 已有对应字段
+  // (valueAssessments / ruleCheckResults / dataQualitySummary / rawData)，
+  // 但 parseWorkflowResults 没把它们填进去，导致 workflow-completed 后
+  // 对应字段一直为空。
+  const valueAssessments: Record<string, string> = {};
+  const ruleCheckResults: Record<string, string> = {};
+  let dataQualitySummary = "";
+  const rawData: Record<string, string> = {};
   let decision: StockDecision | null = null;
 
   for (const [stepId, raw] of Object.entries(results)) {
@@ -81,11 +90,30 @@ function parseWorkflowResults(results: Record<string, unknown>) {
         riskLevel: StockRiskLevel.MID,
         confidence: 0,
       };
+    } else if (stepId === "value-investor") {
+      // 巴菲特框架评估（与 risk-evaluator 并行，在辩论之后运行）
+      valueAssessments[stepId] = output;
+    } else if (stepId === "rule-check") {
+      ruleCheckResults[stepId] = output;
+    } else if (stepId === "data-quality") {
+      // 整个工作流只产出一条 data-quality 报告，直接覆盖即可
+      dataQualitySummary = output;
+    } else if (stepId === "raw-data") {
+      rawData[stepId] = output;
     }
   }
 
   debateRounds.sort((a, b) => a.round - b.round);
-  return { analystReports, debateRounds, riskAssessments, decision };
+  return {
+    analystReports,
+    debateRounds,
+    riskAssessments,
+    valueAssessments,
+    ruleCheckResults,
+    dataQualitySummary,
+    rawData,
+    decision,
+  };
 }
 
 // ── Store ──
@@ -608,16 +636,48 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
 /** 从节点 ID 推断当前管线阶段 */
 function inferStage(nodeId: string): number {
+  // 触发器节点（工作流入口）→ 阶段 0（数据准备）
+  if (nodeId === "trigger") { return 0; }
+  // 工具节点 t-* （t-fundamentals-data / t-news-data / t-policy-data /
+  // t-research-data / t-scoring / t-valuation / t-risk）→ 阶段 1
+  // 这些节点给 a-* 分析师提供数据，与分析师同属"数据采集与分析"阶段。
+  if (nodeId.startsWith("t-")) { return 1; }
+  // a-* 分析师节点 → 阶段 1
   if (nodeId.startsWith("a-")) { return 1; }
+  // 装饰节点 p-analysts（分析师容器）→ 阶段 1
+  if (nodeId === "p-analysts") { return 1; }
+  // 辩论相关节点 → 阶段 2
+  // - debate-bull-bear：装饰容器（容器本身立即成功，但前端希望进度能反映
+  //   用户已进入辩论阶段）
+  // - bull-r{1,2,3} / bear-r{1,2,3}：实际辩论节点（后端统一使用 bull-rN 命名）
+  // - bull-researcher / bear-researcher：早期版本使用的别名（已不再生成，
+  //   但保留兼容以便历史快照/外部测试用例不丢阶段号）
+  if (nodeId === "debate-bull-bear") { return 2; }
   if (
     nodeId === "bull-researcher" || nodeId === "bear-researcher" || nodeId.startsWith("bull-r")
     || nodeId.startsWith("bear-r")
   ) { return 2; }
-  if (nodeId.startsWith("risk-") || nodeId === "research-mgr") { return 3; }
+  // 风险评估阶段节点 → 阶段 3
+  // - value-investor：巴菲特框架（与 risk-evaluator 并行运行）
+  // - risk-agg / risk-con / risk-neu：激进/保守/中性风险评估
+  // - research-mgr：研究主管
+  // - p-risk-assess：装饰容器
+  if (
+    nodeId === "value-investor" || nodeId.startsWith("risk-") || nodeId === "research-mgr"
+    || nodeId === "p-risk-assess"
+  ) { return 3; }
+  // 决策阶段节点 → 阶段 4
   if (nodeId === "trader" || nodeId === "portfolio-mgr") { return 4; }
+  // 决策后处理节点 → 阶段 4（最大阶段，进度 100%）
   if (nodeId === "agg-risk" || nodeId === "cls-risk-level" || nodeId === "v-validate" || nodeId === "notify-result") {
-    return 4; // 决策后处理阶段
+    return 4;
   }
+  // P3 (real-nodes) 决策辅助节点：
+  // - data-quality：数据质量检查（v-validate 之后启动）→ 阶段 3
+  // - raw-data：12 个 t-* 工具节点原始数据聚合（t-risk 之后启动）→ 阶段 3
+  // - rule-check：硬性规则检查（portfolio-mgr 之后启动）→ 阶段 4
+  if (nodeId === "data-quality" || nodeId === "raw-data") { return 3; }
+  if (nodeId === "rule-check") { return 4; }
   return -1;
 }
 

@@ -7371,6 +7371,14 @@
     "risk.aggressive": "Aggressive",
     "risk.conservative": "Conservative",
     "risk.neutral": "Neutral",
+    "valueAssessment": {
+      "title": "Value Assessment",
+      "empty": "No value assessment data yet. The value-investor node runs in parallel with risk evaluators after the debate stage.",
+      "futureFields": "Additional assessment fields (reserved for future nodes)",
+      "ruleCheck": "Rule Check",
+      "dataQuality": "Data Quality",
+      "rawData": "Raw Data"
+    },
     "finalDecision": "Final Decision",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -7380,6 +7388,7 @@
     "tab.market": "Market",
     "tab.analysts": "Analysts",
     "tab.debate": "Debate",
+    "tab.value": "Value",
     "tab.risk": "Risk",
     "tab.decision": "Decision",
     "compare": "Compare",

@@ -292,7 +292,8 @@ mod tests {
 
     #[test]
     fn test_full_coverage_gets_a() {
-        let report = "趋势向上，形态良好，指标多头，支撑强劲，压力位突破。".repeat(10);
+        let report =
+            "趋势向上，形态良好，指标多头，支撑强劲，压力位突破。上涨3.5%建议买入。".repeat(10);
         let grade = check_report_quality(
             "market-analyst",
             &report,

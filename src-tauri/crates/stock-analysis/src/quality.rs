@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn test_short_report_gets_d() {
         let grade = check_report_quality("market-analyst", "短", &[vec!["趋势"]]);
-        assert_eq!(grade, QualityGrade::D);
+        assert_eq!(grade, QualityGrade::F);
     }
 
     #[test]

@@ -22,14 +22,12 @@
     "prompts": "القوالب",
     "link": "الرابط",
     "devTools": "أدوات المطور",
-    "wiki": "Wiki",
-    "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "wiki": "ويكي",
+    "app": "AxAgent"
   },
   "sidebar": {
     "sectionWork": "العمل",
     "sectionTools": "الأدوات",
-    "sectionInvest": "استثمار",
     "sectionInfrastructure": "البنية التحتية",
     "sectionPlugins": "الإضافات",
     "expand": "توسيع الشريط الجانبي",
@@ -336,7 +334,7 @@
       "dagVisualization": "تصور DAG",
       "dagHint": "الصق كود Mermaid هذا في عارض Mermaid لتصور DAG.",
       "listView": "قائمة",
-      "dagView": "DAG",
+      "dagView": "عرض DAG",
       "viewOutput": "الإخراج النهائي",
       "outputCopied": "تم نسخ الإخراج إلى الحافظة",
       "stepStatus": "الحالة:",
@@ -699,7 +697,10 @@
       "cancelled": "ملغى",
       "cancelFailed": "فشل الإلغاء",
       "cancel": "إلغاء",
-      "noSteps": "لا توجد خطوات"
+      "noSteps": "لا توجد خطوات",
+      "chart": {
+        "renderError": "خطأ في عرض المخطط"
+      }
     },
     "modelRoutingConfig": {
       "title": "تكوين توجيه النموذج",
@@ -870,7 +871,9 @@
         "copyFailed": "فشل النسخ",
         "joinFailed": "فشل الانضمام",
         "maxParticipants": "الحد الأقصى للمشاركين",
-        "joinSuccess": "تم الانضمام بنجاح"
+        "joinSuccess": "تم الانضمام بنجاح",
+        "createFailed": "فشل إنشاء المشاركة",
+        "updateFailed": "فشل تحديث المشاركة"
       },
       "sharedResources": "الموارد المشتركة",
       "title": "التعاون"
@@ -1109,7 +1112,22 @@
     },
     "proactiveInsights": "رؤى استباقية وتذكيرات",
     "steerSent": "تم إرسال تعليمات التوجيه",
-    "steerError": "فشل إرسال تعليمات التوجيه"
+    "steerError": "فشل إرسال تعليمات التوجيه",
+    "connector": {
+      "add": "إضافة موصل",
+      "custom": "موصل مخصص",
+      "goConfig": "الانتقال إلى الإعدادات →",
+      "noServers": "الرجاء إضافة أو تفعيل الموصلات أولاً",
+      "title": "الموصل"
+    },
+    "error": "خطأ في الدردشة",
+    "loadError": "فشل التحميل",
+    "mode": {
+      "action": "إجراء",
+      "ask": "سؤال",
+      "plan": "خطة",
+      "title": "تبديل الوضع"
+    }
   },
   "gateway": {
     "title": "البوابة",
@@ -1245,7 +1263,8 @@
     "connectedTools": "الأدوات المتصلة",
     "tab": {
       "monitor": "مراقب"
-    }
+    },
+    "cacheHitTokens": "رموز إصابة ذاكرة التخزين المؤقت"
   },
   "settings": {
     "title": "الإعدادات",
@@ -1265,7 +1284,6 @@
       "resetAll": "إعادة تعيين الكل",
       "saved": "تم الحفظ"
     },
-    "stockAnalysis": "تحليل الأسهم",
     "skillsHub": {
       "title": "مركز المهارات",
       "description": "الوصف",
@@ -2529,6 +2547,10 @@
     },
     "notificationCenter": {
       "title": "الإشعارات"
+    },
+    "provider": {
+      "deepseekBalance": "رصيد DeepSeek",
+      "noValidKey": "لا مفتاح صالح"
     }
   },
   "backup": {
@@ -2767,9 +2789,7 @@
     "conflictApp1": "Feishu/WeChat/WeChat للمؤسسات/DingTalk",
     "conflictApp2": "QQ/WeChat",
     "conflictApp3": "WeChat (Windows)",
-    "conflictError": "الاختصار قيد الاستخدام بالفعل، يرجى تجربة مفاتيح أخرى",
-    "invalidFormat": "تنسيق اختصار غير صالح",
-    "unsupportedCombo": "النظام لا يدعم مجموعة الاختصارات هذه"
+    "conflictError": "الاختصار قيد الاستخدام بالفعل، يرجى تجربة مفاتيح أخرى"
   },
   "tray": {
     "show": "إظهار",
@@ -2864,7 +2884,9 @@
     "imageUrl": "رابط الصورة",
     "emoji": "رمز تعبيري",
     "urlPlaceholder": "أدخل رابط الصورة",
-    "profileTab": "الملف الشخصي"
+    "profileTab": "الملف الشخصي",
+    "prefKey": "مفتاح التفضيل",
+    "prefValue": "قيمة التفضيل"
   },
   "files": {
     "images": "صور",
@@ -3279,7 +3301,7 @@
     "configureBackends": "تكوين الخلفيات...",
     "noSessions": "لا جلسات طرفية",
     "errorsCount": "{{count}} خطأ(أخطاء)",
-    "ok": "OK",
+    "ok": "موافق",
     "dockerConnectPending": "اتصال Docker قيد الانتظار",
     "sshConnectPending": "اتصال SSH قيد الانتظار",
     "newTerminal": "طرفية جديدة",
@@ -3501,7 +3523,7 @@
       "details": "التفاصيل",
       "duration": "المدة",
       "error": "خطأ",
-      "id": "ID",
+      "id": "المعرف",
       "ingest": "استيعاب",
       "lint": "فحص",
       "noOperations": "لا توجد عمليات",
@@ -3560,14 +3582,7 @@
     "searchPlaceholder": "البحث في الويكي...",
     "selectWiki": "اختيار ويكي",
     "selectWikiPrompt": "يرجى تحديد ويكي",
-    "source": {
-      "chunks": "أجزاء",
-      "deleteNotImplemented": "Delete not implemented",
-      "path": "المسار",
-      "status": "الحالة",
-      "title": "Source",
-      "type": "النوع"
-    },
+    "source": "المصدر",
     "sources": "المصادر",
     "sync": {
       "byWiki": "حسب الويكي",
@@ -3684,7 +3699,23 @@
     "quickCapture": "Quick Capture",
     "refresh": "تحديث",
     "startImport": "Start Import",
-    "vaultPath": "Vault Path"
+    "vaultPath": "Vault Path",
+    "ingestSource": {
+      "chunks": "القطع",
+      "deleteNotImplemented": "الحذف غير مطبق بعد",
+      "path": "المسار",
+      "status": "الحالة",
+      "title": "العنوان",
+      "type": "النوع"
+    },
+    "wikiForm": {
+      "description": "الوصف",
+      "name": "الاسم",
+      "rootPath": "المسار الجذر"
+    },
+    "wikiMeta": {
+      "rootPath": "المسار الجذر"
+    }
   },
   "quickbar": {
     "title": "الشريط السريع",
@@ -3821,37 +3852,57 @@
       "explanation": "شرح",
       "replaceConfirmTitle": "تأكيد الاستبدال",
       "replaceConfirmContent": "تحتوي اللوحة الحالية على {{nodes}} عقد و {{edges}} حواف. سيؤدي الإنشاء إلى استبدالها جميعًا. متابعة؟",
-      "actionGenerateWorkflow": "Generate Workflow",
-      "actionAddNodes": "Add Node(s)",
-      "actionModifyNode": "Update Node",
-      "actionDeleteNodes": "Delete Node(s)",
-      "actionAddEdge": "Add Edge",
-      "actionUpdateEdge": "Update Edge",
-      "actionDeleteEdge": "Delete Edge",
-      "actionOptimizePrompt": "Optimize Prompt",
-      "actionApply": "Apply",
-      "actionApplyAll": "Review {{count}} changes",
+      "actionGenerateWorkflow": "إنشاء سير العمل",
+      "actionAddNodes": "إضافة عقد",
+      "actionModifyNode": "تحديث العقدة",
+      "actionDeleteNodes": "حذف عقد",
+      "actionAddEdge": "إضافة حافة",
+      "actionUpdateEdge": "تحديث الحافة",
+      "actionDeleteEdge": "حذف حافة",
+      "actionOptimizePrompt": "تحسين الموجّه",
+      "actionApply": "تطبيق",
+      "actionApplyAll": "مراجعة {{count}} تغييرات",
       "diffPreview": {
-        "title": "AI Edit Preview",
-        "subtitle": "Please review these {{count}} changes before applying to your workflow",
-        "before": "Before",
-        "after": "After",
-        "apply": "Apply this",
-        "applyAll": "Apply All",
-        "cancel": "Cancel",
-        "applied": "Applied",
-        "appliedHint": "Applied {{count}} / {{total}} in this session",
-        "empty": "No changes to preview",
-        "promptLength": "Prompt length: {{from}} → {{to}} chars",
-        "noBefore": "(new item, no prior content)",
-        "noAfter": "(deletion, no new content)",
-        "noChanges": "No field changes",
-        "applyFailed": "Apply failed",
-        "applyAllFailed": "Apply All failed",
-        "rollbackBatch": "Rollback Batch",
-        "rollbackSuccess": "Batch rolled back",
-        "rollbackTip": "Undo the entire batch of AI changes"
-      }
+        "title": "معاينة تعديل الذكاء",
+        "subtitle": "يرجى مراجعة هذه التغييرات البالغ عددها {{count}} قبل تطبيقها",
+        "before": "قبل",
+        "after": "بعد",
+        "apply": "تطبيق هذا",
+        "applyAll": "تطبيق الكل",
+        "cancel": "إلغاء",
+        "applied": "تم التطبيق",
+        "appliedHint": "تم تطبيق {{count}} / {{total}} في هذه الجلسة",
+        "empty": "لا تغييرات للمعاينة",
+        "promptLength": "طول الموجّه: {{from}} → {{to}} حرف",
+        "noBefore": "(عنصر جديد، لا يوجد محتوى سابق)",
+        "noAfter": "(محذوف، لا يوجد محتوى جديد)",
+        "noChanges": "لا تغييرات في الحقول",
+        "applyFailed": "فشل التطبيق",
+        "applyAllFailed": "فشل تطبيق الكل",
+        "rollbackBatch": "التراجع عن الدفعة",
+        "rollbackSuccess": "تم التراجع عن الدفعة",
+        "rollbackTip": "التراجع عن كامل دفعة تغييرات الذكاء الاصطناعي",
+        "deleted": "— محذوف —",
+        "deletedCount": "— حُذف {{count}} —",
+        "edgeNotFound": "الحافة غير موجودة",
+        "newNodes": "{{count}} عقد جديدة",
+        "nodeNotFound": "العقدة غير موجودة",
+        "nodesEdgesLabel": "{{nodes}} عقدة / {{edges}} حافة"
+      },
+      "applyToNode": "تطبيق على العقدة",
+      "chatMode": "وضع الدردشة",
+      "chatPlaceholder": "اكتب رسالة…",
+      "chatWelcome": "مرحباً، أنا مساعدك الذكي.",
+      "chatWelcomeHint": "اسألني عن سير العمل أو إعدادات العقد.",
+      "dragCanvasToAdd": "اسحب إلى اللوحة للإضافة",
+      "dragHintUpdated": "تم تحديث اللوحة من الموجِّه",
+      "fillFromSelectedNode": "تعبئة من العقدة المحددة",
+      "generateMergeBtn": "إنشاء الدمج",
+      "mergeMode": "وضع الدمج",
+      "promptAppliedToNode": "طُبِّق الموجِّه على العقدة",
+      "replaceMode": "وضع الاستبدال",
+      "retry": "إعادة",
+      "toolsMode": "وضع الأدوات"
     },
     "previewInDevelopment": "ميزة المعاينة قيد التطوير",
     "publishInDevelopment": "ميزة النشر قيد التطوير",
@@ -3869,7 +3920,7 @@
       "copy": "نسخ",
       "uploadJsonFile": "رفع ملف JSON",
       "dragOrClickUpload": "انقر أو اسحب ملفًا هنا للتحميل",
-      "or": "or",
+      "or": "أو",
       "pasteJsonData": "لصق بيانات JSON",
       "pasteJsonPlaceholder": "لصق بيانات JSON للقالب...",
       "importTemplate": "استيراد القالب",
@@ -3946,7 +3997,10 @@
       "loadThisVersion": "تحميل هذا الإصدار",
       "currentVersion": "الإصدار الحالي",
       "version": "الإصدار {{version}}",
-      "loading": "جاري تحميل الإصدار..."
+      "loading": "جاري تحميل الإصدار...",
+      "compare": "مقارنة",
+      "compareVersions": "مقارنة الإصدارات",
+      "noChanges": "لا تغييرات"
     },
     "versionHistoryLoadFailed": "فشل تحميل سجل الإصدارات",
     "versionLoaded": "الإصدار{{version}} loaded",
@@ -4025,7 +4079,7 @@
       "selectContextSources": "تحديد مصادر السياق...",
       "prompt": "موجه",
       "promptPlaceholder": "أدخل مطالبتك...",
-      "temperatureHint": "0: Deterministic ↑ | 2: Random ↑",
+      "temperatureHint": "0: حتمية ↑ | 2: عشوائية ↑",
       "loopType": "نوع الحلقة",
       "loopForEach": "🔁 ForEach",
       "loopWhile": "⏳ While",
@@ -4175,8 +4229,8 @@
       "clickToAddMapping": "انقر على \"إضافة\" لإنشاء تعيين الإدخال",
       "language": "اللغة",
       "codeInputOutputHint": "(الإدخال: input، الإخراج: return)",
-      "defaultCodeJsComment": "// Input: input\n// Return value will be stored in output_var",
-      "defaultCodePythonComment": "# Input: input\n# Return value will be stored in output_var",
+      "defaultCodeJsComment": "// Input: input\n// يتم تخزين القيمة المُعادة في output_var",
+      "defaultCodePythonComment": "# Input: input\n# يتم تخزين القيمة المُعادة في output_var",
       "codeInputParams": "معلمات الإدخال: input",
       "codeReturnHint": "سيتم تخزين القيمة المرجعة في output_var",
       "roleCoordinator": "",
@@ -4202,26 +4256,67 @@
       "aggregationRace": "سباق",
       "aggregationMajority": "الأغلبية",
       "aggregationHint": "كيفية تجميع النتائج من فروع متوازية متعددة",
-      "url": "url",
-      "method": "method",
-      "timeout": "timeout",
-      "bodyType": "bodyType",
-      "body": "body",
-      "headers": "headers",
-      "addHeader": "addHeader",
-      "headerKey": "headerKey",
-      "headerValue": "headerValue",
-      "selectTemplate": "Select Template",
-      "searchTemplate": "Search template...",
-      "noTemplates": "No templates found",
-      "ragSourceIdsCount": "RAG Sources ({{count}})",
-      "ragSourceIdsPlaceholder": "Enter or select knowledge source IDs...",
-      "ragSourceIdsHint": "Format: knowledge:<kb_id>, memory:<ns_id>, wiki:<wiki_id>",
-      "modelRole": "Model Role",
-      "modelRolePlaceholder": "Auto (use model field)",
-      "modelRoleQuickThink": "⚡ Quick Think",
-      "modelRoleDeepThink": "🧠 Deep Think",
-      "modelRoleHint": "Preset role overrides model when set; lower priority than explicit model field."
+      "url": "URL",
+      "method": "الطريقة",
+      "timeout": "المهلة",
+      "bodyType": "نوع الجسم",
+      "body": "الجسم",
+      "headers": "الترويسات",
+      "addHeader": "إضافة ترويسة",
+      "headerKey": "مفتاح الترويسة",
+      "headerValue": "قيمة الترويسة",
+      "selectTemplate": "اختر قالبًا",
+      "searchTemplate": "البحث عن قالب…",
+      "noTemplates": "لا توجد قوالب",
+      "ragSourceIdsCount": "مصادر RAG ({{count}})",
+      "ragSourceIdsPlaceholder": "أدخل أو اختر معرفات مصادر المعرفة…",
+      "ragSourceIdsHint": "الصيغة: knowledge:<kb_id>, memory:<ns_id>, wiki:<wiki_id>",
+      "modelRole": "دور النموذج",
+      "modelRolePlaceholder": "تلقائي (استخدم حقل model)",
+      "modelRoleQuickThink": "⚡ تفكير سريع",
+      "modelRoleDeepThink": "🧠 تفكير عميق",
+      "modelRoleHint": "الدور المحدد مسبقًا يتجاوز النموذج، لكن أولويته أقل من حقل model الصريح.",
+      "addCase": "إضافة حالة",
+      "aggregationAny": "أي نتيجة",
+      "aiGenerate": "توليد بالذكاء",
+      "autoInputFromParent": "إدخال تلقائي من الأصل",
+      "autoInputFromParentHint": "عند التفعيل، تُمرَّر مخرجات الأصل تلقائياً كمدخلات للفرع.",
+      "autoInputsFromBranches": "مدخلات تلقائية من الفروع",
+      "autoInputsFromBranchesHint": "عند التفعيل، تُمرَّر مخرجات الفروع تلقائياً كمدخلات للفرع.",
+      "availableTools": "الأدوات المتاحة",
+      "cases": "الحالات",
+      "codeTemplates": "قوالب الكود",
+      "connectInputsManually": "ربط المدخلات يدوياً",
+      "connection": "مصدر البيانات",
+      "defaultConnection": "مصدر البيانات الافتراضي",
+      "editExpertPrompt": "تحرير موجِّه الخبير",
+      "editRolePrompt": "تحرير موجِّه الدور",
+      "emailToPlaceholder": "user@example.com",
+      "hideTools": "إخفاء الأدوات",
+      "inputVarPlaceholder": "node_id.field",
+      "llmRouting": "توجيه LLM",
+      "matchMode": "وضع المطابقة",
+      "maxDelayMs": "أقصى تأخير (مللي)",
+      "mergeAny": "دمج أيٍّ",
+      "mergeMajority": "دمج بالأغلبية",
+      "mergeRace": "دمج سريع",
+      "noToolsAvailable": "لا أدوات متاحة",
+      "promptSaveFailed": "فشل حفظ الموجِّه",
+      "promptSaved": "تم حفظ الموجِّه",
+      "resetTimeoutHint": "إعادة ضبط المهلة",
+      "retryEnabled": "تفعيل إعادة المحاولة",
+      "routingModel": "نموذج التوجيه",
+      "routingModelPlaceholder": "اختر نموذج التوجيه",
+      "routingPrompt": "موجِّه التوجيه",
+      "routingPromptPlaceholder": "صف منطق التوجيه",
+      "showTools": "إظهار الأدوات",
+      "subject": "الموضوع",
+      "switchInputVarPlaceholder": "node_id.output_field",
+      "switchLabelPlaceholder": "label",
+      "switchValuePlaceholder": "value",
+      "to": "إلى",
+      "urlPlaceholder": "https://api.example.com/data",
+      "webhookUrlPlaceholder": "https://hook.example.com/..."
     },
     "debug": {
       "totalDuration": "المدة الإجمالية",
@@ -4247,7 +4342,60 @@
       "labelType": "النوع",
       "labelError": "خطأ",
       "labelInput": "إدخال",
-      "labelOutput": "إخراج"
+      "labelOutput": "إخراج",
+      "allClear": "كل شيء سليم",
+      "breakpoints": "نقاط التوقف",
+      "breakpointsPanel": "لوحة نقاط التوقف",
+      "cancel": "إلغاء",
+      "clickToValidate": "انقر للتحقق",
+      "colIssues": "المشكلات",
+      "colNode": "العقدة",
+      "colStatus": "الحالة",
+      "colTime": "الوقت",
+      "colType": "النوع",
+      "continue": "متابعة",
+      "cyclesDetected": "تم اكتشاف دورات",
+      "deadEnd": "نهاية مسدودة",
+      "error": "خطأ",
+      "errors": "أخطاء",
+      "execTime": "وقت التنفيذ",
+      "executionHistory": "سجل التنفيذ",
+      "input": "الإدخال",
+      "issuesFound": "تم العثور على مشكلات",
+      "noBreakpoints": "لا نقاط توقف",
+      "noHistory": "لا سجل",
+      "noPrompt": "لا موجِّه",
+      "noRuntimeData": "لا بيانات تشغيل",
+      "noVariables": "لا متغيرات",
+      "nodeDiagnostics": "تشخيص العقدة",
+      "nodeRecords": "سجلات العقد",
+      "nodesExecuted": "العقد المنفَّذة",
+      "orphan": "يتيم",
+      "output": "الإخراج",
+      "pause": "إيقاف مؤقت",
+      "resume": "استئناف",
+      "resumeBreakpoint": "استئناف حتى نقطة التوقف",
+      "runFullCheck": "تشغيل الفحص الكامل",
+      "runValidation": "تشغيل التحقق",
+      "running": "قيد التشغيل",
+      "runtimeTrace": "تتبع التشغيل",
+      "startDebug": "بدء التصحيح",
+      "staticCheck": "فحص ثابت",
+      "staticDebugHint": "انقر على عقدة للتصحيح",
+      "step": "خطوة",
+      "stepBreakpoint": "خطوة عند نقطة التوقف",
+      "structuralValidation": "التحقق البنيوي",
+      "subExecutionDetail": "تفاصيل التنفيذ الفرعي",
+      "topoAnalysis": "تحليل البنية",
+      "topoHealthy": "البنية سليمة",
+      "totalEdges": "مجموع الحواف",
+      "totalNodes": "مجموع العقد",
+      "unreachableNodesCount": "عقد غير قابلة للوصول",
+      "view": "عرض",
+      "viewDetail": "عرض التفاصيل",
+      "viewSubExecution": "عرض التنفيذ الفرعي",
+      "waitingForNodes": "بانتظار العقد",
+      "warnings": "تحذيرات"
     },
     "applySemanticCheck": "تطبيق",
     "applyUpgrade": "تطبيق الترقية",
@@ -4308,17 +4456,19 @@
       "end": "نهاية",
       "tool": "أداة",
       "code": "كود",
-      "httpRequest": "HTTP Request",
-      "notification": "Notification",
-      "approval": "Approval",
-      "fileOperation": "File Operation",
-      "dataTransformer": "Data Transformer",
-      "webhookSend": "Webhook Send",
-      "logging": "Logging",
-      "llmClassifier": "LLM Classifier",
-      "aggregator": "Aggregator",
-      "email": "Email",
-      "debate": "Debate"
+      "httpRequest": "طلب HTTP",
+      "notification": "إشعار",
+      "approval": "موافقة",
+      "fileOperation": "عملية ملف",
+      "dataTransformer": "تحويل البيانات",
+      "webhookSend": "إرسال Webhook",
+      "logging": "سجل",
+      "llmClassifier": "مصنّف LLM",
+      "aggregator": "مجمّع",
+      "email": "بريد إلكتروني",
+      "debate": "نقاش",
+      "databaseQuery": "استعلام قاعدة بيانات",
+      "switch": "محوّل"
     },
     "templateList": {
       "deleted": "تم حذف القالب",
@@ -4390,7 +4540,7 @@
       "iconDocument": "📄 مستند",
       "iconGitBranch": "🔀 فرع Git",
       "iconLayers": "📚 طبقات",
-      "iconZap": "⚡ Zap",
+      "iconZap": "⚡ برق",
       "label": "التسمية",
       "name": "الاسم",
       "nodeType": "نوع العقدة",
@@ -4400,7 +4550,7 @@
       "selectNodeToEdit": "اختر عقدة لتحرير الخصائص",
       "settings": "الإعدادات",
       "tagAgent": "وكيل",
-      "tagAi": "AI",
+      "tagAi": "ذكاء اصطناعي",
       "tagAutomation": "أتمتة",
       "tagChatbot": "روبوت محادثة",
       "tagDataProcessing": "معالجة البيانات",
@@ -4496,8 +4646,10 @@
       "notSelected": "غير محدد",
       "title": "سير عمل فرعي",
       "async": "غير متزامن",
-      "expand": "Expand",
-      "collapse": "Collapse"
+      "expand": "توسيع",
+      "collapse": "طي",
+      "inputCount": "المدخلات",
+      "outputCount": "المخرجات"
     },
     "vectorRetrieveNode": {
       "notSelected": "غير محدد",
@@ -4512,7 +4664,8 @@
       "title": "حلقة",
       "maxIterations": "الحد الأقصى للتكرار",
       "continueOnError": "المتابعة عند الخطأ",
-      "steps": "{{count}} خطوات"
+      "steps": "{{count}} خطوات",
+      "notConfigured": "عقدة الحلقة غير مكوَّنة"
     },
     "mergeNode": {
       "all": "الكل",
@@ -4520,13 +4673,13 @@
       "last": "الأخير",
       "title": "دمج",
       "inputCount": "{{count}} مدخلات",
-      "any": "Any",
-      "race": "Race",
-      "majority": "Majority",
-      "inputs": "inputs",
-      "waitAll": "Wait all",
-      "waitAny": "Any complete",
-      "autoInputs": "Auto-receive branch outputs"
+      "any": "أي",
+      "race": "سباق",
+      "majority": "الأغلبية",
+      "inputs": "عدد المدخلات",
+      "waitAll": "انتظار الكل",
+      "waitAny": "أي منتهي",
+      "autoInputs": "استلام تلقائي لمخرجات الفروع"
     },
     "parallelNode": {
       "title": "متوازي",
@@ -4537,9 +4690,11 @@
       "clickToAdd": "انقر لإضافة فرع",
       "expand": "توسيع",
       "collapse": "طي",
-      "race": "Race",
-      "branches": "branches",
-      "autoInput": "Auto-receive parent input"
+      "race": "سباق",
+      "branches": "عدد الفروع",
+      "autoInput": "مدخل تلقائي من الأصل",
+      "waitAll": "انتظار الكل",
+      "waitAny": "انتظار أيٍّ"
     },
     "toolNode": {
       "notSelected": "غير محدد",
@@ -4562,7 +4717,8 @@
       "second": "ثانية",
       "minutes": "دقائق",
       "until": "حتى",
-      "title": "تأخير"
+      "title": "تأخير",
+      "notConfigured": "عقدة التأخير غير مكوَّنة"
     },
     "endNode": {
       "title": "نهاية"
@@ -4576,7 +4732,8 @@
       "continue": "متابعة",
       "title": "تحقق",
       "assertionCount": "{{count}} تأكيدات",
-      "failStrategy": "استراتيجية الفشل"
+      "failStrategy": "استراتيجية الفشل",
+      "rules": "قواعد التحقق"
     },
     "shortcuts": {
       "title": "اختصارات",
@@ -4617,7 +4774,7 @@
         "suggest": "اقتراح",
         "generate": "توليد",
         "rewrite": "إعادة كتابة",
-        "contextComplete": "Context Complete"
+        "contextComplete": "إكمال السياق"
       },
       "tooltip": "تحسين بالذكاء الاصطناعي",
       "noProvider": "لا مزود ذكاء اصطناعي",
@@ -4625,268 +4782,305 @@
       "optimizing": "جارٍ التحسين",
       "generating": "جارٍ التوليد",
       "applied": "تم تطبيق الاقتراح",
-      "contextCompleteApplied": "Context completion applied"
-    },
-    "diagnostic": {
-      "title": "Workflow Diagnostic",
-      "run": "Run Diagnostic",
-      "tooltip": "Scan structure, config, prompts and variable references",
-      "loading": "Diagnosing...",
-      "empty": "Workflow is empty. Add nodes to start diagnosis.",
-      "allGood": "Workflow looks good. No issues found.",
-      "summary": {
-        "title": "Diagnostic Summary",
-        "error": "Errors",
-        "warning": "Warnings",
-        "info": "Info",
-        "total": "{{count}} issue(s)"
+      "contextCompleteApplied": "تم تطبيق إكمال السياق",
+      "dbQuery": {
+        "sqlHint": "تلميح: أدخل SQL وسيقوم الذكاء الاصطناعي بالإكمال."
       },
-      "severity": {
-        "error": "Error",
-        "warning": "Warning",
-        "info": "Info"
+      "loop": {
+        "continueHint": "حدد شرط استمرار الحلقة، مثال: `index < 10`."
       },
-      "category": {
-        "structure": "Structure",
-        "configuration": "Configuration",
-        "prompt": "Prompt",
-        "reference": "Reference",
-        "best_practice": "Best Practice",
-        "prompt_quality": "Prompt Quality",
-        "performance": "Performance",
-        "cost": "Cost",
-        "security": "Security"
+      "parallel": {
+        "branchesHint": "صف مدخلات ومخرجات الفروع المتوازية."
       },
-      "fix": {
-        "apply": "Auto Fix",
-        "applied": "Fixed",
-        "failed": "Fix failed"
+      "subWorkflow": {
+        "needPick": "اختر سير عمل موجوداً أو صف واحداً جديداً.",
+        "parseFailed": "فشل التحليل، تحقق من الوصف."
       },
-      "jump": "Locate Node",
-      "issues": {
-        "duplicate_node_id": {
-          "title": "Duplicate Node ID",
-          "message": "Node ID \"{{id}}\" appears multiple times, which may cause routing issues."
-        },
-        "orphan_node": {
-          "title": "Orphan Node",
-          "message": "Node \"{{label}}\" has neither incoming nor outgoing edges."
-        },
-        "unreachable_from_trigger": {
-          "title": "Node Unreachable from Trigger",
-          "message": "Node \"{{label}}\" has no path from any trigger."
-        },
-        "dangling_edge": {
-          "title": "Dangling Edge",
-          "message": "Edge \"{{id}}\" references a missing source or target node."
-        },
-        "llm_prompt_empty": {
-          "title": "Empty LLM Prompt",
-          "message": "Node \"{{label}}\" has an empty LLM.prompt."
-        },
-        "llm_prompt_short": {
-          "title": "LLM Prompt Too Short",
-          "message": "Node \"{{label}}\" LLM.prompt is only {{len}} characters long."
-        },
-        "agent_prompt_empty": {
-          "title": "Empty Agent System Prompt",
-          "message": "Node \"{{label}}\" has an empty Agent.system_prompt."
-        },
-        "agent_prompt_trivial": {
-          "title": "Agent System Prompt Too Simple",
-          "message": "Node \"{{label}}\" system_prompt is only {{len}} characters."
-        },
-        "classifier_prompt_empty": {
-          "title": "Empty Classifier Prompt",
-          "message": "Node \"{{label}}\" has an empty LlmClassifier.prompt."
-        },
-        "classifier_prompt_trivial": {
-          "title": "Classifier Prompt Too Simple",
-          "message": "Node \"{{label}}\" classifier prompt is only {{len}} characters."
-        },
-        "classifier_categories_empty": {
-          "title": "No Classifier Categories",
-          "message": "Node \"{{label}}\" categories list is empty."
-        },
-        "http_url_empty": {
-          "title": "Empty HTTP URL",
-          "message": "Node \"{{label}}\" HttpRequest.url is empty."
-        },
-        "webhook_url_empty": {
-          "title": "Empty Webhook URL",
-          "message": "Node \"{{label}}\" WebhookSend.url is empty."
-        },
-        "email_to_empty": {
-          "title": "Empty Email Recipients",
-          "message": "Node \"{{label}}\" Email.to is empty."
-        },
-        "email_body_empty": {
-          "title": "Empty Email Body",
-          "message": "Node \"{{label}}\" Email.body is empty."
-        },
-        "validation_assertions_empty": {
-          "title": "Empty Validation Assertions",
-          "message": "Node \"{{label}}\" assertions list is empty."
-        },
-        "code_body_empty": {
-          "title": "Empty Code Node Body",
-          "message": "Node \"{{label}}\" Code.code is empty."
-        },
-        "code_output_var_empty": {
-          "title": "Code Node Missing Output Variable",
-          "message": "Node \"{{label}}\" output_var is empty; downstream nodes cannot reference its result."
-        },
-        "tool_name_empty": {
-          "title": "Tool Node Missing Tool",
-          "message": "Node \"{{label}}\" tool_name is empty."
-        },
-        "subworkflow_id_empty": {
-          "title": "Empty SubWorkflow ID",
-          "message": "Node \"{{label}}\" SubWorkflow.sub_workflow_id is empty."
-        },
-        "unknown_var_reference": {
-          "title": "Undeclared Variable Reference",
-          "message": "Node \"{{label}}\" references ${ {{var}} }, but no node declares this as output_var."
-        },
-        "no_timeout": {
-          "title": "No Timeout Configured",
-          "message": "Node \"{{label}}\" has no timeout, long-running tasks may block the workflow."
-        },
-        "no_retry": {
-          "title": "No Retry Configured",
-          "message": "Node \"{{label}}\" has no retry policy; transient failures will propagate."
-        },
-        "parallel_no_merge": {
-          "title": "Parallel Without Merge",
-          "message": "Parallel node \"{{label}}\" branches should converge into a Merge node."
-        },
-        "no_trigger": {
-          "title": "No Trigger Node",
-          "message": "Workflow has no trigger node. Add a Trigger to define the entry point."
-        },
-        "no_end": {
-          "title": "No End Node",
-          "message": "Workflow has no end node. Consider adding an End node to mark completion."
-        },
-        "agent_empty_prompt": {
-          "title": "Empty Agent System Prompt",
-          "message": "Agent node has an empty system_prompt. Define a clear role and instructions."
-        },
-        "agent_short_prompt": {
-          "title": "Agent System Prompt Too Short",
-          "message": "Agent system_prompt is under 30 characters. Add role definition and output constraints."
-        },
-        "agent_no_max_tokens": {
-          "title": "Agent Missing max_tokens",
-          "message": "Agent node has no max_tokens set. This may lead to unbounded token usage."
-        },
-        "agent_no_max_tool_rounds": {
-          "title": "Agent Missing max_tool_rounds",
-          "message": "Agent with tools has no max_tool_rounds set. Tool loops may run indefinitely."
-        },
-        "llm_empty_prompt": {
-          "title": "Empty LLM Prompt",
-          "message": "LLM node has an empty prompt. Provide a clear instruction."
-        },
-        "llm_no_max_tokens": {
-          "title": "LLM Missing max_tokens",
-          "message": "LLM node has no max_tokens set. This may lead to unbounded token usage."
-        },
-        "http_no_timeout": {
-          "title": "HTTP Request No Timeout",
-          "message": "HttpRequest node has no timeout configured. Long-running requests may block the workflow."
-        },
-        "http_no_retry": {
-          "title": "HTTP Request No Retry",
-          "message": "HttpRequest node has no retry policy. Transient failures will propagate."
-        },
-        "db_no_timeout": {
-          "title": "Database Query No Timeout",
-          "message": "DatabaseQuery node has no timeout configured. Slow queries may block the workflow."
-        },
-        "loop_no_max_iter": {
-          "title": "Loop No Max Iterations",
-          "message": "Loop node has no max_iterations set. Infinite loops may occur."
-        },
-        "loop_no_condition": {
-          "title": "Loop No Continue Condition",
-          "message": "Loop node has no continue_condition defined. The loop may never terminate."
-        },
-        "doc_no_parser_type": {
-          "title": "Document Parser No Type",
-          "message": "DocumentParser node has no parser_type specified."
-        },
-        "insecure_http_url": {
-          "title": "Insecure HTTP URL",
-          "message": "URL uses plain HTTP instead of HTTPS. Data may be transmitted unencrypted."
-        },
-        "insecure_notification_url": {
-          "title": "Insecure Notification Webhook URL",
-          "message": "Notification webhook URL uses plain HTTP. Webhook payloads may be intercepted."
-        },
-        "approval_no_approver": {
-          "title": "Approval No Approver",
-          "message": "Approval node has no approver configured. The workflow will stall at this node."
-        },
-        "vector_no_threshold": {
-          "title": "Vector Retrieve No Similarity Threshold",
-          "message": "VectorRetrieve node has no similarity_threshold. Low-quality matches may be returned."
-        },
-        "vector_high_top_k": {
-          "title": "Vector Retrieve High top_k",
-          "message": "VectorRetrieve top_k exceeds 20. This increases cost and may reduce relevance."
-        },
-        "condition_single_exit": {
-          "title": "Condition Single Exit",
-          "message": "Condition node has fewer than 2 downstream branches. Consider adding both true/false paths."
-        },
-        "classifier_few_cases": {
-          "title": "Classifier Too Few Cases",
-          "message": "LlmClassifier has fewer than 2 classification cases."
-        },
-        "validation_no_rules": {
-          "title": "Validation No Rules",
-          "message": "Validation node has no rules defined. It will always pass."
-        },
-        "edge_dangling_source": {
-          "title": "Dangling Edge Source",
-          "message": "Edge references a source node that no longer exists."
-        },
-        "edge_dangling_target": {
-          "title": "Dangling Edge Target",
-          "message": "Edge references a target node that no longer exists."
-        },
-        "debate_no_debaters": {
-          "title": "Debate No Debaters",
-          "message": "Debate node has no debater agents. Add at least 2 debaters for a meaningful debate."
-        },
-        "debate_single_debater": {
-          "title": "Debate Single Debater",
-          "message": "Debate node has only 1 debater. A debate requires at least 2 opposing sides."
-        },
-        "debate_dangling_step": {
-          "title": "Debate Dangling Debater Reference",
-          "message": "Debate node references a debater step that no longer exists. Remove the stale reference."
-        }
+      "switch": {
+        "casesHint": "اذكر كل الحالات وشروط تشغيلها."
+      },
+      "trigger": {
+        "cronHint": "تعبير cron قياسي، مثال: `0 9 * * *`."
       }
     },
-    "batchEdit": {
-      "title": "Batch Edit",
-      "noChange": "No change",
-      "apply": "Apply to {count} nodes"
+    "diagnostic": {
+      "title": "تشخيص سير العمل",
+      "run": "تشغيل التشخيص",
+      "tooltip": "يفحص البنية والإعداد والموجّهات ومراجع المتغيرات",
+      "loading": "جارٍ التشخيص…",
+      "empty": "سير العمل فارغ. أضف عقدًا لبدء التشخيص.",
+      "allGood": "سير العمل سليم. لم يتم العثور على مشاكل.",
+      "summary": {
+        "title": "ملخص التشخيص",
+        "error": "خطأ",
+        "warning": "تحذير",
+        "info": "معلومات",
+        "total": "{{count}} مشاكل"
+      },
+      "severity": {
+        "error": "خطأ",
+        "warning": "تحذير",
+        "info": "معلومات"
+      },
+      "category": {
+        "structure": "البنية",
+        "configuration": "الإعداد",
+        "prompt": "موجّه",
+        "reference": "مرجع",
+        "best_practice": "أفضل الممارسات",
+        "prompt_quality": "جودة الموجّه",
+        "performance": "الأداء",
+        "cost": "التكلفة",
+        "security": "الأمان"
+      },
+      "fix": {
+        "apply": "إصلاح تلقائي",
+        "applied": "تم الإصلاح",
+        "failed": "فشل الإصلاح"
+      },
+      "jump": "الانتقال إلى العقدة",
+      "issues": {
+        "duplicate_node_id": {
+          "title": "معرّف عقدة مكرر",
+          "message": "معرّف العقدة \"{{id}}\" يظهر عدة مرات، مما قد يسبب مشاكل في التوجيه."
+        },
+        "orphan_node": {
+          "title": "عقدة يتيمة",
+          "message": "العقدة \"{{label}}\" ليس لها حواف واردة أو صادرة."
+        },
+        "unreachable_from_trigger": {
+          "title": "عقدة غير قابلة للوصول من المُحفِّز",
+          "message": "العقدة \"{{label}}\" ليس لها مسار من أي مُحفِّز."
+        },
+        "dangling_edge": {
+          "title": "حافة معلَّقة",
+          "message": "الحافة \"{{id}}\" تشير إلى عقدة مصدر أو هدف غير موجودة."
+        },
+        "llm_prompt_empty": {
+          "title": "موجِّه LLM فارغ",
+          "message": "LLM.prompt للعقدة \"{{label}}\" فارغ."
+        },
+        "llm_prompt_short": {
+          "title": "موجِّه LLM قصير جداً",
+          "message": "LLM.prompt للعقدة \"{{label}}\" يحتوي على {{len}} حرفاً فقط."
+        },
+        "agent_prompt_empty": {
+          "title": "موجِّه نظام الوكيل فارغ",
+          "message": "Agent.system_prompt للعقدة \"{{label}}\" فارغ."
+        },
+        "agent_prompt_trivial": {
+          "title": "موجِّه نظام الوكيل بسيط جداً",
+          "message": "system_prompt للعقدة \"{{label}}\" يحتوي على {{len}} حرفاً فقط."
+        },
+        "classifier_prompt_empty": {
+          "title": "موجِّه المُصنِّف فارغ",
+          "message": "LlmClassifier.prompt للعقدة \"{{label}}\" فارغ."
+        },
+        "classifier_prompt_trivial": {
+          "title": "موجِّه المُصنِّف بسيط جداً",
+          "message": "موجِّه التصنيف للعقدة \"{{label}}\" يحتوي على {{len}} حرفاً فقط."
+        },
+        "classifier_categories_empty": {
+          "title": "لا توجد فئات للمُصنِّف",
+          "message": "قائمة فئات العقدة \"{{label}}\" فارغة."
+        },
+        "http_url_empty": {
+          "title": "URL HTTP فارغ",
+          "message": "HttpRequest.url للعقدة \"{{label}}\" فارغ."
+        },
+        "webhook_url_empty": {
+          "title": "URL Webhook فارغ",
+          "message": "WebhookSend.url للعقدة \"{{label}}\" فارغ."
+        },
+        "email_to_empty": {
+          "title": "مستلمو البريد الإلكتروني فارغون",
+          "message": "Email.to للعقدة \"{{label}}\" فارغ."
+        },
+        "email_body_empty": {
+          "title": "نص البريد الإلكتروني فارغ",
+          "message": "Email.body للعقدة \"{{label}}\" فارغ."
+        },
+        "validation_assertions_empty": {
+          "title": "تأكيدات التحقق فارغة",
+          "message": "قائمة التأكيدات للعقدة \"{{label}}\" فارغة."
+        },
+        "code_body_empty": {
+          "title": "هيكل عقدة الكود فارغ",
+          "message": "Code.code للعقدة \"{{label}}\" فارغ."
+        },
+        "code_output_var_empty": {
+          "title": "عقدة كود بدون متغير إخراج",
+          "message": "output_var للعقدة \"{{label}}\" فارغ؛ لن تتمكن العقد اللاحقة من الإشارة إلى النتيجة."
+        },
+        "tool_name_empty": {
+          "title": "عقدة أداة بدون أداة",
+          "message": "tool_name للعقدة \"{{label}}\" فارغ."
+        },
+        "subworkflow_id_empty": {
+          "title": "معرّف سير العمل الفرعي فارغ",
+          "message": "SubWorkflow.sub_workflow_id للعقدة \"{{label}}\" فارغ."
+        },
+        "unknown_var_reference": {
+          "title": "مرجع متغير غير مُعلن",
+          "message": "تشير العقدة \"{{label}}\" إلى ${ {{var}} }، ولكن لا توجد عقدة تُعلنه كـ output_var."
+        },
+        "no_timeout": {
+          "title": "لم يتم تكوين المهلة",
+          "message": "العقدة \"{{label}}\" ليس لديها مهلة؛ قد تحجب المهام الطويلة سير العمل."
+        },
+        "no_retry": {
+          "title": "لم يتم تكوين إعادة المحاولة",
+          "message": "العقدة \"{{label}}\" ليس لديها سياسة إعادة محاولة؛ ستنتقل الأخطاء العابرة مباشرةً."
+        },
+        "parallel_no_merge": {
+          "title": "متوازي بدون دمج",
+          "message": "يجب أن تتقارب فروع العقدة المتوازية \"{{label}}\" في عقدة Merge."
+        },
+        "no_trigger": {
+          "title": "لا توجد عقدة مُحفِّزة",
+          "message": "لا يحتوي سير العمل على عقدة مُحفِّزة. أضف Trigger لتحديد نقطة الدخول."
+        },
+        "no_end": {
+          "title": "لا توجد عقدة نهاية",
+          "message": "لا يحتوي سير العمل على عقدة End. فكر في إضافة عقدة End للإشارة إلى الاكتمال."
+        },
+        "agent_empty_prompt": {
+          "title": "موجِّه نظام الوكيل فارغ",
+          "message": "موجِّه نظام عقدة الوكيل فارغ. حدد دوراً وتعليمات واضحة."
+        },
+        "agent_short_prompt": {
+          "title": "موجِّه نظام الوكيل قصير جداً",
+          "message": "موجِّه نظام الوكيل أقل من 30 حرفاً. أضف تعريف الدور وقيود الإخراج."
+        },
+        "agent_no_max_tokens": {
+          "title": "الوكيل بدون max_tokens",
+          "message": "لم يتم تعيين max_tokens لعقدة الوكيل. قد يؤدي ذلك إلى استهلاك غير محدود من الرموز."
+        },
+        "agent_no_max_tool_rounds": {
+          "title": "الوكيل بدون max_tool_rounds",
+          "message": "لم يتم تعيين max_tool_rounds للوكيل الذي يستخدم الأدوات. قد تستمر حلقات الأدوات إلى ما لا نهاية."
+        },
+        "llm_empty_prompt": {
+          "title": "موجِّه LLM فارغ",
+          "message": "موجِّه عقدة LLM فارغ. وفِّر تعليمة واضحة."
+        },
+        "llm_no_max_tokens": {
+          "title": "LLM بدون max_tokens",
+          "message": "لم يتم تعيين max_tokens لعقدة LLM. قد يؤدي ذلك إلى استهلاك غير محدود من الرموز."
+        },
+        "http_no_timeout": {
+          "title": "طلب HTTP بدون مهلة",
+          "message": "لم يتم تعيين مهلة لعقدة HttpRequest. قد تحجب الطلبات الطويلة سير العمل."
+        },
+        "http_no_retry": {
+          "title": "طلب HTTP بدون إعادة محاولة",
+          "message": "لا توجد سياسة إعادة محاولة لعقدة HttpRequest. ستنتقل الأخطاء العابرة مباشرةً."
+        },
+        "db_no_timeout": {
+          "title": "استعلام قاعدة بيانات بدون مهلة",
+          "message": "لم يتم تعيين مهلة لعقدة DatabaseQuery. قد تحجب الاستعلامات البطيئة سير العمل."
+        },
+        "loop_no_max_iter": {
+          "title": "حلقة بدون max_iterations",
+          "message": "لم يتم تعيين max_iterations لعقدة الحلقة. قد تحدث حلقات لا نهائية."
+        },
+        "loop_no_condition": {
+          "title": "حلقة بدون شرط متابعة",
+          "message": "لم يتم تعريف continue_condition لعقدة الحلقة. قد لا تنتهي الحلقة أبداً."
+        },
+        "doc_no_parser_type": {
+          "title": "نوع محلل المستندات غير محدد",
+          "message": "لم يتم تحديد parser_type لعقدة DocumentParser."
+        },
+        "insecure_http_url": {
+          "title": "URL HTTP غير آمن",
+          "message": "يستخدم URL HTTP بنص صريح بدلاً من HTTPS. قد تُنقل البيانات دون تشفير."
+        },
+        "insecure_notification_url": {
+          "title": "URL Webhook غير آمن",
+          "message": "يستخدم URL Webhook للإشعارات HTTP بنص صريح. قد يتم اعتراض الحمولة."
+        },
+        "approval_no_approver": {
+          "title": "عقدة الموافقة بدون مُوافق",
+          "message": "لم يتم تهيئة مُوافق لعقدة الموافقة. سيتوقف سير العمل عند هذه العقدة."
+        },
+        "vector_no_threshold": {
+          "title": "Vector Retrieve بدون عتبة تشابه",
+          "message": "لم يتم تعيين similarity_threshold لعقدة VectorRetrieve. قد تُرجع تطابقات منخفضة الجودة."
+        },
+        "vector_high_top_k": {
+          "title": "top_k مرتفع في Vector Retrieve",
+          "message": "top_k لـ VectorRetrieve يتجاوز 20. هذا يزيد التكلفة وقد يقلل الصلة."
+        },
+        "condition_single_exit": {
+          "title": "شرط بمخرج واحد",
+          "message": "تحتوي عقدة الشرط على أقل من فرعين لاحقين. فكر في إضافة كلا المسارين (true/false)."
+        },
+        "classifier_few_cases": {
+          "title": "حالات المُصنِّف قليلة جداً",
+          "message": "LlmClassifier لديه أقل من حالتي تصنيف."
+        },
+        "validation_no_rules": {
+          "title": "تحقق بدون قواعد",
+          "message": "لم يتم تحديد قواعد لعقدة التحقق. ستمر دائماً."
+        },
+        "edge_dangling_source": {
+          "title": "عقدة مصدر الحافة مفقودة",
+          "message": "تشير الحافة إلى عقدة مصدر لم تعد موجودة."
+        },
+        "edge_dangling_target": {
+          "title": "عقدة هدف الحافة مفقودة",
+          "message": "تشير الحافة إلى عقدة هدف لم تعد موجودة."
+        },
+        "debate_no_debaters": {
+          "title": "عقدة المناظرة بدون مناقشين",
+          "message": "لا توجد وكلاء مناقشون في عقدة المناظرة. أضف اثنين على الأقل لمناظرة ذات معنى."
+        },
+        "debate_single_debater": {
+          "title": "مناقش واحد فقط",
+          "message": "تحتوي عقدة المناظرة على مناقش واحد فقط. تحتاج المناظرة إلى جانبين متعارضين على الأقل."
+        },
+        "debate_dangling_step": {
+          "title": "مرجع معلَّق في عقدة المناظرة",
+          "message": "تشير عقدة المناظرة إلى خطوة مناقش لم تعد موجودة. أزل المرجع القديم."
+        }
+      },
+      "error": "خطأ تشخيصي"
     },
-    "autoLayoutWithSubs": "Auto-layout (with {{count}} sub-workflows)",
-    "toggleBreakpoint": "Toggle Breakpoint",
-    "copyNode": "Copy Node",
-    "deleteNode": "Delete Node",
+    "batchEdit": {
+      "title": "تحرير دفعة",
+      "noChange": "لا تغيير",
+      "apply": "تطبيق على {count} عقد"
+    },
+    "autoLayoutWithSubs": "تخطيط تلقائي ({{count}} سير عمل فرعي)",
+    "toggleBreakpoint": "تبديل نقطة التوقف",
+    "copyNode": "نسخ العقدة",
+    "deleteNode": "حذف العقدة",
     "debateNode": {
-      "debaters": "debaters",
-      "rounds": "rounds",
-      "expand": "Expand",
-      "collapse": "Collapse",
-      "newDebater": "Debater",
-      "noDebatersHint": "Add debater Agent nodes inside this container"
-    }
+      "debaters": "المتناظرون",
+      "rounds": "جولات",
+      "expand": "توسيع",
+      "collapse": "طي",
+      "newDebater": "متناظر",
+      "noDebatersHint": "أضف عقد وكلاء متناظرين داخل هذه الحاوية",
+      "defaultRole": "— افتراضي —",
+      "stanceCon": "معارض",
+      "stanceNth": "الجانب {{count}}",
+      "stancePro": "مؤيد",
+      "stanceSystemPromptFallback": "أنت مناقش في جانب {{stance}}. علِّل حول الموضوع."
+    },
+    "batchEditMode": "وضع التحرير المجمَّع",
+    "noExecutionHistory": "لا سجل تنفيذ",
+    "nodeConfig": {
+      "add_debater": "إضافة مناقش",
+      "convergence_model_role": "دور نموذج التقارب",
+      "convergence_prompt": "موجِّه التقارب",
+      "convergence_prompt_placeholder": "موجِّه يحدد متى تتقارب المناظرة",
+      "debaters": "المناقشون",
+      "max_rounds": "الحد الأقصى للجولات",
+      "topic_var": "متغير الموضوع"
+    },
+    "searchNodes": "بحث عن العقد"
   },
   "atomicSkill": {
     "entryType": "نوع الإدخال",
@@ -4916,32 +5110,31 @@
     "tagsPlaceholder": "tag1, tag2"
   },
   "workEngine": {
-    "nodeProgress": "Node Progress",
-    "noExecutionHistory": "No execution history",
-    "workflowStarted": "Workflow started",
-    "startFailed": "Start failed",
-    "configureProviderFirst": "Please configure a default AI provider in settings first",
-    "cancel": "Cancel",
-    "cancelExecution": "Cancel Execution",
-    "confirmCancelExecution": "Confirm cancel current execution?",
-    "duration": "Duration",
-    "executionHistory": "Execution History",
-    "executionId": "Execution ID",
-    "pause": "Pause",
-    "pauseExecution": "Pause Execution",
-    "resume": "Resume",
-    "resumeExecution": "Resume Execution",
-    "start": "Start",
-    "startExecution": "Start Execution",
-    "startTime": "Start Time",
+    "nodeProgress": "تقدم العقدة",
+    "noExecutionHistory": "لا يوجد سجل تنفيذ",
+    "workflowStarted": "بدأ سير العمل",
+    "startFailed": "فشل البدء",
+    "configureProviderFirst": "يرجى أولاً تكوين مزود الذكاء الاصطناعي الافتراضي في الإعدادات",
+    "cancel": "إلغاء",
+    "cancelExecution": "إلغاء التنفيذ",
+    "confirmCancelExecution": "تأكيد إلغاء التنفيذ الحالي؟",
+    "duration": "المدة",
+    "executionHistory": "سجل التنفيذ",
+    "executionId": "معرّف التنفيذ",
+    "pause": "إيقاف مؤقت",
+    "pauseExecution": "إيقاف التنفيذ مؤقتًا",
+    "resume": "استئناف",
+    "resumeExecution": "استئناف التنفيذ",
+    "start": "بدء",
+    "startExecution": "بدء التنفيذ",
+    "startTime": "وقت البدء",
     "status": "الحالة",
-    "statusCancelled": "Cancelled",
-    "statusCompleted": "Completed",
-    "statusFailed": "Failed",
-    "statusPaused": "Paused",
-    "statusPending": "Pending",
-    "statusRunning": "Running",
-    "nodes": "العقد"
+    "statusCancelled": "ملغى",
+    "statusCompleted": "مكتمل",
+    "statusFailed": "فشل",
+    "statusPaused": "متوقف مؤقتاً",
+    "statusPending": "قيد الانتظار",
+    "statusRunning": "قيد التشغيل"
   },
   "rl": {
     "policyDashboard": "لوحة سياسات التعلم المعزز",
@@ -5126,7 +5319,9 @@
     "retry": "إعادة المحاولة",
     "tags": "العلامات: {{tags}}",
     "none": "لا شيء",
-    "response": "استجابة"
+    "response": "استجابة",
+    "report": "التقرير",
+    "tasks": "المهام"
   },
   "traceExplorer": {
     "selectTrace": "حدد تتبعًا لعرض التفاصيل"
@@ -5295,7 +5490,8 @@
     "dismiss": "إغلاق",
     "execute": "تنفيذ",
     "learningSuggestions": "اقتراحات التعلم",
-    "snooze30": "تأجيل (30 دقيقة)"
+    "snooze30": "تأجيل (30 دقيقة)",
+    "noSuggestions": "لا اقتراحات"
   },
   "proactive": {
     "accept": "قبول",
@@ -5446,7 +5642,10 @@
     "analyzeFrontend": "توليد بالذكاء الاصطناعي",
     "analyzeSuccess": "اكتمل تحليل الذكاء الاصطناعي",
     "analyzeError": "فشل تحليل الذكاء الاصطناعي: {{error}}",
-    "generateAgent": "توليد وكيل"
+    "generateAgent": "توليد وكيل",
+    "agentGenerated": "أنشأه الوكيل",
+    "noSkillName": "مهارة بلا اسم",
+    "notFound": "المهارة غير موجودة"
   },
   "task": {
     "title": "مهام الخلفية",
@@ -5635,7 +5834,7 @@
     "noKeysDetected": "لم يتم اكتشاف مفتاح API",
     "presetOllama": "Ollama محلي",
     "presetOllamaDesc": "استخدام النماذج المحلية، تبقى البيانات على الجهاز",
-    "presetOpenAI": "OpenAI سحابي",
+    "presetOpenAI": "OpenAI السحابة",
     "presetOpenAIDesc": "استخدام نماذج سلسلة GPT-4o السحابية",
     "presetMinimal": "إعداد أدنى",
     "presetMinimalDesc": "تكوين الإعدادات الأساسية فقط، إضافة المزيد لاحقًا",
@@ -5816,7 +6015,26 @@
     "connectionFailed": "فشل الاتصال",
     "lastSyncResult": "نتيجة المزامنة الأخيرة",
     "cacheDir": "مجلد التخزين المؤقت",
-    "quickActions": "إجراءات سريعة"
+    "quickActions": "إجراءات سريعة",
+    "autoFillConfig": "تعبئة التكوين تلقائياً",
+    "chineseProviders": "الموفرون الصينيون",
+    "cloudBackup": "نسخة احتياطية سحابية",
+    "cloudBackupSize": "الحجم",
+    "cloudBackupTime": "مُعدَّل",
+    "downloadBackupFailed": "فشل التنزيل من السحابة: {{error}}",
+    "downloadBackupSuccess": "تم تنزيل النسخة الاحتياطية من السحابة",
+    "downloadFromCloud": "استعادة من السحابة",
+    "internationalProviders": "الموفرون الدوليون",
+    "listCloudBackups": "عرض النسخ السحابية",
+    "noCloudBackups": "لا توجد نسخ سحابية",
+    "providerCategory": "فئة الموفر",
+    "s3UsePathStyle": "عناوين Path-Style",
+    "selectProvider": "اختر موفر سحابة",
+    "selectProviderDesc": "اختر موفر تخزين سحابي للتكوين التلقائي",
+    "selfHostedProviders": "استضافة ذاتية",
+    "uploadBackupFailed": "فشل الرفع إلى السحابة: {{error}}",
+    "uploadBackupSuccess": "تم رفع النسخة الاحتياطية إلى السحابة",
+    "uploadToCloud": "رفع إلى السحابة"
   },
   "buddy": {
     "rarity": {
@@ -6141,8 +6359,8 @@
     "noRecords": "لا سجلات",
     "success": "نجاح",
     "failed": "فشل",
-    "viewSubExecution": "View Sub-Execution",
-    "subExecutionDetail": "Sub-Workflow Execution Detail"
+    "viewSubExecution": "عرض التنفيذ الفرعي",
+    "subExecutionDetail": "تفاصيل تنفيذ سير العمل الفرعي"
   },
   "markdown": "ماركداون",
   "success": "نجاح",
@@ -6281,7 +6499,7 @@
     "avgCredibility": "متوسط الموثوقية:",
     "addToReport": "إضافة إلى التقرير",
     "title": "مدير الاقتباسات ({count})",
-    "addCitation": "Add Citation",
+    "addCitation": "إضافة اقتباس",
     "empty": "لا توجد اقتباسات بعد، أضف من نتائج البحث",
     "inReport": "المستخدمة في التقرير ({count})",
     "notInReport": "غير المستخدمة في التقرير ({count})",
@@ -6424,7 +6642,10 @@
     "storeNotRegistered": "المخزن {{storeName}} غير مسجل",
     "functionNotRegistered": "الدالة {{name}} غير مسجلة",
     "handlerNotFound": "المعالج {{name}} غير موجود",
-    "handlerNotDeclarative": "المعالج {{name}} غير تصريحي"
+    "handlerNotDeclarative": "المعالج {{name}} غير تصريحي",
+    "commandPermissionDenied": "تم رفض إذن الأمر",
+    "emitPermissionDenied": "تم رفض إذن الإرسال",
+    "navigatePermissionDenied": "تم رفض إذن التنقل"
   },
   "export": {
     "exportTime": "وقت التصدير",
@@ -6695,7 +6916,9 @@
     "startNewResearch": "بحث جديد",
     "lowCredibilityWarning": "ملاحظة: التقرير يحتوي على {{count}} مصدر منخفض المصداقية",
     "noReferences": "لا توجد مراجع",
-    "noSummary": "لا يوجد ملخص"
+    "noSummary": "لا يوجد ملخص",
+    "noOutline": "لا مخطط",
+    "noReport": "لا تقرير"
   },
   "settingsPage": {
     "refreshPage": "تحديث الصفحة"
@@ -6807,7 +7030,7 @@
     "running": "قيد التشغيل",
     "completed": "مكتمل",
     "failed": "فشل",
-    "id": "ID",
+    "id": "المعرف",
     "status": "الحالة",
     "baseModel": "النموذج الأساسي",
     "datasetId": "معرّف مجموعة البيانات",
@@ -6838,7 +7061,19 @@
   },
   "errorBoundary": {
     "title": "حدث خطأ ما",
-    "retryLoad": "إعادة محاولة تحميل هذه الوحدة"
+    "retryLoad": "إعادة محاولة تحميل هذه الوحدة",
+    "copied": "تم النسخ",
+    "copyError": "نسخ الخطأ",
+    "errorDetails": "تفاصيل الخطأ",
+    "moduleError": "خطأ في الوحدة",
+    "pageError": "خطأ في الصفحة",
+    "panelLoadFailed": "⚠️ فشل تحميل اللوحة \"{{tabKey}}\"",
+    "refreshPage": "تحديث الصفحة",
+    "retry": "إعادة المحاولة",
+    "somethingWentWrong": "حدث خطأ ما",
+    "tryAgain": "حاول مجدداً",
+    "unexpectedError": "خطأ غير متوقع",
+    "unknownError": "خطأ غير معروف"
   },
   "appInit": {
     "idle": "جارٍ التحضير للبدء...",
@@ -6913,7 +7148,8 @@
     "retry": "إعادة المحاولة"
   },
   "subAgentCard": {
-    "viewConversation": "عرض المحادثة الفرعية"
+    "viewConversation": "عرض المحادثة الفرعية",
+    "fork": "تفريع"
   },
   "modelParam": {
     "topP": "Top P"
@@ -6996,7 +7232,8 @@
     "teammate": "فريق",
     "steerInput": "قيادة",
     "showExtras": "المزيد",
-    "hideExtras": "إخفاء"
+    "hideExtras": "إخفاء",
+    "close": "إغلاق"
   },
   "knowledgeSettings": {
     "title": "المعرفة"
@@ -7059,540 +7296,20 @@
       }
     }
   },
+  "appHeader": {
+    "knowledgeContext": "المعرفة",
+    "gatewayContext": "البوابة",
+    "filesContext": "الملفات",
+    "terminalContext": "الطرفية"
+  },
+  "input": {
+    "recordAudio": "تسجيل الصوت",
+    "takePhoto": "التقاط صورة",
+    "uploadFile": "رفع ملف"
+  },
   "stockAnalysis": {
-    "actionBuy": "Buy",
-    "actionSell": "Sell",
-    "actionIncrease": "Increase",
-    "actionHold": "Hold",
-    "actionReduce": "Reduce",
-    "recentAnalysis": "Recent Analysis",
-    "targetPriceNote": "Target ¥{{price}}",
-    "totalMarketValue": "Total Mkt Value",
-    "unrealizedPnl": "Unrealized P&L",
-    "concentration": "Concentration",
-    "holdings": "Holdings",
-    "sharesUnit": "",
-    "wanUnit": "0k",
-    "analystCount": "{{current}}/{{total}} analysts",
-    "debateRounds": "{{current}}/{{total}} rounds",
-    "riskAssessCount": "{{count}} assessments",
-    "offlineMode": "Offline mode",
-    "charCount": "{{count}} chars",
-    "title": "Stock Analysis",
-    "searchPlaceholder": "Enter stock code or name",
-    "startAnalysis": "Start Analysis",
-    "analyzing": "Analyzing...",
-    "starting": "Starting analysis engine...",
-    "price": "Price",
-    "open": "Open",
-    "high": "High",
-    "low": "Low",
-    "close": "إغلاق",
-    "volume": "Volume",
-    "volumeUnit": "10k lots",
-    "volumeChart": "Volume",
-    "klineChart": "K-line",
-    "emptyHint": "Search stock code to start",
-    "emptyHintDetail": "Shanghai/Shenzhen A-shares supported",
-    "watchlist": "Watchlist",
-    "watchlistEmpty": "لا توجد أسهم في قائمة المراقبة. ابحث وانقر على +",
-    "loadHistory": "Click to load history",
-    "history": "History",
-    "historyEmpty": "لا يوجد سجل تحليل",
-    "debateHistory": "Debate History",
-    "addToWatchlist": "Add to Watchlist",
-    "addedToWatchlist": "Added",
-    "inWatchlist": "Watching",
-    "addFailed": "Add Failed",
-    "retry": "Retry",
-    "completed": "Completed",
-    "viewDetails": "View Details",
-    "error": "Error",
-    "startFailed": "Start Failed",
-    "loadingHint": "Loading stock analysis data...",
-    "stage.dataLoading": "Data Loading",
-    "stage.analysis": "Analysis",
-    "stage.debate": "Debate",
-    "stage.risk": "Risk Assessment",
-    "stage.decision": "Decision",
-    "debate": "Debate",
-    "debateRound": "Round {{round}}",
-    "bull": "Bull",
-    "bear": "Bear",
-    "riskAssessment": "Risk Assessment",
-    "risk.aggressive": "Aggressive",
-    "risk.conservative": "Conservative",
-    "risk.neutral": "Neutral",
-    "finalDecision": "Final Decision",
-    "position": "Position",
-    "targetPrice": "Target Price",
-    "stopLoss": "Stop Loss",
-    "riskLevel": "Risk Level",
-    "confidence": "Confidence",
-    "tab.market": "Market",
-    "tab.analysts": "Analysts",
-    "tab.debate": "Debate",
-    "tab.risk": "Risk",
-    "tab.decision": "Decision",
-    "compare": "Compare",
-    "stockCode1": "Stock Code 1",
-    "stockCode2": "Stock Code 2",
-    "compareBtn": "Compare",
-    "change": "Change",
-    "alert.title": "Price Alert",
-    "alert.code": "Code",
-    "alert.name": "Name",
-    "alert.condition": "Condition",
-    "alert.price": "Price",
-    "alert.above": "Above",
-    "alert.below": "Below",
-    "alert.empty": "No Alerts",
-    "alert.triggered": "Alert Triggered!",
-    "settings": {
-      "title": "Stock Analysis Settings",
-      "saveFailed": "Failed to save",
-      "noExperts": "No expert data. Restart the app to seed.",
-      "noRoles": "No role data. Restart the app to seed.",
-      "quoteTag": "Quotes",
-      "financialKlineTag": "Financial/K-line",
-      "newsTag": "News",
-      "tencentFinance": "Tencent Finance",
-      "eastmoney": "East Money",
-      "sinaFinance": "Sina Finance",
-      "dataSources": "Data Sources",
-      "analysis": "Analysis Parameters",
-      "debateRounds": "Debate Rounds",
-      "klinePeriod": "K-line Period",
-      "periodDaily": "Daily",
-      "periodWeekly": "Weekly",
-      "periodMonthly": "Monthly",
-      "klineLimit": "K-line Limit",
-      "newsLimit": "News Limit",
-      "trading": "Trading",
-      "tradingEnabled": "Enable Trading",
-      "maxSinglePosition": "Max Single Position",
-      "maxTotalPosition": "Max Total Position",
-      "maxPositions": "Max Positions",
-      "model": "Model Parameters",
-      "temperature": "Temperature",
-      "maxTokens": "Max Tokens",
-      "resetDefaults": "Reset Defaults",
-      "skipped": "Skipped",
-      "connected": "Connected",
-      "disconnected": "Disconnected",
-      "checkHealth": "Check Health",
-      "tab": {
-        "experts": "Experts",
-        "roles": "Roles",
-        "profiles": "Profiles",
-        "data": "Data",
-        "params": "Params"
-      },
-      "check": "Check",
-      "loadFailed": "Failed to load config",
-      "saveSuccess": "Config saved",
-      "saveConfig": "Save Config",
-      "general": "General",
-      "profile": {
-        "desc": "Manage expert-role-tool combinations. Changes are persisted to the database.",
-        "colName": "Name",
-        "advanced": "Advanced",
-        "promptSection": "Task Instructions + LLM Params",
-        "promptPlaceholder": "Task instructions (e.g., Analyze the technical indicators of this stock...)",
-        "temperature": "Temperature",
-        "maxToolRounds": "Max Tool Rounds",
-        "edit": "Edit",
-        "colFixedTools": "Fixed Tools",
-        "colExposedTools": "Exposed Tools",
-        "colTools": "Tools",
-        "editTools": "Edit Exposed Tools",
-        "selectTools": "Select LLM-visible tools...",
-        "save": "Save",
-        "cancel": "Cancel",
-        "saved": "Saved",
-        "saveError": "Save failed: {{error}}",
-        "noTools": "No tools",
-        "noFixedTools": "(from upstream)",
-        "fixedHint": "Fixed tool {{tools}} auto-injected by DAG, no need to expose",
-        "bothHint": "Both fixed input and LLM-selectable",
-        "goToExperts": "Go to expert editor",
-        "goToRoles": "Go to role editor",
-        "noPrompt": "(Prompt data not loaded)"
-      },
-      "vendors": {
-        "summary": "9 data sources + 6 data tools + 3 local compute",
-        "checking": "Checking...",
-        "notChecked": "Not checked",
-        "apiKey": "API Key",
-        "depActive": "Provides data for these tools:",
-        "depInactive": "When disabled, these tools fall back to next vendor:",
-        "noDeps": "No tools depend on this vendor",
-        "fixedToolHeader": "Fixed tools (DAG ToolNode deterministic execution)",
-        "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
-        "localCompute": "Local compute tools (no remote vendor dependency)"
-      },
-      "group": {
-        "vendor": "Data Sources",
-        "agent": "Analysts",
-        "tool": "Tools",
-        "scoring": "Scoring",
-        "rule": "Rules",
-        "pos": "Position",
-        "value": "Valuation",
-        "monitor": "Monitor",
-        "riskModel": "Risk Model",
-        "agentRuntime": "Agent Runtime",
-        "toolRuntime": "Tool Runtime"
-      },
-      "panels": {
-        "refresh": "Refresh",
-        "noData": "No Data",
-        "dragonTiger": "Dragon & Tiger",
-        "eventCalendar": "Event Calendar",
-        "limitUp": "Limit Up",
-        "northBound": "North Bound",
-        "sectorHeatmap": "Sector Heatmap",
-        "netBuy": "Net Buy",
-        "netSell": "Net Sell",
-        "sealed": "Sealed",
-        "opened": "Opened",
-        "consecutive": "{{n}} consecutive",
-        "turnover": "Turnover",
-        "inflow": "Inflow",
-        "outflow": "Outflow",
-        "lockup": "Lockup",
-        "dividend": "Dividend",
-        "perShare": "¥/share",
-        "yiDisplay": "B",
-        "noDragonTiger": "No Dragon & Tiger data",
-        "noEvents": "No event data",
-        "noLimitUp": "No limit-up data",
-        "noNorthBound": "No north-bound data",
-        "noSector": "No sector data",
-        "northTitle": "North Bound {{dir}} ({{date}})",
-        "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
-      },
-      "sheet": {
-        "screener": "Screener",
-        "limitUp": "Limit Up",
-        "dragonTiger": "D&T",
-        "sectors": "Sectors",
-        "north": "North",
-        "review": "Review",
-        "events": "Events",
-        "more": "More"
-      },
-      "optimize": {
-        "success": "Weights optimized",
-        "failed": "Optimization failed",
-        "btn": "🎯 Optimize scoring weights via backtest"
-      },
-      "screener": {
-        "title": "🔍 Smart Screener",
-        "discover": "Discover",
-        "screen": "Filter",
-        "factorHint": "Select factors ({{count}} selected):",
-        "placeholder": "Value",
-        "filter": "Filter",
-        "clear": "Clear",
-        "discoverHint": "Click Discover to find candidates",
-        "screenHint": "Select factors and click Filter",
-        "score": "Score {{score}}",
-        "factor": {
-          "changePct": "Change% ≥",
-          "turnover": "Turnover ≥",
-          "mainInflow": "Main Inflow ≥",
-          "dragonTiger": "Dragon&Tiger ≥",
-          "northbound": "Northbound ≥",
-          "rsiOversold": "RSI Oversold",
-          "rsiOverbought": "RSI Overbought"
-        },
-        "unit10k": "10k"
-      },
-      "vendor": {
-        "disabled": "No vendor enabled: {{names}}",
-        "connectionFailed": "Connection failed, please check network and retry",
-        "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
-      },
-      "workflow": {
-        "title": "Stock Analysis Workflow",
-        "inProgress": "In Progress",
-        "running": "Running",
-        "pending": "Pending",
-        "completed": "Completed",
-        "phase": "Phase",
-        "debateRound": "Debate Round",
-        "bullBearDebate": "Bull vs Bear Debate",
-        "riskAssessment": "Risk Assessment",
-        "analystReports": "Analyst Reports"
-      }
-    },
-    "progress.fetchingData": "Fetching stock data...",
-    "progress.started": "Analysis started...",
-    "progress.dataLoaded": "Data: {{kline}} K-lines, {{news}} news",
-    "progress.analystProgress": "[{{name}}] {{status}}",
-    "progress.reportReady": "✅ {{name}}: Report ready",
-    "progress.debateRound": "Debate round {{round}}/{{total}}",
-    "progress.riskDone": "✅ {{name}}: Risk done",
-    "progress.investmentPlan": "Generating final decision...",
-    "progress.completed": "✅ Analysis complete!",
-    "progress.llmFallback": "⚠️ LLM not connected, placeholder",
-    "progress.error": "❌ Error: {{msg}}",
-    "chart.zoom": "Area Zoom",
-    "chart.restore": "Restore",
-    "riskUnknown": "Unknown",
-    "tradingTitle": "Trades",
-    "marketCap": "Market Cap",
-    "views": "Views",
-    "turnoverRate": "Turnover",
-    "exported": "Report exported",
-    "contextCopied": "Context copied",
-    "progress.stepDone": "✅ {{name}} done",
-    "progress.stepRetrying": "🔄 {{name}} retrying",
-    "sentimentBullish": "Bullish",
-    "sentimentBearish": "Bearish",
-    "sentimentNeutral": "Neutral",
-    "ep": "P/E",
-    "risk.researchManager": "Research Mgr",
-    "risk.comprehensive": "Comprehensive",
-    "askAI": "Ask AI",
-    "expectedUpside": "Expected Upside",
-    "exportReport": "Export Report",
-    "monitoringActive": "Monitoring Active",
-    "monitoringPaused": "Monitoring Paused",
-    "noChartData": "No Chart Data",
-    "period.1m": "1M",
-    "period.3m": "3M",
-    "period.6m": "6M",
-    "period.1y": "1Y",
-    "period.weekly": "W",
-    "period.monthly": "M",
-    "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
-    "riskScore": "Risk Score: {{score}}",
-    "buyShort": "Buy",
-    "sellShort": "Sell",
-    "autoRefresh": "Auto",
-    "refreshing": "Refreshing",
-    "yiUnit": "B",
-    "workflow": {
-      "title": "تحليل متعدد الأبعاد للأسهم A",
-      "inProgress": "قيد التقدم",
-      "currentPhase": "حالي",
-      "initializing": "تهيئة",
-      "analyst": {
-        "market-analyst": "محلل فني",
-        "sentiment-analyst": "محلل المعنويات",
-        "news-analyst": "محلل الأخبار",
-        "fundamentals-analyst": "محلل أساسي",
-        "policy-analyst": "محلل السياسات",
-        "hot-money-tracker": "متتبع تدفق رأس المال",
-        "lockup-watcher": "مراقب الحظر",
-        "research-analyst": "محلل البحث",
-        "sector-analyst": "محلل القطاع"
-      },
-      "analystComplete": "اكتمل التحليل",
-      "decisionTitle": "القرار النهائي",
-      "positionPct": "المركز",
-      "targetPrice": "هدف",
-      "stopLoss": "وقف خسارة",
-      "confidence": "ثقة",
-      "riskLevel": "مخاطر",
-      "phase": {
-        "trigger": "بدء سير العمل",
-        "done": "مكتمل",
-        "error": "خطأ",
-        "t-market-data": "جلب بيانات الشموع",
-        "t-sentiment-data": "جلب بيانات المعنويات",
-        "t-news-data": "جلب بيانات الأخبار",
-        "t-fundamentals-data": "جلب البيانات المالية",
-        "t-policy-data": "جلب بيانات السياسات",
-        "t-hotmoney-data": "جلب بيانات تدفق رأس المال",
-        "t-lockup-data": "جلب بيانات الحظر",
-        "t-research-data": "جلب بيانات البحث",
-        "t-sector-data": "جلب بيانات القطاع",
-        "a-market-analyst": "التحليل الفني",
-        "a-sentiment": "تحليل المعنويات",
-        "a-news": "تحليل الأخبار",
-        "a-fundamentals": "التحليل الأساسي",
-        "a-policy": "تحليل السياسات",
-        "a-hot-money": "تحليل تدفق رأس المال",
-        "a-lockup": "تحليل الحظر",
-        "a-research": "تحليل البحث",
-        "a-sector": "تحليل القطاع",
-        "bull-r1": "مناظرة الصاعدين 1",
-        "bear-r1": "مناظرة الهابطين 1",
-        "bull-r2": "مناظرة الصاعدين 2",
-        "bear-r2": "مناظرة الهابطين 2",
-        "bull-r3": "مناظرة الصاعدين 3",
-        "bear-r3": "مناظرة الهابطين 3",
-        "risk-agg": "مخاطر عدوانية",
-        "risk-con": "مخاطر متحفظة",
-        "risk-neu": "مخاطر محايدة",
-        "t-scoring": "خوارزمية التسجيل",
-        "t-valuation": "خوارزمية التقييم",
-        "t-risk": "مخاطر المحفظة",
-        "t-quality": "بوابة الجودة",
-        "research-mgr": "توليف البحث",
-        "trader": "خطة التداول",
-        "portfolio-mgr": "القرار النهائي"
-      },
-      "failedStepsWithCount": "Failed Steps ({{count}})"
-    },
-    "risk": {
-      "high": "مرتفع",
-      "medium": "متوسط",
-      "low": "منخفض"
-    },
-    "workflowStarting": "⏳ جاري بدء سير عمل تحليل الأسهم {{stockCode}}...",
-    "success": "Succeeded",
-    "failure": "Failed",
-    "dataSource": "Data Source",
-    "dataFetched": "Fetched",
-    "dataFetching": "Fetching",
-    "dataWaiting": "Waiting",
     "tool": {
       "fundamentalsData": "البيانات الأساسية"
     }
-  },
-  "trade": {
-    "title": "Trading Log",
-    "disabledHint": "Enable to record buy/sell trades. Tracks position cost and P&L.",
-    "stockCode": "Code",
-    "stockName": "Name",
-    "buy": "Buy",
-    "sell": "Sell",
-    "price": "Price",
-    "quantity": "Qty",
-    "cost": "Cost",
-    "shares": "Position",
-    "pnl": "P&L",
-    "recorded": "Recorded",
-    "fillRequired": "Fill required fields",
-    "toggleFailed": "Toggle failed",
-    "agentRole.coordinator": "Coordinator",
-    "agentRole.researcher": "Researcher",
-    "agentRole.planner": "Planner",
-    "agentRole.developer": "Developer",
-    "agentRole.reviewer": "Reviewer",
-    "agentRole.browser": "Browser",
-    "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
-  },
-  "stockAnalysis.progress.stepRunning": "⏳ {{name}} قيد التشغيل",
-  "stockAnalysis.progress.fetchingData": "جاري جلب بيانات الأسهم...",
-  "stockAnalysis.workflow.debateRound": "Debate Round",
-  "stockAnalysis.workflow.pending": "Pending",
-  "stockAnalysis.workflow.riskAssessment": "Risk Assessment",
-  "stockAnalysis.workflow.analystReports": "Analyst Reports",
-  "stockAnalysis.workflow.inProgress": "In Progress",
-  "stockAnalysis.workflow.running": "Running",
-  "stockAnalysis.workflow.completed": "Completed",
-  "stockAnalysis.workflow.phase": "Phase",
-  "stockAnalysis.workflow.title": "Stock Analysis Workflow",
-  "stockAnalysis.workflow.bullBearDebate": "Bull vs Bear Debate",
-  "stockAnalysis.settings.group.workflow": "Workflow",
-  "stockAnalysis.settings.vendor.connectionFailed": "Connection failed, please check network and retry",
-  "stockAnalysis.settings.vendor.backendOffline": "Backend not ready, please try again later",
-  "stockAnalysis.workflow.bullCase": "Bull Case",
-  "stockAnalysis.workflow.bearCase": "Bear Case",
-  "stockAnalysis.expandView": "Expand View",
-  "stockAnalysis.riskHigh": "High Risk",
-  "stockAnalysis.riskMid": "Medium Risk",
-  "stockAnalysis.riskLow": "Low Risk",
-  "stockAnalysis.noReport": "No analysis report",
-  "stockAnalysis.noData": "No data",
-  "stockAnalysis.noDecisionReasoning": "No decision reasoning",
-  "stockAnalysis.noRiskData": "No risk assessment data",
-  "stockAnalysis.tool.marketData": "Market Data",
-  "stockAnalysis.tool.klineData": "K-Line Data",
-  "stockAnalysis.tool.financialData": "Financial Data",
-  "stockAnalysis.tool.newsData": "News",
-  "stockAnalysis.tool.moneyFlow": "Money Flow",
-  "stockAnalysis.tool.sentimentData": "Market Sentiment",
-  "stockAnalysis.tool.policyData": "Policy Data",
-  "stockAnalysis.tool.hotMoneyData": "Hot Money",
-  "stockAnalysis.tool.lockupData": "Lockup Data",
-  "stockAnalysis.tool.researchData": "Research Reports",
-  "stockAnalysis.tool.sectorData": "Sector Data",
-  "stockAnalysis.tool.scoring": "Technical Score",
-  "stockAnalysis.tool.valuation": "Valuation",
-  "stockAnalysis.tool.portfolioRisk": "Portfolio Risk",
-  "stockAnalysis.tool.peersData": "Peer Comparison",
-  "stockAnalysis.tool.optionData": "Options Data",
-  "stockAnalysis.tool.indexData": "Market Index",
-  "stockAnalysis.tool.announcement": "Announcements",
-  "stockAnalysis.tool.northbound": "Northbound Flow",
-  "stockAnalysis.tool.dragonTiger": "Dragon & Tiger",
-  "stockAnalysis.tool.clsFlash": "CLS Flash",
-  "stockAnalysis.tool.blockTrade": "Block Trades",
-  "stockAnalysis.tool.institutional": "Institutional Visits",
-  "stockAnalysis.tool.consensus": "Consensus Forecast",
-  "stockAnalysis.tool.concept": "Concept Sectors",
-  "stockAnalysis.summary.records": "{{count}} record(s)",
-  "stockAnalysis.summary.noData": "No data",
-  "stockAnalysis.summary.score": "Score {{score}}",
-  "stockAnalysis.summary.news": "{{count}} news",
-  "stockAnalysis.summary.dataItems": "{{count}} data items",
-  "stockAnalysis.summary.fields": "{{count}} fields",
-  "stockAnalysis.summary.recordsWithKeys": "{{count}} record(s) ({{keys}})",
-  "stockAnalysis.export.title": "=== AxInvest Investment Report ===",
-  "stockAnalysis.export.stock": "Stock: {{name}} ({{code}})",
-  "stockAnalysis.export.date": "Analysis Date: {{date}}",
-  "stockAnalysis.export.price": "Current Price: ¥{{price}}",
-  "stockAnalysis.export.decision": "Decision: {{action}} | Confidence: {{confidence}}%",
-  "stockAnalysis.export.target": "Target: ¥{{target}} | Stop Loss: ¥{{stopLoss}}",
-  "stockAnalysis.export.position": "Position: {{pct}}% | {{risk}}",
-  "stockAnalysis.export.upside": "Expected Upside: {{pct}}%",
-  "stockAnalysis.export.reasoning": "Reasoning Summary:",
-  "stockAnalysis.export.analystReports": "Analyst Reports: {{count}}",
-  "stockAnalysis.export.debateRounds": "Debate Rounds: {{count}}",
-  "stockAnalysis.export.riskAssessments": "Risk Assessments: {{count}}",
-  "stockAnalysis.workflow.partialFailed": "{{count}} step(s) failed",
-  "stockAnalysis.workflow.failedSteps": "Failed Steps",
-  "stockAnalysis.workflow.bullAnalyst": "Bull Analyst",
-  "stockAnalysis.workflow.bearAnalyst": "Bear Analyst",
-  "stockAnalysis.workflow.riskAggressive": "Aggressive Assessment",
-  "stockAnalysis.workflow.riskConservative": "Conservative Assessment",
-  "stockAnalysis.workflow.riskNeutral": "Neutral Assessment",
-  "stockAnalysis.workflow.riskAggregation": "Risk Aggregation",
-  "stockAnalysis.workflow.riskClassification": "Risk Classification",
-  "stockAnalysis.workflow.notification": "Notification",
-  "stockAnalysis.workflow.fetchFailed": "Failed to fetch data",
-  "stockAnalysis.workflow.startFailed": "Workflow start failed",
-  "stockAnalysis.askAi.prompt": "Analyze {{stockName}} ({{stockCode}}) investment outlook.",
-  "stockAnalysis.askAi.decision": "Latest Decision: {{action}}, Confidence {{confidence}}%.",
-  "stockAnalysis.search": "Search",
-  "stockAnalysis.noRecords": "No records",
-  "stockAnalysis.backtest.failed": "Backtest failed",
-  "stockAnalysis.backtest.allFailed": "Full backtest failed",
-  "stockAnalysis.backtest.summary": "Backtest Summary",
-  "stockAnalysis.backtest.total": "Total",
-  "stockAnalysis.backtest.accuracy": "Accuracy",
-  "stockAnalysis.backtest.avgReturn": "Avg Return",
-  "stockAnalysis.backtest.title": "Backtest: {{code}} {{action}}",
-  "stockAnalysis.backtest.holdingDays": "Holding Days",
-  "stockAnalysis.backtest.returnRate": "Return Rate",
-  "stockAnalysis.backtest.maxDrawdown": "Max Drawdown",
-  "stockAnalysis.backtest.correct": "✓ Correct",
-  "stockAnalysis.backtest.wrong": "✗ Wrong",
-  "stockAnalysis.backtest.runAll": "Backtest All",
-  "stockAnalysis.backtest.run": "Backtest",
-  "stockAnalysis.trade.stopLoss": "Stop Loss: {{price}}",
-  "stockAnalysis.trade.pnlPercent": "P&L%",
-  "stockAnalysis.trade.totalTrades": "Total Trades",
-  "stockAnalysis.trade.totalPnl": "Total P&L",
-  "stockAnalysis.trade.winRate": "Win Rate",
-  "stockAnalysis.trade.quickRecord": "Record",
-  "stockAnalysis.watchlist.analysisStarted": "Started analysis of {{count}} stocks",
-  "stockAnalysis.watchlist.all": "All ({{count}})",
-  "stockAnalysis.watchlist.newGroup": "New Group",
-  "stockAnalysis.watchlist.refreshQuotes": "Refresh",
-  "stockAnalysis.watchlist.sortByChange": "By Change",
-  "stockAnalysis.watchlist.sortByCode": "By Code",
-  "stockAnalysis.watchlist.sortByName": "By Name",
-  "stockAnalysis.watchlist.analyzeAll": "Analyze All",
-  "stockAnalysis.watchlist.moveToAll": "Move to All",
-  "stockAnalysis.watchlist.move": "Move"
+  }
 }

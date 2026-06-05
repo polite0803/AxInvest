@@ -1231,27 +1231,31 @@ async fn seed_stock_analysis_workflow_template(
         let bear_id = format!("bear-r{round_num}");
         // 修复 Defect #4: 第 2 轮用 bull-r2/bear-r2（质询型 prompt），第 1/3 轮
         // 继续用 bull-researcher/bear-researcher（初始论据 / 最终反驳）。
-        let bull_expert = if round_num == 2 { "bull-r2" } else { "bull-researcher" };
-        let bear_expert = if round_num == 2 { "bear-r2" } else { "bear-researcher" };
+        let bull_expert = if round_num == 2 {
+            "bull-r2"
+        } else {
+            "bull-researcher"
+        };
+        let bear_expert = if round_num == 2 {
+            "bear-r2"
+        } else {
+            "bear-researcher"
+        };
         let bull_title = format!("多方研究员·第{round_num}轮");
         let bear_title = format!("空方研究员·第{round_num}轮");
         let bull_y = 40.0 + (round * 2) as f64 * 80.0;
         let bear_y = 40.0 + (round * 2 + 1) as f64 * 80.0;
 
         // 多方辩手：首轮无前置辩论上下文，后续轮次引用所有前序辩论输出
-        let mut bull_an = agent(
-            &bull_id,
-            &bull_title,
-            bull_expert,
-            Some("debate-bull-bear"),
-            20.0,
-            bull_y,
-        );
+        let mut bull_an =
+            agent(&bull_id, &bull_title, bull_expert, Some("debate-bull-bear"), 20.0, bull_y);
         if let WorkflowNode::Agent(ref mut a) = bull_an {
             // 第 2 轮用质询型 prompt，不再注入完整工具集（避免误导 LLM 重新分析）
             if round_num == 2 {
-                if let Some(names) =
-                    PROFILE_TOOLS.iter().find(|(k, _)| *k == bull_expert).map(|(_, v)| *v)
+                if let Some(names) = PROFILE_TOOLS
+                    .iter()
+                    .find(|(k, _)| *k == bull_expert)
+                    .map(|(_, v)| *v)
                 {
                     a.config.tools = names
                         .iter()
@@ -1280,18 +1284,14 @@ async fn seed_stock_analysis_workflow_template(
         nodes.push(bull_an);
 
         // 空方辩手：引用本轮多方输出 + 前序轮次辩论输出
-        let mut bear_an = agent(
-            &bear_id,
-            &bear_title,
-            bear_expert,
-            Some("debate-bull-bear"),
-            20.0,
-            bear_y,
-        );
+        let mut bear_an =
+            agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), 20.0, bear_y);
         if let WorkflowNode::Agent(ref mut a) = bear_an {
             if round_num == 2 {
-                if let Some(names) =
-                    PROFILE_TOOLS.iter().find(|(k, _)| *k == bear_expert).map(|(_, v)| *v)
+                if let Some(names) = PROFILE_TOOLS
+                    .iter()
+                    .find(|(k, _)| *k == bear_expert)
+                    .map(|(_, v)| *v)
                 {
                     a.config.tools = names
                         .iter()
@@ -1533,11 +1533,7 @@ async fn seed_stock_analysis_workflow_template(
     let raw_input_sources: Vec<String> = algo_tools
         .iter()
         .map(|(id, _, _, _, _, _)| id.to_string())
-        .chain(
-            tool_assignments
-                .iter()
-                .map(|(id, _, _, _)| id.to_string()),
-        )
+        .chain(tool_assignments.iter().map(|(id, _, _, _)| id.to_string()))
         .collect();
     nodes.push(WorkflowNode::Aggregator(AggregatorNode {
         base: WorkflowNodeBase {
@@ -1565,9 +1561,11 @@ async fn seed_stock_analysis_workflow_template(
     // 12 个 tool 节点中最深的间接前置）。改成显式声明后，调度器会等待所有 12
     // 个上游 tool 节点都完成才启动 raw-data，input_sources 才有数据可读。
     // 迭代器自然包含 e-t-risk-raw-data（来自 algo_tools 末项）。
-    for src in algo_tools.iter().map(|(id, _, _, _, _, _)| *id).chain(
-        tool_assignments.iter().map(|(id, _, _, _)| *id),
-    ) {
+    for src in algo_tools
+        .iter()
+        .map(|(id, _, _, _, _, _)| *id)
+        .chain(tool_assignments.iter().map(|(id, _, _, _)| *id))
+    {
         edges.push(edge(&format!("e-{src}-raw-data"), src, "raw-data"));
     }
 

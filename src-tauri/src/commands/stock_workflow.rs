@@ -435,10 +435,9 @@ pub async fn run_stock_workflow(
                             extract_decision_fields(&decision_json);
                         // 持久化工作流结果到 blackboard_snapshot，供历史回放/报告
                         // 生成/跨日 key_levels 聚合使用。修复 Defect #2。
-                        let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
-                            &result.results,
-                        ))
-                        .unwrap_or_else(|_| "{}".to_string());
+                        let bb_snapshot =
+                            serde_json::to_string(&build_blackboard_snapshot(&result.results))
+                                .unwrap_or_else(|_| "{}".to_string());
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))

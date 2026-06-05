@@ -3,7 +3,7 @@ import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { Button, Collapse, Dropdown } from "antd";
-import { ArrowLeftRight, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
+import { ArrowLeftRight, Coins, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -28,6 +28,7 @@ import { StockQuoteCard } from "./StockQuoteCard";
 import { StockScreenerPanel } from "./StockScreenerPanel";
 import { StockSearchBar } from "./StockSearchBar";
 import { TradePanel } from "./TradePanel";
+import { ValueAssessmentPanel } from "./ValueAssessmentPanel";
 import { WatchlistPanel } from "./WatchlistPanel";
 
 const PERIOD_MAP: Record<string, { period: string; limit: number }> = {
@@ -127,6 +128,12 @@ export function StockAnalysisPage() {
       label: t("stockAnalysis.tab.debate"),
       icon: <ArrowLeftRight size={14} />,
       children: <DebatePanel />,
+    },
+    {
+      key: "value",
+      label: t("stockAnalysis.tab.value"),
+      icon: <Coins size={14} />,
+      children: <ValueAssessmentPanel />,
     },
     { key: "risk", label: t("stockAnalysis.tab.risk"), icon: <Shield size={14} />, children: <RiskMatrix /> },
     {

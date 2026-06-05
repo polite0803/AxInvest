@@ -7,21 +7,26 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags } from "./utils";
 
-/** 风险类型 → 颜色映射（匹配后端 risk_type 字段，OKLch 值与 index.css --sa-* 同步） */
+/** 风险类型 → 颜色映射（键名对齐 riskAssessments 实际节点 ID，
+ *  OKLch 值与 index.css --sa-* 同步）。
+ * 修复 Bug #5: 旧版键名用专家角色 ID（aggressive-debator 等），
+ * 与 store 中 riskAssessments 实际键（risk-agg 等）不匹配，导致颜色与标签
+ * 全部回退到默认值，用户看到的是 raw 节点 ID + 随机 HSL 颜色。
+ */
 const RISK_COLORS: Record<string, string> = {
-  "aggressive-debator": "oklch(55% 0.20 28)",
-  "conservative-debator": "oklch(55% 0.18 150)",
-  "neutral-debator": "oklch(55% 0.16 250)",
-  "research-manager": "oklch(60% 0.18 85)",
+  "risk-agg": "oklch(55% 0.20 28)",
+  "risk-con": "oklch(55% 0.18 150)",
+  "risk-neu": "oklch(55% 0.16 250)",
+  "research-mgr": "oklch(60% 0.18 85)",
   "comprehensive": "oklch(60% 0.16 290)",
 };
 
-/** 风险类型 → i18n key */
+/** 风险类型 → i18n key（键名对齐 riskAssessments 实际节点 ID） */
 const RISK_LABEL_KEYS: Record<string, string> = {
-  "aggressive-debator": "risk.aggressive",
-  "conservative-debator": "risk.conservative",
-  "neutral-debator": "risk.neutral",
-  "research-manager": "risk.researchManager",
+  "risk-agg": "risk.aggressive",
+  "risk-con": "risk.conservative",
+  "risk-neu": "risk.neutral",
+  "research-mgr": "risk.researchManager",
   "comprehensive": "risk.comprehensive",
 };
 

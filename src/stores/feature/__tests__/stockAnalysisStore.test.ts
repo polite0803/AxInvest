@@ -96,6 +96,46 @@ describe("stockAnalysisStore - feature coverage", () => {
       expect(inferStage("notify-result")).toBe(4);
     });
 
+    // 修复 P2 Bug #4: 补充缺失的 inferStage 映射
+    it("value-investor 巴菲特框架 → 阶段 3 (修复 P2 #4 后)", () => {
+      expect(inferStage("value-investor")).toBe(3);
+    });
+    it("t-* 工具节点 → 阶段 1 (修复 P2 #4 后)", () => {
+      expect(inferStage("t-fundamentals-data")).toBe(1);
+      expect(inferStage("t-news-data")).toBe(1);
+      expect(inferStage("t-policy-data")).toBe(1);
+      expect(inferStage("t-research-data")).toBe(1);
+      expect(inferStage("t-scoring")).toBe(1);
+      expect(inferStage("t-valuation")).toBe(1);
+      expect(inferStage("t-risk")).toBe(1);
+    });
+    it("debate-bull-bear 装饰容器 → 阶段 2 (修复 P2 #4 后)", () => {
+      expect(inferStage("debate-bull-bear")).toBe(2);
+    });
+    it("p-analysts / p-risk-assess 装饰容器 → 阶段 1/3 (修复 P2 #4 后)", () => {
+      expect(inferStage("p-analysts")).toBe(1);
+      expect(inferStage("p-risk-assess")).toBe(3);
+    });
+    it("trigger 入口节点 → 阶段 0 (修复 P2 #4 后)", () => {
+      expect(inferStage("trigger")).toBe(0);
+    });
+    // 修复 P2 Bug #3: bull-researcher 旧命名（已不再生成）保留兼容映射
+    it("bull-researcher / bear-researcher 旧别名 → 阶段 2 (修复 P2 #3 后保留兼容)", () => {
+      expect(inferStage("bull-researcher")).toBe(2);
+      expect(inferStage("bear-researcher")).toBe(2);
+    });
+
+    // P3 (real-nodes): 3 个新节点阶段映射
+    it("data-quality 数据质量检查 → 阶段 3", () => {
+      expect(inferStage("data-quality")).toBe(3);
+    });
+    it("raw-data 原始数据聚合 → 阶段 3", () => {
+      expect(inferStage("raw-data")).toBe(3);
+    });
+    it("rule-check 规则检查 → 阶段 4", () => {
+      expect(inferStage("rule-check")).toBe(4);
+    });
+
     // 修复 #2/#6 后
     it("所有已知 DAG 节点 ID 都能映射到 1-4 阶段之一, 不允许返回 -1 (修复 #2/#6 后启用)", () => {
       const allNodeIds = [
@@ -108,12 +148,30 @@ describe("stockAnalysisStore - feature coverage", () => {
         "a-lockup",
         "a-research",
         "a-sector",
+        // P0 修复新增的分析师节点
+        "value-investor",
+        // 工具节点 t-*
+        "t-fundamentals-data",
+        "t-news-data",
+        "t-policy-data",
+        "t-research-data",
+        "t-scoring",
+        "t-valuation",
+        "t-risk",
+        // 辩论节点（实际命名 + 旧别名）
         "bull-r1",
         "bear-r1",
         "bull-r2",
         "bear-r2",
         "bull-r3",
         "bear-r3",
+        "bull-researcher",
+        "bear-researcher",
+        "debate-bull-bear",
+        // 装饰容器
+        "p-analysts",
+        "p-risk-assess",
+        // 风险/研究/决策
         "risk-agg",
         "risk-con",
         "risk-neu",
@@ -124,6 +182,12 @@ describe("stockAnalysisStore - feature coverage", () => {
         "cls-risk-level",
         "v-validate",
         "notify-result",
+        // P3 (real-nodes) 决策辅助节点
+        "data-quality",
+        "raw-data",
+        "rule-check",
+        // 入口
+        "trigger",
       ];
       for (const id of allNodeIds) {
         expect(inferStage(id), `nodeId=${id}`).not.toBe(-1);
@@ -440,6 +504,76 @@ describe("stockAnalysisStore - feature coverage", () => {
 
       // currentStage 不应被覆写为 -1；进度可继续推进
       expect(useStockAnalysisStore.getState().currentStage).toBe(2);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // 6. workflow-completed 事件 → parseWorkflowResults 填充 4 个新字段
+  //    修复 Bug #2: value-investor / rule-check / data-quality / raw-data
+  // ────────────────────────────────────────────────────────────
+  describe("workflow-completed 事件 - parseWorkflowResults 扩展节点 (修复 Bug #2)", () => {
+    const setupCompleteHandler = async (): Promise<Function> => {
+      let handler: Function = () => {};
+      listenMock.mockImplementation((event: string, h: Function) => {
+        if (event === "workflow-completed") { handler = h; }
+        return Promise.resolve(unlistenMock);
+      });
+      await useStockAnalysisStore.getState().setupEventListener();
+      return handler;
+    };
+
+    it("value-investor 节点输出填充到 valueAssessments", async () => {
+      const handler = await setupCompleteHandler();
+
+      handler({
+        payload: {
+          workflowId: "wf-1",
+          results: {
+            "value-investor": { content: "DCF 估值 1650，Margin of Safety 充足" },
+          },
+        },
+      });
+
+      const values = useStockAnalysisStore.getState().valueAssessments;
+      expect(values["value-investor"]).toBe("DCF 估值 1650，Margin of Safety 充足");
+    });
+
+    it("rule-check / data-quality / raw-data 节点也填充到对应字段", async () => {
+      const handler = await setupCompleteHandler();
+
+      handler({
+        payload: {
+          workflowId: "wf-1",
+          results: {
+            "rule-check": { content: "全部规则通过" },
+            "data-quality": { content: "数据完整度 92%" },
+            "raw-data": { content: "PE=24, PB=6.2, ROE=18%" },
+          },
+        },
+      });
+
+      const state = useStockAnalysisStore.getState();
+      expect(state.ruleCheckResults["rule-check"]).toBe("全部规则通过");
+      expect(state.dataQualitySummary).toBe("数据完整度 92%");
+      expect(state.rawData["raw-data"]).toBe("PE=24, PB=6.2, ROE=18%");
+    });
+
+    it("4 个新节点解析不会影响原有 analystReports / debateRounds", async () => {
+      const handler = await setupCompleteHandler();
+
+      handler({
+        payload: {
+          workflowId: "wf-1",
+          results: {
+            "a-fundamentals": { content: "基本面分析报告" },
+            "value-investor": { content: "巴菲特框架评估" },
+          },
+        },
+      });
+
+      const state = useStockAnalysisStore.getState();
+      expect(state.analystReports["fundamentals"]).toBe("基本面分析报告");
+      expect(state.valueAssessments["value-investor"]).toBe("巴菲特框架评估");
     });
   });
 });

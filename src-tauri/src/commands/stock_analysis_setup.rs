@@ -76,6 +76,14 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "value-investor",
         include_str!("../../agency_experts/stock-analysis/custom/value-investor.md"),
     ),
+    (
+        "data-quality-inspector",
+        include_str!("../../agency_experts/stock-analysis/data-quality-inspector.md"),
+    ),
+    (
+        "rule-checker",
+        include_str!("../../agency_experts/stock-analysis/rule-checker.md"),
+    ),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -99,6 +107,8 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("trader", "trader"),
     ("portfolio-manager", "decision-maker"),
     ("value-investor", "stock-analyst"),
+    ("data-quality-inspector", "stock-analyst"),
+    ("rule-checker", "risk-evaluator"),
 ];
 
 struct StockRoleDef {
@@ -116,7 +126,9 @@ const STOCK_ROLES: &[StockRoleDef] = &[
         name: "股票分析师",
         description: "A股多维分析",
         system_prompt: "你是专业的 A 股分析师，基于行情数据、财务数据、新闻资讯等对股票进行深度分析。",
-        max_concurrent: 7,
+        // 修复 Defect #6: 提升到 12 以容纳 9 个 a-* + value-investor + data-quality-inspector
+        // （共 11 个 stock-analyst 角色节点），留 1 槽位余量。
+        max_concurrent: 12,
         timeout_seconds: 600,
     },
     StockRoleDef {
@@ -243,6 +255,11 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ),
     ("bull-researcher", &["compute_scoring", "compute_valuation", "search_stock"]),
     ("bear-researcher", &["compute_scoring", "compute_valuation", "search_stock"]),
+    // 修复 Defect #4: bull-r2 / bear-r2 是辩论第 2 轮的"质询"型辩手，
+    // 主要工作是阅读对方 R1 论据并提出可证伪的质询问题，仅需 search_stock
+    // 用于核实引用数据。
+    ("bull-r2", &["search_stock"]),
+    ("bear-r2", &["search_stock"]),
     ("aggressive-debator", &["compute_portfolio_risk", "search_stock"]),
     ("conservative-debator", &["compute_portfolio_risk", "search_stock"]),
     ("neutral-debator", &["compute_portfolio_risk", "search_stock"]),
@@ -277,6 +294,20 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "search_stock",
         ],
     ),
+    // ── P3 (real-nodes): 数据质量检查员 + 规则检查员 ──
+    // data-quality-inspector 只需阅读上游分析师报告（context_sources 注入），
+    // 不需要外部工具调用
+    ("data-quality-inspector", &["search_stock"]),
+    // rule-checker 需要读取技术指标与估值/风控结果
+    (
+        "rule-checker",
+        &[
+            "compute_scoring",
+            "compute_valuation",
+            "compute_portfolio_risk",
+            "search_stock",
+        ],
+    ),
 ];
 
 pub async fn ensure_stock_analysis_experts_seeded(
@@ -293,6 +324,33 @@ pub async fn ensure_stock_analysis_experts_seeded(
 /// 将股票分析 DAG 作为工作流模板持久化到 workflow_templates 表。
 /// 模板中的 system_prompt 使用 {{stock_code}} / {{stock_name}} / {{data_ctx}} 占位符，
 /// 运行时由 run_stock_workflow 替换为实际行情数据。
+///
+/// ───────────────────────────────────────────────────────────────────────
+/// 【装饰节点模式 / Decorative Container Pattern】
+/// ───────────────────────────────────────────────────────────────────────
+/// 本模板中以下三个"容器节点"是**纯视觉装饰**，不参与实际流程控制：
+///
+///   1. `p-analysts`       (ParallelNode)  包裹 9 组 (Tool + Agent)
+///   2. `debate-bull-bear` (DebateNode)    包裹 6 个真实辩手 (bull-r1..r3, bear-r1..r3)
+///   3. `p-risk-assess`    (ParallelNode)  包裹 3 个风险偏好 Agent
+///
+/// 关键约定：
+///   • 容器在引擎中**立即 Completed**，不等子节点
+///   • 实际依赖通过**显式 edge** 表达，不依赖容器的调度语义
+///   • `parent_id` 字段仅供前端编辑器嵌套渲染，**运行时调度忽略**
+///   • 子节点的 context_sources 直接指向"父节点"（容器）的 id，
+///     但因为容器瞬时完成，运行时等同于"等触发边到齐即可启动"
+///
+/// 为什么需要这种设计？
+///   前端画布需要把多组节点画在一个可折叠的分组框内，单纯靠 edge
+///   拓扑无法表达"视觉从属关系"。容器节点是"调度语义 + 视觉语义"
+///   的解耦产物：调度走 edge，视觉走 parent_id。
+///
+/// 维护警示：
+///   任何把"等下游数据"的节点直接连到容器都是错的——容器返回的是
+///   配置元数据而非子节点输出。正确接法是连到最后一个真实子节点
+///   （如 value-investor 应连到 `bear-r{debate_max_rounds}`，详见 P0 修复）。
+/// ───────────────────────────────────────────────────────────────────────
 async fn seed_stock_analysis_workflow_template(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), String> {
@@ -309,7 +367,7 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 6;
+    const TEMPLATE_VERSION: i32 = 7;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -962,15 +1020,25 @@ async fn seed_stock_analysis_workflow_template(
     let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
 
     // 为每个分析师插入对应的数据获取 Tool 节点
+    // 注：节点工具决定了下游 analyst 拿到的"前置数据"。LLM agent 自身仍可调用
+    // PROFILE_TOOLS 中的工具，但首屏/冷启动数据由这些 tool 节点预拉。
     let tool_assignments: &[(&str, &str, &str, &str)] = &[
         ("t-market-data", "获取K线+行情", "get_stock_kline", "stock_code"),
         ("t-sentiment-data", "获取新闻+热门", "get_hot_stocks", "stock_code"),
         ("t-news-data", "获取新闻+公告", "get_announcements", "stock_code"),
-        ("t-fundamentals-data", "获取财务+一致预期", "get_consensus_eps", "stock_code"),
-        ("t-policy-data", "获取新闻+公告", "get_announcements", "stock_code"),
+        // 修复 P1: 基本面分析师前置数据改用 get_stock_financials（财报）而非
+        // get_consensus_eps（一致预期），让 a-fundamentals 启动时就能拿到
+        // 营收/利润/资产负债等核心财务数据。
+        ("t-fundamentals-data", "获取财务数据", "get_stock_financials", "stock_code"),
+        // 修复 P1: 政策分析师前置数据改用 get_stock_news（新闻）而非
+        // get_announcements（公告）。新闻覆盖宏观/产业政策动态更广，
+        // 与 a-news 的公告视角形成互补。
+        ("t-policy-data", "获取新闻", "get_stock_news", "stock_code"),
+        // 修复 P1: 研报分析师前置数据改用 get_research_reports（研报），
+        // 让 a-research 启动时就能拿到券商研报的核心结论与目标价。
+        ("t-research-data", "获取研报+新闻", "get_research_reports", "stock_code"),
         ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
-        ("t-lockup-data", "获取财务+公告", "get_announcements", "stock_code"),
-        ("t-research-data", "获取新闻+一致预期", "get_consensus_eps", "stock_code"),
+        ("t-lockup-data", "获取解禁质押数据", "get_announcements", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
@@ -1036,7 +1104,23 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{aid}-debate"), aid, "debate-bull-bear"));
     }
 
-    // ParallelNode: 仅作为视觉分组包裹 9 组 Tool+Agent，不参与实际流程控制
+    // ═══════════════════════════════════════════════════════════════════════
+    // 【装饰节点 / Decorative Container】p-analysts
+    // ═══════════════════════════════════════════════════════════════════════
+    // 语义：视觉分组容器，包裹 9 组 (Tool + Agent) 子节点
+    // 调度：容器本身在引擎中立即 Completed（不参与流程控制）
+    //      - wait_for_all=true, aggregation=All: 等所有子节点完成后聚合
+    //      - auto_input_from_parent=false: 不自动从父节点拉数据
+    //      - 实际依赖通过显式 edge 表达（e-trigger-{tool_id} 和 e-{tool_id}-{aid}）
+    // parent_id：仅供前端编辑器嵌套渲染用，运行时调度忽略此字段
+    //
+    // 为什么不直接用 Edges 表达？
+    //   前端需要把 9 个 Tool 和 9 个 Agent 画在一个可折叠的分组框内，
+    //   单纯靠 edge 拓扑无法表达"视觉从属关系"。ParallelNode 在此
+    //   充当"虚拟容器"，是 workflow_types 中两种角色之一的产物：
+    //     1) 真正的并行控制器（wait_for_all + 聚合）
+    //     2) 纯装饰性容器（仅前端展示，调度无意义）  ← 属于此类
+    // ═══════════════════════════════════════════════════════════════════════
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
             id: "p-analysts".into(),
@@ -1064,6 +1148,25 @@ async fn seed_stock_analysis_workflow_template(
     // ── 辩论轮数（DAG 展开为 max_rounds 轮顺序执行） ──
     let debate_max_rounds: usize = 3;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 【装饰节点 / Decorative Container】debate-bull-bear
+    // ═══════════════════════════════════════════════════════════════════════
+    // 语义：多空辩论的视觉分组容器，配置 max_rounds=3 的辩论元数据
+    // 调度：容器本身在引擎中立即 Completed（返回 debater_steps 配置，不返回辩论结果）
+    //      - debater_steps: 6 个真实辩手节点 (bull-r1..r3, bear-r1..r3)
+    //      - max_rounds=3: 固定 3 轮，无"是否收敛"循环控制
+    //      - convergence_prompt/model: 配置就绪但当前未启用（避免辩论死循环）
+    //
+    // ⚠️ 关键陷阱（P0 已修复）：
+    //   历史 bug：曾将 value-investor 的入边连到本容器，导致 value-investor
+    //   在容器 Completed 时立即启动——拿到的是"辩论配置"而非"辩论结果"。
+    //   正确接法：value-investor 应等待最后一个真实辩手节点 bear-r3 完成。
+    //
+    // 真实调度依赖链（首轮 bull-r1 启动条件）：
+    //   trigger → tool → a-* → debate-bull-bear（立即完成）→ bull-r1
+    //   后续轮次：bull-r{r+1} 等 bear-r{r}，bear-r{r} 等 bull-r{r}
+    // parent_id：仅供前端编辑器嵌套渲染用
+    // ═══════════════════════════════════════════════════════════════════════
     nodes.push(WorkflowNode::Debate(DebateNode {
         base: WorkflowNodeBase {
             id: "debate-bull-bear".into(),
@@ -1126,19 +1229,45 @@ async fn seed_stock_analysis_workflow_template(
         let round_num = round + 1;
         let bull_id = format!("bull-r{round_num}");
         let bear_id = format!("bear-r{round_num}");
+        // 修复 Defect #4: 第 2 轮用 bull-r2/bear-r2（质询型 prompt），第 1/3 轮
+        // 继续用 bull-researcher/bear-researcher（初始论据 / 最终反驳）。
+        let bull_expert = if round_num == 2 { "bull-r2" } else { "bull-researcher" };
+        let bear_expert = if round_num == 2 { "bear-r2" } else { "bear-researcher" };
         let bull_title = format!("多方研究员·第{round_num}轮");
         let bear_title = format!("空方研究员·第{round_num}轮");
         let bull_y = 40.0 + (round * 2) as f64 * 80.0;
         let bear_y = 40.0 + (round * 2 + 1) as f64 * 80.0;
 
         // 多方辩手：首轮无前置辩论上下文，后续轮次引用所有前序辩论输出
-        let mut bull_an =
-            agent(&bull_id, &bull_title, "bull-researcher", Some("debate-bull-bear"), 20.0, bull_y);
+        let mut bull_an = agent(
+            &bull_id,
+            &bull_title,
+            bull_expert,
+            Some("debate-bull-bear"),
+            20.0,
+            bull_y,
+        );
         if let WorkflowNode::Agent(ref mut a) = bull_an {
-            a.config.tools = bull_tools.clone();
-            a.config.max_tool_rounds = Some(2);
-            a.config.system_prompt =
-                format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
+            // 第 2 轮用质询型 prompt，不再注入完整工具集（避免误导 LLM 重新分析）
+            if round_num == 2 {
+                if let Some(names) =
+                    PROFILE_TOOLS.iter().find(|(k, _)| *k == bull_expert).map(|(_, v)| *v)
+                {
+                    a.config.tools = names
+                        .iter()
+                        .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                        .collect();
+                    a.config.exposed_tools = names.iter().map(|&tn| tn.to_string()).collect();
+                    a.config.system_prompt =
+                        format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+                }
+                a.config.max_tool_rounds = Some(1);
+            } else {
+                a.config.tools = bull_tools.clone();
+                a.config.max_tool_rounds = Some(2);
+                a.config.system_prompt =
+                    format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
+            }
             a.config.model_role = Some("debater".into());
             // 注入前序轮次辩论输出作为上下文
             let mut ctx: Vec<String> = Vec::new();
@@ -1151,13 +1280,34 @@ async fn seed_stock_analysis_workflow_template(
         nodes.push(bull_an);
 
         // 空方辩手：引用本轮多方输出 + 前序轮次辩论输出
-        let mut bear_an =
-            agent(&bear_id, &bear_title, "bear-researcher", Some("debate-bull-bear"), 20.0, bear_y);
+        let mut bear_an = agent(
+            &bear_id,
+            &bear_title,
+            bear_expert,
+            Some("debate-bull-bear"),
+            20.0,
+            bear_y,
+        );
         if let WorkflowNode::Agent(ref mut a) = bear_an {
-            a.config.tools = bear_tools.clone();
-            a.config.max_tool_rounds = Some(2);
-            a.config.system_prompt =
-                format!("{}{}", a.config.system_prompt, tool_prompt(&bear_tools));
+            if round_num == 2 {
+                if let Some(names) =
+                    PROFILE_TOOLS.iter().find(|(k, _)| *k == bear_expert).map(|(_, v)| *v)
+                {
+                    a.config.tools = names
+                        .iter()
+                        .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                        .collect();
+                    a.config.exposed_tools = names.iter().map(|&tn| tn.to_string()).collect();
+                    a.config.system_prompt =
+                        format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+                }
+                a.config.max_tool_rounds = Some(1);
+            } else {
+                a.config.tools = bear_tools.clone();
+                a.config.max_tool_rounds = Some(2);
+                a.config.system_prompt =
+                    format!("{}{}", a.config.system_prompt, tool_prompt(&bear_tools));
+            }
             a.config.model_role = Some("debater".into());
             // 注入前序轮次 + 本轮多方输出作为上下文
             let mut ctx: Vec<String> = Vec::new();
@@ -1184,17 +1334,21 @@ async fn seed_stock_analysis_workflow_template(
     }
 
     // ── value-investor（巴菲特框架）：在辩论之后、与风险评估并行运行 ──
+    // 入边从 bear-r{debate_max_rounds} 出发，确保等真辩论收敛后再启动
+    // （debate-bull-bear 是 DebateNode 容器，立即 Completed，返回的是配置而非辩论结果）
     {
         let vi_id = "value-investor";
         let vi_title = "以巴菲特-芒格价值投资理念评估该标的，分析护城河、财务健康度、管理层、安全边际，输出结构化估值框架";
         let vi_y = 1540.0;
+        let last_debate_node = format!("bear-r{debate_max_rounds}");
         let mut vi = agent(vi_id, vi_title, "value-investor", None, 20.0, vi_y);
         if let WorkflowNode::Agent(ref mut a) = vi {
             a.config.context_sources = vec![
                 "a-fundamentals".into(),
                 "a-research".into(),
                 "a-sector".into(),
-                "debate-bull-bear".into(),
+                // 改为辩论最后一轮空方的输出（真辩论结论），而非 DebateNode 容器
+                last_debate_node.clone(),
             ];
             a.config.model_role = Some("stock-analyst".into());
             a.config.max_tool_rounds = Some(2);
@@ -1212,10 +1366,24 @@ async fn seed_stock_analysis_workflow_template(
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         }
         nodes.push(vi);
-        edges.push(edge("e-debate-value-investor", "debate-bull-bear", vi_id));
+        edges.push(edge("e-debate-value-investor", &last_debate_node, vi_id));
     }
 
-    // 风险评估 — 使用 ParallelNode 容器包裹 3 个并行 Agent
+    // ═══════════════════════════════════════════════════════════════════════
+    // 【装饰节点 / Decorative Container】p-risk-assess
+    // ═══════════════════════════════════════════════════════════════════════
+    // 语义：风险评估的视觉分组容器，包裹 3 个并行风险偏好 Agent
+    // 调度：与 p-analysts 相同——容器立即 Completed，子节点独立调度
+    //      - aggressive-debator / conservative-debator / neutral-debator
+    //      - 3 个子节点共享同一份风险输入（来自聚合后的辩论+分析师输出）
+    //      - 实际依赖通过显式 edge 表达：e-bear-r3 → p-risk-assess（容器）→ 3 个子节点
+    //        容器完成是"瞬时"的，3 个子节点会同时被引擎解锁
+    // parent_id：仅供前端编辑器嵌套渲染用
+    //
+    // 与 p-analysts 的区别：
+    //   p-analysts 包裹 9 组 (Tool+Agent) 强调"数据预拉 + 分析"两阶段
+    //   p-risk-assess 包裹纯 Agent，强调"同输入多视角并行评估"
+    // ═══════════════════════════════════════════════════════════════════════
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
             id: "p-risk-assess".into(),
@@ -1359,6 +1527,50 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 
+    // ── P3 (real-nodes): raw-data 聚合节点 ──
+    // 把 12 个 t-* tool 节点的输出聚合成单个 raw 对象，供前端 rawData["raw-data"] 展示
+    // 不接 LLM，纯数据合并（Aggregator 节点），与 cls-risk-level 并行
+    let raw_input_sources: Vec<String> = algo_tools
+        .iter()
+        .map(|(id, _, _, _, _, _)| id.to_string())
+        .chain(
+            tool_assignments
+                .iter()
+                .map(|(id, _, _, _)| id.to_string()),
+        )
+        .collect();
+    nodes.push(WorkflowNode::Aggregator(AggregatorNode {
+        base: WorkflowNodeBase {
+            id: "raw-data".into(),
+            title: "原始数据聚合".into(),
+            description: Some("聚合 12 个 t-* 工具节点的原始输出".into()),
+            position: Position {
+                x: 840.0,
+                y: 2700.0,
+            },
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: AggregatorNodeConfig {
+            strategy: "all".into(),
+            input_sources: raw_input_sources,
+            output_var: "raw-data-aggregated".into(),
+        },
+    }));
+    // 修复 Defect #8: 为 raw-data 显式添加 12 个 tool 节点的入边。
+    // 之前只有 1 条 e-t-risk-raw-data 边，依赖关系是"隐性"的（依赖 t-risk 是
+    // 12 个 tool 节点中最深的间接前置）。改成显式声明后，调度器会等待所有 12
+    // 个上游 tool 节点都完成才启动 raw-data，input_sources 才有数据可读。
+    // 迭代器自然包含 e-t-risk-raw-data（来自 algo_tools 末项）。
+    for src in algo_tools.iter().map(|(id, _, _, _, _, _)| *id).chain(
+        tool_assignments.iter().map(|(id, _, _, _)| *id),
+    ) {
+        edges.push(edge(&format!("e-{src}-raw-data"), src, "raw-data"));
+    }
+
     // ── LlmClassifierNode: 风险等级分类 ──
     nodes.push(WorkflowNode::LlmClassifier(LlmClassifierNode {
         base: WorkflowNodeBase {
@@ -1420,6 +1632,46 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
     edges.push(edge("e-cls-risk-v-validate", "cls-risk-level", "v-validate"));
+
+    // ── P3 (real-nodes): data-quality 数据质量检查 Agent ──
+    // 等待 v-validate 完成（在 cls-risk-level + t-* algo 全跑完后），
+    // 然后评估所有分析师报告的覆盖度、字数、占位检测、一致性。
+    // 与 research-mgr 并行启动，输出通过 portfolio-mgr.context_sources 注入
+    // 最终决策（见 portfolio-mgr 节点的 context_sources 配置）。
+    {
+        let dq_id = "data-quality";
+        let dq_title = "评估本次分析的 9 个分析师报告的覆盖度、字数、占位检测与一致性，输出 A/B/C/D/F 质量等级与数据缺口清单";
+        let dq_y = 3300.0;
+        let mut dq = agent(dq_id, dq_title, "data-quality-inspector", None, 840.0, dq_y);
+        if let WorkflowNode::Agent(ref mut a) = dq {
+            a.config.context_sources = vec![
+                "a-market-analyst".into(),
+                "a-sentiment".into(),
+                "a-news".into(),
+                "a-fundamentals".into(),
+                "a-policy".into(),
+                "a-hot-money".into(),
+                "a-lockup".into(),
+                "a-research".into(),
+                "a-sector".into(),
+            ];
+            a.config.model_role = Some("stock-analyst".into());
+            let tool_names = PROFILE_TOOLS
+                .iter()
+                .find(|(k, _)| *k == "data-quality-inspector")
+                .map(|(_, v)| *v)
+                .unwrap_or(&[]);
+            a.config.tools = tool_names
+                .iter()
+                .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                .collect();
+            a.config.exposed_tools = tool_names.iter().map(|&tn| tn.to_string()).collect();
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+        }
+        nodes.push(dq);
+        edges.push(edge("e-v-validate-data-quality", "v-validate", dq_id));
+    }
 
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(
@@ -1517,6 +1769,12 @@ async fn seed_stock_analysis_workflow_template(
             "trader".into(),
             "research-mgr".into(),
             "debate-bull-bear".into(),
+            // 注入数据质量与原始数据，让最终决策在已知数据完整度
+            // (data-quality) 与可核验的原始指标 (raw-data) 之上做出。
+            // 调度：data-quality/raw-data 都在 v-validate 之后/同步 t-risk
+            // 完成，远早于 portfolio-mgr 启动，可安全作为 context。
+            "data-quality".into(),
+            "raw-data".into(),
         ];
         a.config.model_role = Some("decision-maker".into());
         a.config.tools = vec![
@@ -1551,6 +1809,43 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-trader-portfolio-mgr", "trader", "portfolio-mgr"));
     edges.push(edge("e-research-mgr-portfolio-mgr", "research-mgr", "portfolio-mgr"));
 
+    // ── P3 (real-nodes): rule-check 规则检查 Agent ──
+    // 在 portfolio-mgr 完成后启动，对照硬性规则阈值（RSI/乖离率/止损/放量下跌/空头排列）
+    // 检查交易方案是否违规，输出 violations / corrections / force_signals
+    {
+        let rc_id = "rule-check";
+        let rc_title = "对照硬性规则阈值（RSI 超买/乖离率追高/缺失止损/放量下跌/空头排列）检查最终交易方案是否违规，输出违规清单与修正建议";
+        let rc_y = 4200.0;
+        let mut rc = agent(rc_id, rc_title, "rule-checker", None, 840.0, rc_y);
+        if let WorkflowNode::Agent(ref mut a) = rc {
+            a.config.context_sources = vec![
+                "portfolio-mgr".into(),
+                "t-scoring".into(),
+                "t-valuation".into(),
+                "t-risk".into(),
+                "trader".into(),
+            ];
+            a.config.model_role = Some("risk-evaluator".into());
+            let tool_names = PROFILE_TOOLS
+                .iter()
+                .find(|(k, _)| *k == "rule-checker")
+                .map(|(_, v)| *v)
+                .unwrap_or(&[]);
+            a.config.tools = tool_names
+                .iter()
+                .filter_map(|&tn| tool_def_map.get(tn).cloned())
+                .collect();
+            a.config.exposed_tools = tool_names.iter().map(|&tn| tn.to_string()).collect();
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+        }
+        nodes.push(rc);
+        // ── NotificationNode 由 rule-check 完成后触发（不再保留 portfolio-mgr → notify
+        // 直连，避免通知在规则检查改写决策之前发出）──
+        edges.push(edge("e-portfolio-mgr-rule-check", "portfolio-mgr", rc_id));
+        edges.push(edge("e-rule-check-notify", rc_id, "notify-result"));
+    }
+
     // ── NotificationNode: 分析完成通知 ──
     nodes.push(WorkflowNode::Notification(NotificationNode {
         base: WorkflowNodeBase {
@@ -1577,7 +1872,7 @@ async fn seed_stock_analysis_workflow_template(
             output_var: "notification".into(),
         },
     }));
-    edges.push(edge("e-portfolio-mgr-notify", "portfolio-mgr", "notify-result"));
+    // 注：移除 e-portfolio-mgr-notify 直连，notify-result 现在仅由 rule-check 完成后触发
 
     // 构建 input_schema / output_schema / variables
     let mut input_props = std::collections::HashMap::new();
@@ -1705,7 +2000,9 @@ async fn seed_stock_analysis_workflow_template(
         Variable {
             name: "max_concurrent".into(),
             var_type: "number".into(),
-            value: serde_json::json!(9),
+            // 修复 Defect #6: 与 stock-analyst 角色 max_concurrent=12 对齐，
+            // 留 1 槽位余量；旧值 9 不足以同时调度 9 个分析师 + value-investor + data-quality。
+            value: serde_json::json!(12),
             description: Some("并行分析的 Agent 数量上限".into()),
             is_secret: false,
         },
@@ -2313,8 +2610,13 @@ fn parse_expert_md(content: &str, fallback: &str) -> (String, String, String, Op
         if let Some(end) = rest.find("\n---") {
             let fm = &rest[..end];
             for line in fm.lines() {
+                // title: 作为 name: 的别名（多份 .md 沿用 old frontmatter 习惯）
                 if let Some(v) = line.trim().strip_prefix("name:") {
                     name = v.trim().into();
+                } else if let Some(v) = line.trim().strip_prefix("title:") {
+                    if name.is_empty() {
+                        name = v.trim().into();
+                    }
                 } else if let Some(v) = line.trim().strip_prefix("description:") {
                     desc = v.trim().into();
                 } else if let Some(v) = line.trim().strip_prefix("color:") {

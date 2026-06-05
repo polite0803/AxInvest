@@ -4,7 +4,7 @@
 //! 格式为 YAML frontmatter + Markdown body。
 //! 实际加载由 `stock_analysis_setup.rs` 的 `include_str!` 编译期嵌入完成。
 
-/// 20 个专家 ID（对应 20 个 .md 文件）
+/// 22 个专家 ID（对应 22 个 .md 文件）
 pub const EXPERT_IDS: &[&str] = &[
     "market-analyst",
     "sentiment-analyst",
@@ -26,6 +26,8 @@ pub const EXPERT_IDS: &[&str] = &[
     "trader",
     "portfolio-manager",
     "value-investor",
+    "data-quality-inspector",
+    "rule-checker",
 ];
 
 /// 股票分析硬约束文本（HEAD 锚定——利用 LLM primacy 效应）。

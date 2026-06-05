@@ -126,6 +126,60 @@ async fn load_and_inject_template(
     })
 }
 
+/// 从单个节点输出中提取"可读文本"。
+/// 节点类型不同，结构不同：
+///   - Agent：优先取 `output.content`（字符串）；否则回退到整个 output 的 JSON 字符串
+///   - Tool/Aggregator：直接序列化为 JSON 字符串
+fn extract_node_text(output: &serde_json::Value) -> String {
+    if let Some(content) = output.get("content").and_then(|v| v.as_str()) {
+        if !content.is_empty() {
+            return content.to_string();
+        }
+    }
+    output.to_string()
+}
+
+/// 工作流结果 → blackboard_snapshot（JSON 对象，键名采用约定前缀）
+///
+/// 键名约定（与 `stock_analysis.rs` 读取端保持一致）：
+///   - `report.<nodeId>`         分析师报告（如 `report.a-fundamentals`）
+///   - `report.investment-plan`  交易员方案（trader 节点映射到该键）
+///   - `value.assessment`        价值投资（巴菲特）评估
+///   - `rule_check.summary`      规则检查结果
+///   - `data_quality_summary`    数据质量总评
+///   - `raw.combined`            原始数据聚合
+///   - 其余节点（debate/risk/research-mgr/portfolio-mgr 等）按 nodeId 存
+///
+/// 每个 value 是 String 形态（便于 `HashMap<String, String>` 解析），
+/// 嵌套对象由后续 key_levels API 调用追加（用 Value 解析读取）。
+fn build_blackboard_snapshot(
+    results: &std::collections::HashMap<String, serde_json::Value>,
+) -> std::collections::HashMap<String, serde_json::Value> {
+    let mut bb: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    for (node_id, raw_output) in results {
+        let text = extract_node_text(raw_output);
+        let key = match node_id.as_str() {
+            // 9 个分析师 + value-investor：归到 report.* 前缀
+            id if id.starts_with("a-") => format!("report.{id}"),
+            // 交易员：归到 report.investment-plan
+            "trader" => "report.investment-plan".to_string(),
+            // 价值投资评估
+            "value-investor" => "value.assessment".to_string(),
+            // 规则检查
+            "rule-check" => "rule_check.summary".to_string(),
+            // 数据质量
+            "data-quality" => "data_quality_summary".to_string(),
+            // 原始数据聚合
+            "raw-data" => "raw.combined".to_string(),
+            // 其余按 nodeId 直接存
+            _ => node_id.clone(),
+        };
+        bb.insert(key, serde_json::Value::String(text));
+    }
+    bb
+}
+
 fn extract_decision_fields(
     decision_json: &Option<String>,
 ) -> (Option<String>, Option<f64>, Option<String>) {
@@ -268,6 +322,9 @@ pub async fn run_stock_workflow(
                 "totalNodes": event.total_nodes,
                 "completedNodes": event.completed_nodes,
                 "executionId": event.execution_id,
+                "output": event.output,
+                "error": event.error,
+                "elapsedMs": event.elapsed_ms,
             });
             let _ = app.emit("workflow-step-done", payload);
         })
@@ -376,6 +433,12 @@ pub async fn run_stock_workflow(
                             });
                         let (action, position_pct, reasoning) =
                             extract_decision_fields(&decision_json);
+                        // 持久化工作流结果到 blackboard_snapshot，供历史回放/报告
+                        // 生成/跨日 key_levels 聚合使用。修复 Defect #2。
+                        let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
+                            &result.results,
+                        ))
+                        .unwrap_or_else(|_| "{}".to_string());
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
@@ -390,6 +453,10 @@ pub async fn run_stock_workflow(
                             .col_expr(
                                 stock_analyses::Column::DecisionJson,
                                 Expr::value(decision_json),
+                            )
+                            .col_expr(
+                                stock_analyses::Column::BlackboardSnapshot,
+                                Expr::value(bb_snapshot),
                             )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,

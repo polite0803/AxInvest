@@ -493,35 +493,35 @@ pub async fn generate_stock_report(
     let decision_json = record.decision_json.clone().unwrap_or_default();
 
     // 从 blackboard_snapshot 恢复分析师报告（仅提取 report.* 条目）
-    let analyst_reports: std::collections::HashMap<String, String> = record
+    // 注：snapshot 是 JSON 对象，value 可能是字符串（来自工作流结果）或嵌套对象
+    // （来自 key_levels API 追加），用 Value 解析兼容两种情况。
+    let bb_value: serde_json::Value = record
         .blackboard_snapshot
         .as_ref()
-        .and_then(|snap| {
-            serde_json::from_str::<std::collections::HashMap<String, String>>(snap).ok()
-        })
-        .map(|all| {
-            all.into_iter()
+        .and_then(|snap| serde_json::from_str(snap).ok())
+        .unwrap_or(serde_json::Value::Object(Default::default()));
+
+    // 辅助：从 Value 中取字符串（空值视为缺失）
+    let bb_str = |k: &str| -> String {
+        bb_value
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+
+    // 分析师报告：所有 report.* 前缀的键
+    let analyst_reports: std::collections::HashMap<String, String> = bb_value
+        .as_object()
+        .map(|obj| {
+            obj.iter()
                 .filter(|(k, _)| k.starts_with("report."))
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
                 .collect()
         })
         .unwrap_or_default();
 
-    let value_assessment_json = record
-        .blackboard_snapshot
-        .as_ref()
-        .and_then(|snap| {
-            serde_json::from_str::<std::collections::HashMap<String, String>>(snap).ok()
-        })
-        .and_then(|all| all.get("value.assessment").cloned())
-        .unwrap_or_default();
-
-    let bb_map = record
-        .blackboard_snapshot
-        .as_ref()
-        .and_then(|snap| {
-            serde_json::from_str::<std::collections::HashMap<String, String>>(snap).ok()
-        })
-        .unwrap_or_default();
+    let value_assessment_json = bb_str("value.assessment");
 
     let html = axagent_stock_analysis::report::generate_html_report(
         &record.stock_code,
@@ -535,17 +535,11 @@ pub async fn generate_stock_report(
         "",
         "",
         &value_assessment_json,
-        &bb_map.get("raw.block_trades").cloned().unwrap_or_default(),
-        &bb_map
-            .get("raw.institutional_visits")
-            .cloned()
-            .unwrap_or_default(),
-        &bb_map
-            .get("market.index_quotes")
-            .cloned()
-            .unwrap_or_default(),
-        &bb_map.get("raw.peers").cloned().unwrap_or_default(),
-        &bb_map.get("raw.option_pcr").cloned().unwrap_or_default(),
+        &bb_str("raw.block_trades"),
+        &bb_str("raw.institutional_visits"),
+        &bb_str("market.index_quotes"),
+        &bb_str("raw.peers"),
+        &bb_str("raw.option_pcr"),
     );
 
     std::fs::write(&filepath, &html).map_err(|e| e.to_string())?;

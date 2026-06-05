@@ -28,6 +28,7 @@ const TOOL_NODE_TO_LABEL: Record<string, string> = {
   "t-money-flow": i18next.t("stockAnalysis.tool.moneyFlow"),
   "t-sentiment-data": i18next.t("stockAnalysis.tool.sentimentData"),
   "t-policy-data": i18next.t("stockAnalysis.tool.policyData"),
+  "t-fundamentals-data": i18next.t("stockAnalysis.tool.fundamentalsData"),
   "t-hotmoney-data": i18next.t("stockAnalysis.tool.hotMoneyData"),
   "t-lockup-data": i18next.t("stockAnalysis.tool.lockupData"),
   "t-research-data": i18next.t("stockAnalysis.tool.researchData"),

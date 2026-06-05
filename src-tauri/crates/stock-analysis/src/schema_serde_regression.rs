@@ -229,9 +229,6 @@ mod tests {
         };
         let s = serde_json::to_string(&tool).unwrap();
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
-        assert!(
-            v.get("description").is_none(),
-            "description 为 None 时不应出现该 key"
-        );
+        assert!(v.get("description").is_none(), "description 为 None 时不应出现该 key");
     }
 }

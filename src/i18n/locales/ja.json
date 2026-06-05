@@ -7451,7 +7451,10 @@
     "dataSource": "Data Source",
     "dataFetched": "Fetched",
     "dataFetching": "Fetching",
-    "dataWaiting": "Waiting"
+    "dataWaiting": "Waiting",
+    "tool": {
+      "fundamentalsData": "財務データ"
+    }
   },
   "trade": {
     "title": "Trading Log",

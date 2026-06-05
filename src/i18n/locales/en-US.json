@@ -7700,7 +7700,10 @@
     "dataSource": "Data Source",
     "dataFetched": "Fetched",
     "dataFetching": "Fetching",
-    "dataWaiting": "Waiting"
+    "dataWaiting": "Waiting",
+    "tool": {
+      "fundamentalsData": "Fundamentals Data"
+    }
   },
   "trade": {
     "title": "Trading Log",

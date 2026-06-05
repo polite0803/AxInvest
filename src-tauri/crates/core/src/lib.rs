@@ -95,12 +95,12 @@ pub use axagent_storage::storage_migration;
 pub use axagent_storage::storage_paths;
 // workflow_types 由 axagent-harness 定义，core 做 re-export 以保证上游 rt-workflow/agent 的引用路径兼容
 pub use axagent_harness::workflow_types;
-pub use axagent_storage::sync_conflict;
-pub use axagent_storage::webdav;
 #[cfg(not(target_os = "android"))]
 pub use axagent_kit::workflow_version;
 #[cfg(target_os = "android")]
 pub use axagent_kit::workflow_version;
+pub use axagent_storage::sync_conflict;
+pub use axagent_storage::webdav;
 pub use axagent_storage::workspace_uri;
 
 pub use memory_forgetting::{ForgettingConfig, MemoryEntry, MemoryForgettingEngine};

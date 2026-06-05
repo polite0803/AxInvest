@@ -271,13 +271,18 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
 }
 
 /// 从 settings 表加载估值参数（ValueConfig），仅提取需要的部分
-async fn load_value_config(db: &sea_orm::DatabaseConnection) -> axagent_stock_analysis::decision::ValueConfig {
+async fn load_value_config(
+    db: &sea_orm::DatabaseConnection,
+) -> axagent_stock_analysis::decision::ValueConfig {
     if let Ok(Some(v)) =
         axagent_core::repo::settings::get_setting(db, "stock_analysis_config").await
     {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&v) {
             if let Some(value_section) = parsed.get("value") {
-                if let Ok(cfg) = serde_json::from_value::<axagent_stock_analysis::decision::ValueConfig>(value_section.clone()) {
+                if let Ok(cfg) = serde_json::from_value::<
+                    axagent_stock_analysis::decision::ValueConfig,
+                >(value_section.clone())
+                {
                     return cfg;
                 }
             }

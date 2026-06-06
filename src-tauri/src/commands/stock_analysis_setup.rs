@@ -367,7 +367,12 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    const TEMPLATE_VERSION: i32 = 7;
+    // v8: cls-risk-level.input_var 从 "t-risk.output" 修正为 "t-risk.result"。
+    //   工具 compute_portfolio_risk 实际产出扁平 JSON（无 output 字段），
+    //   且 ToolExecutor 包成 {tool_name, result: <JSON 字符串>, ...}，
+    //   所以正确路径是 "t-risk.result"（下钻到 result 字段拿到工具原文）。
+    //   旧 v7 模板 input_var 路径错，必须 bump 版本号强制重新种子化。
+    const TEMPLATE_VERSION: i32 = 8;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();

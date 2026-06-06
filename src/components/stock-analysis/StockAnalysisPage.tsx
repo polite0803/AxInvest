@@ -302,7 +302,7 @@ export function StockAnalysisPage() {
                                       display: "inline-block",
                                     }}
                                   >
-                                    {id} {expandedFailedNode === id ? " ?" : " ?"}
+                                    {id} {expandedFailedNode === id ? "▼" : "▶"}
                                   </span>
                                   {expandedFailedNode === id && (
                                     <div

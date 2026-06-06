@@ -7980,7 +7980,13 @@
     "backtest.alpha": "超额收益",
     "backtest.avgConfidence": "平均置信度",
     "indexQuotes": "大盘指数",
-    "peers": "同行對比"
+    "peers": "同行對比",
+    "announcements": "公司公告",
+    "conceptBlocks": "概念板块",
+    "industry": "所属行业",
+    "concepts": "概念标签",
+    "regions": "地域板块",
+    "type": "类型"
   },
   "trade": {
     "title": "交易日志",

@@ -7864,7 +7864,13 @@
       "expand": "Expand"
     },
     "indexQuotes": "Market Indices",
-    "peers": "Peer Comparison"
+    "peers": "Peer Comparison",
+    "announcements": "Announcements",
+    "conceptBlocks": "Concept Blocks",
+    "industry": "Industry",
+    "concepts": "Concepts",
+    "regions": "Regions",
+    "type": "Type"
   },
   "trade": {
     "title": "Trading Log",

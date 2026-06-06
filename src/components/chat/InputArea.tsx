@@ -3191,7 +3191,7 @@ export function InputArea() {
             // validation error, form will show errors
           }
         }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={mcpForm}
@@ -3259,7 +3259,7 @@ export function InputArea() {
           </Button>
         }
         width={420}
-        destroyOnClose
+        destroyOnHidden
       >
         {sourcePopoverContent}
       </Modal>

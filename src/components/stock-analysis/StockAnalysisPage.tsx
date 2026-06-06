@@ -11,6 +11,7 @@ import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { BacktestPanel } from "./BacktestPanel";
+import { ClsFlashPanel } from "./ClsFlashPanel";
 import { CompareView } from "./CompareView";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
 import { DailyReviewPanel } from "./DailyReviewPanel";
@@ -20,10 +21,13 @@ import { DragonTigerPanel } from "./DragonTigerPanel";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { ExecutionReplayPanel } from "./ExecutionReplayPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
+import { HotStocksPanel } from "./HotStocksPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
+import { IndustryRankingPanel } from "./IndustryRankingPanel";
 import { KLineChart } from "./KLineChart";
 import { LimitUpPanel } from "./LimitUpPanel";
 import { NorthBoundPanel } from "./NorthBoundPanel";
+import { OptionPcrPanel } from "./OptionPcrPanel";
 import { PeersPanel } from "./PeersPanel";
 import { PriceAlertPanel } from "./PriceAlertPanel";
 import { RiskMatrix } from "./RiskMatrix";
@@ -82,10 +86,10 @@ export function StockAnalysisPage() {
     invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
   }, []);
 
-  // 注意：setupEventListener 改为仅在 startAnalysis 内调用 ?
+  // 注意：setupEventListener 改为仅在 startAnalysis 内调�? ?
   // 之前 L76-78 在页面挂载时也调用， ? startAnalysis  ? await setupEventListener
   // 存在竞态——两 ? listen 会同时进行，后一 ? set({_unlisten}) 覆盖前一次，
-  // 前一次的 3 个监听句柄变成孤儿（永远不会 ? unlisten） ?
+  // 前一次的 3 个监听句柄变成孤儿（永远不会 ? unlisten�? ?
   // 现在挂载时不再注册，只在用户点击"开始分 ?"时由 startAnalysis 负责注册 ?
 
   useEffect(() => {
@@ -176,6 +180,10 @@ export function StockAnalysisPage() {
       element: <AnnouncementsPanel stockCode={stockCode} />,
     },
     { key: "concepts", label: t("stockAnalysis.conceptBlocks"), element: <ConceptBlocksPanel stockCode={stockCode} /> },
+    { key: "optionpcr", label: t("stockAnalysis.optionPcr"), element: <OptionPcrPanel stockCode={stockCode} /> },
+    { key: "hotstocks", label: t("stockAnalysis.hotStocks"), element: <HotStocksPanel /> },
+    { key: "industry", label: t("stockAnalysis.industryRanking"), element: <IndustryRankingPanel /> },
+    { key: "flash", label: t("stockAnalysis.clsFlash"), element: <ClsFlashPanel /> },
   ];
   // 桌面全部显示，移动端 ?9个核心面 ? + 其余通过"更多"下拉菜单访问
   // 移动端只直接显示 9 个核心面板，其余通过"更多"下拉菜单访问 ?

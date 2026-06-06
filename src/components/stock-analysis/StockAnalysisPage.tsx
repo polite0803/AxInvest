@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
+import { BacktestPanel } from "./BacktestPanel";
 import { CompareView } from "./CompareView";
 import { DailyReviewPanel } from "./DailyReviewPanel";
 import { DebatePanel } from "./DebatePanel";
@@ -162,6 +163,7 @@ export function StockAnalysisPage() {
     { key: "review", label: t("stockAnalysis.settings.sheet.review"), element: <DailyReviewPanel /> },
     { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
     { key: "replay", label: t("workEngine.executionHistory"), element: <ExecutionReplayPanel /> },
+    { key: "backtest", label: t("stockAnalysis.backtest.title"), element: <BacktestPanel /> },
   ];
   // 桌面全部显示，移动端前7个核心面板 + 其余通过"更多"下拉菜单访问
   // 移动端只直接显示 7 个核心面板（满足股市日常扫盘需求），其余 6 个面板

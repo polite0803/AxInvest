@@ -232,3 +232,27 @@ export const ANALYST_NAMES: Record<string, string> = {
   "trader": "交易规划师",
   "investment-plan": "投资计划",
 };
+
+// ── 回测类型 ──────────────────────────────────────────────
+
+export interface BacktestResult {
+  stockCode: string;
+  analysisDate: string;
+  decisionAction: string;
+  decisionConfidence: number;
+  entryPrice: number | null;
+  exitPrice: number;
+  holdingDays: number;
+  returnPct: number;
+  wasCorrect: boolean;
+  maxDrawdown: number;
+}
+
+export interface BacktestStats {
+  totalAnalyses: number;
+  accuracyPct: number;
+  avgReturnPct: number;
+  avgMaxDrawdownPct: number;
+  avgConfidence: number;
+  alphaPct: number | null;
+}

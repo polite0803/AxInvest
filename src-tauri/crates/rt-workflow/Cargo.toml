@@ -27,4 +27,8 @@ jsonschema = "0.46"
 regex = "1"
 reqwest = { workspace = true }
 
+[dev-dependencies]
+async-trait = "0.1"
+tokio = { workspace = true, features = ["full"] }
+
 [lints]

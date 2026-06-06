@@ -330,6 +330,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     try {
       await get().setupEventListener();
 
+      // 数据源健康检查（非阻塞，仅打日志）
+      const VENDORS = ["eastmoney", "sina", "tencent", "akshare"];
+      for (const v of VENDORS) {
+        invoke("check_vendor_health", { vendor: v }).catch(() => {
+          console.warn(`[StockAnalysis] Vendor ${v} health check failed`);
+        });
+      }
+
       const dryRun = await get().getDryRun();
       const result = await invoke<{
         analysisId: string;

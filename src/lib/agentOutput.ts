@@ -9,13 +9,66 @@ interface AgentResult {
   tool_calls_made?: unknown[];
 }
 
+/** 清理 LLM 原始输出中的工具调用标签 */
+export function cleanToolCallTags(text: string): string {
+  if (!text) { return ""; }
+  let cleaned = text;
+  // XML 格式：<provider:tool_call>...</provider:tool_call>
+  cleaned = cleaned.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
+  cleaned = cleaned.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
+  // [PROVIDER|tool_calls]...[PROVIDER|/tool_calls] 格式（如 CHAT2API）
+  cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");
+  cleaned = cleaned.replace(/\[[A-Z0-9_]+\|invoke[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/invoke\]/gi, "");
+  cleaned = cleaned.replace(/\[[A-Z0-9_]+\|parameter[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/parameter\]/gi, "");
+  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * 尝试将内容 beautify 为可读 JSON。
+ * 支持三种形式：
+ * - 转义 JSON 字符串（"{\"a\":1}"）
+ * - 普通 JSON 对象/数组（{"a":1}）
+ * - 代码块中的 JSON（```json {"a":1} ```）
+ */
+export function tryBeautifyJson(text: string): string {
+  if (!text) { return text; }
+  const trimmed = text.trim();
+  // 转义 JSON 字符串 "{\"a\":1}"
+  if (
+    (trimmed.startsWith('"{') && trimmed.endsWith('"'))
+    || (trimmed.startsWith('"[') && trimmed.endsWith('"'))
+  ) {
+    try {
+      const unescaped = JSON.parse(trimmed);
+      if (typeof unescaped === "string") {
+        const parsed = JSON.parse(unescaped);
+        return JSON.stringify(parsed, null, 2);
+      }
+    } catch { /* ignore */ }
+  }
+  // 普通 JSON
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch { /* ignore */ }
+  }
+  // 代码块中的 JSON
+  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (m) {
+    try {
+      return JSON.stringify(JSON.parse(m[1].trim()), null, 2);
+    } catch { /* ignore */ }
+  }
+  return text;
+}
+
 /**
  * 从 AgentExecutor 输出中提取纯文本内容。
  *
- * - 字符串直接返回
+ * - 字符串：尝试 beautify JSON（处理转义字符）后返回
  * - 对象：优先取 `content` 字段；若 content 是对象则 JSON.stringify
  * - 其他：JSON.stringify 后回退到 String()
- * - 清理 LLM 工具调用 XML 标签（如 `<minimax:tool_call>...</minimax:tool_call>`）
+ * - 清理 LLM 工具调用标签
  * - 合并多余空行
  */
 export function extractContent(value: unknown): string {
@@ -27,15 +80,14 @@ export function extractContent(value: unknown): string {
     if (typeof r.content === "string" && r.content.length > 0) {
       text = r.content;
     } else if (r.content != null && typeof r.content === "object") {
-      text = JSON.stringify(r.content);
+      text = JSON.stringify(r.content, null, 2);
     } else {
-      text = JSON.stringify(value);
+      text = JSON.stringify(value, null, 2);
     }
   } else {
     text = String(value ?? "");
   }
-  // 清理 LLM 工具调用 XML 标签（如 <minimax:tool_call>...</minimax:tool_call>）
-  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
-  text = text.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
-  return text.replace(/\n{3,}/g, "\n\n").trim();
+  // 调用统一的清理 + beautify 函数
+  text = cleanToolCallTags(text);
+  return tryBeautifyJson(text);
 }

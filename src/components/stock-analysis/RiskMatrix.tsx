@@ -68,6 +68,7 @@ export function RiskMatrix() {
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
+  const [chartReady, setChartReady] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -76,21 +77,28 @@ export function RiskMatrix() {
 
   useEffect(() => {
     if (!chartRef.current) { return; }
+    if (chartRef.current.clientWidth === 0 || chartRef.current.clientHeight === 0) {
+      const timer = requestAnimationFrame(() => setChartReady((v) => !v ? v : true));
+      return () => cancelAnimationFrame(timer);
+    }
     instanceRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
     const chart = instanceRef.current;
-    const handleResize = () => chart.resize();
+    const handleResize = () => {
+      if (!chart.isDisposed()) { chart.resize(); }
+    };
     window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("resize", handleResize);
       chart.dispose();
       instanceRef.current = null;
     };
-  }, []);
+  }, [chartReady]);
 
   useEffect(() => {
     const chart = instanceRef.current;
-    if (!chart || Object.keys(riskAssessments).length === 0) {
-      chart?.clear();
+    if (!chart || chart.isDisposed()) { return; }
+    if (Object.keys(riskAssessments).length === 0) {
+      chart.clear();
       return;
     }
 
@@ -139,6 +147,11 @@ export function RiskMatrix() {
       expandedInstanceRef.current = null;
       return;
     }
+    if (expandedChartRef.current.clientWidth === 0 || expandedChartRef.current.clientHeight === 0) {
+      const timer = requestAnimationFrame(() => setExpanded((v) => v));
+      return () => cancelAnimationFrame(timer);
+    }
+    expandedInstanceRef.current?.dispose();
     const chart = echarts.init(expandedChartRef.current, undefined, { renderer: "canvas" });
     expandedInstanceRef.current = chart;
     const dimensions = Object.keys(riskAssessments).slice(0, 6).map((type) => {
@@ -171,7 +184,9 @@ export function RiskMatrix() {
         }],
       });
     }
-    const handleResize = () => chart.resize();
+    const handleResize = () => {
+      if (!chart.isDisposed()) { chart.resize(); }
+    };
     window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("resize", handleResize);

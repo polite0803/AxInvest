@@ -2,6 +2,7 @@ import { Card, Progress, Tag } from "antd";
 import { TrendingUp } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { tryBeautifyJson } from "@/components/stock-analysis/utils";
 
 export interface WorkflowCardData {
   type: "progress" | "analyst" | "decision" | "aggregate" | "debate" | "risk";
@@ -98,8 +99,9 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   }
 
   if (data.type === "analyst") {
-    const brief = data.analystReport
-      ? data.analystReport.slice(0, 200) + (data.analystReport.length > 200 ? "..." : "")
+    const raw = data.analystReport ? tryBeautifyJson(data.analystReport) : "";
+    const brief = raw
+      ? raw.slice(0, 200) + (raw.length > 200 ? "..." : "")
       : t("stockAnalysis.workflow.analystComplete");
     return (
       <div className="workflow-card" style={{ padding: "10px 14px" }}>
@@ -111,11 +113,13 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
   if (data.type === "debate") {
     const round = data.round ?? 1;
-    const bullBrief = data.bull
-      ? (data.bull.length > 200 ? data.bull.slice(0, 200) + "..." : data.bull)
+    const bullRaw = data.bull ? tryBeautifyJson(data.bull) : "";
+    const bearRaw = data.bear ? tryBeautifyJson(data.bear) : "";
+    const bullBrief = bullRaw
+      ? (bullRaw.length > 200 ? bullRaw.slice(0, 200) + "..." : bullRaw)
       : t("stockAnalysis.workflow.pending");
-    const bearBrief = data.bear
-      ? (data.bear.length > 200 ? data.bear.slice(0, 200) + "..." : data.bear)
+    const bearBrief = bearRaw
+      ? (bearRaw.length > 200 ? bearRaw.slice(0, 200) + "..." : bearRaw)
       : t("stockAnalysis.workflow.pending");
     return (
       <div className="workflow-card" style={{ padding: "10px 14px" }}>
@@ -159,8 +163,9 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   if (data.type === "risk") {
     const riskKey = data.riskKey ?? "risk";
     const riskName = riskKey.startsWith("risk-") ? riskKey.slice(5) : riskKey;
-    const riskBrief = data.riskContent
-      ? (data.riskContent.length > 300 ? data.riskContent.slice(0, 300) + "..." : data.riskContent)
+    const riskRaw = data.riskContent ? tryBeautifyJson(data.riskContent) : "";
+    const riskBrief = riskRaw
+      ? (riskRaw.length > 300 ? riskRaw.slice(0, 300) + "..." : riskRaw)
       : "";
     return (
       <div className="workflow-card" style={{ padding: "10px 14px" }}>
@@ -389,7 +394,10 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     </div>
                     {a.status === "done" && a.report && (
                       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                        {a.report.length > 500 ? a.report.slice(0, 500) + "..." : a.report}
+                        {(() => {
+                          const b = tryBeautifyJson(a.report);
+                          return b.length > 500 ? b.slice(0, 500) + "..." : b;
+                        })()}
                       </div>
                     )}
                   </div>
@@ -433,7 +441,10 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                             🐂 {t("stockAnalysis.workflow.bullCase")}
                           </div>
                           <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                            {d.bull.length > 200 ? d.bull.slice(0, 200) + "..." : d.bull}
+                            {(() => {
+                              const b = tryBeautifyJson(d.bull);
+                              return b.length > 200 ? b.slice(0, 200) + "..." : b;
+                            })()}
                           </div>
                         </div>
                         <div
@@ -449,7 +460,10 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                             🐻 {t("stockAnalysis.workflow.bearCase")}
                           </div>
                           <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                            {d.bear.length > 200 ? d.bear.slice(0, 200) + "..." : d.bear}
+                            {(() => {
+                              const b = tryBeautifyJson(d.bear);
+                              return b.length > 200 ? b.slice(0, 200) + "..." : b;
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -501,7 +515,10 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     </div>
                     {r.status === "done" && r.content && (
                       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                        {r.content.length > 400 ? r.content.slice(0, 400) + "..." : r.content}
+                        {(() => {
+                          const b = tryBeautifyJson(r.content);
+                          return b.length > 400 ? b.slice(0, 400) + "..." : b;
+                        })()}
                       </div>
                     )}
                   </div>

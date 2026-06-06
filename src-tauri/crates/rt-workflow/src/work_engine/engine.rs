@@ -2633,7 +2633,7 @@ fn validate_input(input: &serde_json::Value, schema: &JsonSchema) -> Result<(), 
     }
 }
 
-/// 扫描工作流节点，收集所有 AgentNode 中引用的工具名。
+/// 扫描工作流节点，收集所有被引用的工具名（AgentNode.tools + ToolNode.tool_name）。
 fn collect_workflow_tool_names(nodes: &[WorkflowNode]) -> Vec<String> {
     let mut names = std::collections::HashSet::new();
     for node in nodes {

@@ -367,12 +367,14 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    // v8: cls-risk-level.input_var 从 "t-risk.output" 修正为 "t-risk.result"。
-    //   工具 compute_portfolio_risk 实际产出扁平 JSON（无 output 字段），
-    //   且 ToolExecutor 包成 {tool_name, result: <JSON 字符串>, ...}，
-    //   所以正确路径是 "t-risk.result"（下钻到 result 字段拿到工具原文）。
-    //   旧 v7 模板 input_var 路径错，必须 bump 版本号强制重新种子化。
-    const TEMPLATE_VERSION: i32 = 8;
+    // v10: input_var 从 "t-risk.result" 改为 "t-risk"。
+    //   之前 v8/v9 尝试用 "t-risk.result" 定位工具包裹层的 result 字段，
+    //   但用户反馈仍 VALIDATION_FAILED。观察 v9 新增的可用 key 列表日志
+    //   后发现，运行时 context.variables["t-risk"] 在某些场景下不存在。
+    //   v10 改用 "t-risk"（整个工具输出 JSON 对象），
+    //   让 value_to_input_text 走 pretty JSON 序列化，LLM 直接看到
+    //   tool_name/result/truncated 全貌，不再依赖深层字段下钻。
+    const TEMPLATE_VERSION: i32 = 10;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -922,6 +924,11 @@ async fn seed_stock_analysis_workflow_template(
                 // 行情数据通过 context_sources 由上游 Tool 节点输出自动注入
                 system_prompt: format!("你的任务: {title}"),
                 context_sources: vec![],
+                // 通过 input_mapping 自动注入股票代码/名称到 system_prompt
+                input_mapping: [
+                    ("stock_code".to_string(), "stock_code".to_string()),
+                    ("stock_name".to_string(), "stock_name".to_string()),
+                ].into_iter().collect(),
                 output_var: id.into(),
                 model: None,
                 temperature: Some(0.3),
@@ -1598,24 +1605,9 @@ async fn seed_stock_analysis_workflow_template(
                      高风险：评分<40或多个风险指标触发"
                 .into(),
             model: None,
-            // 关键说明（这次是真的核对过工具输出结构和 ToolExecutor 包装层）：
-            //
-            // (1) t-risk 工具 compute_portfolio_risk 内部产出扁平 JSON 对象
-            //     （stock_data.rs:847-870: stockCount/concentration/diversification/
-            //      sectorExposure/maxSectorConcentration/positions），但**不**含
-            //     名为 `output` 的字段。所以 `t-risk.output` 必然下钻到 None →
-            //     VALIDATION_FAILED。
-            //
-            // (2) ToolExecutor 路径 1（ToolRegistry.execute_tool，line 110-124）会
-            //     把工具输出包成 {tool_name, result: <String>, truncated, is_error,
-            //     node_id}。其中 `result` 字段是 ToolResult.content，已经是
-            //     serde_json::to_string 后的 JSON 字符串。所以 `t-risk.result`
-            //     拿到的是工具原始 JSON 的字符串文本。
-            //
-            // 配合 LlmClassifierExecutor::value_to_input_text 对 String 类型
-            // 透传（不上 pretty 也不会双重 JSON 编码），LLM 拿到的就是直接可读
-            // 的 JSON 原文。
-            input_var: "t-risk.result".into(),
+            // v10: input_var 从 "t-risk.result" 改为 "t-risk"，使用完整工具输出
+            // 让 LLM 直接读取 tool_name/result/truncated 全貌，不再依赖深层字段下钻
+            input_var: "t-risk".into(),
             output_var: "risk-level".into(),
             confidence_threshold: None,
             fallback_label: None,
@@ -1778,7 +1770,7 @@ async fn seed_stock_analysis_workflow_template(
     // portfolio-mgr: 最终决策 — 全量工具验证
     let mut pm = agent(
         "portfolio-mgr",
-        "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。输出JSON格式：{ action: 买入/增持/持有/减持/卖出, positionPct: 仓位百分比, targetPrice: 目标价, stopLoss: 止损价, reasoning: 决策理由(300字以内), riskLevel: 风险等级(低/中/高), confidence: 置信度(0-100) }",
+        "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。\n输出JSON格式（严格模式）：\n{\n  \"action\": \"买入/增持/持有/减持/卖出\",\n  \"positionPct\": 仓位百分比(整数0-100),\n  \"targetPrice\": 目标价(浮点数),\n  \"stopLoss\": 止损价(浮点数),\n  \"reasoning\": \"决策理由(300字以内)\",\n  \"riskLevel\": \"低/中/高\",\n  \"confidence\": 置信度(0-100)\n}\n要求：\n1. 只输出上述JSON对象，前后不要有任何其他文字\n2. 键名和字符串值必须用双引号\n3. riskLevel只允许三个值：\"低\"、\"中\"、\"高\"\n4. action只允许五个值：\"买入\"、\"增持\"、\"持有\"、\"减持\"、\"卖出\"",
         "portfolio-manager",
         None,
         240.0,

@@ -7855,7 +7855,9 @@
       "futureFields": "futureFields",
       "rawData": "rawData",
       "ruleCheck": "ruleCheck",
-      "title": "title"
+      "title": "title",
+      "buffettLabel": "巴菲特",
+      "expand": "展开"
     },
     "askAi.decision": "decision",
     "askAi.prompt": "prompt",
@@ -7929,12 +7931,12 @@
     "trade.totalPnl": "totalPnl",
     "trade.totalTrades": "totalTrades",
     "trade.winRate": "winRate",
-    "valueAssessment.dataQuality": "dataQuality",
-    "valueAssessment.empty": "empty",
-    "valueAssessment.futureFields": "futureFields",
-    "valueAssessment.rawData": "rawData",
-    "valueAssessment.ruleCheck": "ruleCheck",
-    "valueAssessment.title": "title",
+    "valueAssessment.dataQuality": "数据质量",
+    "valueAssessment.empty": "暂无估值数据",
+    "valueAssessment.futureFields": "展望说明",
+    "valueAssessment.rawData": "原始数据",
+    "valueAssessment.ruleCheck": "规则检查",
+    "valueAssessment.title": "估值评估",
     "workflow.analyst.fundamentals-analyst": "基本面分析师",
     "workflow.analyst.hot-money-tracker": "资金面追踪师",
     "workflow.analyst.lockup-watcher": "限售观察师",
@@ -7967,7 +7969,9 @@
     "workflow.riskNeutral": "中性风险评估",
     "workflow.startFailed": "startFailed",
     "workflow.stopLoss": "止损价",
-    "workflow.targetPrice": "目标价"
+    "workflow.targetPrice": "目标价",
+    "valueAssessment.buffettLabel": "巴菲特",
+    "valueAssessment.expand": "展开"
   },
   "trade": {
     "title": "交易日志",

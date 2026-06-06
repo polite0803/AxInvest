@@ -52,7 +52,7 @@ export function ValueAssessmentPanel() {
           size="small"
           title={
             <div className="flex items-center gap-2">
-              <Tag color="gold">巴菲特</Tag>
+              <Tag color="gold">{t("stockAnalysis.valueAssessment.buffettLabel")}</Tag>
               <span className="text-sm">{t("stockAnalysis.valueAssessment.title")}</span>
             </div>
           }
@@ -63,7 +63,7 @@ export function ValueAssessmentPanel() {
               icon={<ExpandOutlined />}
               onClick={() => setExpanded(true)}
             >
-              展开
+              {t("stockAnalysis.valueAssessment.expand")}
             </Button>
           }
         >

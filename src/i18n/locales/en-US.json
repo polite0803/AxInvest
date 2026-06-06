@@ -7857,7 +7857,9 @@
       "futureFields": "futureFields",
       "rawData": "rawData",
       "ruleCheck": "ruleCheck",
-      "title": "title"
+      "title": "title",
+      "buffettLabel": "Buffett",
+      "expand": "Expand"
     }
   },
   "trade": {

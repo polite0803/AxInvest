@@ -78,9 +78,15 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
         };
 
         if input_text.is_empty() {
+            let available_keys: Vec<&String> = context.variables.keys().collect();
             return Err(NodeError::exec_failed(
                 error_code::VALIDATION_FAILED,
-                "LlmClassifier: input_var 指向的变量为空或不存在".to_string(),
+                format!(
+                    "LlmClassifier: input_var '{}' 指向的变量为空或不存在。可用变量 keys ({}): {:?}",
+                    c.input_var,
+                    available_keys.len(),
+                    available_keys,
+                ),
             ));
         }
 

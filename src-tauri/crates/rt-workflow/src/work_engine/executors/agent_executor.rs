@@ -1152,9 +1152,32 @@ async fn execute_tool(
                 .and_then(|cbs| cbs.tool_fallback.clone())
         });
 
-    match cb {
-        Some(handler) => handler(tool_name.to_string(), args).await,
-        None => Err(format!("工具 '{tool_name}' 未注册")),
+    // 优先走 callbacks（tool_handlers / tool_fallback）
+    if let Some(handler) = cb {
+        return handler(tool_name.to_string(), args).await;
+    }
+
+    // 回退：走 ToolRegistry 中心化路径（与 ToolExecutor 保持一致）
+    if let Some(ref tool_registry) = context.tool_registry {
+        let mut tool_ctx =
+            axagent_harness::tool::ToolContext::new(".").with_conversation(context.execution_id.clone());
+        if let Some(ref perms) = context.tool_permissions {
+            tool_ctx.permissions = Some(perms.clone());
+        }
+        match tool_registry
+            .execute_tool(tool_name, args.clone(), &tool_ctx)
+            .await
+        {
+            Ok(result) => Ok(serde_json::json!({
+                "tool_name": tool_name,
+                "result": result.content,
+                "truncated": result.truncated,
+                "is_error": result.is_error,
+            })),
+            Err(e) => Err(format!("ToolRegistry 调用失败: {e}")),
+        }
+    } else {
+        Err(format!("工具 '{tool_name}' 未注册"))
     }
 }
 

@@ -4,7 +4,7 @@ import { Button, Card, Collapse, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { cleanToolCallTags } from "./utils";
+import { cleanToolCallTags, tryBeautifyJson } from "./utils";
 
 export function DebatePanel() {
   const { t } = useTranslation();
@@ -107,7 +107,7 @@ export function DebatePanel() {
                   <Tag color="red">{t("stockAnalysis.bull")}</Tag>
                   <div className="sa-markdown-content text-xs mt-1">
                     {cleanToolCallTags(r.bull)
-                      ? <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
+                      ? <NodeRenderer content={tryBeautifyJson(cleanToolCallTags(r.bull))} isDark={isDark} />
                       : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
                   </div>
                 </div>
@@ -115,7 +115,7 @@ export function DebatePanel() {
                   <Tag color="green">{t("stockAnalysis.bear")}</Tag>
                   <div className="sa-markdown-content text-xs mt-1">
                     {cleanToolCallTags(r.bear)
-                      ? <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
+                      ? <NodeRenderer content={tryBeautifyJson(cleanToolCallTags(r.bear))} isDark={isDark} />
                       : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
                   </div>
                 </div>
@@ -173,21 +173,21 @@ export function DebatePanel() {
           <div key={i} className="mb-4">
             <div className="text-sm font-semibold mb-2">{t("stockAnalysis.debateRound", { round: r.round })}</div>
             <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
-                <Tag color="red">{t("stockAnalysis.bull")}</Tag>
-                <div className="sa-markdown-content text-sm mt-2">
-                  {cleanToolCallTags(r.bull)
-                    ? <NodeRenderer content={cleanToolCallTags(r.bull)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
+                <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
+                  <Tag color="red">{t("stockAnalysis.bull")}</Tag>
+                  <div className="sa-markdown-content text-sm mt-2">
+                    {cleanToolCallTags(r.bull)
+                      ? <NodeRenderer content={tryBeautifyJson(cleanToolCallTags(r.bull))} isDark={isDark} />
+                      : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
-                <Tag color="green">{t("stockAnalysis.bear")}</Tag>
-                <div className="sa-markdown-content text-sm mt-2">
-                  {cleanToolCallTags(r.bear)
-                    ? <NodeRenderer content={cleanToolCallTags(r.bear)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
-                </div>
+                <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
+                  <Tag color="green">{t("stockAnalysis.bear")}</Tag>
+                  <div className="sa-markdown-content text-sm mt-2">
+                    {cleanToolCallTags(r.bear)
+                      ? <NodeRenderer content={tryBeautifyJson(cleanToolCallTags(r.bear))} isDark={isDark} />
+                      : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noData")}</span>}
+                  </div>
               </div>
             </div>
           </div>

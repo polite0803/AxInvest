@@ -330,11 +330,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     try {
       await get().setupEventListener();
 
-      // 数据源健康检查（非阻塞，仅 debug 日志；后端返回错误通常因本地未配置 key 或网络）
-      const VENDORS = ["eastmoney", "sina", "tencent", "ths"];
+      // 数据源健康检查（非阻塞，仅打日志）
+      const VENDORS = ["eastmoney", "sina", "tencent", "akshare"];
       for (const v of VENDORS) {
-        invoke("check_vendor_health", { vendor: v }).catch(() => {
-          console.debug(`[StockAnalysis] Vendor ${v} health check failed (non-critical)`);
+        invoke("check_vendor_health", { vendor: v }).catch((e) => {
+          const msg = e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e);
+          console.warn(`[StockAnalysis] Vendor ${v} health check failed: ${msg}`);
         });
       }
 

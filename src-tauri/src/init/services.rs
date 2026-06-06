@@ -1090,6 +1090,19 @@ fn start_cron_scheduler(state: &AppState) {
                 &mut reg.tools,
                 state.astock_client.clone(),
             );
+            // 注册金融计算工具（供股票分析工作流风险节点使用）
+            use axagent_tools::tools::finance::*;
+            reg.tools.register_all(vec![
+                std::sync::Arc::new(CalcMaxDrawdownTool),
+                std::sync::Arc::new(CalcSharpeRatioTool),
+                std::sync::Arc::new(CalcVarTool),
+                std::sync::Arc::new(CalcPEPercentileTool),
+                std::sync::Arc::new(CalcPEGTool),
+                std::sync::Arc::new(CalcKellyTool),
+                std::sync::Arc::new(CalcRiskParityTool),
+                std::sync::Arc::new(DetectMACrossTool),
+                std::sync::Arc::new(DetectBreakoutTool),
+            ]);
         }
 
         let registry = state.local_tool_registry.clone();
@@ -1154,6 +1167,14 @@ fn start_cron_scheduler(state: &AppState) {
                 })
             });
         rt.block_on(state.work_engine.set_tool_resolver(resolver));
+
+        // 同时注入 ToolRegistry 本体，供 AgentExecutor::execute_tool 回退路径使用
+        {
+            let reg = rt.block_on(state.local_tool_registry.lock());
+            let tool_registry: std::sync::Arc<dyn axagent_harness::ToolRegistry> =
+                std::sync::Arc::new(reg.clone());
+            rt.block_on(state.work_engine.set_tool_registry(tool_registry));
+        }
     }
 
     // 设置 RAG 知识源检索回调（供工作流 Agent 节点从知识库/记忆/Wiki 检索上下文）

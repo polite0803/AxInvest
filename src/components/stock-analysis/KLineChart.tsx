@@ -52,6 +52,7 @@ export function KLineChart() {
   const indicators = useStockAnalysisStore((s) => s.klineIndicators);
   const toggleIndicator = useStockAnalysisStore((s) => s.toggleIndicator);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
+  const [chartReady, setChartReady] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
 
@@ -85,28 +86,39 @@ export function KLineChart() {
   }, [klineData, stockCode, klinePeriod]);
 
   useEffect(() => {
-    if (!chartRef.current) { return; }
+    setChartReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!chartReady || !chartRef.current) { return; }
+    if (chartRef.current.clientWidth === 0 || chartRef.current.clientHeight === 0) {
+      const timer = requestAnimationFrame(() => setChartReady((v) => !v ? v : true));
+      return () => cancelAnimationFrame(timer);
+    }
     const chart = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
     instanceRef.current = chart;
-    setChartReady(true);
-    const onResize = () => chart.resize();
+    const onResize = () => {
+      if (!chart.isDisposed()) { chart.resize(); }
+    };
     const ro = new ResizeObserver(onResize);
     ro.observe(chartRef.current);
     window.addEventListener("resize", onResize);
-    // 确保布局完成后 resize 一次（解决首次挂载容器 0×0 导致空白的问题）
-    requestAnimationFrame(() => chart.resize());
+    requestAnimationFrame(() => {
+      if (!chart.isDisposed()) { chart.resize(); }
+    });
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
       chart.dispose();
       instanceRef.current = null;
     };
-  }, []);
+  }, [chartReady]);
 
   useEffect(() => {
     const chart = instanceRef.current;
-    if (!chart || klineData.length === 0) {
-      chart?.clear();
+    if (!chart || chart.isDisposed()) { return; }
+    if (klineData.length === 0) {
+      chart.clear();
       return;
     }
 
@@ -266,8 +278,6 @@ export function KLineChart() {
       series: seriesArr,
     });
   }, [klineData, t, indicators]);
-
-  const [chartReady, setChartReady] = useState(false);
 
   if (klineData.length === 0) {
     return (

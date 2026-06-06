@@ -89,7 +89,11 @@ export function CompareView() {
   // 雷达图
   useEffect(() => {
     if (!radarRef.current) { return; }
-    if (!radarInstance.current) {
+    if (radarRef.current.clientWidth === 0 || radarRef.current.clientHeight === 0) {
+      return;
+    }
+    if (!radarInstance.current || radarInstance.current.isDisposed()) {
+      radarInstance.current?.dispose();
       radarInstance.current = echarts.init(radarRef.current, undefined, { renderer: "canvas" });
     }
     const chart = radarInstance.current;
@@ -135,13 +139,17 @@ export function CompareView() {
       }],
     });
 
-    const onResize = () => chart.resize();
+    const onResize = () => {
+      if (!chart.isDisposed()) { chart.resize(); }
+    };
     const ro = new ResizeObserver(onResize);
     ro.observe(radarRef.current!);
     window.addEventListener("resize", onResize);
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
+      chart.dispose();
+      radarInstance.current = null;
     };
   }, [quote1, quote2, t]);
 

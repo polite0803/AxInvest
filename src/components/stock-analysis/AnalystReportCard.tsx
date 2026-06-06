@@ -2,11 +2,11 @@ import { useSettingsStore } from "@/stores";
 import { ANALYST_NAMES } from "@/types";
 import { getSignalColor } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
-import { Button, Card, Modal, Tag } from "antd";
+import { Button, Card, Empty, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { cleanToolCallTags } from "./utils";
+import { cleanToolCallTags, tryBeautifyJson } from "./utils";
 
 interface Props {
   expertId: string;
@@ -40,8 +40,9 @@ export function AnalystReportCard({ expertId, report }: Props) {
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const name = ANALYST_NAMES[expertId] || expertId;
   const cleanedReport = cleanToolCallTags(report);
-  const parsed = tryParse(cleanedReport);
-  const displayContent = cleanedReport || report;
+  const beautified = tryBeautifyJson(cleanedReport);
+  const parsed = tryParse(beautified);
+  const displayContent = beautified || report;
   const [expanded, setExpanded] = useState(false);
   const hasContent = !!displayContent || !!parsed;
 
@@ -84,8 +85,14 @@ export function AnalystReportCard({ expertId, report }: Props) {
                 </div>
               )
               : (
-                <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "center", padding: "16px 0" }}>
-                </div>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                      {t("stockAnalysis.noReport")}
+                    </span>
+                  }
+                />
               )}
           </Card>
         )

@@ -70,6 +70,7 @@ struct LoadedTemplate {
 async fn load_and_inject_template(
     db: &sea_orm::DatabaseConnection,
     stock_code: &str,
+    stock_name: &str,
 ) -> Result<LoadedTemplate, String> {
     use axagent_core::entity::workflow_template;
 
@@ -103,6 +104,9 @@ async fn load_and_inject_template(
             }
         }
     }
+
+    // stock_code/stock_name 已通过 AgentNodeConfig.input_mapping 自动注入到每个 Agent 节点的 system_prompt，
+    // 不再需要手动遍历追加（参见 stock_analysis_setup.rs 中 agent() 宏的 input_mapping 配置）。
 
     let input_schema: Option<JsonSchema> = template
         .input_schema
@@ -282,7 +286,7 @@ pub async fn run_stock_workflow(
         },
     }
 
-    let loaded = load_and_inject_template(state.harness.db(), &stock_code).await?;
+    let loaded = load_and_inject_template(state.harness.db(), &stock_code, &quote.name).await?;
 
     if let Some(ref vars) = loaded.variables {
         for v in vars {

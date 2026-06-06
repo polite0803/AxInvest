@@ -41,32 +41,6 @@ export interface WorkflowCardData {
   failedSteps?: Array<{ nodeId: string; error?: string }>;
 }
 
-const TOOL_NAME_LABELS: Record<string, string> = {
-  get_stock_quote: "实时行情",
-  get_stock_kline: "K线数据",
-  get_stock_financials: "财务报表",
-  get_stock_news: "新闻资讯",
-  get_stock_money_flow: "资金流向",
-  get_hot_stocks: "热门股票",
-  get_industry_ranking: "行业排名",
-  get_announcements: "公司公告",
-  get_consensus_eps: "一致预期EPS",
-  get_research_reports: "券商研报",
-  get_concept_blocks: "概念板块",
-  get_north_bound_flow: "北向资金",
-  get_market_dragon_tiger: "龙虎榜",
-  get_cls_flash: "财联社快讯",
-  get_block_trades: "大宗交易",
-  get_institutional_visits: "机构调研",
-  get_index_quotes: "大盘指数",
-  get_stock_peers: "同业可比",
-  get_stock_option_pcr: "期权PCR",
-  compute_scoring: "技术评分",
-  compute_valuation: "估值计算",
-  compute_portfolio_risk: "组合风险",
-  search_stock: "股票搜索",
-};
-
 export function parseWorkflowCard(content: string): WorkflowCardData | null {
   const match = content.match(/^<!-- workflow-(progress|analyst|decision|aggregate|debate|risk):(.*?) -->/);
   if (!match) { return null; }
@@ -99,7 +73,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   };
 
   const getToolLabel = (toolName: string) => {
-    return TOOL_NAME_LABELS[toolName] ?? toolName;
+    return t(`stockAnalysis.toolLabel.${toolName}`, toolName);
   };
 
   if (data.type === "progress") {

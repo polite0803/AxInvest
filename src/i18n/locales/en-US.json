@@ -7871,7 +7871,15 @@
     "industry": "Industry",
     "concepts": "Concepts",
     "regions": "Regions",
-    "type": "Type"
+    "type": "Type",
+    "optionPcr": "Option PCR",
+    "optionPcrVolume": "Volume PCR",
+    "optionPcrOi": "Open Interest PCR",
+    "hotStocks": "Hot Stocks",
+    "reason": "Reason",
+    "industryRanking": "Industry Ranking",
+    "clsFlash": "CLS Flash",
+    "leader": "Leader"
   },
   "trade": {
     "title": "Trading Log",

@@ -2683,10 +2683,28 @@ fn merge_variable_values(
     let old_vars: Vec<serde_json::Value> =
         serde_json::from_str(old_variables_json).map_err(|e| format!("解析旧变量失败: {e}"))?;
 
-    // 构建旧变量名 → value 的映射
+    // 变量迁移映射表：旧名称 → 新名称（模板升级时变量被重命名的情况）
+    const RENAME_MAP: &[(&str, &str)] = &[
+        // 例：("scoring_boll", "scoring_bollinger"),
+    ];
+
+    // 构建旧变量名 → value 的映射（处理重命名别名）
     let old_values: std::collections::HashMap<String, serde_json::Value> = old_vars
         .into_iter()
-        .filter_map(|v| Some((v.get("name")?.as_str()?.to_string(), v.get("value")?.clone())))
+        .filter_map(|v| {
+            let name = v.get("name")?.as_str()?;
+            let value = v.get("value")?.clone();
+            // 主名称
+            let mut entries = vec![(name.to_string(), value.clone())];
+            // 如果该变量有重命名别名，也加入映射
+            for (old, new) in RENAME_MAP {
+                if *new == name {
+                    entries.push((old.to_string(), value.clone()));
+                }
+            }
+            Some(entries)
+        })
+        .flatten()
         .collect();
 
     // 合并：新变量定义 + 旧变量值（如有）

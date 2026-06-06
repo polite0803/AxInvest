@@ -7789,7 +7789,9 @@
       "summary": "summary",
       "title": "title",
       "total": "total",
-      "wrong": "wrong"
+      "wrong": "wrong",
+      "avgConfidence": "平均置信度",
+      "alpha": "超额收益"
     },
     "chart": {
       "restore": "restore",
@@ -7813,7 +7815,7 @@
     "moreRounds": "还有 {{count}} 轮辯論",
     "noData": "noData",
     "noDecisionReasoning": "noDecisionReasoning",
-    "noRecords": "noRecords",
+    "noRecords": "暂无记录",
     "noReport": "noReport",
     "noRiskData": "noRiskData",
     "progress": {
@@ -7862,21 +7864,21 @@
       "expand": "展開"
     },
     "amplitude": "振幅",
-    "askAi.decision": "decision",
-    "askAi.prompt": "prompt",
-    "backtest.accuracy": "accuracy",
+    "askAi.decision": "決策建议",
+    "askAi.prompt": "提问",
+    "backtest.accuracy": "准确率",
     "backtest.allFailed": "allFailed",
-    "backtest.avgReturn": "avgReturn",
+    "backtest.avgReturn": "平均收益率",
     "backtest.correct": "correct",
     "backtest.failed": "failed",
     "backtest.holdingDays": "holdingDays",
-    "backtest.maxDrawdown": "maxDrawdown",
+    "backtest.maxDrawdown": "最大回撤",
     "backtest.returnRate": "returnRate",
     "backtest.run": "run",
     "backtest.runAll": "runAll",
     "backtest.summary": "summary",
-    "backtest.title": "title",
-    "backtest.total": "total",
+    "backtest.title": "回测分析",
+    "backtest.total": "分析次数",
     "backtest.wrong": "wrong",
     "export.analystReports": "analystReports",
     "export.date": "date",
@@ -7974,7 +7976,9 @@
     "workflow.stopLoss": "止损价",
     "workflow.targetPrice": "目标价",
     "valueAssessment.buffettLabel": "巴菲特",
-    "valueAssessment.expand": "展开"
+    "valueAssessment.expand": "展开",
+    "backtest.alpha": "超额收益",
+    "backtest.avgConfidence": "平均置信度"
   },
   "trade": {
     "title": "交易日志",

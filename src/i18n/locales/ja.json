@@ -9160,7 +9160,9 @@
       "summary": "summary",
       "title": "title",
       "total": "total",
-      "wrong": "wrong"
+      "wrong": "wrong",
+      "avgConfidence": "Avg Confidence",
+      "alpha": "Alpha"
     },
     "chart": {
       "restore": "restore",

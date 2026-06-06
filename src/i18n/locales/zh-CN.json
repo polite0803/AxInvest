@@ -7975,7 +7975,9 @@
     "valueAssessment.buffettLabel": "巴菲特",
     "valueAssessment.expand": "展开",
     "backtest.alpha": "超额收益",
-    "backtest.avgConfidence": "平均置信度"
+    "backtest.avgConfidence": "平均置信度",
+    "indexQuotes": "大盘指数",
+    "peers": "同行对比"
   },
   "trade": {
     "title": "交易日志",

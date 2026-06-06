@@ -18,9 +18,11 @@ import { DragonTigerPanel } from "./DragonTigerPanel";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { ExecutionReplayPanel } from "./ExecutionReplayPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
+import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { KLineChart } from "./KLineChart";
 import { LimitUpPanel } from "./LimitUpPanel";
 import { NorthBoundPanel } from "./NorthBoundPanel";
+import { PeersPanel } from "./PeersPanel";
 import { PriceAlertPanel } from "./PriceAlertPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
@@ -146,6 +148,8 @@ export function StockAnalysisPage() {
   ];
 
   const allSheetPanels: SheetPanel[] = [
+    { key: "index", label: "大盘指数", element: <IndexQuotesPanel /> },
+    { key: "peers", label: "同行对比", element: <PeersPanel /> },
     { key: "screener", label: t("stockAnalysis.settings.sheet.screener"), element: <StockScreenerPanel /> },
     { key: "limitup", label: t("stockAnalysis.settings.sheet.limitUp"), element: <LimitUpPanel /> },
     { key: "dragontiger", label: t("stockAnalysis.settings.sheet.dragonTiger"), element: <DragonTigerPanel /> },
@@ -165,11 +169,20 @@ export function StockAnalysisPage() {
     { key: "replay", label: t("workEngine.executionHistory"), element: <ExecutionReplayPanel /> },
     { key: "backtest", label: t("stockAnalysis.backtest.title"), element: <BacktestPanel /> },
   ];
-  // 桌面全部显示，移动端前7个核心面板 + 其余通过"更多"下拉菜单访问
-  // 移动端只直接显示 7 个核心面板（满足股市日常扫盘需求），其余 6 个面板
-  // （alerts, compare, history, review, events, replay）通过"更多"下拉菜单访问。
-  // 总面板数 = 7 + 6 = 13。
-  const mobileCoreKeys = ["screener", "limitup", "dragontiger", "sectors", "north", "watchlist", "trade"];
+  // 桌面全部显示，移动端前9个核心面板 + 其余通过"更多"下拉菜单访问
+  // 移动端只直接显示 9 个核心面板，其余通过"更多"下拉菜单访问。
+  // 总面板数 = 9 + 8 = 17。
+  const mobileCoreKeys = [
+    "index",
+    "peers",
+    "screener",
+    "limitup",
+    "dragontiger",
+    "sectors",
+    "north",
+    "watchlist",
+    "trade",
+  ];
   const sheetPanels = isMobile ? allSheetPanels.filter((p) => mobileCoreKeys.includes(p.key)) : allSheetPanels;
 
   const activePanel = allSheetPanels.find((p) => p.key === sheetTab);

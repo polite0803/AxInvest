@@ -76,9 +76,7 @@ export function BacktestPanel() {
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
               <span>{t("stockAnalysis.backtest.avgConfidence")}: {(stats.avgConfidence * 100).toFixed(0)}%</span>
-              {stats.alphaPct != null && (
-                <span>{t("stockAnalysis.backtest.alpha")}: {stats.alphaPct.toFixed(2)}%</span>
-              )}
+              {stats.alphaPct != null && <span>{t("stockAnalysis.backtest.alpha")}: {stats.alphaPct.toFixed(2)}%</span>}
             </div>
           </div>
         )}

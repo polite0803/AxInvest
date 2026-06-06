@@ -9140,7 +9140,8 @@
       "name": "name",
       "price": "price",
       "title": "title",
-      "triggered": "triggered"
+      "triggered": "triggered",
+      "date": "Date"
     },
     "askAi": {
       "decision": "decision",

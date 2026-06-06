@@ -119,6 +119,7 @@ const zhCN = {
   "alert.below": "跌破",
   "alert.empty": "暂无告警",
   "alert.triggered": "价格告警已触发！",
+  "alert.date": "日期",
   // Settings (nested object — i18next resolves t('stockAnalysis.settings.xxx') as nested path)
   settings: {
     title: "股票分析设置",
@@ -583,6 +584,7 @@ const enUS = {
   "alert.below": "Below",
   "alert.empty": "No Alerts",
   "alert.triggered": "Alert Triggered!",
+  "alert.date": "Date",
   settings: {
     title: "Stock Analysis Settings",
     saveFailed: "Failed to save",

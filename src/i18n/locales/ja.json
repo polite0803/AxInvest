@@ -9233,7 +9233,9 @@
       "title": "title",
       "buffettLabel": "Buffett",
       "expand": "Expand"
-    }
+    },
+    "indexQuotes": "Market Indices",
+    "peers": "Peer Comparison"
   },
   "trade": {
     "title": "Trading Log",

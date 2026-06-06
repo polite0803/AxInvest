@@ -1593,8 +1593,24 @@ async fn seed_stock_analysis_workflow_template(
                      高风险：评分<40或多个风险指标触发"
                 .into(),
             model: None,
-            // 上游 a3e3f8f3 已支持 LlmClassifierExecutor 的点号路径解析。
-            input_var: "t-risk.output".into(),
+            // 关键说明（这次是真的核对过工具输出结构和 ToolExecutor 包装层）：
+            //
+            // (1) t-risk 工具 compute_portfolio_risk 内部产出扁平 JSON 对象
+            //     （stock_data.rs:847-870: stockCount/concentration/diversification/
+            //      sectorExposure/maxSectorConcentration/positions），但**不**含
+            //     名为 `output` 的字段。所以 `t-risk.output` 必然下钻到 None →
+            //     VALIDATION_FAILED。
+            //
+            // (2) ToolExecutor 路径 1（ToolRegistry.execute_tool，line 110-124）会
+            //     把工具输出包成 {tool_name, result: <String>, truncated, is_error,
+            //     node_id}。其中 `result` 字段是 ToolResult.content，已经是
+            //     serde_json::to_string 后的 JSON 字符串。所以 `t-risk.result`
+            //     拿到的是工具原始 JSON 的字符串文本。
+            //
+            // 配合 LlmClassifierExecutor::value_to_input_text 对 String 类型
+            // 透传（不上 pretty 也不会双重 JSON 编码），LLM 拿到的就是直接可读
+            // 的 JSON 原文。
+            input_var: "t-risk.result".into(),
             output_var: "risk-level".into(),
             confidence_threshold: None,
             fallback_label: None,

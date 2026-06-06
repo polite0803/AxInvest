@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-02",
-  "total_entries": 312,
-  "total_files": 312,
+  "total_entries": 313,
+  "total_files": 313,
   "entries": [
     {
       "file": "amplitude",
@@ -1874,6 +1874,12 @@
       "file": "src/components/stock-analysis/ValueAssessmentPanel.tsx",
       "lines": "55,66",
       "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/types/__tests__/stock-analysis.test.ts",
+      "lines": "6,7,8,9,13,14,15,16,20,22,28,29,30,31,32,44,45,46,50,51,52,56",
+      "reason": "测试用例输入数据（中文关键词匹配测试）",
       "phase": 3
     }
   ]

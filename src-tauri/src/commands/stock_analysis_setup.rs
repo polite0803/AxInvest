@@ -1196,7 +1196,7 @@ async fn seed_stock_analysis_workflow_template(
             convergence_prompt: Some(
                 include_str!("../../agency_experts/stock-analysis/debate-convergence.md").into(),
             ),
-            convergence_model: None,
+            convergence_model: Some("auto".into()),
             convergence_model_role: Some("decision-maker".into()),
             topic_var: "trigger.output".into(),
             output_var: "debate-result".into(),

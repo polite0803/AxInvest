@@ -1593,6 +1593,7 @@ async fn seed_stock_analysis_workflow_template(
                      高风险：评分<40或多个风险指标触发"
                 .into(),
             model: None,
+            // 上游 a3e3f8f3 已支持 LlmClassifierExecutor 的点号路径解析。
             input_var: "t-risk.output".into(),
             output_var: "risk-level".into(),
             confidence_threshold: None,

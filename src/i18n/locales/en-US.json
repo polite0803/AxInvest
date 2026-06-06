@@ -7824,9 +7824,9 @@
       "fetchingData": "fetchingData",
       "llmFallback": "llmFallback",
       "started": "started",
-      "stepDone": "stepDone",
-      "stepRetrying": "stepRetrying",
-      "stepRunning": "stepRunning"
+      "stepDone": "✅ {{name}} done",
+      "stepRetrying": "🔄 {{name}} retrying",
+      "stepRunning": "⏳ {{name}} running"
     },
     "search": "search",
     "summary": {

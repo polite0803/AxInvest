@@ -7619,8 +7619,6 @@
     "exported": "报告已导出",
     "monitoringActive": "监控中",
     "monitoringPaused": "已暂停",
-    "progress.stepDone": "stepDone",
-    "progress.stepRetrying": "stepRetrying",
     "ep": "市盈率",
     "risk.comprehensive": "综合评估",
     "loadHistory": "点击加载历史分析报告",
@@ -7822,9 +7820,9 @@
       "fetchingData": "正在获取数据",
       "llmFallback": "模型降级",
       "started": "已启动",
-      "stepDone": "步骤完成",
-      "stepRetrying": "步骤重试中",
-      "stepRunning": "步骤运行中"
+      "stepDone": "{{name}} 步骤完成",
+      "stepRetrying": "{{name}} 步骤重试中",
+      "stepRunning": "{{name}} 步骤进行中"
     },
     "search": "搜索",
     "summary": {
@@ -7890,7 +7888,6 @@
     "export.target": "目标价",
     "export.title": "投资报告",
     "export.upside": "预期涨幅",
-    "progress.stepRunning": "步骤运行中",
     "risk.high": "高",
     "risk.low": "低",
     "risk.medium": "中",

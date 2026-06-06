@@ -9,8 +9,10 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
+import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { BacktestPanel } from "./BacktestPanel";
 import { CompareView } from "./CompareView";
+import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
 import { DailyReviewPanel } from "./DailyReviewPanel";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
@@ -80,11 +82,11 @@ export function StockAnalysisPage() {
     invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
   }, []);
 
-  // 注意：setupEventListener 改为仅在 startAnalysis 内调用。
-  // 之前 L76-78 在页面挂载时也调用，与 startAnalysis 的 await setupEventListener
-  // 存在竞态——两组 listen 会同时进行，后一次 set({_unlisten}) 覆盖前一次，
-  // 前一次的 3 个监听句柄变成孤儿（永远不会被 unlisten）。
-  // 现在挂载时不再注册，只在用户点击"开始分析"时由 startAnalysis 负责注册。
+  // 注意：setupEventListener 改为仅在 startAnalysis 内调用 ?
+  // 之前 L76-78 在页面挂载时也调用， ? startAnalysis  ? await setupEventListener
+  // 存在竞态——两 ? listen 会同时进行，后一 ? set({_unlisten}) 覆盖前一次，
+  // 前一次的 3 个监听句柄变成孤儿（永远不会 ? unlisten） ?
+  // 现在挂载时不再注册，只在用户点击"开始分 ?"时由 startAnalysis 负责注册 ?
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -148,8 +150,8 @@ export function StockAnalysisPage() {
   ];
 
   const allSheetPanels: SheetPanel[] = [
-    { key: "index", label: "大盘指数", element: <IndexQuotesPanel /> },
-    { key: "peers", label: "同行对比", element: <PeersPanel /> },
+    { key: "index", label: t("stockAnalysis.indexQuotes"), element: <IndexQuotesPanel /> },
+    { key: "peers", label: t("stockAnalysis.peers"), element: <PeersPanel /> },
     { key: "screener", label: t("stockAnalysis.settings.sheet.screener"), element: <StockScreenerPanel /> },
     { key: "limitup", label: t("stockAnalysis.settings.sheet.limitUp"), element: <LimitUpPanel /> },
     { key: "dragontiger", label: t("stockAnalysis.settings.sheet.dragonTiger"), element: <DragonTigerPanel /> },
@@ -168,10 +170,16 @@ export function StockAnalysisPage() {
     { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
     { key: "replay", label: t("workEngine.executionHistory"), element: <ExecutionReplayPanel /> },
     { key: "backtest", label: t("stockAnalysis.backtest.title"), element: <BacktestPanel /> },
+    {
+      key: "announcements",
+      label: t("stockAnalysis.announcements"),
+      element: <AnnouncementsPanel stockCode={stockCode} />,
+    },
+    { key: "concepts", label: t("stockAnalysis.conceptBlocks"), element: <ConceptBlocksPanel stockCode={stockCode} /> },
   ];
-  // 桌面全部显示，移动端前9个核心面板 + 其余通过"更多"下拉菜单访问
-  // 移动端只直接显示 9 个核心面板，其余通过"更多"下拉菜单访问。
-  // 总面板数 = 9 + 8 = 17。
+  // 桌面全部显示，移动端 ?9个核心面 ? + 其余通过"更多"下拉菜单访问
+  // 移动端只直接显示 9 个核心面板，其余通过"更多"下拉菜单访问 ?
+  // 总面板数 = 9 + 8 = 17 ?
   const mobileCoreKeys = [
     "index",
     "peers",
@@ -193,7 +201,7 @@ export function StockAnalysisPage() {
       <div className="sa-layout">
         <div className="sa-header">
           <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
-            ← {t("nav.chat")}
+            ? {t("nav.chat")}
           </button>
           <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
           <span className="sa-header-meta">{marketStatus || t("stockAnalysis.subtitle")}</span>
@@ -286,7 +294,7 @@ export function StockAnalysisPage() {
                                       display: "inline-block",
                                     }}
                                   >
-                                    {id} {expandedFailedNode === id ? "▲" : "▼"}
+                                    {id} {expandedFailedNode === id ? " ?" : " ?"}
                                   </span>
                                   {expandedFailedNode === id && (
                                     <div
@@ -360,7 +368,7 @@ export function StockAnalysisPage() {
           </div>
         </div>
 
-        {/* 底部滑出面板 — 平板/移动端 */}
+        {/* 底部滑出面板  ? 平板/移动 ? */}
         <div className={`sa-bottom-sheet${sheetOpen ? " open" : ""}`}>
           <div className="sa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)}>
             <div className="sa-sheet-handle-bar" />
@@ -394,7 +402,7 @@ export function StockAnalysisPage() {
                 }}
                 trigger={["click"]}
               >
-                <button type="button" className="sa-sheet-tab">{t("stockAnalysis.settings.sheet.more")} ▾</button>
+                <button type="button" className="sa-sheet-tab">{t("stockAnalysis.settings.sheet.more")} ?</button>
               </Dropdown>
             )}
           </div>
@@ -409,7 +417,7 @@ export function StockAnalysisPage() {
           className="sa-sheet-toggle"
           onClick={() => setSheetOpen(!sheetOpen)}
         >
-          {sheetOpen ? "✕" : "+"}
+          {sheetOpen ? " ?" : "+"}
         </button>
       </div>
       {isMobile && <StockAnalysisSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />}

@@ -1,32 +1,26 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { Eye } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { PageHeader } from "./_shared/PageHeader";
+import { DailyReviewPanel } from "./DailyReviewPanel";
+import { PriceAlertPanel } from "./PriceAlertPanel";
+import { WatchlistPanel } from "./WatchlistPanel";
 
 /**
  * WatchlistPage — 自选股页面
- * 完整内容将在 Phase 2 填充（WatchlistPanel + PriceAlertPanel + DailyReviewPanel）
+ *
+ * 布局：
+ *   顶部：WatchlistPanel（全宽，自选股核心）
+ *   下方：DailyReviewPanel + PriceAlertPanel（桌面端 2 列，移动端 1 列）
  */
 export function WatchlistPage() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
   return (
     <PageErrorBoundary title="Watchlist">
       <div className="flex h-full flex-col">
-        <header className="sa-header">
-          <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
-            ‹ {t("nav.chat")}
-          </button>
-          <h2 className="sa-header-title">{t("watchlist.title")}</h2>
-          <span className="sa-header-meta">{t("common.comingSoon")}</span>
-        </header>
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="text-center max-w-md space-y-4">
-            <Eye size={48} className="mx-auto opacity-30" />
-            <h3 className="text-lg font-medium">{t("watchlist.title")}</h3>
-            <p className="text-sm opacity-60">
-              {t("watchlist.placeholder")}
-            </p>
+        <PageHeader titleKey="watchlist.title" backTo="/stock-analysis" />
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          <WatchlistPanel />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <DailyReviewPanel />
+            <PriceAlertPanel />
           </div>
         </div>
       </div>

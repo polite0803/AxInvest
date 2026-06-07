@@ -7,9 +7,67 @@ use std::sync::Arc;
 /// 候选池条目：(code, name, sector)
 pub type SeedItem = (String, String, Option<String>);
 
+/// 回退候选股列表（沪深 300 核心成分股 + 行业龙头，覆盖主要行业）
+///
+/// 当 `get_hot_stocks` / `get_industry_ranking` 都拿不到数据时用作种子池兜底，
+/// 保证 `recommend_stocks` 至少能基于一组已知活跃股跑子策略。
+const FALLBACK_STOCKS: &[(&str, &str)] = &[
+    ("600519", "贵州茅台"),
+    ("000858", "五粮液"),
+    ("300750", "宁德时代"),
+    ("600036", "招商银行"),
+    ("601318", "中国平安"),
+    ("000333", "美的集团"),
+    ("002475", "立讯精密"),
+    ("600276", "恒瑞医药"),
+    ("300059", "东方财富"),
+    ("000651", "格力电器"),
+    ("002415", "海康威视"),
+    ("600900", "长江电力"),
+    ("601888", "中国中免"),
+    ("300014", "亿纬锂能"),
+    ("002594", "比亚迪"),
+    ("601012", "隆基绿能"),
+    ("000001", "平安银行"),
+    ("600030", "中信证券"),
+    ("000002", "万科A"),
+    ("601166", "兴业银行"),
+    ("601899", "紫金矿业"),
+    ("300124", "汇川技术"),
+    ("600809", "山西汾酒"),
+    ("002714", "牧原股份"),
+    ("000568", "泸州老窖"),
+    ("603259", "药明康德"),
+    ("600887", "伊利股份"),
+    ("002230", "科大讯飞"),
+    ("300274", "阳光电源"),
+    ("601088", "中国神华"),
+    ("600585", "海螺水泥"),
+    ("000725", "京东方A"),
+    ("002304", "洋河股份"),
+    ("300760", "迈瑞医疗"),
+    ("600031", "三一重工"),
+    ("601211", "国泰君安"),
+    ("002241", "歌尔股份"),
+    ("300408", "三环集团"),
+    ("603986", "兆易创新"),
+    ("600745", "闻泰科技"),
+    ("002044", "美年健康"),
+    ("300122", "智飞生物"),
+    ("000063", "中兴通讯"),
+    ("002049", "紫光国微"),
+    ("603501", "韦尔股份"),
+    ("601398", "工商银行"),
+    ("600028", "中国石化"),
+    ("601857", "中国石油"),
+];
+
 /// 构造 seed pool
 ///
-/// 顺序：get_hot_stocks(30) ∪ get_industry_ranking 龙头(10) ∪ 用户 watchlist/holdings
+/// 顺序：get_hot_stocks(30) ∪ get_industry_ranking 龙头(10) ∪ FALLBACK_STOCKS 兜底
+///
+/// `get_hot_stocks` / `get_industry_ranking` 在 vendor 未启用 / 网络失败时返回 `Ok(vec![])`，
+/// 因此函数末尾兜底加入 [`FALLBACK_STOCKS`]，保证 seed pool 永远非空。
 pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<SeedItem> = Vec::new();
@@ -30,6 +88,16 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
                 if seen.insert(code.clone()) {
                     out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
                 }
+            }
+        }
+    }
+
+    // 3. 兜底：若前两个源都没拿到（vendor 缺失 / 网络失败 / 非交易时段），
+    // 退到一组已知活跃股，至少能跑 K 线 / 估值等基础策略
+    if out.is_empty() {
+        for (code, name) in FALLBACK_STOCKS {
+            if seen.insert((*code).to_string()) {
+                out.push(((*code).to_string(), (*name).to_string(), None));
             }
         }
     }

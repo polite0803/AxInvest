@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
-import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 
 type StyleKey = "trend" | "value" | "capital" | "reversion";
 type PeriodKey = "short" | "mid" | "long";
@@ -66,41 +65,30 @@ export function RecommendationPanel() {
   const [data, setData] = useState<RecoResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
-  const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
   const [generatedAtText, setGeneratedAtText] = useState<string>("");
 
   // P1-2: monotonically increasing request token — discard stale results.
   const reqTokenRef = useRef(0);
 
   const load = useCallback(
-    async (silent = false) => {
+    async () => {
       const myToken = ++reqTokenRef.current;
       setLoading(true);
       setEmptyKind(null);
-      setEmptyVendors(undefined);
       try {
-        const check = await checkVendorEnabled("screener", { silent });
-        if (myToken !== reqTokenRef.current) { return; // stale
-         }
-        if (check.status === "disabled") {
-          setData(null);
-          setEmptyKind("vendorDisabled");
-          setEmptyVendors(check.vendors);
-          setLoading(false);
-          return;
-        }
-        if (check.status === "backend_offline") {
-          setData(null);
-          setEmptyKind("backendOffline");
-          setLoading(false);
-          return;
-        }
+        // 后端会基于 FALLBACK_STOCKS 兜底 seed pool，并在响应里返回 disabledStyles；
+        // 这里不再做硬性 vendor 门控（否则会卡死整个面板）。
         const r = await invoke<RecoResponse>("recommend_stocks", { period });
         if (myToken !== reqTokenRef.current) { return; // stale
          }
         if (!r || !r.picks || Object.keys(r.picks).length === 0) {
           setData(r ?? null);
-          setEmptyKind("noData");
+          // 区分"全风格 disabled" vs "有 enabled 但没出 picks"
+          if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
+            setEmptyKind("vendorDisabled");
+          } else {
+            setEmptyKind("noData");
+          }
           setLoading(false);
           return;
         }
@@ -126,7 +114,7 @@ export function RecommendationPanel() {
   );
 
   useEffect(() => {
-    load(true);
+    load();
   }, [load]);
 
   const handleAnalyze = async (code: string) => {
@@ -199,7 +187,6 @@ export function RecommendationPanel() {
         ? (
           <PanelEmpty
             kind={emptyKind}
-            vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
             description={emptyKind === "noData" ? t("stockAnalysis.recommendation.empty") : undefined}
             onOpenSettings={openDataSourceSettings}
           />

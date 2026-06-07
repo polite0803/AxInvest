@@ -6611,7 +6611,8 @@
     "devops": "DevOps",
     "design": "تصميم",
     "writing": "كتابة",
-    "business": "أعمال"
+    "business": "أعمال",
+    "finance": "المالية"
   },
   "planStore": {
     "rejectFailed": "فشل رفض الخطة: {{error}}",

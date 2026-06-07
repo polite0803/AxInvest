@@ -7981,7 +7981,8 @@
     "devops": "DevOps",
     "design": "デザイン",
     "writing": "執筆",
-    "business": "ビジネス"
+    "business": "ビジネス",
+    "finance": "金融"
   },
   "planStore": {
     "rejectFailed": "プランの拒否に失敗しました：{{error}}",

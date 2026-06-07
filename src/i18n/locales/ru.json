@@ -6611,7 +6611,8 @@
     "devops": "DevOps",
     "design": "Дизайн",
     "writing": "Написание",
-    "business": "Бизнес"
+    "business": "Бизнес",
+    "finance": "Финансы"
   },
   "planStore": {
     "rejectFailed": "Не удалось отклонить план: {{error}}",

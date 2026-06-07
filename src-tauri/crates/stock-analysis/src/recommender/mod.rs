@@ -95,6 +95,20 @@ pub async fn recommend_stocks(
     let raw_seed = seed.clone();
     seed = liquidity_filter_and_truncate(client.clone(), seed).await;
 
+    // 流动性过滤兜底：若 vendor 拿不到 60 日 K 线 / 全部不达标，过滤后池子可能
+    // 全空。这种情况下 4 个主策略（trend/value/capital/reversion）会遍历 0 次
+    // 直接返回空 picks —— 表现就是面板上"趋势/价值/资金/超跌"全空，只剩
+    // Watchlist（用 raw_seed）有数据。回退到 raw_seed 让 4 个主策略至少有机会跑
+    // 一遍（它们各自的 `scan_one` 内部还会再判空，自然剔掉真没数据的票）。
+    if seed.is_empty() && !raw_seed.is_empty() {
+        eprintln!(
+            "[recommender] liquidity filter removed all {} stocks; \
+             falling back to raw seed pool (4 main strategies will scan raw)",
+            raw_seed_pool_size
+        );
+        seed = raw_seed.clone();
+    }
+
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
     //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
     //    workflow template 中往往 vendor_* 变量为空，导致 4 个 style 全 disabled。

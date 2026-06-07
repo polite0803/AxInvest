@@ -6611,7 +6611,8 @@
     "devops": "DevOps",
     "design": "Design",
     "writing": "Schreiben",
-    "business": "Geschäft"
+    "business": "Geschäft",
+    "finance": "Finanzen"
   },
   "planStore": {
     "rejectFailed": "Ablehnung des Plans fehlgeschlagen: {{error}}",

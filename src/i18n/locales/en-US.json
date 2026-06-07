@@ -7610,7 +7610,10 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "todayRecommend": "Today's Picks",
+        "myFilter": "My Filter",
+        "refresh": "Refresh"
       },
       "recommendation": {
         "title": "🔍 Smart Picks",

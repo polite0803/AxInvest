@@ -7582,7 +7582,10 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "todayRecommend": "आज की सिफारिशें",
+        "myFilter": "मेरा फ़िल्टर",
+        "refresh": "ताज़ा करें"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",

@@ -1,7 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { SearchOutlined } from "@ant-design/icons";
+import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Button, Card, InputNumber, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -89,7 +89,16 @@ const FACTOR_DEFS = [
   },
 ] as const;
 
-export function StockScreenerPanel() {
+export type StockScreenerMode = "discover" | "screen";
+
+interface StockScreenerPanelProps {
+  /** 必填:`discover` 展示今日荐股(自动加载),`screen` 展示多因子筛选器 */
+  mode: StockScreenerMode;
+  /** 自定义 Card 标题 i18n key,默认按 mode 推断 */
+  titleKey?: string;
+}
+
+export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) {
   const { t } = useTranslation();
   const { openDataSourceSettings } = useStockAnalysisPage();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -101,9 +110,13 @@ export function StockScreenerPanel() {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
-  const [mode, setMode] = useState<"discover" | "screen">("discover");
   const [factors, setFactors] = useState<Record<string, FactorState>>({});
   const [selectedCount, setSelectedCount] = useState(0);
+
+  const resolvedTitleKey = titleKey
+    ?? (mode === "discover"
+      ? "stockAnalysis.settings.screener.todayRecommend"
+      : "stockAnalysis.settings.screener.myFilter");
 
   const discover = useCallback(async (silent = false) => {
     setLoading(true);
@@ -182,8 +195,10 @@ export function StockScreenerPanel() {
   }, [factors]);
 
   useEffect(() => {
-    discover(true);
-  }, [watchlistVersion, discover]);
+    if (mode === "discover") {
+      discover(true);
+    }
+  }, [watchlistVersion, discover, mode]);
 
   const toggleFactor = (key: string) => {
     setFactors((prev) => {
@@ -212,28 +227,28 @@ export function StockScreenerPanel() {
   return (
     <Card
       size="small"
-      title={t("stockAnalysis.settings.screener.title")}
+      title={t(resolvedTitleKey)}
       styles={{ body: { padding: "8px 10px" } }}
       extra={
-        <div className="flex gap-1">
+        mode === "discover" ? (
           <Button
             size="small"
-            type={mode === "discover" ? "primary" : "default"}
+            icon={<ReloadOutlined />}
+            onClick={() => discover()}
+          >
+            {t("stockAnalysis.settings.screener.refresh")}
+          </Button>
+        ) : (
+          <Button
+            size="small"
             onClick={() => {
-              setMode("discover");
-              discover();
+              setFactors({});
+              setSelectedCount(0);
             }}
           >
-            {t("stockAnalysis.settings.screener.discover")}
+            {t("stockAnalysis.settings.screener.clear")}
           </Button>
-          <Button
-            size="small"
-            type={mode === "screen" ? "primary" : "default"}
-            onClick={() => setMode("screen")}
-          >
-            {t("stockAnalysis.settings.screener.screen")}
-          </Button>
-        </div>
+        )
       }
     >
       {mode === "screen" && (
@@ -282,15 +297,6 @@ export function StockScreenerPanel() {
               <div className="flex gap-1">
                 <Button size="small" icon={<SearchOutlined />} onClick={screen} loading={loading} type="primary">
                   {t("stockAnalysis.settings.screener.filter")}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setFactors({});
-                    setSelectedCount(0);
-                  }}
-                >
-                  {t("stockAnalysis.settings.screener.clear")}
                 </Button>
               </div>
             </div>

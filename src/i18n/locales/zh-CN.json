@@ -7577,13 +7577,7 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通",
-        "hotStocks": "热门股票",
-        "industryRank": "行业排名",
-        "main": "主力",
-        "noHot": "暂无热门数据",
-        "noIndustry": "暂无行业数据",
-        "tags": "标签"
+        "szFlow": "深股通"
       },
       "sheet": {
         "screener": "荐股",
@@ -7602,8 +7596,6 @@
       },
       "screener": {
         "title": "🔍 智能荐股",
-        "todayRecommend": "今日荐股",
-        "myFilter": "我的筛选",
         "discover": "全市场",
         "screen": "自选筛选",
         "factorHint": "选择筛选因子（已选 {{count}} 项）：",
@@ -7622,8 +7614,7 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元",
-        "refresh": "刷新"
+        "unit10k": "万元"
       },
       "recommendation": {
         "title": "🔍 智能荐股",
@@ -7659,8 +7650,7 @@
         "disabled": "数据源未开启：{{names}} 均未启用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
-        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源",
-        "disabledGeneric": "stockAnalysis.settings.vendor.disabledGeneric"
+        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
       },
       "workflow": {
         "title": "股票分析工作流",

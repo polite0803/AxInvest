@@ -7539,12 +7539,12 @@
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
         "szFlow": "深股通",
-        "hotStocks": "stockAnalysis.settings.panels.hotStocks",
-        "industryRank": "stockAnalysis.settings.panels.industryRank",
-        "main": "stockAnalysis.settings.panels.main",
-        "noHot": "stockAnalysis.settings.panels.noHot",
-        "noIndustry": "stockAnalysis.settings.panels.noIndustry",
-        "tags": "stockAnalysis.settings.panels.tags"
+        "hotStocks": "熱門股票",
+        "industryRank": "行業排名",
+        "main": "主力",
+        "noHot": "暫無熱門數據",
+        "noIndustry": "暫無行業數據",
+        "tags": "標籤"
       },
       "sheet": {
         "screener": "荐股",

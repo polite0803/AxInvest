@@ -4,7 +4,7 @@ import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/type
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, message, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { cleanToolCallTags } from "./utils";
@@ -63,7 +63,17 @@ export function DecisionBanner() {
 
   const actionLabel = (action: string) => t(getActionTKey(action));
 
-  const confidencePct = useMemo(() => Math.round(decision?.confidence ?? 0), [decision]);
+  // ── 空决策检查：全 0 / 无目标价 / 无理由 时不渲染 ──
+  if (!decision) { return null; }
+  // TypeScript 在此之后已将 decision 收窄为 StockDecision (non-null)
+  const emptyDecision = decision.confidence === 0
+    && decision.positionPct === 0
+    && decision.targetPrice == null
+    && decision.stopLoss == null
+    && (!decision.reasoning || decision.reasoning.trim() === "");
+  if (emptyDecision) { return null; }
+
+  const confidencePct = Math.round(decision.confidence ?? 0);
   const meterColor = confidencePct >= 70
     ? "var(--sa-green)"
     : confidencePct >= 40
@@ -72,7 +82,7 @@ export function DecisionBanner() {
 
   // 从报价和决策计算预期收益
   const currentPrice = quote?.price ?? 0;
-  const targetPriceNum = decision?.targetPrice != null ? Number(decision.targetPrice) : 0;
+  const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
   const upside = targetPriceNum > 0 && currentPrice > 0
     ? ((targetPriceNum - currentPrice) / currentPrice * 100)
     : null;
@@ -137,8 +147,6 @@ export function DecisionBanner() {
       navigate(`/chat?code=${stockCode}`);
     });
   }, [stockCode, stockName, decision, currentPrice, confidencePct, upside, navigate, t]);
-
-  if (!decision) { return null; }
 
   return (
     <>

@@ -20,8 +20,35 @@ fn to_tencent_code(stock_code: &str) -> String {
 }
 
 /// 解析腾讯财经实时行情响应
+/// API 格式: v_sh600519="1~贵州茅台~600519~1272.86~1268.00~1278.00~..."
+/// 字段结构 (以 ~ 分隔):
+///   fields[0]  标志位(1=上海,51=深圳)
+///   fields[1]  股票名称
+///   fields[2]  股票代码
+///   fields[3]  当前价
+///   fields[4]  昨收
+///   fields[5]  今开
+///   fields[6]  成交量(手) — 与 fields[ts+6] 重复
+///   fields[7]  外盘
+///   fields[8]  内盘
+///   fields[9..29] 买卖五档 (价格/数量交替)
+///   fields[30] 时间戳 (YYYYMMDDHHMMSS)
+///   fields[31] 涨跌额
+///   fields[32] 涨跌幅%
+///   fields[33] 最高价
+///   fields[34] 最低价
+///   fields[35] 现价/成交量/成交额 复合字段
+///   fields[36] 成交量(手)
+///   fields[37] 成交额(万)
+///   fields[38] 换手率%
+///   fields[39] 市盈率
+///   fields[43] 振幅%
+///   fields[44] 总市值(亿)
+///   fields[45] 流通市值(亿)
+///   fields[46] 市净率
+///   fields[47] 涨停价
+///   fields[48] 跌停价
 fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
-    // 格式: v_sh600519="1~贵州茅台~600519~1680.00~1650.00~..."
     let start = raw
         .find('"')
         .ok_or_else(|| DataError::ParseError("no opening quote".into()))?;
@@ -31,23 +58,32 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
     let data = &raw[start + 1..start + 1 + end];
     let fields: Vec<&str> = data.split('~').collect();
 
-    if fields.len() < 49 {
-        return Err(DataError::ParseError(format!("expected >=49 fields, got {}", fields.len())));
+    if fields.len() < 50 {
+        return Err(DataError::ParseError(format!("expected >=50 fields, got {}", fields.len())));
     }
 
     let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
     let parse_opt = |s: &str| -> Option<f64> {
         let v: f64 = s.parse().ok()?;
-        if v == 0.0 {
-            None
-        } else {
-            Some(v)
-        }
+        if v == 0.0 { None } else { Some(v) }
     };
 
     // 从股票名称检测 ST 状态
     let name = fields[1].to_string();
     let is_st = name.contains("ST") || name.contains("*ST");
+
+    // 通过时间戳定位后续字段（14位数字），兼容字段数可能变化的情况
+    let ts_idx = fields.iter().position(|f| {
+        f.len() == 14 && f.chars().all(|c| c.is_ascii_digit())
+    }).unwrap_or(30);
+
+    if fields.len() < ts_idx + 19 {
+        return Err(DataError::ParseError(format!(
+            "expected >= {} fields after timestamp, got {}",
+            ts_idx + 19,
+            fields.len()
+        )));
+    }
 
     Ok(StockQuote {
         code: fields[2].to_string(),
@@ -55,31 +91,23 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
         price: parse(fields[3]),
         pre_close: parse(fields[4]),
         open: parse(fields[5]),
-        high: parse(fields[33]),
-        low: parse(fields[34]),
-        volume: parse(fields[6]) * 100.0,
-        amount: parse(fields[37]) * 10000.0,
-        change_pct: parse(fields[32]),
-        turnover_rate: parse(fields[38]),
-        pe: parse_opt(fields[39]),
-        pb: parse_opt(fields[46]),
-        total_mv: parse_opt(fields[45]).map(|v| v * 10000.0),
-        circulating_mv: None,
+        high: parse(fields[ts_idx + 3]),
+        low: parse(fields[ts_idx + 4]),
+        volume: parse(fields[ts_idx + 6]) * 100.0,     // 手 → 股
+        amount: parse(fields[ts_idx + 7]) * 10000.0,   // 万 → 元
+        change_pct: parse(fields[ts_idx + 2]),
+        turnover_rate: parse(fields[ts_idx + 8]),
+        pe: parse_opt(fields[ts_idx + 9]),
+        pb: parse_opt(fields[ts_idx + 16]),
+        total_mv: parse_opt(fields[ts_idx + 14]).map(|v| v * 1e8),
+        circulating_mv: parse_opt(fields[ts_idx + 15]).map(|v| v * 1e8),
         limit_up: {
-            let v = parse(fields[47]);
-            if v > 0.0 {
-                Some(v)
-            } else {
-                None
-            }
+            let v = parse(fields[ts_idx + 17]);
+            if v > 0.0 { Some(v) } else { None }
         },
         limit_down: {
-            let v = parse(fields[48]);
-            if v > 0.0 {
-                Some(v)
-            } else {
-                None
-            }
+            let v = parse(fields[ts_idx + 18]);
+            if v > 0.0 { Some(v) } else { None }
         },
         is_st,
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -194,6 +222,66 @@ impl StockVendor for TencentVendor {
 
     async fn get_lockup_schedule(&self, _: &str) -> Result<Vec<LockupSchedule>, DataError> {
         Ok(vec![])
+    }
+
+    async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        let indices: Vec<(&str, &str)> = vec![
+            ("sh000001", "上证指数"),
+            ("sz399001", "深证成指"),
+            ("sz399006", "创业板指"),
+        ];
+        let codes = indices.iter().map(|(c, _)| *c).collect::<Vec<_>>().join(",");
+        let url = format!("https://qt.gtimg.cn/q={}", codes);
+        let resp = self.http.get(&url).send().await?;
+        let text = resp.text().await?;
+
+        // 用 HashMap 按股票代码匹配，避免依赖返回行顺序
+        use std::collections::HashMap;
+        let name_map: HashMap<&str, &str> = indices.iter().copied().collect();
+
+        let mut results = Vec::new();
+        for line in text.lines() {
+            if line.is_empty() || !line.contains('~') {
+                continue;
+            }
+            let fields: Vec<&str> = line.split('~').collect();
+            if fields.len() < 50 {
+                continue;
+            }
+
+            let code_in = fields[2]; // e.g. "sh000001"
+            let name = match name_map.get(code_in) {
+                Some(n) => n.to_string(),
+                None => continue, // 不是我们请求的指数
+            };
+
+            let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
+
+            let ts_idx = fields.iter().position(|f| {
+                f.len() == 14 && f.chars().all(|c| c.is_ascii_digit())
+            }).unwrap_or(30);
+
+            if fields.len() < ts_idx + 8 {
+                continue;
+            }
+
+            results.push(IndexQuote {
+                code: code_in.to_string(),
+                name,
+                price: parse(fields[3]),
+                pre_close: parse(fields[4]),
+                change_pct: parse(fields[ts_idx + 2]),
+                volume: parse(fields[ts_idx + 6]) * 100.0,
+                amount: parse(fields[ts_idx + 7]) * 10000.0,
+            });
+        }
+
+        // 按请求顺序排序，保证面板显示顺序一致
+        let order: HashMap<&str, usize> = indices.iter().enumerate()
+            .map(|(i, (c, _))| (*c, i)).collect();
+        results.sort_by_key(|q| order.get(q.code.as_str()).copied().unwrap_or(99));
+
+        Ok(results)
     }
 
     async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {

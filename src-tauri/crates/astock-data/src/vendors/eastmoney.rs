@@ -14,20 +14,11 @@ impl EastMoneyVendor {
             .get(url)
             .header("Referer", "https://quote.eastmoney.com/")
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             .send()
             .await
             .map_err(DataError::from)
-    }
-}
-
-/// 构建东方财富股票代码 (1.SH600519, 0.SZ000001)
-fn to_em_code(stock_code: &str) -> String {
-    if stock_code.starts_with('6') || stock_code.starts_with('9') {
-        format!("1.{stock_code}")
-    } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
-        format!("0.BJ{stock_code}")
-    } else {
-        format!("0.SZ{stock_code}")
     }
 }
 
@@ -160,49 +151,164 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
+        // 东方财富 2025 年后 FinanceSummary API 失效，改用 NewFinanceAnalysis/ZYZBAjaxNew
+        let em_code = if stock_code.starts_with('6') || stock_code.starts_with('9') {
+            format!("SH{stock_code}")
+        } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+            format!("BJ{stock_code}")
+        } else {
+            format!("SZ{stock_code}")
+        };
+
         let url = format!(
-            "https://emweb.securities.eastmoney.com/PC_HSF10/FinanceSummary/FinanceSummary?code={}&type=web",
-            to_em_code(stock_code)
+            "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={}",
+            em_code
         );
 
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
-        let reports = json["data"]["list"]
-            .as_array()
-            .ok_or_else(|| DataError::ParseError("missing financials list".into()))?;
+        let data = match json["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
 
-        reports
+        Ok(data
             .iter()
+            .take(8)
             .map(|r| {
                 let s = |key: &str| -> &str { r[key].as_str().unwrap_or("") };
                 let n = |key: &str| -> Option<f64> { r[key].as_str().and_then(|v| v.parse().ok()) };
-                Ok(FinancialReport {
+                FinancialReport {
                     stock_code: stock_code.to_string(),
                     report_date: s("REPORT_DATE").to_string(),
-                    revenue: n("TOTAL_OPERATE_INCOME"),
-                    net_profit: n("PARENT_NETPROFIT"),
-                    eps: n("BASIC_EPS"),
-                    bps: n("BPS"),
-                    roe: n("WEIGHTAVG_ROE"),
-                    debt_ratio: n("DEBT_ASSET_RATIO"),
-                    gross_margin: n("GROSS_PROFIT_RATIO"),
-                    net_margin: n("NETPROFIT_MARGIN"),
-                    revenue_yoy: n("TOTAL_OPERATE_INCOME_YOY"),
-                    profit_yoy: n("PARENT_NETPROFIT_YOY"),
-                    total_assets: n("TOTAL_ASSETS"),
-                    operating_cash_flow: n("NETCASH_OPERATE"),
-                    capital_expenditure: n("CCE_ADD_ASSET"),
+                    // 东方财富 2025 年字段名变更映射
+                    revenue: n("TOTALOPERATEREVE"),          // 营业总收入
+                    net_profit: n("PARENTNETPROFIT"),      // 归母净利润
+                    eps: n("EPSJB"),                        // 基本每股收益
+                    bps: n("BPS"),                          // 每股净资产
+                    roe: n("ROEJQ"),                        // 加权平均ROE
+                    debt_ratio: n("ZCFZL"),                 // 资产负债率
+                    gross_margin: n("XSMLL"),               // 销售毛利率
+                    net_margin: n("XSJLL"),                 // 销售净利率
+                    revenue_yoy: n("TOTALOPERATEREVETZ"),   // 营收同比增长
+                    profit_yoy: n("PARENTNETPROFITTZ"),     // 净利润同比增长
+                    total_assets: None,
+                    operating_cash_flow: None,
+                    capital_expenditure: None,
                     free_cash_flow: None,
-                    current_ratio: n("CURRENT_RATIO"),
-                    quick_ratio: n("QUICK_RATIO"),
-                })
+                    current_ratio: n("LD"),                 // 流动比率
+                    quick_ratio: n("SD"),                   // 速动比率
+                }
             })
-            .collect()
+            .collect())
     }
 
-    async fn get_news(&self, _: &str, _: u32) -> Result<Vec<NewsItem>, DataError> {
-        Ok(vec![])
+    async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        // 使用东方财富搜索 API（与 akshare 相同的 endpoint，作为主源）
+        let param = serde_json::json!({
+            "uid": "",
+            "keyword": stock_code,
+            "type": ["cmsArticleWebOld"],
+            "client": "web",
+            "clientType": "web",
+            "clientVersion": "curr",
+            "param": {
+                "cmsArticleWebOld": {
+                    "searchScope": "default",
+                    "sort": "default",
+                    "pageIndex": 1,
+                    "pageSize": limit.min(50),
+                    "preTag": "",
+                    "postTag": ""
+                }
+            }
+        });
+
+        let url = format!(
+            "https://search-api-web.eastmoney.com/search/jsonp?cb=jQuery&param={}",
+            urlencoding::encode(&param.to_string())
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://so.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await
+            .map_err(|e| DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!("新闻搜索请求失败: {e}"),
+            })?;
+
+        let text = resp.text().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("新闻搜索响应读取失败: {e}"),
+        })?;
+
+        // 解析 JSONP 响应: jQuery18306726XXX(...)
+        // 找到第一个 '(' 和最后一个 ')'，提取中间的 JSON 内容
+        let trimmed = text.trim();
+        let json_str = if let Some(start) = trimmed.find('(') {
+            if let Some(end) = trimmed.rfind(')') {
+                &trimmed[start + 1..end]
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
+
+        let json: Value = serde_json::from_str(json_str).map_err(|e| {
+            DataError::ParseError(format!("eastmoney news jsonp parse failed: {e}, raw: {}", &text[..200.min(text.len())]))
+        })?;
+
+        let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(items
+            .iter()
+            .filter_map(|item| {
+                let title = item.get("title")?.as_str()?.to_string();
+                let summary = item
+                    .get("digest")
+                    .or_else(|| item.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let source = item
+                    .get("mediaName")
+                    .or_else(|| item.get("source"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("东方财富")
+                    .to_string();
+                let article_url = item
+                    .get("articleUrl")
+                    .or_else(|| item.get("url"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let publish_time = item
+                    .get("showTime")
+                    .or_else(|| item.get("publishTime"))
+                    .or_else(|| item.get("ctime"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                Some(NewsItem {
+                    title,
+                    summary,
+                    source,
+                    url: article_url,
+                    publish_time,
+                    sentiment_score: None,
+                })
+            })
+            .collect())
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
@@ -626,9 +732,13 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
-        let url = "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns?client=web&biz=web_news_col&column=250&order=1&needInteractData=0&page_index=1&page_size=20";
+        // req_trace 为必填参数，使用当前毫秒时间戳
+        let req_trace = chrono::Utc::now().timestamp_millis();
+        let url = format!(
+            "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns?client=web&biz=web_news_col&column=250&order=1&needInteractData=0&page_index=1&page_size=20&req_trace={req_trace}"
+        );
 
-        let resp = self.em_get(url).await?;
+        let resp = self.em_get(&url).await?;
 
         let json: Value = resp.json().await?;
 
@@ -941,6 +1051,76 @@ impl StockVendor for EastMoneyVendor {
             put_oi,
             volume_pcr,
             oi_pcr,
+        }))
+    }
+
+    /// 行业/板块排名 — 东方财富板块 API
+    async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
+        // m:90 = 行业板块, t:2 = 概念板块；fid=f3 按涨跌幅排序
+        let url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=50&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f204,f205,f124";
+        let resp = self.em_get(url).await?;
+        let json: Value = resp.json().await?;
+
+        let rows = match json["data"]["diff"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let industry_name = r["f14"].as_str()?.to_string();
+                let change_pct = r["f3"].as_f64().unwrap_or(0.0) / 100.0;
+                let main_inflow = r["f62"].as_f64().map(|v| v * 10000.0);
+                Some(IndustryRank {
+                    industry_name,
+                    change_pct,
+                    turnover: None,
+                    main_inflow,
+                    leader_code: None,
+                    leader_name: None,
+                    leader_change_pct: None,
+                })
+            })
+            .collect())
+    }
+
+    /// 北向资金（沪深港通）— 东方财富 API
+    async fn get_north_bound_flow(&self) -> Result<Option<NorthBoundFlow>, DataError> {
+        let url = "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get?lmt=0&klt=1&secid=1.000001&secid2=0.399001&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63";
+        let resp = self.em_get(url).await?;
+        let json: Value = resp.json().await?;
+
+        let data = &json["data"];
+        if data.is_null() {
+            return Ok(None);
+        }
+
+        let parse_kline = |v: &Value| -> (String, f64) {
+            let s = v.as_str().unwrap_or("");
+            let parts: Vec<&str> = s.split(',').collect();
+            let date = parts.get(0).unwrap_or(&"").to_string();
+            let inflow = parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            (date, inflow)
+        };
+
+        let (_sh_date, sh_flow) = data["klines"]
+            .as_array()
+            .and_then(|arr| arr.last())
+            .map(|v| parse_kline(v))
+            .unwrap_or_default();
+        let (_sz_date, sz_flow) = data["klines2"]
+            .as_array()
+            .and_then(|arr| arr.last())
+            .map(|v| parse_kline(v))
+            .unwrap_or_default();
+
+        Ok(Some(NorthBoundFlow {
+            date: _sh_date,
+            sh_flow,
+            sz_flow,
+            total_flow: sh_flow + sz_flow,
+            timestamp: None,
         }))
     }
 }

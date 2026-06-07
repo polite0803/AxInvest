@@ -1,7 +1,9 @@
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Empty, Spin, Table, Tag } from "antd";
+import { Button, Card, Spin, Table, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 
 interface Announcement {
   title: string;
@@ -14,19 +16,30 @@ interface Announcement {
 
 export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
   const { t } = useTranslation();
+  const { openDataSourceSettings } = useStockAnalysisPage();
   const [items, setItems] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
   const load = useCallback(async () => {
-    if (!stockCode) { return; }
+    if (!stockCode) {
+      setItems([]);
+      setEmptyKind("noStock");
+      return;
+    }
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
     try {
       const data = await invoke<Announcement[]>("get_stock_announcements", { stockCode });
-      setItems(data ?? []);
+      if (Array.isArray(data) && data.length > 0) {
+        setItems(data);
+      } else {
+        setItems([]);
+        setEmptyKind("noData");
+      }
     } catch {
-      setFetchError(true);
+      setItems([]);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
   }, [stockCode]);
@@ -60,15 +73,21 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
       title={`📋 ${t("stockAnalysis.announcements")}`}
       styles={{ body: { padding: 0 } }}
       extra={
-        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+        <Button size="small" loading={loading} onClick={load}>
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
       }
     >
-      {!stockCode
-        ? <Empty description={t("stockAnalysis.searchPlaceholder")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        : loading
+      {loading
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
-        : fetchError
-        ? <Empty description={t("stockAnalysis.error")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        : emptyKind
+        ? (
+          <PanelEmpty
+            kind={emptyKind}
+            description={emptyKind === "noData" ? t("stockAnalysis.announcementsEmpty") : undefined}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
         : (
           <Table
             dataSource={items}

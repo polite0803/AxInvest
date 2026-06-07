@@ -2,7 +2,9 @@ import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettin
 import { Drawer } from "antd";
 import { useTranslation } from "react-i18next";
 
-export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function StockAnalysisSettingsModal(
+  { open, onClose, defaultTab }: { open: boolean; onClose: () => void; defaultTab?: string },
+) {
   const { t } = useTranslation();
 
   return (
@@ -14,7 +16,7 @@ export function StockAnalysisSettingsModal({ open, onClose }: { open: boolean; o
       open={open}
       onClose={onClose}
     >
-      <StockAnalysisSettings />
+      <StockAnalysisSettings key={defaultTab ?? "default"} defaultTab={defaultTab} />
     </Drawer>
   );
 }

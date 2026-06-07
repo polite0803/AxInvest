@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import type { StockQuote } from "@/types";
 import { SwapOutlined } from "@ant-design/icons";
-import { Button, Card, Input, Spin, Tag } from "antd";
+import { Button, Card, Empty, Input, Spin, Tag } from "antd";
 import * as echarts from "echarts";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -184,6 +184,14 @@ export function CompareView() {
       </div>
 
       {loading && <Spin size="small" />}
+
+      {!loading && !quote1 && !quote2 && (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={t("stockAnalysis.settings.screener.discoverHint")}
+          style={{ marginTop: 16 }}
+        />
+      )}
 
       {quote1 && quote2 && (
         <>

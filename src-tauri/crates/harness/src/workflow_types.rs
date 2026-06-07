@@ -283,11 +283,6 @@ pub struct AgentNodeConfig {
     /// 防幻觉锚定检查配置（可选，不配置时零影响）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hallucination_guard: Option<HallucinationGuardConfig>,
-    /// 输入变量映射：将工作流变量（如 trigger 输出）注入到 Agent 的 system_prompt 中。
-    /// key = 注入到 prompt 的变量名，value = ExecutionState.variables 中的键。
-    /// 运行时自动解析并追加 `【key】:value` 格式到 system_prompt 尾部。
-    #[serde(default)]
-    pub input_mapping: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

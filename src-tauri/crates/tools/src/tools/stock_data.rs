@@ -1,6 +1,7 @@
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult};
 use async_trait::async_trait;
 use axagent_astock_data::AStockClient;
+use chrono::Local;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -491,6 +492,23 @@ impl Tool for ComputeScoringTool {
         let weighted: f64 = scores.iter().zip(weights.iter()).map(|(s, w)| s * w).sum();
         let total_score = (weighted + value_adj).clamp(0.0, 100.0);
 
+        let mut warnings: Vec<Value> = Vec::new();
+        if indicators.bias_ma5.is_nan() || indicators.bias_ma20.is_nan() {
+            warnings.push(Value::String("BIAS指标异常：MA数据不足".into()));
+        }
+        if quote.price <= 0.0 {
+            warnings.push(Value::String("当前价格无效（可能停牌或未开盘）".into()));
+        }
+        let freshness = if indicators.latest_date.contains(
+            &Local::now().format("%Y-%m-%d").to_string()
+        ) {
+            "today"
+        } else if quote.price > 0.0 {
+            "delayed"
+        } else {
+            "stale"
+        };
+
         let rating = if total_score >= 80.0 {
             "强烈推荐"
         } else if total_score >= 65.0 {
@@ -519,6 +537,12 @@ impl Tool for ComputeScoringTool {
             },
             "valueAdjustment": value_adj,
             "indicators": indicators,
+            "credibility": {
+                "dataCompleteness": 100.0,
+                "dataFreshness": freshness,
+                "source": "tencent|eastmoney",
+                "warnings": Value::Array(warnings)
+            },
         });
         Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
     }
@@ -677,6 +701,37 @@ impl Tool for ComputeValuationTool {
         } else {
             0.0
         };
+        let mut v_warnings: Vec<Value> = Vec::new();
+        if eps <= 0.0 {
+            v_warnings.push(Value::String("EPS≤0，DCF估值不可靠".into()));
+        }
+        let fin_count = financials.len();
+        if fin_count < 2 {
+            v_warnings.push(Value::String(format!(
+                "财务数据仅{}期，估值模型依赖多期数据",
+                fin_count
+            )));
+        }
+        let v_freshness = if let Some(ref lf) = latest_fin {
+            if lf.report_date.contains(
+                &Local::now().format("%Y-%m").to_string()
+            ) {
+                "current_quarter"
+            } else if let Ok(now) = chrono::NaiveDate::parse_from_str(
+                &Local::now().format("%Y-%m-%d").to_string(),
+                "%Y-%m-%d",
+            ) {
+                if let Some(ref rd) = lf.report_date.strip_suffix("00:00:00") {
+                    if let Ok(report_date) =
+                        chrono::NaiveDate::parse_from_str(rd.trim(), "%Y-%m-%d")
+                    {
+                        let days_old = (now - report_date).num_days();
+                        if days_old <= 90 { "recent_quarter" } else { "outdated" }
+                    } else { "unknown" }
+                } else { "unknown" }
+            } else { "unknown" }
+        } else { "no_data" };
+
         let graham_upside = if graham_value > 0.0 {
             (graham_value - current_price) / current_price * 100.0
         } else {
@@ -721,6 +776,12 @@ impl Tool for ComputeValuationTool {
                 "profitYoy": profit_yoy,
             },
             "financialsUsed": latest_fin.map(|f| f.report_date.clone()).unwrap_or_default(),
+            "credibility": {
+                "dataCompleteness": if fin_count >= 2 { 100.0 } else { fin_count as f64 * 50.0 },
+                "dataFreshness": v_freshness,
+                "source": "eastmoney",
+                "warnings": Value::Array(v_warnings)
+            },
         });
         Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
     }
@@ -836,6 +897,16 @@ impl Tool for ComputeRiskTool {
         } else {
             "分散"
         };
+        let requested_count = codes.len();
+        let loaded_count = positions.len();
+        let r_warnings: Vec<Value> = if requested_count > loaded_count {
+            vec![Value::String(format!(
+                "{}/{} 只股票行情加载失败",
+                requested_count - loaded_count,
+                requested_count
+            ))]
+        } else { vec![] };
+
         let diversification_label = if effective_n >= 8.0 {
             "充分分散"
         } else if effective_n >= 4.0 {
@@ -867,6 +938,12 @@ impl Tool for ComputeRiskTool {
                 "changePct": q.change_pct,
                 "weightPct": (*w * 100.0).round() / 100.0,
             })).collect::<Vec<_>>(),
+            "credibility": {
+                "dataCompleteness": if requested_count > 0 { (loaded_count as f64 / requested_count as f64) * 100.0 } else { 0.0 },
+                "dataFreshness": "realtime",
+                "source": "tencent|eastmoney",
+                "warnings": Value::Array(r_warnings)
+            },
         });
         Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
     }
@@ -944,6 +1021,545 @@ impl Tool for StockInstitutionalVisitsTool {
     }
 }
 
+// ── 16. StockPeersTool ──
+pub struct StockPeersTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockPeersTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockPeersTool {
+    fn name(&self) -> &str {
+        "get_stock_peers"
+    }
+    fn description(&self) -> &str {
+        "获取同行业可比公司估值（PE/PB/ROE/涨跌幅/市值）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_peers(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 17. StockResearchReportsTool ──
+pub struct StockResearchReportsTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockResearchReportsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockResearchReportsTool {
+    fn name(&self) -> &str {
+        "get_research_reports"
+    }
+    fn description(&self) -> &str {
+        "获取券商研报列表（机构、评级、目标价、EPS预测）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_research_reports(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 18. StockConceptBlocksTool ──
+pub struct StockConceptBlocksTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockConceptBlocksTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockConceptBlocksTool {
+    fn name(&self) -> &str {
+        "get_concept_blocks"
+    }
+    fn description(&self) -> &str {
+        "获取概念板块三维归属（行业/概念/地域）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_concept_blocks(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 19. StockOptionPCRTool ──
+pub struct StockOptionPCRTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockOptionPCRTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockOptionPCRTool {
+    fn name(&self) -> &str {
+        "get_stock_option_pcr"
+    }
+    fn description(&self) -> &str {
+        "获取期权PCR（看跌/看涨成交量和持仓量比率，市场情绪前瞻指标）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_option_pcr(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 20. StockCLSFlashTool ──
+pub struct StockCLSFlashTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockCLSFlashTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockCLSFlashTool {
+    fn name(&self) -> &str {
+        "get_cls_flash"
+    }
+    fn description(&self) -> &str {
+        "获取财联社实时快讯（分钟级电报）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{}})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let r = self
+            .client
+            .get_cls_flash()
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 21. StockNorthBoundFlowTool ──
+pub struct StockNorthBoundFlowTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockNorthBoundFlowTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockNorthBoundFlowTool {
+    fn name(&self) -> &str {
+        "get_north_bound_flow"
+    }
+    fn description(&self) -> &str {
+        "获取北向资金分钟级流向（沪深股通）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{}})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let r = self
+            .client
+            .get_north_bound_flow()
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 22. StockMarketDragonTigerTool ──
+pub struct StockMarketDragonTigerTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockMarketDragonTigerTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockMarketDragonTigerTool {
+    fn name(&self) -> &str {
+        "get_market_dragon_tiger"
+    }
+    fn description(&self) -> &str {
+        "获取全市场龙虎榜（每日上榜股票+净买额排名）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{}})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let r = self
+            .client
+            .get_market_dragon_tiger()
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 23. StockIndexQuotesTool ──
+pub struct StockIndexQuotesTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockIndexQuotesTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockIndexQuotesTool {
+    fn name(&self) -> &str {
+        "get_index_quotes"
+    }
+    fn description(&self) -> &str {
+        "获取大盘指数行情（上证指数、深证成指、创业板指）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{}})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let r = self
+            .client
+            .get_index_quotes()
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 24. StockLockupTool ──
+pub struct StockLockupTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockLockupTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockLockupTool {
+    fn name(&self) -> &str {
+        "get_stock_lockup"
+    }
+    fn description(&self) -> &str {
+        "获取限售解禁日程（解禁日期、股数、比例、股东名称）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_lockup_schedule(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 25. StockShareholderTradesTool ──
+pub struct StockShareholderTradesTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockShareholderTradesTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockShareholderTradesTool {
+    fn name(&self) -> &str {
+        "get_stock_shareholder_trades"
+    }
+    fn description(&self) -> &str {
+        "获取大股东增减持记录（变动类型、数量、均价、原因）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_shareholder_trades(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 26. StockDividendRecordsTool ──
+pub struct StockDividendRecordsTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockDividendRecordsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockDividendRecordsTool {
+    fn name(&self) -> &str {
+        "get_stock_dividend_records"
+    }
+    fn description(&self) -> &str {
+        "获取除权除息/分红送配记录"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_dividend_records(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 27. StockNorthBoundHoldingTool ──
+pub struct StockNorthBoundHoldingTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockNorthBoundHoldingTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockNorthBoundHoldingTool {
+    fn name(&self) -> &str {
+        "get_stock_north_bound"
+    }
+    fn description(&self) -> &str {
+        "获取北向资金个股持仓（持股数量、占比）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_north_bound_holding(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 28. StockDragonTigerTool ──
+pub struct StockDragonTigerTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockDragonTigerTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockDragonTigerTool {
+    fn name(&self) -> &str {
+        "get_stock_dragon_tiger"
+    }
+    fn description(&self) -> &str {
+        "获取个股龙虎榜数据（营业部买卖、上榜原因）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_dragon_tiger(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 29. StockMarginDataTool ──
+pub struct StockMarginDataTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockMarginDataTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockMarginDataTool {
+    fn name(&self) -> &str {
+        "get_stock_margin_data"
+    }
+    fn description(&self) -> &str {
+        "获取融资融券数据（融资买入额、余额、融券卖出量、余量）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_margin_data(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
+// ── 30. StockSectorInfoTool ──
+pub struct StockSectorInfoTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockSectorInfoTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockSectorInfoTool {
+    fn name(&self) -> &str {
+        "get_stock_sector_info"
+    }
+    fn description(&self) -> &str {
+        "获取行业分类（申万一级/二级、概念板块标签）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self
+            .client
+            .get_sector_info(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
 // ── Registration ──
 pub fn register_stock_tools(
     registry: &mut crate::registry::ToolRegistry,
@@ -964,6 +1580,21 @@ pub fn register_stock_tools(
         Arc::new(ComputeValuationTool::new(client.clone())),
         Arc::new(ComputeRiskTool::new(client.clone())),
         Arc::new(StockBlockTradesTool::new(client.clone())),
-        Arc::new(StockInstitutionalVisitsTool::new(client)),
+        Arc::new(StockInstitutionalVisitsTool::new(client.clone())),
+        Arc::new(StockPeersTool::new(client.clone())),
+        Arc::new(StockResearchReportsTool::new(client.clone())),
+        Arc::new(StockConceptBlocksTool::new(client.clone())),
+        Arc::new(StockOptionPCRTool::new(client.clone())),
+        Arc::new(StockCLSFlashTool::new(client.clone())),
+        Arc::new(StockNorthBoundFlowTool::new(client.clone())),
+        Arc::new(StockMarketDragonTigerTool::new(client.clone())),
+        Arc::new(StockIndexQuotesTool::new(client.clone())),
+        Arc::new(StockLockupTool::new(client.clone())),
+        Arc::new(StockShareholderTradesTool::new(client.clone())),
+        Arc::new(StockDividendRecordsTool::new(client.clone())),
+        Arc::new(StockNorthBoundHoldingTool::new(client.clone())),
+        Arc::new(StockDragonTigerTool::new(client.clone())),
+        Arc::new(StockMarginDataTool::new(client.clone())),
+        Arc::new(StockSectorInfoTool::new(client)),
     ]);
 }

@@ -1,80 +1,127 @@
 import { invoke } from "@/lib/invoke";
-import { ReloadOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Spin, Tag } from "antd";
-import { useCallback, useState } from "react";
+import { useStockAnalysisStore } from "@/stores";
+import { Button, Card, List, Spin, Tag, Typography } from "antd";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 
 interface DailyReview {
   date: string;
-  marketSummary: string;
-  watchlistReview: Array<{ stockCode: string; stockName: string; comment: string; alertNotes: string[] }>;
-  triggeredAlerts: Record<string, string[]>;
+  summary: string;
+  watchlistAnalyses: { stockCode: string; stockName: string; suggestion: string }[];
+  alerts: string[];
   recommendations: string[];
 }
 
 export function DailyReviewPanel() {
+  const { t } = useTranslation();
+  const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
+  const [codes, setCodes] = useState<string[]>([]);
   const [review, setReview] = useState<DailyReview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 跟随自选股变化
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list: any[] = await invoke("list_watchlist");
+        if (!cancelled) { setCodes(Array.isArray(list) ? list.map((w) => w.stockCode) : []); }
+      } catch {
+        if (!cancelled) { setCodes([]); }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [watchlistVersion]);
 
   const generate = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const r = await invoke<DailyReview>("generate_daily_review");
+      const r = await invoke<DailyReview>("generate_daily_review", { codes });
       setReview(r);
-    } catch { /* 后端未运行 */ }
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
     setLoading(false);
-  }, []);
+  }, [codes]);
+
+  const hasCodes = codes.length > 0;
+  const emptyKind: PanelEmptyKind = error ? "connectionFailed" : "noData";
+  const emptyDescription = !hasCodes
+    ? t("stockAnalysis.dailyReview.noWatchlist")
+    : (error ?? t("stockAnalysis.dailyReview.empty"));
 
   return (
     <Card
       size="small"
-      title="📋 每日复盘"
-      styles={{ body: { padding: "6px 8px" } }}
-      extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={generate}>生成</Button>}
+      title={t("stockAnalysis.dailyReview.title")}
+      styles={{ body: { padding: "8px 10px" } }}
+      extra={
+        <Button
+          size="small"
+          loading={loading}
+          onClick={generate}
+          type={review ? "default" : "primary"}
+          disabled={loading}
+        >
+          {review ? t("stockAnalysis.dailyReview.regenerate") : t("stockAnalysis.dailyReview.generate")}
+        </Button>
+      }
     >
       {loading
-        ? <Spin size="small" />
+        ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
         : !review
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击生成今日复盘" />
+        ? <PanelEmpty kind={emptyKind} description={emptyDescription} />
         : (
-          <div className="flex flex-col gap-1 text-xs">
-            <div className="text-gray-500">{review.date} {review.marketSummary}</div>
+          <div className="space-y-2">
+            {review.summary && (
+              <Typography.Paragraph className="text-xs" style={{ marginBottom: 4 }}>
+                {review.summary}
+              </Typography.Paragraph>
+            )}
 
-            {review.triggeredAlerts && Object.keys(review.triggeredAlerts).length > 0 && (
-              <div className="p-1 rounded" style={{ background: "var(--surface)" }}>
-                <span className="font-medium">触发告警:</span>
-                {Object.entries(review.triggeredAlerts).map(([code, alerts]) => (
-                  <div key={code}>{code}: {alerts.join(", ")}</div>
-                ))}
+            {review.alerts?.length > 0 && (
+              <div>
+                <div className="text-xs font-medium mb-1">
+                  {t("stockAnalysis.dailyReview.alerts")} ({review.alerts.length})
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {review.alerts.map((a, i) => <Tag key={i} color="red" className="text-xs m-0">{a}</Tag>)}
+                </div>
               </div>
             )}
 
-            <Collapse
-              size="small"
-              ghost
-              items={[{
-                key: "watchlist",
-                label: `自选股复盘 (${review.watchlistReview?.length ?? 0})`,
-                children: review.watchlistReview?.map((w) => (
-                  <div
-                    key={w.stockCode}
-                    className="flex items-start gap-2 py-0.5"
-                    style={{ borderBottom: "1px solid var(--border)" }}
-                  >
-                    <Tag className="text-xs m-0 shrink-0">{w.stockCode}</Tag>
-                    <div>
-                      <span className="font-medium">{w.stockName}</span>
-                      <div className="text-gray-500">{w.comment}</div>
-                      {w.alertNotes.length > 0 && <div className="text-orange-500">{w.alertNotes.join(" ")}</div>}
-                    </div>
-                  </div>
-                )) ?? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无自选股" />,
-              }]}
-            />
+            {review.watchlistAnalyses?.length > 0 && (
+              <div>
+                <div className="text-xs font-medium mb-1">
+                  {t("stockAnalysis.dailyReview.watchlist", { count: review.watchlistAnalyses.length })}
+                </div>
+                <List
+                  size="small"
+                  dataSource={review.watchlistAnalyses}
+                  renderItem={(w) => (
+                    <List.Item style={{ padding: "3px 0" }}>
+                      <div className="text-xs w-full">
+                        <span className="font-mono mr-1">{w.stockCode}</span>
+                        <span className="font-medium mr-2">{w.stockName}</span>
+                        <span className="text-gray-500">{w.suggestion}</span>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </div>
+            )}
 
             {review.recommendations?.length > 0 && (
-              <div className="p-1 rounded" style={{ background: "var(--surface)" }}>
-                <span className="font-medium">建议:</span>
-                {review.recommendations.map((rec, i) => <div key={i}>• {rec}</div>)}
+              <div>
+                <div className="text-xs font-medium mb-1">{t("stockAnalysis.dailyReview.recommendations")}</div>
+                <div className="flex flex-wrap gap-1">
+                  {review.recommendations.map((r, i) => <Tag key={i} color="blue" className="text-xs m-0">{r}</Tag>)}
+                </div>
               </div>
             )}
           </div>

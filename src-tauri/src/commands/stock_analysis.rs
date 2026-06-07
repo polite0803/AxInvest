@@ -1,6 +1,6 @@
 use crate::AppState;
 use axagent_core::entity::{
-    portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
+    portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items, workflow_template,
 };
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
@@ -9,6 +9,7 @@ use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker}
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
 use axagent_stock_analysis::position_limits::PositionLimits;
+use axagent_stock_analysis::recommender::{self, RecoResponse};
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
@@ -1115,4 +1116,50 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
         .check_vendor_health(&vendor)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 拉取智能荐股结果（按周期）
+///
+/// 前端传 period 序列化为 [Period] 枚举（"short" | "mid" | "long"）
+/// 响应见 [RecoResponse]
+#[tauri::command]
+pub async fn recommend_stocks(
+    state: State<'_, AppState>,
+    period: axagent_stock_analysis::recommender::Period,
+) -> Result<RecoResponse, String> {
+    // 读取 workflow template 变量用于 vendor 启用检测
+    let template = axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")
+        .one(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let vars: Vec<(String, serde_json::Value)> = match template {
+        Some(t) => extract_template_vars(&t),
+        None => Vec::new(),
+    };
+
+    // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
+    let client: std::sync::Arc<_> = state.astock_client.clone();
+    recommender::recommend_stocks(client, period, &vars).await
+}
+
+/// 失效荐股缓存（设置页保存 vendor 后由前端调用）
+#[tauri::command]
+pub fn invalidate_recommendation_cache() {
+    recommender::invalidate_cache();
+}
+
+/// 从 workflow_template 实体提取 (name, value) 列表
+fn extract_template_vars(
+    t: &axagent_core::entity::workflow_template::Model,
+) -> Vec<(String, serde_json::Value)> {
+    use axagent_harness::workflow_types::Variable;
+    let raw = match t.variables.as_ref() {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    match serde_json::from_str::<Vec<Variable>>(raw) {
+        Ok(vs) => vs.into_iter().map(|v| (v.name, v.value)).collect(),
+        Err(_) => Vec::new(),
+    }
 }

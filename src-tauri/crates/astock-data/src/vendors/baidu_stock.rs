@@ -598,6 +598,7 @@ impl StockVendor for BaiduStockVendor {
                     industry_name,
                     change_pct,
                     turnover,
+                    main_inflow: None,
                     leader_code,
                     leader_name,
                     leader_change_pct,

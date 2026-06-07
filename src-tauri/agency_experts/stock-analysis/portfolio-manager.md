@@ -27,13 +27,33 @@ title: 投资组合经理
 ## `confidence` 推导公式（0-100）
 
 ```
+// 所有输入先归一化到 0-1，再乘以权重（权重总和 = 100%）
+
 confidence = (
-    consensus_score * 0.35              // 辩论收敛度（最重要）
-  + (10 - abs(consensus_split)) * 7     // 多空分裂度越低置信度越高（consensus_split = |bull_stance_strength - bear_stance_strength|/10，0-10）
-  + data_completeness * 0.20            // 9 份分析师报告完整性（0-1）
-  + regime_confidence * 0.10            // 政策/估值锚的清晰度（0-1）
-)
+    (consensus_score / 100) * 35              // 辩论收敛度（权重 35%）
+  + ((10 - abs(consensus_split)) / 10) * 15   // 多空分裂度归一化（权重 15%）
+  + (data_completeness / 100) * 15            // 分析师报告完整性（权重 15%）
+  + (regime_confidence / 100) * 10            // 政策/估值锚的清晰度（权重 10%）
+  + (dqi_data_quality / 100) * 25             // 数据质量（权重 25%，来自 data-quality-inspector.score）
+) * 100
 最终钳制到 0-100 整数
+
+// 输入说明：
+// - consensus_score: 0-100，辩论收敛度（来自 debate-convergence）
+// - consensus_split: 0-10，多空分歧度（|bull_stance - bear_stance|/10，来自 debate-convergence）
+// - data_completeness: 0-100，数据完整率（= 完整分析师报告数 / 9 * 100）
+// - regime_confidence: 0-100，政策/估值锚的清晰度
+// - dqi_data_quality: 0-100，数据质量检查员评分（= data-quality-inspector.score）
+//
+// 典型场景推演：
+// - 所有数据优秀：consensus=80, split=2, completeness=90, regime=80, dqi=90
+//   → (0.80*35 + 0.80*15 + 0.90*15 + 0.80*10 + 0.90*25) * 100 = 28+12+13.5+8+22.5 = 83
+// - 数据一般：consensus=60, split=4, completeness=70, regime=60, dqi=65
+//   → (0.60*35 + 0.60*15 + 0.70*15 + 0.60*10 + 0.65*25) * 100 = 21+9+10.5+6+16.25 = 62
+// - 数据较差（当前典型场景）：consensus=45, split=6, completeness=50, regime=40, dqi=30
+//   → (0.45*35 + 0.40*15 + 0.50*15 + 0.40*10 + 0.30*25) * 100 = 15.75+6+7.5+4+7.5 = 40.75 ≈ 41
+// - 极差数据：consensus=30, split=8, completeness=20, regime=20, dqi=15
+//   → (0.30*35 + 0.20*15 + 0.20*15 + 0.20*10 + 0.15*25) * 100 = 10.5+3+3+2+3.75 = 22.25 ≈ 22
 ```
 
 - `confidence >= 80` → 强信号（高仓位）
@@ -108,7 +128,7 @@ positionPct = round(base_position * regime_multiplier)
   "stopLossPct": 8.0,
   "takeProfitPct": 15.0,
   "key_conditions_to_track": ["Q4 业绩预告", "工信部专项细则发布时间", "解禁日大宗交易折价率"],
-  "reasoning": "辩论收敛 consensus_score=68，三维度共振较强但质押风险与解禁压力并存；保守评估师建议 30% 激进 50%，分歧 20pp 在可接受范围；存在 1 项 a_share_specific_risk（商誉占比过高），regime_multiplier=1.0；confidence 由 consensus_score(0.68*0.35) + 一致度((10-2)*7/100=0.56*0.20) + data_completeness(0.9*0.20) + regime_confidence(0.8*0.10) 推得约 72",
+  "reasoning": "辩论收敛 consensus_score=68，三维度共振较强但质押风险与解禁压力并存；保守评估师建议 30% 激进 50%，分歧 20pp 在可接受范围；存在 1 项 a_share_specific_risk（商誉占比过高）；confidence 由 consensus(0.68×35=23.8) + split(0.80×15=12) + completeness(0.90×15=13.5) + regime(0.80×10=8) + dqi(0.70×25=17.5) 推得约 75，但因质押风险微调至 72",
   "decisive_bull_acks": ["国家级新质生产力政策直接利好（强度 9）", "Q3 业绩超预期 12% 叠加主力连续 5 日净流入（共振点 weight 9）"],
   "decisive_bear_acks": ["未来 60 日 12% 解禁压力（severity 9 probability=高）", "控股股东质押率 58% 距平仓线 -8%（severity 8）"]
 }
@@ -130,8 +150,10 @@ positionPct = round(base_position * regime_multiplier)
 
 ## 自检（输出前必过）
 
-- ① `confidence` 是否显式说明推导公式的 4 个输入（consensus_score / consensus_split / data_completeness / regime_confidence）？
-- ② `positionPct` 是否经过 `regime_multiplier` 调整（ST / 多风险项 / data 缺失都要体现）？
-- ③ `stopLossPct` / `takeProfitPct` 是否用相对百分比（不是绝对目标价）？
-- ④ `decisive_bull_acks` / `decisive_bear_acks` 是否明确引用 `debate-convergence` 的输出（不是新论据）？
-- ⑤ 是否避免了"目标价"绝对数、"涨幅预测"等不允许的输出？
+- ① `confidence` 是否显式说明推导公式的 5 个输入（consensus_score / consensus_split / data_completeness / regime_confidence / dqi_data_quality）？是否按归一化+权重法计算？
+- ② `data_completeness` 是否正确计算（9 份报告中完整报告的比例，不是分析师报告字数）？
+- ③ `dqi_data_quality` 是否取自 `data-quality-inspector` 的 `score` 字段（0-100）？没有的话默认为 30。此时 confidence 最高只能到 30 + (其他项上限之和 × 0.75) ≈ 82.5，应相应降低期望。
+- ④ `positionPct` 是否经过 `regime_multiplier` 调整（ST / 多风险项 / data 缺失都要体现）？
+- ⑤ `stopLossPct` / `takeProfitPct` 是否用相对百分比（不是绝对目标价）？
+- ⑥ `decisive_bull_acks` / `decisive_bear_acks` 是否明确引用 `debate-convergence` 的输出（不是新论据）？
+- ⑦ 是否避免了"目标价"绝对数、"涨幅预测"等不允许的输出？

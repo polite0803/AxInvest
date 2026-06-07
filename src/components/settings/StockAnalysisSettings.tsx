@@ -8,9 +8,9 @@ import { RolePromptList } from "./RolePromptList";
 import { ScheduledAnalysisTab } from "./ScheduledAnalysisTab";
 import { StockAnalysisConfigPanel } from "./StockAnalysisConfigPanel";
 
-export function StockAnalysisSettings() {
+export function StockAnalysisSettings({ defaultTab }: { defaultTab?: string } = {}) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState("experts");
+  const [activeTab, setActiveTab] = useState(defaultTab ?? "experts");
 
   return (
     <div className="p-6 pb-12">

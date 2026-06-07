@@ -841,6 +841,17 @@ export function createSendMethods(
       };
 
       const handleWorkflowEvent = (event: WorkflowEvent) => {
+        // Auto-switch session to workflow mode so UI shows workflow badges/panels
+        if (event.type === "workflow_start") {
+          const conv = get().conversations.find((c) => c.id === conversationId);
+          if (conv && conv.session_type !== "workflow") {
+            // Fire-and-forget: don't block the event loop
+            get().updateConversation(conversationId, {
+              session_type: "workflow",
+              workflow_template_id: event.workflowId ?? null,
+            });
+          }
+        }
         const text = formatWorkflowEventAsText(event);
         if (text) {
           _agentPendingText += text;

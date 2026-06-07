@@ -2,8 +2,8 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Dropdown, Empty, Input, message, Popconfirm, Select, Space, Spin, Tag } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Card, Dropdown, Empty, Input, message, Popconfirm, Select, Space, Spin, Tag } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface WatchlistItem {
@@ -46,17 +46,36 @@ export function WatchlistPanel() {
   const [newGroup, setNewGroup] = useState("");
   const [editingGroup, setEditingGroup] = useState<string | null>(null);
 
-  // 分组列表（从 localStorage）
+  // 分组列表（从 localStorage）—— 使用 ref 避免在 onClose 事件里拿到旧值
+  const groupsRef = useRef<string[]>([]);
+  const [groupsVersion, setGroupsVersion] = useState(0);
   const groups = useMemo(() => {
     try {
       return JSON.parse(localStorage.getItem(GROUP_STORAGE_KEY) ?? "[]") as string[];
     } catch {
       return [];
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupsVersion]);
+  useEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
 
   const saveGroups = (g: string[]) => {
     localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(g));
+    setGroupsVersion((v) => v + 1);
+  };
+
+  const removeGroupAndReassign = (g: string) => {
+    const next = groupsRef.current.filter((x) => x !== g);
+    saveGroups(next);
+    setActiveGroup(DEFAULT_GROUP);
+    setEditingGroup(null);
+    // 将该分组下所有自选股移回默认分组
+    const moving = items.filter((i) => i.group === g);
+    if (moving.length === 0) { return; }
+    Promise.all(moving.map((i) => invoke("add_to_watchlist", { stockCode: i.stockCode, notes: "" })))
+      .catch(() => message.error(t("common.error")));
   };
 
   const loadWatchlist = useCallback(async () => {
@@ -138,7 +157,8 @@ export function WatchlistPanel() {
   const addCurrent = async () => {
     if (!stockCode || !stockName) { return; }
     try {
-      await invoke("add_to_watchlist", { stockCode, stockName });
+      const notes = JSON.stringify({ group: activeGroup !== DEFAULT_GROUP ? activeGroup : DEFAULT_GROUP });
+      await invoke("add_to_watchlist", { stockCode, stockName, notes });
       loadWatchlist();
     } catch { /* 静默 */ }
   };
@@ -152,10 +172,8 @@ export function WatchlistPanel() {
 
   const moveToGroup = async (item: WatchlistItem, targetGroup: string) => {
     try {
-      await invoke("remove_from_watchlist", { id: item.id });
-      await invoke("add_to_watchlist", { stockCode: item.stockCode, stockName: item.stockName });
-      // 用 notes 存 group
-      // 简化：直接更新本地状态
+      const notes = JSON.stringify({ group: targetGroup });
+      await invoke("add_to_watchlist", { stockCode: item.stockCode, stockName: item.stockName, notes });
       setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, group: targetGroup } : i)));
     } catch { /* 静默 */ }
   };
@@ -186,10 +204,24 @@ export function WatchlistPanel() {
     setActiveGroup(name);
   };
 
-  if (loading) { return <Spin size="small" />; }
+  if (loading) {
+    return (
+      <Card
+        size="small"
+        title={`⭐ ${t("stockAnalysis.watchlist._default")}`}
+        styles={{ body: { padding: "8px" } }}
+      >
+        <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
+      </Card>
+    );
+  }
 
   return (
-    <div>
+    <Card
+      size="small"
+      title={`⭐ ${t("stockAnalysis.watchlist._default")}`}
+      styles={{ body: { padding: "8px" } }}
+    >
       {/* 分组 Tab */}
       <div className="flex items-center gap-1 mb-2 flex-wrap">
         <Tag
@@ -205,11 +237,7 @@ export function WatchlistPanel() {
             color={activeGroup === g ? "blue" : "default"}
             className="cursor-pointer m-0 text-xs"
             closable={editingGroup === g}
-            onClose={() => {
-              saveGroups(groups.filter((x) => x !== g));
-              setActiveGroup(DEFAULT_GROUP);
-              setEditingGroup(null);
-            }}
+            onClose={() => removeGroupAndReassign(g)}
             onClick={() => setActiveGroup(g)}
             onDoubleClick={() => setEditingGroup(g)}
           >
@@ -315,6 +343,6 @@ export function WatchlistPanel() {
             }}
           />
         )}
-    </div>
+    </Card>
   );
 }

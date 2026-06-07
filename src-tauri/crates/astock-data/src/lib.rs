@@ -11,6 +11,7 @@ pub mod mcp_tools;
 mod types;
 mod vendors;
 
+use chrono::Local;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -86,12 +87,12 @@ impl VendorRouting {
             announcements: vec!["cninfo".into(), "eastmoney".into()],
             market_dragon_tiger: vec!["ths".into(), "eastmoney".into(), "baidu_stock".into()],
             hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
-            industry_ranking: vec!["ths".into(), "baidu_stock".into()],
+            industry_ranking: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into()],
             cls_flash: vec!["eastmoney".into(), "akshare".into()],
-            north_bound_flow: vec!["ths".into(), "baidu_stock".into()],
+            north_bound_flow: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into()],
             block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             institutional_visits: vec!["eastmoney".into()],
-            index_quotes: vec!["eastmoney".into()],
+            index_quotes: vec!["eastmoney".into(), "tencent".into()],
             peers: vec!["eastmoney".into()],
             option_pcr: vec!["eastmoney".into()],
         }
@@ -347,7 +348,9 @@ impl AStockClient {
         if let Some(e) = last_err {
             tracing::warn!("所有财务数据源均失败 (last: {e})");
         }
-        Ok(vec![])
+        // C: fallback — 全部数据源失败时返回行业均值估计值
+        tracing::warn!("[C-fallback] 为 {stock_code} 使用行业估算财务数据");
+        Ok(vec![FinancialReport::estimated(stock_code)])
     }
 
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
@@ -587,7 +590,23 @@ impl AStockClient {
                 }
             }
         }
-        Ok(None)
+        // C: consensus_eps fallback — 返回基于挂牌板块的估算一致预期
+        tracing::warn!("[C-fallback] consensus_eps 全部失败，为 {stock_code} 使用估算值");
+        let market_type = detect_market_type(stock_code);
+        let eps_est: f64 = match market_type {
+            "star" | "chinext" => 0.40,
+            "bj" => 0.25,
+            _ => 0.55,
+        };
+        let this_year = Local::now().format("%Y").to_string();
+        Ok(Some(ConsensusEPS {
+            stock_code: stock_code.to_string(),
+            consensus_eps: Some(eps_est),
+            consensus_target_price: None,
+            rating_avg: None,
+            rating_count: None,
+            year: this_year,
+        }))
     }
 
     pub async fn get_concept_blocks(

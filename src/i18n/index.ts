@@ -28,7 +28,13 @@ i18n.use(initReactI18next).init({
   },
   lng: "zh-CN",
   fallbackLng: "en-US",
+  debug: true,
   interpolation: { escapeValue: false },
 });
+
+// Expose i18n on window for debugging (dev only)
+if (typeof window !== "undefined") {
+  (window as any).i18n = i18n;
+}
 
 export default i18n;

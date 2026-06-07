@@ -80,16 +80,10 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     } else if (stepId === "trader") {
       analystReports["investment-plan"] = output;
     } else if (stepId === "portfolio-mgr") {
+      // 不要构造全 0 假决策——解析失败就保持 null，
+      // 让调用方决定如何处理缺失决策。
       const parsed = tryParseDecision(output);
-      decision = parsed ?? {
-        action: StockAction.HOLD,
-        positionPct: 0,
-        targetPrice: null,
-        stopLoss: null,
-        reasoning: output,
-        riskLevel: StockRiskLevel.MID,
-        confidence: 0,
-      };
+      if (parsed) { decision = parsed; }
     } else if (stepId === "value-investor") {
       // 巴菲特框架评估（与 risk-evaluator 并行，在辩论之后运行）
       valueAssessments[stepId] = output;
@@ -585,14 +579,35 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       output?: unknown;
     }>("workflow-completed", (event) => {
       const { results, output } = event.payload;
-      const parsed = parseWorkflowResults(results);
-      let decision: StockDecision | null = parsed.decision;
-      if (output && typeof output === "object") {
-        decision = normalizeDecision(output as Record<string, unknown>);
-      } else if (typeof output === "string") {
-        const tryParsed = tryParseDecision(output);
-        if (tryParsed) { decision = tryParsed; }
+
+      // 优先从 portfolio-mgr 节点结果中提取决策（与分析页一致）
+      let decision: StockDecision | null = null;
+      const pmRaw = results["portfolio-mgr"];
+      if (pmRaw) {
+        const pmText = typeof pmRaw === "string"
+          ? pmRaw
+          : (pmRaw as Record<string, unknown>).content ?? JSON.stringify(pmRaw);
+        const parsed = tryParseDecision(String(pmText));
+        if (parsed) { decision = parsed; }
       }
+
+      // 回退：从 parseWorkflowResults 中获取
+      if (!decision) {
+        const parsed = parseWorkflowResults(results);
+        decision = parsed.decision;
+      }
+
+      // 最后回退：尝试 output（最后一个节点输出，通常是 trader）
+      if (!decision && output) {
+        if (typeof output === "object" && output !== null) {
+          decision = normalizeDecision(output as Record<string, unknown>);
+        } else if (typeof output === "string") {
+          const tryParsed = tryParseDecision(output);
+          if (tryParsed) { decision = tryParsed; }
+        }
+      }
+
+      const parsed = parseWorkflowResults(results);
       set({
         ...parsed,
         decision,
@@ -611,12 +626,42 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       output?: StockDecision | null;
     }>("workflow-error", (event) => {
       const msg = event.payload.error;
-      // 即使失败也尝试解析已有的部分结果
       const { results, output, errorCode } = event.payload;
+
+      // 即使失败也尝试解析已有的部分结果（优先 portfolio-mgr，与分析页一致）
+      let decision: StockDecision | null = null;
       if (results) {
-        const parsed = parseWorkflowResults(results);
-        set({ ...parsed, decision: output ?? parsed.decision });
+        const pmRaw = results["portfolio-mgr"];
+        if (pmRaw) {
+          const pmText = typeof pmRaw === "string"
+            ? pmRaw
+            : (pmRaw as Record<string, unknown>).content ?? JSON.stringify(pmRaw);
+          const parsed = tryParseDecision(String(pmText));
+          if (parsed) { decision = parsed; }
+        }
+        if (!decision) {
+          const parsed = parseWorkflowResults(results);
+          decision = parsed.decision;
+        }
       }
+      // 最后回退：尝试 output
+      if (!decision && output) {
+        decision = output;
+      }
+
+      // 空决策（全 0、无目标价、无理由）不写入 store，
+      // 避免 DecisionBanner 渲染无意义的 0% 仓位 / ¥0 目标价。
+      if (
+        decision
+        && decision.confidence === 0
+        && decision.positionPct === 0
+        && decision.targetPrice == null
+        && decision.stopLoss == null
+        && (!decision.reasoning || decision.reasoning.trim() === "")
+      ) {
+        decision = null;
+      }
+
       // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
       const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR");
       const isLlmError = effectiveErrorCode.startsWith("LLM_");
@@ -630,6 +675,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           : msg,
         progressPct: 100,
         currentStage: 4,
+        decision,
       });
     });
 

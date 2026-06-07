@@ -56,33 +56,30 @@ impl StockVendor for AkshareVendor {
         Ok(data
             .iter()
             .take(8)
-            .map(|r| FinancialReport {
-                stock_code: stock_code.to_string(),
-                report_date: r["REPORT_DATE"].as_str().unwrap_or("").to_string(),
-                revenue: r["TOTAL_OPERATE_INCOME"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
-                net_profit: r["PARENT_NETPROFIT"].as_str().and_then(|s| s.parse().ok()),
-                eps: r["BASIC_EPS"].as_str().and_then(|s| s.parse().ok()),
-                bps: r["BPS"].as_str().and_then(|s| s.parse().ok()),
-                roe: r["WEIGHTAVG_ROE"].as_str().and_then(|s| s.parse().ok()),
-                debt_ratio: r["DEBT_ASSET_RATIO"].as_str().and_then(|s| s.parse().ok()),
-                gross_margin: r["GROSS_PROFIT_RATIO"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
-                net_margin: r["NETPROFIT_MARGIN"].as_str().and_then(|s| s.parse().ok()),
-                revenue_yoy: r["TOTAL_OPERATE_INCOME_YOY"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
-                profit_yoy: r["PARENT_NETPROFIT_YOY"]
-                    .as_str()
-                    .and_then(|s| s.parse().ok()),
-                total_assets: None,
-                operating_cash_flow: None,
-                capital_expenditure: None,
-                free_cash_flow: None,
-                current_ratio: None,
-                quick_ratio: None,
+            .map(|r| {
+                let s = |key: &str| -> &str { r[key].as_str().unwrap_or("") };
+                let n = |key: &str| -> Option<f64> { r[key].as_str().and_then(|v| v.parse().ok()) };
+                FinancialReport {
+                    stock_code: stock_code.to_string(),
+                    report_date: s("REPORT_DATE").to_string(),
+                    // 东方财富 2025 年字段名变更映射
+                    revenue: n("TOTALOPERATEREVE"),          // 营业总收入
+                    net_profit: n("PARENTNETPROFIT"),      // 归母净利润
+                    eps: n("EPSJB"),                        // 基本每股收益
+                    bps: n("BPS"),                          // 每股净资产
+                    roe: n("ROEJQ"),                        // 加权平均ROE
+                    debt_ratio: n("ZCFZL"),                 // 资产负债率
+                    gross_margin: n("XSMLL"),               // 销售毛利率
+                    net_margin: n("XSJLL"),                 // 销售净利率
+                    revenue_yoy: n("TOTALOPERATEREVETZ"),   // 营收同比增长
+                    profit_yoy: n("PARENTNETPROFITTZ"),     // 净利润同比增长
+                    total_assets: None,
+                    operating_cash_flow: None,
+                    capital_expenditure: None,
+                    free_cash_flow: None,
+                    current_ratio: n("LD"),                 // 流动比率
+                    quick_ratio: n("SD"),                   // 速动比率
+                }
             })
             .collect())
     }

@@ -6611,7 +6611,8 @@
     "devops": "DevOps",
     "design": "डिज़ाइन",
     "writing": "लेखन",
-    "business": "व्यापार"
+    "business": "व्यापार",
+    "finance": "वित्त"
   },
   "planStore": {
     "rejectFailed": "योजना अस्वीकार करने में विफल: {{error}}",

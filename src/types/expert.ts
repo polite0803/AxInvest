@@ -6,7 +6,8 @@ export type ExpertCategory =
   | "devops"
   | "design"
   | "writing"
-  | "business";
+  | "business"
+  | "finance";
 
 export const EXPERT_CATEGORY_KEYS = [
   "general",
@@ -17,6 +18,7 @@ export const EXPERT_CATEGORY_KEYS = [
   "design",
   "writing",
   "business",
+  "finance",
 ] as const;
 
 export type ExpertCategoryKey = (typeof EXPERT_CATEGORY_KEYS)[number];

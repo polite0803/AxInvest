@@ -6611,7 +6611,8 @@
     "devops": "維運",
     "design": "設計",
     "writing": "寫作",
-    "business": "商業"
+    "business": "商業",
+    "finance": "金融"
   },
   "planStore": {
     "rejectFailed": "拒絕計劃失敗: {{error}}",

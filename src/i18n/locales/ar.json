@@ -24,7 +24,12 @@
     "devTools": "أدوات المطور",
     "wiki": "ويكي",
     "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "watchlist": "قائمة المراقبة",
+    "screener": "المُصفّي",
+    "trade": "التداول",
+    "backtest": "اختبار رجعي",
+    "compare": "مقارنة"
   },
   "sidebar": {
     "sectionWork": "العمل",
@@ -7934,6 +7939,23 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "placeholder": "تنفيذ ومراجعة الصفقات"
+  },
+  "watchlist": {
+    "title": "قائمة المراقبة",
+    "placeholder": "إدارة قائمة المراقبة وتنبيهات الأسعار"
+  },
+  "screener": {
+    "title": "مُصفّي الأسهم",
+    "placeholder": "ابحث عن الأسهم حسب المعايير"
+  },
+  "backtest": {
+    "title": "اختبار رجعي",
+    "placeholder": "تحقق من الاستراتيجيات ببيانات تاريخية"
+  },
+  "compare": {
+    "title": "مقارنة",
+    "placeholder": "قارن الأسهم مع الأقران"
   }
 }

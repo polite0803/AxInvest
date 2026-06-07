@@ -24,7 +24,12 @@
     "devTools": "Инструменты разработчика",
     "wiki": "Вики",
     "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "watchlist": "Список наблюдения",
+    "screener": "Скринер",
+    "trade": "Торговля",
+    "backtest": "Бэктест",
+    "compare": "Сравнить"
   },
   "sidebar": {
     "sectionWork": "Работа",
@@ -7934,6 +7939,23 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "placeholder": "Исполнение и разбор сделок"
+  },
+  "watchlist": {
+    "title": "Список наблюдения",
+    "placeholder": "Управление списком и оповещениями"
+  },
+  "screener": {
+    "title": "Скринер акций",
+    "placeholder": "Найти акции по критериям"
+  },
+  "backtest": {
+    "title": "Бэктест",
+    "placeholder": "Проверка стратегий на истории"
+  },
+  "compare": {
+    "title": "Сравнение",
+    "placeholder": "Сравнение с аналогами"
   }
 }

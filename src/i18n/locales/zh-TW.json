@@ -24,7 +24,12 @@
     "devTools": "開發工具",
     "wiki": "知識庫",
     "app": "AxAgent",
-    "stockAnalysis": "股票分析"
+    "stockAnalysis": "股票分析",
+    "watchlist": "自選",
+    "screener": "選股",
+    "trade": "交易",
+    "backtest": "回測",
+    "compare": "對比"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -8044,6 +8049,23 @@
     "agentRole.reviewer": "审查者",
     "agentRole.browser": "浏览器",
     "agentRole.synthesizer": "综合者",
-    "agentRole.executor": "执行者"
+    "agentRole.executor": "执行者",
+    "placeholder": "執行與回放交易"
+  },
+  "watchlist": {
+    "title": "自選股",
+    "placeholder": "管理你的自選股和價格提醒"
+  },
+  "screener": {
+    "title": "選股中心",
+    "placeholder": "依條件篩選股票"
+  },
+  "backtest": {
+    "title": "回測驗證",
+    "placeholder": "用歷史資料驗證策略"
+  },
+  "compare": {
+    "title": "對標研究",
+    "placeholder": "對比同業公司"
   }
 }

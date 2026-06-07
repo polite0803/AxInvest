@@ -70,7 +70,12 @@
     "createAccount": "アカウント作成",
     "documentation": "ドキュメント",
     "communication": "コミュニケーション",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "watchlist": "ウォッチリスト",
+    "screener": "スクリーナー",
+    "trade": "トレード",
+    "backtest": "バックテスト",
+    "compare": "比較"
   },
   "sidebar": {
     "sectionWork": "ワーク",
@@ -9304,6 +9309,23 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "placeholder": "取引の実行と振り返り"
+  },
+  "watchlist": {
+    "title": "ウォッチリスト",
+    "placeholder": "ウォッチリストと価格アラートを管理"
+  },
+  "screener": {
+    "title": "スクリーナー",
+    "placeholder": "条件を指定して銘柄を絞り込む"
+  },
+  "backtest": {
+    "title": "バックテスト",
+    "placeholder": "過去データで戦略を検証"
+  },
+  "compare": {
+    "title": "比較",
+    "placeholder": "同業他社の銘柄と比較"
   }
 }

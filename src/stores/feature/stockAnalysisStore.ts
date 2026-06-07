@@ -185,6 +185,9 @@ interface StockAnalysisState {
   pushTimelineNode: (node: TimelineNode) => void;
   updateTimelineNode: (id: string, patch: Partial<TimelineNode>) => void;
   clearTimeline: () => void;
+  // Phase 8: Right panel highlight (0.4s 闪烁)
+  highlightedPanel: string | null;
+  setHighlightedPanel: (key: string | null) => void;
 
   // Actions
   searchStock: (keyword: string) => Promise<void>;
@@ -238,6 +241,7 @@ const initialState = {
   sidebarCollapsed: {},
   watchlistVersion: 0,
   timeline: [],
+  highlightedPanel: null,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -486,6 +490,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   clearTimeline: () => {
     set({ timeline: [] });
+  },
+
+  setHighlightedPanel: (key) => {
+    set({ highlightedPanel: key });
   },
 
   setKlinePeriod: (period: string) => {
@@ -853,7 +861,9 @@ function agentDisplayName(nodeId: string): string {
 }
 
 /** 节点 → 证据引用：根据 nodeId 推断其结果会落在哪个侧栏 sheet panel */
-function inferEvidenceRefs(nodeId: string): Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string; snippet: string }> {
+function inferEvidenceRefs(
+  nodeId: string,
+): Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string; snippet: string }> {
   // 工具节点 → 行情/概念面板
   if (nodeId === "t-fundamentals-data" || nodeId === "t-valuation") {
     return [{ tabKey: "market", panelKey: "concepts", snippet: "基本面/估值数据" }];

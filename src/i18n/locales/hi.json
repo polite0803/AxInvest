@@ -7916,7 +7916,18 @@
       "market_dragon_tiger": "Dragon Tiger",
       "block_trades": "Block Trades",
       "institutional_visits": "Institutional Visits"
-    }
+    },
+    "timeline": {
+      "phase.scan": "स्कैन",
+      "phase.diagnose": "निदान",
+      "phase.debate": "बहस",
+      "phase.decide": "निर्णय",
+      "empty": "इस चरण में कोई नोड नहीं",
+      "idleHint": "विश्लेषण शुरू करने के बाद पूर्ण निर्णय टाइमलाइन यहाँ दिखेगी",
+      "emptyHint": "वर्कफ़्लो नोड्स की प्रतीक्षा…",
+      "sendToChat": "चैट पर भेजें"
+    },
+    "alert.date": "Date"
   },
   "trade": {
     "title": "Trading Log",

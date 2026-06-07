@@ -7916,7 +7916,18 @@
       "market_dragon_tiger": "Dragon Tiger",
       "block_trades": "Block Trades",
       "institutional_visits": "Institutional Visits"
-    }
+    },
+    "timeline": {
+      "phase.scan": "Analyse",
+      "phase.diagnose": "Diagnostic",
+      "phase.debate": "Débat",
+      "phase.decide": "Décision",
+      "empty": "Aucun nœud dans cette phase",
+      "idleHint": "Une fois l'analyse lancée, la chronologie complète apparaîtra ici",
+      "emptyHint": "En attente des nœuds du flux…",
+      "sendToChat": "Envoyer au chat"
+    },
+    "alert.date": "Date"
   },
   "trade": {
     "title": "Trading Log",

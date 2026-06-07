@@ -7916,7 +7916,18 @@
       "market_dragon_tiger": "Dragon Tiger",
       "block_trades": "Block Trades",
       "institutional_visits": "Institutional Visits"
-    }
+    },
+    "timeline": {
+      "phase.scan": "Сканирование",
+      "phase.diagnose": "Диагностика",
+      "phase.debate": "Дебаты",
+      "phase.decide": "Решение",
+      "empty": "В этой фазе нет узлов",
+      "idleHint": "После запуска анализа здесь появится полная временная шкала решений",
+      "emptyHint": "Ожидание узлов рабочего процесса…",
+      "sendToChat": "Отправить в чат"
+    },
+    "alert.date": "Date"
   },
   "trade": {
     "title": "Trading Log",

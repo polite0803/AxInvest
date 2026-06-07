@@ -9286,7 +9286,18 @@
       "market_dragon_tiger": "Dragon Tiger",
       "block_trades": "Block Trades",
       "institutional_visits": "Institutional Visits"
-    }
+    },
+    "timeline": {
+      "phase.scan": "スキャン",
+      "phase.diagnose": "診断",
+      "phase.debate": "討論",
+      "phase.decide": "決定",
+      "empty": "このフェーズにノードがありません",
+      "idleHint": "分析を開始すると、完全な決定タイムラインがここに表示されます",
+      "emptyHint": "ワークフローのノードを待機中…",
+      "sendToChat": "チャットに送信"
+    },
+    "alert.date": "Date"
   },
   "trade": {
     "title": "Trading Log",

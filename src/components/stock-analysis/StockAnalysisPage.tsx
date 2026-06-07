@@ -12,7 +12,7 @@ import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { ClsFlashPanel } from "./ClsFlashPanel";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
 import { DebatePanel } from "./DebatePanel";
-import { DecisionTimelinePanel } from "./DecisionTimelinePanel";
+import { DecisionBanner } from "./DecisionBanner";
 import "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
@@ -172,7 +172,7 @@ export function StockAnalysisPage() {
       key: "decision",
       label: t("stockAnalysis.tab.decision"),
       icon: <TrendingUp size={14} />,
-      children: <DecisionTimelinePanel />,
+      children: <DecisionBanner />,
     },
   ];
 

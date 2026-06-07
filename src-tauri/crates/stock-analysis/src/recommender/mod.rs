@@ -37,7 +37,13 @@ use crate::recommender::strategy::PerCodeLocks;
 // ── 缓存 ──
 
 static RESULT_CACHE: RwLock<Option<(Period, RecoResponse, Instant)>> = RwLock::new(None);
-const CACHE_TTL: Duration = Duration::from_secs(300);
+/// 缓存 TTL：从 5 min 缩短到 60 s。
+///
+/// 荐股的 entry / target / stop_loss 是基于扫描时刻的现价算的，
+/// 5 min 内股价可能已经走完整个目标区间（如图 莱伯泰科 5 min 内 38 → 48），
+/// 这种"还显示着旧 target / entry 但现价远超"的推荐对用户毫无价值，
+/// 还会误导用户按旧价位挂单。60 s 是为价格时效性与扫描性能做的折中。
+const CACHE_TTL: Duration = Duration::from_secs(60);
 
 fn cache_get(period: Period) -> Option<RecoResponse> {
     let g = RESULT_CACHE.read().ok()?;
@@ -195,6 +201,15 @@ pub async fn recommend_stocks(
             && !p.position_pct.is_nan()
     });
 
+    // P3-2: drop picks whose target_price is already below current price
+    // (no upside left — the BUY thesis is dead). Frontend should also visually
+    // flag this in case cache holds the stale pick, but the backend drop
+    // makes sure new scans never emit these in the first place.
+    all_picks.retain(|p| {
+        // 允许 ≤0.5% 的轻微容差，避免价格微抖时被误杀
+        p.target_price >= p.price * 0.995
+    });
+
     // 7. 按风格分组 + 限 10
     let mut by_style = group_by_style_and_trim(&mut all_picks, 10);
 
@@ -262,5 +277,45 @@ mod tests {
         assert!(cache_get(Period::Short).is_some());
         invalidate_cache();
         assert!(cache_get(Period::Short).is_none());
+    }
+
+    fn make_pick(price: f64, target: f64) -> types::RecoPick {
+        types::RecoPick {
+            stock_code: "688056".into(),
+            stock_name: "莱伯泰科".into(),
+            sector: None,
+            style: Style::Trend,
+            period: Period::Short,
+            price,
+            entry_low: price * 0.98,
+            entry_high: price * 1.02,
+            stop_loss: price * 0.95,
+            target_price: target,
+            position_pct: 5.0,
+            holding_days: 5,
+            confidence: 60,
+            reasons: vec!["test".into()],
+            risk_notes: vec![],
+            secondary_styles: vec![],
+            synthetic: false,
+        }
+    }
+
+    /// Bug 修复：target ≤ current price 的 pick 必须被剔除。
+    /// 旧逻辑会保留"现价 48 / 目标 41"的 BUY 推荐，逻辑上矛盾。
+    #[test]
+    fn drops_picks_with_no_upside() {
+        let mut picks = vec![
+            make_pick(48.16, 41.87), // ✗ 无上行空间
+            make_pick(38.0, 42.0),   // ✓ 正常
+            make_pick(38.0, 38.0),   // ✗ target == price，无意义（容差外）
+            make_pick(38.0, 37.81),  // ✗ 略低于 0.5% 容差
+            make_pick(38.0, 37.85),  // 边界 = 0.5% 之内（37.85 / 38.0 ≈ 0.996）— 实际 37.85 / 38.0 = 0.996 > 0.995，所以保留
+        ];
+        picks.retain(|p| p.target_price >= p.price * 0.995);
+        let codes: Vec<&str> = picks.iter().map(|p| p.stock_code.as_str()).collect();
+        // 1) 和 2) 应该留下，3) target == price 被剔除，4) 在容差内（37.81 / 38.0 = 0.995）实际略低于 0.995 被剔除
+        // 5) 37.85 / 38.0 ≈ 0.996 > 0.995 → 保留
+        assert_eq!(picks.len(), 2, "保留: {codes:?}");
     }
 }

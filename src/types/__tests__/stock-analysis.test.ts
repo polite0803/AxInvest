@@ -21,6 +21,48 @@ describe("classifySentiment", () => {
     expect(classifySentiment("")).toBe("neutral");
     expect(classifySentiment("建议关注")).toBe("neutral");
   });
+
+  it("reads stance field from JSON (trader: 买入/卖出/观望)", () => {
+    expect(classifySentiment(JSON.stringify({ stance: "买入", positionPct: 35 }))).toBe("bullish");
+    expect(classifySentiment(JSON.stringify({ stance: "卖出", positionPct: 0 }))).toBe("bearish");
+    expect(classifySentiment(JSON.stringify({ stance: "观望", positionPct: 0 }))).toBe("neutral");
+  });
+
+  it("reads stance from news/debate agents (多头/空头/中性)", () => {
+    expect(classifySentiment(JSON.stringify({ stance: "多头" }))).toBe("bullish");
+    expect(classifySentiment(JSON.stringify({ stance: "空头" }))).toBe("bearish");
+    expect(classifySentiment(JSON.stringify({ stance: "中性" }))).toBe("neutral");
+  });
+
+  it("reads bull_score / bear_score (0-10) — majority wins", () => {
+    expect(classifySentiment(JSON.stringify({ bull_score: 6, bear_score: 4 }))).toBe("bullish");
+    expect(classifySentiment(JSON.stringify({ bull_score: 3, bear_score: 7 }))).toBe("bearish");
+    expect(classifySentiment(JSON.stringify({ bull_score: 5, bear_score: 5 }))).toBe("neutral");
+  });
+
+  it("reads positionPct (trader/debator) — ≥6 bullish, <0 bearish, else neutral", () => {
+    expect(classifySentiment(JSON.stringify({ positionPct: 35 }))).toBe("bullish");
+    expect(classifySentiment(JSON.stringify({ positionPct: 0 }))).toBe("neutral");
+    expect(classifySentiment(JSON.stringify({ positionPct: 5 }))).toBe("neutral");
+    expect(classifySentiment(JSON.stringify({ positionPct: -10 }))).toBe("bearish");
+  });
+
+  it("handles combined report JSON (stance + scores + free text)", () => {
+    // 实际 LLM 输出：多头 + bull_score 6 + bear_score 4 + 自由文本里有风险提示
+    const report = JSON.stringify({
+      stance: "多头",
+      bull_score: 6,
+      bear_score: 4,
+      summary: "技术面突破前高，基本面估值合理。短期存在回调风险，但中长期看好。",
+    });
+    expect(classifySentiment(report)).toBe("bullish");
+  });
+
+  it("text fallback: simple majority (not 65% threshold)", () => {
+    // 旧 65% 阈值会让"看好 + 风险"被中性化；现在简单多数直接判看多
+    expect(classifySentiment("看好后市，但短期有回调风险")).toBe("bullish");
+    expect(classifySentiment("看空后市，但长期或有机会")).toBe("bearish");
+  });
 });
 
 describe("parseAction", () => {

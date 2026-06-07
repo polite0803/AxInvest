@@ -36,7 +36,9 @@ impl TrendStrategy {
         sector: Option<String>,
     ) -> Option<RecoPick> {
         let klines = client.get_klines(code, "daily", 250).await.ok()?;
-        if klines.len() < 60 {
+        // 放宽 K 线最低长度：60 → 30。理由：vendor 在数据稀疏时只能返回 ~30 日，
+        // 旧门槛会把几乎所有票直接 return None，导致面板"真实推荐"为 0。
+        if klines.len() < 30 {
             return None;
         }
         let cs = indicators::closes(&klines);
@@ -63,13 +65,14 @@ impl TrendStrategy {
                 if !(ma5 > ma10 && ma10 > ma20) {
                     return None;
                 }
-                // 突破 20 日新高
+                // 突破 20 日新高：放宽 0.998 → 0.99（旧门槛要求几乎贴 20 日高，
+                // 实际盘中常常差 0.3% 突破未确认）
                 let high_20 = indicators::highest(&klines, 20)?;
-                if last < high_20 * 0.998 {
+                if last < high_20 * 0.99 {
                     return None;
                 }
-                // 量比 > 1.2
-                if amount_ratio < 1.2 {
+                // 量比放宽：1.2 → 0.8。允许"温和放量"也入选（缩量反弹时也常有真信号）
+                if amount_ratio < 0.8 {
                     return None;
                 }
                 let reasons = vec![
@@ -83,17 +86,18 @@ impl TrendStrategy {
             Period::Mid => {
                 let ma20 = indicators::sma(&cs, 20)?;
                 let ma60 = indicators::sma(&cs, 60)?;
-                if ma60.is_nan() || last <= ma60 {
+                // 放宽 ma60 NaN / 站上判断：容许 0.5% 内的浅回踩
+                if ma60.is_nan() || last < ma60 * 0.995 {
                     return None;
                 }
-                // 突破 60 日高
+                // 突破 60 日高：0.995 → 0.98
                 let high_60 = indicators::highest(&klines, 60)?;
-                if last < high_60 * 0.995 {
+                if last < high_60 * 0.98 {
                     return None;
                 }
-                // MACD 红柱
+                // MACD 红柱：DIF > DEA 即可，macd_bar 容许略 <= 0（红柱刚起时常见）
                 if let Some((dif, dea, macd_bar)) = indicators::macd(&klines, 12, 26, 9) {
-                    if macd_bar <= 0.0 || dif <= dea {
+                    if dif <= dea {
                         return None;
                     }
                     let reasons = vec![
@@ -109,11 +113,13 @@ impl TrendStrategy {
             Period::Long => {
                 let ma60 = indicators::sma(&cs, 60)?;
                 let ma250 = indicators::sma(&cs, 250)?;
-                if ma250.is_nan() || ma60 <= ma250 {
+                // MA60 > MA250 放宽到 MA60 > MA250 * 0.95（容许 MA60 略低于 MA250 的
+                // "金叉前夕"形态，也算长期多头启动）
+                if ma250.is_nan() || ma60 < ma250 * 0.95 {
                     return None;
                 }
-                // 不跌破 MA60（最新一根 close > MA60）
-                if last < ma60 * 0.97 {
+                // 不跌破 MA60：0.97 → 0.95
+                if last < ma60 * 0.95 {
                     return None;
                 }
                 let reasons = vec![

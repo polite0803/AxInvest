@@ -1,6 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
+import type { StockConsensus } from "@/types";
 import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,6 +28,8 @@ interface RecoPick {
   reasons: string[];
   riskNotes: string[];
   secondaryStyles?: StyleKey[];
+  /** true = 系统初筛 / 数据稀疏兜底（无技术信号），false = 主策略真实命中 */
+  synthetic?: boolean;
 }
 
 interface RecoResponse {
@@ -132,6 +135,22 @@ export function RecommendationPanel() {
       .join(" / ");
   }, [data, t]);
 
+  // 真实 / 兜底 picks 统计：用于顶部 banner 提示用户当前数据是真实策略命中
+  // 还是数据稀疏兜底合成（vendor K 线 / 财务 / 资金不可用时）。
+  const dataQuality = useMemo(() => {
+    if (!data) { return { real: 0, synthetic: 0 }; }
+    let real = 0;
+    let synthetic = 0;
+    for (const arr of Object.values(data.picks)) {
+      if (!arr) { continue; }
+      for (const p of arr) {
+        if (p.synthetic) { synthetic++; }
+        else { real++; }
+      }
+    }
+    return { real, synthetic };
+  }, [data]);
+
   const periodItems = [
     { key: "short", label: t("stockAnalysis.recommendation.periodShort") },
     { key: "mid", label: t("stockAnalysis.recommendation.periodMid") },
@@ -178,6 +197,23 @@ export function RecommendationPanel() {
             <Button size="small" type="link" onClick={openDataSourceSettings}>
               {t("stockAnalysis.recommendation.openSettings")}
             </Button>
+          }
+        />
+      )}
+
+      {/* 数据质量提示：当存在兜底 picks 时提示用户当前数据稀疏 */}
+      {data && dataQuality.synthetic > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          className="!text-xs !mb-2"
+          message={
+            <span className="text-xs">
+              {t("stockAnalysis.recommendation.dataQualitySummary", {
+                real: dataQuality.real,
+                synthetic: dataQuality.synthetic,
+              })}
+            </span>
           }
         />
       )}
@@ -252,14 +288,106 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** 荐股 ↔ 分析师共识交叉验证徽章
+ *  - 推荐为 BUY，仅在有缓存共识时显示（避免噪音）
+ *  - 共识看多 → 绿色 ✓
+ *  - 共识看空 / 中性 / 分歧 → 警示色 ⚠
+ */
+function CrossCheckBadge({
+  consensus,
+  recAction,
+}: {
+  consensus: StockConsensus;
+  recAction: string;
+}) {
+  const { t, i18n } = useTranslation();
+  if (consensus.total === 0) { return null; }
+
+  // 推荐与共识的对齐：BUY 时要求共识 bullish 才算"一致"；
+  // 其他动作（HOLD/SELL）暂不参与交叉验证，留给后续扩展。
+  const aligned = recAction === "BUY" ? consensus.consensus === "bullish" : null;
+
+  let color: "green" | "red" | "orange" | "gold";
+  let icon: string;
+  let label: string;
+  let tooltipBody: string;
+
+  if (aligned === true) {
+    color = "green";
+    icon = "✓";
+    label = t("stockAnalysis.recommendation.consensusBullish");
+    tooltipBody = t("stockAnalysis.recommendation.crossCheckAligned");
+  } else if (consensus.consensus === "bearish") {
+    color = "red";
+    icon = "⚠";
+    label = t("stockAnalysis.recommendation.consensusBearish");
+    tooltipBody = t("stockAnalysis.recommendation.crossCheckBearish");
+  } else if (consensus.consensus === "divided") {
+    color = "gold";
+    icon = "⚠";
+    label = t("stockAnalysis.recommendation.consensusDivided");
+    tooltipBody = t("stockAnalysis.recommendation.crossCheckDivided");
+  } else {
+    // 共识中性，且推荐为 BUY → 直接提示"未印证 BUY 推荐"
+    color = "orange";
+    icon = "⚠";
+    label = `${consensus.neutral}/${consensus.total} ${t("stockAnalysis.recommendation.neutral")}`;
+    tooltipBody = t("stockAnalysis.recommendation.crossCheckNeutral", {
+      total: consensus.total,
+      neutral: consensus.neutral,
+    });
+  }
+
+  const updatedAtText = new Date(consensus.updatedAt).toLocaleString(
+    i18n.language === "zh-CN" ? "zh-CN" : "en-US",
+    { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" },
+  );
+
+  return (
+    <Tooltip
+      title={
+        <div className="text-[11px] space-y-0.5">
+          <div>{tooltipBody}</div>
+          <div style={{ opacity: 0.75 }}>
+            {t("stockAnalysis.recommendation.crossCheckTitle", { updatedAt: updatedAtText })}
+          </div>
+        </div>
+      }
+    >
+      <Tag color={color} className="m-0 text-[10px]">
+        {icon} {label}
+      </Tag>
+    </Tooltip>
+  );
+}
+
 function PickRow({ pick, onAnalyze }: { pick: RecoPick; onAnalyze: (code: string) => void }) {
   const { t } = useTranslation();
+  // 读荐股 ↔ 分析师交叉验证缓存（仅当该股已有最近一次工作流结果时存在）
+  const stockCodeConsensus = useStockAnalysisStore((s) => s.stockCodeConsensus);
+  const consensus = stockCodeConsensus[pick.stockCode];
   const content = (
     <div className="text-xs w-full flex flex-col gap-0.5 py-0.5">
       <div className="flex items-center gap-1.5">
         <Tag className="m-0 text-[10px]">{pick.stockCode}</Tag>
         <span className="font-medium truncate flex-1">{pick.stockName}</span>
         <Tag color="volcano" className="m-0 text-[10px]">BUY</Tag>
+        {consensus && <CrossCheckBadge consensus={consensus} recAction="BUY" />}
+        {pick.synthetic
+          ? (
+            <Tooltip title={t("stockAnalysis.recommendation.syntheticTooltip")}>
+              <Tag color="orange" className="m-0 text-[10px]">
+                {t("stockAnalysis.recommendation.tagSynthetic")}
+              </Tag>
+            </Tooltip>
+          )
+          : (
+            <Tooltip title={t("stockAnalysis.recommendation.realTooltip")}>
+              <Tag color="green" className="m-0 text-[10px]">
+                {t("stockAnalysis.recommendation.tagReal")}
+              </Tag>
+            </Tooltip>
+          )}
         <span className="font-mono text-[10px] text-gray-500">{fmt(pick.price)}</span>
       </div>
       <div className="flex items-center gap-1.5 text-[10px] text-gray-500">

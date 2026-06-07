@@ -36,57 +36,62 @@ impl ValueStrategy {
     ) -> Option<RecoPick> {
         let quote = client.get_quote(code).await.ok()?;
         let price = quote.price;
-        let pe = quote.pe?;
-        let pb = quote.pb?;
+        // vendor 数据稀疏时 pe/pb 可能是 None。放宽：容许缺失 → 用 None coalesce
+        // 成 0 走过滤；但只要 pe / pb 至少一个有数 + > 0，就算入候选（理由里标注）
+        let pe = quote.pe.unwrap_or(0.0);
+        let pb = quote.pb.unwrap_or(0.0);
+        // 至少要有 pe 或 pb 之一有数；否则视为无估值数据直接放弃
+        if pe <= 0.0 && pb <= 0.0 {
+            return None;
+        }
 
         let (pre_filter_ok, mut reasons) = match self.period {
             Period::Short => {
-                // 短线价值：低 PE 分位 + 缩量回踩 MA20
-                if pe <= 0.0 || pe > 30.0 {
+                // 短线价值：放宽 PE 上限 30 → 50（旧门槛把 PE 30~50 的"周期低估值"也剔了）
+                if pe > 0.0 && pe > 50.0 {
                     return None;
                 }
+                // 缩量回踩 MA20：放宽到 0.99 → 1.005（容许小幅冲高）
                 let klines = client.get_klines(code, "daily", 30).await.ok()?;
                 if klines.is_empty() {
                     return None;
                 }
                 let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
                 let ma20 = crate::recommender::indicators::sma(&cs, 20).unwrap_or(price);
-                if price > ma20 * 0.99 {
+                if price > ma20 * 1.005 {
                     return None;
                 }
-                (
-                    true,
-                    vec![
-                        format!("PE {:.1} 估值偏低", pe),
-                        format!("缩量回踩 MA20 {:.2}", ma20),
-                    ],
-                )
+                let mut r = Vec::new();
+                if pe > 0.0 { r.push(format!("PE {:.1} 估值偏低", pe)); }
+                if pb > 0.0 { r.push(format!("PB {:.2}", pb)); }
+                r.push(format!("回踩 MA20 {:.2}", ma20));
+                (true, r)
             },
             Period::Mid => {
-                // 中线价值：PE < 行业中位 0.7 + 利润增速 > 0（v1 简化为 PE + PB 联合判断）
-                if pe <= 0.0 || pe > 25.0 {
+                // 中线价值：PE 25 → 40，PB 5 → 8（旧门槛对中盘股过严）
+                if pe > 0.0 && pe > 40.0 {
                     return None;
                 }
-                if pb <= 0.0 || pb > 5.0 {
+                if pb > 0.0 && pb > 8.0 {
                     return None;
                 }
-                (
-                    true,
-                    vec![
-                        format!("PE {:.1} 行业中位以下", pe),
-                        format!("PB {:.2}", pb),
-                    ],
-                )
+                let mut r = Vec::new();
+                if pe > 0.0 { r.push(format!("PE {:.1} 行业中位以下", pe)); }
+                if pb > 0.0 { r.push(format!("PB {:.2}", pb)); }
+                (true, r)
             },
             Period::Long => {
-                // 长线价值：低 PE + 低 PB + 高 ROE（v1 用 PE/PB 联合 + 股价 60 日均线上方做趋势过滤）
-                if pe <= 0.0 || pe > 20.0 {
+                // 长线价值：PE 20 → 35，PB 3 → 6（旧门槛对成长股过严）
+                if pe > 0.0 && pe > 35.0 {
                     return None;
                 }
-                if pb <= 0.0 || pb > 3.0 {
+                if pb > 0.0 && pb > 6.0 {
                     return None;
                 }
-                (true, vec![format!("低 PE {:.1}", pe), format!("低 PB {:.2}", pb)])
+                let mut r = Vec::new();
+                if pe > 0.0 { r.push(format!("低 PE {:.1}", pe)); }
+                if pb > 0.0 { r.push(format!("低 PB {:.2}", pb)); }
+                (true, r)
             },
         };
 
@@ -107,7 +112,8 @@ impl ValueStrategy {
                     &klines.iter().map(|k| k.close).collect::<Vec<_>>(),
                     60,
                 ) {
-                    if price < ma60 * 0.95 {
+                    // 放宽：0.95 → 0.90（容许在 MA60 下方 10% 内也算"近端"）
+                    if price < ma60 * 0.90 {
                         return None;
                     }
                     reasons.push(format!("站上 MA60 {:.2}", ma60));

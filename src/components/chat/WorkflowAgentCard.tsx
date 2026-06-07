@@ -277,7 +277,17 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
   if (data.type === "risk") {
     const riskKey = data.riskKey ?? "risk";
-    const riskName = riskKey.startsWith("risk-") ? riskKey.slice(5) : riskKey;
+    const RISK_LABEL_MAP: Record<string, string> = {
+      "risk-agg": "stockAnalysis.workflow.riskAggregation",
+      "risk-con": "stockAnalysis.workflow.riskConservative",
+      "risk-neu": "stockAnalysis.workflow.riskNeutral",
+      "research-mgr": "stockAnalysis.workflow.researchManager",
+      "risk-level": "stockAnalysis.workflow.riskLevel",
+    };
+    const i18nKey = RISK_LABEL_MAP[riskKey];
+    const riskName = i18nKey
+      ? t(i18nKey)
+      : (riskKey.startsWith("risk-") ? riskKey.slice(5) : riskKey);
     const riskRaw = data.riskContent ? tryBeautifyJson(data.riskContent) : "";
     const riskBrief = riskRaw
       ? (riskRaw.length > 300 ? riskRaw.slice(0, 300) + "..." : riskRaw)

@@ -4,6 +4,7 @@
  * 输出:风险分条形对比 + 平均/最高分
  */
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 
 function computeRiskScore(text: string): number {
   const high = [
@@ -44,19 +45,25 @@ function normalizeMap(data: CompactRiskSummaryProps["data"]): Record<string, str
   return {};
 }
 
-const LABELS: Record<string, string> = {
-  "risk-agg": "激进",
-  "risk-con": "保守",
-  "risk-neu": "中性",
-  "research-mgr": "研究主管",
-  "comprehensive": "综合",
+const LABEL_KEY_MAP: Record<string, string> = {
+  "risk-agg": "stockAnalysis.workflow.riskAggregation",
+  "risk-con": "stockAnalysis.workflow.riskConservative",
+  "risk-neu": "stockAnalysis.workflow.riskNeutral",
+  "research-mgr": "stockAnalysis.workflow.researchManager",
+  "comprehensive": "stockAnalysis.workflow.comprehensive",
 };
 
-function getLabel(key: string): string {
-  return LABELS[key] ?? key;
+function useGetLabel() {
+  const { t } = useTranslation();
+  return (key: string): string => {
+    const i18nKey = LABEL_KEY_MAP[key];
+    return i18nKey ? t(i18nKey) : key;
+  };
 }
 
 export function CompactRiskSummary({ data }: CompactRiskSummaryProps) {
+  const { t } = useTranslation();
+  const getLabel = useGetLabel();
   const assessments = useMemo(() => normalizeMap(data), [data]);
   const entries = useMemo(() => {
     return Object.entries(assessments).map(([type, text]) => ({
@@ -69,7 +76,7 @@ export function CompactRiskSummary({ data }: CompactRiskSummaryProps) {
   if (entries.length === 0) {
     return (
       <div className="text-[12px] italic" style={{ color: "var(--muted)" }}>
-        暂无风险评估
+        {t("stockAnalysis.noRiskData")}
       </div>
     );
   }
@@ -95,10 +102,10 @@ export function CompactRiskSummary({ data }: CompactRiskSummaryProps) {
               : "var(--sa-green, #16a34a)",
           }}
         >
-          平均风险 {avg}
+          {t("stockAnalysis.avgRiskScore", { score: avg })}
         </span>
         <span style={{ color: "var(--muted)" }}>
-          最高: {max.label} {max.score}
+          {t("stockAnalysis.highestRisk", { label: max.label, score: max.score })}
         </span>
       </div>
       <div className="space-y-0.5">

@@ -59,12 +59,13 @@ impl CapitalStrategy {
 
         let (pass, reasons) = match self.period {
             Period::Short => {
-                // 主力 5 日净流入 > 5000 万（v1 近似为当日 > 1000 万）
-                if main_inflow_wan < 1000.0 {
+                // 主力净流入 1000 万 → 200 万（旧门槛太高，data sparse 时 0 也常见；
+                // 放宽到 200 万能让"温和流入"也入选）
+                if main_inflow_wan < 200.0 {
                     return None;
                 }
-                // 换手 > 5%
-                if quote.turnover_rate < 5.0 {
+                // 换手 5% → 2%（容许低活跃度的小盘股也入选）
+                if quote.turnover_rate < 2.0 {
                     return None;
                 }
                 (
@@ -76,8 +77,8 @@ impl CapitalStrategy {
                 )
             },
             Period::Mid => {
-                // 北向 + 主力（龙虎缺失则降级，去掉龙虎标签继续显示）
-                if nb_ratio < 1.0 && main_inflow_wan < 3000.0 {
+                // nb_ratio 1.0 → 0.3，main_inflow 3000 → 500
+                if nb_ratio < 0.3 && main_inflow_wan < 500.0 {
                     return None;
                 }
                 let mut r = Vec::new();
@@ -93,8 +94,8 @@ impl CapitalStrategy {
                 (true, r)
             },
             Period::Long => {
-                // 长线：以北向 / 主力综合判断（无趋势过滤视为可入选）
-                if nb_ratio < 0.5 && main_inflow_wan < 1000.0 {
+                // nb_ratio 0.5 → 0.1，main_inflow 1000 → 100
+                if nb_ratio < 0.1 && main_inflow_wan < 100.0 {
                     return None;
                 }
                 let r = if nb_ratio > 0.0 {

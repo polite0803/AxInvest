@@ -172,35 +172,87 @@ function tryParseJson(text: string): Record<string, unknown> | null {
 
 /**
  * 分析师报告情感分类（先解析 JSON 提取结构化字段，再回退子串匹配）
- * - JSON 中有 action/view/sentiment 字段时直接映射，准确率远高于子串匹配
- * - 子串匹配作为回退，覆盖非 JSON 格式的纯文本报告
+ * - JSON 中有 stance / action / bull_score / bear_score / positionPct 等结构化字段时
+ *   直接按规则映射，准确率远高于子串匹配。
+ * - 子串匹配作为回退，覆盖非 JSON 格式的纯文本报告。
+ *   回退采用"谁多就判谁"的简单多数规则（不再用 65% 严阈值，
+ *   避免 LLM 偏正偏差导致"提到风险就看中性"）。
  */
 export function classifySentiment(report: string): "bullish" | "bearish" | "neutral" {
   // 1) 尝试从 JSON 结构化字段提取
   const json = tryParseJson(report);
   if (json) {
-    // action 字段（BUY/INCREASE/SELL/REDUCE/HOLD）
+    // 1a) stance 字段 — 中文方向词，覆盖各 agent 不同的命名空间
+    const stanceRaw = json["stance"] ?? json["view"] ?? json["sentiment"] ?? json["verdict"];
+    const stance = String(stanceRaw ?? "").trim();
+    if (stance) {
+      const lower = stance.toLowerCase();
+      // 多头方向词
+      if (
+        stance.includes("买入") || stance.includes("增持") || stance.includes("看多")
+        || stance.includes("做多") || stance.includes("看涨") || stance.includes("多头")
+        || stance.includes("利好") || stance.includes("上涨") || stance.includes("乐观")
+        || stance.includes("上行") || stance.includes("流入") || stance.includes("扫货")
+        || stance.includes("强于") || stance.includes("超配") || stance.includes("加仓")
+        || lower.includes("bull") || lower.includes("buy") || lower.includes("overweight")
+      ) {
+        return "bullish";
+      }
+      // 空头方向词
+      if (
+        stance.includes("卖出") || stance.includes("减持") || stance.includes("看空")
+        || stance.includes("做空") || stance.includes("看跌") || stance.includes("空头")
+        || stance.includes("利空") || stance.includes("下跌") || stance.includes("悲观")
+        || stance.includes("下行") || stance.includes("流出") || stance.includes("出货")
+        || stance.includes("弱于") || stance.includes("低配") || stance.includes("减仓")
+        || lower.includes("bear") || lower.includes("sell") || lower.includes("underweight")
+      ) {
+        return "bearish";
+      }
+      // 中性方向词
+      if (
+        stance.includes("观望") || stance.includes("中性") || stance.includes("平衡")
+        || stance.includes("震荡") || stance.includes("同步") || stance.includes("保守")
+        || stance.includes("放缓") || stance.includes("持有") || stance.includes("hold")
+        || lower.includes("neutral") || lower.includes("hold")
+      ) {
+        return "neutral";
+      }
+    }
+    // 1b) action 字段（BUY/INCREASE/SELL/REDUCE/HOLD 或中文 买入/增持/...）
     const action = String(json["action"] ?? "").trim();
     if (action) {
       const a = action.toUpperCase();
       if (a === "BUY" || a === "INCREASE") { return "bullish"; }
       if (a === "SELL" || a === "REDUCE") { return "bearish"; }
       if (a === "HOLD") { return "neutral"; }
+      if (action.includes("买入") || action.includes("增持")) { return "bullish"; }
+      if (action.includes("卖出") || action.includes("减持")) { return "bearish"; }
+      if (action.includes("持有") || action.includes("观望")) { return "neutral"; }
     }
-    // view 字段（bullish/bearish/neutral 或 看多/看空/中性）
-    const view = String(json["view"] ?? json["sentiment"] ?? "").trim().toLowerCase();
-    if (view) {
-      if (view.includes("bull") || view.includes("看多") || view.includes("乐观") || view.includes("利好")) {
-        return "bullish";
+    // 1c) bull_score / bear_score 数字打分（0-10，分开打分）
+    const bullScoreRaw = json["bull_score"] ?? json["bullScore"];
+    const bearScoreRaw = json["bear_score"] ?? json["bearScore"];
+    if (bullScoreRaw != null || bearScoreRaw != null) {
+      const bullScore = Number(bullScoreRaw ?? 0);
+      const bearScore = Number(bearScoreRaw ?? 0);
+      if (Number.isFinite(bullScore) && Number.isFinite(bearScore)) {
+        const diff = bullScore - bearScore;
+        if (diff > 0) { return "bullish"; }
+        if (diff < 0) { return "bearish"; }
       }
-      if (view.includes("bear") || view.includes("看空") || view.includes("悲观") || view.includes("利空")) {
-        return "bearish";
-      }
-      if (view.includes("neutral") || view.includes("中性") || view.includes("观望")) {
+    }
+    // 1d) positionPct 仓位 — trader / debator 输出，0-100
+    const posPctRaw = json["positionPct"] ?? json["position_pct"];
+    if (posPctRaw != null) {
+      const posPct = Number(posPctRaw);
+      if (Number.isFinite(posPct)) {
+        if (posPct >= 6) { return "bullish"; }
+        if (posPct < 0) { return "bearish"; }
         return "neutral";
       }
     }
-    // recommendation 字段
+    // 1e) recommendation / rating 字段
     const rec = String(json["recommendation"] ?? json["rating"] ?? "").trim().toLowerCase();
     if (rec) {
       if (rec.includes("buy") || rec.includes("买入") || rec.includes("增持") || rec.includes("看涨")) {
@@ -215,8 +267,9 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
     }
   }
 
-  // 2) 回退：子串匹配（覆盖非 JSON 报告）
-  // 注意：必须先检查 bullish 再检查 bearish，因为"看涨"包含"涨"但不包含"跌"
+  // 2) 回退：计分制子串匹配（多数表决 — 谁多判谁，不再用 65% 严阈值）
+  //    旧 65/35 阈值会让"看好 + 提示风险"的真实推荐被误判为中性，
+  //    现在改成简单多数：bull > 0 且 bear === 0 也算看多；bull > bear 即看多。
   const lower = report.toLowerCase();
   const bullishWords = [
     "买入",
@@ -263,9 +316,75 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
     "underweight",
     "strong sell",
   ];
-  for (const w of bullishWords) { if (lower.includes(w)) { return "bullish"; } }
-  for (const w of bearishWords) { if (lower.includes(w)) { return "bearish"; } }
+  // 短词判定：仅当"短且是英文"才走单词边界正则（避免 "bull" 误中 "bullet"）。
+  // 中文/混合词用 includes 更可靠 —— \b 在中文里不生效。
+  const wordBoundary = (w: string) => /^[a-z]+$/i.test(w) && w.length <= 3;
+  let bull = 0;
+  let bear = 0;
+  for (const w of bullishWords) {
+    if (wordBoundary(w)) {
+      const re = new RegExp(`\\b${w}\\b`, "gi");
+      bull += (lower.match(re) ?? []).length;
+    } else {
+      bull += lower.split(w).length - 1;
+    }
+  }
+  for (const w of bearishWords) {
+    if (wordBoundary(w)) {
+      const re = new RegExp(`\\b${w}\\b`, "gi");
+      bear += (lower.match(re) ?? []).length;
+    } else {
+      bear += lower.split(w).length - 1;
+    }
+  }
+  if (bull === 0 && bear === 0) { return "neutral"; }
+  // 简单多数：谁多判谁，差距为 0 才算真正分歧
+  if (bull > bear) { return "bullish"; }
+  if (bear > bull) { return "bearish"; }
   return "neutral";
+}
+
+/** 共识枚举：在 bullish / bearish / neutral 之外加一个 divided
+ *  表示多空双方都有一定占比但都未到 65% 阈值。 */
+export type Sentiment = "bullish" | "bearish" | "neutral";
+export type Consensus = Sentiment | "divided";
+
+/** 一只股票的分析师共识（用于荐股列表与该股分析结果做交叉验证） */
+export interface StockConsensus {
+  bullish: number;
+  bearish: number;
+  neutral: number;
+  total: number;
+  /** 共识标签（多空比例决定） */
+  consensus: Consensus;
+  /** 时间戳（毫秒）— 用于排序/淘汰过老数据 */
+  updatedAt: number;
+}
+
+/** 工具：对单只股票的多份分析师报告做投票聚合，输出 StockConsensus */
+export function computeStockConsensus(
+  reports: Record<string, string>,
+  updatedAt = Date.now(),
+): StockConsensus {
+  let bullish = 0;
+  let bearish = 0;
+  let neutral = 0;
+  for (const raw of Object.values(reports)) {
+    const s = classifySentiment(raw);
+    if (s === "bullish") { bullish++; }
+    else if (s === "bearish") { bearish++; }
+    else { neutral++; }
+  }
+  const total = bullish + bearish + neutral;
+  let consensus: Consensus = "neutral";
+  if (total > 0) {
+    const bullRatio = bullish / total;
+    const bearRatio = bearish / total;
+    if (bullRatio > 0.65) { consensus = "bullish"; }
+    else if (bearRatio > 0.65) { consensus = "bearish"; }
+    else if (bullRatio > 0 && bearRatio > 0) { consensus = "divided"; }
+  }
+  return { bullish, bearish, neutral, total, consensus, updatedAt };
 }
 
 /** 信号标签 → Tag 颜色（启发式子串匹配，信号为 LLM 自由文本） */

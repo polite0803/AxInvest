@@ -6,13 +6,14 @@ import type {
   AnalysisStatus,
   AnalysisSummary,
   KLine,
+  StockConsensus,
   StockDecision,
   StockQuote,
   StockSearchResult,
   TimelineNode,
   TimelinePhase,
 } from "@/types";
-import { parseAction, parseRiskLevel, StockAction, StockRiskLevel } from "@/types";
+import { computeStockConsensus, parseAction, parseRiskLevel, StockAction, StockRiskLevel } from "@/types";
 import { create } from "zustand";
 
 // ── 工作流结果解析 ──
@@ -189,6 +190,11 @@ interface StockAnalysisState {
   highlightedPanel: string | null;
   setHighlightedPanel: (key: string | null) => void;
 
+  // 荐股 ↔ 分析师交叉验证：每只股票在最近一次工作流完成时
+  // 缓存的分析师共识，用于 RecommendationPanel 中提示"推荐与共识是否一致"。
+  stockCodeConsensus: Record<string, StockConsensus>;
+  setStockCodeConsensus: (stockCode: string, consensus: StockConsensus) => void;
+
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
@@ -242,6 +248,7 @@ const initialState = {
   watchlistVersion: 0,
   timeline: [],
   highlightedPanel: null,
+  stockCodeConsensus: {},
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -451,6 +458,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           dataQualitySummary: dataQuality,
           rawData: raws,
         });
+
+        // 历史分析回放：也缓存一次共识，让 RecommendationPanel 能用
+        if (record.stockCode && Object.keys(reports).length > 0) {
+          get().setStockCodeConsensus(
+            record.stockCode,
+            computeStockConsensus(reports, Date.now()),
+          );
+        }
       } catch (e) {
         console.error("[StockAnalysis] Failed to restore blackboard snapshot:", e);
       }
@@ -494,6 +509,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   setHighlightedPanel: (key) => {
     set({ highlightedPanel: key });
+  },
+
+  setStockCodeConsensus: (stockCode, consensus) => {
+    if (!stockCode) { return; }
+    set((s) => ({
+      stockCodeConsensus: { ...s.stockCodeConsensus, [stockCode]: consensus },
+    }));
   },
 
   setKlinePeriod: (period: string) => {
@@ -705,6 +727,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         progressPct: 100,
         currentStage: 4,
       });
+
+      // 荐股 ↔ 分析师交叉验证：把本次的分析师投票结果缓存到 stockCodeConsensus
+      // RecommendationPanel 会读取这个缓存来提示用户"推荐与共识是否一致"。
+      const stockCode = get().stockCode;
+      if (stockCode && parsed.analystReports && Object.keys(parsed.analystReports).length > 0) {
+        const consensus = computeStockConsensus(parsed.analystReports);
+        get().setStockCodeConsensus(stockCode, consensus);
+      }
     });
 
     const unlistenError = await listen<{

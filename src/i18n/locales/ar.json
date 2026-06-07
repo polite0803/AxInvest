@@ -7739,7 +7739,10 @@
       "pending": "pending",
       "riskAssessment": "riskAssessment",
       "running": "running",
-      "startFailed": "startFailed"
+      "startFailed": "startFailed",
+      "vValidate": "التحقق من البيانات",
+      "aggRisk": "المخاطر العدوانية",
+      "notifyResult": "إخطار بالنتيجة"
     },
     "risk": {
       "high": "مرتفع",
@@ -8009,7 +8012,9 @@
       "ts:568:t(": "Ts:568:T(",
       "ts:704:t(": "Ts:704:T(",
       "ts:763:t(": "Ts:763:T("
-    }
+    },
+    "avgRiskScore": "متوسط المخاطر {{score}}",
+    "highestRisk": "الأعلى {{label}} ({{score}})"
   },
   "trade": {
     "title": "Trading Log",

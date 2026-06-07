@@ -58,26 +58,24 @@ export function PanelEmpty(props: PanelEmptyProps) {
   return (
     <Empty
       image={image ?? Empty.PRESENTED_IMAGE_SIMPLE}
-      description={
-        showCta
-          ? (
-            <Space orientation="vertical" size={4} className="text-center">
-              <Typography.Text type="secondary" className="text-xs">
-                {descText}
-              </Typography.Text>
-              <Button
-                size="small"
-                type="link"
-                icon={<SettingOutlined />}
-                onClick={onOpenSettings}
-                className="px-0"
-              >
-                {t("stockAnalysis.settings.openDataSource")}
-              </Button>
-            </Space>
-          )
-          : descText
-      }
+      description={showCta
+        ? (
+          <Space orientation="vertical" size={4} className="text-center">
+            <Typography.Text type="secondary" className="text-xs">
+              {descText}
+            </Typography.Text>
+            <Button
+              size="small"
+              type="link"
+              icon={<SettingOutlined />}
+              onClick={onOpenSettings}
+              className="px-0"
+            >
+              {t("stockAnalysis.settings.openDataSource")}
+            </Button>
+          </Space>
+        )
+        : descText}
     />
   );
 }

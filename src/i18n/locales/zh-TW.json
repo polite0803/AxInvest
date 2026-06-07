@@ -7738,7 +7738,10 @@
       "pending": "pending",
       "riskAssessment": "riskAssessment",
       "running": "running",
-      "startFailed": "startFailed"
+      "startFailed": "startFailed",
+      "vValidate": "驗證數據",
+      "aggRisk": "激進風險評估",
+      "notifyResult": "通知結果"
     },
     "risk": {
       "high": "高",
@@ -8119,7 +8122,9 @@
       "ts:568:t(": "stockAnalysisStore.ts:568:t(",
       "ts:704:t(": "stockAnalysisStore.ts:704:t(",
       "ts:763:t(": "stockAnalysisStore.ts:763:t("
-    }
+    },
+    "avgRiskScore": "風險均值 {{score}}",
+    "highestRisk": "最高 {{label}} ({{score}})"
   },
   "trade": {
     "title": "交易日志",

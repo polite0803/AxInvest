@@ -24,7 +24,12 @@
     "devTools": "डेव टूल्स",
     "wiki": "विकी",
     "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "watchlist": "वॉचलिस्ट",
+    "screener": "स्क्रीनर",
+    "trade": "ट्रेड",
+    "backtest": "बैकटेस्ट",
+    "compare": "तुलना"
   },
   "sidebar": {
     "sectionWork": "कार्य",
@@ -7934,6 +7939,23 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "placeholder": "ट्रेड निष्पादित और समीक्षा करें"
+  },
+  "watchlist": {
+    "title": "वॉचलिस्ट",
+    "placeholder": "वॉचलिस्ट और मूल्य अलर्ट प्रबंधित करें"
+  },
+  "screener": {
+    "title": "स्टॉक स्क्रीनर",
+    "placeholder": "मानदंडों से स्टॉक खोजें"
+  },
+  "backtest": {
+    "title": "बैकटेस्ट",
+    "placeholder": "ऐतिहासिक डेटा से रणनीति सत्यापित करें"
+  },
+  "compare": {
+    "title": "तुलना",
+    "placeholder": "साथियों के साथ स्टॉक तुलना"
   }
 }

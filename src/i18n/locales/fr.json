@@ -24,7 +24,12 @@
     "devTools": "Outils de développement",
     "wiki": "Wiki",
     "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "watchlist": "Liste de suivi",
+    "screener": "Filtre",
+    "trade": "Trading",
+    "backtest": "Backtest",
+    "compare": "Comparer"
   },
   "sidebar": {
     "sectionWork": "Travail",
@@ -7934,6 +7939,23 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "placeholder": "Exécuter et revoir les trades"
+  },
+  "watchlist": {
+    "title": "Liste de suivi",
+    "placeholder": "Gérer la liste de suivi et les alertes"
+  },
+  "screener": {
+    "title": "Filtre d'actions",
+    "placeholder": "Trouver des actions par critères"
+  },
+  "backtest": {
+    "title": "Backtest",
+    "placeholder": "Valider les stratégies avec données historiques"
+  },
+  "compare": {
+    "title": "Comparaison",
+    "placeholder": "Comparer les actions avec leurs pairs"
   }
 }

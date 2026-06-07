@@ -24,7 +24,12 @@
     "devTools": "개발 도구",
     "wiki": "위키",
     "app": "AxAgent",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "watchlist": "관심종목",
+    "screener": "스크리너",
+    "trade": "매매",
+    "backtest": "백테스트",
+    "compare": "비교"
   },
   "sidebar": {
     "sectionWork": "작업",
@@ -7934,6 +7939,23 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "placeholder": "거래 실행과 리플레이"
+  },
+  "watchlist": {
+    "title": "관심종목",
+    "placeholder": "관심종목과 가격 알림을 관리"
+  },
+  "screener": {
+    "title": "종목 스크리너",
+    "placeholder": "조건으로 종목을 검색"
+  },
+  "backtest": {
+    "title": "백테스트",
+    "placeholder": "과거 데이터로 전략 검증"
+  },
+  "compare": {
+    "title": "비교 분석",
+    "placeholder": "동업 종목과 비교"
   }
 }

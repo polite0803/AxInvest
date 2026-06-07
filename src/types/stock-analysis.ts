@@ -370,3 +370,41 @@ export interface BacktestStats {
   avgConfidence: number;
   alphaPct: number | null;
 }
+
+// ── Decision Timeline（Phase 8）──
+
+/** 时间线 4 阶段：扫描 → 诊断 → 辩论 → 决策 */
+export type TimelinePhase = "scan" | "diagnose" | "debate" | "decide";
+
+/** 节点状态：pending(未开始)/ running(进行中)/ done(完成)/ failed(失败) */
+export type TimelineNodeStatus = "pending" | "running" | "done" | "failed";
+
+/** 节点证据引用：点击 EvidenceChip 时跳转到对应侧栏面板 */
+export interface EvidenceRef {
+  /** 目标 tab key；时间线 4 阶段之外，落在 market/analyze/execute 上 */
+  tabKey: "market" | "analyze" | "execute";
+  /** 与 sheet panels key 对齐 */
+  panelKey: string;
+  /** 可选 anchor 锚点 */
+  anchor?: string;
+  /** 一句话证据摘要 */
+  snippet: string;
+}
+
+/** 单个时间线节点：一名 agent 在某 phase 的一次执行 */
+export interface TimelineNode {
+  id: string;
+  phase: TimelinePhase;
+  agentId: string;
+  agentName: string;
+  title: string;
+  summary: string;
+  /** 0-1；后端暂无原始置信度，估算自 confidencePct / 100 */
+  confidence: number;
+  status: TimelineNodeStatus;
+  evidenceRefs: EvidenceRef[];
+  /** 辩论阶段 bull/bear 回合用 children 表达 */
+  children?: TimelineNode[];
+  startedAt?: number;
+  finishedAt?: number;
+}

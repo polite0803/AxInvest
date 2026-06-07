@@ -2,7 +2,16 @@ import i18n from "@/i18n";
 import { extractContent } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
-import type { AnalysisStatus, AnalysisSummary, KLine, StockDecision, StockQuote, StockSearchResult } from "@/types";
+import type {
+  AnalysisStatus,
+  AnalysisSummary,
+  KLine,
+  StockDecision,
+  StockQuote,
+  StockSearchResult,
+  TimelineNode,
+  TimelinePhase,
+} from "@/types";
 import { parseAction, parseRiskLevel, StockAction, StockRiskLevel } from "@/types";
 import { create } from "zustand";
 
@@ -171,6 +180,12 @@ interface StockAnalysisState {
   watchlistVersion: number;
   bumpWatchlistVersion: () => void;
 
+  // Phase 8: Decision Timeline
+  timeline: TimelineNode[];
+  pushTimelineNode: (node: TimelineNode) => void;
+  updateTimelineNode: (id: string, patch: Partial<TimelineNode>) => void;
+  clearTimeline: () => void;
+
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
@@ -222,6 +237,7 @@ const initialState = {
   klineIndicators: { ma5: true, ma10: true, ma20: true },
   sidebarCollapsed: {},
   watchlistVersion: 0,
+  timeline: [],
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -318,6 +334,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       rawData: {},
       decision: null,
       _unlisten: null,
+      timeline: [],
     });
 
     // 先注册事件监听，再触发工作流
@@ -444,6 +461,33 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set((s) => ({ watchlistVersion: s.watchlistVersion + 1 }));
   },
 
+  pushTimelineNode: (node) => {
+    set((s) => {
+      // 同 id 视为 update（去重），避免重复推送
+      const idx = s.timeline.findIndex((n) => n.id === node.id);
+      if (idx >= 0) {
+        const next = s.timeline.slice();
+        next[idx] = { ...next[idx], ...node };
+        return { timeline: next };
+      }
+      return { timeline: [...s.timeline, node] };
+    });
+  },
+
+  updateTimelineNode: (id, patch) => {
+    set((s) => {
+      const idx = s.timeline.findIndex((n) => n.id === id);
+      if (idx < 0) { return {}; }
+      const next = s.timeline.slice();
+      next[idx] = { ...next[idx], ...patch };
+      return { timeline: next };
+    });
+  },
+
+  clearTimeline: () => {
+    set({ timeline: [] });
+  },
+
   setKlinePeriod: (period: string) => {
     set({ klinePeriod: period });
   },
@@ -522,9 +566,46 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           : get().failedNodeErrors,
       });
 
+      // 失败节点也写入 timeline，状态为 "failed"，便于侧栏脊柱高亮红色
+      if (status === "failed") {
+        const phase = inferTimelinePhase(nodeId);
+        if (phase) {
+          get().pushTimelineNode({
+            id: nodeId,
+            phase,
+            agentId: nodeId,
+            agentName: agentDisplayName(nodeId),
+            title: agentDisplayName(nodeId),
+            summary: error ?? "",
+            confidence: 0,
+            status: "failed",
+            evidenceRefs: inferEvidenceRefs(nodeId),
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+          });
+        }
+      }
+
       if (status === "completed" && output != null) {
         const text = extractContent(output);
         const s = get();
+        // 同步推送 timeline 节点（去重：同 id 的后续 push 视为 update）
+        const phase = inferTimelinePhase(nodeId);
+        if (phase) {
+          s.pushTimelineNode({
+            id: nodeId,
+            phase,
+            agentId: nodeId,
+            agentName: agentDisplayName(nodeId),
+            title: agentDisplayName(nodeId),
+            summary: text.slice(0, 200),
+            confidence: 0.5,
+            status: "done",
+            evidenceRefs: inferEvidenceRefs(nodeId),
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+          });
+        }
         if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
           set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });
         } else if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
@@ -738,3 +819,77 @@ function inferStage(nodeId: string): number {
 
 // 暴露给单元测试使用
 export { inferStage };
+
+// ── Decision Timeline helpers（Phase 8）──
+
+/** 从节点 ID 推断时间线 4 阶段之一；非业务节点返回 null 不进 timeline */
+function inferTimelinePhase(nodeId: string): TimelinePhase | null {
+  // scan: 工具节点（数据采集）
+  if (nodeId.startsWith("t-")) { return "scan"; }
+  // diagnose: 分析师节点
+  if (nodeId.startsWith("a-")) { return "diagnose"; }
+  // debate: bull/bear 辩论（含早期别名）
+  if (
+    nodeId === "bull-researcher" || nodeId === "bear-researcher" || nodeId.startsWith("bull-r")
+    || nodeId.startsWith("bear-r")
+  ) { return "debate"; }
+  // decide: 决策与决策后处理
+  if (
+    nodeId === "trader" || nodeId === "portfolio-mgr" || nodeId === "rule-check"
+    || nodeId === "value-investor" || nodeId === "research-mgr" || nodeId.startsWith("risk-")
+  ) { return "decide"; }
+  return null;
+}
+
+/** Agent 显示名：去前缀 + 首字母大写。a-tech-analyst → Tech Analyst */
+function agentDisplayName(nodeId: string): string {
+  const stripped = nodeId
+    .replace(/^a-/, "")
+    .replace(/^t-/, "")
+    .replace(/^bull-/, "")
+    .replace(/^bear-/, "")
+    .replace(/-/g, " ");
+  return stripped.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** 节点 → 证据引用：根据 nodeId 推断其结果会落在哪个侧栏 sheet panel */
+function inferEvidenceRefs(nodeId: string): Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string; snippet: string }> {
+  // 工具节点 → 行情/概念面板
+  if (nodeId === "t-fundamentals-data" || nodeId === "t-valuation") {
+    return [{ tabKey: "market", panelKey: "concepts", snippet: "基本面/估值数据" }];
+  }
+  if (nodeId === "t-news-data" || nodeId === "t-policy-data") {
+    return [{ tabKey: "market", panelKey: "announcements", snippet: "新闻/政策公告" }];
+  }
+  if (nodeId === "t-research-data") {
+    return [{ tabKey: "market", panelKey: "industry", snippet: "行业排名" }];
+  }
+  if (nodeId === "t-scoring") {
+    return [{ tabKey: "market", panelKey: "screener", snippet: "推荐评分" }];
+  }
+  if (nodeId === "t-risk") {
+    return [{ tabKey: "market", panelKey: "north", snippet: "北向资金/风险" }];
+  }
+  // 分析师节点 → 报告
+  if (nodeId.startsWith("a-")) {
+    return [{ tabKey: "analyze", panelKey: "analysts", snippet: "分析师报告" }];
+  }
+  // 辩论 → 辩论
+  if (nodeId.startsWith("bull-") || nodeId.startsWith("bear-")) {
+    return [{ tabKey: "analyze", panelKey: "debate", snippet: "多空辩论" }];
+  }
+  // 风险/研究/价值/规则
+  if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
+    return [{ tabKey: "analyze", panelKey: "risk", snippet: "风险评估" }];
+  }
+  if (nodeId === "value-investor") {
+    return [{ tabKey: "analyze", panelKey: "value", snippet: "价值评估" }];
+  }
+  if (nodeId === "trader") {
+    return [{ tabKey: "execute", panelKey: "trade", snippet: "交易计划" }];
+  }
+  if (nodeId === "portfolio-mgr" || nodeId === "rule-check") {
+    return [{ tabKey: "analyze", panelKey: "decision", snippet: "最终决策" }];
+  }
+  return [];
+}

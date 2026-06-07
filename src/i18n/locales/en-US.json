@@ -7605,8 +7605,7 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "refresh": "Refresh"
+        "unit10k": "10k"
       },
       "recommendation": {
         "title": "🔍 Smart Picks",

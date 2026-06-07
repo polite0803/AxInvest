@@ -175,6 +175,8 @@ const RISK_COLORS: Record<string, string> = {
   "risk-neu": "oklch(55% 0.16 250)",
   "research-mgr": "oklch(60% 0.18 85)",
   "comprehensive": "oklch(60% 0.16 290)",
+  "risk-aggregated": "oklch(55% 0.20 28)",
+  "risk-level": "oklch(55% 0.18 45)",
 };
 
 /** 风险类型 → i18n key（键名对齐 riskAssessments 实际节点 ID） */
@@ -184,6 +186,8 @@ const RISK_LABEL_KEYS: Record<string, string> = {
   "risk-neu": "stockAnalysis.risk.neutral",
   "research-mgr": "stockAnalysis.risk.researchManager",
   "comprehensive": "stockAnalysis.risk.comprehensive",
+  "risk-aggregated": "stockAnalysis.workflow.riskAggregation",
+  "risk-level": "stockAnalysis.riskLevel",
 };
 
 /** 从风险评估文本中计算 0-100 的量化风险分 */

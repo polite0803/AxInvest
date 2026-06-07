@@ -25,6 +25,11 @@ const pageKeyToPath: Record<PageKey, string> = {
   terminal: "/terminal",
   workflow: "/workflow",
   "stock-analysis": "/stock-analysis",
+  watchlist: "/watchlist",
+  screener: "/screener",
+  trade: "/trade",
+  backtest: "/backtest",
+  compare: "/compare",
   settings: "/settings",
 };
 

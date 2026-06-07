@@ -1,32 +1,26 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { Filter } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { PageHeader } from "./_shared/PageHeader";
+import { DragonTigerPanel } from "./DragonTigerPanel";
+import { HotStocksPanel } from "./HotStocksPanel";
+import { LimitUpPanel } from "./LimitUpPanel";
+import { StockScreenerPanel } from "./StockScreenerPanel";
 
 /**
  * ScreenerPage — 选股中心
- * 完整内容将在 Phase 3 填充（StockScreener + HotStocks + LimitUp + DragonTiger + ConceptBlocks）
+ * 覆盖:StockScreener(主选股器)+ HotStocks(热门股)+ LimitUp(涨停板)+ DragonTiger(龙虎榜)
+ * ConceptBlocksPanel 需要 stockCode,与选股语义不匹配,不在此处复用
  */
 export function ScreenerPage() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
   return (
     <PageErrorBoundary title="Screener">
       <div className="flex h-full flex-col">
-        <header className="sa-header">
-          <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
-            ‹ {t("nav.chat")}
-          </button>
-          <h2 className="sa-header-title">{t("screener.title")}</h2>
-          <span className="sa-header-meta">{t("common.comingSoon")}</span>
-        </header>
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="text-center max-w-md space-y-4">
-            <Filter size={48} className="mx-auto opacity-30" />
-            <h3 className="text-lg font-medium">{t("screener.title")}</h3>
-            <p className="text-sm opacity-60">
-              {t("screener.placeholder")}
-            </p>
+        <PageHeader titleKey="screener.title" backTo="/stock-analysis" />
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          <StockScreenerPanel />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <HotStocksPanel />
+            <LimitUpPanel />
+            <DragonTigerPanel />
           </div>
         </div>
       </div>

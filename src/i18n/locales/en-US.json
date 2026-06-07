@@ -7325,7 +7325,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "Shares Unit",
+    "sharesUnit": "",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",
@@ -7568,13 +7568,7 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect",
-        "hotStocks": "Hot Stocks",
-        "industryRank": "Industry Rank",
-        "main": "Main",
-        "noHot": "No Hot",
-        "noIndustry": "No Industry",
-        "tags": "Tags"
+        "szFlow": "SZ Connect"
       },
       "sheet": {
         "screener": "Screener",
@@ -7611,10 +7605,7 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "todayRecommend": "Today's Picks",
-        "myFilter": "My Filter",
-        "refresh": "Refresh"
+        "unit10k": "10k"
       },
       "recommendation": {
         "title": "🔍 Smart Picks",
@@ -7650,8 +7641,7 @@
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
-        "disabledGeneric": "Disabled Generic"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",

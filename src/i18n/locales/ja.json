@@ -8697,7 +8697,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "Shares Unit",
+    "sharesUnit": "",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",
@@ -8910,13 +8910,7 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect",
-        "hotStocks": "Hot Stocks",
-        "industryRank": "Industry Rank",
-        "main": "Main",
-        "noHot": "No Hot",
-        "noIndustry": "No Industry",
-        "tags": "Tags"
+        "szFlow": "SZ Connect"
       },
       "sheet": {
         "screener": "Screener",
@@ -8953,17 +8947,13 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "todayRecommend": "本日の推奨",
-        "myFilter": "マイフィルター",
-        "refresh": "更新"
+        "unit10k": "10k"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
-        "disabledGeneric": "Disabled Generic"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -9334,7 +9324,9 @@
       "openSettings": "Open Settings",
       "empty": "No recommendation data",
       "styleDisabled": "(Disabled)",
-      "styleDisabledReason": "Style {style} is disabled in settings"
+      "styleDisabledReason": "Style {style} is disabled in settings",
+      "realTooltip": "実際の戦略ヒット（Kライン・財務・資金シグナルが揃っている）",
+      "tagReal": "実際"
     },
     "periodShort": "短期",
     "periodMid": "中期",

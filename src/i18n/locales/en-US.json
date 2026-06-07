@@ -8154,5 +8154,12 @@
   "compare": {
     "title": "Compare",
     "placeholder": "Compare stocks with peers"
+  },
+  "dualView": {
+    "notRegistered": "Unregistered dual view: {{id}}",
+    "expand": "Expand to {{title}}",
+    "expandToPanel": "Expand to panel",
+    "collapse": "Collapse",
+    "collapseToBubble": "Collapse to bubble"
   }
 }

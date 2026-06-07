@@ -8085,5 +8085,12 @@
   "compare": {
     "title": "對標研究",
     "placeholder": "對比同業公司"
+  },
+  "dualView": {
+    "notRegistered": "未註冊的 dual view: {{id}}",
+    "expand": "展開為「{{title}}」",
+    "expandToPanel": "展開為面板",
+    "collapse": "折疊",
+    "collapseToBubble": "折疊為氣泡"
   }
 }

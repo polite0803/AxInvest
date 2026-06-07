@@ -7975,5 +7975,12 @@
   "compare": {
     "title": "Vergleich",
     "placeholder": "Aktien mit Peers vergleichen"
+  },
+  "dualView": {
+    "notRegistered": "Nicht registrierte Dual-View: {{id}}",
+    "expand": "Zu {{title}} erweitern",
+    "expandToPanel": "Zum Panel erweitern",
+    "collapse": "Einklappen",
+    "collapseToBubble": "Zur Blase einklappen"
   }
 }

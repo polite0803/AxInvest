@@ -7975,5 +7975,12 @@
   "compare": {
     "title": "तुलना",
     "placeholder": "साथियों के साथ स्टॉक तुलना"
+  },
+  "dualView": {
+    "notRegistered": "अपंजीकृत dual view: {{id}}",
+    "expand": "{{title}} में विस्तृत करें",
+    "expandToPanel": "पैनल में विस्तृत करें",
+    "collapse": "संकुचित करें",
+    "collapseToBubble": "बुलबुले में संकुचित करें"
   }
 }

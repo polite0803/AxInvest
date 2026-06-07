@@ -7975,5 +7975,12 @@
   "compare": {
     "title": "مقارنة",
     "placeholder": "قارن الأسهم مع الأقران"
+  },
+  "dualView": {
+    "notRegistered": "عرض مزدوج غير مسجل: {{id}}",
+    "expand": "توسيع إلى {{title}}",
+    "expandToPanel": "توسيع إلى لوحة",
+    "collapse": "طي",
+    "collapseToBubble": "طي إلى فقاعة"
   }
 }

@@ -172,7 +172,10 @@ export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) 
         setLoading(false);
         return;
       }
-      const criteria: Record<string, any> = {};
+      const criteria: Record<string, any> = {
+        rsiOversold: false,
+        rsiOverbought: false,
+      };
       for (const fd of FACTOR_DEFS) {
         const f = factors[fd.key];
         if (!f?.enabled) { continue; }

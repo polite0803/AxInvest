@@ -4,41 +4,30 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { Button, Collapse, Dropdown } from "antd";
 import { ArrowLeftRight, Coins, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
-import { BacktestPanel } from "./BacktestPanel";
 import { ClsFlashPanel } from "./ClsFlashPanel";
-import { CompareView } from "./CompareView";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
-import { DailyReviewPanel } from "./DailyReviewPanel";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
-import { DragonTigerPanel } from "./DragonTigerPanel";
 import { EventCalendarPanel } from "./EventCalendarPanel";
-import { ExecutionReplayPanel } from "./ExecutionReplayPanel";
-import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
-import { HotStocksPanel } from "./HotStocksPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
 import { KLineChart } from "./KLineChart";
-import { LimitUpPanel } from "./LimitUpPanel";
 import { NorthBoundPanel } from "./NorthBoundPanel";
 import { OptionPcrPanel } from "./OptionPcrPanel";
-import { PeersPanel } from "./PeersPanel";
-import { PriceAlertPanel } from "./PriceAlertPanel";
+import { RecommendationPanel } from "./RecommendationPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
+import { StockAnalysisPageContext } from "./StockAnalysisPageContext";
 import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
 import { StockQuoteCard } from "./StockQuoteCard";
-import { StockScreenerPanel } from "./StockScreenerPanel";
 import { StockSearchBar } from "./StockSearchBar";
-import { TradePanel } from "./TradePanel";
 import { ValueAssessmentPanel } from "./ValueAssessmentPanel";
-import { WatchlistPanel } from "./WatchlistPanel";
 
 const PERIOD_MAP: Record<string, { period: string; limit: number }> = {
   "1m": { period: "daily", limit: 22 },
@@ -59,7 +48,6 @@ export function StockAnalysisPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const analysisId = useStockAnalysisStore((s) => s.analysisId);
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const status = useStockAnalysisStore((s) => s.status);
   const error = useStockAnalysisStore((s) => s.error);
@@ -79,8 +67,14 @@ export function StockAnalysisPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState("trade");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDefaultTab, setSettingsDefaultTab] = useState<string | undefined>(undefined);
   const [marketStatus, setMarketStatus] = useState("");
   const [expandedFailedNode, setExpandedFailedNode] = useState<string | null>(null);
+
+  const openDataSourceSettings = useCallback(() => {
+    setSettingsDefaultTab("data");
+    setSettingsOpen(true);
+  }, []);
 
   useEffect(() => {
     invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
@@ -155,25 +149,10 @@ export function StockAnalysisPage() {
 
   const allSheetPanels: SheetPanel[] = [
     { key: "index", label: t("stockAnalysis.indexQuotes"), element: <IndexQuotesPanel /> },
-    { key: "peers", label: t("stockAnalysis.peers"), element: <PeersPanel /> },
-    { key: "screener", label: t("stockAnalysis.settings.sheet.screener"), element: <StockScreenerPanel /> },
-    { key: "limitup", label: t("stockAnalysis.settings.sheet.limitUp"), element: <LimitUpPanel /> },
-    { key: "dragontiger", label: t("stockAnalysis.settings.sheet.dragonTiger"), element: <DragonTigerPanel /> },
+    { key: "screener", label: t("stockAnalysis.settings.sheet.screener"), element: <RecommendationPanel /> },
     { key: "sectors", label: t("stockAnalysis.settings.sheet.sectors"), element: <SectorHeatmapPanel /> },
     { key: "north", label: t("stockAnalysis.settings.sheet.north"), element: <NorthBoundPanel /> },
-    { key: "watchlist", label: t("stockAnalysis.watchlist._default"), element: <WatchlistPanel /> },
-    { key: "trade", label: t("stockAnalysis.tradingTitle"), element: <TradePanel /> },
-    { key: "alerts", label: t("stockAnalysis.alert.title"), element: <PriceAlertPanel /> },
-    { key: "compare", label: t("stockAnalysis.compare"), element: <CompareView /> },
-    {
-      key: "history",
-      label: t("stockAnalysis.history"),
-      element: <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />,
-    },
-    { key: "review", label: t("stockAnalysis.settings.sheet.review"), element: <DailyReviewPanel /> },
     { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
-    { key: "replay", label: t("workEngine.executionHistory"), element: <ExecutionReplayPanel /> },
-    { key: "backtest", label: t("stockAnalysis.backtest.title"), element: <BacktestPanel /> },
     {
       key: "announcements",
       label: t("stockAnalysis.announcements"),
@@ -181,23 +160,16 @@ export function StockAnalysisPage() {
     },
     { key: "concepts", label: t("stockAnalysis.conceptBlocks"), element: <ConceptBlocksPanel stockCode={stockCode} /> },
     { key: "optionpcr", label: t("stockAnalysis.optionPcr"), element: <OptionPcrPanel stockCode={stockCode} /> },
-    { key: "hotstocks", label: t("stockAnalysis.hotStocks"), element: <HotStocksPanel /> },
     { key: "industry", label: t("stockAnalysis.industryRanking"), element: <IndustryRankingPanel /> },
     { key: "flash", label: t("stockAnalysis.clsFlash"), element: <ClsFlashPanel /> },
   ];
-  // 桌面全部显示，移动端 ?9个核心面 ? + 其余通过"更多"下拉菜单访问
-  // 移动端只直接显示 9 个核心面板，其余通过"更多"下拉菜单访问 ?
-  // 总面板数 = 9 + 8 = 17 ?
+  // 桌面全部显示，移动端只直接显示 4 个核心面板，其余通过"更多"下拉菜单访问
+  // 总面板数 = 4 + 6 = 10
   const mobileCoreKeys = [
     "index",
-    "peers",
     "screener",
-    "limitup",
-    "dragontiger",
     "sectors",
     "north",
-    "watchlist",
-    "trade",
   ];
   const sheetPanels = isMobile ? allSheetPanels.filter((p) => mobileCoreKeys.includes(p.key)) : allSheetPanels;
 
@@ -206,229 +178,245 @@ export function StockAnalysisPage() {
 
   return (
     <PageErrorBoundary title={t("error.page")}>
-      <div className="sa-layout">
-        <div className="sa-header">
-          <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
-            ? {t("nav.chat")}
-          </button>
-          <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
-          <span className="sa-header-meta">{marketStatus || t("stockAnalysis.subtitle")}</span>
-          <button
-            type="button"
-            className="sa-header-back"
-            onClick={() => setSettingsOpen(!settingsOpen)}
-            title={t("stockAnalysis.settings.title")}
-            style={settingsOpen && !isMobile ? { background: "var(--accent-bg)", color: "var(--accent)" } : undefined}
-          >
-            {settingsOpen && !isMobile ? <X size={16} /> : <Settings size={16} />}
-          </button>
-        </div>
+      <StockAnalysisPageContext.Provider value={{ openDataSourceSettings }}>
+        <div className="sa-layout">
+          <div className="sa-header">
+            <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
+              ? {t("nav.chat")}
+            </button>
+            <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
+            <span className="sa-header-meta">{marketStatus || t("stockAnalysis.subtitle")}</span>
+            <button
+              type="button"
+              className="sa-header-back"
+              onClick={() => navigate("/trade")}
+              title={t("nav.trade")}
+            >
+              <ArrowLeftRight size={14} /> {t("nav.trade")}
+            </button>
+            <button
+              type="button"
+              className="sa-header-back"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              title={t("stockAnalysis.settings.title")}
+              style={settingsOpen && !isMobile ? { background: "var(--accent-bg)", color: "var(--accent)" } : undefined}
+            >
+              {settingsOpen && !isMobile ? <X size={16} /> : <Settings size={16} />}
+            </button>
+          </div>
 
-        <div className="sa-body">
-          <StockSearchBar />
+          <div className="sa-body">
+            <StockSearchBar />
 
-          <div className="sa-body-inner">
-            <div className="sa-main">
-              {settingsOpen && !isMobile
-                ? (
-                  <div className="sa-settings-inline">
-                    <div className="sa-settings-header">
-                      <span className="sa-settings-title">{t("stockAnalysis.settings.title")}</span>
-                      <button type="button" className="sa-header-back" onClick={() => setSettingsOpen(false)}>
-                        <X size={14} /> {t("common.close")}
-                      </button>
-                    </div>
-                    <div className="sa-settings-body">
-                      <StockAnalysisSettings />
-                    </div>
-                  </div>
-                )
-                : (
-                  <>
-                    {status === "loading" && (
-                      <div className="sa-loading">
-                        <div className="sa-spinner" />
-                        <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
+            <div className="sa-body-inner">
+              <div className="sa-main">
+                {settingsOpen && !isMobile
+                  ? (
+                    <div className="sa-settings-inline">
+                      <div className="sa-settings-header">
+                        <span className="sa-settings-title">{t("stockAnalysis.settings.title")}</span>
+                        <button type="button" className="sa-header-back" onClick={() => setSettingsOpen(false)}>
+                          <X size={14} /> {t("common.close")}
+                        </button>
                       </div>
-                    )}
-
-                    {status === "idle" && (
-                      <div className="sa-empty">
-                        <div>
-                          <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
-                          <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
+                      <div className="sa-settings-body">
+                        <StockAnalysisSettings key={settingsDefaultTab ?? "default"} defaultTab={settingsDefaultTab} />
+                      </div>
+                    </div>
+                  )
+                  : (
+                    <>
+                      {status === "loading" && (
+                        <div className="sa-loading">
+                          <div className="sa-spinner" />
+                          <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {status === "error" && (
-                      <div
-                        style={{
-                          padding: 16,
-                          margin: 16,
-                          border: "1px solid var(--sa-red)",
-                          borderRadius: 8,
-                          background: "var(--surface)",
-                        }}
-                      >
-                        <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-red)" }}>
-                          {failedNodes.length > 0
-                            ? t("stockAnalysis.workflow.partialFailed", { count: failedNodes.length })
-                            : t("stockAnalysis.workflow.startFailed")}
-                        </h3>
-                        <p style={{ margin: "0 0 12px 0", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
-                          {error ?? t("common.unknownError")}
-                        </p>
-                        {failedNodes.length > 0 && (
-                          <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--sa-red)", marginBottom: 4 }}>
-                              {t("stockAnalysis.workflow.failedSteps")}
-                            </div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                              {failedNodes.map((id) => (
-                                <div key={id}>
-                                  <span
-                                    onClick={() =>
-                                      setExpandedFailedNode(
-                                        expandedFailedNode === id ? null : id,
-                                      )}
-                                    style={{
-                                      fontSize: 11,
-                                      padding: "2px 6px",
-                                      borderRadius: 4,
-                                      background: "var(--sa-red-bg)",
-                                      color: "var(--sa-red)",
-                                      cursor: "pointer",
-                                      display: "inline-block",
-                                    }}
-                                  >
-                                    {id} {expandedFailedNode === id ? "▼" : "▶"}
-                                  </span>
-                                  {expandedFailedNode === id && (
-                                    <div
+                      {status === "idle" && (
+                        <div className="sa-empty">
+                          <div>
+                            <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
+                            <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {status === "error" && (
+                        <div
+                          style={{
+                            padding: 16,
+                            margin: 16,
+                            border: "1px solid var(--sa-red)",
+                            borderRadius: 8,
+                            background: "var(--surface)",
+                          }}
+                        >
+                          <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-red)" }}>
+                            {failedNodes.length > 0
+                              ? t("stockAnalysis.workflow.partialFailed", { count: failedNodes.length })
+                              : t("stockAnalysis.workflow.startFailed")}
+                          </h3>
+                          <p style={{ margin: "0 0 12px 0", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
+                            {error ?? t("common.unknownError")}
+                          </p>
+                          {failedNodes.length > 0 && (
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--sa-red)", marginBottom: 4 }}>
+                                {t("stockAnalysis.workflow.failedSteps")}
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                {failedNodes.map((id) => (
+                                  <div key={id}>
+                                    <span
+                                      onClick={() =>
+                                        setExpandedFailedNode(
+                                          expandedFailedNode === id ? null : id,
+                                        )}
                                       style={{
-                                        marginTop: 4,
-                                        padding: 8,
-                                        background: "var(--surface)",
-                                        borderRadius: 6,
-                                        border: "1px solid var(--sa-red)",
                                         fontSize: 11,
-                                        color: "var(--muted)",
-                                        whiteSpace: "pre-wrap",
-                                        lineHeight: 1.5,
+                                        padding: "2px 6px",
+                                        borderRadius: 4,
+                                        background: "var(--sa-red-bg)",
+                                        color: "var(--sa-red)",
+                                        cursor: "pointer",
+                                        display: "inline-block",
                                       }}
                                     >
-                                      {failedNodeErrors[id] || error || t("common.unknownError")}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
+                                      {id} {expandedFailedNode === id ? "▼" : "▶"}
+                                    </span>
+                                    {expandedFailedNode === id && (
+                                      <div
+                                        style={{
+                                          marginTop: 4,
+                                          padding: 8,
+                                          background: "var(--surface)",
+                                          borderRadius: 6,
+                                          border: "1px solid var(--sa-red)",
+                                          fontSize: 11,
+                                          color: "var(--muted)",
+                                          whiteSpace: "pre-wrap",
+                                          lineHeight: 1.5,
+                                        }}
+                                      >
+                                        {failedNodeErrors[id] || error || t("common.unknownError")}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                        <Button
-                          type="primary"
-                          disabled={!stockCode}
-                          onClick={() => stockCode && startAnalysis(stockCode)}
-                        >
-                          {t("common.retry")}
-                        </Button>
-                      </div>
-                    )}
-
-                    {status !== "loading" && status !== "idle" && status !== "error" && (
-                      <>
-                        <AnalysisProgress />
-
-                        <div className="sa-tabs">
-                          {tabs.map((tab) => (
-                            <button
-                              key={tab.key}
-                              type="button"
-                              className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
-                              onClick={() => setActiveTab(tab.key)}
-                            >
-                              {tab.icon}
-                              {tab.label}
-                            </button>
-                          ))}
+                          )}
+                          <Button
+                            type="primary"
+                            disabled={!stockCode}
+                            onClick={() => stockCode && startAnalysis(stockCode)}
+                          >
+                            {t("common.retry")}
+                          </Button>
                         </div>
+                      )}
 
-                        {activeContent?.children}
-                      </>
-                    )}
-                  </>
-                )}
-            </div>
+                      {status !== "loading" && status !== "idle" && status !== "error" && (
+                        <>
+                          <AnalysisProgress />
 
-            <div className="sa-sidebar">
-              <Collapse
-                size="small"
-                ghost
-                defaultActiveKey={["screener"]}
-                items={sheetPanels.map((p) => ({
-                  key: p.key,
-                  label: <span className="text-xs font-medium">{p.label}</span>,
-                  children: <div className="sa-panel-body">{p.element}</div>,
-                }))}
-              />
-            </div>
-          </div>
-        </div>
+                          <div className="sa-tabs">
+                            {tabs.map((tab) => (
+                              <button
+                                key={tab.key}
+                                type="button"
+                                className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
+                                onClick={() => setActiveTab(tab.key)}
+                              >
+                                {tab.icon}
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
 
-        {/* 底部滑出面板  ? 平板/移动 ? */}
-        <div className={`sa-bottom-sheet${sheetOpen ? " open" : ""}`}>
-          <div className="sa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)}>
-            <div className="sa-sheet-handle-bar" />
-          </div>
+                          {activeContent?.children}
+                        </>
+                      )}
+                    </>
+                  )}
+              </div>
 
-          <div className="sa-sheet-tabs">
-            {sheetPanels.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                className={`sa-sheet-tab${sheetTab === p.key ? " active" : ""}`}
-                onClick={() => {
-                  setSheetTab(p.key);
-                  if (!sheetOpen) { setSheetOpen(true); }
-                }}
-              >
-                {p.label}
-              </button>
-            ))}
-            {isMobile && (
-              <Dropdown
-                menu={{
-                  items: allSheetPanels.filter((p) => !mobileCoreKeys.includes(p.key)).map((p) => ({
+              <div className="sa-sidebar">
+                <Collapse
+                  size="small"
+                  ghost
+                  defaultActiveKey={["screener"]}
+                  items={sheetPanels.map((p) => ({
                     key: p.key,
-                    label: p.label,
-                    onClick: () => {
-                      setSheetTab(p.key);
-                      if (!sheetOpen) { setSheetOpen(true); }
-                    },
-                  })),
-                }}
-                trigger={["click"]}
-              >
-                <button type="button" className="sa-sheet-tab">{t("stockAnalysis.settings.sheet.more")} ?</button>
-              </Dropdown>
-            )}
+                    label: <span className="text-xs font-medium">{p.label}</span>,
+                    children: <div className="sa-panel-body">{p.element}</div>,
+                  }))}
+                />
+              </div>
+            </div>
           </div>
 
-          <div className="sa-sheet-body">
-            {activePanel?.element}
+          {/* 底部滑出面板  ? 平板/移动 ? */}
+          <div className={`sa-bottom-sheet${sheetOpen ? " open" : ""}`}>
+            <div className="sa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)}>
+              <div className="sa-sheet-handle-bar" />
+            </div>
+
+            <div className="sa-sheet-tabs">
+              {sheetPanels.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className={`sa-sheet-tab${sheetTab === p.key ? " active" : ""}`}
+                  onClick={() => {
+                    setSheetTab(p.key);
+                    if (!sheetOpen) { setSheetOpen(true); }
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+              {isMobile && (
+                <Dropdown
+                  menu={{
+                    items: allSheetPanels.filter((p) => !mobileCoreKeys.includes(p.key)).map((p) => ({
+                      key: p.key,
+                      label: p.label,
+                      onClick: () => {
+                        setSheetTab(p.key);
+                        if (!sheetOpen) { setSheetOpen(true); }
+                      },
+                    })),
+                  }}
+                  trigger={["click"]}
+                >
+                  <button type="button" className="sa-sheet-tab">{t("stockAnalysis.settings.sheet.more")} ?</button>
+                </Dropdown>
+              )}
+            </div>
+
+            <div className="sa-sheet-body">
+              {activePanel?.element}
+            </div>
           </div>
+
+          <button
+            type="button"
+            className="sa-sheet-toggle"
+            onClick={() => setSheetOpen(!sheetOpen)}
+          >
+            {sheetOpen ? " ?" : "+"}
+          </button>
         </div>
-
-        <button
-          type="button"
-          className="sa-sheet-toggle"
-          onClick={() => setSheetOpen(!sheetOpen)}
-        >
-          {sheetOpen ? " ?" : "+"}
-        </button>
-      </div>
-      {isMobile && <StockAnalysisSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+        {isMobile && (
+          <StockAnalysisSettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            defaultTab={settingsDefaultTab}
+          />
+        )}
+      </StockAnalysisPageContext.Provider>
     </PageErrorBoundary>
   );
 }

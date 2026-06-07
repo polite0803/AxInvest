@@ -12,9 +12,21 @@ pub struct TrendStrategy {
 }
 
 impl TrendStrategy {
-    pub const fn short() -> Self { Self { period: Period::Short } }
-    pub const fn mid() -> Self { Self { period: Period::Mid } }
-    pub const fn long() -> Self { Self { period: Period::Long } }
+    pub const fn short() -> Self {
+        Self {
+            period: Period::Short,
+        }
+    }
+    pub const fn mid() -> Self {
+        Self {
+            period: Period::Mid,
+        }
+    }
+    pub const fn long() -> Self {
+        Self {
+            period: Period::Long,
+        }
+    }
 
     async fn scan_one(
         &self,
@@ -33,10 +45,16 @@ impl TrendStrategy {
         // 拉取 20 日均成交额，量比估算
         let avg_20 = indicators::avg_amount_20d(&klines).unwrap_or(0.0);
         let today_amount = klines.last().map(|k| k.amount).unwrap_or(0.0);
-        let turnover_anomaly = if avg_20 > 0.0 { today_amount / avg_20 } else { 1.0 };
+        let turnover_anomaly = if avg_20 > 0.0 {
+            today_amount / avg_20
+        } else {
+            1.0
+        };
         let amount_ratio = turnover_anomaly; // 量比近似
 
-        let (entry_low, entry_high, stop_loss, target_price, base_position, reasons) = match self.period {
+        let (entry_low, entry_high, stop_loss, target_price, base_position, reasons) = match self
+            .period
+        {
             Period::Short => {
                 // MA5/10/20 多头
                 let ma5 = indicators::sma(&cs, 5)?;
@@ -108,10 +126,10 @@ impl TrendStrategy {
 
         // 置信度
         let conf = calc_confidence(
-            0.85,                    // 子策略内多因子方向一致
-            0.7,                     // 信号强度
+            0.85, // 子策略内多因子方向一致
+            0.7,  // 信号强度
             if amount_ratio > 1.5 { 0.8 } else { 0.5 },
-            0.0,                     // market_regime 占位，v1 简化为 0
+            0.0, // market_regime 占位，v1 简化为 0
             turnover_anomaly,
         );
         let position = calc_position(base_position, conf, self.period);
@@ -146,8 +164,12 @@ impl RecommendStrategy for TrendStrategy {
             Period::Long => "trend_long",
         }
     }
-    fn style(&self) -> Style { Style::Trend }
-    fn period(&self) -> Period { self.period }
+    fn style(&self) -> Style {
+        Style::Trend
+    }
+    fn period(&self) -> Period {
+        self.period
+    }
     fn required_vendors(&self) -> &'static [&'static str] {
         &["eastmoney", "tencent", "ths", "akshare"]
     }

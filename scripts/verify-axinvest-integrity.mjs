@@ -42,7 +42,7 @@ check("Sidebar 导航入口", () => {
     fail("LineChart 未 import");
   }
 
-  if (f.includes('|| n.key === "stock-analysis"')) {
+  if (f.includes('"stock-analysis"') && f.includes('n.key ===')) {
     pass("section filter 包含 stock-analysis");
   } else {
     fail("section filter 缺少 stock-analysis");

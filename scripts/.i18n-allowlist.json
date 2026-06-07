@@ -264,67 +264,67 @@
     },
     {
       "file": "indexQuotes",
-      "lines": "M,a,r,k,e,t, ,I,n,d,i,c,e,s",
+      "lines": "M,a,r,k,e,t,I,n,d,i,c,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "peers",
-      "lines": "P,e,e,r, ,C,o,m,p,a,r,i,s,o,n",
+      "lines": "P,e,r,C,o,m,p,a,i,s,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "announcements",
-      "lines": "A,n,n,o,u,n,c,e,m,e,n,t,s",
+      "lines": "A,n,o,u,c,e,m,t,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "conceptBlocks",
-      "lines": "C,o,n,c,e,p,t, ,B,l,o,c,k,s",
+      "lines": "C,o,n,c,e,p,t,B,l,k,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "clsFlash",
-      "lines": "C,L,S, ,F,l,a,s,h",
+      "lines": "C,L,S,F,l,a,s,h",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "hotStocks",
-      "lines": "H,o,t, ,S,t,o,c,k,s",
+      "lines": "H,o,t,S,c,k,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "industryRanking",
-      "lines": "I,n,d,u,s,t,r,y, ,R,a,n,k,i,n,g",
+      "lines": "I,n,d,u,s,t,r,y,R,a,k,i,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "leader",
-      "lines": "L,e,a,d,e,r",
+      "lines": "L,e,a,d,r",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "optionPcr",
-      "lines": "O,p,t,i,o,n, ,P,C,R",
+      "lines": "O,p,t,i,o,n,P,C,R",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "optionPcrOi",
-      "lines": "O,p,e,n, ,I,n,t,e,r,e,s,t, ,P,C,R",
+      "lines": "O,p,e,n,I,t,r,s,P,C,R",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "optionPcrVolume",
-      "lines": "V,o,l,u,m,e, ,P,C,R",
+      "lines": "V,o,l,u,m,e,P,C,R",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

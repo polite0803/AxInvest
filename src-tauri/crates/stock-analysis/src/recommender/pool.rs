@@ -147,7 +147,9 @@ pub fn vendors_satisfied(required: &[&str], enabled: &HashSet<String>) -> bool {
 
 /// 把 vendor 列表 (a股 vendor 名) 映射到 PANEL_VENDORS 里的 key
 /// 与前端 [PANEL_VENDORS](file:///d:/OneManager/AxInvest/src/components/stock-analysis/vendorCheck.ts) 保持一致
-pub fn required_vendors_for_style(style: crate::recommender::types::Style) -> &'static [&'static str] {
+pub fn required_vendors_for_style(
+    style: crate::recommender::types::Style,
+) -> &'static [&'static str] {
     use crate::recommender::types::Style::*;
     match style {
         // 趋势跟踪：依赖 K 线（任意一家支持 K 线的 vendor）
@@ -164,7 +166,14 @@ pub fn required_vendors_for_style(style: crate::recommender::types::Style) -> &'
 /// 给后端 logs 用的：从 HashSet 序列化为 vendor → bool 表，方便调试
 pub fn vendors_to_map(enabled: &HashSet<String>) -> HashMap<String, bool> {
     let all = [
-        "eastmoney", "tencent", "ths", "baidu_stock", "akshare", "iwencai", "cninfo", "sina",
+        "eastmoney",
+        "tencent",
+        "ths",
+        "baidu_stock",
+        "akshare",
+        "iwencai",
+        "cninfo",
+        "sina",
     ];
     all.iter()
         .map(|v| (v.to_string(), enabled.contains(*v)))

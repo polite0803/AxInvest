@@ -27,7 +27,9 @@ pub struct PerCodeLocks {
 }
 
 impl PerCodeLocks {
-    pub fn new() -> Arc<Self> { Arc::new(Self::default()) }
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
 
     /// 锁定指定 code：先在 map 里查 / 创建一个 `Arc<Mutex<()>>`，再 `lock_owned` 拿到 owned guard
     ///

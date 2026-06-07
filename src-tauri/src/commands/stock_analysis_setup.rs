@@ -1005,7 +1005,9 @@ async fn seed_stock_analysis_workflow_template(
                 input_mapping: [
                     ("stock_code".to_string(), "stock_code".to_string()),
                     ("stock_name".to_string(), "stock_name".to_string()),
-                ].into_iter().collect(),
+                ]
+                .into_iter()
+                .collect(),
                 output_var: id.into(),
                 model: None,
                 temperature: Some(0.3),

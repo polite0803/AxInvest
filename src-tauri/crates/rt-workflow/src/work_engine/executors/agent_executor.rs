@@ -1159,8 +1159,8 @@ async fn execute_tool(
 
     // 回退：走 ToolRegistry 中心化路径（与 ToolExecutor 保持一致）
     if let Some(ref tool_registry) = context.tool_registry {
-        let mut tool_ctx =
-            axagent_harness::tool::ToolContext::new(".").with_conversation(context.execution_id.clone());
+        let mut tool_ctx = axagent_harness::tool::ToolContext::new(".")
+            .with_conversation(context.execution_id.clone());
         if let Some(ref perms) = context.tool_permissions {
             tool_ctx.permissions = Some(perms.clone());
         }

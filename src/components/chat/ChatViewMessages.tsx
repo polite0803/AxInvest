@@ -109,6 +109,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { formatDuration, formatSpeed, formatTokenCount } from "../gateway/tokenFormat";
 import { AskUserCard } from "./AskUserCard";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { ChatBubbleExpandButton } from "./ChatBubbleExpandButton";
 import { AssistantMarkdown, getChatCodeThemes, THINKING_LOADING_MARKER } from "./ChatMarkdownNodes";
 import { getStreamingLoadingState, shouldRenderAssistantMarkdownFromContent } from "./chatStreaming";
 import { DeleteLastVersionPopover } from "./DeleteLastVersionPopover";
@@ -376,6 +377,10 @@ function AssistantFooter({
                         messageApi.error(String(e));
                       }
                     },
+                  },
+                  {
+                    key: "expand-to-panel",
+                    actionRender: () => <ChatBubbleExpandButton message={msg} />,
                   },
                 ]
                 : []),

@@ -151,6 +151,7 @@ impl TrendStrategy {
             reasons,
             risk_notes: vec!["大盘破 20 日均线 -10%".to_string()],
             secondary_styles: vec![],
+            synthetic: false,
         })
     }
 }

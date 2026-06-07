@@ -683,7 +683,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
               </div>
             )
             : (
-              <Space direction="vertical" className="w-full">
+              <Space orientation="vertical" className="w-full">
                 {validationResult.errors.length > 0 && (
                   <List
                     size="small"
@@ -695,7 +695,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
                     dataSource={validationResult.errors}
                     renderItem={(err) => (
                       <List.Item>
-                        <Space direction="vertical" size={0} className="w-full">
+                        <Space orientation="vertical" size={0} className="w-full">
                           <Space>
                             <CloseCircleOutlined style={{ color: token.colorError }} />
                             <Text>{err.message}</Text>
@@ -718,7 +718,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
                     dataSource={validationResult.warnings}
                     renderItem={(warn) => (
                       <List.Item>
-                        <Space direction="vertical" size={0}>
+                        <Space orientation="vertical" size={0}>
                           <Space>
                             <WarningOutlined style={{ color: token.colorWarning }} />
                             <Text>{warn.message}</Text>

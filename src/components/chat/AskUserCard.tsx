@@ -156,7 +156,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({
                   disabled={submitting || submitted}
                   style={{ width: "100%" }}
                 >
-                  <Space direction="vertical" style={{ width: "100%" }} size={4}>
+                  <Space orientation="vertical" style={{ width: "100%" }} size={4}>
                     {options!.map((opt) => (
                       <Radio
                         key={opt}
@@ -178,7 +178,7 @@ const AskUserCard: React.FC<AskUserCardProps> = ({
                 </Radio.Group>
               )
               : (
-                <Space direction="vertical" style={{ width: "100%" }} size={4}>
+                <Space orientation="vertical" style={{ width: "100%" }} size={4}>
                   {options!.map((opt) => (
                     <Button
                       key={opt}

@@ -29,7 +29,8 @@ use crate::recommender::pool::{
 };
 use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim};
 use crate::recommender::strategies::{
-    CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy, WatchlistStrategy,
+    emit_synthetic_picks, CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy,
+    WatchlistStrategy,
 };
 use crate::recommender::strategy::PerCodeLocks;
 
@@ -195,7 +196,40 @@ pub async fn recommend_stocks(
     });
 
     // 7. 按风格分组 + 限 10
-    let by_style = group_by_style_and_trim(&mut all_picks, 10);
+    let mut by_style = group_by_style_and_trim(&mut all_picks, 10);
+
+    // 8. 数据稀疏兜底：5 个 style 桶里若有空，且 raw_seed 非空，用 get_quote 拉
+    //    基础行情 emit 合成 picks 填入对应 style 桶。解决"只有 Watchlist 有 10 条，
+    //    其他 4 个主风格全空"的问题（K 线 / 财务 / 资金数据全不可用时主策略都
+    //    短路返回 None，但 watchlist 仅依赖 quote 仍能出 picks）。
+    //
+    //    合成 pick 的 reason 明确标注"信号缺失，按现价合成"，UI 可区分。
+    //    跳过 dedup：兜底数据加在 by_style 之后，不与真实 pick 合并。
+    if !raw_seed.is_empty() {
+        for style in [
+            Style::Trend,
+            Style::Value,
+            Style::Capital,
+            Style::Reversion,
+            Style::Watchlist,
+        ] {
+            let bucket_empty = by_style.get(&style).map_or(true, |v| v.is_empty());
+            if !bucket_empty {
+                continue;
+            }
+            let synthetic = emit_synthetic_picks(
+                client.clone(),
+                style,
+                period,
+                &raw_seed,
+                per_code_locks.clone(),
+            )
+            .await;
+            let mut tagged: Vec<types::RecoPick> = synthetic;
+            tagged.truncate(10);
+            by_style.insert(style, tagged);
+        }
+    }
 
     let resp = RecoResponse {
         period,

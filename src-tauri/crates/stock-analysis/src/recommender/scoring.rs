@@ -164,6 +164,7 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                synthetic: false,
             },
             RecoPick {
                 stock_code: "600519".into(),
@@ -182,6 +183,7 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                synthetic: false,
             },
         ];
         dedup_and_merge(&mut picks);
@@ -213,6 +215,7 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![Style::Value],
+                synthetic: false,
             },
             RecoPick {
                 stock_code: "600519".into(),
@@ -231,6 +234,7 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                synthetic: false,
             },
         ];
         dedup_and_merge(&mut picks);
@@ -262,6 +266,7 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                synthetic: false,
             })
             .collect();
         let grouped = group_by_style_and_trim(&mut picks, 10);

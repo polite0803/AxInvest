@@ -9297,7 +9297,13 @@
       "emptyHint": "ワークフローのノードを待機中…",
       "sendToChat": "チャットに送信"
     },
-    "alert.date": "Date"
+    "alert.date": "Date",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

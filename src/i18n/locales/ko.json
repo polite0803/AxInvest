@@ -7927,7 +7927,13 @@
       "emptyHint": "워크플로 노드 대기 중…",
       "sendToChat": "채팅으로 보내기"
     },
-    "alert.date": "Date"
+    "alert.date": "Date",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

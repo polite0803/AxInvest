@@ -8092,7 +8092,13 @@
     "workflow.riskNeutral": "中性风险评估",
     "workflow.startFailed": "startFailed",
     "workflow.stopLoss": "止损价",
-    "workflow.targetPrice": "目标价"
+    "workflow.targetPrice": "目标价",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "交易日志",

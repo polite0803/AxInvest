@@ -7927,7 +7927,13 @@
       "emptyHint": "Ожидание узлов рабочего процесса…",
       "sendToChat": "Отправить в чат"
     },
-    "alert.date": "Date"
+    "alert.date": "Date",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

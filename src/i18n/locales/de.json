@@ -7927,7 +7927,13 @@
       "emptyHint": "Warte auf Workflow-Knoten…",
       "sendToChat": "An Chat senden"
     },
-    "alert.date": "Date"
+    "alert.date": "Date",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

@@ -7601,6 +7601,8 @@
       },
       "screener": {
         "title": "🔍 智能荐股",
+        "todayRecommend": "今日荐股",
+        "myFilter": "我的筛选",
         "discover": "全市场",
         "screen": "自选筛选",
         "factorHint": "选择筛选因子（已选 {{count}} 项）：",
@@ -7619,7 +7621,8 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元"
+        "unit10k": "万元",
+        "refresh": "刷新"
       },
       "recommendation": {
         "title": "🔍 智能荐股",

@@ -4,7 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback ?? key,
+    t: (key: string, opts?: unknown) => {
+      if (typeof opts === "string") { return opts; }
+      if (opts && typeof opts === "object" && "defaultValue" in opts) {
+        return String((opts as { defaultValue: string }).defaultValue);
+      }
+      return key;
+    },
   }),
   initReactI18next: { type: "3rdParty", init: () => {} },
 }));
@@ -39,10 +45,25 @@ describe("ScreenerPage", () => {
     expect(title?.textContent).toBe("screener.title");
   });
 
-  it("renders a 3-column grid containing HotStocks/LimitUp/DragonTiger", () => {
+  it("renders a top grid with 2 StockScreenerPanel instances (discover + screen)", () => {
     const { container } = renderWithRouter();
     const grid = container.querySelector(".grid");
     expect(grid).toBeTruthy();
-    expect(grid?.children.length).toBe(3);
+    expect(grid?.children.length).toBe(2);
+  });
+
+  it("renders 3 accordion items for HotStocks / LimitUp / DragonTiger", () => {
+    const { container } = renderWithRouter();
+    // antd Collapse 渲染为 .ant-collapse,包含 N 个 .ant-collapse-item
+    const collapse = container.querySelector(".ant-collapse");
+    expect(collapse).toBeTruthy();
+    const items = collapse?.querySelectorAll(".ant-collapse-item");
+    expect(items?.length).toBe(3);
+  });
+
+  it("defaults to all accordion items collapsed", () => {
+    const { container } = renderWithRouter();
+    const expanded = container.querySelectorAll(".ant-collapse-item-active");
+    expect(expanded.length).toBe(0);
   });
 });

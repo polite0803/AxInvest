@@ -17,7 +17,12 @@ interface HotStock {
   sector: string | null;
 }
 
-export function HotStocksPanel() {
+interface HotStocksPanelProps {
+  /** 是否显示外边框(ScreenerPage Collapse 内嵌时传 false) */
+  bordered?: boolean;
+}
+
+export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
   const { t } = useTranslation();
   const { openDataSourceSettings } = useStockAnalysisPage();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -126,6 +131,7 @@ export function HotStocksPanel() {
   return (
     <Card
       size="small"
+      bordered={bordered}
       title={`🔥 ${t("stockAnalysis.settings.panels.hotStocks")}`}
       styles={{ body: { padding: 0 } }}
       extra={

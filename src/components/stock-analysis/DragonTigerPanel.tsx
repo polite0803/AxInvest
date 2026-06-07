@@ -24,7 +24,12 @@ function fmtYi(v: number): string {
   return `${v.toFixed(0)}`;
 }
 
-export function DragonTigerPanel() {
+interface DragonTigerPanelProps {
+  /** 是否显示外边框(ScreenerPage Collapse 内嵌时传 false) */
+  bordered?: boolean;
+}
+
+export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}) {
   const { t } = useTranslation();
   const { openDataSourceSettings } = useStockAnalysisPage();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -89,6 +94,7 @@ export function DragonTigerPanel() {
   return (
     <Card
       size="small"
+      bordered={bordered}
       title={`🐉 ${t("stockAnalysis.settings.panels.dragonTiger")}`}
       styles={{ body: { padding: "4px 8px" } }}
       extra={

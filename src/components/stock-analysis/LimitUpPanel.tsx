@@ -18,7 +18,12 @@ interface LimitUpStock {
   boardCount: number;
 }
 
-export function LimitUpPanel() {
+interface LimitUpPanelProps {
+  /** 是否显示外边框(ScreenerPage Collapse 内嵌时传 false) */
+  bordered?: boolean;
+}
+
+export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
   const { t } = useTranslation();
   const { openDataSourceSettings } = useStockAnalysisPage();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
@@ -94,6 +99,7 @@ export function LimitUpPanel() {
   return (
     <Card
       size="small"
+      bordered={bordered}
       title={`🏆 ${t("stockAnalysis.settings.panels.limitUp")}`}
       styles={{ body: { padding: "4px 8px" } }}
       extra={

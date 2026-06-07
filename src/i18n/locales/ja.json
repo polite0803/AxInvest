@@ -8947,8 +8947,7 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "refresh": "Refresh"
+        "unit10k": "10k"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
@@ -9328,7 +9327,9 @@
       "styleDisabledReason": "Style {style} is disabled in settings",
       "realTooltip": "実際の戦略ヒット（Kライン・財務・資金シグナルが揃っている）",
       "tagReal": "実際",
-      "tagSynthetic": "フォールバック"
+      "tagSynthetic": "フォールバック",
+      "crossCheckDivided": "アナリストの見解が分かれている — 行動する前に様子見",
+      "syntheticTooltip": "データ不足のフォールバック（Kライン・財務・資金データなし、現在価格から合成）"
     },
     "periodShort": "短期",
     "periodMid": "中期",

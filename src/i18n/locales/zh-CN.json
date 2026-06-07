@@ -7614,8 +7614,7 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元",
-        "refresh": "刷新"
+        "unit10k": "万元"
       },
       "recommendation": {
         "title": "🔍 智能荐股",

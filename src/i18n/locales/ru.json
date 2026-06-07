@@ -7577,8 +7577,7 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "refresh": "Refresh"
+        "unit10k": "10k"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
@@ -7958,7 +7957,9 @@
       "styleDisabledReason": "Style {style} is disabled in settings",
       "realTooltip": "Реальное стратегическое попадание (K-линии / финансы / сигналы капитала)",
       "tagReal": "Реальный",
-      "tagSynthetic": "Запасной"
+      "tagSynthetic": "Запасной",
+      "crossCheckDivided": "Мнения аналитиков разделились — наблюдайте перед действием",
+      "syntheticTooltip": "Запасной вариант при разреженных данных (K-линии / финансы / капитал недоступны, синтезировано из текущей цены)"
     },
     "periodShort": "Краткосрочно",
     "periodMid": "Среднесрочно",

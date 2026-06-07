@@ -1,6 +1,6 @@
 use crate::AppState;
 use axagent_core::entity::{
-    portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items, workflow_template,
+    portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,

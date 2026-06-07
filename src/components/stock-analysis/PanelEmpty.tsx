@@ -53,26 +53,30 @@ export function PanelEmpty(props: PanelEmptyProps) {
 
   const showCta = !hideCta && onOpenSettings && (kind === "vendorDisabled" || kind === "backendOffline");
 
+  // Empty 的 description 传 string 才会覆盖 antd 内置的 "No data"，
+  // 传 ReactNode 时 antd 会同时渲染默认文案和自定义节点，叠加出两层。
   return (
     <Empty
       image={image ?? Empty.PRESENTED_IMAGE_SIMPLE}
       description={
-        <Space orientation="vertical" size={4} className="text-center">
-          <Typography.Text type="secondary" className="text-xs">
-            {descText}
-          </Typography.Text>
-          {showCta && (
-            <Button
-              size="small"
-              type="link"
-              icon={<SettingOutlined />}
-              onClick={onOpenSettings}
-              className="px-0"
-            >
-              {t("stockAnalysis.settings.openDataSource")}
-            </Button>
-          )}
-        </Space>
+        showCta
+          ? (
+            <Space orientation="vertical" size={4} className="text-center">
+              <Typography.Text type="secondary" className="text-xs">
+                {descText}
+              </Typography.Text>
+              <Button
+                size="small"
+                type="link"
+                icon={<SettingOutlined />}
+                onClick={onOpenSettings}
+                className="px-0"
+              >
+                {t("stockAnalysis.settings.openDataSource")}
+              </Button>
+            </Space>
+          )
+          : descText
       }
     />
   );

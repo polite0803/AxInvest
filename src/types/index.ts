@@ -694,7 +694,12 @@ export type BuiltinPageKey =
   | "marketplace"
   | "wiki"
   | "workflow"
-  | "stock-analysis";
+  | "stock-analysis"
+  | "watchlist"
+  | "screener"
+  | "trade"
+  | "backtest"
+  | "compare";
 export type PageKey = BuiltinPageKey | string;
 export type SettingsSection =
   | "providers"

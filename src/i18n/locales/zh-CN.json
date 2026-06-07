@@ -7633,6 +7633,7 @@
         "styleValue": "价值低估",
         "styleCapital": "资金驱动",
         "styleReversion": "超跌反弹",
+        "styleWatchlist": "系统初筛",
         "styleDisabled": "已禁用",
         "bannerVendorDisabled": "{{styles}} 数据源未启用，相关推荐已隐藏",
         "openSettings": "去启用",

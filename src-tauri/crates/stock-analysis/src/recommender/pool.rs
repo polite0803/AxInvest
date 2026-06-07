@@ -228,6 +228,8 @@ pub fn required_vendors_for_style(
         Capital => &["ths", "baidu_stock"],
         // 超跌反弹：依赖 K 线
         Reversion => &["eastmoney", "tencent", "ths", "akshare"],
+        // 候选池兜底：只依赖实时 quote
+        Watchlist => &["tencent", "eastmoney", "mootdx"],
     }
 }
 
@@ -283,7 +285,7 @@ mod tests {
 
     #[test]
     fn each_style_has_required_vendors() {
-        for s in [Style::Trend, Style::Value, Style::Capital, Style::Reversion] {
+        for s in [Style::Trend, Style::Value, Style::Capital, Style::Reversion, Style::Watchlist] {
             let v = required_vendors_for_style(s);
             assert!(!v.is_empty(), "{:?} missing vendors", s);
         }

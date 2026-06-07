@@ -7624,6 +7624,7 @@
         "styleValue": "Value",
         "styleCapital": "Capital",
         "styleReversion": "Reversion",
+        "styleWatchlist": "Watchlist",
         "styleDisabled": "Disabled",
         "bannerVendorDisabled": "{{styles}} data source(s) not enabled, related picks hidden",
         "openSettings": "Enable",

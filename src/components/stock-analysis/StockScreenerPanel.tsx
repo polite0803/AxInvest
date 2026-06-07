@@ -145,7 +145,8 @@ export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) 
         setResults([]);
         setEmptyKind("noData");
       }
-    } catch {
+    } catch (e) {
+      console.error("[StockScreenerPanel] discover_stock_candidates 失败:", e);
       setResults([]);
       setEmptyKind("connectionFailed");
     }
@@ -187,7 +188,8 @@ export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) 
         setResults([]);
         setEmptyKind("noData");
       }
-    } catch {
+    } catch (e) {
+      console.error("[StockScreenerPanel] screen_stocks 失败:", e);
       setResults([]);
       setEmptyKind("connectionFailed");
     }

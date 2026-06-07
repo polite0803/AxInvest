@@ -667,19 +667,25 @@ pub async fn backtest_key_levels(
 
 // ── Screen Commands ──
 
-/// 从自选股中筛选
+/// 从自选股中筛选(自选股为空或 DB 异常时回退到 FALLBACK_STOCKS 池)
 #[tauri::command]
 pub async fn screen_stocks(
     state: State<'_, AppState>,
     criteria: ScreenCriteria,
 ) -> Result<Vec<ScreenResult>, String> {
-    let watchlist: Vec<(String, String)> = axagent_core::entity::watchlist_items::Entity::find()
+    let watchlist: Vec<(String, String)> = match axagent_core::entity::watchlist_items::Entity::find()
         .all(state.harness.db())
         .await
-        .map_err(|e| e.to_string())?
-        .iter()
-        .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
-        .collect();
+    {
+        Ok(rows) => rows
+            .iter()
+            .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
+            .collect(),
+        Err(e) => {
+            tracing::warn!("screen_stocks: 读自选股失败,改用 FALLBACK 池: {}", e);
+            Vec::new()
+        }
+    };
 
     StockScreener::screen_watchlist(&state.astock_client, &watchlist, &criteria).await
 }

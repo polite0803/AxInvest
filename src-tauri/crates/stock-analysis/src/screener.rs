@@ -94,7 +94,7 @@ pub struct ScreenResult {
 pub struct StockScreener;
 
 impl StockScreener {
-    /// 从自选股中筛选符合条件的标的
+    /// 从自选股中筛选符合条件的标的;自选股为空时回退到 FALLBACK_STOCKS 池
     pub async fn screen_watchlist(
         client: &AStockClient,
         watchlist: &[(String, String)],
@@ -102,7 +102,21 @@ impl StockScreener {
     ) -> Result<Vec<ScreenResult>, String> {
         let mut results = Vec::new();
 
-        for (code, name) in watchlist {
+        // 自选股为空时,使用 FALLBACK_STOCKS 兜底池
+        let pool: Vec<(String, String)> = if watchlist.is_empty() {
+            tracing::info!(
+                "screen_watchlist: 自选股为空,使用 FALLBACK_STOCKS 池 ({} 只)",
+                FALLBACK_STOCKS.len()
+            );
+            FALLBACK_STOCKS
+                .iter()
+                .map(|(code, name)| (code.to_string(), name.to_string()))
+                .collect()
+        } else {
+            watchlist.to_vec()
+        };
+
+        for (code, name) in &pool {
             let mut reasons = Vec::new();
             let mut score = 0u32;
 

@@ -19,17 +19,17 @@ pub use strategy::{RecoContext, RecommendStrategy};
 pub use types::{Period, RecoResponse, Style};
 
 use axagent_astock_data::AStockClient;
-use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+// `HashSet` 在 Rust 2024 edition 已加入 prelude
 
 use crate::recommender::pool::{
     build_seed_pool, clear_cached_vendors, get_cached_vendors, liquidity_filter_and_truncate,
-    load_enabled_vendors_from_template, set_cached_vendors, vendors_satisfied,
+    load_enabled_vendors_from_template, set_cached_vendors,
 };
 use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim};
 use crate::recommender::strategies::{
-    CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy,
+    CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy, WatchlistStrategy,
 };
 use crate::recommender::strategy::PerCodeLocks;
 
@@ -80,64 +80,70 @@ pub async fn recommend_stocks(
         return Ok(cached);
     }
 
-    // 1. 加载 enabled vendor 集合
-    let enabled_vendors: HashSet<String> = match get_cached_vendors() {
-        Some(s) => s,
-        None => {
-            let s = load_enabled_vendors_from_template(template_vars);
-            set_cached_vendors(s.clone());
-            s
-        },
-    };
+    // 1. 预热 enabled-vendors 缓存（settings 页保存 vendor 时需要 invalid 这个缓存
+    //    来刷新结果缓存；此处不依赖 enabled_vendors 做策略 gating）
+    let _ = get_cached_vendors().unwrap_or_else(|| {
+        let s = load_enabled_vendors_from_template(template_vars);
+        set_cached_vendors(s.clone());
+        s
+    });
 
     // 2. seed pool + 流动性过滤
     let mut seed = build_seed_pool(&client).await;
     let raw_seed_pool_size = seed.len();
+    // 保留 raw_seed 给 WatchlistStrategy（它只依赖 quote，不依赖 K 线）
+    let raw_seed = seed.clone();
     seed = liquidity_filter_and_truncate(client.clone(), seed).await;
 
-    // 3. 选定该 period 下的所有子策略 + vendor 降级
+    // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
+    //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
+    //    workflow template 中往往 vendor_* 变量为空，导致 4 个 style 全 disabled。
+    //    现在所有 style 都跑；data 真的取不到时该 style 自然返回空 picks，
+    //    前端展示 "no data" 而非误报 "数据源未启用"）
     let all_strategies: Vec<Box<dyn RecommendStrategy>> = match period {
         Period::Short => vec![
             Box::new(TrendStrategy::short()),
             Box::new(ValueStrategy::short()),
             Box::new(CapitalStrategy::short()),
             Box::new(ReversionStrategy::short()),
+            Box::new(WatchlistStrategy::short()),
         ],
         Period::Mid => vec![
             Box::new(TrendStrategy::mid()),
             Box::new(ValueStrategy::mid()),
             Box::new(CapitalStrategy::mid()),
             Box::new(ReversionStrategy::mid()),
+            Box::new(WatchlistStrategy::mid()),
         ],
         Period::Long => vec![
             Box::new(TrendStrategy::long()),
             Box::new(ValueStrategy::long()),
             Box::new(CapitalStrategy::long()),
             // ReversionStrategy long 不做
+            Box::new(WatchlistStrategy::long()),
         ],
     };
 
-    let mut enabled: Vec<Box<dyn RecommendStrategy>> = Vec::new();
-    let mut disabled_styles_set: std::collections::HashSet<Style> =
-        std::collections::HashSet::new();
-    for s in all_strategies {
-        let reqs = s.required_vendors();
-        if vendors_satisfied(reqs, &enabled_vendors) {
-            enabled.push(s);
-        } else {
-            disabled_styles_set.insert(s.style());
-        }
-    }
+    let enabled: Vec<Box<dyn RecommendStrategy>> = all_strategies;
+    let disabled_styles_set: std::collections::HashSet<Style> = std::collections::HashSet::new();
 
     // 4. 并行执行（per-code 互斥锁：不同 code 真正并行，同 code 4 策略间串行）
     let per_code_locks = PerCodeLocks::new();
     let ctx_pool = seed.clone();
+    let raw_ctx_pool = raw_seed.clone();
     let mut futures = Vec::new();
     for s in enabled.iter() {
+        // WatchlistStrategy 用 raw_seed（不过流动性过滤），
+        // 这样 K 线全部拿不到时它仍能基于 raw pool 出 picks
+        let use_raw = matches!(s.style(), Style::Watchlist);
         let s_ref: &dyn RecommendStrategy = s.as_ref();
         let client_ref: Arc<AStockClient> = client.clone();
         let lock_ref = per_code_locks.clone();
-        let seed_ref = ctx_pool.clone();
+        let seed_ref = if use_raw {
+            raw_ctx_pool.clone()
+        } else {
+            ctx_pool.clone()
+        };
         let period_val = period;
         let fut = async move {
             let ctx = RecoContext {

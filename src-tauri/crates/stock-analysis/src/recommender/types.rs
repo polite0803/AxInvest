@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 风格（4 种）
+/// 风格
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Style {
@@ -14,6 +14,9 @@ pub enum Style {
     Capital,
     /// 超跌反弹
     Reversion,
+    /// 候选池兜底：仅依赖 quote 数据的"系统初筛"列表，
+    /// 当 4 个主风格都拿不到数据时充当 fallback，确保面板始终有内容
+    Watchlist,
 }
 
 impl Style {
@@ -23,6 +26,7 @@ impl Style {
             Style::Value => "value",
             Style::Capital => "capital",
             Style::Reversion => "reversion",
+            Style::Watchlist => "watchlist",
         }
     }
 }

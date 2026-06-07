@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 
-type StyleKey = "trend" | "value" | "capital" | "reversion";
+type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist";
 type PeriodKey = "short" | "mid" | "long";
 
 interface RecoPick {
@@ -37,12 +37,13 @@ interface RecoResponse {
   rawSeedPoolSize: number;
 }
 
-const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion"];
+const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist"];
 const STYLE_COLOR: Record<StyleKey, string> = {
   trend: "blue",
   value: "gold",
   capital: "magenta",
   reversion: "green",
+  watchlist: "default",
 };
 
 const FALLBACK = "—";

@@ -7975,5 +7975,12 @@
   "compare": {
     "title": "Сравнение",
     "placeholder": "Сравнение с аналогами"
+  },
+  "dualView": {
+    "notRegistered": "Незарегистрированное dual view: {{id}}",
+    "expand": "Развернуть в {{title}}",
+    "expandToPanel": "Развернуть в панель",
+    "collapse": "Свернуть",
+    "collapseToBubble": "Свернуть в пузырь"
   }
 }

@@ -9345,5 +9345,12 @@
   "compare": {
     "title": "比較",
     "placeholder": "同業他社の銘柄と比較"
+  },
+  "dualView": {
+    "notRegistered": "未登録の dual view: {{id}}",
+    "expand": "「{{title}}」に展開",
+    "expandToPanel": "パネルに展開",
+    "collapse": "折りたたみ",
+    "collapseToBubble": "バブルに折りたたむ"
   }
 }

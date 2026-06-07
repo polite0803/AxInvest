@@ -7975,5 +7975,12 @@
   "compare": {
     "title": "Comparación",
     "placeholder": "Comparar acciones con sus pares"
+  },
+  "dualView": {
+    "notRegistered": "Vista dual no registrada: {{id}}",
+    "expand": "Expandir a {{title}}",
+    "expandToPanel": "Expandir a panel",
+    "collapse": "Contraer",
+    "collapseToBubble": "Contraer a burbuja"
   }
 }

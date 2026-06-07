@@ -199,6 +199,15 @@ export interface Message {
   first_token_latency_ms?: number | null;
   /** Structured content blocks (from agent session ContentBlock). */
   blocks?: ContentBlock[];
+  /** Phase 9 Dual View: 让 chat bubble 可折叠/展开为侧栏 panel。bubbleMeta 决定能否展开。 */
+  meta?: {
+    bubbleMeta?: {
+      /** 对应 dualViewRegistry 中的 id */
+      dualViewId?: string;
+      /** 引用 store 中的某份数据；展开时用此 key 找回完整数据 */
+      dataRef?: string;
+    };
+  };
 }
 
 // ── Content Block (Part-based message model, short-term) ──────────────

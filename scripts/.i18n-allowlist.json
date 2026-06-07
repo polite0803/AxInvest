@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-02",
-  "total_entries": 313,
-  "total_files": 313,
+  "total_entries": 329,
+  "total_files": 329,
   "entries": [
     {
       "file": "amplitude",
@@ -12,31 +12,31 @@
     },
     {
       "file": "askAI",
-      "lines": "A,s,k, ,A,I",
+      "lines": "A,s,k,I",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "askAi.decision",
-      "lines": "d,e,c,i,s,i,o,n",
+      "lines": "d,e,c,i,s,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "askAi.prompt",
-      "lines": "p,r,o,m,p,t",
+      "lines": "p,r,o,m,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "backtest.accuracy",
-      "lines": "a,c,c,u,r,a,c,y",
+      "lines": "a,c,u,r,y",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "backtest.allFailed",
-      "lines": "a,l,l,F,a,i,l,e,d",
+      "lines": "a,l,F,i,e,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -48,7 +48,7 @@
     },
     {
       "file": "backtest.correct",
-      "lines": "c,o,r,r,e,c,t",
+      "lines": "c,o,r,e,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -66,13 +66,13 @@
     },
     {
       "file": "backtest.maxDrawdown",
-      "lines": "m,a,x,D,r,a,w,d,o,w,n",
+      "lines": "m,a,x,D,r,w,d,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "backtest.returnRate",
-      "lines": "r,e,t,u,r,n,R,a,t,e",
+      "lines": "r,e,t,u,n,R,a",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -84,25 +84,25 @@
     },
     {
       "file": "backtest.runAll",
-      "lines": "r,u,n,A,l,l",
+      "lines": "r,u,n,A,l",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "backtest.summary",
-      "lines": "s,u,m,m,a,r,y",
+      "lines": "s,u,m,a,r,y",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "backtest.title",
-      "lines": "t,i,t,l,e",
+      "lines": "t,i,l,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "backtest.total",
-      "lines": "t,o,t,a,l",
+      "lines": "t,o,a,l",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -120,13 +120,13 @@
     },
     {
       "file": "contextCopied",
-      "lines": "C,o,n,t,e,x,t, ,c,o,p,i,e,d",
+      "lines": "C,o,n,t,e,x,c,p,i,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "dataFetched",
-      "lines": "F,e,t,c,h,e,d",
+      "lines": "F,e,t,c,h,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -138,13 +138,13 @@
     },
     {
       "file": "dataSource",
-      "lines": "D,a,t,a, ,S,o,u,r,c,e",
+      "lines": "D,a,t,S,o,u,r,c,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "dataWaiting",
-      "lines": "W,a,i,t,i,n,g",
+      "lines": "W,a,i,t,n,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -156,19 +156,19 @@
     },
     {
       "file": "expandView",
-      "lines": "E,x,p,a,n,d, ,V,i,e,w",
+      "lines": "E,x,p,a,n,d,V,i,e,w",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "expectedUpside",
-      "lines": "E,x,p,e,c,t,e,d, ,U,p,s,i,d,e",
+      "lines": "E,x,p,e,c,t,d,U,s,i",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "export.analystReports",
-      "lines": "a,n,a,l,y,s,t,R,e,p,o,r,t,s",
+      "lines": "a,n,l,y,s,t,R,e,p,o,r",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -180,19 +180,19 @@
     },
     {
       "file": "export.debateRounds",
-      "lines": "d,e,b,a,t,e,R,o,u,n,d,s",
+      "lines": "d,e,b,a,t,R,o,u,n,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "export.decision",
-      "lines": "d,e,c,i,s,i,o,n",
+      "lines": "d,e,c,i,s,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "export.position",
-      "lines": "p,o,s,i,t,i,o,n",
+      "lines": "p,o,s,i,t,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -204,13 +204,13 @@
     },
     {
       "file": "export.reasoning",
-      "lines": "r,e,a,s,o,n,i,n,g",
+      "lines": "r,e,a,s,o,n,i,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "export.riskAssessments",
-      "lines": "r,i,s,k,A,s,s,e,s,s,m,e,n,t,s",
+      "lines": "r,i,s,k,A,e,m,n,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -222,13 +222,13 @@
     },
     {
       "file": "export.target",
-      "lines": "t,a,r,g,e,t",
+      "lines": "t,a,r,g,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "export.title",
-      "lines": "t,i,t,l,e",
+      "lines": "t,i,l,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -240,13 +240,13 @@
     },
     {
       "file": "exportReport",
-      "lines": "E,x,p,o,r,t, ,R,e,p,o,r,t",
+      "lines": "E,x,p,o,r,t,R,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "exported",
-      "lines": "R,e,p,o,r,t, ,e,x,p,o,r,t,e,d",
+      "lines": "R,e,p,o,r,t,x,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -258,79 +258,169 @@
     },
     {
       "file": "historyEmpty",
-      "lines": "N,o, ,h,i,s,t,o,r,i,c,a,l, ,a,n,a,l,y,s,i,s, ,r,e,c,o,r,d,s",
+      "lines": "N,o,h,i,s,t,r,c,a,l,n,y,e,d",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "indexQuotes",
+      "lines": "M,a,r,k,e,t, ,I,n,d,i,c,e,s",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "peers",
+      "lines": "P,e,e,r, ,C,o,m,p,a,r,i,s,o,n",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "announcements",
+      "lines": "A,n,n,o,u,n,c,e,m,e,n,t,s",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "conceptBlocks",
+      "lines": "C,o,n,c,e,p,t, ,B,l,o,c,k,s",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "clsFlash",
+      "lines": "C,L,S, ,F,l,a,s,h",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "hotStocks",
+      "lines": "H,o,t, ,S,t,o,c,k,s",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "industryRanking",
+      "lines": "I,n,d,u,s,t,r,y, ,R,a,n,k,i,n,g",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "leader",
+      "lines": "L,e,a,d,e,r",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "optionPcr",
+      "lines": "O,p,t,i,o,n, ,P,C,R",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "optionPcrOi",
+      "lines": "O,p,e,n, ,I,n,t,e,r,e,s,t, ,P,C,R",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "optionPcrVolume",
+      "lines": "V,o,l,u,m,e, ,P,C,R",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "industry",
+      "lines": "I,n,d,u,s,t,r,y",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "concepts",
+      "lines": "C,o,n,c,e,p,t,s",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "regions",
+      "lines": "R,e,g,i,o,n,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "monitoringActive",
-      "lines": "M,o,n,i,t,o,r,i,n,g, ,A,c,t,i,v,e",
+      "lines": "M,o,n,i,t,r,g,A,c,v,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "monitoringPaused",
-      "lines": "M,o,n,i,t,o,r,i,n,g, ,P,a,u,s,e,d",
+      "lines": "M,o,n,i,t,r,g,P,a,u,s,e,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "moreRounds",
-      "lines": "m,o,r,e,R,o,u,n,d,s",
+      "lines": "m,o,r,e,R,u,n,d,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "noChartData",
-      "lines": "N,o, ,C,h,a,r,t, ,D,a,t,a",
+      "lines": "N,o,C,h,a,r,t,D",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "noDecisionReasoning",
-      "lines": "n,o,D,e,c,i,s,i,o,n,R,e,a,s,o,n,i,n,g",
+      "lines": "n,o,D,e,c,i,s,R,a,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "noRecords",
-      "lines": "N,o, ,r,e,c,o,r,d,s",
+      "lines": "N,o,r,e,c,d,s",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "reason",
+      "lines": "R,e,a,s,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "noReport",
-      "lines": "n,o,R,e,p,o,r,t",
+      "lines": "n,o,R,e,p,r,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "noRiskData",
-      "lines": "n,o,R,i,s,k,D,a,t,a",
+      "lines": "n,o,R,i,s,k,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "progress.stepDone",
-      "lines": "s,t,e,p,D,o,n,e",
+      "lines": "s,t,e,p,D,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "progress.stepRetrying",
-      "lines": "s,t,e,p,R,e,t,r,y,i,n,g",
+      "lines": "s,t,e,p,R,r,y,i,n,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "progress.stepRunning",
-      "lines": "s,t,e,p,R,u,n,n,i,n,g",
+      "lines": "s,t,e,p,R,u,n,i,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "risk.comprehensive",
-      "lines": "C,o,m,p,r,e,h,e,n,s,i,v,e",
+      "lines": "C,o,m,p,r,e,h,n,s,i,v",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -354,13 +444,13 @@
     },
     {
       "file": "risk.researchManager",
-      "lines": "R,e,s,e,a,r,c,h, ,M,g,r",
+      "lines": "R,e,s,a,r,c,h,M,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "riskUnknown",
-      "lines": "U,n,k,n,o,w,n",
+      "lines": "U,n,k,o,w",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -378,7 +468,7 @@
     },
     {
       "file": "sentimentBullish",
-      "lines": "B,u,l,l,i,s,h",
+      "lines": "B,u,l,i,s,h",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -390,7 +480,7 @@
     },
     {
       "file": "summary.dataItems",
-      "lines": "d,a,t,a,I,t,e,m,s",
+      "lines": "d,a,t,I,e,m,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -408,19 +498,19 @@
     },
     {
       "file": "summary.noData",
-      "lines": "n,o,D,a,t,a",
+      "lines": "n,o,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "summary.records",
-      "lines": "r,e,c,o,r,d,s",
+      "lines": "r,e,c,o,d,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "summary.recordsWithKeys",
-      "lines": "r,e,c,o,r,d,s,W,i,t,h,K,e,y,s",
+      "lines": "r,e,c,o,d,s,W,i,t,h,K,y",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -438,7 +528,7 @@
     },
     {
       "file": "tool.announcement",
-      "lines": "a,n,n,o,u,n,c,e,m,e,n,t",
+      "lines": "a,n,o,u,c,e,m,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -450,121 +540,121 @@
     },
     {
       "file": "tool.clsFlash",
-      "lines": "c,l,s,F,l,a,s,h",
+      "lines": "c,l,s,F,a,h",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.concept",
-      "lines": "c,o,n,c,e,p,t",
+      "lines": "c,o,n,e,p,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.consensus",
-      "lines": "c,o,n,s,e,n,s,u,s",
+      "lines": "c,o,n,s,e,u",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.dragonTiger",
-      "lines": "d,r,a,g,o,n,T,i,g,e,r",
+      "lines": "d,r,a,g,o,n,T,i,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.financialData",
-      "lines": "f,i,n,a,n,c,i,a,l,D,a,t,a",
+      "lines": "f,i,n,a,c,l,D,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.fundamentalsData",
-      "lines": "F,u,n,d,a,m,e,n,t,a,l,s, ,D,a,t,a",
+      "lines": "F,u,n,d,a,m,e,t,l,s,D",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.hotMoneyData",
-      "lines": "h,o,t,M,o,n,e,y,D,a,t,a",
+      "lines": "h,o,t,M,n,e,y,D,a",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.indexData",
-      "lines": "i,n,d,e,x,D,a,t,a",
+      "lines": "i,n,d,e,x,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.institutional",
-      "lines": "i,n,s,t,i,t,u,t,i,o,n,a,l",
+      "lines": "i,n,s,t,u,o,a,l",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.klineData",
-      "lines": "k,l,i,n,e,D,a,t,a",
+      "lines": "k,l,i,n,e,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.lockupData",
-      "lines": "l,o,c,k,u,p,D,a,t,a",
+      "lines": "l,o,c,k,u,p,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.marketData",
-      "lines": "m,a,r,k,e,t,D,a,t,a",
+      "lines": "m,a,r,k,e,t,D",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.moneyFlow",
-      "lines": "m,o,n,e,y,F,l,o,w",
+      "lines": "m,o,n,e,y,F,l,w",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.newsData",
-      "lines": "n,e,w,s,D,a,t,a",
+      "lines": "n,e,w,s,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.northbound",
-      "lines": "n,o,r,t,h,b,o,u,n,d",
+      "lines": "n,o,r,t,h,b,u,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.optionData",
-      "lines": "o,p,t,i,o,n,D,a,t,a",
+      "lines": "o,p,t,i,n,D,a",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.peersData",
-      "lines": "p,e,e,r,s,D,a,t,a",
+      "lines": "p,e,r,s,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.policyData",
-      "lines": "p,o,l,i,c,y,D,a,t,a",
+      "lines": "p,o,l,i,c,y,D,a,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.portfolioRisk",
-      "lines": "p,o,r,t,f,o,l,i,o,R,i,s,k",
+      "lines": "p,o,r,t,f,l,i,R,s,k",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.researchData",
-      "lines": "r,e,s,e,a,r,c,h,D,a,t,a",
+      "lines": "r,e,s,a,c,h,D,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -576,49 +666,49 @@
     },
     {
       "file": "tool.sectorData",
-      "lines": "s,e,c,t,o,r,D,a,t,a",
+      "lines": "s,e,c,t,o,r,D,a",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.sentimentData",
-      "lines": "s,e,n,t,i,m,e,n,t,D,a,t,a",
+      "lines": "s,e,n,t,i,m,D,a",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "tool.valuation",
-      "lines": "v,a,l,u,a,t,i,o,n",
+      "lines": "v,a,l,u,t,i,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "trade.pnlPercent",
-      "lines": "p,n,l,P,e,r,c,e,n,t",
+      "lines": "p,n,l,P,e,r,c,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "trade.quickRecord",
-      "lines": "q,u,i,c,k,R,e,c,o,r,d",
+      "lines": "q,u,i,c,k,R,e,o,r,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "trade.stopLoss",
-      "lines": "s,t,o,p,L,o,s,s",
+      "lines": "s,t,o,p,L",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "trade.totalPnl",
-      "lines": "t,o,t,a,l,P,n,l",
+      "lines": "t,o,a,l,P,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "trade.totalTrades",
-      "lines": "t,o,t,a,l,T,r,a,d,e,s",
+      "lines": "t,o,a,l,T,r,d,e,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -630,25 +720,31 @@
     },
     {
       "file": "turnoverRate",
-      "lines": "T,u,r,n,o,v,e,r",
+      "lines": "T,u,r,n,o,v,e",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "toolLabel",
+      "lines": "",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "valueAssessment.buffettLabel",
-      "lines": "B,u,f,f,e,t,t",
+      "lines": "B,u,f,e,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "valueAssessment.dataQuality",
-      "lines": "D,a,t,a, ,Q,u,a,l,i,t,y",
+      "lines": "D,a,t,Q,u,l,i,y",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "valueAssessment.empty",
-      "lines": "N,o, ,v,a,l,u,a,t,i,o,n, ,d,a,t,a",
+      "lines": "N,o,v,a,l,u,t,i,n,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -660,25 +756,25 @@
     },
     {
       "file": "valueAssessment.futureFields",
-      "lines": "O,u,t,l,o,o,k",
+      "lines": "O,u,t,l,o,k",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "valueAssessment.rawData",
-      "lines": "R,a,w, ,D,a,t,a",
+      "lines": "R,a,w,D,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "valueAssessment.ruleCheck",
-      "lines": "R,u,l,e, ,C,h,e,c,k",
+      "lines": "R,u,l,e,C,h,c,k",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "valueAssessment.title",
-      "lines": "V,a,l,u,a,t,i,o,n, ,A,s,s,e,s,s,m,e,n,t",
+      "lines": "V,a,l,u,t,i,o,n,A,s,e,m",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -690,67 +786,67 @@
     },
     {
       "file": "watchlistEmpty",
-      "lines": "N,o, ,s,t,o,c,k,s, ,i,n, ,w,a,t,c,h,l,i,s,t,., ,S,e,a,r,c,h, ,a,n,d, ,c,l,i,c,k, ,+, ,t,o, ,a,d,d",
+      "lines": "N,o,s,t,c,k,i,n,w,a,h,l,.,S,e,r,d,+",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.fundamentals-analyst",
-      "lines": "F,u,n,d,a,m,e,n,t,a,l, ,A,n,a,l,y,s,t",
+      "lines": "F,u,n,d,a,m,e,t,l,A,y,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.hot-money-tracker",
-      "lines": "H,o,t, ,M,o,n,e,y, ,T,r,a,c,k,e,r",
+      "lines": "H,o,t,M,n,e,y,T,r,a,c,k",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.lockup-watcher",
-      "lines": "L,o,c,k,u,p, ,W,a,t,c,h,e,r",
+      "lines": "L,o,c,k,u,p,W,a,t,h,e,r",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.market-analyst",
-      "lines": "T,e,c,h,n,i,c,a,l, ,A,n,a,l,y,s,t",
+      "lines": "T,e,c,h,n,i,a,l,A,y,s,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.news-analyst",
-      "lines": "N,e,w,s, ,A,n,a,l,y,s,t",
+      "lines": "N,e,w,s,A,n,a,l,y,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.policy-analyst",
-      "lines": "P,o,l,i,c,y, ,A,n,a,l,y,s,t",
+      "lines": "P,o,l,i,c,y,A,n,a,s,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.research-analyst",
-      "lines": "R,e,s,e,a,r,c,h, ,A,n,a,l,y,s,t",
+      "lines": "R,e,s,a,r,c,h,A,n,l,y,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.sector-analyst",
-      "lines": "S,e,c,t,o,r, ,A,n,a,l,y,s,t",
+      "lines": "S,e,c,t,o,r,A,n,a,l,y,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analyst.sentiment-analyst",
-      "lines": "S,e,n,t,i,m,e,n,t, ,A,n,a,l,y,s,t",
+      "lines": "S,e,n,t,i,m,A,a,l,y,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.analystComplete",
-      "lines": "A,n,a,l,y,s,i,s, ,c,o,m,p,l,e,t,e,., ,S,e,e, ,d,e,t,a,i,l,s, ,o,n, ,a,n,a,l,y,s,i,s, ,p,a,g,e,.",
+      "lines": "A,n,a,l,y,s,i,c,o,m,p,e,t,.,S,d,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -762,103 +858,103 @@
     },
     {
       "file": "workflow.bearCase",
-      "lines": "b,e,a,r,C,a,s,e",
+      "lines": "b,e,a,r,C,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.bullAnalyst",
-      "lines": "B,u,l,l",
+      "lines": "B,u,l",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.bullCase",
-      "lines": "b,u,l,l,C,a,s,e",
+      "lines": "b,u,l,C,a,s,e",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.confidence",
-      "lines": "C,o,n,f,i,d,e,n,c,e",
+      "lines": "C,o,n,f,i,d,e,c",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.currentPhase",
-      "lines": "C,u,r,r,e,n,t",
+      "lines": "C,u,r,e,n,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.decisionTitle",
-      "lines": "F,i,n,a,l, ,D,e,c,i,s,i,o,n",
+      "lines": "F,i,n,a,l,D,e,c,s,o",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.failedSteps",
-      "lines": "F,a,i,l,e,d, ,S,t,e,p,s",
+      "lines": "F,a,i,l,e,d,S,t,p,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.failedStepsWithCount",
-      "lines": "F,a,i,l,e,d, ,S,t,e,p,s, ,(,{,{,c,o,u,n,t,},},)",
+      "lines": "F,a,i,l,e,d,S,t,p,s,(,{,c,o,u,n,},)",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.fetchFailed",
-      "lines": "F,a,i,l,e,d, ,t,o, ,f,e,t,c,h, ,d,a,t,a",
+      "lines": "F,a,i,l,e,d,t,o,f,c,h",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.initializing",
-      "lines": "I,n,i,t,i,a,l,i,z,i,n,g",
+      "lines": "I,n,i,t,a,l,z,g",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.notification",
-      "lines": "A,n,a,l,y,s,i,s, ,C,o,m,p,l,e,t,e, ,N,o,t,i,f,i,c,a,t,i,o,n",
+      "lines": "A,n,a,l,y,s,i,C,o,m,p,e,t,N,f,c",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.partialFailed",
-      "lines": "p,a,r,t,i,a,l,F,a,i,l,e,d",
+      "lines": "p,a,r,t,i,l,F,e,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.positionPct",
-      "lines": "P,o,s,i,t,i,o,n",
+      "lines": "P,o,s,i,t,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.riskAggregation",
-      "lines": "R,i,s,k, ,A,g,g,r,e,g,a,t,i,o,n",
+      "lines": "R,i,s,k,A,g,r,e,a,t,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.riskAggressive",
-      "lines": "A,g,g,r,e,s,s,i,v,e, ,R,i,s,k, ,A,s,s,e,s,s,m,e,n,t",
+      "lines": "A,g,r,e,s,i,v,R,k,m,n,t",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.riskClassification",
-      "lines": "R,i,s,k, ,C,l,a,s,s,i,f,i,c,a,t,i,o,n",
+      "lines": "R,i,s,k,C,l,a,f,c,t,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.riskConservative",
-      "lines": "C,o,n,s,e,r,v,a,t,i,v,e, ,R,i,s,k, ,A,s,s,e,s,s,m,e,n,t",
+      "lines": "C,o,n,s,e,r,v,a,t,i,R,k,A,m",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -870,19 +966,19 @@
     },
     {
       "file": "workflow.riskNeutral",
-      "lines": "N,e,u,t,r,a,l, ,R,i,s,k, ,A,s,s,e,s,s,m,e,n,t",
+      "lines": "N,e,u,t,r,a,l,R,i,s,k,A,m,n",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.startFailed",
-      "lines": "s,t,a,r,t,F,a,i,l,e,d",
+      "lines": "s,t,a,r,F,i,l,e,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "workflow.stopLoss",
-      "lines": "S,t,o,p, ,L,o,s,s",
+      "lines": "S,t,o,p,L,s",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -894,7 +990,7 @@
     },
     {
       "file": "workflowStarting",
-      "lines": "⏳, ,S,t,a,r,t,i,n,g, ,{,{,s,t,o,c,k,C,o,d,e,},}, ,s,t,o,c,k, ,a,n,a,l,y,s,i,s, ,w,o,r,k,f,l,o,w,.,.,.",
+      "lines": "⏳,S,t,a,r,i,n,g,{,s,o,c,k,C,d,e,},l,y,w,f,.",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -1879,7 +1975,7 @@
     {
       "file": "src/types/__tests__/stock-analysis.test.ts",
       "lines": "6,7,8,9,13,14,15,16,20,22,28,29,30,31,32,44,45,46,50,51,52,56",
-      "reason": "测试用例输入数据（中文关键词匹配测试）",
+      "reason": "硬编码中文字符串",
       "phase": 3
     }
   ]

@@ -1176,7 +1176,7 @@ const existing = {
   workflowStarting: "⏳ Starting {{stockCode}} stock analysis workflow...",
 };
 al.entries.forEach((e) => {
-  if (!existing[e.file]) { existing[e.file] = new Set(); }
+  if (!(existing[e.file] instanceof Set)) { existing[e.file] = new Set(); }
   (e.lines || "").split(",").forEach((l) => {
     if (l.trim()) { existing[e.file].add(l.trim()); }
   });

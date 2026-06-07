@@ -7987,7 +7987,13 @@
     "progress.investmentPlan": "Generating final decision...",
     "progress.completed": "✅ Analysis complete!",
     "progress.llmFallback": "⚠️ LLM not connected, placeholder",
-    "progress.error": "❌ Error: {{msg}}"
+    "progress.error": "❌ Error: {{msg}}",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

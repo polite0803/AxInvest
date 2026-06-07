@@ -7927,7 +7927,13 @@
       "emptyHint": "En attente des nœuds du flux…",
       "sendToChat": "Envoyer au chat"
     },
-    "alert.date": "Date"
+    "alert.date": "Date",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

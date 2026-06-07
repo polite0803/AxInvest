@@ -8037,7 +8037,13 @@
       "emptyHint": "等待工作流推送節點…",
       "sendToChat": "發送到對話"
     },
-    "alert.date": "日期"
+    "alert.date": "日期",
+    "recommendation": {
+      "row": {
+        "reasons": "Reasons",
+        "risks": "Risks"
+      }
+    }
   },
   "trade": {
     "title": "交易日志",

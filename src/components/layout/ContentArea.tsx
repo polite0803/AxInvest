@@ -46,6 +46,15 @@ const LazyFilesPage = lazy(() => import("@/pages/FilesPage").then((m) => ({ defa
 const LazyStockAnalysisPage = lazy(() =>
   import("@/pages/StockAnalysisPage").then((m) => ({ default: m.StockAnalysisPage }))
 );
+const LazyWatchlistPage = lazy(() =>
+  import("@/pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage }))
+);
+const LazyScreenerPage = lazy(() => import("@/pages/ScreenerPage").then((m) => ({ default: m.ScreenerPage })));
+const LazyTradePage = lazy(() => import("@/pages/TradePage").then((m) => ({ default: m.TradePage })));
+const LazyBacktestPage = lazy(() =>
+  import("@/pages/BacktestPage").then((m) => ({ default: m.BacktestPage }))
+);
+const LazyComparePage = lazy(() => import("@/pages/ComparePage").then((m) => ({ default: m.ComparePage })));
 
 function PageLoader() {
   return (
@@ -130,7 +139,15 @@ function NotFoundRoute() {
 export const ContentArea = memo(function ContentArea() {
   const skillPages = useSkillExtensionStore((s) => s.pages);
   const location = useLocation();
-  const isStockAnalysis = location.pathname === "/stock-analysis";
+  const stockInvestmentPaths = new Set([
+    "/stock-analysis",
+    "/watchlist",
+    "/screener",
+    "/trade",
+    "/backtest",
+    "/compare",
+  ]);
+  const isStockPage = stockInvestmentPaths.has(location.pathname);
 
   const pluginRoutes = useMemo(() => {
     return skillPages.map((page) => (
@@ -144,7 +161,7 @@ export const ContentArea = memo(function ContentArea() {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-      {!isStockAnalysis && <AppHeader />}
+      {!isStockPage && <AppHeader />}
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Routes>
           <Route path="/" element={<SafeLazyPage Page={LazyChatPage} />} />
@@ -212,6 +229,26 @@ export const ContentArea = memo(function ContentArea() {
           <Route
             path="/stock-analysis/:id"
             element={<SafeLazyPage Page={LazyStockAnalysisPage} />}
+          />
+          <Route
+            path="/watchlist"
+            element={<SafeLazyPage Page={LazyWatchlistPage} />}
+          />
+          <Route
+            path="/screener"
+            element={<SafeLazyPage Page={LazyScreenerPage} />}
+          />
+          <Route
+            path="/trade"
+            element={<SafeLazyPage Page={LazyTradePage} />}
+          />
+          <Route
+            path="/backtest"
+            element={<SafeLazyPage Page={LazyBacktestPage} />}
+          />
+          <Route
+            path="/compare"
+            element={<SafeLazyPage Page={LazyComparePage} />}
           />
           <Route
             path="/devtools/trace-explorer"

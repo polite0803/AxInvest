@@ -8947,7 +8947,8 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "refresh": "Refresh"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
@@ -9326,7 +9327,8 @@
       "styleDisabled": "(Disabled)",
       "styleDisabledReason": "Style {style} is disabled in settings",
       "realTooltip": "実際の戦略ヒット（Kライン・財務・資金シグナルが揃っている）",
-      "tagReal": "実際"
+      "tagReal": "実際",
+      "tagSynthetic": "フォールバック"
     },
     "periodShort": "短期",
     "periodMid": "中期",

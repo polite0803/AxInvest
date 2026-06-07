@@ -13,6 +13,7 @@ import { ClsFlashPanel } from "./ClsFlashPanel";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionTimelinePanel } from "./DecisionTimelinePanel";
+import "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";

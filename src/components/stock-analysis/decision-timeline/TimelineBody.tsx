@@ -1,6 +1,8 @@
+import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import type { TimelineNode, TimelinePhase } from "@/types";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DecisionBanner } from "../DecisionBanner";
 import { TimelineNodeCard } from "./TimelineNodeCard";
 
 const PHASE_ORDER: TimelinePhase[] = ["scan", "diagnose", "debate", "decide"];
@@ -21,6 +23,9 @@ interface PhaseSectionProps {
 export function PhaseSection({ phase, nodes }: PhaseSectionProps) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
+  // decide 阶段末节点:DecisionBanner(仅在决策存在时渲染)
+  const decision = useStockAnalysisStore((s) => s.decision);
+  const showDecisionBanner = phase === "decide" && !!decision;
 
   const total = nodes.length;
   const done = nodes.filter((n) => n.status === "done").length;
@@ -76,6 +81,11 @@ export function PhaseSection({ phase, nodes }: PhaseSectionProps) {
               </div>
             )
             : nodes.map((node) => <TimelineNodeCard key={node.id} node={node} />)}
+          {showDecisionBanner && (
+            <div className="mt-2">
+              <DecisionBanner />
+            </div>
+          )}
         </div>
       )}
     </div>

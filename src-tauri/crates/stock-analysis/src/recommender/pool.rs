@@ -285,7 +285,13 @@ mod tests {
 
     #[test]
     fn each_style_has_required_vendors() {
-        for s in [Style::Trend, Style::Value, Style::Capital, Style::Reversion, Style::Watchlist] {
+        for s in [
+            Style::Trend,
+            Style::Value,
+            Style::Capital,
+            Style::Reversion,
+            Style::Watchlist,
+        ] {
             let v = required_vendors_for_style(s);
             assert!(!v.is_empty(), "{:?} missing vendors", s);
         }

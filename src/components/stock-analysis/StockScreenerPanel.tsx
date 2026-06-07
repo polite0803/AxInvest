@@ -231,8 +231,8 @@ export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) 
       size="small"
       title={t(resolvedTitleKey)}
       styles={{ body: { padding: "8px 10px" } }}
-      extra={
-        mode === "discover" ? (
+      extra={mode === "discover"
+        ? (
           <Button
             size="small"
             icon={<ReloadOutlined />}
@@ -240,7 +240,8 @@ export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) 
           >
             {t("stockAnalysis.settings.screener.refresh")}
           </Button>
-        ) : (
+        )
+        : (
           <Button
             size="small"
             onClick={() => {
@@ -250,8 +251,7 @@ export function StockScreenerPanel({ mode, titleKey }: StockScreenerPanelProps) 
           >
             {t("stockAnalysis.settings.screener.clear")}
           </Button>
-        )
-      }
+        )}
     >
       {mode === "screen" && (
         <div className="flex flex-col gap-1 mb-2">

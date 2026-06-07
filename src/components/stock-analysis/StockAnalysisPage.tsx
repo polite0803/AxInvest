@@ -7,13 +7,12 @@ import { ArrowLeftRight, Coins, LineChart, Settings, Shield, TrendingUp, Users, 
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { ClsFlashPanel } from "./ClsFlashPanel";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
 import { DebatePanel } from "./DebatePanel";
-import { DecisionBanner } from "./DecisionBanner";
+import { DecisionTimelinePanel } from "./DecisionTimelinePanel";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
@@ -143,7 +142,7 @@ export function StockAnalysisPage() {
       key: "decision",
       label: t("stockAnalysis.tab.decision"),
       icon: <TrendingUp size={14} />,
-      children: <DecisionBanner />,
+      children: <DecisionTimelinePanel />,
     },
   ];
 
@@ -319,8 +318,6 @@ export function StockAnalysisPage() {
 
                       {status !== "loading" && status !== "idle" && status !== "error" && (
                         <>
-                          <AnalysisProgress />
-
                           <div className="sa-tabs">
                             {tabs.map((tab) => (
                               <button

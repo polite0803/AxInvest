@@ -12,6 +12,8 @@ interface RecoPick {
   confidence: number;
   price: number;
   targetPrice: number;
+  /** true = 兜底合成 pick（系统初筛 / 数据稀疏），false = 主策略真实命中 */
+  synthetic?: boolean;
 }
 
 interface RecoResponseShape {

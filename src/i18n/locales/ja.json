@@ -9109,7 +9109,10 @@
       "pending": "pending",
       "riskAssessment": "riskAssessment",
       "running": "running",
-      "startFailed": "startFailed"
+      "startFailed": "startFailed",
+      "vValidate": "データ検証",
+      "aggRisk": "積極的リスク評価",
+      "notifyResult": "結果を通知"
     },
     "risk": {
       "high": "高",
@@ -9379,7 +9382,9 @@
       "ts:568:t(": "Ts:568:T(",
       "ts:704:t(": "Ts:704:T(",
       "ts:763:t(": "Ts:763:T("
-    }
+    },
+    "avgRiskScore": "リスク平均 {{score}}",
+    "highestRisk": "最高 {{label}} ({{score}})"
   },
   "trade": {
     "title": "Trading Log",

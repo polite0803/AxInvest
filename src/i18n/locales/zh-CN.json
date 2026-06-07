@@ -7942,7 +7942,10 @@
       "pending": "等待中",
       "riskAssessment": "风险评估",
       "running": "运行中",
-      "startFailed": "启动失败"
+      "startFailed": "启动失败",
+      "vValidate": "验证数据",
+      "aggRisk": "激进风险评估",
+      "notifyResult": "通知结果"
     },
     "timeline": {
       "phase.scan": "扫描",
@@ -8134,7 +8137,28 @@
       "styleDisabledReason": "{{style}} 数据源未启用，暂无推荐",
       "empty": "暂无符合条件的推荐",
       "valueNaN": "—",
-      "generatedAt": "更新于 {{time}}"
+      "generatedAt": "更新于 {{time}}",
+      "tagReal": "真实",
+      "tagSynthetic": "兜底",
+      "realTooltip": "主策略真实命中（K 线 / 财务 / 资金信号齐全）",
+      "syntheticTooltip": "数据稀疏兜底（K 线 / 财务 / 资金数据不可用，按现价合成）",
+      "dataQualitySummary": "当前共 {{real}} 条真实推荐 + {{synthetic}} 条兜底合成（数据源不完整时自动回退）",
+      "consensusBullish": "共识看多",
+      "consensusBearish": "共识看空",
+      "consensusNeutral": "中性",
+      "consensusDivided": "观点分歧",
+      "bullish": "看多",
+      "bearish": "看空",
+      "neutral": "中性",
+      "bullishTooltip": "买入 / 增持 / 强烈推荐 / 上涨信号等正向词命中",
+      "bearishTooltip": "卖出 / 减持 / 强烈回避 / 下跌信号等负向词命中",
+      "neutralTooltip": "没有命中任何多空信号，或多空词频相近、无法判断",
+      "reportCountSuffix": " 份报告",
+      "crossCheckAligned": "与分析师共识一致",
+      "crossCheckDivided": "分析师观点分歧，建议观望",
+      "crossCheckBearish": "共识看空，与 BUY 推荐矛盾",
+      "crossCheckNeutral": "{{total}} 份报告中 {{neutral}} 份为中性，未印证 BUY 推荐",
+      "crossCheckTitle": "分析师交叉验证（最近 {{updatedAt}}）"
     },
     "stockAnalysisStore": {
       "ts:329:t(": "stockAnalysisStore.ts:329:t(",
@@ -8145,7 +8169,9 @@
       "ts:568:t(": "stockAnalysisStore.ts:568:t(",
       "ts:704:t(": "stockAnalysisStore.ts:704:t(",
       "ts:763:t(": "stockAnalysisStore.ts:763:t("
-    }
+    },
+    "avgRiskScore": "风险均值 {{score}}",
+    "highestRisk": "最高 {{label}} ({{score}})"
   },
   "trade": {
     "title": "交易日志",

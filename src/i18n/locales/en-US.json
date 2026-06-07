@@ -7947,7 +7947,10 @@
       "pending": "Pending",
       "riskAssessment": "Risk Assessment",
       "running": "Running",
-      "startFailed": "Start Failed"
+      "startFailed": "Start Failed",
+      "vValidate": "Validate Data",
+      "aggRisk": "Aggressive Risk",
+      "notifyResult": "Notify Result"
     },
     "timeline": {
       "phase.scan": "Scan",
@@ -8029,7 +8032,28 @@
       "styleDisabledReason": "{{style}} data source not enabled, no picks",
       "empty": "No qualifying picks at the moment",
       "valueNaN": "—",
-      "generatedAt": "Updated {{time}}"
+      "generatedAt": "Updated {{time}}",
+      "tagReal": "Real",
+      "tagSynthetic": "Fallback",
+      "realTooltip": "Real strategy hit (K-line / financials / capital signals present)",
+      "syntheticTooltip": "Data-sparse fallback (K-line / financials / capital data unavailable, synthesized from current price)",
+      "dataQualitySummary": "{{real}} real + {{synthetic}} fallback picks (auto-recovered from incomplete data sources)",
+      "consensusBullish": "Bullish consensus",
+      "consensusBearish": "Bearish consensus",
+      "consensusNeutral": "Neutral",
+      "consensusDivided": "Divided",
+      "bullish": "Bullish",
+      "bearish": "Bearish",
+      "neutral": "Neutral",
+      "bullishTooltip": "Buy / overweight / strong buy / upside signals matched",
+      "bearishTooltip": "Sell / underweight / strong sell / downside signals matched",
+      "neutralTooltip": "No directional signals matched, or bull/bear counts too close to call",
+      "reportCountSuffix": " reports",
+      "crossCheckAligned": "Aligns with analyst consensus",
+      "crossCheckDivided": "Analysts are divided — observe before acting",
+      "crossCheckBearish": "Consensus bearish — contradicts the BUY pick",
+      "crossCheckNeutral": "{{neutral}} of {{total}} reports were neutral — does not confirm the BUY pick",
+      "crossCheckTitle": "Analyst cross-check (last {{updatedAt}})"
     },
     "stockAnalysisStore": {
       "ts:329:t(": "Ts:329:T(",
@@ -8040,7 +8064,9 @@
       "ts:568:t(": "Ts:568:T(",
       "ts:704:t(": "Ts:704:T(",
       "ts:763:t(": "Ts:763:T("
-    }
+    },
+    "avgRiskScore": "Avg Risk {{score}}",
+    "highestRisk": "Highest {{label}} ({{score}})"
   },
   "trade": {
     "title": "Trading Log",

@@ -33,7 +33,8 @@ impl ReversionStrategy {
         sector: Option<String>,
     ) -> Option<RecoPick> {
         let klines = client.get_klines(code, "daily", 250).await.ok()?;
-        if klines.len() < 60 {
+        // 放宽 K 线最低长度：60 → 30
+        if klines.len() < 30 {
             return None;
         }
         let price = klines.last()?.close;
@@ -41,32 +42,33 @@ impl ReversionStrategy {
 
         let (pass, reasons) = match self.period {
             Period::Short => {
-                // RSI(6) < 25
-                if rsi_value >= 25.0 {
+                // RSI(6) 25 → 35（旧的 25 太严，市场常态 RSI 就在 30~70）
+                if rsi_value >= 35.0 {
                     return None;
                 }
-                // 缩量：今日 amount < 5 日均 * 0.8
+                // 缩量：today < avg_5 * 0.8 → today < avg_5 * 1.2（容许温和放量也入选）
                 let avg_5 = indicators::avg_amount_n(&klines, 5).unwrap_or(0.0);
                 let today = klines.last().map(|k| k.amount).unwrap_or(0.0);
-                if avg_5 <= 0.0 || today > avg_5 * 0.8 {
+                if avg_5 <= 0.0 || today > avg_5 * 1.2 {
                     return None;
                 }
                 (
                     true,
                     vec![
                         format!("RSI(6) {:.1} 超卖", rsi_value),
-                        format!("缩量至 5 日均 {:.0}%", today / avg_5 * 100.0),
+                        format!("量比 5 日均 {:.0}%", today / avg_5 * 100.0),
                     ],
                 )
             },
             Period::Mid => {
-                // 距 250 日新高回撤 > 30%
+                // 距 250 日新高回撤 30% → 20%
                 let dd = indicators::drawdown_from_high(&klines, 250).unwrap_or(0.0);
-                if dd < 30.0 {
+                if dd < 20.0 {
                     return None;
                 }
+                // 月线 RSI 40 → 50
                 let rsi_30 = indicators::rsi(&klines, 30).unwrap_or(50.0);
-                if rsi_30 > 40.0 {
+                if rsi_30 > 50.0 {
                     return None;
                 }
                 (

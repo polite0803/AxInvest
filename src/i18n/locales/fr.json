@@ -7739,7 +7739,10 @@
       "pending": "pending",
       "riskAssessment": "riskAssessment",
       "running": "running",
-      "startFailed": "startFailed"
+      "startFailed": "startFailed",
+      "vValidate": "Valider les données",
+      "aggRisk": "Risque agressif",
+      "notifyResult": "Notifier le résultat"
     },
     "risk": {
       "high": "Élevé",
@@ -8009,7 +8012,9 @@
       "ts:568:t(": "Ts:568:T(",
       "ts:704:t(": "Ts:704:T(",
       "ts:763:t(": "Ts:763:T("
-    }
+    },
+    "avgRiskScore": "Risque moyen {{score}}",
+    "highestRisk": "Plus haut {{label}} ({{score}})"
   },
   "trade": {
     "title": "Trading Log",

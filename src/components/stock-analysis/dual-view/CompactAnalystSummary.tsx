@@ -1,40 +1,33 @@
 /**
  * CompactAnalystSummary — AnalystReportGrid 在 chat 中的紧凑版本
  * 输入:分析师报告 { expertId: report }
- * 输出:多空条 + Top 3 报告摘要
+ * 输出:共识标签 + 多空条 + Top 3 报告摘要
  */
+import { classifySentiment } from "@/types/stock-analysis";
+import { Tooltip } from "antd";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { cleanToolCallTags } from "../utils";
 
 interface CompactAnalystSummaryProps {
   data: Record<string, string> | unknown;
 }
 
-function cleanToolCallTags(text: string): string {
-  return (text ?? "").replace(/<tool_call[\s\S]*?<\/tool_call>/g, "").trim();
-}
+type Consensus = "bullish" | "bearish" | "neutral" | "divided";
 
-function classifySentiment(text: string): "bullish" | "bearish" | "neutral" {
-  const cleaned = cleanToolCallTags(text);
-  const bullWords = [
-    "buy",
-    "买入",
-    "增持",
-    "推荐",
-    "看好",
-    "上涨",
-    "看多",
-    "推荐买入",
-    "outperform",
-    "overweight",
-    "strong buy",
-  ];
-  const bearWords = ["sell", "卖出", "减持", "看空", "下跌", "看淡", "看低", "underperform", "underweight", "reduce"];
-  let bull = 0;
-  let bear = 0;
-  for (const w of bullWords) { bull += (cleaned.match(new RegExp(w, "gi")) || []).length; }
-  for (const w of bearWords) { bear += (cleaned.match(new RegExp(w, "gi")) || []).length; }
-  if (bull > bear && bull > 0) { return "bullish"; }
-  if (bear > bull && bear > 0) { return "bearish"; }
+/** 根据多空比例推共识（与 AnalystReportGrid 保持一致） */
+function deriveConsensus(
+  bullish: number,
+  bearish: number,
+  neutral: number,
+): Consensus {
+  const total = bullish + bearish + neutral;
+  if (total === 0) { return "neutral"; }
+  const bullRatio = bullish / total;
+  const bearRatio = bearish / total;
+  if (bullRatio > 0.65) { return "bullish"; }
+  if (bearRatio > 0.65) { return "bearish"; }
+  if (bullRatio > 0 && bearRatio > 0) { return "divided"; }
   return "neutral";
 }
 
@@ -60,6 +53,7 @@ function getAgentShortName(id: string): string {
 }
 
 export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
+  const { t } = useTranslation();
   const reports = useMemo(() => normalizeMap(data), [data]);
 
   const summary = useMemo(() => {
@@ -71,6 +65,7 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
     const details: Array<{ id: string; name: string; sentiment: "bullish" | "bearish" | "neutral"; snippet: string }> =
       [];
     for (const [id, rawReport] of entries) {
+      // 先剥掉 tool_call 标签，再让统一 classifySentiment 解析（支持 JSON + 计分回退）
       const cleaned = cleanToolCallTags(rawReport);
       const sentiment = classifySentiment(cleaned);
       if (sentiment === "bullish") { bullish++; }
@@ -95,29 +90,97 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
     );
   }
 
+  const consensus = deriveConsensus(summary.bullish, summary.bearish, summary.neutral);
+  const consensusConfig: Record<Consensus, { color: string; bg: string; labelKey: string; icon: string }> = {
+    bullish: {
+      color: "var(--sa-red, #dc2626)",
+      bg: "var(--sa-red-bg, #fee2e2)",
+      labelKey: "consensusBullish",
+      icon: "📈",
+    },
+    bearish: {
+      color: "var(--sa-green, #16a34a)",
+      bg: "var(--sa-green-bg, #dcfce7)",
+      labelKey: "consensusBearish",
+      icon: "📉",
+    },
+    neutral: {
+      color: "var(--muted, #6b7280)",
+      bg: "var(--muted-bg, #e5e7eb)",
+      labelKey: "consensusNeutral",
+      icon: "➖",
+    },
+    divided: {
+      color: "var(--ant-warning, #f59e0b)",
+      bg: "var(--ant-warning-bg, #fef3c7)",
+      labelKey: "consensusDivided",
+      icon: "⚖️",
+    },
+  };
+  const cc = consensusConfig[consensus];
+
   return (
     <div className="space-y-1 text-[12px]">
+      {/* 共识标签 — 与 AnalystReportGrid 风格一致 */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold"
+          style={{ background: cc.bg, color: cc.color }}
+        >
+          <span>{cc.icon}</span>
+          <span>{t(`stockAnalysis.recommendation.${cc.labelKey}`)}</span>
+        </span>
+        <span style={{ color: "var(--muted)" }}>
+          {summary.total}
+          {t("stockAnalysis.recommendation.reportCountSuffix")}
+        </span>
+      </div>
+
+      {/* 多空条 */}
       <div className="flex items-baseline gap-2 flex-wrap">
-        <span style={{ color: "var(--muted)" }}>{summary.total} 份</span>
-        <span style={{ color: "var(--sa-red, #dc2626)" }}>📈 {summary.bullish}</span>
-        <span style={{ color: "var(--sa-green, #16a34a)" }}>📉 {summary.bearish}</span>
-        <span style={{ color: "var(--muted)" }}>➖ {summary.neutral}</span>
+        <Tooltip title={t("stockAnalysis.recommendation.bullishTooltip")}>
+          <span style={{ color: "var(--sa-red, #dc2626)" }} className="cursor-default">
+            📈 {t("stockAnalysis.recommendation.bullish")} {summary.bullish}
+          </span>
+        </Tooltip>
+        <Tooltip title={t("stockAnalysis.recommendation.bearishTooltip")}>
+          <span style={{ color: "var(--sa-green, #16a34a)" }} className="cursor-default">
+            📉 {t("stockAnalysis.recommendation.bearish")} {summary.bearish}
+          </span>
+        </Tooltip>
+        <Tooltip title={t("stockAnalysis.recommendation.neutralTooltip")}>
+          <span style={{ color: "var(--muted)" }} className="cursor-default">
+            ➖ {t("stockAnalysis.recommendation.neutral")} {summary.neutral}
+          </span>
+        </Tooltip>
       </div>
       {summary.total > 0 && (
         <div className="flex h-1.5 rounded overflow-hidden" style={{ background: "var(--muted-bg, #e5e7eb)" }}>
           {summary.bullish > 0 && (
             <div
-              style={{ width: `${(summary.bullish / summary.total) * 100}%`, background: "var(--sa-red, #dc2626)" }}
+              style={{
+                width: `${(summary.bullish / summary.total) * 100}%`,
+                background: "var(--sa-red, #dc2626)",
+                transition: "width 0.3s ease",
+              }}
             />
           )}
           {summary.neutral > 0 && (
             <div
-              style={{ width: `${(summary.neutral / summary.total) * 100}%`, background: "var(--muted, #6b7280)" }}
+              style={{
+                width: `${(summary.neutral / summary.total) * 100}%`,
+                background: "var(--muted, #6b7280)",
+                transition: "width 0.3s ease",
+              }}
             />
           )}
           {summary.bearish > 0 && (
             <div
-              style={{ width: `${(summary.bearish / summary.total) * 100}%`, background: "var(--sa-green, #16a34a)" }}
+              style={{
+                width: `${(summary.bearish / summary.total) * 100}%`,
+                background: "var(--sa-green, #16a34a)",
+                transition: "width 0.3s ease",
+              }}
             />
           )}
         </div>

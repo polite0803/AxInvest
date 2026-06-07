@@ -46,14 +46,10 @@ const LazyFilesPage = lazy(() => import("@/pages/FilesPage").then((m) => ({ defa
 const LazyStockAnalysisPage = lazy(() =>
   import("@/pages/StockAnalysisPage").then((m) => ({ default: m.StockAnalysisPage }))
 );
-const LazyWatchlistPage = lazy(() =>
-  import("@/pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage }))
-);
+const LazyWatchlistPage = lazy(() => import("@/pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage })));
 const LazyScreenerPage = lazy(() => import("@/pages/ScreenerPage").then((m) => ({ default: m.ScreenerPage })));
 const LazyTradePage = lazy(() => import("@/pages/TradePage").then((m) => ({ default: m.TradePage })));
-const LazyBacktestPage = lazy(() =>
-  import("@/pages/BacktestPage").then((m) => ({ default: m.BacktestPage }))
-);
+const LazyBacktestPage = lazy(() => import("@/pages/BacktestPage").then((m) => ({ default: m.BacktestPage })));
 const LazyComparePage = lazy(() => import("@/pages/ComparePage").then((m) => ({ default: m.ComparePage })));
 
 function PageLoader() {

@@ -30,10 +30,10 @@ interface BacktestResult {
 }
 
 interface Props {
-  analysisId: string;
+  analysisId?: string;
 }
 
-export function HistoricalAnalysisPanel({ analysisId }: Props) {
+export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
   const { t } = useTranslation();
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [loading, setLoading] = useState(false);

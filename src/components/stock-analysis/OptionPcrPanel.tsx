@@ -1,7 +1,9 @@
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Empty, Spin } from "antd";
+import { Button, Card, Spin } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 
 interface OptionPCR {
   stockCode: string;
@@ -16,19 +18,30 @@ interface OptionPCR {
 
 export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
   const { t } = useTranslation();
+  const { openDataSourceSettings } = useStockAnalysisPage();
   const [pcr, setPcr] = useState<OptionPCR | null>(null);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
   const load = useCallback(async () => {
-    if (!stockCode) { return; }
+    if (!stockCode) {
+      setPcr(null);
+      setEmptyKind("noStock");
+      return;
+    }
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
     try {
       const result = await invoke<OptionPCR | null>("get_stock_option_pcr", { stockCode });
-      setPcr(result);
+      if (result && (result.callVolume > 0 || result.putVolume > 0)) {
+        setPcr(result);
+      } else {
+        setPcr(null);
+        setEmptyKind("noData");
+      }
     } catch {
-      setFetchError(true);
+      setPcr(null);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
   }, [stockCode]);
@@ -37,7 +50,8 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
     load();
   }, [load]);
 
-  const pcrColor = (v: number) => v > 1 ? "var(--sa-green)" : "var(--sa-red)";
+  // PCR > 1 表示看空力量更强（红色）；PCR < 1 表示看多（绿色）
+  const pcrColor = (v: number) => v > 1 ? "var(--sa-red)" : "var(--sa-green)";
 
   return (
     <Card
@@ -45,18 +59,22 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
       title={`📊 ${t("stockAnalysis.optionPcr")}`}
       styles={{ body: { padding: "8px 10px" } }}
       extra={
-        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+        <Button size="small" loading={loading} onClick={load}>
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
       }
     >
-      {!stockCode
-        ? <Empty description={t("stockAnalysis.searchPlaceholder")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        : loading
+      {loading
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
-        : fetchError
-        ? <Empty description={t("stockAnalysis.error")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        : !pcr
-        ? <Empty description={t("stockAnalysis.noRecords")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        : (
+        : emptyKind
+        ? (
+          <PanelEmpty
+            kind={emptyKind}
+            description={emptyKind === "noData" ? t("stockAnalysis.optionsEmpty") : undefined}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
+        : pcr && (
           <div className="space-y-2">
             <div className="text-xs text-gray-500">{pcr.date}</div>
             <div className="grid grid-cols-2 gap-2">

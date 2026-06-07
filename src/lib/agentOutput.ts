@@ -9,7 +9,7 @@ interface AgentResult {
   tool_calls_made?: unknown[];
 }
 
-/** 清理 LLM 原始输出中的工具调用标签 */
+/** 清理 LLM 原始输出中的工具调用标签和乱码 */
 export function cleanToolCallTags(text: string): string {
   if (!text) { return ""; }
   let cleaned = text;
@@ -20,6 +20,8 @@ export function cleanToolCallTags(text: string): string {
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|invoke[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/invoke\]/gi, "");
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|parameter[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/parameter\]/gi, "");
+  // 清理 UTF-8 替换字符（乱码）
+  cleaned = cleaned.replace(/\uFFFD+/g, "...");
   return cleaned.replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -46,11 +48,37 @@ export function tryBeautifyJson(text: string): string {
       }
     } catch { /* ignore */ }
   }
-  // 普通 JSON
+  // 普通 JSON（严格匹配）
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       return JSON.stringify(JSON.parse(trimmed), null, 2);
-    } catch { /* ignore */ }
+    } catch { /* 不完美 JSON：尝试提取中间片段 */ }
+  }
+  // 不完美 JSON 提取：找第一个 { 到最后一个 }（或 [ 到 ]）
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = trimmed.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.stringify(JSON.parse(candidate), null, 2);
+    } catch {
+      // 修复常见错误：trailing comma、多余换行
+      const fixed = candidate
+        .replace(/,\s*}/g, "}")
+        .replace(/,\s*\]/g, "]")
+        .replace(/\n/g, " ");
+      try {
+        return JSON.stringify(JSON.parse(fixed), null, 2);
+      } catch { /* fallthrough */ }
+    }
+  }
+  const firstBracket = trimmed.indexOf("[");
+  const lastBracket = trimmed.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    const candidate = trimmed.slice(firstBracket, lastBracket + 1);
+    try {
+      return JSON.stringify(JSON.parse(candidate), null, 2);
+    } catch { /* fallthrough */ }
   }
   // 代码块中的 JSON
   const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -81,6 +109,9 @@ export function extractContent(value: unknown): string {
       text = r.content;
     } else if (r.content != null && typeof r.content === "object") {
       text = JSON.stringify(r.content, null, 2);
+    } else if (typeof r.content === "string" && r.content.length === 0) {
+      // content 为空字符串：说明 LLM 未产生实质输出，不返回 AgentResult 包装 JSON
+      text = "";
     } else {
       text = JSON.stringify(value, null, 2);
     }

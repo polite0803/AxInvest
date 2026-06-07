@@ -1,8 +1,130 @@
+import { cleanToolCallTags, tryBeautifyJson } from "@/components/stock-analysis/utils";
+import { getWorkflowNodeLabel } from "@/utils/workflowNodeLabel";
 import { Card, Progress, Tag } from "antd";
 import { TrendingUp } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { tryBeautifyJson } from "@/components/stock-analysis/utils";
+
+/** 从任意 Agent JSON 输出中提取一段可读摘要 */
+function extractAgentBrief(report: string, maxLen = 180): string {
+  const cleaned = cleanToolCallTags(report).trim();
+  if (!cleaned) { return ""; }
+
+  // 尝试解析 JSON（支持：纯JSON、```json...```、```...```、以及前后带文字的混合格式）
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const trimmed = cleaned.trim();
+    if (trimmed.startsWith("{")) {
+      parsed = JSON.parse(trimmed);
+    } else {
+      // 匹配 ```json ... ```
+      let m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (m) { parsed = JSON.parse(m[1]); }
+    }
+  } catch {
+    // 混合格式：找第一个 { 到最后一个 }
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        // 修复常见错误后重试
+        try {
+          const fixed = candidate.replace(/,\s*}/g, "}").replace(/,\s*\]/g, "]");
+          parsed = JSON.parse(fixed);
+        } catch { /* fallthrough */ }
+      }
+    }
+  }
+
+  if (parsed) {
+    // 按优先级提取字段（分析师 + 辩论 + 估值 + 决策）
+    const candidates = [
+      // 分析师标准字段
+      parsed.summary,
+      parsed.argument,
+      parsed.analysis,
+      parsed.assessment,
+      // 辩论字段
+      parsed.our_claim,
+      parsed.their_weakness,
+      // 估值字段
+      parsed.buffett_verdict,
+      parsed.verdict,
+      parsed.reasoning,
+      parsed.business_model,
+      parsed.moat_reasoning,
+      parsed.financial_health,
+      parsed.margin_of_safety,
+      // 资金面/筹码面
+      parsed.stance,
+      parsed.main_flow_state,
+      parsed.dragon_tiger_signal,
+      // 决策
+      parsed.action,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && c.length > 5) {
+        return c.length > maxLen ? c.slice(0, maxLen) + "..." : c;
+      }
+    }
+    // 提取 evidence / key_points / core_arguments / resonance_points 的前几项
+    for (const key of ["evidence", "key_points", "core_arguments", "resonance_points", "preempted_counter_attacks"]) {
+      const arr = parsed[key];
+      if (Array.isArray(arr) && arr.length > 0) {
+        const first = arr[0];
+        const text = typeof first === "string"
+          ? first
+          : (first && typeof first === "object" && "point" in first)
+          ? String((first as Record<string, unknown>).point ?? "")
+          : (first && typeof first === "object" && "claim" in first)
+          ? String((first as Record<string, unknown>).claim ?? "")
+          : "";
+        if (text.length > 5) {
+          return text.length > maxLen ? text.slice(0, maxLen) + "..." : text;
+        }
+      }
+    }
+    // 如果有 bull_score / bear_score，构造标签文本
+    const bScore = parsed.bull_strength_score ?? parsed.bull_score;
+    const beScore = parsed.bear_strength_score ?? parsed.bear_score;
+    if (typeof bScore === "number" || typeof beScore === "number") {
+      const parts: string[] = [];
+      if (typeof bScore === "number") { parts.push(`看多:${bScore}`); }
+      if (typeof beScore === "number") { parts.push(`看空:${beScore}`); }
+      return parts.join("，");
+    }
+    // 如果有 data_gaps 且没有实质内容，提示数据不足
+    const gaps = parsed.data_gaps;
+    if (Array.isArray(gaps) && gaps.length > 0) {
+      const firstGap = String(gaps[0]);
+      return firstGap.length > maxLen
+        ? `数据不足: ${firstGap.slice(0, maxLen)}...`
+        : `数据不足: ${firstGap}`;
+    }
+  }
+
+  // 回退：直接截断文本（过滤掉常见解释性前缀）
+  let plain = cleaned.replace(/\n/g, " ").trim();
+  // 移除"由于上游工具调用..."这类前缀
+  const noisePrefixes = [
+    /由于上游工具调用返回了.*?的错误[，。]/,
+    /根据系统指令.*?[，。]/,
+    /我的职责是.*?[，。]/,
+    /在上游数据缺失.*?[，。]/,
+    /我无法获取.*?[，。]/,
+    /我必须诚实反映.*?[，。]/,
+    /以下是基于当前可用上下文.*?[，。]/,
+    /请注意，由于缺乏.*?[，。]/,
+  ];
+  for (const re of noisePrefixes) {
+    plain = plain.replace(re, "");
+  }
+  plain = plain.replace(/\s+/g, " ").trim();
+  return plain.length > maxLen ? plain.slice(0, maxLen) + "..." : plain;
+}
 
 export interface WorkflowCardData {
   type: "progress" | "analyst" | "decision" | "aggregate" | "debate" | "risk";
@@ -99,9 +221,8 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   }
 
   if (data.type === "analyst") {
-    const raw = data.analystReport ? tryBeautifyJson(data.analystReport) : "";
-    const brief = raw
-      ? raw.slice(0, 200) + (raw.length > 200 ? "..." : "")
+    const brief = data.analystReport
+      ? extractAgentBrief(data.analystReport, 200)
       : t("stockAnalysis.workflow.analystComplete");
     return (
       <div className="workflow-card" style={{ padding: "10px 14px" }}>
@@ -113,14 +234,8 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
 
   if (data.type === "debate") {
     const round = data.round ?? 1;
-    const bullRaw = data.bull ? tryBeautifyJson(data.bull) : "";
-    const bearRaw = data.bear ? tryBeautifyJson(data.bear) : "";
-    const bullBrief = bullRaw
-      ? (bullRaw.length > 200 ? bullRaw.slice(0, 200) + "..." : bullRaw)
-      : t("stockAnalysis.workflow.pending");
-    const bearBrief = bearRaw
-      ? (bearRaw.length > 200 ? bearRaw.slice(0, 200) + "..." : bearRaw)
-      : t("stockAnalysis.workflow.pending");
+    const bullBrief = data.bull ? extractAgentBrief(data.bull, 200) : t("stockAnalysis.workflow.pending");
+    const bearBrief = data.bear ? extractAgentBrief(data.bear, 200) : t("stockAnalysis.workflow.pending");
     return (
       <div className="workflow-card" style={{ padding: "10px 14px" }}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
@@ -394,10 +509,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     </div>
                     {a.status === "done" && a.report && (
                       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                        {(() => {
-                          const b = tryBeautifyJson(a.report);
-                          return b.length > 500 ? b.slice(0, 500) + "..." : b;
-                        })()}
+                        {extractAgentBrief(a.report, 500)}
                       </div>
                     )}
                   </div>
@@ -441,10 +553,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                             🐂 {t("stockAnalysis.workflow.bullCase")}
                           </div>
                           <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                            {(() => {
-                              const b = tryBeautifyJson(d.bull);
-                              return b.length > 200 ? b.slice(0, 200) + "..." : b;
-                            })()}
+                            {extractAgentBrief(d.bull ?? "", 200)}
                           </div>
                         </div>
                         <div
@@ -460,10 +569,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                             🐻 {t("stockAnalysis.workflow.bearCase")}
                           </div>
                           <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                            {(() => {
-                              const b = tryBeautifyJson(d.bear);
-                              return b.length > 200 ? b.slice(0, 200) + "..." : b;
-                            })()}
+                            {extractAgentBrief(d.bear ?? "", 200)}
                           </div>
                         </div>
                       </div>
@@ -515,10 +621,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                     </div>
                     {r.status === "done" && r.content && (
                       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
-                        {(() => {
-                          const b = tryBeautifyJson(r.content);
-                          return b.length > 400 ? b.slice(0, 400) + "..." : b;
-                        })()}
+                        {extractAgentBrief(r.content, 400)}
                       </div>
                     )}
                   </div>
@@ -557,7 +660,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                         padding: "2px 0",
                       }}
                     >
-                      ❌ {fs.nodeId}
+                      ❌ {getWorkflowNodeLabel(fs.nodeId, t)}
                     </summary>
                     {fs.error && (
                       <pre

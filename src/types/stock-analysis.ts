@@ -144,11 +144,125 @@ export function getRiskColor(level: string): string {
   }
 }
 
-/** 分析师报告情感分类（启发式子串匹配，报告为 LLM 中文输出） */
+/** 尝试解析报告字符串为 JSON 对象（复用 AnalystReportCard.tryParse 的轻量版） */
+function tryParseJson(text: string): Record<string, unknown> | null {
+  try {
+    const trimmed = text.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return JSON.parse(trimmed) as Record<string, unknown>;
+      } catch { /* try below */ }
+    }
+    const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (m) {
+      try {
+        return JSON.parse(m[1].trim()) as Record<string, unknown>;
+      } catch { /* try below */ }
+    }
+    const fb = trimmed.indexOf("{");
+    const lb = trimmed.lastIndexOf("}");
+    if (fb !== -1 && lb !== -1 && lb > fb) {
+      try {
+        return JSON.parse(trimmed.slice(fb, lb + 1)) as Record<string, unknown>;
+      } catch { /* ignore */ }
+    }
+  } catch { /* not json */ }
+  return null;
+}
+
+/**
+ * 分析师报告情感分类（先解析 JSON 提取结构化字段，再回退子串匹配）
+ * - JSON 中有 action/view/sentiment 字段时直接映射，准确率远高于子串匹配
+ * - 子串匹配作为回退，覆盖非 JSON 格式的纯文本报告
+ */
 export function classifySentiment(report: string): "bullish" | "bearish" | "neutral" {
+  // 1) 尝试从 JSON 结构化字段提取
+  const json = tryParseJson(report);
+  if (json) {
+    // action 字段（BUY/INCREASE/SELL/REDUCE/HOLD）
+    const action = String(json["action"] ?? "").trim();
+    if (action) {
+      const a = action.toUpperCase();
+      if (a === "BUY" || a === "INCREASE") { return "bullish"; }
+      if (a === "SELL" || a === "REDUCE") { return "bearish"; }
+      if (a === "HOLD") { return "neutral"; }
+    }
+    // view 字段（bullish/bearish/neutral 或 看多/看空/中性）
+    const view = String(json["view"] ?? json["sentiment"] ?? "").trim().toLowerCase();
+    if (view) {
+      if (view.includes("bull") || view.includes("看多") || view.includes("乐观") || view.includes("利好")) {
+        return "bullish";
+      }
+      if (view.includes("bear") || view.includes("看空") || view.includes("悲观") || view.includes("利空")) {
+        return "bearish";
+      }
+      if (view.includes("neutral") || view.includes("中性") || view.includes("观望")) {
+        return "neutral";
+      }
+    }
+    // recommendation 字段
+    const rec = String(json["recommendation"] ?? json["rating"] ?? "").trim().toLowerCase();
+    if (rec) {
+      if (rec.includes("buy") || rec.includes("买入") || rec.includes("增持") || rec.includes("看涨")) {
+        return "bullish";
+      }
+      if (rec.includes("sell") || rec.includes("卖出") || rec.includes("减持") || rec.includes("看跌")) {
+        return "bearish";
+      }
+      if (rec.includes("hold") || rec.includes("持有") || rec.includes("中性") || rec.includes("观望")) {
+        return "neutral";
+      }
+    }
+  }
+
+  // 2) 回退：子串匹配（覆盖非 JSON 报告）
+  // 注意：必须先检查 bullish 再检查 bearish，因为"看涨"包含"涨"但不包含"跌"
   const lower = report.toLowerCase();
-  const bullishWords = ["买入", "增持", "看多", "推荐", "看好", "乐观", "上涨"];
-  const bearishWords = ["卖出", "减持", "看空", "回避", "看跌", "悲观", "下跌"];
+  const bullishWords = [
+    "买入",
+    "增持",
+    "看多",
+    "做多",
+    "推荐",
+    "看好",
+    "乐观",
+    "上涨",
+    "看涨",
+    "利好",
+    "强势",
+    "突破",
+    "买入持有",
+    "强烈推荐",
+    "建议买入",
+    "建议增持",
+    "bull",
+    "bullish",
+    "outperform",
+    "overweight",
+    "strong buy",
+  ];
+  const bearishWords = [
+    "卖出",
+    "减持",
+    "看空",
+    "做空",
+    "回避",
+    "看跌",
+    "悲观",
+    "下跌",
+    "利空",
+    "弱势",
+    "破位",
+    "卖出回避",
+    "强烈回避",
+    "建议卖出",
+    "建议减持",
+    "bear",
+    "bearish",
+    "underperform",
+    "underweight",
+    "strong sell",
+  ];
   for (const w of bullishWords) { if (lower.includes(w)) { return "bullish"; } }
   for (const w of bearishWords) { if (lower.includes(w)) { return "bearish"; } }
   return "neutral";

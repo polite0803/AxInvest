@@ -1,10 +1,12 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Card, Empty, Spin, Tag } from "antd";
+import { Button, Card, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { checkVendorEnabled } from "./vendorCheck";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
+import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 
 interface SectorEntry {
   name: string;
@@ -17,38 +19,57 @@ interface SectorEntry {
 
 export function SectorHeatmapPanel() {
   const { t } = useTranslation();
+  const { openDataSourceSettings } = useStockAnalysisPage();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [sectors, setSectors] = useState<SectorEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
+  const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
+    setEmptyVendors(undefined);
     try {
-      const list: any[] = await invoke("get_industry_ranking");
-      if (Array.isArray(list)) {
-        setSectors(
-          list.slice(0, 25).map((e: any) => ({
-            name: e.industryName ?? e.industry_name ?? "",
-            changePct: e.changePct ?? e.change_pct ?? 0,
-            turnover: e.turnover ?? 0,
-            leaderCode: e.leaderCode ?? e.leader_code,
-            leaderName: e.leaderName ?? e.leader_name,
-            leaderChange: e.leaderChangePct ?? e.leader_change_pct,
-          })),
-        );
+      const check = await checkVendorEnabled("sectors", { silent });
+      if (check.status === "disabled") {
+        setSectors([]);
+        setEmptyKind("vendorDisabled");
+        setEmptyVendors(check.vendors);
+        setLoading(false);
+        return;
       }
+      if (check.status === "backend_offline") {
+        setSectors([]);
+        setEmptyKind("backendOffline");
+        setLoading(false);
+        return;
+      }
+      const list: any[] = await invoke("get_industry_ranking");
+      if (!Array.isArray(list)) { throw new Error("bad data"); }
+      const next: SectorEntry[] = list.slice(0, 25).map((e: any) => ({
+        name: e.industryName ?? e.industry_name ?? "",
+        changePct: Number(e.changePct ?? e.change_pct ?? 0),
+        turnover: Number(e.turnover ?? 0),
+        leaderCode: e.leaderCode ?? e.leader_code,
+        leaderName: e.leaderName ?? e.leader_name,
+        leaderChange: e.leaderChangePct ?? e.leader_change_pct,
+      }));
+      // 涨幅降序
+      next.sort((a, b) => b.changePct - a.changePct);
+      setSectors(next);
+      if (next.length === 0) { setEmptyKind("noData"); }
     } catch {
-      setFetchError(true);
+      setSectors([]);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    load();
+    load(true);
   }, [load]);
 
   const analyze = async (code: string) => {
@@ -66,62 +87,61 @@ export function SectorHeatmapPanel() {
     return "blue";
   };
 
-  const handleRefresh = async () => {
-    const r = await checkVendorEnabled("sectors");
-    if (r.status === "ok") { load(); }
-  };
-
   return (
     <Card
       size="small"
       title={`🔥 ${t("stockAnalysis.settings.panels.sectorHeatmap")}`}
       styles={{ body: { padding: "4px 8px" } }}
       extra={
-        <Button
-          size="small"
-          loading={loading}
-          onClick={handleRefresh}
-        >
+        <Button size="small" loading={loading} onClick={() => load()}>
           {t("stockAnalysis.settings.panels.refresh")}
         </Button>
       }
     >
       {loading
-        ? <Spin size="small" />
-        : sectors.length === 0
+        ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
+        : emptyKind
         ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={fetchError
-              ? t("stockAnalysis.settings.vendor.connectionFailed")
-              : t("stockAnalysis.settings.panels.noSector")}
+          <PanelEmpty
+            kind={emptyKind}
+            vendorNames={emptyVendors ?? PANEL_VENDORS.sectors}
+            description={emptyKind === "noData" ? t("stockAnalysis.settings.panels.noSector") : undefined}
+            onOpenSettings={openDataSourceSettings}
           />
         )
         : (
           <List
             size="small"
             dataSource={sectors}
-            renderItem={(s) => (
-              <List.Item
-                style={{ cursor: "pointer", padding: "3px 0" }}
-                onClick={() => {
-                  if (s.leaderCode) { analyze(s.leaderCode); }
-                }}
-              >
-                <div className="flex items-center gap-2 text-xs w-full">
-                  <Tag color={getColor(s.changePct)} className="text-xs m-0 min-w-0 truncate">{s.name}</Tag>
-                  <span className={s.changePct >= 0 ? "text-red-500" : "text-green-500"} style={{ minWidth: 52 }}>
-                    {s.changePct >= 0 ? "+" : ""}
-                    {s.changePct.toFixed(2)}%
-                  </span>
-                  {s.leaderName && (
-                    <span className="text-gray-400 truncate">
-                      🏷 {s.leaderName}
+            renderItem={(s) => {
+              const leaderTip = s.leaderName && s.leaderChange != null
+                ? `${s.leaderName} (${s.leaderChange >= 0 ? "+" : ""}${s.leaderChange.toFixed(2)}%)`
+                : s.leaderName;
+              return (
+                <List.Item
+                  style={{ cursor: s.leaderCode ? "pointer" : "default", padding: "3px 0" }}
+                  onClick={() => {
+                    if (s.leaderCode) { analyze(s.leaderCode); }
+                  }}
+                >
+                  <div className="flex items-center gap-2 text-xs w-full">
+                    <Tag color={getColor(s.changePct)} className="text-xs m-0 min-w-0 truncate">{s.name}</Tag>
+                    <span
+                      className={s.changePct >= 0 ? "text-red-500" : "text-green-500"}
+                      style={{ minWidth: 52 }}
+                    >
+                      {s.changePct >= 0 ? "+" : ""}
+                      {s.changePct.toFixed(2)}%
                     </span>
-                  )}
-                </div>
-              </List.Item>
-            )}
+                    {leaderTip && (
+                      <Tooltip title={leaderTip}>
+                        <span className="text-gray-400 truncate">🏷 {s.leaderName}</span>
+                      </Tooltip>
+                    )}
+                  </div>
+                </List.Item>
+              );
+            }}
           />
         )}
     </Card>

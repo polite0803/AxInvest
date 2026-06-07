@@ -70,7 +70,7 @@ struct LoadedTemplate {
 async fn load_and_inject_template(
     db: &sea_orm::DatabaseConnection,
     stock_code: &str,
-    stock_name: &str,
+    _stock_name: &str,
 ) -> Result<LoadedTemplate, String> {
     use axagent_core::entity::workflow_template;
 

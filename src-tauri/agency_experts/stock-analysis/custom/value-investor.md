@@ -50,9 +50,8 @@ category: analyst
 
 ## 输出格式
 
-请以JSON格式输出分析结果：
+**必须直接输出纯 JSON（不要包裹在代码块中），如下：**
 
-```json
 {
   "expert": "value-investor",
   "type": "价值投资分析",
@@ -66,4 +65,8 @@ category: analyst
   "ideal_buy_price": "巴菲特愿意支付的价格",
   "risk_flags": ["风险点1", "风险点2"]
 }
-```
+
+**重要**：
+- 输出必须是合法的 JSON，可以被 JSON.parse() 解析
+- 不要添加 ```json ``` 代码块包裹
+- 不要添加任何解释文字，直接输出 JSON

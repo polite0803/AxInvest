@@ -224,10 +224,11 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     (
         "lockup-watcher",
         &[
-            "get_stock_financials",
+            "get_stock_lockup",
+            "get_stock_shareholder_trades",
+            "get_stock_margin_data",
             "get_announcements",
             "get_block_trades",
-            "get_institutional_visits",
             "search_stock",
         ],
     ),
@@ -255,11 +256,10 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ),
     ("bull-researcher", &["compute_scoring", "compute_valuation", "search_stock"]),
     ("bear-researcher", &["compute_scoring", "compute_valuation", "search_stock"]),
-    // 修复 Defect #4: bull-r2 / bear-r2 是辩论第 2 轮的"质询"型辩手，
-    // 主要工作是阅读对方 R1 论据并提出可证伪的质询问题，仅需 search_stock
-    // 用于核实引用数据。
-    ("bull-r2", &["search_stock"]),
-    ("bear-r2", &["search_stock"]),
+    // v16: R2 质询型辩手也需要 compute_scoring / compute_valuation 来核实对方论据中的
+    // 技术评分与估值结论，否则质询问题缺乏数据支撑，容易产出空泛内容。
+    ("bull-r2", &["compute_scoring", "compute_valuation", "search_stock"]),
+    ("bear-r2", &["compute_scoring", "compute_valuation", "search_stock"]),
     ("aggressive-debator", &["compute_portfolio_risk", "search_stock"]),
     ("conservative-debator", &["compute_portfolio_risk", "search_stock"]),
     ("neutral-debator", &["compute_portfolio_risk", "search_stock"]),
@@ -367,6 +367,27 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
+    // v15: 修复风险评估 Agent（aggressive/conservative/neutral-debator）缺少
+    //   context_sources 的问题。之前 3 个风险评估节点没有配置 context_sources，
+    //   LLM 看不到上游 9 个分析师报告和辩论结果，没有分析素材，
+    //   因此不会主动调用工具，输出空泛结论。
+    //   现在注入所有分析师报告、辩论结果、技术指标，让风险评估有依据。
+    // v14: 进一步加强 system_prompt：
+    //   - 明确告知 LLM 工具返回空数组/空对象是正常情况（数据源暂无记录）
+    //   - 严禁使用 '数据缺失'/'无法获取'/'does not exist'/'error' 等负面措辞
+    //   - 研报分析师即使没有机构覆盖数据，也要基于公开信息给出独立分析
+    // v13: 修复 tool_def_map 缺失 7 个筹码面/基本面工具定义
+    //   （get_stock_lockup/get_stock_shareholder_trades/get_stock_margin_data 等），
+    //   导致 LLM 看不到这些工具。同时更新 lockup-watcher 的 PROFILE_TOOLS
+    //   和 t-lockup-data 前置工具，让筹码面分析师能获取真正的解禁/增减持数据。
+    //   修改 system_prompt 禁止 LLM 使用"工具调用失败"等负面措辞。
+    // v12: 修改 Agent system_prompt 使用 {{stock_code}}/{{stock_name}} 模板语法，
+    //   让 LLM 在 system_prompt 中直接看到目标股票代码，减少工具调用时遗漏参数。
+    //   同时修复 tool_def_map 中缺失 get_stock_peers/get_research_reports 等
+    //   工具定义，导致 Agent 暴露给 LLM 的工具列表不完整。
+    // v11: 为所有 AgentNodeConfig 添加 input_mapping 字段，自动将 stock_code/stock_name
+    //   注入 system_prompt。之前 v10 模板中 Agent 节点没有 input_mapping，导致 LLM
+    //   不知道目标股票代码，所有分析师输出为空或"请提供股票代码"。
     // v10: input_var 从 "t-risk.result" 改为 "t-risk"。
     //   之前 v8/v9 尝试用 "t-risk.result" 定位工具包裹层的 result 字段，
     //   但用户反馈仍 VALIDATION_FAILED。观察 v9 新增的可用 key 列表日志
@@ -374,7 +395,19 @@ async fn seed_stock_analysis_workflow_template(
     //   v10 改用 "t-risk"（整个工具输出 JSON 对象），
     //   让 value_to_input_text 走 pretty JSON 序列化，LLM 直接看到
     //   tool_name/result/truncated 全貌，不再依赖深层字段下钻。
-    const TEMPLATE_VERSION: i32 = 10;
+    // v16: 修复 R2 辩论节点（bull-r2/bear-r2）无数据输出。
+    //   R2 节点只有 search_stock 一个工具，LLM 若不调用工具则产出空泛；
+    //   同时未设置 output_mode: Json，LLM 输出格式不固定，前端解析失败。
+    //   现在给 R2 与 R1/R3 相同工具集，并强制 JSON 输出。
+    // v17: value-investor 节点设置 output_mode: Json，
+    //   同时 prompt 改为直接输出 JSON（不再用代码块包裹），
+    //   彻底解决前端解析失败导致显示原始 JSON 的问题。
+    // v18: 修复 portfolio-manager confidence 公式（consensus_split 项归一化，所有输入统一到 0-1 * 权重）。
+    //   修复 data-quality 节点 context_sources 缺少 t-scoring/t-valuation/t-risk，
+    //   导致 data-quality-inspector 无法读取工具 credibility 元数据，工具可信度分始终缺失。
+    // v19: 修复情绪类数据工具（get_news JSONP 解析 bug + t-sentiment-data 调用错误工具）。
+    //   修复 trader 节点输出纯文本导致前端无法解析（改为 JSON 输出）。
+    const TEMPLATE_VERSION: i32 = 19;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -845,6 +878,41 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("获取期权PCR（看跌/看涨比率和持仓量比率，市场情绪前瞻指标）".into()),
         parameters: stock_code_params(),
     };
+    let td_lockup = ToolDef {
+        name: "get_stock_lockup".into(),
+        description: Some("获取限售解禁日程（解禁日期、股数、比例、股东名称）".into()),
+        parameters: stock_code_params(),
+    };
+    let td_sh_trades = ToolDef {
+        name: "get_stock_shareholder_trades".into(),
+        description: Some("获取大股东增减持记录（变动类型、数量、均价、原因）".into()),
+        parameters: stock_code_params(),
+    };
+    let td_dividend = ToolDef {
+        name: "get_stock_dividend_records".into(),
+        description: Some("获取除权除息/分红送配记录".into()),
+        parameters: stock_code_params(),
+    };
+    let td_nb_holding = ToolDef {
+        name: "get_stock_north_bound".into(),
+        description: Some("获取北向资金个股持仓（持股数量、占比）".into()),
+        parameters: stock_code_params(),
+    };
+    let td_dt = ToolDef {
+        name: "get_stock_dragon_tiger".into(),
+        description: Some("获取个股龙虎榜数据（营业部买卖、上榜原因）".into()),
+        parameters: stock_code_params(),
+    };
+    let td_margin = ToolDef {
+        name: "get_stock_margin_data".into(),
+        description: Some("获取融资融券数据（融资买入额、余额、融券卖出量、余量）".into()),
+        parameters: stock_code_params(),
+    };
+    let td_sector_info = ToolDef {
+        name: "get_stock_sector_info".into(),
+        description: Some("获取行业分类（申万一级/二级、概念板块标签）".into()),
+        parameters: stock_code_params(),
+    };
 
     // 工具名 → ToolDef 映射（用于按名查找，给节点填充 config.tools）
     let tool_def_map: std::collections::HashMap<&str, ToolDef> = [
@@ -880,6 +948,13 @@ async fn seed_stock_analysis_workflow_template(
         ("get_index_quotes", td_idx.clone()),
         ("get_stock_peers", td_peers.clone()),
         ("get_stock_option_pcr", td_pcr.clone()),
+        ("get_stock_lockup", td_lockup.clone()),
+        ("get_stock_shareholder_trades", td_sh_trades.clone()),
+        ("get_stock_dividend_records", td_dividend.clone()),
+        ("get_stock_north_bound", td_nb_holding.clone()),
+        ("get_stock_dragon_tiger", td_dt.clone()),
+        ("get_stock_margin_data", td_margin.clone()),
+        ("get_stock_sector_info", td_sector_info.clone()),
     ]
     .into_iter()
     .collect();
@@ -922,7 +997,9 @@ async fn seed_stock_analysis_workflow_template(
             config: AgentNodeConfig {
                 // inline system_prompt 只放任务指令，专家 prompt 由 agent_profile 自动加载，
                 // 行情数据通过 context_sources 由上游 Tool 节点输出自动注入
-                system_prompt: format!("你的任务: {title}"),
+                system_prompt: format!(
+                    "你的任务: {title}\n目标股票代码: {{stock_code}}，股票名称: {{stock_name}}\n\n重要原则：\n1. 如果上游数据节点返回为空，请主动调用可用工具获取补充数据。\n2. 如果确实无法获取某些数据，基于你已知的公开信息和通用分析框架给出尽可能有价值的分析，不要只列 data_gaps。\n3. 始终针对目标股票给出明确的观点（看多/看空/中性）和论据，不要输出空结果。\n4. 调用任何需要 stock_code 参数的工具时，必须始终传递 stock_code={{stock_code}}。\n5. 分析输出中严禁出现'工具调用失败'、'在当前环境中不可用'、'上游数据获取为空'、'数据缺失'、'无法获取'、'does not exist'、'error'等负面措辞。工具返回空数组[]或空对象{{}}是正常情况（表示该数据源暂无记录），请直接基于已有信息给出分析结论。\n6. 如果你是研报分析师，目标是从券商研报、一致预期EPS、机构调研等维度给出观点。如果这些数据源返回空，说明该股票暂无机构覆盖，你可以基于公司基本面、行业地位、新闻公告等公开信息给出独立分析，不要强调'无券商研报'。",
+                ),
                 context_sources: vec![],
                 // 通过 input_mapping 自动注入股票代码/名称到 system_prompt
                 input_mapping: [
@@ -1036,7 +1113,9 @@ async fn seed_stock_analysis_workflow_template(
     // PROFILE_TOOLS 中的工具，但首屏/冷启动数据由这些 tool 节点预拉。
     let tool_assignments: &[(&str, &str, &str, &str)] = &[
         ("t-market-data", "获取K线+行情", "get_stock_kline", "stock_code"),
-        ("t-sentiment-data", "获取新闻+热门", "get_hot_stocks", "stock_code"),
+        // 修复: t-sentiment-data 原调用 get_hot_stocks（热门股票列表，非个股新闻），
+        // 导致情绪面分析师拿不到个股新闻舆情数据。改为 get_stock_news。
+        ("t-sentiment-data", "获取新闻+热门", "get_stock_news", "stock_code"),
         ("t-news-data", "获取新闻+公告", "get_announcements", "stock_code"),
         // 修复 P1: 基本面分析师前置数据改用 get_stock_financials（财报）而非
         // get_consensus_eps（一致预期），让 a-fundamentals 启动时就能拿到
@@ -1050,7 +1129,7 @@ async fn seed_stock_analysis_workflow_template(
         // 让 a-research 启动时就能拿到券商研报的核心结论与目标价。
         ("t-research-data", "获取研报+新闻", "get_research_reports", "stock_code"),
         ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
-        ("t-lockup-data", "获取解禁质押数据", "get_announcements", "stock_code"),
+        ("t-lockup-data", "获取解禁质押数据", "get_stock_lockup", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
@@ -1084,7 +1163,7 @@ async fn seed_stock_analysis_workflow_template(
     // 工具由模板节点 config.tools 统一管理
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
-        let fixed_tool_name = tool_assignments[i].2;
+        let _fixed_tool_name = tool_assignments[i].2;
         let row_y = 40.0 + i as f64 * 80.0;
         let mut an = agent(id, title, _expert, Some("p-analysts"), 240.0, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
@@ -1100,11 +1179,7 @@ async fn seed_stock_analysis_workflow_template(
                 .iter()
                 .filter_map(|&tn| tool_def_map.get(tn).cloned())
                 .collect();
-            a.config.exposed_tools = tool_names
-                .iter()
-                .filter(|&&tn| tn != fixed_tool_name)
-                .map(|&tn| tn.to_string())
-                .collect();
+            a.config.exposed_tools = vec![]; // 空 = 暴露全部 tools，允许 Agent 在 ToolNode 数据不足时自行补充调用
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         }
@@ -1262,7 +1337,7 @@ async fn seed_stock_analysis_workflow_template(
         let mut bull_an =
             agent(&bull_id, &bull_title, bull_expert, Some("debate-bull-bear"), 20.0, bull_y);
         if let WorkflowNode::Agent(ref mut a) = bull_an {
-            // 第 2 轮用质询型 prompt，不再注入完整工具集（避免误导 LLM 重新分析）
+            // v16: R2 质询型辩手强制 JSON 输出，工具轮次提升到 2
             if round_num == 2 {
                 if let Some(names) = PROFILE_TOOLS
                     .iter()
@@ -1277,7 +1352,8 @@ async fn seed_stock_analysis_workflow_template(
                     a.config.system_prompt =
                         format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
                 }
-                a.config.max_tool_rounds = Some(1);
+                a.config.max_tool_rounds = Some(2);
+                a.config.output_mode = OutputMode::Json;
             } else {
                 a.config.tools = bull_tools.clone();
                 a.config.max_tool_rounds = Some(2);
@@ -1285,11 +1361,15 @@ async fn seed_stock_analysis_workflow_template(
                     format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
             }
             a.config.model_role = Some("debater".into());
-            // 注入前序轮次辩论输出作为上下文
+            // 注入前序轮次辩论输出 + 所有分析师报告作为上下文
             let mut ctx: Vec<String> = Vec::new();
             for r in 1..round_num {
                 ctx.push(format!("bull-r{r}"));
                 ctx.push(format!("bear-r{r}"));
+            }
+            // 添加所有分析师报告，让辩手有素材可辩论
+            for aid in &a_ids {
+                ctx.push(aid.to_string());
             }
             a.config.context_sources = ctx;
         }
@@ -1299,6 +1379,7 @@ async fn seed_stock_analysis_workflow_template(
         let mut bear_an =
             agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), 20.0, bear_y);
         if let WorkflowNode::Agent(ref mut a) = bear_an {
+            // v16: R2 质询型辩手强制 JSON 输出，工具轮次提升到 2
             if round_num == 2 {
                 if let Some(names) = PROFILE_TOOLS
                     .iter()
@@ -1313,7 +1394,8 @@ async fn seed_stock_analysis_workflow_template(
                     a.config.system_prompt =
                         format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
                 }
-                a.config.max_tool_rounds = Some(1);
+                a.config.max_tool_rounds = Some(2);
+                a.config.output_mode = OutputMode::Json;
             } else {
                 a.config.tools = bear_tools.clone();
                 a.config.max_tool_rounds = Some(2);
@@ -1321,13 +1403,17 @@ async fn seed_stock_analysis_workflow_template(
                     format!("{}{}", a.config.system_prompt, tool_prompt(&bear_tools));
             }
             a.config.model_role = Some("debater".into());
-            // 注入前序轮次 + 本轮多方输出作为上下文
+            // 注入前序轮次 + 本轮多方输出 + 所有分析师报告作为上下文
             let mut ctx: Vec<String> = Vec::new();
             for r in 1..round_num {
                 ctx.push(format!("bull-r{r}"));
                 ctx.push(format!("bear-r{r}"));
             }
             ctx.push(bull_id.clone());
+            // 添加所有分析师报告
+            for aid in &a_ids {
+                ctx.push(aid.to_string());
+            }
             a.config.context_sources = ctx;
         }
         nodes.push(bear_an);
@@ -1364,6 +1450,7 @@ async fn seed_stock_analysis_workflow_template(
             ];
             a.config.model_role = Some("stock-analyst".into());
             a.config.max_tool_rounds = Some(2);
+            a.config.output_mode = OutputMode::Json;
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| *k == "value-investor")
@@ -1492,7 +1579,24 @@ async fn seed_stock_analysis_workflow_template(
             a.config.tools = rtools.clone();
             a.config.max_tool_rounds = Some(2);
             a.config.system_prompt = format!("{}{}", a.config.system_prompt, tool_prompt(rtools));
-            a.config.model_role = Some("risk-assessor".into());
+            a.config.model_role = Some("risk-evaluator".into());
+            // 修复：风险评估 Agent 需要读到上游分析师报告 + 辩论结果 + 技术指标，
+            // 否则 LLM 没有分析素材，不会主动调用工具。
+            a.config.context_sources = vec![
+                "a-market-analyst".into(),
+                "a-sentiment".into(),
+                "a-news".into(),
+                "a-fundamentals".into(),
+                "a-policy".into(),
+                "a-hot-money".into(),
+                "a-lockup".into(),
+                "a-research".into(),
+                "a-sector".into(),
+                format!("bull-r{debate_max_rounds}"),
+                format!("bear-r{debate_max_rounds}"),
+                "t-scoring".into(),
+                "t-valuation".into(),
+            ];
         }
         nodes.push(an);
         // p-risk-assess 容器 → 子节点依赖边：防止子节点被独立调度
@@ -1666,6 +1770,11 @@ async fn seed_stock_analysis_workflow_template(
                 "a-lockup".into(),
                 "a-research".into(),
                 "a-sector".into(),
+                // 注入算法工具节点的 credibility 元数据，支持数据质量检查员
+                // 评估工具可信度分的 4 个维度（freshness/completeness/warnings/source）
+                "t-scoring".into(),
+                "t-valuation".into(),
+                "t-risk".into(),
             ];
             a.config.model_role = Some("stock-analyst".into());
             let tool_names = PROFILE_TOOLS
@@ -1739,7 +1848,7 @@ async fn seed_stock_analysis_workflow_template(
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
     let mut trader = agent(
         "trader",
-        "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则",
+        "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则。\n如果数据不足，基于当前股价和通用风控原则给出保守方案，不要留空字段。",
         "trader",
         None,
         240.0,
@@ -1770,7 +1879,7 @@ async fn seed_stock_analysis_workflow_template(
     // portfolio-mgr: 最终决策 — 全量工具验证
     let mut pm = agent(
         "portfolio-mgr",
-        "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。\n输出JSON格式（严格模式）：\n{\n  \"action\": \"买入/增持/持有/减持/卖出\",\n  \"positionPct\": 仓位百分比(整数0-100),\n  \"targetPrice\": 目标价(浮点数),\n  \"stopLoss\": 止损价(浮点数),\n  \"reasoning\": \"决策理由(300字以内)\",\n  \"riskLevel\": \"低/中/高\",\n  \"confidence\": 置信度(0-100)\n}\n要求：\n1. 只输出上述JSON对象，前后不要有任何其他文字\n2. 键名和字符串值必须用双引号\n3. riskLevel只允许三个值：\"低\"、\"中\"、\"高\"\n4. action只允许五个值：\"买入\"、\"增持\"、\"持有\"、\"减持\"、\"卖出\"",
+        "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。\n输出JSON格式（严格模式）：\n{\n  \"action\": \"买入/增持/持有/减持/卖出\",\n  \"positionPct\": 仓位百分比(整数0-100),\n  \"targetPrice\": 目标价(浮点数),\n  \"stopLoss\": 止损价(浮点数),\n  \"reasoning\": \"决策理由(300字以内)\",\n  \"riskLevel\": \"低/中/高\",\n  \"confidence\": 置信度(0-100)\n}\n要求：\n1. 只输出上述JSON对象，前后不要有任何其他文字\n2. 键名和字符串值必须用双引号\n3. riskLevel只允许三个值：\"低\"、\"中\"、\"高\"\n4. action只允许五个值：\"买入\"、\"增持\"、\"持有\"、\"减持\"、\"卖出\"\n5. 如果上游分析数据不足，基于已有信息给出最合理的保守决策（通常是\"持有\"+低仓位），reasoning中说明数据限制，不要返回空字段。",
         "portfolio-manager",
         None,
         240.0,

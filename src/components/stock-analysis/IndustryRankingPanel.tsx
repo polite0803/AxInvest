@@ -1,89 +1,164 @@
+import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Empty, Spin, Table } from "antd";
+import { useStockAnalysisStore } from "@/stores";
+import { Button, Card, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
+import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 
-interface IndustryRank {
+interface IndustryRow {
+  rank: number;
   industryName: string;
+  industryCode: string;
   changePct: number;
-  turnover: number | null;
-  leaderCode: string | null;
-  leaderName: string | null;
-  leaderChangePct: number | null;
+  mainInflow: number | null;
+  leaderCode: string;
+  leaderName: string;
+  leaderChangePct: number;
+}
+
+function fmtYi(v: number): string {
+  if (Math.abs(v) >= 1e8) { return `${(v / 1e8).toFixed(2)}亿`; }
+  if (Math.abs(v) >= 1e4) { return `${(v / 1e4).toFixed(0)}万`; }
+  return `${v.toFixed(0)}`;
 }
 
 export function IndustryRankingPanel() {
   const { t } = useTranslation();
-  const [rankings, setRankings] = useState<IndustryRank[]>([]);
+  const { openDataSourceSettings } = useStockAnalysisPage();
+  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
+  const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
+  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
+  const [rows, setRows] = useState<IndustryRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
+  const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
+    setEmptyVendors(undefined);
     try {
-      const data = await invoke<IndustryRank[]>("get_industry_ranking");
-      setRankings(data ?? []);
+      const check = await checkVendorEnabled("sectors", { silent });
+      if (check.status === "disabled") {
+        setRows([]);
+        setEmptyKind("vendorDisabled");
+        setEmptyVendors(check.vendors);
+        setLoading(false);
+        return;
+      }
+      if (check.status === "backend_offline") {
+        setRows([]);
+        setEmptyKind("backendOffline");
+        setLoading(false);
+        return;
+      }
+      const data = await invoke<any[]>("get_industry_ranking");
+      if (!Array.isArray(data)) { throw new Error("bad data"); }
+      const list: IndustryRow[] = data.slice(0, 20).map((e: any, i: number) => ({
+        rank: i + 1,
+        industryName: e.industryName ?? e.industry_name ?? "",
+        industryCode: e.industryCode ?? e.industry_code ?? "",
+        changePct: Number(e.changePct ?? e.change_pct ?? 0),
+        mainInflow: e.mainInflow != null
+          ? Number(e.mainInflow)
+          : (e.main_inflow != null ? Number(e.main_inflow) : null),
+        leaderCode: e.leaderCode ?? e.leader_code ?? "",
+        leaderName: e.leaderName ?? e.leader_name ?? "",
+        leaderChangePct: Number(e.leaderChangePct ?? e.leader_change_pct ?? 0),
+      }));
+      list.sort((a, b) => b.changePct - a.changePct);
+      list.forEach((r, i) => {
+        r.rank = i + 1;
+      });
+      setRows(list);
+      if (list.length === 0) { setEmptyKind("noData"); }
     } catch {
-      setFetchError(true);
+      setRows([]);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    load();
+    load(true);
   }, [load]);
 
-  const columns = [
-    { title: t("stockAnalysis.industry"), dataIndex: "industryName", key: "name" },
-    {
-      title: t("stockAnalysis.change"),
-      dataIndex: "changePct",
-      key: "change",
-      width: 80,
-      render: (v: number) => {
-        const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
-        return <span style={{ color, fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span>;
-      },
-    },
-    {
-      title: t("stockAnalysis.turnoverRate"),
-      dataIndex: "turnover",
-      key: "turnover",
-      width: 70,
-      render: (v: number | null) => v != null ? `${v.toFixed(1)}%` : "-",
-    },
-    {
-      title: t("stockAnalysis.leader"),
-      dataIndex: "leaderName",
-      key: "leader",
-      width: 80,
-      render: (v: string | null, r: IndustryRank) =>
-        v
-          ? (
-            <span>
-              {v}{" "}
-              {r.leaderChangePct != null ? `${r.leaderChangePct >= 0 ? "+" : ""}${r.leaderChangePct.toFixed(2)}%` : ""}
-            </span>
-          )
-          : "-",
-    },
-  ];
+  const analyze = async (code: string) => {
+    if (!code) { return; }
+    await getStockQuote(code);
+    await getStockKline(code, "daily", 120);
+    startAnalysis(code);
+  };
 
   return (
     <Card
       size="small"
-      title={`📊 ${t("stockAnalysis.industryRanking")}`}
-      styles={{ body: { padding: 0 } }}
+      title={`🏆 ${t("stockAnalysis.settings.panels.industryRank")}`}
+      styles={{ body: { padding: "4px 8px" } }}
       extra={
-        <Button size="small" loading={loading} onClick={load}>{t("stockAnalysis.settings.panels.refresh")}</Button>
+        <Button size="small" loading={loading} onClick={() => load()}>
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
       }
     >
       {loading
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
-        : fetchError
-        ? <Empty description={t("stockAnalysis.error")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        : <Table dataSource={rankings} columns={columns} rowKey="industryName" size="small" pagination={false} />}
+        : emptyKind
+        ? (
+          <PanelEmpty
+            kind={emptyKind}
+            vendorNames={emptyVendors ?? PANEL_VENDORS.sectors}
+            description={emptyKind === "noData" ? t("stockAnalysis.settings.panels.noIndustry") : undefined}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
+        : (
+          <List
+            size="small"
+            dataSource={rows}
+            renderItem={(r) => {
+              const up = r.changePct >= 0;
+              return (
+                <List.Item
+                  style={{ padding: "3px 0", cursor: r.leaderCode ? "pointer" : "default" }}
+                  onClick={() => analyze(r.leaderCode)}
+                >
+                  <div className="flex items-center gap-2 text-xs w-full">
+                    <span className="w-5 text-right text-gray-400 font-mono shrink-0">{r.rank}</span>
+                    <Tag
+                      className="m-0 text-xs shrink-0"
+                      color={r.rank <= 3 ? (up ? "red" : "green") : "default"}
+                    >
+                      {r.industryName}
+                    </Tag>
+                    <span
+                      className={up ? "text-red-500" : "text-green-500"}
+                      style={{ minWidth: 50 }}
+                    >
+                      {up ? "+" : ""}
+                      {r.changePct.toFixed(2)}%
+                    </span>
+                    {r.mainInflow != null && (
+                      <span className="text-gray-400 text-xs">
+                        {t("stockAnalysis.settings.panels.main")} {fmtYi(r.mainInflow)}
+                      </span>
+                    )}
+                    {r.leaderName && (
+                      <Tooltip
+                        title={`${r.leaderName} (${r.leaderChangePct >= 0 ? "+" : ""}${r.leaderChangePct.toFixed(2)}%)`}
+                      >
+                        <span className="text-gray-400 truncate">👑 {r.leaderName}</span>
+                      </Tooltip>
+                    )}
+                  </div>
+                </List.Item>
+              );
+            }}
+          />
+        )}
     </Card>
   );
 }

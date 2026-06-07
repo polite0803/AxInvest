@@ -2,10 +2,12 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, InputNumber, Spin, Tag } from "antd";
+import { Button, Card, InputNumber, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { checkVendorEnabled } from "./vendorCheck";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
+import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 
 interface ScreenResult {
   stockCode: string;
@@ -89,6 +91,7 @@ const FACTOR_DEFS = [
 
 export function StockScreenerPanel() {
   const { t } = useTranslation();
+  const { openDataSourceSettings } = useStockAnalysisPage();
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -96,27 +99,65 @@ export function StockScreenerPanel() {
 
   const [results, setResults] = useState<ScreenResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
+  const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
   const [mode, setMode] = useState<"discover" | "screen">("discover");
   const [factors, setFactors] = useState<Record<string, FactorState>>({});
   const [selectedCount, setSelectedCount] = useState(0);
 
-  const discover = useCallback(async () => {
+  const discover = useCallback(async (silent = false) => {
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
+    setEmptyVendors(undefined);
     try {
+      const check = await checkVendorEnabled("screener", { silent });
+      if (check.status === "disabled") {
+        setResults([]);
+        setEmptyKind("vendorDisabled");
+        setEmptyVendors(check.vendors);
+        setLoading(false);
+        return;
+      }
+      if (check.status === "backend_offline") {
+        setResults([]);
+        setEmptyKind("backendOffline");
+        setLoading(false);
+        return;
+      }
       const r = await invoke<ScreenResult[]>("discover_stock_candidates");
-      if (Array.isArray(r)) { setResults(r); }
+      if (Array.isArray(r)) {
+        setResults(r);
+        if (r.length === 0) { setEmptyKind("noData"); }
+      } else {
+        setResults([]);
+        setEmptyKind("noData");
+      }
     } catch {
-      setFetchError(true);
+      setResults([]);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
   }, []);
 
   const screen = useCallback(async () => {
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
+    setEmptyVendors(undefined);
     try {
+      const check = await checkVendorEnabled("screener");
+      if (check.status === "disabled") {
+        setResults([]);
+        setEmptyKind("vendorDisabled");
+        setEmptyVendors(check.vendors);
+        setLoading(false);
+        return;
+      }
+      if (check.status === "backend_offline") {
+        setResults([]);
+        setEmptyKind("backendOffline");
+        setLoading(false);
+        return;
+      }
       const criteria: Record<string, any> = {};
       for (const fd of FACTOR_DEFS) {
         const f = factors[fd.key];
@@ -126,15 +167,22 @@ export function StockScreenerPanel() {
         else if (f.value != null) { criteria[fd.key] = f.value; }
       }
       const r = await invoke<ScreenResult[]>("screen_stocks", { criteria });
-      if (Array.isArray(r)) { setResults(r); }
+      if (Array.isArray(r)) {
+        setResults(r);
+        if (r.length === 0) { setEmptyKind("noData"); }
+      } else {
+        setResults([]);
+        setEmptyKind("noData");
+      }
     } catch {
-      setFetchError(true);
+      setResults([]);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
   }, [factors]);
 
   useEffect(() => {
-    discover();
+    discover(true);
   }, [watchlistVersion, discover]);
 
   const toggleFactor = (key: string) => {
@@ -171,15 +219,18 @@ export function StockScreenerPanel() {
           <Button
             size="small"
             type={mode === "discover" ? "primary" : "default"}
-            onClick={async () => {
+            onClick={() => {
               setMode("discover");
-              const r = await checkVendorEnabled("screener");
-              if (r.status === "ok") { discover(); }
+              discover();
             }}
           >
             {t("stockAnalysis.settings.screener.discover")}
           </Button>
-          <Button size="small" type={mode === "screen" ? "primary" : "default"} onClick={() => setMode("screen")}>
+          <Button
+            size="small"
+            type={mode === "screen" ? "primary" : "default"}
+            onClick={() => setMode("screen")}
+          >
             {t("stockAnalysis.settings.screener.screen")}
           </Button>
         </div>
@@ -248,14 +299,18 @@ export function StockScreenerPanel() {
       )}
 
       {loading
-        ? <Spin size="small" />
-        : results.length === 0
+        ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
+        : emptyKind
         ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={fetchError ? t("stockAnalysis.settings.vendor.connectionFailed") : mode === "discover"
-              ? t("stockAnalysis.settings.screener.discoverHint")
-              : t("stockAnalysis.settings.screener.screenHint")}
+          <PanelEmpty
+            kind={emptyKind}
+            vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
+            description={emptyKind === "noData"
+              ? (mode === "discover"
+                ? t("stockAnalysis.settings.screener.discoverHint")
+                : t("stockAnalysis.settings.screener.screenHint"))
+              : undefined}
+            onOpenSettings={openDataSourceSettings}
           />
         )
         : (

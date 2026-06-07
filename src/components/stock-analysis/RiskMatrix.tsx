@@ -7,6 +7,162 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags } from "./utils";
 
+/** 粗略检测文本是否看起来像 JSON */
+function looksLikeJson(text: string): boolean {
+  const trimmed = text.trim();
+  return (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    || (trimmed.startsWith("[") && trimmed.endsWith("]"));
+}
+
+/**
+ * 尝试从风险报告 JSON 中提取可读 Markdown 文本
+ * 支持 a-risk / trader / portfolio-manager 等多种输出结构
+ */
+function extractReadableFromRiskReport(report: string): string {
+  const cleaned = cleanToolCallTags(report);
+  const trimmed = cleaned.trim();
+
+  if (!looksLikeJson(trimmed)) { return cleaned; }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null) { return cleaned; }
+
+    const parts: string[] = [];
+
+    // 1. 立场/风格
+    if (typeof parsed.stance === "string") {
+      parts.push(`**立场**: ${parsed.stance}`);
+    }
+
+    // 2. 仓位/头寸
+    if (typeof parsed.positionPct === "number") {
+      parts.push(`**建议仓位**: ${parsed.positionPct}%`);
+    }
+
+    // 3. 信心度
+    if (typeof parsed.confidence === "number") {
+      parts.push(`**信心度**: ${parsed.confidence}%`);
+    }
+
+    // 4. 风险等级
+    if (typeof parsed.riskLevel === "string") {
+      parts.push(`**风险等级**: ${parsed.riskLevel}`);
+    }
+
+    // 5. 摘要/分析/推理
+    const textFields = ["summary", "risk_analysis", "analysis", "reasoning", "report", "content", "text", "detail"];
+    for (const field of textFields) {
+      if (typeof parsed[field] === "string" && parsed[field].length > 5) {
+        parts.push(parsed[field]);
+      }
+    }
+
+    // 6. Kelly 公式参数
+    if (parsed.kelly_inputs && typeof parsed.kelly_inputs === "object") {
+      const k = parsed.kelly_inputs;
+      const kParts: string[] = [];
+      if (typeof k.win_rate === "number") { kParts.push(`胜率 ${(k.win_rate * 100).toFixed(0)}%`); }
+      if (typeof k.payoff_ratio === "number") { kParts.push(`赔率 ${k.payoff_ratio}`); }
+      if (typeof k.raw_kelly === "number") { kParts.push(`原始 Kelly ${(k.raw_kelly * 100).toFixed(1)}%`); }
+      if (typeof k.scale_factor === "number") { kParts.push(`缩放因子 ${k.scale_factor}`); }
+      if (kParts.length > 0) {
+        parts.push(`**Kelly 参数**: ${kParts.join("，")}`);
+      }
+    }
+
+    // 7. 非对称机会
+    if (Array.isArray(parsed.asymmetric_opportunities) && parsed.asymmetric_opportunities.length > 0) {
+      parts.push("**非对称机会**:");
+      for (const opp of parsed.asymmetric_opportunities) {
+        if (typeof opp.opportunity === "string") {
+          parts.push(`- ${opp.opportunity}`);
+        }
+        if (Array.isArray(opp.evidence_refs)) {
+          for (const ref of opp.evidence_refs) {
+            if (typeof ref === "string") { parts.push(`  - 依据: ${ref}`); }
+          }
+        }
+        if (typeof opp.expected_value === "string") {
+          parts.push(`  - 预期价值: ${opp.expected_value}`);
+        }
+      }
+    }
+
+    // 8. 执行备注
+    if (Array.isArray(parsed.execution_notes) && parsed.execution_notes.length > 0) {
+      parts.push("**执行要点**:");
+      for (const note of parsed.execution_notes) {
+        if (typeof note === "string") { parts.push(`- ${note}`); }
+      }
+    } else if (typeof parsed.execution_notes === "string" && parsed.execution_notes.length > 5) {
+      parts.push(`**执行要点**: ${parsed.execution_notes}`);
+    }
+
+    // 9. 风险项列表
+    if (Array.isArray(parsed.risk_items) && parsed.risk_items.length > 0) {
+      parts.push("**风险项**:");
+      for (const item of parsed.risk_items) {
+        if (typeof item.risk === "string") {
+          const severity = typeof item.severity === "string" ? `（${item.severity}）` : "";
+          parts.push(`- ${item.risk}${severity}`);
+        }
+        if (Array.isArray(item.evidence_refs)) {
+          for (const ref of item.evidence_refs) {
+            if (typeof ref === "string") { parts.push(`  - 依据: ${ref}`); }
+          }
+        }
+      }
+    }
+
+    // 10. 关键条件跟踪
+    if (Array.isArray(parsed.key_conditions_to_track) && parsed.key_conditions_to_track.length > 0) {
+      parts.push("**关键跟踪条件**:");
+      for (const cond of parsed.key_conditions_to_track) {
+        if (typeof cond === "string") { parts.push(`- ${cond}`); }
+      }
+    }
+
+    // 11. 多空核心论据
+    if (Array.isArray(parsed.decisive_bull_acks) && parsed.decisive_bull_acks.length > 0) {
+      parts.push("**核心做多论据**:");
+      for (const ack of parsed.decisive_bull_acks) {
+        if (typeof ack === "string") { parts.push(`- ${ack}`); }
+      }
+    }
+    if (Array.isArray(parsed.decisive_bear_acks) && parsed.decisive_bear_acks.length > 0) {
+      parts.push("**核心做空论据**:");
+      for (const ack of parsed.decisive_bear_acks) {
+        if (typeof ack === "string") { parts.push(`- ${ack}`); }
+      }
+    }
+
+    // 12. 止损/止盈
+    if (typeof parsed.stopLossPct === "number") {
+      parts.push(`**止损**: -${parsed.stopLossPct}%`);
+    }
+    if (typeof parsed.takeProfitPct === "number") {
+      parts.push(`**止盈**: +${parsed.takeProfitPct}%`);
+    }
+
+    if (parts.length > 0) {
+      return parts.join("\n\n");
+    }
+
+    // 兜底：提取所有字符串值
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string" && value.length > 10) {
+        parts.push(`**${key}**: ${value}`);
+      }
+    }
+    if (parts.length > 0) { return parts.join("\n\n"); }
+  } catch {
+    // 解析失败回退
+  }
+
+  return cleaned;
+}
+
 /** 风险类型 → 颜色映射（键名对齐 riskAssessments 实际节点 ID，
  *  OKLch 值与 index.css --sa-* 同步）。
  * 修复 Bug #5: 旧版键名用专家角色 ID（aggressive-debator 等），
@@ -23,11 +179,11 @@ const RISK_COLORS: Record<string, string> = {
 
 /** 风险类型 → i18n key（键名对齐 riskAssessments 实际节点 ID） */
 const RISK_LABEL_KEYS: Record<string, string> = {
-  "risk-agg": "risk.aggressive",
-  "risk-con": "risk.conservative",
-  "risk-neu": "risk.neutral",
-  "research-mgr": "risk.researchManager",
-  "comprehensive": "risk.comprehensive",
+  "risk-agg": "stockAnalysis.risk.aggressive",
+  "risk-con": "stockAnalysis.risk.conservative",
+  "risk-neu": "stockAnalysis.risk.neutral",
+  "research-mgr": "stockAnalysis.risk.researchManager",
+  "comprehensive": "stockAnalysis.risk.comprehensive",
 };
 
 /** 从风险评估文本中计算 0-100 的量化风险分 */
@@ -72,6 +228,7 @@ export function RiskMatrix() {
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const expandedChartRef = useRef<HTMLDivElement>(null);
   const expandedInstanceRef = useRef<echarts.ECharts | null>(null);
 
@@ -104,13 +261,20 @@ export function RiskMatrix() {
 
     const dimensions = Object.keys(riskAssessments).slice(0, 6).map((type) => {
       const key = RISK_LABEL_KEYS[type];
-      return key ? t(`stockAnalysis.${key}`) : type;
+      return key ? t(key) : type;
     });
 
     const scores = Object.entries(riskAssessments).slice(0, 6).map(([, text]) => computeRiskScore(text));
 
     // 如果维度不足 3，不画雷达图
     if (dimensions.length < 3) { return; }
+
+    // 深色主题下使用高对比度颜色
+    const axisTextColor = isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.5)";
+    const lineColor = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)";
+    const areaColors = isDark
+      ? ["rgba(82,130,255,0.06)", "rgba(82,130,255,0.10)", "rgba(82,130,255,0.14)"]
+      : ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)", "rgba(22,119,255,0.06)"];
 
     chart.setOption({
       animation: true,
@@ -119,14 +283,14 @@ export function RiskMatrix() {
         indicator: dimensions.map((name) => ({ name, max: 100 })),
         center: ["50%", "50%"],
         radius: "60%",
-        axisName: { color: "var(--muted)", fontSize: 11 },
+        axisName: { color: axisTextColor, fontSize: 11 },
         splitArea: {
           areaStyle: {
-            color: ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)", "rgba(22,119,255,0.06)"],
+            color: areaColors,
           },
         },
-        splitLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
-        axisLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
+        splitLine: { lineStyle: { color: lineColor } },
+        axisLine: { lineStyle: { color: lineColor } },
       },
       series: [{
         type: "radar",
@@ -138,7 +302,7 @@ export function RiskMatrix() {
         itemStyle: { color: "oklch(55% 0.20 28)" },
       }],
     });
-  }, [riskAssessments, t]);
+  }, [riskAssessments, t, isDark]);
 
   // Render expanded chart when modal opens
   useEffect(() => {
@@ -156,22 +320,28 @@ export function RiskMatrix() {
     expandedInstanceRef.current = chart;
     const dimensions = Object.keys(riskAssessments).slice(0, 6).map((type) => {
       const key = RISK_LABEL_KEYS[type];
-      return key ? t(`stockAnalysis.${key}`) : type;
+      return key ? t(key) : type;
     });
     const scores = Object.entries(riskAssessments).slice(0, 6).map(([, text]) => computeRiskScore(text));
     if (dimensions.length >= 3) {
+      const axisTextColor = isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.5)";
+      const lineColor = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)";
+      const areaColors = isDark
+        ? ["rgba(82,130,255,0.06)", "rgba(82,130,255,0.10)", "rgba(82,130,255,0.14)"]
+        : ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)", "rgba(22,119,255,0.06)"];
+
       chart.setOption({
         animation: true,
         radar: {
           indicator: dimensions.map((name) => ({ name, max: 100 })),
           center: ["50%", "50%"],
           radius: "65%",
-          axisName: { color: "var(--muted)", fontSize: 13 },
+          axisName: { color: axisTextColor, fontSize: 13 },
           splitArea: {
-            areaStyle: { color: ["rgba(22,119,255,0.02)", "rgba(22,119,255,0.04)", "rgba(22,119,255,0.06)"] },
+            areaStyle: { color: areaColors },
           },
-          splitLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
-          axisLine: { lineStyle: { color: "rgba(0,0,0,0.08)" } },
+          splitLine: { lineStyle: { color: lineColor } },
+          axisLine: { lineStyle: { color: lineColor } },
         },
         series: [{
           type: "radar",
@@ -220,13 +390,23 @@ export function RiskMatrix() {
             const color = RISK_COLORS[type]
               || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
             const label = RISK_LABEL_KEYS[type]
-              ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`)
+              ? t(RISK_LABEL_KEYS[type])
               : type;
             const score = computeRiskScore(report);
             return (
               <div key={type} className="p-1.5 rounded" style={{ background: "var(--surface)" }}>
                 <div className="text-sm font-medium mb-0.5 flex items-center justify-between">
-                  <Tag color={color} style={{ marginRight: 4 }}>{label}</Tag>
+                  <div className="flex items-center gap-1">
+                    <Tag color={color} style={{ marginRight: 4 }}>{label}</Tag>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ExpandOutlined />}
+                      style={{ padding: 0, width: 20, height: 20, fontSize: 10 }}
+                      onClick={() => setSelectedCard(type)}
+                      title="展开详情"
+                    />
+                  </div>
                   <span
                     className="text-xs font-mono"
                     style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
@@ -238,9 +418,12 @@ export function RiskMatrix() {
                   className="sa-markdown-content text-xs leading-relaxed"
                   style={{ maxHeight: 160, overflow: "auto" }}
                 >
-                  {cleanToolCallTags(report)
-                    ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>}
+                  {(() => {
+                    const readable = extractReadableFromRiskReport(report);
+                    return readable
+                      ? <NodeRenderer content={readable} isDark={isDark} />
+                      : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;
+                  })()}
                 </div>
               </div>
             );
@@ -263,7 +446,7 @@ export function RiskMatrix() {
             const color = RISK_COLORS[type]
               || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
             const label = RISK_LABEL_KEYS[type]
-              ? t(`stockAnalysis.${RISK_LABEL_KEYS[type]}`)
+              ? t(RISK_LABEL_KEYS[type])
               : type;
             const score = computeRiskScore(report);
             return (
@@ -278,14 +461,57 @@ export function RiskMatrix() {
                   </span>
                 </div>
                 <div className="sa-markdown-content text-sm leading-relaxed">
-                  {cleanToolCallTags(report)
-                    ? <NodeRenderer content={cleanToolCallTags(report)} isDark={isDark} />
-                    : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>}
+                  {(() => {
+                    const readable = extractReadableFromRiskReport(report);
+                    return readable
+                      ? <NodeRenderer content={readable} isDark={isDark} />
+                      : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;
+                  })()}
                 </div>
               </div>
             );
           })}
         </div>
+      </Modal>
+
+      {/* 单个风险卡片大屏详情 Modal */}
+      <Modal
+        title={(() => {
+          const type = selectedCard;
+          if (!type) { return ""; }
+          const label = RISK_LABEL_KEYS[type] ? t(RISK_LABEL_KEYS[type]) : type;
+          const color = RISK_COLORS[type]
+            || `hsl(${type.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 50%, 45%)`;
+          const score = type ? computeRiskScore(riskAssessments[type] || "") : 0;
+          return (
+            <div className="flex items-center gap-2">
+              <Tag color={color}>{label}</Tag>
+              <span
+                className="font-mono text-sm"
+                style={{ color: score > 70 ? "var(--sa-red)" : score > 40 ? "var(--sa-amber)" : "var(--sa-green)" }}
+              >
+                {t("stockAnalysis.riskScore", { score })}
+              </span>
+            </div>
+          );
+        })()}
+        open={!!selectedCard}
+        onCancel={() => setSelectedCard(null)}
+        footer={null}
+        width="70vw"
+        style={{ top: 40 }}
+        styles={{ body: { maxHeight: "75vh", overflow: "auto", padding: 24 } }}
+      >
+        {selectedCard && riskAssessments[selectedCard] && (
+          <div className="sa-markdown-content leading-relaxed text-base">
+            {(() => {
+              const readable = extractReadableFromRiskReport(riskAssessments[selectedCard]);
+              return readable
+                ? <NodeRenderer content={readable} isDark={isDark} />
+                : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;
+            })()}
+          </div>
+        )}
       </Modal>
     </>
   );

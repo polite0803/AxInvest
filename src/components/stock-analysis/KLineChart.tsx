@@ -1,7 +1,7 @@
 import { useStockAnalysisStore } from "@/stores";
 import type { KLine } from "@/types";
 import * as echarts from "echarts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 /** 模块级 LRU 缓存：按 (stockCode, period, limit) 缓存 K 线结果 */
@@ -52,9 +52,18 @@ export function KLineChart() {
   const indicators = useStockAnalysisStore((s) => s.klineIndicators);
   const toggleIndicator = useStockAnalysisStore((s) => s.toggleIndicator);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
-  const [chartReady, setChartReady] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
+
+  /** 安全地获取 chart 实例，已 disposed 则返回 null */
+  const getChart = useCallback((): echarts.ECharts | null => {
+    const c = instanceRef.current;
+    if (c && !c.isDisposed()) { return c; }
+    instanceRef.current = null;
+    return null;
+  }, []);
+
+  /** 安全地获取 chart 实例，已 disposed 则返回 null */
 
   const handlePeriodChange = useCallback((key: string, limit: number, periodType: string) => {
     setKlinePeriod(key);
@@ -62,13 +71,10 @@ export function KLineChart() {
     const cacheKey = getKlineCacheKey(stockCode, periodType, limit);
     const cached = klineCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < KLINE_CACHE_TTL_MS) {
-      // 命中缓存：先 delete 再 set，把该 key 移到 Map 末尾（真正的 LRU）
       klineCache.delete(cacheKey);
       klineCache.set(cacheKey, cached);
-      // 立即把数据塞回 store，避免重复请求
       useStockAnalysisStore.setState({ klineData: cached.data });
     }
-    // 后台请求最新数据（store 内部 set klineData；下方 useEffect 同步写入缓存）
     getStockKline(stockCode, periodType, limit);
   }, [stockCode, getStockKline, setKlinePeriod]);
 
@@ -85,37 +91,69 @@ export function KLineChart() {
     }
   }, [klineData, stockCode, klinePeriod]);
 
+  // 初始化 ECharts 实例 + 无条件设置观察者
+  // 核心策略：ResizeObserver 和 visibilitychange 始终监听，
+  // 当容器从 display:none 变为可见时自动初始化或 resize
   useEffect(() => {
-    setChartReady(true);
-  }, []);
+    const el = chartRef.current;
+    if (!el) { return; }
 
-  useEffect(() => {
-    if (!chartReady || !chartRef.current) { return; }
-    if (chartRef.current.clientWidth === 0 || chartRef.current.clientHeight === 0) {
-      const timer = requestAnimationFrame(() => setChartReady((v) => !v ? v : true));
-      return () => cancelAnimationFrame(timer);
-    }
-    const chart = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
-    instanceRef.current = chart;
-    const onResize = () => {
-      if (!chart.isDisposed()) { chart.resize(); }
+    const tryInit = () => {
+      if (instanceRef.current && !instanceRef.current.isDisposed()) { return; }
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w === 0 || h === 0) { return; }
+      // 容器已有尺寸，安全初始化
+      const existing = instanceRef.current;
+      if (existing && !existing.isDisposed()) { existing.dispose(); }
+      instanceRef.current = echarts.init(el, undefined, { renderer: "canvas" });
     };
-    const ro = new ResizeObserver(onResize);
-    ro.observe(chartRef.current);
-    window.addEventListener("resize", onResize);
-    requestAnimationFrame(() => {
-      if (!chart.isDisposed()) { chart.resize(); }
+
+    const onResize = () => {
+      const c = instanceRef.current;
+      if (c && !c.isDisposed()) { c.resize(); }
+    };
+
+    // 立即尝试初始化（若容器已有尺寸）
+    tryInit();
+
+    // ResizeObserver：容器尺寸变化时（含从 display:none 变可见）触发
+    const ro = new ResizeObserver(() => {
+      onResize();
+      // 若尚未初始化（之前容器为 0 尺寸），现在尝试
+      tryInit();
     });
+    ro.observe(el);
+
+    // visibilitychange：浏览器标签页切换时，切回时强制 resize / 初始化
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        const c = instanceRef.current;
+        if (c && !c.isDisposed()) {
+          requestAnimationFrame(() => c.resize());
+        } else {
+          tryInit();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // 窗口 resize
+    window.addEventListener("resize", onResize);
+
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
-      chart.dispose();
+      document.removeEventListener("visibilitychange", onVisibility);
+      const c = instanceRef.current;
+      if (c && !c.isDisposed()) { c.dispose(); }
       instanceRef.current = null;
     };
-  }, [chartReady]);
+  }, []);
 
+  // klineData 或 indicators 变化时，更新图表（不重建实例）
   useEffect(() => {
-    const chart = instanceRef.current;
+    const chart = getChart();
     if (!chart || chart.isDisposed()) { return; }
     if (klineData.length === 0) {
       chart.clear();
@@ -123,7 +161,7 @@ export function KLineChart() {
     }
 
     const dates = klineData.map((k) => k.date);
-    const ohlc = klineData.map((k) => [k.open, k.close, k.low, k.high]);
+    const ohlc = klineData.map((k) => [k.open, k.close, k.low, k.high] as [number, number, number, number]);
     const volumes = klineData.map((k) => k.volume);
     const closes = klineData.map((k) => k.close);
 
@@ -277,7 +315,7 @@ export function KLineChart() {
       ],
       series: seriesArr,
     });
-  }, [klineData, t, indicators]);
+  }, [klineData, t, indicators, getChart]);
 
   if (klineData.length === 0) {
     return (
@@ -348,8 +386,7 @@ export function KLineChart() {
           <span style={{ color: MA_PURPLE }}>━</span> MA20
         </label>
       </div>
-      {!chartReady && <div className="ax-skeleton" style={{ width: "100%", height: chartHeight, borderRadius: 6 }} />}
-      <div ref={chartRef} style={{ width: "100%", height: chartHeight, display: chartReady ? "block" : "none" }} />
+      <div ref={chartRef} style={{ width: "100%", height: chartHeight }} />
     </div>
   );
 }

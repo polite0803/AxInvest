@@ -1,7 +1,10 @@
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Empty, Spin, Table } from "antd";
+import { useStockAnalysisStore } from "@/stores";
+import { Button, Card, Spin, Table } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 
 interface PeerComparison {
   stockCode: string;
@@ -15,21 +18,34 @@ interface PeerComparison {
 
 export function PeersPanel() {
   const { t } = useTranslation();
+  const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const { openDataSourceSettings } = useStockAnalysisPage();
   const [peers, setPeers] = useState<PeerComparison[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
   const load = useCallback(async () => {
+    if (!stockCode) {
+      setPeers([]);
+      setEmptyKind("noStock");
+      return;
+    }
     setLoading(true);
-    setFetchError(false);
+    setEmptyKind(null);
     try {
-      const data = await invoke<PeerComparison[]>("get_stock_peers", { stockCode: "" }); // empty = auto
-      setPeers(data ?? []);
+      const data = await invoke<PeerComparison[]>("get_stock_peers", { stockCode });
+      if (Array.isArray(data) && data.length > 0) {
+        setPeers(data);
+      } else {
+        setPeers([]);
+        setEmptyKind("noData");
+      }
     } catch {
-      setFetchError(true);
+      setPeers([]);
+      setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  }, [stockCode]);
 
   useEffect(() => {
     load();
@@ -64,7 +80,8 @@ export function PeersPanel() {
       dataIndex: "changePct",
       key: "change",
       width: 70,
-      render: (v: number) => {
+      render: (v: number | undefined) => {
+        if (v == null) { return <span>-</span>; }
         const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
         return <span style={{ color, fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span>;
       },
@@ -82,8 +99,14 @@ export function PeersPanel() {
     >
       {loading
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
-        : fetchError
-        ? <Empty description={t("stockAnalysis.error")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        : emptyKind
+        ? (
+          <PanelEmpty
+            kind={emptyKind}
+            description={emptyKind === "noData" ? t("stockAnalysis.peersEmpty") : undefined}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
         : <Table dataSource={peers} columns={columns} rowKey="stockCode" size="small" pagination={false} />}
     </Card>
   );

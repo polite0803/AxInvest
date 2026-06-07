@@ -297,6 +297,11 @@ export function DataVendorsTab() {
           variables: merged,
         },
       });
+      // 通知侧栏面板的 vendor 缓存失效，下次进入时按新值重新检查
+      try {
+        const { clearVendorCheckCache } = await import("@/components/stock-analysis/vendorCheck");
+        clearVendorCheckCache();
+      } catch { /* 浏览器模式或路径不存在时跳过 */ }
       message.success(t("stockAnalysis.settings.saveSuccess"));
     } catch {
       message.error(t("stockAnalysis.settings.saveFailed"));

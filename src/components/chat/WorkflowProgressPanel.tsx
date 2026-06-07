@@ -319,6 +319,8 @@ function computeDagLayout(steps: StepLike[], token: GlobalToken): {
   return { nodes, edges };
 }
 
+import { getWorkflowNodeLabel } from "@/utils/workflowNodeLabel";
+
 // ---------------------------------------------------------------------------
 // WorkflowDagNode
 // ---------------------------------------------------------------------------
@@ -326,6 +328,8 @@ function computeDagLayout(steps: StepLike[], token: GlobalToken): {
 const WorkflowDagNode: React.FC<NodeProps<WorkflowDagNodeData>> = memo(
   ({ data, selected }) => {
     const { token } = theme.useToken();
+    const { t } = useTranslation();
+    const label = getWorkflowNodeLabel(data.stepId, t);
     const color = getStatusColor(data.status, token);
     const isRunning = data.status === "running";
     const isFailed = data.status === "failed";
@@ -361,7 +365,7 @@ const WorkflowDagNode: React.FC<NodeProps<WorkflowDagNodeData>> = memo(
             className="text-[10px] font-mono font-medium truncate"
             style={{ color }}
           >
-            {data.stepId}
+            {label}
           </span>
         </div>
         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5 leading-tight">

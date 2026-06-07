@@ -10,7 +10,22 @@ import { useHelpStore, useSettingsStore, useSkillExtensionStore, useUIStore, use
 import type { AppSettings, PageKey } from "@/types";
 import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar } from "antd";
-import { Globe, LineChart, Moon, Pin, PinOff, RotateCcw, Settings, Sun, User } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Eye,
+  Filter,
+  GitCompareArrows,
+  Globe,
+  History,
+  LineChart,
+  Moon,
+  Pin,
+  PinOff,
+  RotateCcw,
+  Settings,
+  Sun,
+  User,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -104,6 +119,41 @@ const builtinNavItems: NavItem[] = [
     icon: <LineChart size={18} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.stockAnalysis",
     path: "/stock-analysis",
+    isPlugin: false,
+  },
+  {
+    key: "watchlist",
+    icon: <Eye size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.watchlist",
+    path: "/watchlist",
+    isPlugin: false,
+  },
+  {
+    key: "screener",
+    icon: <Filter size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.screener",
+    path: "/screener",
+    isPlugin: false,
+  },
+  {
+    key: "trade",
+    icon: <ArrowLeftRight size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.trade",
+    path: "/trade",
+    isPlugin: false,
+  },
+  {
+    key: "backtest",
+    icon: <History size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.backtest",
+    path: "/backtest",
+    isPlugin: false,
+  },
+  {
+    key: "compare",
+    icon: <GitCompareArrows size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.compare",
+    path: "/compare",
     isPlugin: false,
   },
 ];
@@ -380,11 +430,19 @@ export function Sidebar() {
     });
 
     sections.push({
+      key: "invest",
+      labelKey: "sidebar.sectionInvest",
+      items: builtinNavItems.filter((n) =>
+        n.key === "stock-analysis" || n.key === "watchlist" || n.key === "screener"
+        || n.key === "trade" || n.key === "backtest" || n.key === "compare"
+      ),
+    });
+
+    sections.push({
       key: "infrastructure",
       labelKey: "sidebar.sectionInfrastructure",
       items: builtinNavItems.filter((n) =>
         n.key === "gateway" || n.key === "terminal" || n.key === "files" || n.key === "workflow"
-        || n.key === "stock-analysis"
       ),
     });
 

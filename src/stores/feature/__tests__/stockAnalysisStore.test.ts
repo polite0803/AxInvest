@@ -44,6 +44,8 @@ describe("stockAnalysisStore - feature coverage", () => {
       progressPct: 0,
       llmStatus: "unknown",
       _unlisten: null,
+      timeline: [],
+      highlightedPanel: null,
     });
     listenMock.mockResolvedValue(unlistenMock);
   });
@@ -574,6 +576,115 @@ describe("stockAnalysisStore - feature coverage", () => {
       const state = useStockAnalysisStore.getState();
       expect(state.analystReports["fundamentals"]).toBe("基本面分析报告");
       expect(state.valueAssessments["value-investor"]).toBe("巴菲特框架评估");
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // 7. Decision Timeline (Phase 8)
+  // ────────────────────────────────────────────────────────────
+  describe("Decision Timeline (Phase 8)", () => {
+    it("pushTimelineNode 追加新节点", () => {
+      const store = useStockAnalysisStore.getState();
+      store.pushTimelineNode({
+        id: "t-news-data",
+        phase: "scan",
+        agentId: "t-news-data",
+        agentName: "News Data",
+        title: "News Data",
+        summary: "抓取了 12 条新闻",
+        confidence: 0.5,
+        status: "done",
+        evidenceRefs: [],
+      });
+      store.pushTimelineNode({
+        id: "a-tech-analyst",
+        phase: "diagnose",
+        agentId: "a-tech-analyst",
+        agentName: "Tech Analyst",
+        title: "Tech Analyst",
+        summary: "技术面偏多",
+        confidence: 0.7,
+        status: "done",
+        evidenceRefs: [],
+      });
+      expect(useStockAnalysisStore.getState().timeline).toHaveLength(2);
+      expect(useStockAnalysisStore.getState().timeline[0].phase).toBe("scan");
+      expect(useStockAnalysisStore.getState().timeline[1].phase).toBe("diagnose");
+    });
+
+    it("pushTimelineNode 同 id 视为 update（去重）", () => {
+      const store = useStockAnalysisStore.getState();
+      store.pushTimelineNode({
+        id: "trader",
+        phase: "decide",
+        agentId: "trader",
+        agentName: "Trader",
+        title: "Trader",
+        summary: "v1",
+        confidence: 0.4,
+        status: "running",
+        evidenceRefs: [],
+      });
+      store.pushTimelineNode({
+        id: "trader",
+        phase: "decide",
+        agentId: "trader",
+        agentName: "Trader",
+        title: "Trader",
+        summary: "v2 updated",
+        confidence: 0.8,
+        status: "done",
+        evidenceRefs: [],
+      });
+      const tl = useStockAnalysisStore.getState().timeline;
+      expect(tl).toHaveLength(1);
+      expect(tl[0].summary).toBe("v2 updated");
+      expect(tl[0].status).toBe("done");
+      expect(tl[0].confidence).toBe(0.8);
+    });
+
+    it("updateTimelineNode 局部更新字段", () => {
+      const store = useStockAnalysisStore.getState();
+      store.pushTimelineNode({
+        id: "bull-r1",
+        phase: "debate",
+        agentId: "bull-r1",
+        agentName: "Bull R1",
+        title: "Bull R1",
+        summary: "多方论点 v1",
+        confidence: 0.5,
+        status: "running",
+        evidenceRefs: [],
+      });
+      store.updateTimelineNode("bull-r1", { status: "done", summary: "多方论点最终版" });
+      const node = useStockAnalysisStore.getState().timeline[0];
+      expect(node.status).toBe("done");
+      expect(node.summary).toBe("多方论点最终版");
+      expect(node.confidence).toBe(0.5); // 未改
+    });
+
+    it("updateTimelineNode 不存在的 id 是 no-op", () => {
+      const before = useStockAnalysisStore.getState().timeline.length;
+      useStockAnalysisStore.getState().updateTimelineNode("nonexistent", { status: "done" });
+      expect(useStockAnalysisStore.getState().timeline.length).toBe(before);
+    });
+
+    it("clearTimeline 清空", () => {
+      const store = useStockAnalysisStore.getState();
+      store.pushTimelineNode({
+        id: "a-market",
+        phase: "diagnose",
+        agentId: "a-market",
+        agentName: "Market",
+        title: "Market",
+        summary: "x",
+        confidence: 0.5,
+        status: "done",
+        evidenceRefs: [],
+      });
+      expect(useStockAnalysisStore.getState().timeline).toHaveLength(1);
+      useStockAnalysisStore.getState().clearTimeline();
+      expect(useStockAnalysisStore.getState().timeline).toHaveLength(0);
     });
   });
 });

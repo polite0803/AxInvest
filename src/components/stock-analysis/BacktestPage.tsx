@@ -1,33 +1,23 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { History } from "lucide-react";
-import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+import { PageHeader } from "./_shared/PageHeader";
+import { BacktestPanel } from "./BacktestPanel";
+import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
 
 /**
  * BacktestPage — 回测验证
- * 完整内容将在 Phase 5 填充（BacktestPanel + HistoricalAnalysisPanel）
+ * 覆盖:BacktestPanel(全量回测统计)+ HistoricalAnalysisPanel(历史分析列表 + 单次回测)
+ * analysisId 可选:BacktestPage 默认无聚焦分析,展示历史列表;有 store 当前 analysis 时,会显示其 blackboard snapshot
  */
 export function BacktestPage() {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
+  const analysisId = useStockAnalysisStore((s) => s.analysisId);
   return (
     <PageErrorBoundary title="Backtest">
       <div className="flex h-full flex-col">
-        <header className="sa-header">
-          <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
-            ‹ {t("nav.chat")}
-          </button>
-          <h2 className="sa-header-title">{t("backtest.title")}</h2>
-          <span className="sa-header-meta">{t("common.comingSoon")}</span>
-        </header>
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="text-center max-w-md space-y-4">
-            <History size={48} className="mx-auto opacity-30" />
-            <h3 className="text-lg font-medium">{t("backtest.title")}</h3>
-            <p className="text-sm opacity-60">
-              {t("backtest.placeholder")}
-            </p>
-          </div>
+        <PageHeader titleKey="backtest.title" backTo="/stock-analysis" />
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          <BacktestPanel />
+          <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />
         </div>
       </div>
     </PageErrorBoundary>

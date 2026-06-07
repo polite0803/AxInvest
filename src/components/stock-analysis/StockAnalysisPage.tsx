@@ -108,6 +108,35 @@ export function StockAnalysisPage() {
     }
   }, [id, loadAnalysis, getStockQuote, getStockKline]);
 
+  // Decision Timeline 证据芯片 → 切换主 tab（useRightPanel 派发的 timeline-jump 事件）
+  // 格式: timelineJump = "<tabKey>:<panelKey>"（tabKey 为 market/analyze/execute）
+  // 映射:analyze 的子 panelKey 决定具体 tab(execute 默认落到 decision)
+  useEffect(() => {
+    const handle = () => {
+      const raw = searchParams.get("timelineJump");
+      if (!raw) { return; }
+      const [tabKey, panelKey] = raw.split(":");
+      let next: string | null = null;
+      if (tabKey === "market") {
+        next = "market";
+      } else if (tabKey === "execute") {
+        next = "decision";
+      } else if (tabKey === "analyze") {
+        if (
+          panelKey === "analysts" || panelKey === "debate" || panelKey === "value"
+          || panelKey === "risk" || panelKey === "decision"
+        ) {
+          next = panelKey;
+        } else {
+          next = "decision";
+        }
+      }
+      if (next) { setActiveTab(next); }
+    };
+    window.addEventListener("timeline-jump", handle);
+    return () => window.removeEventListener("timeline-jump", handle);
+  }, [searchParams]);
+
   const tabs = [
     {
       key: "market",

@@ -5,7 +5,7 @@ import {
   listDualViews,
   registerDualView,
 } from "@/lib/dualView";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("dualView registry", () => {
   afterEach(() => _resetDualViewRegistry());

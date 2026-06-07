@@ -5,6 +5,7 @@ import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button, Card, Dropdown, Empty, Input, message, Popconfirm, Select, Space, Spin, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 interface WatchlistItem {
   id: string;
@@ -29,6 +30,7 @@ type SortKey = "name" | "change" | "code";
 
 export function WatchlistPanel() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const store = useStockAnalysisStore();
   const stockCode = store.stockCode;
   const stockName = store.stockName;
@@ -179,6 +181,7 @@ export function WatchlistPanel() {
   };
 
   const handleClick = async (code: string) => {
+    navigate(`/stock-analysis?code=${encodeURIComponent(code)}`);
     await getStockQuote(code);
     await getStockKline(code, "daily", 120);
     startAnalysis(code);

@@ -3617,52 +3617,6 @@ export async function handleCommand<T>(
       return [{ exDate: "2026-06-20", dividendPerShare: 12.5 }] as T;
     case "get_market_status":
       return { isTrading: true, marketStatus: "交易中" } as T;
-    case "discover_stock_candidates":
-      return [
-        {
-          stockCode: "002400",
-          stockName: "省广集团",
-          price: 8.45,
-          changePct: 9.98,
-          reasons: ["AI概念", "游资介入"],
-          score: 85,
-        },
-        {
-          stockCode: "000858",
-          stockName: "五粮液",
-          price: 156.80,
-          changePct: 10.02,
-          reasons: ["业绩超预期", "外资增持"],
-          score: 92,
-        },
-        {
-          stockCode: "300750",
-          stockName: "宁德时代",
-          price: 220.30,
-          changePct: 5.67,
-          reasons: ["锂电池龙头", "储能概念"],
-          score: 78,
-        },
-      ] as T;
-    case "screen_stocks":
-      return [
-        {
-          stockCode: "600519",
-          stockName: "贵州茅台",
-          price: 1780.50,
-          changePct: 2.35,
-          reasons: ["北向资金流入", "股息率提升"],
-          score: 90,
-        },
-        {
-          stockCode: "002230",
-          stockName: "科大讯飞",
-          price: 58.70,
-          changePct: 6.80,
-          reasons: ["AI赛道龙头", "政策利好"],
-          score: 88,
-        },
-      ] as T;
     case "list_workflow_executions":
       return [
         {

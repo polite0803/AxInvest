@@ -11,7 +11,6 @@ use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRisk
 use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::recommender::{self, RecoResponse};
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
-use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -663,33 +662,6 @@ pub async fn backtest_key_levels(
     let tracker =
         KeyLevelTracker::new(Arc::new(state.harness.db().clone()), state.astock_client.clone());
     tracker.backtest_key_levels(lookback_days).await
-}
-
-// ── Screen Commands ──
-
-/// 从自选股中筛选
-#[tauri::command]
-pub async fn screen_stocks(
-    state: State<'_, AppState>,
-    criteria: ScreenCriteria,
-) -> Result<Vec<ScreenResult>, String> {
-    let watchlist: Vec<(String, String)> = axagent_core::entity::watchlist_items::Entity::find()
-        .all(state.harness.db())
-        .await
-        .map_err(|e| e.to_string())?
-        .iter()
-        .map(|w| (w.stock_code.clone(), w.stock_name.clone()))
-        .collect();
-
-    StockScreener::screen_watchlist(&state.astock_client, &watchlist, &criteria).await
-}
-
-/// 从全市场发现热门候选标的
-#[tauri::command]
-pub async fn discover_stock_candidates(
-    state: State<'_, AppState>,
-) -> Result<Vec<ScreenResult>, String> {
-    StockScreener::discover_candidates(&state.astock_client).await
 }
 
 // ── Calendar Commands ──

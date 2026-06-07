@@ -983,8 +983,6 @@ pub fn run() {
             commands::stock_analysis::validate_trade,
             commands::stock_analysis::compare_trade_with_analysis,
             commands::stock_analysis::backtest_key_levels,
-            commands::stock_analysis::screen_stocks,
-            commands::stock_analysis::discover_stock_candidates,
             commands::stock_analysis::recommend_stocks,
             commands::stock_analysis::invalidate_recommendation_cache,
             commands::stock_analysis::get_market_status,

@@ -1,6 +1,14 @@
 // Side-effect import: 注册所有 dual view 试点
 import "./valueAssessmentDualView";
-// 后续试点(辩论节点、风险、回测等)在此处追加
+import "./debateDualView";
+import "./riskDualView";
+import "./recommendationDualView";
+import "./analystDualView";
+// 后续接入(回测、节点时间线等)在此处追加
+export { CompactAnalystSummary } from "./CompactAnalystSummary";
+export { CompactDebateNode } from "./CompactDebateNode";
+export { CompactRecommendation } from "./CompactRecommendation";
+export { CompactRiskSummary } from "./CompactRiskSummary";
 export { CompactValueAssessment } from "./CompactValueAssessment";
 export { DualViewRenderer } from "./DualViewRenderer";
 export { PanelCollapseButton } from "./PanelCollapseButton";

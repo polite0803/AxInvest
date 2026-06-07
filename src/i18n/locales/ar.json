@@ -7916,7 +7916,18 @@
       "market_dragon_tiger": "Dragon Tiger",
       "block_trades": "Block Trades",
       "institutional_visits": "Institutional Visits"
-    }
+    },
+    "timeline": {
+      "phase.scan": "مسح",
+      "phase.diagnose": "تشخيص",
+      "phase.debate": "نقاش",
+      "phase.decide": "قرار",
+      "empty": "لا توجد عقد في هذه المرحلة",
+      "idleHint": "بعد بدء التحليل، سيظهر الجدول الزمني الكامل هنا",
+      "emptyHint": "في انتظار عقد سير العمل…",
+      "sendToChat": "إرسال إلى الدردشة"
+    },
+    "alert.date": "Date"
   },
   "trade": {
     "title": "Trading Log",

@@ -7916,7 +7916,18 @@
       "market_dragon_tiger": "Dragon Tiger",
       "block_trades": "Block Trades",
       "institutional_visits": "Institutional Visits"
-    }
+    },
+    "timeline": {
+      "phase.scan": "스캔",
+      "phase.diagnose": "진단",
+      "phase.debate": "토론",
+      "phase.decide": "결정",
+      "empty": "이 단계에 노드 없음",
+      "idleHint": "분석을 시작하면 전체 결정 타임라인이 여기에 표시됩니다",
+      "emptyHint": "워크플로 노드 대기 중…",
+      "sendToChat": "채팅으로 보내기"
+    },
+    "alert.date": "Date"
   },
   "trade": {
     "title": "Trading Log",

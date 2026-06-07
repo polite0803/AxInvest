@@ -7996,7 +7996,7 @@
     "type": "类型",
     "optionPcr": "期权 PCR",
     "optionPcrVolume": "成交量 PCR",
-    "optionPcrOi": "持仓量 PCR",
+    "optionPcrOi": "持倉量 PCR",
     "hotStocks": "热门股票",
     "reason": "原因",
     "industryRanking": "行业排名",
@@ -8026,7 +8026,18 @@
       "compute_valuation": "估值计算",
       "compute_portfolio_risk": "组合风险",
       "search_stock": "股票搜索"
-    }
+    },
+    "timeline": {
+      "phase.scan": "掃描",
+      "phase.diagnose": "診斷",
+      "phase.debate": "辯論",
+      "phase.decide": "決策",
+      "empty": "該階段暫無節點",
+      "idleHint": "開始分析後,這裡會展示完整的決策時間線",
+      "emptyHint": "等待工作流推送節點…",
+      "sendToChat": "發送到對話"
+    },
+    "alert.date": "日期"
   },
   "trade": {
     "title": "交易日志",

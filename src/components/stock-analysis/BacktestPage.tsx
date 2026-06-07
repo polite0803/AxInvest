@@ -1,7 +1,7 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { History } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { History } from "lucide-react";
 
 /**
  * BacktestPage — 回测验证

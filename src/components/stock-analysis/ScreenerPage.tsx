@@ -1,7 +1,7 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { Filter } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Filter } from "lucide-react";
 
 /**
  * ScreenerPage — 选股中心

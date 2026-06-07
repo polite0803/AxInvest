@@ -1,7 +1,7 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { Eye } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Eye } from "lucide-react";
 
 /**
  * WatchlistPage — 自选股页面

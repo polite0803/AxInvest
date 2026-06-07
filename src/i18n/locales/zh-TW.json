@@ -7576,7 +7576,8 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元"
+        "unit10k": "万元",
+        "refresh": "刷新"
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
@@ -8066,7 +8067,8 @@
       "styleDisabled": "(已禁用)",
       "styleDisabledReason": "風格 {style} 已在設定中禁用",
       "realTooltip": "主策略真實命中（K 線 / 財務 / 資金訊號齊全）",
-      "tagReal": "真實"
+      "tagReal": "真實",
+      "tagSynthetic": "兜底"
     },
     "periodShort": "短期",
     "periodMid": "中期",

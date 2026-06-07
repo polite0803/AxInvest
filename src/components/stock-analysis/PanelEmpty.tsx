@@ -57,7 +57,7 @@ export function PanelEmpty(props: PanelEmptyProps) {
     <Empty
       image={image ?? Empty.PRESENTED_IMAGE_SIMPLE}
       description={
-        <Space direction="vertical" size={4} className="text-center">
+        <Space orientation="vertical" size={4} className="text-center">
           <Typography.Text type="secondary" className="text-xs">
             {descText}
           </Typography.Text>

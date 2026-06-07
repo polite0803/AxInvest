@@ -280,7 +280,7 @@ export const PermissionModal: React.FC = () => {
       onCancel={() => handleDecision("deny")}
       destroyOnHidden
     >
-      <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
         {/* 工具名称和风险等级 */}
         <div
           style={{

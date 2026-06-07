@@ -104,6 +104,10 @@ pub struct RecoPick {
     /// 次选风格（同票被多策略命中时记录）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secondary_styles: Vec<Style>,
+    /// 是否为兜底合成 pick（true = 系统初筛 / 数据稀疏兜底，无技术信号支撑；
+    /// false = 主策略真实命中）。前端用此字段显示"真实/兜底"标识。
+    #[serde(default)]
+    pub synthetic: bool,
 }
 
 /// 荐股响应

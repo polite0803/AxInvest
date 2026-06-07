@@ -19,9 +19,9 @@ pub struct ScreenCriteria {
     /// 换手率>N%
     pub turnover_rate_min: Option<f64>,
     /// RSI 超卖（<30）
-    pub rsi_oversold: bool,
+    pub rsi_oversold: Option<bool>,
     /// RSI 超买（>70）
-    pub rsi_overbought: bool,
+    pub rsi_overbought: Option<bool>,
 }
 
 /// 回退候选股列表（沪深300核心成分股，覆盖主要行业）
@@ -193,7 +193,7 @@ impl StockScreener {
                 }
             }
 
-            if criteria.rsi_oversold || criteria.rsi_overbought {
+            if criteria.rsi_oversold.unwrap_or(false) || criteria.rsi_overbought.unwrap_or(false) {
                 if let Ok(klines) = client.get_klines(code, "daily", 30).await {
                     if klines.len() >= 8 {
                         let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
@@ -223,8 +223,9 @@ impl StockScreener {
                             100.0
                         };
                         let rsi = 100.0 - 100.0 / (1.0 + rs);
-                        let matches_criteria = (criteria.rsi_oversold && rsi < 30.0)
-                            || (criteria.rsi_overbought && rsi > 70.0);
+                        let matches_criteria = (criteria.rsi_oversold.unwrap_or(false)
+                            && rsi < 30.0)
+                            || (criteria.rsi_overbought.unwrap_or(false) && rsi > 70.0);
                         if !matches_criteria {
                             continue;
                         }

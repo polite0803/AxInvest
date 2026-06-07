@@ -60,7 +60,7 @@ export const SemanticCheckModal: React.FC<SemanticCheckModalProps> = ({
       && currentSelection?.action === "keep";
 
     return (
-      <Space direction="vertical" style={{ width: "100%" }}>
+      <Space orientation="vertical" style={{ width: "100%" }}>
         <Button
           type={isReplaceSelected ? "primary" : "default"}
           onClick={() => handleSelectAction(nodeId, match.existing_skill.id, "replace")}

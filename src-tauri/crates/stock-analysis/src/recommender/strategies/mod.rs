@@ -10,4 +10,4 @@ pub use capital::CapitalStrategy;
 pub use reversion::ReversionStrategy;
 pub use trend::TrendStrategy;
 pub use value::ValueStrategy;
-pub use watchlist::WatchlistStrategy;
+pub use watchlist::{emit_synthetic_picks, WatchlistStrategy};

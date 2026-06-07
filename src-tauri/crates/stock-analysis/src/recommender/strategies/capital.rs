@@ -142,6 +142,7 @@ impl CapitalStrategy {
             reasons,
             risk_notes: risk,
             secondary_styles: vec![],
+            synthetic: false,
         })
     }
 }

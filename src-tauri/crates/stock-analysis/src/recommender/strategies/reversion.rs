@@ -110,6 +110,7 @@ impl ReversionStrategy {
             reasons,
             risk_notes: vec!["下跌趋势未尽 / 抄底过早".to_string()],
             secondary_styles: vec![],
+            synthetic: false,
         })
     }
 }

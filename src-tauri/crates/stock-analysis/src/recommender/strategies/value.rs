@@ -135,6 +135,7 @@ impl ValueStrategy {
             reasons,
             risk_notes: vec!["行业基本面恶化".to_string()],
             secondary_styles: vec![],
+            synthetic: false,
         })
     }
 }

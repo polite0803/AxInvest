@@ -18,5 +18,7 @@ const SPECIAL_MAP: Record<string, string> = {
 
 export function getWorkflowNodeLabel(nodeId: string, t: TFunction): string {
   const key = SPECIAL_MAP[nodeId] ?? `stockAnalysis.workflow.${nodeId}`;
-  return t(key, { defaultValue: nodeId });
+  const result = t(key, { defaultValue: nodeId });
+  // Some keys (e.g. "analyst", "phase") resolve to i18n objects, not strings
+  return typeof result === "string" ? result : nodeId;
 }

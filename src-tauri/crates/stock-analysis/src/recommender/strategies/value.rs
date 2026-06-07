@@ -11,9 +11,21 @@ pub struct ValueStrategy {
 }
 
 impl ValueStrategy {
-    pub const fn short() -> Self { Self { period: Period::Short } }
-    pub const fn mid() -> Self { Self { period: Period::Mid } }
-    pub const fn long() -> Self { Self { period: Period::Long } }
+    pub const fn short() -> Self {
+        Self {
+            period: Period::Short,
+        }
+    }
+    pub const fn mid() -> Self {
+        Self {
+            period: Period::Mid,
+        }
+    }
+    pub const fn long() -> Self {
+        Self {
+            period: Period::Long,
+        }
+    }
 
     async fn scan_one(
         &self,
@@ -42,7 +54,13 @@ impl ValueStrategy {
                 if price > ma20 * 0.99 {
                     return None;
                 }
-                (true, vec![format!("PE {:.1} 估值偏低", pe), format!("缩量回踩 MA20 {:.2}", ma20)])
+                (
+                    true,
+                    vec![
+                        format!("PE {:.1} 估值偏低", pe),
+                        format!("缩量回踩 MA20 {:.2}", ma20),
+                    ],
+                )
             },
             Period::Mid => {
                 // 中线价值：PE < 行业中位 0.7 + 利润增速 > 0（v1 简化为 PE + PB 联合判断）
@@ -52,7 +70,13 @@ impl ValueStrategy {
                 if pb <= 0.0 || pb > 5.0 {
                     return None;
                 }
-                (true, vec![format!("PE {:.1} 行业中位以下", pe), format!("PB {:.2}", pb)])
+                (
+                    true,
+                    vec![
+                        format!("PE {:.1} 行业中位以下", pe),
+                        format!("PB {:.2}", pb),
+                    ],
+                )
             },
             Period::Long => {
                 // 长线价值：低 PE + 低 PB + 高 ROE（v1 用 PE/PB 联合 + 股价 60 日均线上方做趋势过滤）
@@ -124,8 +148,12 @@ impl RecommendStrategy for ValueStrategy {
             Period::Long => "value_long",
         }
     }
-    fn style(&self) -> Style { Style::Value }
-    fn period(&self) -> Period { self.period }
+    fn style(&self) -> Style {
+        Style::Value
+    }
+    fn period(&self) -> Period {
+        self.period
+    }
     fn required_vendors(&self) -> &'static [&'static str] {
         &["eastmoney", "ths", "akshare"]
     }

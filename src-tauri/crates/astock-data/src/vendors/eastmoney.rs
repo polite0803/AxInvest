@@ -183,22 +183,22 @@ impl StockVendor for EastMoneyVendor {
                     stock_code: stock_code.to_string(),
                     report_date: s("REPORT_DATE").to_string(),
                     // 东方财富 2025 年字段名变更映射
-                    revenue: n("TOTALOPERATEREVE"),          // 营业总收入
-                    net_profit: n("PARENTNETPROFIT"),      // 归母净利润
-                    eps: n("EPSJB"),                        // 基本每股收益
-                    bps: n("BPS"),                          // 每股净资产
-                    roe: n("ROEJQ"),                        // 加权平均ROE
-                    debt_ratio: n("ZCFZL"),                 // 资产负债率
-                    gross_margin: n("XSMLL"),               // 销售毛利率
-                    net_margin: n("XSJLL"),                 // 销售净利率
-                    revenue_yoy: n("TOTALOPERATEREVETZ"),   // 营收同比增长
-                    profit_yoy: n("PARENTNETPROFITTZ"),     // 净利润同比增长
+                    revenue: n("TOTALOPERATEREVE"),       // 营业总收入
+                    net_profit: n("PARENTNETPROFIT"),     // 归母净利润
+                    eps: n("EPSJB"),                      // 基本每股收益
+                    bps: n("BPS"),                        // 每股净资产
+                    roe: n("ROEJQ"),                      // 加权平均ROE
+                    debt_ratio: n("ZCFZL"),               // 资产负债率
+                    gross_margin: n("XSMLL"),             // 销售毛利率
+                    net_margin: n("XSJLL"),               // 销售净利率
+                    revenue_yoy: n("TOTALOPERATEREVETZ"), // 营收同比增长
+                    profit_yoy: n("PARENTNETPROFITTZ"),   // 净利润同比增长
                     total_assets: None,
                     operating_cash_flow: None,
                     capital_expenditure: None,
                     free_cash_flow: None,
-                    current_ratio: n("LD"),                 // 流动比率
-                    quick_ratio: n("SD"),                   // 速动比率
+                    current_ratio: n("LD"), // 流动比率
+                    quick_ratio: n("SD"),   // 速动比率
                 }
             })
             .collect())
@@ -261,7 +261,10 @@ impl StockVendor for EastMoneyVendor {
         };
 
         let json: Value = serde_json::from_str(json_str).map_err(|e| {
-            DataError::ParseError(format!("eastmoney news jsonp parse failed: {e}, raw: {}", &text[..200.min(text.len())]))
+            DataError::ParseError(format!(
+                "eastmoney news jsonp parse failed: {e}, raw: {}",
+                &text[..200.min(text.len())]
+            ))
         })?;
 
         let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {

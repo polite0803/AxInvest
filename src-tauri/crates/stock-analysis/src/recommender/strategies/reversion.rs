@@ -14,8 +14,16 @@ pub struct ReversionStrategy {
 }
 
 impl ReversionStrategy {
-    pub const fn short() -> Self { Self { period: Period::Short } }
-    pub const fn mid() -> Self { Self { period: Period::Mid } }
+    pub const fn short() -> Self {
+        Self {
+            period: Period::Short,
+        }
+    }
+    pub const fn mid() -> Self {
+        Self {
+            period: Period::Mid,
+        }
+    }
 
     async fn scan_one(
         &self,
@@ -43,10 +51,13 @@ impl ReversionStrategy {
                 if avg_5 <= 0.0 || today > avg_5 * 0.8 {
                     return None;
                 }
-                (true, vec![
-                    format!("RSI(6) {:.1} 超卖", rsi_value),
-                    format!("缩量至 5 日均 {:.0}%", today / avg_5 * 100.0),
-                ])
+                (
+                    true,
+                    vec![
+                        format!("RSI(6) {:.1} 超卖", rsi_value),
+                        format!("缩量至 5 日均 {:.0}%", today / avg_5 * 100.0),
+                    ],
+                )
             },
             Period::Mid => {
                 // 距 250 日新高回撤 > 30%
@@ -58,10 +69,13 @@ impl ReversionStrategy {
                 if rsi_30 > 40.0 {
                     return None;
                 }
-                (true, vec![
-                    format!("距 250 日高回撤 {:.0}%", dd),
-                    format!("月线 RSI {:.1}", rsi_30),
-                ])
+                (
+                    true,
+                    vec![
+                        format!("距 250 日高回撤 {:.0}%", dd),
+                        format!("月线 RSI {:.1}", rsi_30),
+                    ],
+                )
             },
             Period::Long => return None, // v1 不做长线超跌
         };
@@ -109,8 +123,12 @@ impl RecommendStrategy for ReversionStrategy {
             Period::Long => "rev_long",
         }
     }
-    fn style(&self) -> Style { Style::Reversion }
-    fn period(&self) -> Period { self.period }
+    fn style(&self) -> Style {
+        Style::Reversion
+    }
+    fn period(&self) -> Period {
+        self.period
+    }
     fn required_vendors(&self) -> &'static [&'static str] {
         &["eastmoney", "tencent", "ths", "akshare"]
     }

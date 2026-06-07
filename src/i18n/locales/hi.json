@@ -7326,7 +7326,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "",
+    "sharesUnit": "Shares Unit",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",
@@ -7539,7 +7539,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "hotStocks": "Hot Stocks",
+        "industryRank": "Industry Rank",
+        "main": "Main",
+        "noHot": "No Hot",
+        "noIndustry": "No Industry",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "Screener",
@@ -7582,7 +7588,8 @@
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
+        "disabledGeneric": "Disabled Generic"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -7595,7 +7602,8 @@
         "bullBearDebate": "Bull vs Bear Debate",
         "riskAssessment": "Risk Assessment",
         "analystReports": "Analyst Reports"
-      }
+      },
+      "openDataSource": "Open Data Source"
     },
     "progress.fetchingData": "Fetching stock data...",
     "progress.started": "Analysis started...",
@@ -7931,8 +7939,72 @@
     "recommendation": {
       "row": {
         "reasons": "Reasons",
-        "risks": "Risks"
-      }
+        "risks": "Risks",
+        "secondaryStyle": "Secondary Style",
+        "entry": "Entry",
+        "stopLoss": "Stop Loss",
+        "target": "Target",
+        "position": "Position",
+        "holding": "Holding",
+        "confidence": "Confidence"
+      },
+      "periodShort": "Short",
+      "periodMid": "Mid",
+      "periodLong": "Long",
+      "title": "Recommendation",
+      "generatedAt": "Generated at {time}",
+      "bannerVendorDisabled": "Some styles are disabled: {styles}",
+      "openSettings": "Open Settings",
+      "empty": "No recommendation data",
+      "styleDisabled": "(Disabled)",
+      "styleDisabledReason": "Style {style} is disabled in settings"
+    },
+    "periodShort": "Short",
+    "periodMid": "Mid",
+    "periodLong": "Long",
+    "generatedAt": "Generated at {time}",
+    "bannerVendorDisabled": "Some styles are disabled: {styles}",
+    "openSettings": "Open Settings",
+    "empty": "No recommendation data",
+    "styleDisabled": "(Disabled)",
+    "styleDisabledReason": "Style {style} is disabled in settings",
+    "row": {
+      "entry": "Entry",
+      "stopLoss": "Stop Loss",
+      "target": "Target",
+      "position": "Position",
+      "holding": "Holding",
+      "confidence": "Confidence",
+      "secondaryStyle": "Secondary Style",
+      "reasons": "Reasons",
+      "risks": "Risks"
+    },
+    "announcementsEmpty": "No Announcements",
+    "clsFlashEmpty": "Cls Flash Empty",
+    "conceptBlocksEmpty": "Concept Blocks Empty",
+    "dailyReview": {
+      "alerts": "Alerts",
+      "empty": "Empty",
+      "generate": "Generate",
+      "noWatchlist": "No Watchlist",
+      "recommendations": "Recommendations",
+      "regenerate": "Regenerate",
+      "title": "Daily Review",
+      "watchlist": "Watchlist"
+    },
+    "indexQuoteEmpty": "Index Quote Empty",
+    "optionsEmpty": "Options Empty",
+    "peersEmpty": "Peers Empty",
+    "selectStockFirst": "Select Stock First",
+    "stockAnalysisStore": {
+      "ts:329:t(": "Ts:329:T(",
+      "ts:371:t(": "Ts:371:T(",
+      "ts:381:t(": "Ts:381:T(",
+      "ts:565:t(": "Ts:565:T(",
+      "ts:567:t(": "Ts:567:T(",
+      "ts:568:t(": "Ts:568:T(",
+      "ts:704:t(": "Ts:704:T(",
+      "ts:763:t(": "Ts:763:T("
     }
   },
   "trade": {

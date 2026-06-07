@@ -84,7 +84,10 @@ pub fn dedup_and_merge(picks: &mut Vec<RecoPick>) {
 }
 
 /// 按风格分组 + 每组 top N
-pub fn group_by_style_and_trim(picks: &mut Vec<RecoPick>, per_style_limit: usize) -> HashMap<Style, Vec<RecoPick>> {
+pub fn group_by_style_and_trim(
+    picks: &mut Vec<RecoPick>,
+    per_style_limit: usize,
+) -> HashMap<Style, Vec<RecoPick>> {
     let mut by_style: HashMap<Style, Vec<RecoPick>> = HashMap::new();
     for p in picks.drain(..) {
         by_style.entry(p.style).or_default().push(p);

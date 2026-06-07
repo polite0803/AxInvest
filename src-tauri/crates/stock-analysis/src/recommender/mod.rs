@@ -11,8 +11,8 @@
 pub mod indicators;
 pub mod pool;
 pub mod scoring;
-pub mod strategy;
 pub mod strategies;
+pub mod strategy;
 pub mod types;
 
 pub use strategy::{RecoContext, RecommendStrategy};
@@ -28,7 +28,9 @@ use crate::recommender::pool::{
     load_enabled_vendors_from_template, set_cached_vendors, vendors_satisfied,
 };
 use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim};
-use crate::recommender::strategies::{CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy};
+use crate::recommender::strategies::{
+    CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy,
+};
 use crate::recommender::strategy::PerCodeLocks;
 
 // ── 缓存 ──
@@ -116,7 +118,8 @@ pub async fn recommend_stocks(
     };
 
     let mut enabled: Vec<Box<dyn RecommendStrategy>> = Vec::new();
-    let mut disabled_styles_set: std::collections::HashSet<Style> = std::collections::HashSet::new();
+    let mut disabled_styles_set: std::collections::HashSet<Style> =
+        std::collections::HashSet::new();
     for s in all_strategies {
         let reqs = s.required_vendors();
         if vendors_satisfied(reqs, &enabled_vendors) {

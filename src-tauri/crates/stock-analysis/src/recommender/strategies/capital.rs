@@ -14,9 +14,21 @@ pub struct CapitalStrategy {
 }
 
 impl CapitalStrategy {
-    pub const fn short() -> Self { Self { period: Period::Short } }
-    pub const fn mid() -> Self { Self { period: Period::Mid } }
-    pub const fn long() -> Self { Self { period: Period::Long } }
+    pub const fn short() -> Self {
+        Self {
+            period: Period::Short,
+        }
+    }
+    pub const fn mid() -> Self {
+        Self {
+            period: Period::Mid,
+        }
+    }
+    pub const fn long() -> Self {
+        Self {
+            period: Period::Long,
+        }
+    }
 
     async fn scan_one(
         &self,
@@ -33,7 +45,10 @@ impl CapitalStrategy {
         let dt = client.get_dragon_tiger(code).await.ok();
 
         // 主力净流入
-        let main_inflow_wan = mf.as_ref().map(|m| m.main_net_inflow / 10_000.0).unwrap_or(0.0);
+        let main_inflow_wan = mf
+            .as_ref()
+            .map(|m| m.main_net_inflow / 10_000.0)
+            .unwrap_or(0.0);
         // 北向持仓占比
         let nb_ratio = nb.as_ref().map(|n| n.holding_ratio).unwrap_or(0.0);
         // 龙虎榜净买入
@@ -52,10 +67,13 @@ impl CapitalStrategy {
                 if quote.turnover_rate < 5.0 {
                     return None;
                 }
-                (true, vec![
-                    format!("主力净流入 {:.0} 万", main_inflow_wan),
-                    format!("换手 {:.2}%", quote.turnover_rate),
-                ])
+                (
+                    true,
+                    vec![
+                        format!("主力净流入 {:.0} 万", main_inflow_wan),
+                        format!("换手 {:.2}%", quote.turnover_rate),
+                    ],
+                )
             },
             Period::Mid => {
                 // 北向 + 主力（龙虎缺失则降级，去掉龙虎标签继续显示）
@@ -137,8 +155,12 @@ impl RecommendStrategy for CapitalStrategy {
             Period::Long => "capital_long",
         }
     }
-    fn style(&self) -> Style { Style::Capital }
-    fn period(&self) -> Period { self.period }
+    fn style(&self) -> Style {
+        Style::Capital
+    }
+    fn period(&self) -> Period {
+        self.period
+    }
     fn required_vendors(&self) -> &'static [&'static str] {
         &["ths", "baidu_stock"]
     }

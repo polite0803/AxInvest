@@ -499,9 +499,10 @@ impl Tool for ComputeScoringTool {
         if quote.price <= 0.0 {
             warnings.push(Value::String("当前价格无效（可能停牌或未开盘）".into()));
         }
-        let freshness = if indicators.latest_date.contains(
-            &Local::now().format("%Y-%m-%d").to_string()
-        ) {
+        let freshness = if indicators
+            .latest_date
+            .contains(&Local::now().format("%Y-%m-%d").to_string())
+        {
             "today"
         } else if quote.price > 0.0 {
             "delayed"
@@ -707,15 +708,14 @@ impl Tool for ComputeValuationTool {
         }
         let fin_count = financials.len();
         if fin_count < 2 {
-            v_warnings.push(Value::String(format!(
-                "财务数据仅{}期，估值模型依赖多期数据",
-                fin_count
-            )));
+            v_warnings
+                .push(Value::String(format!("财务数据仅{}期，估值模型依赖多期数据", fin_count)));
         }
         let v_freshness = if let Some(ref lf) = latest_fin {
-            if lf.report_date.contains(
-                &Local::now().format("%Y-%m").to_string()
-            ) {
+            if lf
+                .report_date
+                .contains(&Local::now().format("%Y-%m").to_string())
+            {
                 "current_quarter"
             } else if let Ok(now) = chrono::NaiveDate::parse_from_str(
                 &Local::now().format("%Y-%m-%d").to_string(),
@@ -726,11 +726,23 @@ impl Tool for ComputeValuationTool {
                         chrono::NaiveDate::parse_from_str(rd.trim(), "%Y-%m-%d")
                     {
                         let days_old = (now - report_date).num_days();
-                        if days_old <= 90 { "recent_quarter" } else { "outdated" }
-                    } else { "unknown" }
-                } else { "unknown" }
-            } else { "unknown" }
-        } else { "no_data" };
+                        if days_old <= 90 {
+                            "recent_quarter"
+                        } else {
+                            "outdated"
+                        }
+                    } else {
+                        "unknown"
+                    }
+                } else {
+                    "unknown"
+                }
+            } else {
+                "unknown"
+            }
+        } else {
+            "no_data"
+        };
 
         let graham_upside = if graham_value > 0.0 {
             (graham_value - current_price) / current_price * 100.0
@@ -905,7 +917,9 @@ impl Tool for ComputeRiskTool {
                 requested_count - loaded_count,
                 requested_count
             ))]
-        } else { vec![] };
+        } else {
+            vec![]
+        };
 
         let diversification_label = if effective_n >= 8.0 {
             "充分分散"

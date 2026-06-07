@@ -7538,7 +7538,13 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通"
+        "szFlow": "深股通",
+        "hotStocks": "stockAnalysis.settings.panels.hotStocks",
+        "industryRank": "stockAnalysis.settings.panels.industryRank",
+        "main": "stockAnalysis.settings.panels.main",
+        "noHot": "stockAnalysis.settings.panels.noHot",
+        "noIndustry": "stockAnalysis.settings.panels.noIndustry",
+        "tags": "stockAnalysis.settings.panels.tags"
       },
       "sheet": {
         "screener": "荐股",
@@ -7581,7 +7587,8 @@
         "disabled": "数据源未开启：{{names}} 均未启用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
-        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
+        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源",
+        "disabledGeneric": "stockAnalysis.settings.vendor.disabledGeneric"
       },
       "workflow": {
         "title": "股票分析工作流",
@@ -7594,7 +7601,8 @@
         "bullBearDebate": "多空辩论",
         "riskAssessment": "风险评估",
         "analystReports": "分析师报告"
-      }
+      },
+      "openDataSource": "stockAnalysis.settings.openDataSource"
     },
     "progress.fetchingData": "正在获取股票資料，请稍候...",
     "progress.started": "分析已启动，正在載入資料...",
@@ -8041,8 +8049,72 @@
     "recommendation": {
       "row": {
         "reasons": "Reasons",
-        "risks": "Risks"
-      }
+        "risks": "Risks",
+        "secondaryStyle": "次要風格",
+        "entry": "入場區間",
+        "stopLoss": "止損位",
+        "target": "目標價",
+        "position": "建議倉位",
+        "holding": "持倉天數",
+        "confidence": "置信度"
+      },
+      "periodShort": "短期",
+      "periodMid": "中期",
+      "periodLong": "長期",
+      "title": "推薦結果",
+      "generatedAt": "生成於 {time}",
+      "bannerVendorDisabled": "部分風格已禁用: {styles}",
+      "openSettings": "打開設定",
+      "empty": "暫無推薦數據",
+      "styleDisabled": "(已禁用)",
+      "styleDisabledReason": "風格 {style} 已在設定中禁用"
+    },
+    "periodShort": "短期",
+    "periodMid": "中期",
+    "periodLong": "長期",
+    "generatedAt": "生成於 {time}",
+    "bannerVendorDisabled": "部分風格已禁用: {styles}",
+    "openSettings": "打開設定",
+    "empty": "暫無推薦數據",
+    "styleDisabled": "(已禁用)",
+    "styleDisabledReason": "風格 {style} 已在設定中禁用",
+    "row": {
+      "entry": "入場區間",
+      "stopLoss": "止損位",
+      "target": "目標價",
+      "position": "建議倉位",
+      "holding": "持倉天數",
+      "confidence": "置信度",
+      "secondaryStyle": "次要風格",
+      "reasons": "理由",
+      "risks": "風險"
+    },
+    "announcementsEmpty": "暫無公告",
+    "clsFlashEmpty": "暫無快訊",
+    "conceptBlocksEmpty": "暫無概念板塊",
+    "dailyReview": {
+      "alerts": "stockAnalysis.dailyReview.alerts",
+      "empty": "stockAnalysis.dailyReview.empty",
+      "generate": "stockAnalysis.dailyReview.generate",
+      "noWatchlist": "stockAnalysis.dailyReview.noWatchlist",
+      "recommendations": "stockAnalysis.dailyReview.recommendations",
+      "regenerate": "stockAnalysis.dailyReview.regenerate",
+      "title": "每日復盤",
+      "watchlist": "stockAnalysis.dailyReview.watchlist"
+    },
+    "indexQuoteEmpty": "暫無指数數據",
+    "optionsEmpty": "stockAnalysis.optionsEmpty",
+    "peersEmpty": "暫無同行數據",
+    "selectStockFirst": "stockAnalysis.selectStockFirst",
+    "stockAnalysisStore": {
+      "ts:329:t(": "stockAnalysisStore.ts:329:t(",
+      "ts:371:t(": "stockAnalysisStore.ts:371:t(",
+      "ts:381:t(": "stockAnalysisStore.ts:381:t(",
+      "ts:565:t(": "stockAnalysisStore.ts:565:t(",
+      "ts:567:t(": "stockAnalysisStore.ts:567:t(",
+      "ts:568:t(": "stockAnalysisStore.ts:568:t(",
+      "ts:704:t(": "stockAnalysisStore.ts:704:t(",
+      "ts:763:t(": "stockAnalysisStore.ts:763:t("
     }
   },
   "trade": {

@@ -356,6 +356,17 @@ export async function exportAsMarkdown(
   );
 }
 
+/**
+ * 通用 Markdown 文件保存：复用 saveFile 的 Tauri save dialog + browser fallback，
+ * 供其他模块（风险评估、决策报告、分析师报告等）一键导出文档用。
+ */
+export async function saveFileMarkdown(defaultName: string, content: string): Promise<boolean> {
+  const safeName = defaultName.replace(/[\\/:*?"<>|]/g, "_");
+  return saveFile(`${safeName}.md`, content, [
+    { name: "Markdown", extensions: ["md"] },
+  ]);
+}
+
 export async function exportAsText(
   messages: Message[],
   title: string,

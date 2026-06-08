@@ -8,6 +8,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalystReportGrid } from "./AnalystReportGrid";
+import { AnalysisProgress } from "./AnalysisProgress";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { ClsFlashPanel } from "./ClsFlashPanel";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
@@ -257,8 +258,7 @@ export function StockAnalysisPage() {
                     <>
                       {status === "loading" && (
                         <div className="sa-loading">
-                          <div className="sa-spinner" />
-                          <span style={{ fontSize: 13 }}>{t("stockAnalysis.loadingHint")}</span>
+                          <AnalysisProgress />
                         </div>
                       )}
 

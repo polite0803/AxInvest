@@ -7,8 +7,8 @@ import { ArrowLeftRight, Coins, LineChart, Settings, Shield, TrendingUp, Users, 
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { AnalystReportGrid } from "./AnalystReportGrid";
 import { AnalysisProgress } from "./AnalysisProgress";
+import { AnalystReportGrid } from "./AnalystReportGrid";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
 import { ClsFlashPanel } from "./ClsFlashPanel";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
@@ -346,8 +346,21 @@ export function StockAnalysisPage() {
                         </div>
                       )}
 
-                      {status !== "loading" && status !== "idle" && status !== "error" && (
+                      {(status === "running" || status === "completed") && (
                         <>
+                          {status === "running" && (
+                            <div
+                              style={{
+                                padding: "12px 16px",
+                                margin: "12px 16px 0 16px",
+                                border: "1px solid var(--border, #e0e0e0)",
+                                borderRadius: 8,
+                                background: "var(--surface)",
+                              }}
+                            >
+                              <AnalysisProgress />
+                            </div>
+                          )}
                           <div className="sa-tabs">
                             {tabs.map((tab) => (
                               <button

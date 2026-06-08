@@ -650,8 +650,9 @@ impl Tool for ComputeValuationTool {
                 let projected_eps = eps * (1.0_f64 + dcf_growth_rate).powi(year);
                 pv += projected_eps / (1.0_f64 + discount_rate).powi(year);
             }
-            let terminal_eps =
-                eps * (1.0_f64 + dcf_growth_rate).powi(high_years as i32) * (1.0_f64 + growth_stable);
+            let terminal_eps = eps
+                * (1.0_f64 + dcf_growth_rate).powi(high_years as i32)
+                * (1.0_f64 + growth_stable);
             let terminal_value = terminal_eps * terminal_multiple
                 / (1.0_f64 + discount_rate).powi(high_years as i32);
             dcf_value = pv + terminal_value;

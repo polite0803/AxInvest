@@ -947,11 +947,17 @@ impl AStockClient {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) = self.try_daily_snapshot("search_stock", &date) {
                     if let Ok(r) = serde_json::from_str::<Vec<StockSearchResult>>(&cached) {
-                        if !r.is_empty() { return Ok(r); }
+                        if !r.is_empty() {
+                            return Ok(r);
+                        }
                     }
                 }
             }
-            crate::as_of::record_degradation("astock-data", "search_stock", "as-of 模式搜索不可用(搜索是当下语义)");
+            crate::as_of::record_degradation(
+                "astock-data",
+                "search_stock",
+                "as-of 模式搜索不可用(搜索是当下语义)",
+            );
             return Ok(vec![]);
         }
         for name in &self.routing.search {
@@ -1103,7 +1109,9 @@ impl AStockClient {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) = self.try_daily_snapshot("get_sector_info", &date) {
                     if let Ok(r) = serde_json::from_str::<Option<SectorInfo>>(&cached) {
-                        if r.is_some() { return Ok(r); }
+                        if r.is_some() {
+                            return Ok(r);
+                        }
                     }
                 }
             }
@@ -1465,7 +1473,9 @@ impl AStockClient {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) = self.try_daily_snapshot("get_industry_ranking", &date) {
                     if let Ok(r) = serde_json::from_str::<Vec<IndustryRank>>(&cached) {
-                        if !r.is_empty() { return Ok(r); }
+                        if !r.is_empty() {
+                            return Ok(r);
+                        }
                     }
                 }
             }
@@ -1517,7 +1527,9 @@ impl AStockClient {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) = self.try_daily_snapshot("get_cls_flash", &date) {
                     if let Ok(r) = serde_json::from_str::<Vec<ClsFlashItem>>(&cached) {
-                        if !r.is_empty() { return Ok(r); }
+                        if !r.is_empty() {
+                            return Ok(r);
+                        }
                     }
                 }
             }

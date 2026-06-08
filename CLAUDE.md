@@ -124,3 +124,46 @@ Conventional Commits + 中文描述。类型映射：
 `feat` → 🚀 新功能 | `fix` → 🐛 Bug 修复 | `refactor` → 🔨 重构 | `style` → 🎨 样式
 `docs` → 📝 文档 | `test` → 🧪 测试 | `chore` → 📦 杂项 | `ci` → 🔧 CI/CD
 `build` → 🏗️ 构建 | `perf` → ⚡ 性能提升
+
+## 上游合并流程（必须严格遵循）
+
+合并 upstream/master 前必须执行 `bash scripts/upstream-merge.sh`，禁止手工 git merge。流程要点：
+
+### 前置规则
+1. **locale 文件优先提交**：合并前如有 `src/i18n/locales/` 的修改，必须先 `git add && git commit`，禁止 stash locale 文件
+2. **非 locale 修改**：可以 stash，合并后必须 pop 回来验证
+3. **禁止跳过 CI**：合并后必须通过 `node scripts/ci-check.mjs --quick` + `bash scripts/check-hardcoded-i18n.sh --diff-only`
+
+### 完整步骤（由脚本自动执行）
+```
+# 一条命令完成全部
+bash scripts/upstream-merge.sh
+```
+
+脚本自动执行：
+1. 前置检查：确认 upstream remote、工作区状态
+2. locale 保护：检测 locale 修改 → 要求先提交
+3. 非 locale 修改 → stash（合并后自动 pop）
+4. 拉取上游 + 检查 commit 列表
+5. 合并前运行 dprint + cargo fmt
+6. 执行 merge
+7. 合并后：dprint + cargo fmt + tsc + i18n key 完整性 + 硬编码字符串检查
+8. fmt 修复自动提交
+
+### 手工合并（仅脚本不可用时）
+如必须手工操作：
+1. `git fetch upstream --prune`
+2. 检查 `src/i18n/locales/` 有未提交变更 → **先提交，绝不 stash**
+3. 其他文件有未提交变更 → `git stash push -m "msg"`
+4. `git merge upstream/master`
+5. `npm run format && (cd src-tauri && cargo fmt)`
+6. 运行 `node scripts/ci-check.mjs --quick` — i18n key 缺失必须补全
+7. 运行 `bash scripts/check-hardcoded-i18n.sh --diff-only` — 零新增硬编码
+8. `git stash pop`（如有 stash）
+
+### 合并后验证清单
+- [ ] `node scripts/ci-check.mjs --quick` 全部通过
+- [ ] `bash scripts/check-hardcoded-i18n.sh --diff-only` 零违规
+- [ ] `(cd src-tauri && cargo fmt --check)` 通过
+- [ ] 所有 stash 已恢复
+- [ ] 应用能正常启动（`npm run dev` / `npm run tauri dev`）

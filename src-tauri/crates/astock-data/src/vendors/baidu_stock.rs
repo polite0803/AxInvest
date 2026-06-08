@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -626,5 +627,65 @@ impl StockVendor for BaiduStockVendor {
             total_flow: sh_flow + sz_flow,
             timestamp: data["time"].as_str().map(|s| s.to_string()),
         }))
+    }
+
+    // ── Vendor trait 大重构 P2:baidu_stock 能力申报 ──
+    // 百度财经 API 形态:
+    // - quote:实时快照,用 K 线合成(SynthesizeFromKline)
+    // - klines:原生支持日期范围(NativeDateParam)
+    // - 其他方法:返回带 date 字段的全量,lib.rs truncate_by_asof 正确截断(Fallthrough)
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "get_quote" => AsOfCapability::SynthesizeFromKline,
+            "get_klines" => AsOfCapability::NativeDateParam,
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> BaiduStockVendor {
+        BaiduStockVendor {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn baidu_asof_capability_quote_is_synthesize() {
+        let v = make_vendor();
+        assert_eq!(
+            v.asof_capability("get_quote"),
+            AsOfCapability::SynthesizeFromKline
+        );
+    }
+
+    #[test]
+    fn baidu_asof_capability_klines_is_native() {
+        let v = make_vendor();
+        assert_eq!(
+            v.asof_capability("get_klines"),
+            AsOfCapability::NativeDateParam
+        );
+    }
+
+    #[test]
+    fn baidu_asof_capability_others_are_fallthrough() {
+        let v = make_vendor();
+        for m in &[
+            "get_financials", "get_news", "get_money_flow", "get_dragon_tiger",
+            "get_lockup_schedule", "get_margin_data", "get_north_bound_holding",
+            "get_sector_info", "get_shareholder_trades", "get_dividend_records",
+            "search_stock", "get_research_reports", "get_concept_blocks",
+            "get_hot_stocks", "get_industry_ranking", "get_north_bound_flow",
+        ] {
+            assert_eq!(
+                v.asof_capability(m),
+                AsOfCapability::Fallthrough,
+                "baidu.{m} 应为 Fallthrough(lib.rs truncate 正确)"
+            );
+        }
     }
 }

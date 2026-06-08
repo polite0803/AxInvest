@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -117,6 +118,42 @@ impl StockVendor for CninfoVendor {
                 })
             })
             .collect())
+    }
+
+    // ── Vendor trait 大重构 P2:cninfo 能力申报 ──
+    // cninfo 只有 get_announcements 有真实实现,其他都是 stub 返回 Error/None。
+    // get_announcements 返回带 date 字段的全量,lib.rs 已正确 truncate_by_asof → Fallthrough。
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        let _ = method;
+        AsOfCapability::Fallthrough
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> CninfoVendor {
+        CninfoVendor {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn cninfo_all_fallthrough() {
+        let v = make_vendor();
+        assert_eq!(
+            v.asof_capability("get_announcements"),
+            AsOfCapability::Fallthrough
+        );
+        assert_eq!(
+            v.asof_capability("get_news"),
+            AsOfCapability::Fallthrough
+        );
+        assert_eq!(
+            v.asof_capability("nonexistent"),
+            AsOfCapability::Fallthrough
+        );
     }
 }
 

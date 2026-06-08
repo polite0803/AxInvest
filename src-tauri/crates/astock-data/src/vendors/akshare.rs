@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -306,6 +307,48 @@ impl StockVendor for AkshareVendor {
             rating_count,
             year,
         }))
+    }
+
+    // ── Vendor trait 大重构 P2:akshare 能力申报 ──
+    // akshare 实现:financials/news/cls_flash/consensus_eps
+    // - cls_flash:财联社快讯,当下语义无历史(NoHistoricalSemantic)
+    // - 其他:带 date 字段,lib.rs 已正确 truncate(Fallthrough)
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "get_cls_flash" => AsOfCapability::NoHistoricalSemantic,
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> AkshareVendor {
+        AkshareVendor {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn akshare_cls_flash_is_no_historical() {
+        let v = make_vendor();
+        assert_eq!(
+            v.asof_capability("get_cls_flash"),
+            AsOfCapability::NoHistoricalSemantic
+        );
+    }
+
+    #[test]
+    fn akshare_others_are_fallthrough() {
+        let v = make_vendor();
+        for m in &["get_financials", "get_news", "get_consensus_eps", "get_quote"] {
+            assert_eq!(
+                v.asof_capability(m),
+                AsOfCapability::Fallthrough
+            );
+        }
     }
 }
 

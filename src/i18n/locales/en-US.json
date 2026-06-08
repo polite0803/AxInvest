@@ -7543,30 +7543,15 @@
         "rule": "Rules",
         "pos": "Position",
         "value": "Valuation",
-        "moat": "Moat",
-        "screener": "Screener",
-        "signals": "Signals",
-        "keylevels": "Key Levels",
-        "recommender": "Recommender",
-        "indicators": "Indicators",
-        "strategyParams": "Strategy Params",
-        "trading": "Trading",
         "monitor": "Monitor",
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow",
-        "dryRun": "Dry Run"
+        "workflow": "Workflow"
       },
       "panels": {
         "refresh": "Refresh",
         "noData": "No Data",
-        "hotStocks": "Hot Stocks",
-        "industryRank": "Industry Rank",
-        "main": "Main",
-        "noHot": "No hot stock data",
-        "noIndustry": "No industry data",
-        "tags": "Tags",
         "dragonTiger": "Dragon & Tiger",
         "eventCalendar": "Event Calendar",
         "limitUp": "Limit Up",
@@ -7591,13 +7576,7 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect",
-        "main": "Main",
-        "industryRank": "Industry Rank",
-        "noIndustry": "No industry data",
-        "hotStocks": "Hot Stocks",
-        "noHot": "No hot stock data",
-        "tags": "Tags"
+        "szFlow": "SZ Connect"
       },
       "sheet": {
         "screener": "Screener",
@@ -7616,8 +7595,6 @@
       },
       "screener": {
         "title": "🔍 Smart Screener",
-        "todayRecommend": "Today's Picks",
-        "myFilter": "My Filter",
         "discover": "Discover",
         "screen": "Filter",
         "factorHint": "Select factors ({{count}} selected):",
@@ -7636,8 +7613,7 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "refresh": "Refresh"
+        "unit10k": "10k"
       },
       "recommendation": {
         "title": "🔍 Smart Picks",
@@ -7674,8 +7650,7 @@
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
-        "disabledGeneric": "Data source not connected"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",

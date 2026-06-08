@@ -8888,16 +8888,7 @@
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow",
-        "dryRun": "Dry Run",
-        "moat": "Moat",
-        "screener": "Screener",
-        "signals": "Signals",
-        "keylevels": "Key Levels",
-        "recommender": "Recommender",
-        "indicators": "Indicators",
-        "strategyParams": "Strategy Params",
-        "trading": "Trading"
+        "workflow": "Workflow"
       },
       "panels": {
         "refresh": "Refresh",
@@ -8926,13 +8917,7 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect",
-        "main": "Main",
-        "industryRank": "Industry Rank",
-        "noIndustry": "No industry data",
-        "hotStocks": "Hot Stocks",
-        "noHot": "No hot stock data",
-        "tags": "Tags"
+        "szFlow": "SZ Connect"
       },
       "sheet": {
         "screener": "Screener",
@@ -8969,15 +8954,13 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k",
-        "refresh": "Refresh"
+        "unit10k": "10k"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
-        "disabledGeneric": "Data source not connected"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",

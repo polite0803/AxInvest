@@ -7552,30 +7552,15 @@
         "rule": "规则",
         "pos": "仓位",
         "value": "估值",
-        "moat": "护城河",
-        "screener": "选股筛选",
-        "signals": "信号检测",
-        "keylevels": "关键价位",
-        "recommender": "推荐器",
-        "indicators": "技术指标",
-        "strategyParams": "策略参数",
-        "trading": "交易决策",
         "monitor": "监控",
         "riskModel": "风险模型",
         "agentRuntime": "Agent 运行时",
         "toolRuntime": "Tool 运行时",
-        "workflow": "工作流",
-        "dryRun": "干跑"
+        "workflow": "工作流"
       },
       "panels": {
         "refresh": "刷新",
         "noData": "暂无数据",
-        "hotStocks": "热门股票",
-        "industryRank": "行业排名",
-        "main": "主力",
-        "noHot": "暂无热门股数据",
-        "noIndustry": "暂无行业数据",
-        "tags": "标签",
         "dragonTiger": "龙虎榜",
         "eventCalendar": "事件日历",
         "limitUp": "涨停板",
@@ -7600,13 +7585,7 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通",
-        "main": "主力",
-        "industryRank": "行业排名",
-        "noIndustry": "暂无行业数据",
-        "hotStocks": "热门股票",
-        "noHot": "暂无热门股数据",
-        "tags": "标签"
+        "szFlow": "深股通"
       },
       "sheet": {
         "screener": "荐股",
@@ -7625,8 +7604,6 @@
       },
       "screener": {
         "title": "🔍 智能荐股",
-        "todayRecommend": "今日荐股",
-        "myFilter": "我的筛选",
         "discover": "全市场",
         "screen": "自选筛选",
         "factorHint": "选择筛选因子（已选 {{count}} 项）：",
@@ -7645,8 +7622,7 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元",
-        "refresh": "Refresh"
+        "unit10k": "万元"
       },
       "recommendation": {
         "title": "🔍 智能荐股",
@@ -7683,8 +7659,7 @@
         "disabled": "数据源未开启：{{names}} 均未启用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
-        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源",
-        "disabledGeneric": "Data source not connected"
+        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
       },
       "workflow": {
         "title": "股票分析工作流",
@@ -8247,7 +8222,14 @@
         "stockName": "股票名称",
         "cron": "Cron 表达式"
       }
-    }
+    },
+    "backtest.accuracy": "准确率",
+    "backtest.alpha": "超额收益",
+    "backtest.avgConfidence": "平均置信度",
+    "backtest.avgReturn": "平均收益率",
+    "backtest.maxDrawdown": "最大回撤",
+    "backtest.title": "回测分析",
+    "backtest.total": "分析次数"
   },
   "trade": {
     "title": "交易日志",

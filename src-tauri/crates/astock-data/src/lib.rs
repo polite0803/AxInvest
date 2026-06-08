@@ -2022,19 +2022,21 @@ mod asof_realtime_degrade_tests {
         let client = AStockClient::new();
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        // 用 get_news(eastmoney 申报为 Fallthrough)
         let r: Option<String> = AS_OF
             .scope(
                 Some(ctx),
                 async {
                     client
-                        .try_vendor_with_asof("get_quote", "eastmoney", async {
+                        .try_vendor_with_asof("get_news", "eastmoney", async {
                             Ok::<String, DataError>("unused".to_string())
                         })
                         .await
                 },
             )
             .await;
-        // eastmoney 当前是 Fallthrough(P0 默认);P1 后会变成 NativeDateParam
+        // eastmoney.get_news 是 Fallthrough(返回带 date 字段的全量,lib.rs 截断)
+        // try_vendor_with_asof 对 Fallthrough 返回 None,让调用方走截断兜底
         assert!(
             r.is_none(),
             "Fallthrough vendor 在 replay 模式应返回 None(由调用方走截断)"

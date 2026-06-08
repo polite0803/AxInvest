@@ -797,13 +797,25 @@ impl AStockClient {
     }
 
     pub async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // 目前所有 vendor 均为 Fallthrough(不支持 as-of 参数),as-of 模式返回 None
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_money_flow",
-                "vendor 接口不传日期参数,replay 模式整方法跳过",
-            );
-            tracing::info!("[asof] skipping get_money_flow (no historical semantics)");
+            for name in self.routing.vendors_for("money_flow", &self.routing.money_flow) {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_money_flow") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(Some(r)) = vendor.get_money_flow_with_asof(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_money_flow", "no historical semantic");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_money_flow", "as-of 模式所有 vendor 均未提供历史资金流向");
             return Ok(None);
         }
         {
@@ -902,13 +914,53 @@ impl AStockClient {
     }
 
     pub async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney 已申报 NativeDateParam,as-of 模式调 with_asof 可拿到当日数据
         if crate::as_of::is_asof_active() {
+            for name in &self.routing.margin {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_margin_data") {
+                        AsOfCapability::NativeDateParam => {
+                            match vendor.get_margin_data_with_asof(stock_code).await {
+                                Ok(Some(r)) => {
+                                    let cache_key = Self::cache_key_for("margin", stock_code);
+                                    let json = serde_json::to_string(&Some(&r)).unwrap_or_default();
+                                    self.cache_set(cache_key, json, 300).await;
+                                    return Ok(Some(r));
+                                },
+                                Ok(None) => continue,
+                                Err(e) => {
+                                    crate::as_of::record_degradation(
+                                        name, "get_margin_data",
+                                        &format!("with_asof 失败: {e}"),
+                                    );
+                                    continue;
+                                },
+                            }
+                        },
+                        AsOfCapability::Fallthrough => {
+                            // 没有 truncation 函数,不能使用 vendor 实时数据
+                            crate::as_of::record_degradation(
+                                name, "get_margin_data",
+                                "Fallthrough vendor 不支持 as-of 参数,跳过",
+                            );
+                            continue;
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(
+                                name, "get_margin_data",
+                                "no historical semantic",
+                            );
+                            continue;
+                        },
+                    }
+                }
+            }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_margin_data",
-                "vendor 接口不传日期参数,replay 模式整方法跳过",
+                "as-of 模式所有 vendor 均未提供历史数据",
             );
-            tracing::info!("[asof] skipping get_margin_data (no historical semantics)");
             return Ok(None);
         }
         {
@@ -936,8 +988,24 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Option<NorthBoundHolding>, DataError> {
+        // P4: 按 capability 决策(所有 vendor Fallthrough,as-of 模式返回 None)
         if crate::as_of::is_asof_active() {
-            tracing::warn!("[asof] north_bound 在 replay 模式下不可用 (stock={stock_code})");
+            for name in &self.routing.north_bound {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_north_bound_holding") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(Some(r)) = vendor.get_north_bound_holding_with_asof(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_north_bound_holding", "no historical semantic");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_north_bound_holding", "as-of 模式所有 vendor 均未提供历史北向持仓");
             return Ok(None);
         }
         {
@@ -962,16 +1030,25 @@ impl AStockClient {
     }
 
     pub async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney Fallthrough, iwencai NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
-            // 行业分类是静态属性，但 vendor.get_sector_info 不接收日期参数，
-            // 且无法保证返回的是 as_of_date 当日的分类映射(SectorInfo 本身无 date 字段)。
-            // replay 模式下整方法跳过，依赖降级报告告诉用户"无历史语义"。
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_sector_info",
-                "vendor 接口不传日期参数且类型无 date 字段,replay 模式整方法跳过",
-            );
-            tracing::info!("[asof] skipping get_sector_info (no historical semantics)");
+            for name in &self.routing.sector {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_sector_info") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(Some(r)) = vendor.get_sector_info_with_asof(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_sector_info", "no historical semantic");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_sector_info", "as-of 模式所有 vendor 均未提供历史行业分类");
             return Ok(None);
         }
         for name in &self.routing.sector {
@@ -1038,16 +1115,29 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Option<ConsensusEPS>, DataError> {
-        // consensus_eps 在 replay 模式下不应用 C-fallback 估算:
-        // 估算 EPS 是基于"当前年份板块均值"的兜底值,与 as_of_date 的真实历史预期无关,
-        // 会污染荐股评分。replay 模式下整方法跳过,等待真实 vendor 数据或留空。
+        // P4: 按 vendor 申报的 capability 决策
+        // 所有 vendor 均为 Fallthrough(as-of 模式跳过,不执行 C-fallback 估算)
         if crate::as_of::is_asof_active() {
+            for name in self.routing.vendors_for("consensus_eps", &self.routing.consensus_eps) {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_consensus_eps") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(Some(r)) = vendor.get_consensus_eps_with_asof(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_consensus_eps", "vendor 不支持 as-of 参数,跳过");
+                            continue;
+                        },
+                    }
+                }
+            }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_consensus_eps",
                 "C-fallback 估算是基于当前年份的板块均值,replay 模式禁用",
             );
-            tracing::info!("[asof] skipping get_consensus_eps fallback in replay mode");
             return Ok(None);
         }
         for name in self.routing.vendors_for("consensus_eps", &self.routing.consensus_eps) {
@@ -1080,14 +1170,25 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Option<ConceptBlocks>, DataError> {
-        // ConceptBlocks 静态归属,无 date 字段,replay 模式下整方法跳过
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney/ths/iwencai 均为 NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_concept_blocks",
-                "类型无 date 字段,replay 模式整方法跳过",
-            );
-            tracing::info!("[asof] skipping get_concept_blocks (no historical semantics)");
+            for name in &self.routing.concept_blocks {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_concept_blocks") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(Some(r)) = vendor.get_concept_blocks_with_asof(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_concept_blocks", "no historical semantic");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_concept_blocks", "as-of 模式所有 vendor 均未提供历史概念板块");
             return Ok(None);
         }
         for name in &self.routing.concept_blocks {
@@ -1166,18 +1267,30 @@ impl AStockClient {
     }
 
     pub async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
-        // 实时性方法：热门股没有"过去某日的热门"语义，在 as-of 模式下整方法跳过。
-        // 返回 Ok(vec![]) 而非 Err(AsOfDegraded)：避免破坏 8 个调用点的 `if let Ok` 模式
-        // 与前端 Tauri command 契约(返回 Err 会被前端 showError 弹窗，UX 不友好)。
-        // workflow 节点通过 get_asof_degradation_report() 拉取累积的降级条目，
-        // 写入 dataQualitySummary.degraded_sources。
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney/ths/iwencai NoHistoricalSemantic,baidu Fallthrough
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_hot_stocks",
-                "no historical semantics",
-            );
-            tracing::info!("[asof] skipping get_hot_stocks (no historical semantics)");
+            for name in &self.routing.hot_stocks {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_hot_stocks") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(r) = vendor.get_hot_stocks_with_asof().await {
+                                if !r.is_empty() { return Ok(r); }
+                            }
+                        },
+                        AsOfCapability::Fallthrough => {
+                            if let Ok(r) = vendor.get_hot_stocks().await {
+                                if !r.is_empty() { return Ok(r); }
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_hot_stocks", "no historical semantics");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_hot_stocks", "as-of 模式所有 vendor 均未提供热门股数据");
             return Ok(vec![]);
         }
         for name in &self.routing.hot_stocks {
@@ -1191,13 +1304,25 @@ impl AStockClient {
     }
 
     pub async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney/ths NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_industry_ranking",
-                "no historical semantics",
-            );
-            tracing::info!("[asof] skipping get_industry_ranking (no historical semantics)");
+            for name in &self.routing.industry_ranking {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_industry_ranking") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(r) = vendor.get_industry_ranking_with_asof().await {
+                                if !r.is_empty() { return Ok(r); }
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_industry_ranking", "no historical semantics");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_industry_ranking", "as-of 模式所有 vendor 均未提供行业排名");
             return Ok(vec![]);
         }
         for name in &self.routing.industry_ranking {
@@ -1211,13 +1336,25 @@ impl AStockClient {
     }
 
     pub async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney/akshare NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_cls_flash",
-                "no historical semantics",
-            );
-            tracing::info!("[asof] skipping get_cls_flash (no historical semantics)");
+            for name in &self.routing.cls_flash {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_cls_flash") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(r) = vendor.get_cls_flash_with_asof().await {
+                                if !r.is_empty() { return Ok(r); }
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_cls_flash", "no historical semantics");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_cls_flash", "as-of 模式所有 vendor 均未提供实时快讯");
             return Ok(vec![]);
         }
         for name in &self.routing.cls_flash {
@@ -1314,14 +1451,30 @@ impl AStockClient {
     }
 
     pub async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
-        // PeerComparison 包含当日 change_pct,是"实时"对比,无历史快照语义
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney Fallthrough(同行对比带 date 字段,可截断),as-of 模式调用 live + truncate
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_peers",
-                "no historical snapshot semantics,replay 模式整方法跳过",
-            );
-            tracing::info!("[asof] skipping get_peers (no historical snapshot semantics)");
+            for name in self.routing.vendors_for("peers", &self.routing.peers) {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_peers") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(r) = vendor.get_peers_with_asof(stock_code).await {
+                                if !r.is_empty() { return Ok(r); }
+                            }
+                        },
+                        AsOfCapability::Fallthrough => {
+                            if let Ok(result) = vendor.get_peers(stock_code).await {
+                                if !result.is_empty() { return Ok(result); }
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_peers", "no historical snapshot semantics");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_peers", "as-of 模式所有 vendor 均未提供同行对比");
             return Ok(vec![]);
         }
         for name in self.routing.vendors_for("peers", &self.routing.peers) {
@@ -1341,13 +1494,30 @@ impl AStockClient {
     }
 
     pub async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // eastmoney Fallthrough(date 字段可用),as-of 模式调用 live + 取最新
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_option_pcr",
-                "vendor 接口不传日期参数,replay 模式整方法跳过",
-            );
-            tracing::info!("[asof] skipping get_option_pcr (no historical semantics)");
+            for name in &self.routing.option_pcr {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_option_pcr") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(Some(r)) = vendor.get_option_pcr_with_asof(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        AsOfCapability::Fallthrough => {
+                            if let Ok(Some(r)) = vendor.get_option_pcr(stock_code).await {
+                                return Ok(Some(r));
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(name, "get_option_pcr", "no historical semantic");
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "get_option_pcr", "as-of 模式所有 vendor 均未提供期权 PCR");
             return Ok(None);
         }
         for name in &self.routing.option_pcr {

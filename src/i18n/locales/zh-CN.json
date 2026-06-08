@@ -7559,6 +7559,12 @@
       "panels": {
         "refresh": "刷新",
         "noData": "暂无数据",
+        "hotStocks": "热门股票",
+        "industryRank": "行业排名",
+        "main": "主力",
+        "noHot": "暂无热门股数据",
+        "noIndustry": "暂无行业数据",
+        "tags": "标签",
         "dragonTiger": "龙虎榜",
         "eventCalendar": "事件日历",
         "limitUp": "涨停板",
@@ -7602,6 +7608,8 @@
       },
       "screener": {
         "title": "🔍 智能荐股",
+        "todayRecommend": "今日荐股",
+        "myFilter": "我的筛选",
         "discover": "全市场",
         "screen": "自选筛选",
         "factorHint": "选择筛选因子（已选 {{count}} 项）：",

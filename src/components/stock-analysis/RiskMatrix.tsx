@@ -1,5 +1,5 @@
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
-import { ExpandOutlined } from "@ant-design/icons";
+import { DownloadOutlined, ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Modal, Tag } from "antd";
 import * as echarts from "echarts";
 import NodeRenderer from "markstream-react";
@@ -222,19 +222,88 @@ function computeRiskScore(text: string): number {
   return Math.min(100, Math.max(5, score));
 }
 
+/** 把风险评估条目序列化为可分享的 Markdown 文档 */
+function buildRiskMarkdown(
+  entries: Array<[string, string]>,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  stockCode?: string,
+  stockName?: string,
+): string {
+  const now = new Date().toISOString().replace("T", " ").substring(0, 19);
+  const title = stockName && stockCode
+    ? `${stockName} (${stockCode}) — 风险评估报告`
+    : "风险评估报告";
+  const lines: string[] = [
+    `# ${title}`,
+    "",
+    `> 导出时间：${now}  `,
+    `> 评估维度：${entries.length}`,
+    "",
+    "## 风险评分总览",
+    "",
+    "| 维度 | 风险评分 |",
+    "| --- | --- |",
+    ...entries.map(([type, report]) => {
+      const label = RISK_LABEL_KEYS[type] ? t(RISK_LABEL_KEYS[type]) : type;
+      const score = computeRiskScore(report);
+      return `| ${label} | ${score} / 100 |`;
+    }),
+    "",
+    "## 详细评估",
+    "",
+  ];
+  for (const [type, report] of entries) {
+    const label = RISK_LABEL_KEYS[type] ? t(RISK_LABEL_KEYS[type]) : type;
+    const score = computeRiskScore(report);
+    const readable = extractReadableFromRiskReport(report) || t("stockAnalysis.noRiskData");
+    lines.push(
+      `### ${label}（${score} / 100）`,
+      "",
+      readable,
+      "",
+      "---",
+      "",
+    );
+  }
+  lines.push(
+    `*本文档由 AxInvest 风险评估模块自动生成，仅供研究参考，不构成投资建议。*`,
+  );
+  return lines.join("\n");
+}
+
 export function RiskMatrix() {
   const { t } = useTranslation();
   const themeMode = useSettingsStore((s) => s.settings.theme_mode);
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
+  const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const stockName = useStockAnalysisStore((s) => s.stockName);
   const [chartReady, setChartReady] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const expandedChartRef = useRef<HTMLDivElement>(null);
   const expandedInstanceRef = useRef<echarts.ECharts | null>(null);
+
+  /** 大屏模式一键导出风险评估为 Markdown 文档 */
+  const handleExportRiskMarkdown = async () => {
+    const entries = Object.entries(riskAssessments);
+    if (entries.length === 0 || exporting) { return; }
+    setExporting(true);
+    try {
+      const md = buildRiskMarkdown(entries, t, stockCode, stockName);
+      const { saveFileMarkdown } = await import("@/lib/exportChat");
+      const safeName = (stockName && stockCode)
+        ? `${stockName}-${stockCode}-风险评估`
+        : "风险评估";
+      await saveFileMarkdown(safeName, md);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (!chartRef.current) { return; }
@@ -439,7 +508,18 @@ export function RiskMatrix() {
         title={t("stockAnalysis.riskAssessment")}
         open={expanded}
         onCancel={() => setExpanded(false)}
-        footer={null}
+        footer={[
+          <Button
+            key="export"
+            type="primary"
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            onClick={handleExportRiskMarkdown}
+            disabled={entries.length === 0}
+          >
+            {t("common.exportMarkdown", { defaultValue: "导出 Markdown" })}
+          </Button>,
+        ]}
         width="80vw"
         style={{ top: 20 }}
         styles={{ body: { maxHeight: "80vh", overflow: "auto" } }}

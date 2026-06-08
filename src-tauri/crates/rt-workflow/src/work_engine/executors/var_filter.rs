@@ -56,10 +56,8 @@ pub fn is_data_var(key: &str) -> bool {
 /// 中当 `context_sources` 或 `input_var` 为空时的兼容分支），避免把 100+ 模板参数
 /// 全部硬灌给 LLM。
 pub fn collect_data_vars(variables: &HashMap<String, Value>) -> Vec<(&String, &Value)> {
-    let mut out: Vec<(&String, &Value)> = variables
-        .iter()
-        .filter(|(k, _)| is_data_var(k))
-        .collect();
+    let mut out: Vec<(&String, &Value)> =
+        variables.iter().filter(|(k, _)| is_data_var(k)).collect();
     // 排序确保稳定输出（便于调试 + 单元测试断言）
     out.sort_by(|a, b| a.0.cmp(b.0));
     out

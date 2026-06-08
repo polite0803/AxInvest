@@ -929,10 +929,10 @@ fn monte_carlo(args: &Value) -> Result<Value, String> {
         .get("annual_volatility")
         .and_then(|v| v.as_f64())
         .unwrap_or(tv_f64(args, "mc_default_volatility", 0.3));
-    let days = args
-        .get("days")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(tv_i64(args, "mc_default_days", 30) as u64) as usize;
+    let days =
+        args.get("days")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(tv_i64(args, "mc_default_days", 30) as u64) as usize;
     let sims = args
         .get("simulations")
         .and_then(|v| v.as_u64())
@@ -1041,9 +1041,7 @@ fn limit_up(args: &Value) -> Result<Value, String> {
     let w_trend = tv_f64(args, "limit_up_w_trend", 40.0);
     let w_volume = tv_f64(args, "limit_up_w_volume", 20.0);
     let w_hits = tv_f64(args, "limit_up_w_hits", 15.0);
-    let score = trend * w_trend
-        + (vr.min(3.0) - 1.0) * w_volume
-        + (hits as f64) * w_hits;
+    let score = trend * w_trend + (vr.min(3.0) - 1.0) * w_volume + (hits as f64) * w_hits;
     let th_high = tv_f64(args, "limit_up_th_high", 60.0);
     let th_med = tv_f64(args, "limit_up_th_med", 30.0);
     let th_low = tv_f64(args, "limit_up_th_low", 10.0);

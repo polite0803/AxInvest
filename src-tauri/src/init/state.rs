@@ -9,6 +9,7 @@ use crate::AppState;
 use crate::app_state::SemanticCacheState;
 use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::{CacheConfig, SemanticCache};
+use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
@@ -163,8 +164,40 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
     let sync_engine = create_sync_engine(&sea_db, &app_settings, rt.handle());
 
     // 共享 AStockClient：astock_client 和 stock_monitor 共用同一实例（共享缓存）
-    let astock_client = Arc::new(axagent_astock_data::AStockClient::new());
+    // 缺陷 D 修复: 注入 L2 磁盘缓存(持久化跨进程) + 启动后台 flush 任务。
+    let (astock_client, l2_handle) = {
+        let l2_path: PathBuf = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".axagent")
+            .join("astock_l2_cache.json");
+        if let Some(parent) = l2_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        AStockClient::new().with_l2_cache(l2_path)
+    };
+    let astock_client = Arc::new(astock_client);
     axagent_tools::global_state::set_astock_client(astock_client.clone());
+    // 启动 30s flush loop(后台 tokio task)
+    axagent_astock_data::disk_cache::spawn_flush_loop(l2_handle);
+    tracing::info!("[l2] 磁盘缓存已注入,后台 flush 任务已启动");
+
+    // 缺陷 A 修复:启动后异步拉一次 A 股交易日历,填充 calendar.rs 远程节假日缓存。
+    // fire-and-forget,失败也不影响主流程(会 fallback 到硬编码 2025-2026)。
+    {
+        let astock_for_calendar = astock_client.clone();
+        rt.spawn(async move {
+            // 给主流程 5s 时间先起来,避免冷启动 IO 拥塞
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            match axagent_astock_data::calendar::init_holiday_calendar().await {
+                Ok(n) => tracing::info!("[calendar] 远程节假日缓存初始化: {} 条", n),
+                Err(e) => {
+                    tracing::warn!("[calendar] 远程节假日缓存初始化失败,fallback 硬编码: {}", e)
+                },
+            }
+            // 抑制 unused 警告
+            let _ = astock_for_calendar;
+        });
+    }
     let stock_monitor = Some(Arc::new(axagent_stock_analysis::monitor::RealtimeMonitor::new(
         astock_client.clone(),
     )));
@@ -323,9 +356,32 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             ));
             // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
             rt.block_on(engine.inject_into_agent_executor(engine.clone()));
-            // 注册股票分析领域约束回调（A 股头部/尾部锚定）
+            // 注册股票分析领域约束回调（A 股头部/尾部锚定 + as-of 时间锚定）
+            // spec §6.1: 回放模式下,头部必须先于 STOCK_HARD_CONSTRAINTS 注入
+            // `时间锚定 (截至 X 收盘)` 块,让 LLM 第一时间看到闭世界假设。
+            // as-of 上下文通过 `AS_OF.scope()` 跨 async 任务传递;本闭包在节点
+            // 执行时运行,正处 scope 内,可以直接 `current_as_of()` 读取。
             rt.block_on(engine.set_domain_constraints(Arc::new(|role_name: &str| {
-                if axagent_stock_analysis::prompts::is_stock_role(role_name) {
+                let as_of_date: Option<String> =
+                    axagent_astock_data::as_of::current_as_of().map(|c| c.as_string());
+                let is_stock = axagent_stock_analysis::prompts::is_stock_role(role_name);
+                if let Some(date) = as_of_date.as_deref() {
+                    // 回放模式: 时间锚定 + 股票角色约束
+                    let asof_block = axagent_stock_analysis::prompts::asof_system_prompt(date);
+                    if is_stock {
+                        let head = format!(
+                            "{asof_block}\n\n{}",
+                            axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS
+                        );
+                        axagent_runtime::work_engine::ConstraintBlocks::default()
+                            .with_head(head)
+                            .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
+                    } else {
+                        axagent_runtime::work_engine::ConstraintBlocks::default()
+                            .with_head(asof_block)
+                    }
+                } else if is_stock {
+                    // live 模式: 仅股票角色约束
                     axagent_runtime::work_engine::ConstraintBlocks::default()
                         .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
                         .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)

@@ -2,6 +2,8 @@ import i18n from "@/i18n";
 import { extractContent } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
   AnalysisStatus,
   AnalysisSummary,
@@ -195,6 +197,19 @@ interface StockAnalysisState {
   stockCodeConsensus: Record<string, StockConsensus>;
   setStockCodeConsensus: (stockCode: string, consensus: StockConsensus) => void;
 
+  // Phase 9: Time-travel snapshot metadata
+  // - `asOfDate`: 当前 analysis 的 as_of_date（live 时为 null）
+  // - `mode`: 模式标签（"live" / "replay" / "backtest_sweep"）
+  // - `violations`: 3 阶段 LLM 未来引用检测发现的违规列表
+  asOfDate: string | null;
+  mode: "live" | "replay" | "backtest_sweep";
+  violations: Array<{ nodeId: string; snippet: string; ruleHit: string }>;
+  setAsOfDate: (date: string | null) => void;
+  setMode: (mode: "live" | "replay" | "backtest_sweep") => void;
+  setViolations: (
+    v: Array<{ nodeId: string; snippet: string; ruleHit: string }>,
+  ) => void;
+
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
@@ -249,6 +264,9 @@ const initialState = {
   timeline: [],
   highlightedPanel: null,
   stockCodeConsensus: {},
+  asOfDate: null,
+  mode: "live" as const,
+  violations: [],
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -277,7 +295,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   getStockQuote: async (code: string) => {
     try {
-      const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code });
+      // 时间旅行：从 timeAnchorStore 读 as_of_date，透传给后端
+      const asOfDate = useTimeAnchorStore.getState().asOfDate;
+      const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
       set({ quote, stockCode: code, stockName: quote.name });
     } catch (e) {
       console.error("[StockAnalysis] Failed to get stock quote:", e);
@@ -286,10 +306,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   getStockKline: async (code: string, period: string, limit: number) => {
     try {
+      // 时间旅行：K 线按 as_of_date 截断
+      const asOfDate = useTimeAnchorStore.getState().asOfDate;
       const klineData = await invoke<KLine[]>("get_stock_kline", {
         stockCode: code,
         period,
         limit,
+        asOfDate,
       });
       set({ klineData });
     } catch (e) {
@@ -362,12 +385,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       }
 
       const dryRun = await get().getDryRun();
+      // 时间旅行模式：从 useTimeAnchorStore 读 as_of_date，透传给后端
+      const asOfDate = useTimeAnchorStore.getState().asOfDate;
+      const anchorMode = useTimeAnchorStore.getState().mode;
+      set({
+        asOfDate,
+        mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",
+      });
       const result = await invoke<{
         analysisId: string;
         workflowId: string;
         stockCode: string;
         stockName: string;
-      }>("run_stock_workflow", { stockCode, dryRun });
+      }>("run_stock_workflow", { stockCode, dryRun, asOfDate });
 
       set({
         analysisId: result.analysisId,
@@ -553,6 +583,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({ ...initialState, _unlisten: null, llmStatus: "unknown" as const });
   },
 
+  setAsOfDate: (date) => set({ asOfDate: date }),
+  setMode: (mode) => set({ mode }),
+  setViolations: (violations) => set({ violations }),
+
   setupEventListener: async () => {
     const existing = get()._unlisten;
     if (existing) { return; }
@@ -619,7 +653,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       if (status === "completed" && output != null) {
         const text = extractContent(output);
         const s = get();
-        // 同步推送 timeline 节点（去重：同 id 的后续 push 视为 update）
+        // 同步推送 timeline 节点(去重:同 id 的后续 push 视为 update)
         const phase = inferTimelinePhase(nodeId);
         if (phase) {
           s.pushTimelineNode({
@@ -635,6 +669,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             startedAt: Date.now(),
             finishedAt: Date.now(),
           });
+        }
+        // ── spec §6.2: 3 阶段 LLM 未来引用检测 ──
+        // 仅在 as-of 模式下激活;live 模式(asOfDate=null)不做检测
+        const asOf = s.asOfDate;
+        if (asOf) {
+          const newViolations = detectFutureReferencesForNode(nodeId, text, asOf);
+          if (newViolations.length > 0) {
+            set({
+              violations: [...s.violations, ...newViolations],
+            });
+          }
         }
         if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
           set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });

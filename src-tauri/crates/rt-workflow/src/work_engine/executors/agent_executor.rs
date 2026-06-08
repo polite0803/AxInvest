@@ -559,6 +559,10 @@ impl NodeExecutorTrait for AgentExecutor {
 
         // 最大工具调用轮数：配置值或默认 5
         let max_rounds = an.config.max_tool_rounds.unwrap_or(5).max(1);
+        // 温度 / max_tokens：模板变量优先（用户在「股票分析设置」调整 `agent_temperature`
+        // / `agent_max_tokens` 后这里读到的就是新值），缺失时回退到节点静态配置。
+        let temperature = resolve_temperature(&context.variables, an.config.temperature);
+        let max_tokens = resolve_max_tokens(&context.variables, an.config.max_tokens);
         let mut total_usage = (0u32, 0u32);
         let mut final_content = String::new();
         let mut final_thinking: Option<String> = None;
@@ -569,8 +573,8 @@ impl NodeExecutorTrait for AgentExecutor {
                 model: model.clone(),
                 messages: messages.clone(),
                 stream: true,
-                temperature: an.config.temperature.map(|t| t as f64),
-                max_tokens: an.config.max_tokens,
+                temperature,
+                max_tokens,
                 top_p: None,
                 // 首轮传 tools，后续轮次若 tools 为空则不传
                 tools: if round == 0 { tools.clone() } else { None },
@@ -1299,6 +1303,51 @@ fn parse_rag_source_ids(ids: &[String]) -> (Vec<String>, Vec<String>, Vec<String
         }
     }
     (kb, mem, wiki)
+}
+
+/// 从模板变量中读取 LLM 温度，缺失或非法时回退到节点静态配置。
+///
+/// 用户在「股票分析设置 → 参数」调整 `agent_temperature` 后，WorkEngine 会把
+/// 它写进 `context.variables`，这里读到的就是新值；这样 stock-analysis 模板
+/// 之外的通用 Agent 节点也能复用同一套覆盖逻辑，且无需修改节点静态配置。
+fn resolve_temperature(
+    variables: &std::collections::HashMap<String, Value>,
+    node_default: Option<f32>,
+) -> Option<f64> {
+    if let Some(v) = variables.get("agent_temperature") {
+        if let Some(n) = v.as_f64() {
+            if n.is_finite() {
+                return Some(n.clamp(0.0, 2.0));
+            }
+        }
+    }
+    node_default.map(|t| t as f64)
+}
+
+/// 从模板变量中读取 LLM max_tokens，缺失或非法时回退到节点静态配置。
+///
+/// 兼容两种形式：
+///   * `agent_max_tokens` 为 JSON number（如 4096 / 8192）
+///   * `agent_max_tokens` 为 JSON string（如 "4096"），旧 UI 曾这样存
+fn resolve_max_tokens(
+    variables: &std::collections::HashMap<String, Value>,
+    node_default: Option<u32>,
+) -> Option<u32> {
+    if let Some(v) = variables.get("agent_max_tokens") {
+        if let Some(n) = v.as_u64() {
+            if n > 0 && n <= u32::MAX as u64 {
+                return Some(n as u32);
+            }
+        }
+        if let Some(s) = v.as_str() {
+            if let Ok(n) = s.trim().parse::<u32>() {
+                if n > 0 {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    node_default
 }
 
 fn user_prompt_for_rag(

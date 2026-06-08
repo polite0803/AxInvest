@@ -329,7 +329,7 @@ impl StockVendor for IwencaiVendor {
         match method {
             "search_stock" | "get_concept_blocks" | "get_hot_stocks" | "get_sector_info" => {
                 AsOfCapability::NoHistoricalSemantic
-            }
+            },
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -349,7 +349,12 @@ mod capability_tests {
     #[test]
     fn iwencai_no_historical_methods() {
         let v = make_vendor();
-        for m in &["search_stock", "get_concept_blocks", "get_hot_stocks", "get_sector_info"] {
+        for m in &[
+            "search_stock",
+            "get_concept_blocks",
+            "get_hot_stocks",
+            "get_sector_info",
+        ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::NoHistoricalSemantic);
         }
     }
@@ -363,7 +368,15 @@ mod capability_tests {
     #[test]
     fn iwencai_stub_methods_are_fallthrough() {
         let v = make_vendor();
-        for m in &["get_quote", "get_klines", "get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule"] {
+        for m in &[
+            "get_quote",
+            "get_klines",
+            "get_financials",
+            "get_news",
+            "get_money_flow",
+            "get_dragon_tiger",
+            "get_lockup_schedule",
+        ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
     }

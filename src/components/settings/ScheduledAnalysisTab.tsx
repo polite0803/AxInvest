@@ -29,6 +29,42 @@ export function ScheduledAnalysisTab() {
   const [adding, setAdding] = useState(false);
   const [form] = Form.useForm();
 
+  // 自选股自动扫描
+  const [wlScanJobs, setWlScanJobs] = useState<CronJobRow[]>([]);
+  const [wlCron, setWlCron] = useState("0 21 * * 1-5");
+
+  const loadWlScan = async () => {
+    try {
+      const list = await invoke<CronJobRow[]>("list_watchlist_scan_crons");
+      if (Array.isArray(list)) { setWlScanJobs(list); }
+    } catch { /* 后端未运行 */ }
+  };
+
+  const toggleWlScan = async (job: CronJobRow | null, enable: boolean) => {
+    try {
+      if (enable && !job) {
+        await invoke("create_watchlist_scan_cron", {
+          cronExpression: wlCron,
+          enabled: true,
+        });
+        message.success("自选股自动扫描已开启");
+      } else if (!enable && job) {
+        await invoke("toggle_watchlist_scan_cron", { id: job.id, enabled: false });
+        message.success("自选股自动扫描已暂停");
+      }
+      loadWlScan();
+    } catch {
+      message.error("操作失败");
+    }
+  };
+
+  const deleteWlScan = async (id: string) => {
+    try {
+      await invoke("delete_watchlist_scan_cron", { id });
+      loadWlScan();
+    } catch { /* 静默 */ }
+  };
+
   const load = async () => {
     setLoading(true);
     try {
@@ -40,6 +76,7 @@ export function ScheduledAnalysisTab() {
 
   useEffect(() => {
     load();
+    loadWlScan();
   }, []);
 
   const create = async (values: any) => {
@@ -125,6 +162,39 @@ export function ScheduledAnalysisTab() {
       <div className="text-sm text-gray-500">
         基于上游 CronJobStore 持久化 — 按 Cron 表达式周期性对指定股票执行完整分析流程
       </div>
+
+      {/* 自选股自动扫描 */}
+      <Card size="small" title="自选股自动扫描" styles={{ body: { padding: "8px 12px" } }}>
+        <div className="flex items-center gap-3">
+          <Switch
+            checked={wlScanJobs.some((j) => j.status === "active")}
+            onChange={(checked) => toggleWlScan(wlScanJobs.length > 0 ? wlScanJobs[0] : null, checked)}
+          />
+          <span className="text-xs text-gray-400">
+            {wlScanJobs.some((j) => j.status === "active") ? "已开启" : "已关闭"}
+          </span>
+          <Select
+            size="small"
+            style={{ width: 180 }}
+            value={wlCron}
+            onChange={setWlCron}
+            options={[
+              { label: "交易日 21:00 (每日收盘)", value: "0 21 * * 1-5" },
+              { label: "每日 09:00 (开盘前)", value: "0 9 * * *" },
+              { label: "每日 15:30 (收盘)", value: "30 15 * * *" },
+              { label: "每周一 09:00", value: "0 9 * * 1" },
+            ]}
+          />
+          {wlScanJobs.length > 0 && (
+            <Popconfirm
+              title="删除此定时任务?"
+              onConfirm={() => deleteWlScan(wlScanJobs[0].id)}
+            >
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
+        </div>
+      </Card>
 
       <Card
         size="small"

@@ -219,7 +219,10 @@ pub trait StockVendor: Send + Sync {
         self.get_lockup_schedule(stock_code).await
     }
 
-    async fn search_stock_with_asof(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
+    async fn search_stock_with_asof(
+        &self,
+        keyword: &str,
+    ) -> Result<Vec<StockSearchResult>, DataError> {
         self.search_stock(keyword).await
     }
 

@@ -696,6 +696,49 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         db.execute_unprepared(sql).await?;
     }
 
+    // --- Time-travel mode: stock_analyses 扩展字段（幂等） ---
+    for sql in &[
+        "ALTER TABLE stock_analyses ADD COLUMN analysis_kind TEXT NOT NULL DEFAULT 'live'",
+        "ALTER TABLE stock_analyses ADD COLUMN as_of_date TEXT",
+        "ALTER TABLE stock_analyses ADD COLUMN model_version TEXT",
+        "ALTER TABLE stock_analyses ADD COLUMN data_snapshot_id TEXT",
+    ] {
+        let _ = db.execute_unprepared(sql).await;
+    }
+
+    // --- Time-travel mode: market_data_history L2 cache 表 ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS market_data_history (\
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, \
+            vendor TEXT NOT NULL, method TEXT NOT NULL, stock_code TEXT NOT NULL DEFAULT '', \
+            as_of_date TEXT NOT NULL, data_window_start TEXT, data_window_end TEXT, \
+            payload_json TEXT NOT NULL, payload_hash TEXT NOT NULL, \
+            fetched_at INTEGER NOT NULL, last_accessed_at INTEGER NOT NULL, \
+            access_count INTEGER NOT NULL DEFAULT 0, expires_at INTEGER)",
+    )
+    .await?;
+    // 关闭并重开语句以避免大段 SQL 跨越行
+    db.execute_unprepared(
+        "CREATE INDEX IF NOT EXISTS idx_mdh_lookup ON market_data_history(\
+             vendor, method, stock_code, as_of_date, data_window_end)",
+    )
+    .await?;
+    db.execute_unprepared(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mdh_unique ON market_data_history(\
+             vendor, method, stock_code, as_of_date, payload_hash)",
+    )
+    .await?;
+
+    // --- Time-travel mode: replay_runs 元数据表 ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS replay_runs (\
+            id TEXT NOT NULL PRIMARY KEY, name TEXT, \
+            stock_codes TEXT NOT NULL, as_of_dates TEXT NOT NULL, \
+            config_id TEXT, created_at INTEGER NOT NULL, completed_at INTEGER, \
+            summary_json TEXT)",
+    )
+    .await?;
+
     // ========================================================================
     // SECTION K: Indexes
     // ========================================================================
@@ -762,6 +805,12 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         // AxInvest: Stock analysis indexes
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_code ON stock_analyses(stock_code)",
         "CREATE INDEX IF NOT EXISTS idx_stock_analyses_status ON stock_analyses(status)",
+        // Time-travel mode indexes
+        "CREATE INDEX IF NOT EXISTS idx_stock_analyses_kind ON stock_analyses(analysis_kind, as_of_date)",
+        "CREATE INDEX IF NOT EXISTS idx_stock_analyses_as_of ON stock_analyses(as_of_date)",
+        "CREATE INDEX IF NOT EXISTS idx_mdh_accessed ON market_data_history(last_accessed_at)",
+        "CREATE INDEX IF NOT EXISTS idx_mdh_expires ON market_data_history(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_replay_runs_created ON replay_runs(created_at)",
     ] {
         db.execute_unprepared(sql).await?;
     }

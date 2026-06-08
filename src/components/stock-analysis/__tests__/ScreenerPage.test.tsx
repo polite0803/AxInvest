@@ -11,6 +11,9 @@ vi.mock("react-i18next", () => ({
       }
       return key;
     },
+    // RecommendationPanel accesses i18n.language in useCallback deps.
+    // Provide a stub so the panel can mount under the test mock.
+    i18n: { language: "en-US" },
   }),
   initReactI18next: { type: "3rdParty", init: () => {} },
 }));
@@ -45,11 +48,23 @@ describe("ScreenerPage", () => {
     expect(title?.textContent).toBe("screener.title");
   });
 
-  it("renders a top grid with 2 StockScreenerPanel instances (discover + screen)", () => {
+  it("renders a single Tabs container with smart-reco as default", () => {
     const { container } = renderWithRouter();
-    const grid = container.querySelector(".grid");
-    expect(grid).toBeTruthy();
-    expect(grid?.children.length).toBe(2);
+    const tabs = container.querySelector(".ant-tabs");
+    expect(tabs).toBeTruthy();
+    // Only count the page-level Tabs header (not the nested period Tabs
+    // inside RecommendationPanel, which has 3 short/mid/long entries).
+    const navHeaders = tabs?.querySelectorAll(":scope > .ant-tabs-nav .ant-tabs-tab");
+    expect(navHeaders?.length).toBe(2);
+    // Default active tab should be the smart-reco tab.
+    const activeHeader = tabs?.querySelector(".ant-tabs-nav .ant-tabs-tab-active");
+    expect(activeHeader?.textContent).toContain("screener.tab.smartReco");
+  });
+
+  it("renders both tab labels via i18n", () => {
+    const { container } = renderWithRouter();
+    expect(container.textContent).toContain("screener.tab.smartReco");
+    expect(container.textContent).toContain("screener.tab.myFilter");
   });
 
   it("renders 3 accordion items for HotStocks / LimitUp / DragonTiger", () => {

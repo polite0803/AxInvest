@@ -1,12 +1,25 @@
 import { List } from "@/components/common/AntdList";
+import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { StockConsensus } from "@/types";
 import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
+
+interface RecommendationPanelProps {
+  /**
+   * 打开数据源设置的回调。优先于上下文中的实现 —— 让该面板可脱离
+   * <StockAnalysisPage> 渲染（例如在选股中心里）。
+   * 不传时回退到上下文（默认 no-op）。
+   */
+  onOpenDataSourceSettings?: () => void;
+}
+
+const noop = () => {};
 
 type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist";
 type PeriodKey = "short" | "mid" | "long";
@@ -36,8 +49,16 @@ interface RecoResponse {
   period: PeriodKey;
   picks: Partial<Record<StyleKey, RecoPick[]>>;
   disabledStyles: StyleKey[];
+  /** as-of 模式下被降级(≠ 缺失)的风格(spec §8)。live 模式恒为空数组。 */
+  degradedStyles?: StyleKey[];
+  /** degradedStyles 中各风格的具体降级原因,key=styleKey, value=本地化文本 */
+  degradedReasons?: Record<string, string>;
   generatedAt: number;
   rawSeedPoolSize: number;
+  /** 模式标签: live / replay / backtest_sweep — 后端 spec §8 注入 */
+  mode?: string;
+  /** 时间旅行模式截止日 YYYY-MM-DD;live 时 undefined */
+  asOfDate?: string;
 }
 
 const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist"];
@@ -58,12 +79,15 @@ function fmt(value: unknown, decimals = 2, fallback = FALLBACK): string {
   return value.toFixed(decimals);
 }
 
-export function RecommendationPanel() {
+export function RecommendationPanel({ onOpenDataSourceSettings }: RecommendationPanelProps = {}) {
   const { t, i18n } = useTranslation();
-  const { openDataSourceSettings } = useStockAnalysisPage();
+  const { openDataSourceSettings: ctxOpenSettings } = useStockAnalysisPage();
+  const openDataSourceSettings = onOpenDataSourceSettings ?? ctxOpenSettings ?? noop;
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
+  const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
+  const anchorMode = useTimeAnchorStore((s) => s.mode);
 
   const [period, setPeriod] = useState<PeriodKey>("short");
   const [data, setData] = useState<RecoResponse | null>(null);
@@ -82,7 +106,7 @@ export function RecommendationPanel() {
       try {
         // 后端会基于 FALLBACK_STOCKS 兜底 seed pool，并在响应里返回 disabledStyles；
         // 这里不再做硬性 vendor 门控（否则会卡死整个面板）。
-        const r = await invoke<RecoResponse>("recommend_stocks", { period });
+        const r = await invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
         if (myToken !== reqTokenRef.current) { return; // stale
          }
         if (!r || !r.picks || Object.keys(r.picks).length === 0) {
@@ -114,7 +138,7 @@ export function RecommendationPanel() {
       }
       if (myToken === reqTokenRef.current) { setLoading(false); }
     },
-    [period, i18n.language],
+    [period, asOfDate, i18n.language],
   );
 
   useEffect(() => {
@@ -130,10 +154,14 @@ export function RecommendationPanel() {
   const disabledStyleSet = useMemo(() => new Set(data?.disabledStyles ?? []), [data]);
   const disabledStyleNames = useMemo(() => {
     if (!data) { return ""; }
-    return data.disabledStyles
-      .map((s) => t(`stockAnalysis.recommendation.style${capitalize(s)}`))
+    return data.disabledStyles?.map((s) => t(`stockAnalysis.recommendation.style${capitalize(s)}`))
       .join(" / ");
   }, [data, t]);
+
+  // B15: degraded styles — as-of 截断导致降级(≠ 缺失),前端用橙色"⛔"标识
+  // 与 disabled(灰)区分: disabled 是 vendor 完全不可用;degraded 是可用但效果减弱
+  const degradedStyleSet = useMemo(() => new Set(data?.degradedStyles ?? []), [data]);
+  const hasDegraded = degradedStyleSet.size > 0;
 
   // 真实 / 兜底 picks 统计：用于顶部 banner 提示用户当前数据是真实策略命中
   // 还是数据稀疏兜底合成（vendor K 线 / 财务 / 资金不可用时）。
@@ -141,7 +169,7 @@ export function RecommendationPanel() {
     if (!data) { return { real: 0, synthetic: 0 }; }
     let real = 0;
     let synthetic = 0;
-    for (const arr of Object.values(data.picks)) {
+    for (const arr of Object.values(data.picks ?? {})) {
       if (!arr) { continue; }
       for (const p of arr) {
         if (p.synthetic) { synthetic++; }
@@ -157,10 +185,17 @@ export function RecommendationPanel() {
     { key: "long", label: t("stockAnalysis.recommendation.periodLong") },
   ];
 
+  const isReplay = anchorMode === "replay" && asOfDate !== null;
+
   return (
     <Card
       size="small"
-      title={t("stockAnalysis.recommendation.title")}
+      title={
+        <div className="flex items-center gap-2">
+          <span>{t("stockAnalysis.recommendation.title")}</span>
+          {isReplay && <ReplayBadge />}
+        </div>
+      }
       styles={{ body: { padding: "8px 10px" } }}
       extra={
         <div className="flex items-center gap-2">
@@ -183,103 +218,152 @@ export function RecommendationPanel() {
         style={{ marginBottom: 8 }}
       />
 
-      {disabledStyleSet.size > 0 && (
+      {isReplay && asOfDate && (
         <Alert
           type="warning"
           showIcon
           className="!text-xs !mb-2"
           message={
             <span className="text-xs">
-              {t("stockAnalysis.recommendation.bannerVendorDisabled", { styles: disabledStyleNames })}
-            </span>
-          }
-          action={
-            <Button size="small" type="link" onClick={openDataSourceSettings}>
-              {t("stockAnalysis.recommendation.openSettings")}
-            </Button>
-          }
-        />
-      )}
-
-      {/* 数据质量提示：当存在兜底 picks 时提示用户当前数据稀疏 */}
-      {data && dataQuality.synthetic > 0 && (
-        <Alert
-          type="info"
-          showIcon
-          className="!text-xs !mb-2"
-          message={
-            <span className="text-xs">
-              {t("stockAnalysis.recommendation.dataQualitySummary", {
-                real: dataQuality.real,
-                synthetic: dataQuality.synthetic,
-              })}
+              {t("timeTravel.recommendationBanner", { date: asOfDate })}
             </span>
           }
         />
       )}
 
-      {loading
-        ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
-        : emptyKind
-        ? (
-          <PanelEmpty
-            kind={emptyKind}
-            description={emptyKind === "noData" ? t("stockAnalysis.recommendation.empty") : undefined}
-            onOpenSettings={openDataSourceSettings}
-          />
-        )
-        : !data
-        ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.recommendation.empty")} />
-        : (
-          // P3-4: key={period} forces the Collapse to remount when period changes,
-          // so defaultActiveKey re-applies for the new dataset.
-          <Collapse
-            key={period}
-            ghost
-            size="small"
-            defaultActiveKey={STYLE_KEYS.filter((s) => !disabledStyleSet.has(s) && (data.picks[s]?.length ?? 0) > 0)
-              .slice(0, 2)}
-            items={STYLE_KEYS.map((style) => {
-              const picks = data.picks[style] ?? [];
-              const isDisabled = disabledStyleSet.has(style);
-              // P2-3: when a style is disabled, still show the section (expandable)
-              // with a specific empty state explaining why.
-              return {
-                key: style,
-                label: (
-                  <div className="flex items-center gap-2">
-                    <Tag color={STYLE_COLOR[style]} className="m-0 text-xs">
-                      {t(`stockAnalysis.recommendation.style${capitalize(style)}`)}
-                    </Tag>
-                    <span className="text-xs text-gray-500">
-                      {isDisabled
-                        ? t("stockAnalysis.recommendation.styleDisabled")
-                        : `(${picks.length})`}
-                    </span>
-                  </div>
-                ),
-                children: isDisabled
-                  ? (
-                    <Empty
-                      image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      description={t("stockAnalysis.recommendation.styleDisabledReason", {
-                        style: t(`stockAnalysis.recommendation.style${capitalize(style)}`),
-                      })}
-                    />
-                  )
-                  : picks.length === 0
-                  ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.recommendation.empty")} />
-                  : (
-                    <List
-                      size="small"
-                      dataSource={picks}
-                      renderItem={(p) => <PickRow pick={p} onAnalyze={handleAnalyze} />}
-                    />
-                  ),
-              };
-            })}
+      <div style={{ position: "relative" }}>
+        {disabledStyleSet.size > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            className="!text-xs !mb-2"
+            message={
+              <span className="text-xs">
+                {t("stockAnalysis.recommendation.bannerVendorDisabled", { styles: disabledStyleNames })}
+              </span>
+            }
+            action={
+              <Button size="small" type="link" onClick={openDataSourceSettings}>
+                {t("stockAnalysis.recommendation.openSettings")}
+              </Button>
+            }
           />
         )}
+
+        {/* 数据质量提示：当存在兜底 picks 时提示用户当前数据稀疏 */}
+        {data && dataQuality.synthetic > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            className="!text-xs !mb-2"
+            message={
+              <span className="text-xs">
+                {t("stockAnalysis.recommendation.dataQualitySummary", {
+                  real: dataQuality.real,
+                  synthetic: dataQuality.synthetic,
+                })}
+              </span>
+            }
+          />
+        )}
+
+        {/* B15: 降级风格提示 —— 与 disabled 不同,degraded 是"可用但效果减弱",用橙色 info 区分 */}
+        {data && hasDegraded && asOfDate && (
+          <Alert
+            type="warning"
+            showIcon
+            className="!text-xs !mb-2"
+            message={
+              <span className="text-xs">
+                {t("stockAnalysis.recommendation.bannerDegraded", {
+                  styles: Array.from(degradedStyleSet)
+                    .map((s) => t(`stockAnalysis.recommendation.style${capitalize(s)}`))
+                    .join(" / "),
+                  date: asOfDate,
+                })}
+              </span>
+            }
+          />
+        )}
+
+        {loading
+          ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
+          : emptyKind
+          ? (
+            <PanelEmpty
+              kind={emptyKind}
+              description={emptyKind === "noData" ? t("stockAnalysis.recommendation.empty") : undefined}
+              onOpenSettings={openDataSourceSettings}
+            />
+          )
+          : !data
+          ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.recommendation.empty")} />
+          : (
+            // P3-4: key={period} forces the Collapse to remount when period changes,
+            // so defaultActiveKey re-applies for the new dataset.
+            <Collapse
+              key={period}
+              ghost
+              size="small"
+              defaultActiveKey={STYLE_KEYS.filter((s) =>
+                !disabledStyleSet.has(s) && (data?.picks?.[s]?.length ?? 0) > 0
+              )
+                .slice(0, 2)}
+              items={STYLE_KEYS.map((style) => {
+                const picks = (data?.picks?.[style]) ?? [];
+                const isDisabled = disabledStyleSet.has(style);
+                const isDegraded = degradedStyleSet.has(style);
+                // P2-3: when a style is disabled, still show the section (expandable)
+                // with a specific empty state explaining why.
+                return {
+                  key: style,
+                  label: (
+                    <div className="flex items-center gap-2">
+                      <Tag color={STYLE_COLOR[style]} className="m-0 text-xs">
+                        {t(`stockAnalysis.recommendation.style${capitalize(style)}`)}
+                      </Tag>
+                      {/* B15: 降级风格在 label 处加 ⛔ 徽标(橙色),区别于 disabled 的灰 */}
+                      {isDegraded && (
+                        <Tag color="orange" className="m-0 text-[10px]">
+                          ⛔ {t("timeTravel.degradedStyles.title")}
+                        </Tag>
+                      )}
+                      <span className="text-xs text-gray-500">
+                        {isDisabled
+                          ? t("stockAnalysis.recommendation.styleDisabled")
+                          : `(${picks.length})`}
+                      </span>
+                    </div>
+                  ),
+                  children: isDisabled
+                    ? (
+                      <Empty
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description={t("stockAnalysis.recommendation.styleDisabledReason", {
+                          style: t(`stockAnalysis.recommendation.style${capitalize(style)}`),
+                        })}
+                      />
+                    )
+                    : picks.length === 0
+                    ? (
+                      <Empty
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description={t("stockAnalysis.recommendation.empty")}
+                      />
+                    )
+                    : (
+                      <List
+                        size="small"
+                        dataSource={picks}
+                        renderItem={(p) => <PickRow pick={p} onAnalyze={handleAnalyze} />}
+                      />
+                    ),
+                };
+              })}
+            />
+          )}
+        {isReplay && <ReplayWatermark />}
+      </div>
     </Card>
   );
 }
@@ -414,7 +498,7 @@ function PickRow({ pick, onAnalyze }: { pick: RecoPick; onAnalyze: (code: string
         {pick.secondaryStyles && pick.secondaryStyles.length > 0 && (
           <span className="text-gray-400">
             ({t("stockAnalysis.recommendation.row.secondaryStyle")}:
-            {pick.secondaryStyles.map((s) => t(`stockAnalysis.recommendation.style${capitalize(s)}`)).join("/")})
+            {pick.secondaryStyles?.map((s) => t(`stockAnalysis.recommendation.style${capitalize(s)}`)).join("/")})
           </span>
         )}
       </div>
@@ -431,7 +515,7 @@ function PickRow({ pick, onAnalyze }: { pick: RecoPick; onAnalyze: (code: string
               <div className="text-green-600">
                 {t("stockAnalysis.recommendation.row.reasons")}：
               </div>
-              <ul className="m-0 pl-4">{pick.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              <ul className="m-0 pl-4">{pick.reasons?.map((r, i) => <li key={i}>{r}</li>)}</ul>
             </div>
           )}
           {pick.riskNotes.length > 0 && (
@@ -439,7 +523,7 @@ function PickRow({ pick, onAnalyze }: { pick: RecoPick; onAnalyze: (code: string
               <div className="text-red-600">
                 {t("stockAnalysis.recommendation.row.risks")}：
               </div>
-              <ul className="m-0 pl-4">{pick.riskNotes.map((r, i) => <li key={i}>{r}</li>)}</ul>
+              <ul className="m-0 pl-4">{pick.riskNotes?.map((r, i) => <li key={i}>{r}</li>)}</ul>
             </div>
           )}
         </div>

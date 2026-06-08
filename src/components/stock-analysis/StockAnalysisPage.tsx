@@ -1,7 +1,9 @@
 import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
 import { ArrowLeftRight, Coins, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -21,7 +23,6 @@ import { IndustryRankingPanel } from "./IndustryRankingPanel";
 import { KLineChart } from "./KLineChart";
 import { NorthBoundPanel } from "./NorthBoundPanel";
 import { OptionPcrPanel } from "./OptionPcrPanel";
-import { RecommendationPanel } from "./RecommendationPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
 import { StockAnalysisPageContext } from "./StockAnalysisPageContext";
@@ -62,6 +63,10 @@ export function StockAnalysisPage() {
 
   const deviceLayout = useUIStore((s) => s.deviceLayout);
   const isMobile = deviceLayout === "mobile" || deviceLayout === "tablet";
+
+  // 时间旅行: 监听全局 TimeAnchor,用于 sa-header 的 L2 视觉信号(回放半透紫色遮罩)
+  const timeAnchorMode = useTimeAnchorStore((s) => s.mode);
+  const isReplay = timeAnchorMode === "replay" || timeAnchorMode === "backtest_sweep";
 
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState("market");
@@ -179,7 +184,6 @@ export function StockAnalysisPage() {
 
   const allSheetPanels: SheetPanel[] = [
     { key: "index", label: t("stockAnalysis.indexQuotes"), element: <IndexQuotesPanel /> },
-    { key: "screener", label: t("stockAnalysis.settings.sheet.screener"), element: <RecommendationPanel /> },
     { key: "sectors", label: t("stockAnalysis.settings.sheet.sectors"), element: <SectorHeatmapPanel /> },
     { key: "north", label: t("stockAnalysis.settings.sheet.north"), element: <NorthBoundPanel /> },
     { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
@@ -193,11 +197,12 @@ export function StockAnalysisPage() {
     { key: "industry", label: t("stockAnalysis.industryRanking"), element: <IndustryRankingPanel /> },
     { key: "flash", label: t("stockAnalysis.clsFlash"), element: <ClsFlashPanel /> },
   ];
-  // 桌面全部显示，移动端只直接显示 4 个核心面板，其余通过"更多"下拉菜单访问
-  // 总面板数 = 4 + 6 = 10
+  // 桌面全部显示，移动端只直接显示 3 个核心面板，其余通过"更多"下拉菜单访问
+  // 总面板数 = 3 + 6 = 9
+  // 注: 荐股面板已迁出 —— 选股中心用 Tabs 统一了"智能荐股 / 我的筛选",
+  // 避免"两处都看到荐股"的歧义。
   const mobileCoreKeys = [
     "index",
-    "screener",
     "sectors",
     "north",
   ];
@@ -216,6 +221,7 @@ export function StockAnalysisPage() {
             </button>
             <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
             <span className="sa-header-meta">{marketStatus || t("stockAnalysis.subtitle")}</span>
+            <PageTimeAnchor />
             <button
               type="button"
               className="sa-header-back"
@@ -234,8 +240,27 @@ export function StockAnalysisPage() {
               {settingsOpen && !isMobile ? <X size={16} /> : <Settings size={16} />}
             </button>
           </div>
+          {isReplay && (
+            // L2 视觉信号: 页面态细条 — 顶部 1px 紫色细线 + 极淡紫色背景,让用户一眼看到当前是回放模式
+            <div
+              data-testid="sa-replay-stripe"
+              style={{
+                height: 2,
+                background: "linear-gradient(90deg, #7c3aed 0%, #a855f7 50%, #7c3aed 100%)",
+                opacity: 0.85,
+              }}
+            />
+          )}
 
-          <div className="sa-body">
+          <div
+            className="sa-body"
+            style={isReplay
+              ? {
+                backgroundImage:
+                  "linear-gradient(180deg, rgba(124,58,237,0.04) 0%, rgba(124,58,237,0.01) 30%, transparent 100%)",
+              }
+              : undefined}
+          >
             <StockSearchBar />
 
             <div className="sa-body-inner">

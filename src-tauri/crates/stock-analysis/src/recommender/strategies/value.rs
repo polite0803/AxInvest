@@ -1,10 +1,12 @@
 //! 价值低估子策略：低估值 + 基本面
 
-use super::super::strategy::{RecoContext, RecommendStrategy};
+use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;
 use axagent_astock_data::AStockClient;
+use serde_json::Value;
+use std::collections::HashMap;
 
 pub struct ValueStrategy {
     pub period: Period,
@@ -33,64 +35,79 @@ impl ValueStrategy {
         code: &str,
         name: &str,
         sector: Option<String>,
+        vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
         let quote = client.get_quote(code).await.ok()?;
         let price = quote.price;
-        // vendor 数据稀疏时 pe/pb 可能是 None。放宽：容许缺失 → 用 None coalesce
-        // 成 0 走过滤；但只要 pe / pb 至少一个有数 + > 0，就算入候选（理由里标注）
         let pe = quote.pe.unwrap_or(0.0);
         let pb = quote.pb.unwrap_or(0.0);
-        // 至少要有 pe 或 pb 之一有数；否则视为无估值数据直接放弃
         if pe <= 0.0 && pb <= 0.0 {
             return None;
         }
 
         let (pre_filter_ok, mut reasons) = match self.period {
             Period::Short => {
-                // 短线价值：放宽 PE 上限 30 → 50（旧门槛把 PE 30~50 的"周期低估值"也剔了）
-                if pe > 0.0 && pe > 50.0 {
+                let pe_max = read_f64(vars, "val_short_pe_max", 50.0);
+                if pe > 0.0 && pe > pe_max {
                     return None;
                 }
-                // 缩量回踩 MA20：放宽到 0.99 → 1.005（容许小幅冲高）
-                let klines = client.get_klines(code, "daily", 30).await.ok()?;
-                if klines.is_empty() {
+                let kline_limit = read_f64(vars, "val_short_kline_limit", 30.0) as u32;
+                let klines = client.get_klines(code, "daily", kline_limit).await.ok()?;
+                let min_kline_len = read_f64(vars, "val_short_min_kline_len", 20.0) as usize;
+                if klines.len() < min_kline_len {
                     return None;
                 }
                 let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
-                let ma20 = crate::recommender::indicators::sma(&cs, 20).unwrap_or(price);
-                if price > ma20 * 1.005 {
+                let ma_period = read_f64(vars, "val_short_ma_period", 20.0) as usize;
+                let ma20 = crate::recommender::indicators::sma(&cs, ma_period)?;
+                let ma_mult = read_f64(vars, "val_short_ma_mult", 1.005);
+                if price > ma20 * ma_mult {
                     return None;
                 }
                 let mut r = Vec::new();
-                if pe > 0.0 { r.push(format!("PE {:.1} 估值偏低", pe)); }
-                if pb > 0.0 { r.push(format!("PB {:.2}", pb)); }
-                r.push(format!("回踩 MA20 {:.2}", ma20));
+                if pe > 0.0 {
+                    r.push(format!("PE {:.1} 估值偏低", pe));
+                }
+                if pb > 0.0 {
+                    r.push(format!("PB {:.2}", pb));
+                }
+                r.push(format!("回踩 MA{} {:.2}", ma_period, ma20));
                 (true, r)
             },
             Period::Mid => {
-                // 中线价值：PE 25 → 40，PB 5 → 8（旧门槛对中盘股过严）
-                if pe > 0.0 && pe > 40.0 {
+                let pe_max = read_f64(vars, "val_mid_pe_max", 40.0);
+                if pe > 0.0 && pe > pe_max {
                     return None;
                 }
-                if pb > 0.0 && pb > 8.0 {
+                let pb_max = read_f64(vars, "val_mid_pb_max", 8.0);
+                if pb > 0.0 && pb > pb_max {
                     return None;
                 }
                 let mut r = Vec::new();
-                if pe > 0.0 { r.push(format!("PE {:.1} 行业中位以下", pe)); }
-                if pb > 0.0 { r.push(format!("PB {:.2}", pb)); }
+                if pe > 0.0 {
+                    r.push(format!("PE {:.1} 行业中位以下", pe));
+                }
+                if pb > 0.0 {
+                    r.push(format!("PB {:.2}", pb));
+                }
                 (true, r)
             },
             Period::Long => {
-                // 长线价值：PE 20 → 35，PB 3 → 6（旧门槛对成长股过严）
-                if pe > 0.0 && pe > 35.0 {
+                let pe_max = read_f64(vars, "val_long_pe_max", 35.0);
+                if pe > 0.0 && pe > pe_max {
                     return None;
                 }
-                if pb > 0.0 && pb > 6.0 {
+                let pb_max = read_f64(vars, "val_long_pb_max", 6.0);
+                if pb > 0.0 && pb > pb_max {
                     return None;
                 }
                 let mut r = Vec::new();
-                if pe > 0.0 { r.push(format!("低 PE {:.1}", pe)); }
-                if pb > 0.0 { r.push(format!("低 PB {:.2}", pb)); }
+                if pe > 0.0 {
+                    r.push(format!("低 PE {:.1}", pe));
+                }
+                if pb > 0.0 {
+                    r.push(format!("低 PB {:.2}", pb));
+                }
                 (true, r)
             },
         };
@@ -100,28 +117,57 @@ impl ValueStrategy {
         }
 
         let (entry_low, entry_high, stop_loss, target, base_position) = match self.period {
-            Period::Short => (price * 0.98, price * 1.02, price * 0.93, price * 1.10, 5.0),
-            Period::Mid => (price * 0.95, price * 1.05, price * 0.88, price * 1.20, 8.0),
-            Period::Long => (price * 0.93, price * 1.05, price * 0.85, price * 1.30, 10.0),
+            Period::Short => {
+                let el = read_f64(vars, "val_short_entry_low", 0.98);
+                let eh = read_f64(vars, "val_short_entry_high", 1.02);
+                let sl = read_f64(vars, "val_short_stop", 0.93);
+                let tg = read_f64(vars, "val_short_target", 1.10);
+                let bp = read_f64(vars, "val_short_base_pos", 5.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
+            Period::Mid => {
+                let el = read_f64(vars, "val_mid_entry_low", 0.95);
+                let eh = read_f64(vars, "val_mid_entry_high", 1.05);
+                let sl = read_f64(vars, "val_mid_stop", 0.88);
+                let tg = read_f64(vars, "val_mid_target", 1.20);
+                let bp = read_f64(vars, "val_mid_base_pos", 8.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
+            Period::Long => {
+                let el = read_f64(vars, "val_long_entry_low", 0.93);
+                let eh = read_f64(vars, "val_long_entry_high", 1.05);
+                let sl = read_f64(vars, "val_long_stop", 0.85);
+                let tg = read_f64(vars, "val_long_target", 1.30);
+                let bp = read_f64(vars, "val_long_base_pos", 10.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
         };
 
         // 长线要求股价在 60 日均线之上（趋势过滤）
         if matches!(self.period, Period::Long) {
-            if let Ok(klines) = client.get_klines(code, "daily", 70).await {
+            let long_kline_limit = read_f64(vars, "val_long_kline_limit", 70.0) as u32;
+            if let Ok(klines) = client.get_klines(code, "daily", long_kline_limit).await {
+                let ma_period = read_f64(vars, "val_long_ma_period", 60.0) as usize;
                 if let Some(ma60) = crate::recommender::indicators::sma(
                     &klines.iter().map(|k| k.close).collect::<Vec<_>>(),
-                    60,
+                    ma_period,
                 ) {
-                    // 放宽：0.95 → 0.90（容许在 MA60 下方 10% 内也算"近端"）
-                    if price < ma60 * 0.90 {
+                    let ma60_mult = read_f64(vars, "val_long_ma60_mult", 0.90);
+                    if price < ma60 * ma60_mult {
                         return None;
                     }
-                    reasons.push(format!("站上 MA60 {:.2}", ma60));
+                    reasons.push(format!("站上 MA{} {:.2}", ma_period, ma60));
                 }
             }
         }
 
-        let conf = calc_confidence(0.75, 0.7, 0.6, 0.0, 1.0);
+        let conf = calc_confidence(
+            read_f64(vars, "val_conf_consistency", 0.75),
+            read_f64(vars, "val_conf_signal", 0.7),
+            read_f64(vars, "val_conf_direction", 0.6),
+            read_f64(vars, "val_conf_market", 0.0),
+            read_f64(vars, "val_conf_base", 1.0),
+        );
         let position = calc_position(base_position, conf, self.period);
 
         Some(RecoPick {
@@ -169,7 +215,10 @@ impl RecommendStrategy for ValueStrategy {
         let mut picks = Vec::new();
         for (code, name, sector) in ctx.seed {
             let _g = ctx.per_code_locks.lock_for(code).await;
-            if let Some(p) = self.scan_one(ctx.client, code, name, sector.clone()).await {
+            if let Some(p) = self
+                .scan_one(ctx.client, code, name, sector.clone(), ctx.vars)
+                .await
+            {
                 picks.push(p);
             }
         }

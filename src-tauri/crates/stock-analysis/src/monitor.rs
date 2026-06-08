@@ -51,6 +51,8 @@ pub struct RealtimeMonitor {
     running: RwLock<bool>,
     app_handle: RwLock<Option<tauri::AppHandle>>,
     last_alerts: RwLock<HashMap<String, i64>>,
+    poll_interval_secs: RwLock<u64>,
+    alert_cooldown_secs: RwLock<i64>,
 }
 
 impl RealtimeMonitor {
@@ -63,6 +65,8 @@ impl RealtimeMonitor {
             running: RwLock::new(false),
             app_handle: RwLock::new(None),
             last_alerts: RwLock::new(HashMap::new()),
+            poll_interval_secs: RwLock::new(30),
+            alert_cooldown_secs: RwLock::new(300),
         }
     }
 
@@ -101,7 +105,7 @@ impl RealtimeMonitor {
         configs.values().cloned().collect()
     }
 
-    /// 启动监控循环（每30秒轮询一次）
+    /// 启动监控循环（轮询间隔从 `poll_interval_secs` 读取，默认 30 秒）
     pub async fn start(&self) {
         {
             let mut running = self.running.write().await;
@@ -111,7 +115,8 @@ impl RealtimeMonitor {
             *running = true;
         }
 
-        let mut ticker = interval(Duration::from_secs(30));
+        let interval_secs = *self.poll_interval_secs.read().await;
+        let mut ticker = interval(Duration::from_secs(interval_secs));
         loop {
             ticker.tick().await;
             {
@@ -142,9 +147,18 @@ impl RealtimeMonitor {
         }
     }
 
+    /// 停止监控循环
     pub async fn stop(&self) {
         let mut running = self.running.write().await;
         *running = false;
+    }
+
+    /// 以自定义参数启动监控循环。
+    /// 设置轮询间隔和告警冷却时间后自动调用 `start()`。
+    pub async fn start_with_config(&self, poll_interval_secs: u64, alert_cooldown_secs: i64) {
+        *self.poll_interval_secs.write().await = poll_interval_secs;
+        *self.alert_cooldown_secs.write().await = alert_cooldown_secs;
+        self.start().await;
     }
 
     async fn check_alerts(&self, config: &MonitorConfig, quote: &StockQuote) {
@@ -280,7 +294,7 @@ impl RealtimeMonitor {
         }
 
         let now_ts = chrono::Utc::now().timestamp();
-        let cooldown_secs: i64 = 300;
+        let cooldown_secs = *self.alert_cooldown_secs.read().await;
         let mut last = self.last_alerts.write().await;
         alerts.retain(|a| {
             let key = format!("{}:{}", a.stock_code, a.alert_type);

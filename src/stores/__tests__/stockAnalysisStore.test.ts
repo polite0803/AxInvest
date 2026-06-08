@@ -62,6 +62,7 @@ describe("stockAnalysisStore", () => {
       expect(invokeMock).toHaveBeenCalledWith("run_stock_workflow", {
         stockCode: "600519",
         dryRun: false,
+        asOfDate: null,
       });
     });
 

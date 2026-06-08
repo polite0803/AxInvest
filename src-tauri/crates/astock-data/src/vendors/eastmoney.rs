@@ -1141,21 +1141,34 @@ impl StockVendor for EastMoneyVendor {
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             // NativeDateParam: URL 真的支持日期参数
-            "get_klines" | "get_margin_data" | "get_north_bound_flow"
-            | "get_market_dragon_tiger" | "get_announcements" | "get_research_reports" => {
-                AsOfCapability::NativeDateParam
-            }
+            "get_klines"
+            | "get_margin_data"
+            | "get_north_bound_flow"
+            | "get_market_dragon_tiger"
+            | "get_announcements"
+            | "get_research_reports" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
-            "get_hot_stocks" | "get_industry_ranking" | "get_cls_flash"
-            | "get_concept_blocks" => AsOfCapability::NoHistoricalSemantic,
+            "get_hot_stocks" | "get_industry_ranking" | "get_cls_flash" | "get_concept_blocks" => {
+                AsOfCapability::NoHistoricalSemantic
+            },
             // Fallthrough: vendor 返回带 date 字段的全量,lib.rs 截断(已正确)
-            "get_financials" | "get_news" | "get_money_flow" | "get_dragon_tiger"
-            | "get_lockup_schedule" | "get_north_bound_holding" | "get_shareholder_trades"
-            | "get_dividend_records" | "get_consensus_eps" | "get_block_trades"
-            | "get_institutional_visits" | "get_sector_info" | "get_peers"
-            | "get_option_pcr" | "search_stock" => AsOfCapability::Fallthrough,
+            "get_financials"
+            | "get_news"
+            | "get_money_flow"
+            | "get_dragon_tiger"
+            | "get_lockup_schedule"
+            | "get_north_bound_holding"
+            | "get_shareholder_trades"
+            | "get_dividend_records"
+            | "get_consensus_eps"
+            | "get_block_trades"
+            | "get_institutional_visits"
+            | "get_sector_info"
+            | "get_peers"
+            | "get_option_pcr"
+            | "search_stock" => AsOfCapability::Fallthrough,
             // 未知方法兜底
             _ => AsOfCapability::Fallthrough,
         }
@@ -1296,7 +1309,8 @@ impl StockVendor for EastMoneyVendor {
         let _ = stock_code;
         Err(DataError::VendorError {
             vendor: "eastmoney".into(),
-            message: "get_quote_with_asof: lib.rs 路由层调用 quote_from_klines 合成,不应直连".into(),
+            message: "get_quote_with_asof: lib.rs 路由层调用 quote_from_klines 合成,不应直连"
+                .into(),
         })
     }
 
@@ -1354,7 +1368,11 @@ impl StockVendor for EastMoneyVendor {
                     close: parse(parts[2]),
                     volume: parse(parts[5]),
                     amount: parse(parts[6]),
-                    turnover_rate: if parts.len() > 7 { Some(parse(parts[7])) } else { None },
+                    turnover_rate: if parts.len() > 7 {
+                        Some(parse(parts[7]))
+                    } else {
+                        None
+                    },
                 })
             })
             .collect::<Result<_, _>>()?;
@@ -1403,9 +1421,7 @@ impl StockVendor for EastMoneyVendor {
 
     /// get_north_bound_flow 升级:加 TRADE_DATE 过滤
     /// (原本只能取最近 2 个交易日,as_of 模式可指定日期)
-    async fn get_north_bound_flow_with_asof(
-        &self,
-    ) -> Result<Option<NorthBoundFlow>, DataError> {
+    async fn get_north_bound_flow_with_asof(&self) -> Result<Option<NorthBoundFlow>, DataError> {
         let as_of = crate::as_of::current_as_of()
             .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
         let trade_date = as_of.as_of_date.format("%Y-%m-%d").to_string();
@@ -1544,11 +1560,7 @@ mod asof_capability_tests {
             "get_option_pcr",
             "search_stock",
         ] {
-            assert_eq!(
-                v.asof_capability(m),
-                AsOfCapability::Fallthrough,
-                "{m} 应该是 Fallthrough"
-            );
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough, "{m} 应该是 Fallthrough");
         }
     }
 
@@ -1587,9 +1599,8 @@ mod asof_capability_tests {
     fn klines_url_uses_yyyymmdd_end_format() {
         // KLine 的 end 参数是 YYYYMMDD(非 YYYY-MM-DD)
         let end = "20240601";
-        let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/kline/get?end={end}&lmt=100"
-        );
+        let url =
+            format!("https://push2his.eastmoney.com/api/qt/stock/kline/get?end={end}&lmt=100");
         assert!(url.contains("end=20240601"));
         assert!(!url.contains("end=2024-06-01")); // 必须不是带分隔符的
     }
@@ -1608,19 +1619,15 @@ mod asof_capability_tests {
         let begin_date = chrono::NaiveDate::parse_from_str(begin, "%Y-%m-%d").unwrap();
         let end_date = chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d").unwrap();
         let diff = (end_date - begin_date).num_days();
-        assert!(
-            (360..=366).contains(&diff),
-            "窗口应在 360-366 天之间,实际: {diff} 天"
-        );
+        assert!((360..=366).contains(&diff), "窗口应在 360-366 天之间,实际: {diff} 天");
     }
 
     #[test]
     fn research_reports_url_uses_actual_asof_window() {
         let end = "2024-12-31";
         let begin = "2023-12-31";
-        let url = format!(
-            "https://reportapi.eastmoney.com/report/list?beginTime={begin}&endTime={end}"
-        );
+        let url =
+            format!("https://reportapi.eastmoney.com/report/list?beginTime={begin}&endTime={end}");
         assert!(url.contains("beginTime=2023-12-31"));
         assert!(url.contains("endTime=2024-12-31"));
     }
@@ -1631,17 +1638,8 @@ mod asof_capability_tests {
     fn routing_layer_can_query_eastmoney_capability() {
         let v = make_vendor();
         // 模拟 lib.rs 路由层调用
-        assert_eq!(
-            v.asof_capability("get_market_dragon_tiger"),
-            AsOfCapability::NativeDateParam
-        );
-        assert_eq!(
-            v.asof_capability("get_quote"),
-            AsOfCapability::SynthesizeFromKline
-        );
-        assert_eq!(
-            v.asof_capability("get_hot_stocks"),
-            AsOfCapability::NoHistoricalSemantic
-        );
+        assert_eq!(v.asof_capability("get_market_dragon_tiger"), AsOfCapability::NativeDateParam);
+        assert_eq!(v.asof_capability("get_quote"), AsOfCapability::SynthesizeFromKline);
+        assert_eq!(v.asof_capability("get_hot_stocks"), AsOfCapability::NoHistoricalSemantic);
     }
 }

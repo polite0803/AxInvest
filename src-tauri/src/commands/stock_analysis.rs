@@ -1,4 +1,5 @@
 use crate::AppState;
+use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_core::entity::{
     portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
 };
@@ -21,6 +22,26 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tauri::State;
 
+/// 获取当前全局 as-of 降级条目总数(进程级,跨 live/replay)。
+/// 缺陷 E 修复:前端 poll 用,实时显示降级数量。
+#[tauri::command]
+pub fn get_asof_degradation_count() -> u64 {
+    as_of::global_degradation_count()
+}
+
+/// 拉取最近 256 条全局降级日志(快照,不清空)。
+/// 供前端做"降级详情面板"展示。
+#[tauri::command]
+pub fn get_asof_degradation_log() -> Vec<as_of::DegradationEntry> {
+    as_of::peek_global_degradation_report()
+}
+
+/// 清空全局降级缓冲(用户从 replay 切回 live 时调用,避免过期条目一直显示)。
+#[tauri::command]
+pub fn clear_asof_degradation_log() {
+    as_of::reset_global_degradation_log();
+}
+
 /// 搜索股票
 #[tauri::command]
 pub async fn search_stock(
@@ -35,31 +56,54 @@ pub async fn search_stock(
 }
 
 /// 获取实时行情
+///
+/// spec §4.1: `as_of_date` 非空时,所有 vendor 调用以"截至该日"语义截断,
+/// 并在 task_local 中标记 `AsOfContext`,让上层 LLM / 缓存 / 校验能感知。
 #[tauri::command]
 pub async fn get_stock_quote(
     state: State<'_, AppState>,
     stock_code: String,
+    as_of_date: Option<String>,
 ) -> Result<axagent_astock_data::StockQuote, String> {
-    state
-        .astock_client
-        .get_quote(&stock_code)
+    let as_of_ctx = axagent_astock_data::as_of::AsOfContext::parse_optional(as_of_date.as_deref())
+        .map_err(|e| format!("as_of_date 解析失败: {e}"))?;
+    axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
+        axagent_astock_data::as_of::with_degradation_log(async {
+            state
+                .astock_client
+                .get_quote(&stock_code)
+                .await
+                .map_err(|e| e.to_string())
+        })
         .await
-        .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// 获取K线数据
+///
+/// spec §4.1: K 线在 as-of 模式下保留 date <= as_of_date 的行(live 模式原样返回)。
 #[tauri::command]
 pub async fn get_stock_kline(
     state: State<'_, AppState>,
     stock_code: String,
     period: String,
     limit: u32,
+    as_of_date: Option<String>,
 ) -> Result<Vec<axagent_astock_data::KLine>, String> {
-    state
-        .astock_client
-        .get_klines(&stock_code, &period, limit)
+    let as_of_ctx = axagent_astock_data::as_of::AsOfContext::parse_optional(as_of_date.as_deref())
+        .map_err(|e| format!("as_of_date 解析失败: {e}"))?;
+    axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
+        axagent_astock_data::as_of::with_degradation_log(async {
+            state
+                .astock_client
+                .get_klines(&stock_code, &period, limit)
+                .await
+                .map_err(|e| e.to_string())
+        })
         .await
-        .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// 取消分析 — 设置取消令牌让后台任务停止
@@ -335,13 +379,27 @@ pub async fn backtest_analysis(
 }
 
 /// 批量回测历史分析（已完成的分析）
+///
+/// `scope`:
+/// - `"all"` (默认): 所有 completed 分析(live + replay)
+/// - `"live"`: 仅 live 模式分析(实时分析的回测准确率)
+/// - `"replay"`: 仅 replay 模式分析(回放分析的真实回测)
 #[tauri::command]
 pub async fn backtest_all_history(
     state: State<'_, AppState>,
     holding_days: u32,
+    scope: Option<String>,
 ) -> Result<BacktestStats, String> {
-    let analyses = stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::Status.eq("completed"))
+    let scope = scope.unwrap_or_else(|| "all".to_string());
+
+    let mut query =
+        stock_analyses::Entity::find().filter(stock_analyses::Column::Status.eq("completed"));
+    query = match scope.as_str() {
+        "live" => query.filter(stock_analyses::Column::AnalysisKind.eq("live")),
+        "replay" => query.filter(stock_analyses::Column::AnalysisKind.eq("replay")),
+        _ => query, // "all" 或未知值 = 不过滤
+    };
+    let analyses = query
         .all(state.harness.db())
         .await
         .map_err(|e| e.to_string())?;
@@ -371,6 +429,85 @@ pub async fn backtest_all_history(
         BacktestEngine::backtest_history(&state.astock_client, historical, holding_days).await?;
     let stats = BacktestEngine::compute_stats(&results);
     Ok(stats)
+}
+
+// ── Replay Sweep (spec §5 Step 8, §9.3) ──
+
+/// 单条 sweep 项：(代码, as-of 截止日, 假设决策, 置信度)
+#[derive(serde::Deserialize, Debug, Clone)]
+pub struct ReplaySweepItem {
+    pub stock_code: String,
+    pub as_of_date: String,
+    pub decision_action: String,
+    pub decision_confidence: f64,
+}
+
+/// Sweep 中失败的样本 + 失败原因
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct ReplaySweepInvalid {
+    pub stock_code: String,
+    pub as_of_date: String,
+    pub reason: String,
+}
+
+/// Sweep 结果汇总
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct ReplaySweepResult {
+    pub total: u32,
+    pub valid: u32,
+    pub invalid: u32,
+    pub results: Vec<BacktestResult>,
+    pub invalid_details: Vec<ReplaySweepInvalid>,
+    pub stats: BacktestStats,
+}
+
+/// 批量回放回测（Replay Sweep）
+///
+/// 对给定的 `(stock_code, as_of_date, decision)` 元组逐个调用
+/// `BacktestEngine::backtest_decision`，汇总 valid/invalid 统计与 BacktestStats。
+///
+/// 注意：
+/// - `as_of_date` 必须在过去；前端 `DatePicker` 已约束 `disabledDate={d => d > dayjs()}`。
+/// - 此命令不读写 DB，只做计算；与 `backtest_all_history` 互为补充。
+#[tauri::command]
+pub async fn run_replay_backtest(
+    state: State<'_, AppState>,
+    items: Vec<ReplaySweepItem>,
+    holding_days: u32,
+) -> Result<ReplaySweepResult, String> {
+    let total = items.len() as u32;
+    let mut results: Vec<BacktestResult> = Vec::new();
+    let mut invalid_details: Vec<ReplaySweepInvalid> = Vec::new();
+
+    for item in items {
+        match BacktestEngine::backtest_decision(
+            &state.astock_client,
+            &item.stock_code,
+            &item.as_of_date,
+            &item.decision_action,
+            item.decision_confidence,
+            holding_days,
+        )
+        .await
+        {
+            Ok(r) => results.push(r),
+            Err(e) => invalid_details.push(ReplaySweepInvalid {
+                stock_code: item.stock_code,
+                as_of_date: item.as_of_date,
+                reason: e,
+            }),
+        }
+    }
+
+    let stats = BacktestEngine::compute_stats(&results);
+    Ok(ReplaySweepResult {
+        total,
+        valid: results.len() as u32,
+        invalid: invalid_details.len() as u32,
+        results,
+        invalid_details,
+        stats,
+    })
 }
 
 // ── Price Alerts ──
@@ -1128,12 +1265,18 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
 /// 拉取智能荐股结果（按周期）
 ///
 /// 前端传 period 序列化为 [Period] 枚举（"short" | "mid" | "long"）
+/// 可选 `as_of_date` 触发时间旅行模式：as_of_date 之前的数据用于回测，
+/// 之后的数据被严格屏蔽。
 /// 响应见 [RecoResponse]
 #[tauri::command]
 pub async fn recommend_stocks(
     state: State<'_, AppState>,
     period: axagent_stock_analysis::recommender::Period,
+    as_of_date: Option<String>,
 ) -> Result<RecoResponse, String> {
+    // 解析 as_of_date；非法/未来 → 4xx-style 错误
+    let as_of_ctx = axagent_astock_data::as_of::AsOfContext::parse_optional(as_of_date.as_deref())?;
+
     // 读取 workflow template 变量用于 vendor 启用检测
     let template = axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")
         .one(state.harness.db())
@@ -1147,7 +1290,13 @@ pub async fn recommend_stocks(
 
     // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
     let client: std::sync::Arc<_> = state.astock_client.clone();
-    recommender::recommend_stocks(client, period, &vars).await
+    if let Some(ctx) = as_of_ctx {
+        axagent_astock_data::as_of::AS_OF
+            .scope(Some(ctx), async { recommender::recommend_stocks(client, period, &vars).await })
+            .await
+    } else {
+        recommender::recommend_stocks(client, period, &vars).await
+    }
 }
 
 /// 失效荐股缓存（设置页保存 vendor 后由前端调用）
@@ -1169,4 +1318,82 @@ fn extract_template_vars(
         Ok(vs) => vs.into_iter().map(|v| (v.name, v.value)).collect(),
         Err(_) => Vec::new(),
     }
+}
+
+// ── 自选股自动扫描定时任务 ──
+
+/// 创建自选股自动分析定时任务
+///
+/// 到点时遍历用户自选股列表，对每只股票执行 `run_single_stock_analysis`。
+/// 后端 CronExecutor 通过 `task_type = "watchlist-scan"` 路由。
+#[tauri::command]
+pub async fn create_watchlist_scan_cron(
+    state: State<'_, AppState>,
+    cron_expression: String,
+    enabled: Option<bool>,
+) -> Result<CronJobResponse, String> {
+    let id = format!(
+        "wlscan-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("x")
+    );
+    let mut job = CronJob::new(
+        &id,
+        &cron_expression,
+        "自选股自动扫描",
+        "定时扫描自选股列表，对每只股票执行完整分析工作流",
+    )
+    .with_task_type("watchlist-scan");
+    if !enabled.unwrap_or(true) {
+        job.status = CronJobStatus::Paused;
+    }
+    state.cron_job_store.add(job.clone()).await;
+    Ok(CronJobResponse::from(&job))
+}
+
+/// 列出所有自选股扫描定时任务
+#[tauri::command]
+pub async fn list_watchlist_scan_crons(
+    state: State<'_, AppState>,
+) -> Result<Vec<CronJobResponse>, String> {
+    let jobs = state.cron_job_store.list().await;
+    Ok(jobs
+        .iter()
+        .filter(|j| j.task_type.as_deref() == Some("watchlist-scan"))
+        .map(CronJobResponse::from)
+        .collect())
+}
+
+/// 启停自选股扫描定时任务
+#[tauri::command]
+pub async fn toggle_watchlist_scan_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .cron_job_store
+        .set_status(
+            &id,
+            if enabled {
+                CronJobStatus::Active
+            } else {
+                CronJobStatus::Paused
+            },
+        )
+        .await;
+    Ok(())
+}
+
+/// 删除自选股扫描定时任务
+#[tauri::command]
+pub async fn delete_watchlist_scan_cron(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.cron_job_store.remove(&id).await;
+    Ok(())
 }

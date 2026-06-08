@@ -35,7 +35,8 @@
     "screener": "选股",
     "trade": "交易",
     "backtest": "回测",
-    "compare": "对比"
+    "compare": "对比",
+    "replayWorkbench": "回放工作台"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -7324,6 +7325,7 @@
     "actionIncrease": "增持",
     "actionHold": "持有",
     "actionReduce": "减持",
+    "actionUncertain": "不确定",
     "recentAnalysis": "最近分析",
     "targetPriceNote": "目标¥{{price}}",
     "totalMarketValue": "总市值",
@@ -7550,11 +7552,20 @@
         "rule": "规则",
         "pos": "仓位",
         "value": "估值",
+        "moat": "护城河",
+        "screener": "选股筛选",
+        "signals": "信号检测",
+        "keylevels": "关键价位",
+        "recommender": "推荐器",
+        "indicators": "技术指标",
+        "strategyParams": "策略参数",
+        "trading": "交易决策",
         "monitor": "监控",
         "riskModel": "风险模型",
         "agentRuntime": "Agent 运行时",
         "toolRuntime": "Tool 运行时",
-        "workflow": "工作流"
+        "workflow": "工作流",
+        "dryRun": "干跑"
       },
       "panels": {
         "refresh": "刷新",
@@ -7589,7 +7600,13 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通"
+        "szFlow": "深股通",
+        "main": "主力",
+        "industryRank": "行业排名",
+        "noIndustry": "暂无行业数据",
+        "hotStocks": "热门股票",
+        "noHot": "暂无热门股数据",
+        "tags": "标签"
       },
       "sheet": {
         "screener": "荐股",
@@ -7628,7 +7645,8 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元"
+        "unit10k": "万元",
+        "refresh": "Refresh"
       },
       "recommendation": {
         "title": "🔍 智能荐股",
@@ -7658,13 +7676,15 @@
         "styleDisabledReason": "{{style}} 数据源未启用，暂无推荐",
         "empty": "暂无符合条件的推荐",
         "valueNaN": "—",
-        "generatedAt": "更新于 {{time}}"
+        "generatedAt": "更新于 {{time}}",
+        "consensusDivided": "意见分歧"
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
-        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
+        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "股票分析工作流",
@@ -7773,7 +7793,10 @@
       "total": "分析次数",
       "wrong": "错误",
       "avgConfidence": "平均置信度",
-      "alpha": "超额收益"
+      "alpha": "Alpha",
+      "scopeAll": "全部",
+      "scopeLive": "仅 Live",
+      "scopeReplay": "仅 Replay"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -8172,7 +8195,8 @@
       "forceRefreshTooltip": "强制清空后端缓存并重新扫描，避免使用 60 秒内的旧数据",
       "dataAsOf": "数据日期 {{date}}",
       "dataAsOfStale": "K 线数据停在 {{date}}（已 {{days}} 天），价格/目标位可能与现价脱节，请谨慎参考",
-      "dataAsOfStaleTooltip": "后端 vendor 返回的 K 线数据停留在 {{date}}，差 {{days}} 个日历日。BUY 推荐基于该日 K 线计算，可能与当前真实行情脱节。"
+      "dataAsOfStaleTooltip": "后端 vendor 返回的 K 线数据停留在 {{date}}，差 {{days}} 个日历日。BUY 推荐基于该日 K 线计算，可能与当前真实行情脱节。",
+      "bannerDegraded": "数据风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。"
     },
     "stockAnalysisStore": {
       "ts:329:t(": "stockAnalysisStore.ts:329:t(",
@@ -8185,7 +8209,13 @@
       "ts:763:t(": "stockAnalysisStore.ts:763:t("
     },
     "avgRiskScore": "风险均值 {{score}}",
-    "highestRisk": "最高 {{label}} ({{score}})"
+    "highestRisk": "最高 {{label}} ({{score}})",
+    "empty": {
+      "replayDegradedTitle": "⏪ 回放模式下降级",
+      "replayDegraded": "此数据源在回放模式下无历史语义,已被自动跳过。",
+      "replayDegradedWithCount": "回放模式下共 {{n}} 项数据源被跳过,本面板不显示。",
+      "replayDegradedWithReason": "回放模式下降级: {{reason}}"
+    }
   },
   "trade": {
     "title": "交易日志",
@@ -8218,11 +8248,48 @@
   },
   "screener": {
     "title": "选股中心",
-    "placeholder": "按条件筛选股票"
+    "placeholder": "按条件筛选股票",
+    "tab": {
+      "smartReco": "智能荐股",
+      "myFilter": "我的筛选"
+    }
   },
-  "backtest": {
-    "title": "回测验证",
-    "placeholder": "用历史数据验证策略"
+  "replayWorkbench": {
+    "title": "回放工作台",
+    "description": "把所有数据锚定到过去的某一天。系统会拒绝未来日期。可安全回测策略，避免前视偏差。",
+    "step1": {
+      "title": "选择截止日期",
+      "currentlyPicked": "当前正以 {{date}} 为锚点回放",
+      "reselect": "重选"
+    },
+    "step2": {
+      "title": "运行回放感知分析",
+      "description": "下方所有操作都会把 as_of_date = {{date}} 注入后端，把世界封闭在该日。",
+      "analyze": "分析单股",
+      "backtest": "查看回测统计",
+      "watchlist": "查看自选股"
+    },
+    "sweep": {
+      "title": "回放矩阵",
+      "intro": "批量跑「股票 × as-of 截止日」的回测矩阵。强制重选日期范围（不沿用全局 TimeAnchor）。",
+      "codesLabel": "股票代码（每行一个或逗号分隔）",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "As-of 截止日范围（仅工作日）",
+      "holdingDaysLabel": "持有天数",
+      "actionLabel": "假设决策",
+      "confidenceLabel": "决策置信度 (0–1)",
+      "runBtn": "开始 Sweep",
+      "running": "正在跑 sweep {{done}} / {{total}} …",
+      "summary": "Sweep 完成: 共 {{total}},有效 {{valid}}, 失败 {{invalid}}。",
+      "violationNotice": "已记录 {{count}} 处 as-of 违规 — 详见 Invalid 折叠面板。",
+      "invalidTitle": "失败样本",
+      "noInvalid": "无失败样本。",
+      "exportCsv": "导出 CSV",
+      "exportJson": "导出 JSON"
+    },
+    "notice": "此工作台中的所有数据、提示词与结论都以选定日期为锚点。切回 Live 模式需要显式确认。",
+    "exitHint": "你仍在回放模式。在别处发起的任何新分析都会带 as-of 锚点。",
+    "exitBtn": "切回 Live"
   },
   "compare": {
     "title": "对标研究",
@@ -8234,5 +8301,66 @@
     "expandToPanel": "展开为面板",
     "collapse": "折叠",
     "collapseToBubble": "折叠为气泡"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "实时",
+      "replay": "回放 {{date}}",
+      "sweep": "批量回测",
+      "tooltipLive": "点击进入回放模式（按过去某日分析）",
+      "tooltipReplay": "点击切回实时模式",
+      "confirmTitle": "确认切回实时模式？",
+      "confirmBody": "实时模式使用最新行情，此前得出的结论可能已被新信息推翻。回放模式把世界封在选定的过去某日，可避免前视偏差。",
+      "confirmOk": "切到实时",
+      "confirmCancel": "保持在回放",
+      "currentlyInReplay": "当前正以 {{date}} 为锚点回放。",
+      "enteredReplay": "已进入回放模式：{{date}}",
+      "switchedToLive": "已切到实时模式"
+    },
+    "datePicker": {
+      "hint": "请选择过去的交易日。今天及未来日期被禁用（封闭世界假设）。",
+      "placeholder": "选择截止日期",
+      "ok": "进入回放",
+      "cancel": "取消"
+    },
+    "pageAnchor": {
+      "live": "实时",
+      "replay": "回放",
+      "untilDate": "截至 {{date}}"
+    },
+    "replayBadge": {
+      "label": "回放 · {{date}}",
+      "tooltip": "此视图中的所有数据、提示词与结论都以 {{date}} 为锚点。不可用于实盘交易。"
+    },
+    "replayWatermark": {
+      "label": "截至 {{date}}"
+    },
+    "tour": {
+      "title": "时间旅行模式已上线",
+      "body": "把分析和荐股都锚定到过去的某一日，可以安全地回测策略、避免前视偏差。系统会拒绝未来日期，违反时间约束的输出会在时间线上高亮。",
+      "gotIt": "知道了",
+      "stepAnchor": "随时点击「实时」胶囊进入回放模式。"
+    },
+    "violations": {
+      "chip": "⚠ {{n}} 处违规",
+      "chip_plural": "⚠ {{n}} 处违规",
+      "chipAria": "本节点有 {{n}} 处未来日期引用违规",
+      "tooltip": "本节点输出提及了 as-of 锚点之后的日期。结论应视为不可信。",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "回放模式已开启：选股、价格、买入区间均以 {{date}} 为锚点。不可用于实盘交易。",
+    "backtestHint": "这些统计汇总了截至 {{date}} 的所有已完成分析（实时 + 回放）。可进入 Replay Workbench 按模式过滤。",
+    "degradedStyles": {
+      "title": "as-of 截断导致的数据降级",
+      "description": "以下数据风格因 as-of 截止日 {{date}} 截断了所需的全部历史,在回放模式下以低可信度输出。",
+      "reason": "原因: {{reason}}",
+      "hint": "降级不等于错误,只是信息量变少,请低于非降级风格的可信度处理。",
+      "vendor": "数据源: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "已降级 · 部分数据无历史",
+      "labelWithCount": "已降级 · {{n}} 项",
+      "tooltip": "回放模式下资金流向/融资融券/北向持仓等数据无历史语义,已被跳过。详见推荐面板的降级提示。"
+    }
   }
 }

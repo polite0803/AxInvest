@@ -1,10 +1,13 @@
 import { useStockAnalysisStore } from "@/stores";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { KLine } from "@/types";
 import * as echarts from "echarts";
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 模块级 LRU 缓存：按 (stockCode, period, limit) 缓存 K 线结果 */
+/** 模块级 LRU 缓存：按 (stockCode, period, limit, asOfDate) 缓存 K 线结果
+ *  asOfDate 决定"截至哪一天"——不同 as-of 下截断点不同,必须分桶,否则
+ *  切换 Live ↔ Replay 会读到错误的截断后数据,违反 spec §4.1 闭世界假设。 */
 interface CachedKline {
   data: KLine[];
   ts: number;
@@ -13,8 +16,8 @@ const klineCache = new Map<string, CachedKline>();
 const KLINE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
 const KLINE_CACHE_MAX = 20; // 最多缓存 20 个组合
 
-function getKlineCacheKey(stockCode: string, period: string, limit: number): string {
-  return `${stockCode}|${period}|${limit}`;
+function getKlineCacheKey(stockCode: string, period: string, limit: number, asOfDate: string | null): string {
+  return `${stockCode}|${period}|${limit}|${asOfDate ?? "live"}`;
 }
 
 /** 计算移动平均线 */
@@ -52,6 +55,8 @@ export function KLineChart() {
   const indicators = useStockAnalysisStore((s) => s.klineIndicators);
   const toggleIndicator = useStockAnalysisStore((s) => s.toggleIndicator);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
+  // 时间旅行: 顶部时间戳 react 到 store 变化
+  const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
 
@@ -68,7 +73,8 @@ export function KLineChart() {
   const handlePeriodChange = useCallback((key: string, limit: number, periodType: string) => {
     setKlinePeriod(key);
     if (!stockCode) { return; }
-    const cacheKey = getKlineCacheKey(stockCode, periodType, limit);
+    const asOfDate = useTimeAnchorStore.getState().asOfDate;
+    const cacheKey = getKlineCacheKey(stockCode, periodType, limit, asOfDate);
     const cached = klineCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < KLINE_CACHE_TTL_MS) {
       klineCache.delete(cacheKey);
@@ -83,13 +89,28 @@ export function KLineChart() {
     if (klineData.length === 0 || !stockCode) { return; }
     const opt = PERIOD_OPTIONS.find((o) => o.key === klinePeriod);
     if (!opt) { return; }
-    const cacheKey = getKlineCacheKey(stockCode, opt.periodType, opt.limit);
+    const asOfDate = useTimeAnchorStore.getState().asOfDate;
+    const cacheKey = getKlineCacheKey(stockCode, opt.periodType, opt.limit, asOfDate);
     klineCache.set(cacheKey, { data: klineData, ts: Date.now() });
     if (klineCache.size > KLINE_CACHE_MAX) {
       const firstKey = klineCache.keys().next().value;
       if (firstKey) { klineCache.delete(firstKey); }
     }
   }, [klineData, stockCode, klinePeriod]);
+
+  // 时间旅行：mode / asOfDate 变化时,本地缓存中其它 as-of 的桶全部失效,
+  // 强制拉新数据(spec §4.1 闭世界假设)
+  useEffect(() => {
+    return useTimeAnchorStore.subscribe((s, prev) => {
+      if (s.asOfDate !== prev.asOfDate || s.mode !== prev.mode) {
+        klineCache.clear();
+        if (stockCode) {
+          const opt = PERIOD_OPTIONS.find((o) => o.key === klinePeriod);
+          if (opt) { getStockKline(stockCode, opt.periodType, opt.limit); }
+        }
+      }
+    });
+  }, [stockCode, klinePeriod, getStockKline]);
 
   // 初始化 ECharts 实例 + 无条件设置观察者
   // 核心策略：ResizeObserver 和 visibilitychange 始终监听，
@@ -332,8 +353,28 @@ export function KLineChart() {
 
   return (
     <div>
-      {/* 第一行：时间周期切换 + MA 图例 */}
+      {/* 第一行：时间周期切换 + MA 图例 + 时间水印 */}
       <div className="flex gap-1 mb-1 flex-wrap items-center">
+        {/* 时间旅行: L4 数据水印 — 顶部时间戳横条,让用户一眼看到当前 K 线截断到哪一天 */}
+        {asOfDate && (
+          <span
+            data-testid="kline-asof-badge"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 8px",
+              fontSize: 12,
+              borderRadius: 4,
+              background: "rgba(124,58,237,0.12)",
+              color: "#7c3aed",
+              border: "1px solid rgba(124,58,237,0.35)",
+            }}
+            title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}
+          >
+            ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+          </span>
+        )}
         {PERIOD_OPTIONS.map((opt) => (
           <button
             key={opt.key}

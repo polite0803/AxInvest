@@ -159,6 +159,10 @@ pub async fn start_analysis(
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
         config_id: Set(None),
+        analysis_kind: Set("live".into()),
+        as_of_date: Set(None),
+        model_version: Set(None),
+        data_snapshot_id: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     };

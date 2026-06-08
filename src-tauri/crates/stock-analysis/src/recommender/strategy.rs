@@ -4,6 +4,7 @@ use crate::recommender::pool::SeedItem;
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;
 use axagent_astock_data::AStockClient;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -18,6 +19,18 @@ pub struct RecoContext<'a> {
     pub per_code_locks: Arc<PerCodeLocks>,
     /// 当前选中的 period
     pub period: Period,
+    /// 模板变量映射表，策略用其读取可配置参数
+    pub vars: &'a HashMap<String, Value>,
+}
+
+/// 从模板变量映射表中读取 f64 值，不存在或无法解析时返回 `default`
+pub fn read_f64(vars: &HashMap<String, Value>, key: &str, default: f64) -> f64 {
+    vars.get(key)
+        .and_then(|v| {
+            v.as_f64()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+        })
+        .unwrap_or(default)
 }
 
 /// per-code 互斥锁表（线程安全）

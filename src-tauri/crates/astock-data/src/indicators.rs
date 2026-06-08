@@ -40,6 +40,42 @@ pub struct TechnicalIndicators {
     pub resistance_levels: Vec<f64>,
 }
 
+/// 指标计算参数配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndicatorConfig {
+    pub ma_periods: Vec<usize>,
+    pub macd_fast: usize,
+    pub macd_slow: usize,
+    pub macd_signal: usize,
+    pub rsi_periods: Vec<usize>,
+    pub boll_period: usize,
+    pub boll_stddev: f64,
+    pub volume_lookback: usize,
+    pub volume_surge_ratio: f64,
+    pub volume_shrink_ratio: f64,
+    pub rsi_overbought: f64,
+    pub rsi_oversold: f64,
+}
+
+impl Default for IndicatorConfig {
+    fn default() -> Self {
+        Self {
+            ma_periods: vec![5, 10, 20, 60],
+            macd_fast: 12,
+            macd_slow: 26,
+            macd_signal: 9,
+            rsi_periods: vec![6, 12, 24],
+            boll_period: 20,
+            boll_stddev: 2.0,
+            volume_lookback: 5,
+            volume_surge_ratio: 1.5,
+            volume_shrink_ratio: 0.7,
+            rsi_overbought: 80.0,
+            rsi_oversold: 20.0,
+        }
+    }
+}
+
 /// Compute SMA (Simple Moving Average) — 取最近 period 个数据
 fn sma(data: &[f64], period: usize) -> Option<f64> {
     if data.len() < period || period == 0 {
@@ -120,8 +156,16 @@ fn stddev(data: &[f64], mean: f64) -> f64 {
     variance.sqrt()
 }
 
-/// Compute all technical indicators from K-line data
-pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndicators {
+/// Compute all technical indicators from K-line data with configurable parameters.
+/// Pass `None` for `config` to use default parameters.
+pub fn compute_indicators_with_config(
+    stock_code: &str,
+    klines: &[KLine],
+    config: Option<&IndicatorConfig>,
+) -> TechnicalIndicators {
+    let default_config = IndicatorConfig::default();
+    let cfg = config.unwrap_or(&default_config);
+
     if klines.is_empty() {
         return TechnicalIndicators {
             stock_code: stock_code.to_string(),
@@ -163,11 +207,21 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         .unwrap_or(0.0);
     let price_change = latest_close - prev_close;
 
-    // MA
-    let ma5 = sma(&closes, 5).unwrap_or(latest_close);
-    let ma10 = sma(&closes, 10).unwrap_or(latest_close);
-    let ma20 = sma(&closes, 20).unwrap_or(latest_close);
-    let ma60 = sma(&closes, 60).unwrap_or(latest_close);
+    // MA — 计算配置中所有周期，按 period 值映射到命名域
+    let mut ma5 = latest_close;
+    let mut ma10 = latest_close;
+    let mut ma20 = latest_close;
+    let mut ma60 = latest_close;
+    for &period in &cfg.ma_periods {
+        let val = sma(&closes, period).unwrap_or(latest_close);
+        match period {
+            5 => ma5 = val,
+            10 => ma10 = val,
+            20 => ma20 = val,
+            60 => ma60 = val,
+            _ => {},
+        }
+    }
 
     // MA alignment
     let ma_alignment = if ma5 > ma10 && ma10 > ma20 && ma20 > ma60 {
@@ -180,19 +234,19 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         "缠绕/交叉".to_string()
     };
 
-    // MACD: 计算完整 DIF 序列后再做 EMA(9) 得到 DEA
-    let dif_series: Vec<f64> = if closes.len() >= 26 {
-        let ema12_series: Vec<f64> = build_ema_series(&closes, 12);
-        let ema26_series: Vec<f64> = build_ema_series(&closes, 26);
-        ema12_series
+    // MACD: 计算完整 DIF 序列后再做 EMA(signal) 得到 DEA
+    let dif_series: Vec<f64> = if closes.len() >= cfg.macd_slow {
+        let ema_fast_series = build_ema_series(&closes, cfg.macd_fast);
+        let ema_slow_series = build_ema_series(&closes, cfg.macd_slow);
+        ema_fast_series
             .iter()
-            .zip(ema26_series.iter())
-            .map(|(&e12, &e26)| e12 - e26)
+            .zip(ema_slow_series.iter())
+            .map(|(&e_fast, &e_slow)| e_fast - e_slow)
             .collect()
     } else {
         vec![0.0]
     };
-    let dea_series = build_ema_series(&dif_series, 9);
+    let dea_series = build_ema_series(&dif_series, cfg.macd_signal);
     let dif = dif_series.last().copied().unwrap_or(0.0);
     let prev_dif = if dif_series.len() >= 2 {
         dif_series[dif_series.len() - 2]
@@ -207,7 +261,7 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
     };
     let bar = (dif - dea) * 2.0;
 
-    // MACD signal: 基于金叉/死叉（DIF 与 DEA 交叉）判断
+    // MACD signal
     let macd_signal = if prev_dif <= prev_dea && dif > dea {
         "金叉".to_string()
     } else if prev_dif >= prev_dea && dif < dea {
@@ -220,14 +274,23 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         "缠绕".to_string()
     };
 
-    // RSI
-    let rsi6 = rsi(&closes, 6);
-    let rsi12 = rsi(&closes, 12);
-    let rsi24 = rsi(&closes, 24);
+    // RSI — 计算配置中所有周期，按 period 值映射到命名域
+    let mut rsi6 = 50.0;
+    let mut rsi12 = 50.0;
+    let mut rsi24 = 50.0;
+    for &period in &cfg.rsi_periods {
+        let val = rsi(&closes, period);
+        match period {
+            6 => rsi6 = val,
+            12 => rsi12 = val,
+            24 => rsi24 = val,
+            _ => {},
+        }
+    }
 
-    let rsi_signal = if rsi6 > 80.0 {
+    let rsi_signal = if rsi6 > cfg.rsi_overbought {
         "超买".to_string()
-    } else if rsi6 < 20.0 {
+    } else if rsi6 < cfg.rsi_oversold {
         "超卖".to_string()
     } else if rsi6 > 60.0 {
         "强势".to_string()
@@ -237,17 +300,17 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         "中性".to_string()
     };
 
-    // Bollinger Bands (20,2) — 取最近20根K线计算
-    let boll_mid = ma20;
-    let boll_std = if closes.len() >= 20 {
-        stddev(&closes[closes.len() - 20..], boll_mid)
+    // Bollinger Bands — 取最近 boll_period 根K线计算
+    let boll_mid = sma(&closes, cfg.boll_period).unwrap_or(latest_close);
+    let boll_std = if closes.len() >= cfg.boll_period {
+        stddev(&closes[closes.len() - cfg.boll_period..], boll_mid)
     } else if !closes.is_empty() {
         stddev(&closes, boll_mid)
     } else {
         0.0
     };
-    let boll_upper = boll_mid + 2.0 * boll_std;
-    let boll_lower = boll_mid - 2.0 * boll_std;
+    let boll_upper = boll_mid + cfg.boll_stddev * boll_std;
+    let boll_lower = boll_mid - cfg.boll_stddev * boll_std;
 
     let half_std = boll_std * 0.5;
     let boll_position = if latest_close > boll_upper {
@@ -274,30 +337,30 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         0.0
     };
 
-    // Volume ratio — 取最近5日均量
-    let avg_vol_5 = if volumes.len() >= 6 {
-        volumes[volumes.len() - 6..volumes.len() - 1]
+    // Volume ratio — 取最近 volume_lookback 日均量
+    let avg_vol = if volumes.len() >= cfg.volume_lookback + 1 {
+        volumes[volumes.len() - cfg.volume_lookback - 1..volumes.len() - 1]
             .iter()
             .sum::<f64>()
-            / 5.0
+            / cfg.volume_lookback as f64
     } else if volumes.len() >= 2 {
         volumes[..volumes.len() - 1].iter().sum::<f64>() / (volumes.len() - 1) as f64
     } else {
         latest_volume
     };
-    let volume_ratio = if avg_vol_5 > 0.0 {
-        latest_volume / avg_vol_5
+    let volume_ratio = if avg_vol > 0.0 {
+        latest_volume / avg_vol
     } else {
         1.0
     };
 
-    let volume_signal = if volume_ratio > 1.5 && price_change > 0.0 {
+    let volume_signal = if volume_ratio > cfg.volume_surge_ratio && price_change > 0.0 {
         "放量上涨".to_string()
-    } else if volume_ratio < 0.7 && price_change < 0.0 {
+    } else if volume_ratio < cfg.volume_shrink_ratio && price_change < 0.0 {
         "缩量回调".to_string()
-    } else if volume_ratio > 1.5 && price_change < 0.0 {
+    } else if volume_ratio > cfg.volume_surge_ratio && price_change < 0.0 {
         "放量下跌".to_string()
-    } else if volume_ratio < 0.7 && price_change > 0.0 {
+    } else if volume_ratio < cfg.volume_shrink_ratio && price_change > 0.0 {
         "缩量上涨".to_string()
     } else {
         "正常".to_string()
@@ -338,6 +401,11 @@ pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndica
         support_levels,
         resistance_levels,
     }
+}
+
+/// Compute all technical indicators from K-line data (使用默认参数)
+pub fn compute_indicators(stock_code: &str, klines: &[KLine]) -> TechnicalIndicators {
+    compute_indicators_with_config(stock_code, klines, None)
 }
 
 #[cfg(test)]
@@ -480,5 +548,29 @@ mod tests {
             (result.macd_dea - result.macd_dif).abs() > 0.001 || result.macd_bar.abs() > 0.001,
             "DEA should differ from DIF with sufficient data"
         );
+    }
+
+    #[test]
+    fn test_compute_indicators_with_config_custom() {
+        let mut config = IndicatorConfig::default();
+        config.ma_periods = vec![5, 10];
+        config.rsi_periods = vec![6, 12];
+        let klines: Vec<KLine> = (0..65)
+            .map(|i| {
+                make_kline(
+                    &format!("2025-01-{:02}", i + 1),
+                    10.0,
+                    10.5,
+                    9.5,
+                    10.0 + i as f64 * 0.1,
+                    10000.0,
+                )
+            })
+            .collect();
+        let result = compute_indicators_with_config("000001", &klines, Some(&config));
+        assert!(result.ma5 > 0.0);
+        assert!(result.ma10 > 0.0);
+        assert!(!result.macd_signal.is_empty());
+        assert!(result.rsi6 >= 0.0 && result.rsi6 <= 100.0);
     }
 }

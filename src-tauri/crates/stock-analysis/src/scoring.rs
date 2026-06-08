@@ -22,30 +22,97 @@ pub struct ObjectiveScore {
     pub signal_code: String, // strong_buy | buy | hold | watch | sell | strong_sell
 }
 
+/// 参数化评分分段阈值
+#[derive(Debug, Clone)]
+pub struct ScoreBands {
+    // 乖离率分段 (bias_ma5)
+    pub deviation_band_1: f64,  // 1.0
+    pub deviation_score_1: u32, // 20
+    pub deviation_band_2: f64,  // 2.0
+    pub deviation_score_2: u32, // 18
+    pub deviation_band_3: f64,  // 3.0
+    pub deviation_score_3: u32, // 15
+    pub deviation_band_4: f64,  // 5.0
+    pub deviation_score_4: u32, // 10
+    pub deviation_band_5: f64,  // 8.0
+    pub deviation_score_5: u32, // 5
+
+    // RSI 分段
+    pub rsi_oversold_deep: f64,   // 20.0
+    pub rsi_oversold: f64,        // 30.0
+    pub rsi_neutral_low: f64,     // 40.0
+    pub rsi_neutral_high: f64,    // 60.0
+    pub rsi_overbought: f64,      // 70.0
+    pub rsi_overbought_high: f64, // 80.0
+
+    // 支撑
+    pub support_tolerance_pct: f64, // 0.03 (3%)
+
+    // 布林带
+    pub boll_half_std_factor: f64, // 0.5
+}
+
+impl Default for ScoreBands {
+    fn default() -> Self {
+        Self {
+            deviation_band_1: 1.0,
+            deviation_score_1: 20,
+            deviation_band_2: 2.0,
+            deviation_score_2: 18,
+            deviation_band_3: 3.0,
+            deviation_score_3: 15,
+            deviation_band_4: 5.0,
+            deviation_score_4: 10,
+            deviation_band_5: 8.0,
+            deviation_score_5: 5,
+            rsi_oversold_deep: 20.0,
+            rsi_oversold: 30.0,
+            rsi_neutral_low: 40.0,
+            rsi_neutral_high: 60.0,
+            rsi_overbought: 70.0,
+            rsi_overbought_high: 80.0,
+            support_tolerance_pct: 0.03,
+            boll_half_std_factor: 0.5,
+        }
+    }
+}
+
 /// 100分评分引擎
 pub struct ScoringEngine;
 
 impl ScoringEngine {
     /// 从技术指标计算客观评分（可传入自定义权重）
+    /// 内部使用默认 ScoreBands 阈值，委托给 score_with_bands
     pub fn score(
         indicators: &TechnicalIndicators,
         latest_price: f64,
         weights: Option<&ScoringWeights>,
     ) -> ObjectiveScore {
+        Self::score_with_bands(indicators, latest_price, weights, &ScoreBands::default())
+    }
+
+    /// 从技术指标计算客观评分（可传入自定义权重和分段参数）
+    pub fn score_with_bands(
+        indicators: &TechnicalIndicators,
+        latest_price: f64,
+        weights: Option<&ScoringWeights>,
+        bands: &ScoreBands,
+    ) -> ObjectiveScore {
         let default_weights = ScoringWeights::default();
         let w = weights.unwrap_or(&default_weights);
         let trend = (Self::score_trend(&indicators.ma_alignment) as f64 * w.trend / 30.0) as u32;
         let deviation =
-            (Self::score_deviation(indicators.bias_ma5) as f64 * w.deviation / 20.0) as u32;
+            (Self::score_deviation(indicators.bias_ma5, bands) as f64 * w.deviation / 20.0) as u32;
         let macd = (Self::score_macd(&indicators.macd_signal, indicators.macd_dif) as f64 * w.macd
             / 15.0) as u32;
         let volume =
             (Self::score_volume(&indicators.volume_signal) as f64 * w.volume / 15.0) as u32;
-        let rsi = (Self::score_rsi(indicators.rsi6) as f64 * w.rsi / 10.0) as u32;
-        let support = (Self::score_support(latest_price, &indicators.support_levels) as f64
+        let rsi = (Self::score_rsi(indicators.rsi6, bands) as f64 * w.rsi / 10.0) as u32;
+        let support = (Self::score_support(latest_price, &indicators.support_levels, bands) as f64
             * w.support
             / 5.0) as u32;
-        let boll = (Self::score_boll(&indicators.boll_position) as f64 * w.boll / 5.0) as u32;
+        let boll =
+            (Self::score_boll(&indicators.boll_position, bands) as f64 * w.boll / 5.0) as u32;
         let total = (trend + deviation + macd + volume + rsi + support + boll).min(100);
 
         let (signal, signal_code) = Self::map_signal(total, &indicators.ma_alignment);
@@ -77,22 +144,22 @@ impl ScoringEngine {
     }
 
     /// 乖离率评分 (满分20) -- 略高于MA5最佳，远超MA5(>5%)最差
-    fn score_deviation(bias_ma5: f64) -> u32 {
+    fn score_deviation(bias_ma5: f64, bands: &ScoreBands) -> u32 {
         let abs_bias = bias_ma5.abs();
-        if bias_ma5 > 0.0 && abs_bias < 1.0 {
-            return 20;
+        if bias_ma5 > 0.0 && abs_bias < bands.deviation_band_1 {
+            return bands.deviation_score_1;
         }
-        if abs_bias < 2.0 {
-            return 18;
+        if abs_bias < bands.deviation_band_2 {
+            return bands.deviation_score_2;
         }
-        if abs_bias < 3.0 {
-            return 15;
+        if abs_bias < bands.deviation_band_3 {
+            return bands.deviation_score_3;
         }
-        if abs_bias < 5.0 {
-            return 10;
+        if abs_bias < bands.deviation_band_4 {
+            return bands.deviation_score_4;
         }
-        if abs_bias < 8.0 {
-            return 5;
+        if abs_bias < bands.deviation_band_5 {
+            return bands.deviation_score_5;
         }
         0
     }
@@ -123,36 +190,36 @@ impl ScoringEngine {
     }
 
     /// RSI评分 (满分10) -- 超卖反弹最佳，超买最差
-    fn score_rsi(rsi6: f64) -> u32 {
-        if rsi6 < 20.0 {
+    fn score_rsi(rsi6: f64, bands: &ScoreBands) -> u32 {
+        if rsi6 < bands.rsi_oversold_deep {
             return 10;
         }
-        if rsi6 < 30.0 {
+        if rsi6 < bands.rsi_oversold {
             return 8;
         }
-        if rsi6 < 40.0 {
+        if rsi6 < bands.rsi_neutral_low {
             return 6;
         }
-        if rsi6 <= 60.0 {
+        if rsi6 <= bands.rsi_neutral_high {
             return 5;
         }
-        if rsi6 < 70.0 {
+        if rsi6 < bands.rsi_overbought {
             return 3;
         }
-        if rsi6 < 80.0 {
+        if rsi6 < bands.rsi_overbought_high {
             return 1;
         }
         0
     }
 
     /// 支撑评分 (满分5) -- 同时受MA5和MA10双重支撑最佳
-    fn score_support(price: f64, supports: &[f64]) -> u32 {
+    fn score_support(price: f64, supports: &[f64], bands: &ScoreBands) -> u32 {
         if price <= 0.0 {
             return 2;
         }
         let near_support = supports
             .iter()
-            .filter(|&&s| s > 0.0 && price > s && (price - s) / price < 0.03)
+            .filter(|&&s| s > 0.0 && price > s && (price - s) / price < bands.support_tolerance_pct)
             .count();
         match near_support {
             2.. => 5,
@@ -162,7 +229,7 @@ impl ScoringEngine {
     }
 
     /// 布林带位置评分 (满分5) -- 中轨附近最佳，上轨以上超买，下轨以下超卖
-    fn score_boll(position: &str) -> u32 {
+    fn score_boll(position: &str, _bands: &ScoreBands) -> u32 {
         match position {
             "中轨附近" => 5,
             "下轨区间" => 4,
@@ -423,12 +490,14 @@ mod tests {
 
     #[test]
     fn test_score_deviation_small() {
-        assert_eq!(ScoringEngine::score_deviation(0.5), 20);
+        let bands = ScoreBands::default();
+        assert_eq!(ScoringEngine::score_deviation(0.5, &bands), 20);
     }
 
     #[test]
     fn test_score_deviation_large() {
-        assert_eq!(ScoringEngine::score_deviation(10.0), 0);
+        let bands = ScoreBands::default();
+        assert_eq!(ScoringEngine::score_deviation(10.0, &bands), 0);
     }
 
     #[test]
@@ -453,28 +522,33 @@ mod tests {
 
     #[test]
     fn test_score_rsi_oversold() {
-        assert_eq!(ScoringEngine::score_rsi(15.0), 10);
+        let bands = ScoreBands::default();
+        assert_eq!(ScoringEngine::score_rsi(15.0, &bands), 10);
     }
 
     #[test]
     fn test_score_rsi_overbought() {
-        assert_eq!(ScoringEngine::score_rsi(85.0), 0);
+        let bands = ScoreBands::default();
+        assert_eq!(ScoringEngine::score_rsi(85.0, &bands), 0);
     }
 
     #[test]
     fn test_score_rsi_neutral() {
-        assert_eq!(ScoringEngine::score_rsi(50.0), 5);
+        let bands = ScoreBands::default();
+        assert_eq!(ScoringEngine::score_rsi(50.0, &bands), 5);
     }
 
     #[test]
     fn test_score_support_double() {
+        let bands = ScoreBands::default();
         let supports = vec![9.8, 9.75, 7.0];
-        assert!(ScoringEngine::score_support(10.0, &supports) >= 5);
+        assert!(ScoringEngine::score_support(10.0, &supports, &bands) >= 5);
     }
 
     #[test]
     fn test_score_support_none() {
-        assert_eq!(ScoringEngine::score_support(10.0, &[12.0, 15.0]), 1);
+        let bands = ScoreBands::default();
+        assert_eq!(ScoringEngine::score_support(10.0, &[12.0, 15.0], &bands), 1);
     }
 
     #[test]
@@ -485,6 +559,28 @@ mod tests {
         assert!(score.total <= 100);
         assert!(!score.signal.is_empty());
         assert!(!score.signal_code.is_empty());
+    }
+
+    #[test]
+    fn test_full_scoring_with_bands() {
+        let bands = ScoreBands::default();
+        let ind = make_indicators("多头排列", 1.0, "多头运行", 0.3, "正常", 50.0, vec![9.5, 9.0]);
+        let score = ScoringEngine::score_with_bands(&ind, 10.0, None, &bands);
+        assert!(score.total > 0);
+        assert!(score.total <= 100);
+        assert!(!score.signal.is_empty());
+        assert!(!score.signal_code.is_empty());
+    }
+
+    #[test]
+    fn test_score_with_custom_bands() {
+        let mut bands = ScoreBands::default();
+        bands.deviation_band_1 = 0.5;
+        bands.deviation_score_1 = 25;
+        let ind = make_indicators("多头排列", 0.3, "多头运行", 0.3, "正常", 50.0, vec![9.5, 9.0]);
+        let score = ScoringEngine::score_with_bands(&ind, 10.0, None, &bands);
+        assert!(score.total > 0);
+        assert!(score.total <= 100);
     }
 
     #[test]

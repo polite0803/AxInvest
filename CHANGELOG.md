@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-06-08 — Time Travel / As-Of Mode
+
+### 重大变更
+
+#### AsOfContext (Rust 后端)
+- `AsOfContext` 跨异步任务传递 via `tokio::task_local!`,值类型 `Option<AsOfContext>`,不引入 RefCell
+- 9 vendor 完整适配:EastMoney / Tencent / Sina / Baidu / AkShare / THS / Cninfo / iwencai / mootdx
+- 拒绝未来日期(`is_valid_past_date` 与前端 `todayIso` 严格一致)
+- DDL 幂等迁移:`ALTER TABLE` 全部用 `let _ = ...` 吞错误
+- L1 in-memory cache + L2 disk-cache (`market_data_history` 表)双层架构
+- L1 cache key 后缀化:`as_of::cache_suffix()` 返回 `"live"` 或 `"asof-YYYYMMDD"`,Live 与 Replay 数据完全隔离
+- `AsOfContext` 注入 + 3 阶段 LLM 未来引用检测(正则 + 时态词典 + 可选 LLM judge)
+- `partial-valid` 严格模式:检到未来引用 → `partial_valid: false`,backtest sweep 阻塞
+
+#### 时间旅行前端 (React)
+- `useTimeAnchorStore` Zustand + persist 中间件(`axagent-time-anchor`),跨刷新存活
+- `ModeSwitch` pill:AppHeader 右上角,全局唯一时间锚点
+- `AsOfDatePicker`:AntD DatePicker + `disabledDate` 阻止今日/未来
+- `ReplayBadge` / `ReplayWatermark`:replay 模式视觉标记
+- `TimeAnchorTour`:首次使用引导气泡(三角指针 + step hint + 持久化 dismiss)
+- 切回 Live 二次确认 Modal(`pendingLiveConfirm` 状态机)
+- `ReplayWorkbench` 页面:强制重选 as-of(`/replay-workbench` 路由)
+- `DecisionTimelinePanel` 每节点红色"⚠ N 处违规" chip + `<mark>` 高亮违规片段
+- 4 层 HCI 视觉信号:L1 Pill(顶栏)/ L2 页面态细条 / L3 面板 chip / L4 数据水印
+- `RecommendationPanel` + `BacktestPanel` 透传 `asOfDate` + Replay banner / hint
+
+#### i18n + 测试
+- 11 locale × 36 key:en-US / zh-CN / zh-TW / ja / ko / fr / de / es / ru / hi / ar
+- `timeTravel` 顶级 + `replayWorkbench` 顶级(避免嵌套键插入)
+- 新增测试:`ModeSwitch` / `AsOfDatePicker` / `ReplayWorkbench` / `TimeAnchorTour` / `TimelineNodeCard` violations / `RecommendationPanel` asOfDate / `BacktestPanel` 视觉
+- E2E:`e2e/time-travel.spec.ts`(7 个场景,涵盖 pill/picker/confirm modal/workbench/navigation/tour)
+
+### 工程指标
+
+- `npm run typecheck` → 0 错
+- `npm run test:run` → **607 tests passed, 1 skipped**(67 个测试文件)
+- Rust 后端 `cargo test` → 全部通过(由 T1-T13 累积)
+- i18n 11 locale JSON 全部通过 `JSON.parse` 校验
+
+### 不在本次范围
+
+- 不支持 past-time backfill(可后续扩展为完整历史回放引擎)
+- 不接入真实 LLM judge(留 API 入口,默认只跑前两阶段)
+- 不在 Live 模式下显示历史违规(只对 Replay 模式严格)
+- 不支持 as-of 在中途切换(进入 Replay 后必须先回到 Live)
+
+### 验证清单(浏览器手动)
+
+- [ ] 顶栏 LIVE pill 出现并可点击
+- [ ] AsOfDatePicker 阻止今日及未来日期
+- [ ] 选过去某日后整页进入 Replay 视觉态
+- [ ] 切回 Live 弹确认 Modal,确认后才切
+- [ ] ReplayWorkbench 强制重选,即使已有 asOfDate
+- [ ] DecisionTimelinePanel 节点显示"⚠ N 处违规" chip
+- [ ] i18n 切换 11 种语言无键缺失
+
+---
+
 ## 2026-06-07 — Stock Investment Refactor + Decision Timeline + Dual View
 
 ### 重大变更

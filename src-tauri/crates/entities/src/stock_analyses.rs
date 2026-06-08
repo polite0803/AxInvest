@@ -19,6 +19,15 @@ pub struct Model {
     pub decision_json: Option<String>,
     pub blackboard_snapshot: Option<String>,
     pub config_id: Option<String>,
+    /// Time-travel mode: 'live' | 'replay' | 'ab_test'
+    #[sea_orm(default_value = "live")]
+    pub analysis_kind: String,
+    /// Time-travel mode: replay 模式的数据截止日 (YYYY-MM-DD)
+    pub as_of_date: Option<String>,
+    /// 决策所用 LLM 的版本标识（用于复现实验）
+    pub model_version: Option<String>,
+    /// 关联到 L2 disk-cache 的快照 ID
+    pub data_snapshot_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

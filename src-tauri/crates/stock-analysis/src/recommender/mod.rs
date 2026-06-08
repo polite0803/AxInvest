@@ -18,7 +18,10 @@ pub mod types;
 pub use strategy::{RecoContext, RecommendStrategy};
 pub use types::{Period, RecoResponse, Style};
 
+use axagent_astock_data::as_of;
 use axagent_astock_data::AStockClient;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 // `HashSet` 在 Rust 2024 edition 已加入 prelude
@@ -35,8 +38,11 @@ use crate::recommender::strategies::{
 use crate::recommender::strategy::PerCodeLocks;
 
 // ── 缓存 ──
+//
+// 缓存 key 由 (period, as_of) 二元组组成，确保 live / replay 互相隔离。
+// replay 模式缓存 key 后缀为 `asof-YYYYMMDD`，由 `as_of::cache_suffix()` 提供。
 
-static RESULT_CACHE: RwLock<Option<(Period, RecoResponse, Instant)>> = RwLock::new(None);
+static RESULT_CACHE: RwLock<Option<(Period, String, RecoResponse, Instant)>> = RwLock::new(None);
 /// 缓存 TTL：从 5 min 缩短到 60 s。
 ///
 /// 荐股的 entry / target / stop_loss 是基于扫描时刻的现价算的，
@@ -45,10 +51,89 @@ static RESULT_CACHE: RwLock<Option<(Period, RecoResponse, Instant)>> = RwLock::n
 /// 还会误导用户按旧价位挂单。60 s 是为价格时效性与扫描性能做的折中。
 const CACHE_TTL: Duration = Duration::from_secs(60);
 
+// ── 推荐器配置（从 workflow template variables 读取） ──
+
+/// 用户可配置的推荐器参数
+struct RecoConfig {
+    trend_enabled: bool,
+    reversion_enabled: bool,
+    value_enabled: bool,
+    capital_enabled: bool,
+    watchlist_enabled: bool,
+    min_confidence: u8,
+}
+
+impl Default for RecoConfig {
+    fn default() -> Self {
+        Self {
+            trend_enabled: true,
+            reversion_enabled: true,
+            value_enabled: true,
+            capital_enabled: true,
+            watchlist_enabled: true,
+            min_confidence: 0, // 0 = 不筛选
+        }
+    }
+}
+
+/// 从 template_vars 解析推荐器配置
+///
+/// `template_vars` 来自 workflow_template 表的 variables 字段，
+/// 由前端 StockAnalysisConfigPanel 保存。变量名映射参见前端 getDefaultVariables()。
+fn parse_reco_config(template_vars: &[(String, serde_json::Value)]) -> RecoConfig {
+    let mut cfg = RecoConfig::default();
+    for (name, value) in template_vars {
+        let bool_val = || -> Option<bool> {
+            value.as_bool().or_else(|| {
+                value.as_str().and_then(|s| match s {
+                    "true" | "1" => Some(true),
+                    "false" | "0" => Some(false),
+                    _ => None,
+                })
+            })
+        };
+        match name.as_str() {
+            "reco_trend_enabled" => {
+                if let Some(v) = bool_val() {
+                    cfg.trend_enabled = v;
+                }
+            },
+            "reco_reversion_enabled" => {
+                if let Some(v) = bool_val() {
+                    cfg.reversion_enabled = v;
+                }
+            },
+            "reco_value_enabled" => {
+                if let Some(v) = bool_val() {
+                    cfg.value_enabled = v;
+                }
+            },
+            "reco_capital_enabled" => {
+                if let Some(v) = bool_val() {
+                    cfg.capital_enabled = v;
+                }
+            },
+            "reco_watchlist_enabled" => {
+                if let Some(v) = bool_val() {
+                    cfg.watchlist_enabled = v;
+                }
+            },
+            "reco_min_confidence" => {
+                if let Some(n) = value.as_f64() {
+                    cfg.min_confidence = n.clamp(0.0, 100.0) as u8;
+                }
+            },
+            _ => {},
+        }
+    }
+    cfg
+}
+
 fn cache_get(period: Period) -> Option<RecoResponse> {
-    let g = RESULT_CACHE.read().ok()?;
-    if let Some((p, resp, ts)) = g.as_ref() {
-        if *p == period && ts.elapsed() < CACHE_TTL {
+    let suffix = as_of::cache_suffix();
+    let g = RESULT_CACHE.read().unwrap_or_else(|e| e.into_inner());
+    if let Some((p, sfx, resp, ts)) = g.as_ref() {
+        if *p == period && sfx == &suffix && ts.elapsed() < CACHE_TTL {
             return Some(resp.clone());
         }
     }
@@ -56,18 +141,17 @@ fn cache_get(period: Period) -> Option<RecoResponse> {
 }
 
 fn cache_put(period: Period, resp: RecoResponse) {
-    if let Ok(mut g) = RESULT_CACHE.write() {
-        *g = Some((period, resp, Instant::now()));
-    }
+    let suffix = as_of::cache_suffix();
+    let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
+    *g = Some((period, suffix, resp, Instant::now()));
 }
 
 /// 主动失效缓存（设置页保存 vendor 后调用）
 ///
 /// 同时清 vendor 启用集合缓存 + 推荐结果缓存，保证下次调用立即反映新 vendor 状态
 pub fn invalidate_cache() {
-    if let Ok(mut g) = RESULT_CACHE.write() {
-        *g = None;
-    }
+    let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
+    *g = None;
     clear_cached_vendors();
 }
 
@@ -145,13 +229,31 @@ pub async fn recommend_stocks(
         ],
     };
 
-    let enabled: Vec<Box<dyn RecommendStrategy>> = all_strategies;
-    let disabled_styles_set: std::collections::HashSet<Style> = std::collections::HashSet::new();
+    let reco_cfg = parse_reco_config(template_vars);
+    let mut disabled_styles_set: std::collections::HashSet<Style> =
+        std::collections::HashSet::new();
+    let enabled: Vec<Box<dyn RecommendStrategy>> = all_strategies
+        .into_iter()
+        .filter(|s| {
+            let ok = match s.style() {
+                Style::Trend => reco_cfg.trend_enabled,
+                Style::Value => reco_cfg.value_enabled,
+                Style::Capital => reco_cfg.capital_enabled,
+                Style::Reversion => reco_cfg.reversion_enabled,
+                Style::Watchlist => reco_cfg.watchlist_enabled,
+            };
+            if !ok {
+                disabled_styles_set.insert(s.style());
+            }
+            ok
+        })
+        .collect();
 
     // 4. 并行执行（per-code 互斥锁：不同 code 真正并行，同 code 4 策略间串行）
     let per_code_locks = PerCodeLocks::new();
     let ctx_pool = seed.clone();
     let raw_ctx_pool = raw_seed.clone();
+    let vars_map: HashMap<String, Value> = template_vars.iter().cloned().collect();
     let mut futures = Vec::new();
     for s in enabled.iter() {
         // WatchlistStrategy 用 raw_seed（不过流动性过滤），
@@ -166,12 +268,14 @@ pub async fn recommend_stocks(
             ctx_pool.clone()
         };
         let period_val = period;
+        let vars_for_future = vars_map.clone();
         let fut = async move {
             let ctx = RecoContext {
                 client: &client_ref,
                 seed: &seed_ref,
                 per_code_locks: lock_ref,
                 period: period_val,
+                vars: &vars_for_future,
             };
             s_ref.scan(&ctx).await
         };
@@ -210,6 +314,12 @@ pub async fn recommend_stocks(
         p.target_price >= p.price * 0.995
     });
 
+    // P3-3: drop picks below user-configured min_confidence
+    // (reco_min_confidence from StockAnalysisConfigPanel, 0 = no filter)
+    if reco_cfg.min_confidence > 0 {
+        all_picks.retain(|p| p.confidence >= reco_cfg.min_confidence);
+    }
+
     // 7. 按风格分组 + 限 10
     let mut by_style = group_by_style_and_trim(&mut all_picks, 10);
 
@@ -228,6 +338,10 @@ pub async fn recommend_stocks(
             Style::Reversion,
             Style::Watchlist,
         ] {
+            // 用户已禁用的风格不补充合成 picks
+            if disabled_styles_set.contains(&style) {
+                continue;
+            }
             let bucket_empty = by_style.get(&style).map_or(true, |v| v.is_empty());
             if !bucket_empty {
                 continue;
@@ -238,6 +352,7 @@ pub async fn recommend_stocks(
                 period,
                 &raw_seed,
                 per_code_locks.clone(),
+                &vars_map,
             )
             .await;
             let mut tagged: Vec<types::RecoPick> = synthetic;
@@ -246,12 +361,32 @@ pub async fn recommend_stocks(
         }
     }
 
+    let as_of_ctx = as_of::current_as_of();
+    // spec §8: as-of 模式下因数据截断被降级(≠ 缺失)的风格,前端用橙色显示
+    // 简化: 若 as-of 激活 + 某风格被 disabled,等同降级;后续 B11 可细化原因
+    let disabled_vec: Vec<Style> = disabled_styles_set.into_iter().collect();
+    let (degraded_styles, degraded_reasons) = if as_of_ctx.is_some() {
+        let reasons: std::collections::HashMap<Style, String> = disabled_vec
+            .iter()
+            .map(|s| (*s, "as-of 截断后该风格依赖的历史数据不可用".to_string()))
+            .collect();
+        (disabled_vec.clone(), reasons)
+    } else {
+        (Vec::new(), std::collections::HashMap::new())
+    };
     let resp = RecoResponse {
         period,
         picks: by_style,
-        disabled_styles: disabled_styles_set.into_iter().collect(),
+        disabled_styles: disabled_vec,
+        degraded_styles,
+        degraded_reasons,
         generated_at: chrono::Utc::now().timestamp_millis(),
         raw_seed_pool_size,
+        as_of_date: as_of_ctx.as_ref().map(|c| c.as_string()),
+        mode: as_of_ctx
+            .as_ref()
+            .map(|c| c.source.to_string())
+            .unwrap_or_else(|| "live".to_string()),
     };
     cache_put(period, resp.clone());
     Ok(resp)
@@ -270,13 +405,133 @@ mod tests {
             period: Period::Short,
             picks: std::collections::HashMap::new(),
             disabled_styles: vec![Style::Capital],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
             generated_at: 0,
             raw_seed_pool_size: 0,
+            as_of_date: None,
+            mode: "live".to_string(),
         };
         cache_put(Period::Short, resp);
         assert!(cache_get(Period::Short).is_some());
         invalidate_cache();
         assert!(cache_get(Period::Short).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn cache_live_and_replay_are_isolated() {
+        use axagent_astock_data::as_of::{AsOfContext, AsOfSource};
+        use chrono::NaiveDate;
+        invalidate_cache();
+
+        // 1) live scope 写入
+        let live_resp = RecoResponse {
+            period: Period::Short,
+            picks: std::collections::HashMap::new(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at: 1,
+            raw_seed_pool_size: 0,
+            as_of_date: None,
+            mode: "live".to_string(),
+        };
+        cache_put(Period::Short, live_resp);
+
+        // 2) live 读命中 (generated_at == 1)
+        assert_eq!(cache_get(Period::Short).unwrap().generated_at, 1);
+
+        // 3) replay scope 内读应当 miss
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let got_in_replay = as_of::AS_OF
+            .scope(Some(ctx), async { cache_get(Period::Short) })
+            .await;
+        assert!(
+            got_in_replay.is_none(),
+            "live cache must not leak into replay scope (got generated_at={:?})",
+            got_in_replay.as_ref().map(|r| r.generated_at)
+        );
+
+        // 4) replay scope 内写入 → 退出 scope 后 live 仍然 miss，但 replay 自己命中
+        let replay_resp = RecoResponse {
+            period: Period::Short,
+            picks: std::collections::HashMap::new(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at: 2,
+            raw_seed_pool_size: 0,
+            as_of_date: Some("2026-06-01".into()),
+            mode: "user_replay".to_string(),
+        };
+        let replay_cached = as_of::AS_OF
+            .scope(Some(ctx), async {
+                cache_put(Period::Short, replay_resp);
+                cache_get(Period::Short)
+            })
+            .await
+            .expect("replay cache miss after put");
+        assert_eq!(replay_cached.generated_at, 2);
+
+        // 5) 切回 live 后再读：suffix 变化，cache miss
+        assert!(
+            cache_get(Period::Short).is_none(),
+            "after leaving replay scope, live cache should miss (suffix changed)"
+        );
+
+        // 6) live scope 再次写入 → 覆盖
+        let live_resp2 = RecoResponse {
+            period: Period::Short,
+            picks: std::collections::HashMap::new(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at: 11,
+            raw_seed_pool_size: 0,
+            as_of_date: None,
+            mode: "live".to_string(),
+        };
+        cache_put(Period::Short, live_resp2);
+        assert_eq!(cache_get(Period::Short).unwrap().generated_at, 11);
+
+        invalidate_cache();
+    }
+
+    #[test]
+    fn reco_response_serializes_asof_fields() {
+        let resp = RecoResponse {
+            period: Period::Mid,
+            picks: std::collections::HashMap::new(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at: 100,
+            raw_seed_pool_size: 50,
+            as_of_date: Some("2026-06-01".into()),
+            mode: "user_replay".into(),
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(s.contains("\"asOfDate\":\"2026-06-01\""));
+        assert!(s.contains("\"mode\":\"user_replay\""));
+    }
+
+    #[test]
+    fn reco_response_live_omits_asof_field() {
+        let resp = RecoResponse {
+            period: Period::Mid,
+            picks: std::collections::HashMap::new(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at: 100,
+            raw_seed_pool_size: 50,
+            as_of_date: None,
+            mode: "live".into(),
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(!s.contains("asOfDate"), "as_of_date should be skipped when None");
+        assert!(s.contains("\"mode\":\"live\""));
     }
 
     fn make_pick(price: f64, target: f64) -> types::RecoPick {
@@ -303,19 +558,25 @@ mod tests {
 
     /// Bug 修复：target ≤ current price 的 pick 必须被剔除。
     /// 旧逻辑会保留"现价 48 / 目标 41"的 BUY 推荐，逻辑上矛盾。
+    ///
+    /// 阈值 0.995 的实际行为：
+    /// - 41.87 / 48.16 = 0.869 → DROP
+    /// - 42.00 / 38.00 = 1.105 → KEEP
+    /// - 38.00 / 38.00 = 1.000 → KEEP（target == price 在容差内）
+    /// - 37.81 / 38.00 ≈ 0.995 → KEEP（恰好 >= 0.995 浮点边界）
+    /// - 37.85 / 38.00 ≈ 0.996 → KEEP
+    /// 期望保留 4 个（pick 2/3/4/5）。
     #[test]
     fn drops_picks_with_no_upside() {
         let mut picks = vec![
             make_pick(48.16, 41.87), // ✗ 无上行空间
             make_pick(38.0, 42.0),   // ✓ 正常
-            make_pick(38.0, 38.0),   // ✗ target == price，无意义（容差外）
-            make_pick(38.0, 37.81),  // ✗ 略低于 0.5% 容差
-            make_pick(38.0, 37.85),  // 边界 = 0.5% 之内（37.85 / 38.0 ≈ 0.996）— 实际 37.85 / 38.0 = 0.996 > 0.995，所以保留
+            make_pick(38.0, 38.0),   // ✓ target == price 在 0.995 容差内
+            make_pick(38.0, 37.81),  // ✓ 浮点边界，>= 0.995
+            make_pick(38.0, 37.85),  // ✓ 37.85/38 ≈ 0.996 > 0.995
         ];
         picks.retain(|p| p.target_price >= p.price * 0.995);
         let codes: Vec<&str> = picks.iter().map(|p| p.stock_code.as_str()).collect();
-        // 1) 和 2) 应该留下，3) target == price 被剔除，4) 在容差内（37.81 / 38.0 = 0.995）实际略低于 0.995 被剔除
-        // 5) 37.85 / 38.0 ≈ 0.996 > 0.995 → 保留
-        assert_eq!(picks.len(), 2, "保留: {codes:?}");
+        assert_eq!(picks.len(), 4, "保留: {codes:?}");
     }
 }

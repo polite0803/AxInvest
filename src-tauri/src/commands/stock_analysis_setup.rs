@@ -1235,7 +1235,26 @@ async fn seed_stock_analysis_workflow_template(
     // 分析师节点已直接连接 DebateNode（无中间条件节点）
 
     // ── 辩论轮数（DAG 展开为 max_rounds 轮顺序执行） ──
-    let debate_max_rounds: usize = 3;
+    // 用户在「股票分析设置 → 参数 → 工作流 → 多空辩论轮数」中调整的 `debate_rounds`
+    // 会在旧模板升级时被 merge_variable_values 保留到 old_variables 里；这里
+    // 优先读旧值，确保重建后的 DAG 与用户当前意图一致；缺失/越界时回退到 3。
+    let debate_max_rounds: usize = if old_variables.is_empty() {
+        3
+    } else {
+        serde_json::from_str::<Vec<serde_json::Value>>(&old_variables)
+            .ok()
+            .and_then(|arr| {
+                arr.into_iter().find_map(|v| {
+                    let name = v.get("name")?.as_str()?;
+                    if name != "debate_rounds" {
+                        return None;
+                    }
+                    v.get("value")?.as_u64().map(|n| n as usize)
+                })
+            })
+            .map(|n| n.clamp(1, 10))
+            .unwrap_or(3)
+    };
 
     // ═══════════════════════════════════════════════════════════════════════
     // 【装饰节点 / Decorative Container】debate-bull-bear
@@ -2116,7 +2135,10 @@ async fn seed_stock_analysis_workflow_template(
         Variable {
             name: "debate_rounds".into(),
             var_type: "number".into(),
-            value: serde_json::json!(6),
+            // 与 seed 时使用的常量保持一致（seed 函数里硬编码 3）。
+            // 用户在「股票分析设置 → 参数」里调成 6 后，下次模板升级会
+            // 用 merge_variable_values 保留用户的 6，并据此展开 DAG。
+            value: serde_json::json!(3),
             description: Some("多空辩论轮数 (1-10)".into()),
             is_secret: false,
         },
@@ -2236,6 +2258,14 @@ async fn seed_stock_analysis_workflow_template(
             var_type: "number".into(),
             value: serde_json::json!(10.0),
             description: Some("支撑阻力评分权重 (0-100)".into()),
+            is_secret: false,
+        },
+        // 补全：decision.rs:75 的 ScoringWeights 里有这个字段，但模板里漏了种子化
+        Variable {
+            name: "scoring_boll".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5.0),
+            description: Some("布林带评分权重 (0-100)".into()),
             is_secret: false,
         },
         // ── 规则引擎阈值 (RuleConfig) ──
@@ -2474,6 +2504,426 @@ async fn seed_stock_analysis_workflow_template(
             var_type: "number".into(),
             value: serde_json::json!(0.5),
             description: Some("凯利仓位系数 (建议仓位 = half_kelly × 此系数)".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：凯利前置条件（risk.rs:188-198）──
+        Variable {
+            name: "kelly_min_win_rate".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.4),
+            description: Some("凯利最低胜率要求 (0-1)，低于此值返回不适用".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "kelly_min_odds".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.0),
+            description: Some("凯利最低赔率要求 (avg_win/avg_loss)，低于此值降权".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：组合风控（trading.rs:200 / risk.rs）──
+        Variable {
+            name: "risk_max_drawdown_limit".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(15.0),
+            description: Some("组合最大回撤熔断线 (%)，超过则暂停新开仓".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "risk_max_daily_loss_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(3.0),
+            description: Some("单日最大亏损 (%)，超过则停手".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "risk_correlation_lookback_days".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(60),
+            description: Some("风险平价 / 相关性矩阵的回看窗口 (交易日)".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：仓位限制扩展（position_limits.rs）──
+        Variable {
+            name: "pos_min_cash_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5.0),
+            description: Some("最低现金比例 (%)，低于则禁止新开仓".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "pos_max_turnover_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(100.0),
+            description: Some("单期最大换手率 (%)，超过则分批调仓".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：护城河量化阈值（value.rs:320-434）──
+        Variable {
+            name: "moat_roe_years_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(3),
+            description: Some("ROE>15% 最少连续年数 (0-10)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "moat_avg_gross_margin_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(20.0),
+            description: Some("平均毛利率下限 (%)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "moat_margin_stable_std_max".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5.0),
+            description: Some("毛利率稳定性标准差上限 (σ，%)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "moat_fcf_ratio_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.5),
+            description: Some("FCF/净利润 比率下限 (0-1)".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：选股筛选（screener.rs:8 ScreenCriteria）──
+        Variable {
+            name: "screener_min_change_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(-30.0),
+            description: Some("选股最小涨跌幅下限 (%)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "screener_max_change_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(30.0),
+            description: Some("选股最大涨跌幅上限 (%)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "screener_main_inflow_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.0),
+            description: Some("主力净流入下限 (万元)，0=不限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "screener_northbound_ratio_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.0),
+            description: Some("北向持仓占比下限 (%)，0=不限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "screener_turnover_rate_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.0),
+            description: Some("换手率下限 (%)，0=不限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "screener_rsi_oversold".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(false),
+            description: Some("选股时要求 RSI 超卖 (<30)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "screener_rsi_overbought".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(false),
+            description: Some("选股时要求 RSI 超买 (>70)".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：信号检测（signals.rs detect_ma_cross / detect_breakout）──
+        Variable {
+            name: "signal_ma_fast".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5),
+            description: Some("MA 金叉检测快线周期 (3-30)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "signal_ma_slow".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(20),
+            description: Some("MA 金叉检测慢线周期 (10-120)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "signal_breakout_volume_mult".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.5),
+            description: Some("突破/破位放量倍数阈值 (1.0-3.0)".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：关键价位（key_levels.rs KeyLevelTracker）──
+        Variable {
+            name: "keylevel_lookback_days".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(60),
+            description: Some("关键价位回看窗口 (交易日，10-250)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "keylevel_touch_tolerance_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.0),
+            description: Some("关键价位触碰容差 (%，0.1-5.0)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "keylevel_min_touches".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2),
+            description: Some("确认支撑/阻力最少触碰次数 (1-10)".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：监控告警（monitor.rs MonitorConfig）──
+        Variable {
+            name: "monitor_alert_cooldown_secs".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(300),
+            description: Some("同一标的告警冷却时间 (秒，10-3600)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "monitor_min_severity".into(),
+            var_type: "enum".into(),
+            value: serde_json::json!("info"),
+            description: Some("最低推送告警等级: info / warn / critical".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "monitor_channels".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("in_app"),
+            description: Some("推送渠道，逗号分隔: in_app / lark / email / webhook".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：推荐器策略开关（recommender/strategies）──
+        Variable {
+            name: "reco_trend_enabled".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(true),
+            description: Some("启用趋势跟踪子策略".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_reversion_enabled".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(true),
+            description: Some("启用超跌反弹子策略".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_value_enabled".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(true),
+            description: Some("启用价值选股子策略".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_capital_enabled".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(true),
+            description: Some("启用资金流向子策略".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_watchlist_enabled".into(),
+            var_type: "boolean".into(),
+            value: serde_json::json!(true),
+            description: Some("启用自选股策略".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_min_confidence".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(60),
+            description: Some("推荐器最低置信度 (0-100)，低于此值不入选".into()),
+            is_secret: false,
+        },
+        // ── A 类补全：决策回溯（decision_tracker.rs）──
+        Variable {
+            name: "decision_max_history_per_stock".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(50),
+            description: Some("每只股票保留的历史决策条数 (10-200)".into()),
+            is_secret: false,
+        },
+        // ── B 类补全：技术指标周期（indicators.rs IndicatorConfig）──
+        Variable {
+            name: "macd_fast".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(12),
+            description: Some("MACD 快线周期 (5-30)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "macd_slow".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(26),
+            description: Some("MACD 慢线周期 (10-60)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "macd_signal".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(9),
+            description: Some("MACD 信号线周期 (3-20)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "boll_period".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(20),
+            description: Some("布林带周期 (10-50)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "boll_stddev".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2.0),
+            description: Some("布林带标准差倍数 (1.0-3.0)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "volume_lookback".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5),
+            description: Some("均量计算回看周期 (3-30，交易日)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "volume_surge_ratio".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.5),
+            description: Some("放量阈值 (量比 > 此值判为放量)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "volume_shrink_ratio".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.7),
+            description: Some("缩量阈值 (量比 < 此值判为缩量)".into()),
+            is_secret: false,
+        },
+        // ── B 类补全：推荐器参数（recommender/strategies）──
+        Variable {
+            name: "trend_kline_limit".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(250),
+            description: Some("趋势策略读取 K 线上限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "trend_amount_ratio_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.8),
+            description: Some("趋势策略最低量比".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "rev_rsi_short_max".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(35.0),
+            description: Some("超跌反弹短线 RSI 上限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "rev_drawdown_min_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(20.0),
+            description: Some("超跌反弹中线最低回撤 (%)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "rev_rsi_monthly_max".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(50.0),
+            description: Some("超跌反弹月线 RSI 上限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "val_pe_short_max".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(50.0),
+            description: Some("价值策略短线 PE 上限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "val_pe_mid_max".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(40.0),
+            description: Some("价值策略中线 PE 上限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "val_pb_mid_max".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(8.0),
+            description: Some("价值策略中线 PB 上限".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "cap_inflow_short_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(200.0),
+            description: Some("资金策略短线主力净流入下限 (万元)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "cap_inflow_mid_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(500.0),
+            description: Some("资金策略中线主力净流入下限 (万元)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "cap_turnover_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2.0),
+            description: Some("资金策略最低换手率 (%)".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "cap_nb_ratio_min".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.3),
+            description: Some("资金策略北向持仓占比下限 (%)".into()),
+            is_secret: false,
+        },
+        // ── B 类补全：交易决策（trading.rs）──
+        Variable {
+            name: "trading_price_deviation_limit".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5.0),
+            description: Some("交易价偏离分析目标价最大容忍度 (%)".into()),
+            is_secret: false,
+        },
+        // ── B 类补全：风险模型（risk.rs）──
+        Variable {
+            name: "risk_sharpe_annualization".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(252),
+            description: Some("夏普比率年化因子（252=日频，12=月频，4=季频，1=年频）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "risk_kelly_heavy_threshold".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.25),
+            description: Some("凯利公式重仓阈值（>此值判为重仓）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "risk_kelly_medium_threshold".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.1),
+            description: Some("凯利公式中仓阈值（>此值判为中仓）".into()),
             is_secret: false,
         },
         Variable {
@@ -2809,8 +3259,48 @@ fn merge_variable_values(
         serde_json::from_str(old_variables_json).map_err(|e| format!("解析旧变量失败: {e}"))?;
 
     // 变量迁移映射表：旧名称 → 新名称（模板升级时变量被重命名的情况）
+    //
+    // 老 UI 用的 camelCase 命名在 stock-analysis 模板 v15→v19 升级时统一改为 snake_case
+    // 并补全前缀（agent_/tool_/rule_/pos_/value_/monitor_/kline_/news_/vendor_）。
+    // 旧用户在设置面板调整过的值会留在 DB 的 workflow_template.variables 列里，
+    // 升级时如果新模板没有同 key 的变量就会被丢弃。这里建立别名映射，
+    // 升级时把旧 key 的 value 复制到新 key 上，避免用户调参失效。
     const RENAME_MAP: &[(&str, &str)] = &[
-        // 例：("scoring_boll", "scoring_bollinger"),
+        // 分析流程
+        ("analysis_maxDebateRounds", "debate_rounds"),
+        ("analysis_maxConcurrent", "max_concurrent"),
+        // 数据源
+        ("analysis_klinePeriod", "kline_period"),
+        ("analysis_klineLimit", "kline_limit"),
+        ("analysis_newsLimit", "news_limit"),
+        // Agent / Tool
+        ("analysis_temperature", "agent_temperature"),
+        ("analysis_maxTokens", "agent_max_tokens"),
+        ("analysis_timeoutSecs", "agent_timeout_secs"),
+        ("tool_timeoutSecs", "tool_timeout_secs"),
+        ("tool_retryMax", "tool_retry_max"),
+        // 规则
+        ("rule_rsiOverbought", "rule_rsi_overbought"),
+        ("rule_rsiOversold", "rule_rsi_oversold"),
+        ("rule_biasLimit", "rule_bias_limit_pct"),
+        ("rule_volumeSignalBlock", "rule_volume_signal_block"),
+        ("rule_bearLowScore", "rule_bear_low_score"),
+        ("rule_autoStopLossPct", "rule_auto_stop_loss_pct"),
+        // 仓位
+        ("pos_maxSingleStockPct", "pos_max_single_pct"),
+        ("pos_maxTotalPositions", "pos_max_total"),
+        ("pos_maxSectorExposurePct", "pos_max_sector_pct"),
+        // 估值
+        ("value_dcfGrowthRate", "value_dcf_growth_rate"),
+        ("value_dcfPerpetualRate", "value_dcf_perpetual_rate"),
+        ("value_dcfDiscountRate", "value_dcf_discount_rate"),
+        ("value_moatThreshold", "value_moat_threshold"),
+        ("value_fScoreBuyThreshold", "value_fscore_buy"),
+        ("value_safetyMarginMin", "value_safety_margin"),
+        // 监控
+        ("monitor_pollIntervalSecs", "monitor_poll_interval_secs"),
+        ("monitor_changePctThreshold", "monitor_change_pct"),
+        ("monitor_turnoverThreshold", "monitor_turnover"),
     ];
 
     // 构建旧变量名 → value 的映射（处理重命名别名）

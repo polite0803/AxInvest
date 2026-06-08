@@ -35,7 +35,8 @@
     "screener": "Screener",
     "trade": "Trade",
     "backtest": "Backtest",
-    "compare": "Compare"
+    "compare": "Compare",
+    "replayWorkbench": "Replay Workbench"
   },
   "sidebar": {
     "sectionWork": "Work",
@@ -7547,6 +7548,9 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading",
         "monitor": "Monitor",
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
@@ -7587,7 +7591,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "main": "Main",
+        "industryRank": "Industry Rank",
+        "noIndustry": "No industry data",
+        "hotStocks": "Hot Stocks",
+        "noHot": "No hot stock data",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "Screener",
@@ -7626,7 +7636,8 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "refresh": "Refresh"
       },
       "recommendation": {
         "title": "🔍 Smart Picks",
@@ -7656,13 +7667,15 @@
         "styleDisabledReason": "{{style}} data source not enabled, no picks",
         "empty": "No qualifying picks at the moment",
         "valueNaN": "—",
-        "generatedAt": "Updated {{time}}"
+        "generatedAt": "Updated {{time}}",
+        "consensusDivided": "意见分歧"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -7779,7 +7792,10 @@
       "total": "total",
       "wrong": "wrong",
       "avgConfidence": "Avg Confidence",
-      "alpha": "Alpha"
+      "alpha": "Alpha",
+      "scopeAll": "All",
+      "scopeLive": "Live only",
+      "scopeReplay": "Replay only"
     },
     "export": {
       "analystReports": "analystReports",
@@ -8064,7 +8080,8 @@
       "crossCheckDivided": "Analysts are divided — observe before acting",
       "crossCheckBearish": "Consensus bearish — contradicts the BUY pick",
       "crossCheckNeutral": "{{neutral}} of {{total}} reports were neutral — does not confirm the BUY pick",
-      "crossCheckTitle": "Analyst cross-check (last {{updatedAt}})"
+      "crossCheckTitle": "Analyst cross-check (last {{updatedAt}})",
+      "bannerDegraded": "Data styles {{styles}} were reduced in fidelity (as-of {{date}}). Treat their confidence as lower than non-degraded styles."
     },
     "stockAnalysisStore": {
       "ts:329:t(": "Ts:329:T(",
@@ -8077,7 +8094,13 @@
       "ts:763:t(": "Ts:763:T("
     },
     "avgRiskScore": "Avg Risk {{score}}",
-    "highestRisk": "Highest {{label}} ({{score}})"
+    "highestRisk": "Highest {{label}} ({{score}})",
+    "empty": {
+      "replayDegradedTitle": "⏪ Degraded in Replay Mode",
+      "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
+      "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
+      "replayDegradedWithReason": "Degraded in replay mode: {{reason}}"
+    }
   },
   "trade": {
     "title": "Trading Log",
@@ -8229,11 +8252,48 @@
   },
   "screener": {
     "title": "Screener",
-    "placeholder": "Find stocks by criteria"
+    "placeholder": "Find stocks by criteria",
+    "tab": {
+      "smartReco": "Smart Picks",
+      "myFilter": "My Filter"
+    }
   },
-  "backtest": {
-    "title": "Backtest",
-    "placeholder": "Validate strategies with historical data"
+  "replayWorkbench": {
+    "title": "Replay Workbench",
+    "description": "Anchor all data to a past trading day. Future dates are rejected. Use this to safely backtest strategies without look-ahead bias.",
+    "step1": {
+      "title": "Pick an as-of date",
+      "currentlyPicked": "Currently replaying as of {{date}}",
+      "reselect": "Reselect"
+    },
+    "step2": {
+      "title": "Run replay-aware analysis",
+      "description": "All actions below inject as_of_date = {{date}} into the backend, closing the world at that date.",
+      "analyze": "Analyze a stock",
+      "backtest": "View backtest stats",
+      "watchlist": "View watchlist"
+    },
+    "sweep": {
+      "title": "Replay sweep matrix",
+      "intro": "Run backtest across a list of stocks × as-of dates in batch. Forces reselect of date range (does not inherit global TimeAnchor).",
+      "codesLabel": "Stock codes (one per line or comma-separated)",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "As-of date range (workdays only)",
+      "holdingDaysLabel": "Holding days",
+      "actionLabel": "Hypothetical decision",
+      "confidenceLabel": "Decision confidence (0–1)",
+      "runBtn": "Start sweep",
+      "running": "Sweeping {{done}} / {{total}} …",
+      "summary": "Sweep done: {{valid}} valid / {{invalid}} invalid out of {{total}}.",
+      "violationNotice": "{{count}} as-of violations recorded — see Invalid details.",
+      "invalidTitle": "Invalid samples",
+      "noInvalid": "No invalid samples.",
+      "exportCsv": "Export CSV",
+      "exportJson": "Export JSON"
+    },
+    "notice": "All data, prompts and verdicts in this workbench are anchored to the chosen date. Switching back to Live mode requires explicit confirmation.",
+    "exitHint": "You are still in Replay mode. Any new analysis started elsewhere will also be replay-anchored.",
+    "exitBtn": "Switch back to Live"
   },
   "compare": {
     "title": "Compare",
@@ -8245,5 +8305,66 @@
     "expandToPanel": "Expand to panel",
     "collapse": "Collapse",
     "collapseToBubble": "Collapse to bubble"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "LIVE",
+      "replay": "Replay {{date}}",
+      "sweep": "Sweep",
+      "tooltipLive": "Click to enter Replay mode (analyze as of a past date)",
+      "tooltipReplay": "Click to switch back to Live mode",
+      "confirmTitle": "Switch back to Live mode?",
+      "confirmBody": "Live mode uses real-time data and any conclusions drawn may already be invalidated by new information. Replay mode closes the world at a chosen past date to prevent look-ahead bias.",
+      "confirmOk": "Switch to Live",
+      "confirmCancel": "Stay in Replay",
+      "currentlyInReplay": "Currently replaying as of {{date}}.",
+      "enteredReplay": "Entered Replay mode: {{date}}",
+      "switchedToLive": "Switched to Live mode"
+    },
+    "datePicker": {
+      "hint": "Pick a past trading day. Today and future dates are disabled (closed-world assumption).",
+      "placeholder": "Select as-of date",
+      "ok": "Enter Replay",
+      "cancel": "Cancel"
+    },
+    "pageAnchor": {
+      "live": "Live",
+      "replay": "Replay",
+      "untilDate": "As of {{date}}"
+    },
+    "replayBadge": {
+      "label": "Replay · {{date}}",
+      "tooltip": "All data, prompts and verdicts in this view are anchored to {{date}}. Do not trust for live trading."
+    },
+    "replayWatermark": {
+      "label": "as of {{date}}"
+    },
+    "tour": {
+      "title": "Time Travel mode is now available",
+      "body": "Anchor all analysis and recommendations to a past trading day to safely backtest strategies without look-ahead bias. The system will reject future dates and timestamp violations will be highlighted on the timeline.",
+      "gotIt": "Got it",
+      "stepAnchor": "Click the LIVE pill at any time to enter Replay mode."
+    },
+    "violations": {
+      "chip": "⚠ {{n}} violation",
+      "chip_plural": "⚠ {{n}} violations",
+      "chipAria": "{{n}} future-reference violation(s) on this node",
+      "tooltip": "This node's output mentions dates after the as-of anchor. Treat its conclusion as untrustworthy.",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "Replay mode is active. Picks, prices and entry bands are anchored to {{date}}. Do not use for live trading.",
+    "backtestHint": "These stats aggregate all completed analyses (live + replay) as of {{date}}. Use the Replay Workbench to filter by mode.",
+    "degradedStyles": {
+      "title": "Data sources degraded under as-of truncation",
+      "description": "The following data styles were reduced in fidelity because the requested as-of date {{date}} cuts off history needed for the full signal.",
+      "reason": "Reason: {{reason}}",
+      "hint": "A degraded result is not a wrong result; it is a less informative one. Treat its confidence as lower than non-degraded styles.",
+      "vendor": "vendor: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "Degraded · Some data has no history",
+      "labelWithCount": "Degraded · {{n}} items",
+      "tooltip": "In replay mode, money flow / margin / north-bound holding etc. have no historical semantics and were skipped."
+    }
   }
 }

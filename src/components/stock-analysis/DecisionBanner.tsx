@@ -1,5 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, message, Modal, Tag } from "antd";
@@ -24,6 +25,8 @@ export function DecisionBanner() {
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
+  // 时间旅行: 当前决策所基于的 as-of 锚点 (live 时为 null)
+  const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const [adding, setAdding] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -155,11 +158,14 @@ export function DecisionBanner() {
         title={
           <div className="flex items-center gap-2">
             <span>{t("stockAnalysis.finalDecision")}</span>
-            <Tag
-              color={getActionColor(decision.action)}
-            >
+            <Tag color={getActionColor(decision.action)}>
               {actionLabel(decision.action)}
             </Tag>
+            {asOfDate && (
+              <Tag color="purple" title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}>
+                ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+              </Tag>
+            )}
           </div>
         }
         extra={
@@ -284,11 +290,14 @@ export function DecisionBanner() {
         title={
           <div className="flex items-center gap-2">
             <span>{t("stockAnalysis.finalDecision")}</span>
-            <Tag
-              color={getActionColor(decision.action)}
-            >
+            <Tag color={getActionColor(decision.action)}>
               {actionLabel(decision.action)}
             </Tag>
+            {asOfDate && (
+              <Tag color="purple" title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}>
+                ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+              </Tag>
+            )}
           </div>
         }
         open={expanded}

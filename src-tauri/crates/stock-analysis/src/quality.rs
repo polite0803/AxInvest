@@ -64,7 +64,7 @@ pub fn check_report_quality(
         return QualityGrade::F;
     }
 
-    // 硬检查 1: 报告是否为空或过短
+    // 硬检查 1: 报告是否为空或过短（<50字符→F, <200字符→D）
     if report_text.trim().is_empty() {
         return QualityGrade::F;
     }
@@ -108,6 +108,7 @@ pub fn check_report_quality(
 
     // 实质分析启发式：除了"提到"关键词，至少要有数字/百分号/明确结论
     // 防止 LLM 用一句"趋势向上"刷满所有必采项
+    // 阈值：≥3个数字字符，或包含 % / 看多/看空/建议/买卖持有/增减持
     let has_substance = report_text.chars().filter(|c| c.is_ascii_digit()).count() >= 3
         || report_text.contains('%')
         || report_text.contains("看多")
@@ -119,6 +120,7 @@ pub fn check_report_quality(
         || report_text.contains("增持")
         || report_text.contains("减持");
 
+    // 覆盖率分级阈值: ≥0.8→A(有实质)或B(无实质), ≥0.6→B, ≥0.4→C, <0.4→D
     if ratio >= 0.8 {
         if has_substance {
             QualityGrade::A
@@ -225,6 +227,7 @@ pub fn run_quality_gate(reports: &HashMap<String, String>) -> QualityCheck {
         .filter(|(_, g)| *g == QualityGrade::F || *g == QualityGrade::D)
         .count();
 
+    // 失败率分级阈值: 0%→A, ≤20%且≤1个→B, ≤50%→C, ≤80%→D, >80%→F
     let overall = if total_count == 0 {
         QualityGrade::C
     } else if fail_count == 0 {

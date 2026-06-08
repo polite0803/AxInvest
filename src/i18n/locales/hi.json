@@ -7518,7 +7518,16 @@
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "dryRun": "Dry Run",
+        "moat": "Moat",
+        "screener": "Screener",
+        "signals": "Signals",
+        "keylevels": "Key Levels",
+        "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading"
       },
       "panels": {
         "refresh": "Refresh",
@@ -7547,7 +7556,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "main": "Main",
+        "industryRank": "Industry Rank",
+        "noIndustry": "No industry data",
+        "hotStocks": "Hot Stocks",
+        "noHot": "No hot stock data",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "Screener",
@@ -7584,13 +7599,15 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "refresh": "Refresh"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -7811,7 +7828,10 @@
       "total": "total",
       "wrong": "wrong",
       "avgConfidence": "Avg Confidence",
-      "alpha": "Alpha"
+      "alpha": "Alpha",
+      "scopeAll": "सभी",
+      "scopeLive": "केवल Live",
+      "scopeReplay": "केवल Replay"
     },
     "chart": {
       "restore": "restore",
@@ -7966,7 +7986,25 @@
       "tagReal": "वास्तविक",
       "tagSynthetic": "फ़ॉलबैक",
       "crossCheckDivided": "विश्लेषक विभाजित हैं — कार्य करने से पहले निरीक्षण करें",
-      "syntheticTooltip": "डेटा-स्पार्स फ़ॉलबैक (K-लाइन / वित्तीय / पूंजी डेटा अनुपलब्ध, वर्तमान मूल्य से संश्लेषित)"
+      "syntheticTooltip": "डेटा-स्पार्स फ़ॉलबैक (K-लाइन / वित्तीय / पूंजी डेटा अनुपलब्ध, वर्तमान मूल्य से संश्लेषित)",
+      "consensusDivided": "Divided",
+      "consensusBearish": "मंदी",
+      "crossCheckBearish": "सर्वसम्मति मंदी — खरीद सुझाव के विपरीत",
+      "consensusBullish": "तीव्र सर्वसम्मति",
+      "consensusNeutral": "तटस्थ",
+      "bullish": "तीव्र",
+      "bearish": "मंदी",
+      "neutral": "तटस्थ",
+      "bullishTooltip": "खरीद/अधिक भार संकेत मिले",
+      "bearishTooltip": "बिक्री/कम भार संकेत मिले",
+      "neutralTooltip": "कोई दिशात्मक संकेत नहीं",
+      "reportCountSuffix": " रिपोर्ट",
+      "crossCheckAligned": "विश्लेषक सर्वसम्मति से मेल",
+      "crossCheckNeutral": "{{total}} में {{neutral}} रिपोर्ट तटस्थ",
+      "crossCheckTitle": "विश्लेषक क्रॉस-चेक (अंतिम {{updatedAt}})",
+      "dataQualitySummary": "{{real}} वास्तविक + {{synthetic}} आपात",
+      "backtestWinrate": "जीत दर",
+      "bannerDegraded": "डेटा शैलियाँ {{styles}} की विश्वसनीयता कम हुई (as-of {{date}}). गैर-अवनत शैलियों से कम विश्वास के साथ व्यवहार करें।"
     },
     "periodShort": "Short",
     "periodMid": "Mid",
@@ -7974,7 +8012,13 @@
     "generatedAt": "Generated at {time}",
     "bannerVendorDisabled": "Some styles are disabled: {styles}",
     "openSettings": "Open Settings",
-    "empty": "No recommendation data",
+    "empty": {
+      "replayDegradedTitle": "⏪ Degraded in Replay Mode",
+      "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
+      "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
+      "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
+      "_fallback": "No recommendation data"
+    },
     "styleDisabled": "(Disabled)",
     "styleDisabledReason": "Style {style} is disabled in settings",
     "row": {
@@ -8049,7 +8093,11 @@
   },
   "screener": {
     "title": "स्टॉक स्क्रीनर",
-    "placeholder": "मानदंडों से स्टॉक खोजें"
+    "placeholder": "मानदंडों से स्टॉक खोजें",
+    "tab": {
+      "smartReco": "स्मार्ट सुझाव",
+      "myFilter": "मेरा फ़िल्टर"
+    }
   },
   "backtest": {
     "title": "बैकटेस्ट",
@@ -8065,5 +8113,103 @@
     "expandToPanel": "पैनल में विस्तृत करें",
     "collapse": "संकुचित करें",
     "collapseToBubble": "बुलबुले में संकुचित करें"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "लाइव",
+      "replay": "{{date}} पर रीप्ले",
+      "sweep": "स्वीप बैकटेस्ट",
+      "tooltipLive": "रीप्ले मोड में प्रवेश करने के लिए क्लिक करें (पिछली तारीख पर विश्लेषण)",
+      "tooltipReplay": "लाइव मोड पर वापस जाने के लिए क्लिक करें",
+      "confirmTitle": "क्या लाइव मोड पर वापस जाना है?",
+      "confirmBody": "लाइव मोड वास्तविक समय के डेटा का उपयोग करता है और पहले निकाले गए निष्कर्ष नई जानकारी से अमान्य हो सकते हैं। रीप्ले मोड लुक-अहेड पक्षपात से बचने के लिए चुनी गई पिछली तारीख पर दुनिया को बंद कर देता है।",
+      "confirmOk": "लाइव पर जाएँ",
+      "confirmCancel": "रीप्ले में रहें",
+      "currentlyInReplay": "{{date}} को एंकर करके रीप्ले चल रहा है।",
+      "enteredReplay": "रीप्ले मोड सक्रिय: {{date}}",
+      "switchedToLive": "लाइव मोड पर स्विच किया गया"
+    },
+    "datePicker": {
+      "hint": "पिछला ट्रेडिंग दिन चुनें. आज और भविष्य की तारीखें अक्षम हैं (बंद दुनिया धारणा).",
+      "placeholder": "as-of तारीख चुनें",
+      "ok": "रीप्ले शुरू करें",
+      "cancel": "रद्द करें"
+    },
+    "pageAnchor": {
+      "live": "लाइव",
+      "replay": "रीप्ले",
+      "untilDate": "{{date}} तक"
+    },
+    "replayBadge": {
+      "label": "रीप्ले · {{date}}",
+      "tooltip": "इस दृश्य का सारा डेटा, प्रॉम्प्ट और निर्णय {{date}} पर एंकर किए गए हैं। लाइव ट्रेडिंग के लिए उपयोग न करें।"
+    },
+    "replayWatermark": {
+      "label": "{{date}} तक"
+    },
+    "tour": {
+      "title": "टाइम ट्रैवल मोड उपलब्ध है",
+      "body": "लुक-अहेड पक्षपात के बिना रणनीतियों का सुरक्षित रूप से बैकटेस्ट करने के लिए सभी विश्लेषण और सिफारिशें पिछले ट्रेडिंग दिन पर एंकर करें। सिस्टम भविष्य की तारीखों को अस्वीकार करेगा और टाइमस्टैम्प उल्लंघनों को टाइमलाइन पर हाइलाइट किया जाएगा।",
+      "gotIt": "समझ गया",
+      "stepAnchor": "कभी भी रीप्ले मोड में प्रवेश करने के लिए 'लाइव' पिल पर क्लिक करें।"
+    },
+    "violations": {
+      "chip": "⚠ {{n}} उल्लंघन",
+      "chip_plural": "⚠ {{n}} उल्लंघन",
+      "chipAria": "इस नोड पर {{n}} भविष्य-संदर्भ उल्लंघन",
+      "tooltip": "इस नोड का आउटपुट as-of एंकर के बाद की तारीखों का उल्लेख करता है। इसके निष्कर्ष को अविश्वसनीय मानें।",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "रीप्ले मोड सक्रिय। चयन, कीमतें और प्रवेश सीमाएँ {{date}} पर एंकर की गई हैं। लाइव ट्रेडिंग के लिए उपयोग न करें।",
+    "backtestHint": "ये आंकड़े {{date}} तक सभी पूर्ण विश्लेषणों (लाइव + रीप्ले) को एकत्र करते हैं। मोड के अनुसार फ़िल्टर करने के लिए रीप्ले वर्कबेंच का उपयोग करें।",
+    "degradedStyles": {
+      "title": "as-of ट्रंकेशन के कारण डेटा स्रोतों का अवनमन",
+      "description": "निम्नलिखित डेटा शैलियों की विश्वसनीयता कम हुई क्योंकि as-of तिथि {{date}} पूर्ण संकेत के लिए आवश्यक इतिहास को काटती है।",
+      "reason": "कारण: {{reason}}",
+      "hint": "अवनत परिणाम गलत नहीं है; यह कम जानकारीपूर्ण है। इसके विश्वास को गैर-अवनत शैलियों से कम मानें।",
+      "vendor": "विक्रेता: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "अवनत · कुछ डेटा का इतिहास नहीं",
+      "labelWithCount": "अवनत · {{n}} आइटम",
+      "tooltip": "रीप्ले मोड में मनी फ्लो/मार्जिन/नॉर्थ-बाउंड होल्डिंग आदि का कोई ऐतिहासिक अर्थ नहीं है, छोड़ दिया गया।"
+    }
+  },
+  "replayWorkbench": {
+    "title": "रीप्ले वर्कबेंच",
+    "description": "सारे डेटा को पिछले किसी दिन पर एंकर करें। सिस्टम भविष्य की तारीखों को अस्वीकार करेगा। लुक-अहेड पक्षपात के बिना अपनी रणनीतियों का सुरक्षित रूप से बैकटेस्ट करें।",
+    "step1": {
+      "title": "as-of तारीख चुनें",
+      "currentlyPicked": "वर्तमान में {{date}} को एंकर करके रीप्ले चल रहा है",
+      "reselect": "फिर से चुनें"
+    },
+    "step2": {
+      "title": "रीप्ले-जागरूक विश्लेषण चलाएँ",
+      "description": "नीचे के सभी क्रियाएँ as_of_date = {{date}} को बैकएंड में इंजेक्ट करती हैं और उस दिन दुनिया को बंद कर देती हैं।",
+      "analyze": "एक स्टॉक का विश्लेषण करें",
+      "backtest": "बैकटेस्ट आंकड़े देखें",
+      "watchlist": "वॉचलिस्ट देखें"
+    },
+    "sweep": {
+      "title": "रीप्ले स्वीप मैट्रिक्स",
+      "intro": "स्टॉक × as-of तारीखों के बैकटेस्ट को बैच में चलाएँ। तारीख रेंज को पुनः चुनने पर मजबूर करता है (वैश्विक TimeAnchor विरासत में नहीं मिलता)।",
+      "codesLabel": "स्टॉक कोड (प्रति पंक्ति एक या अल्पविराम से अलग)",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "As-of तारीख रेंज (केवल कार्य दिवस)",
+      "holdingDaysLabel": "होल्डिंग दिन",
+      "actionLabel": "परिकल्पित निर्णय",
+      "confidenceLabel": "निर्णय विश्वास (0–1)",
+      "runBtn": "स्वीप शुरू करें",
+      "running": "स्वीप चल रहा है {{done}} / {{total}} …",
+      "summary": "स्वीप पूरा: कुल {{total}},वैध {{valid}}, अवैध {{invalid}}।",
+      "violationNotice": "{{count}} as-of उल्लंघन दर्ज — Invalid पैनल देखें।",
+      "invalidTitle": "अवैध नमूने",
+      "noInvalid": "कोई अवैध नमूना नहीं।",
+      "exportCsv": "CSV निर्यात",
+      "exportJson": "JSON निर्यात"
+    },
+    "notice": "इस वर्कबेंच का सारा डेटा, प्रॉम्प्ट और निर्णय चुनी गई तारीख पर एंकर किए गए हैं। लाइव मोड पर वापस जाने के लिए स्पष्ट पुष्टि आवश्यक है।",
+    "exitHint": "आप अभी भी रीप्ले मोड में हैं। कहीं और शुरू किया गया कोई भी नया विश्लेषण भी रीप्ले-एंकर होगा।",
+    "exitBtn": "लाइव पर वापस जाएँ"
   }
 }

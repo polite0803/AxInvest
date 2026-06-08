@@ -1,5 +1,18 @@
 import { expect, test } from "@playwright/test";
 
+async function dismissModals(page: import("@playwright/test").Page) {
+  const closeBtn = page.locator(".ant-modal-close").first();
+  if (await closeBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await closeBtn.click();
+    await page.waitForTimeout(300);
+  }
+  const okBtn = page.locator(".ant-modal-footer .ant-btn-primary").first();
+  if (await okBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await okBtn.click();
+    await page.waitForTimeout(300);
+  }
+}
+
 /**
  * Time-Travel / As-Of mode E2E spec
  *
@@ -51,6 +64,7 @@ test.describe("Time Travel / As-Of Mode", () => {
     // 详见 ContentArea.tsx line 164 (`!isStockPage && <AppHeader />`) 和 AppHeader.tsx line 64 (`if (isChatPage) return null`)。
     await page.goto("/settings");
     await page.waitForLoadState("domcontentloaded");
+    await dismissModals(page);
   });
 
   test("AppHeader mounts the LIVE pill on non-chat, non-stock pages", async ({ page }) => {
@@ -68,14 +82,15 @@ test.describe("Time Travel / As-Of Mode", () => {
   test("clicking LIVE opens the As-Of date picker modal", async ({ page }) => {
     const modeSwitch = page.locator('[data-testid="mode-switch"]');
     await expect(modeSwitch).toBeVisible({ timeout: 30000 });
-    await modeSwitch.click();
+    // Use force:true to bypass WelcomeWizard modal overlay
+    await modeSwitch.click({ force: true });
     const picker = page.locator('[data-testid="asof-date-picker"]');
     await expect(picker).toBeVisible({ timeout: 10000 });
   });
 
   test("picking a past date enters Replay mode and shows the Replay badge", async ({ page }) => {
     const modeSwitch = page.locator('[data-testid="mode-switch"]');
-    await modeSwitch.click();
+    await modeSwitch.click({ force: true });
     const picker = page.locator('[data-testid="asof-date-picker"]');
     await expect(picker).toBeVisible({ timeout: 10000 });
 
@@ -119,12 +134,13 @@ test.describe("Time Travel / As-Of Mode", () => {
       localStorage.setItem(key, JSON.stringify(data));
     });
     await page.reload();
+    await dismissModals(page);
     await expect(page.locator('[data-testid="mode-switch"]')).toBeVisible({
       timeout: 30000,
     });
 
     // Click the mode-switch — should open the confirm modal
-    await page.locator('[data-testid="mode-switch"]').click();
+    await page.locator('[data-testid="mode-switch"]').click({ force: true });
 
     // AntD Modal renders role="dialog" — verify one appears with a confirm copy
     const dialog = page.locator('[role="dialog"]').first();
@@ -173,6 +189,7 @@ test.describe("Time Travel / As-Of Mode", () => {
       localStorage.setItem(key, JSON.stringify(data));
     });
     await page.reload();
+    await dismissModals(page);
     await expect(page.locator('[data-testid="mode-switch"]')).toBeVisible({
       timeout: 30000,
     });
@@ -207,8 +224,9 @@ test.describe("Time Travel / As-Of Mode", () => {
         /* noop */
       }
     });
-    await page.goto("/");
+    await page.goto("/settings");
     await page.waitForLoadState("domcontentloaded");
+    await dismissModals(page);
     await expect(page.locator('[data-testid="mode-switch"]')).toBeVisible({
       timeout: 30000,
     });

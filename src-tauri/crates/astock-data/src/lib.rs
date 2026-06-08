@@ -938,6 +938,20 @@ impl AStockClient {
     }
 
     pub async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
+        // P5:搜索是当下语义(iwencai NoHistoricalSemantic),as-of 模式检查每日快照或返回空
+        if crate::as_of::is_asof_active() {
+            let as_of = crate::as_of::current_as_of();
+            if let Some(ref ctx) = as_of {
+                let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
+                if let Some(cached) = self.try_daily_snapshot("search_stock", &date) {
+                    if let Ok(r) = serde_json::from_str::<Vec<StockSearchResult>>(&cached) {
+                        if !r.is_empty() { return Ok(r); }
+                    }
+                }
+            }
+            crate::as_of::record_degradation("astock-data", "search_stock", "as-of 模式搜索不可用(搜索是当下语义)");
+            return Ok(vec![]);
+        }
         for name in &self.routing.search {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.search_stock(keyword).await {
@@ -1081,6 +1095,16 @@ impl AStockClient {
         // P4: 按 vendor 申报的 capability 决策
         // eastmoney Fallthrough, iwencai NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
+            // P5:先查每日快照缓存
+            let as_of = crate::as_of::current_as_of();
+            if let Some(ref ctx) = as_of {
+                let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
+                if let Some(cached) = self.try_daily_snapshot("get_sector_info", &date) {
+                    if let Ok(r) = serde_json::from_str::<Option<SectorInfo>>(&cached) {
+                        if r.is_some() { return Ok(r); }
+                    }
+                }
+            }
             for name in &self.routing.sector {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_sector_info") {
@@ -1433,6 +1457,16 @@ impl AStockClient {
         // P4: 按 vendor 申报的 capability 决策
         // eastmoney/ths NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
+            // P5:先查每日快照缓存
+            let as_of = crate::as_of::current_as_of();
+            if let Some(ref ctx) = as_of {
+                let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
+                if let Some(cached) = self.try_daily_snapshot("get_industry_ranking", &date) {
+                    if let Ok(r) = serde_json::from_str::<Vec<IndustryRank>>(&cached) {
+                        if !r.is_empty() { return Ok(r); }
+                    }
+                }
+            }
             for name in &self.routing.industry_ranking {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_industry_ranking") {
@@ -1475,6 +1509,16 @@ impl AStockClient {
         // P4: 按 vendor 申报的 capability 决策
         // eastmoney/akshare NoHistoricalSemantic
         if crate::as_of::is_asof_active() {
+            // P5:先查每日快照缓存
+            let as_of = crate::as_of::current_as_of();
+            if let Some(ref ctx) = as_of {
+                let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
+                if let Some(cached) = self.try_daily_snapshot("get_cls_flash", &date) {
+                    if let Ok(r) = serde_json::from_str::<Vec<ClsFlashItem>>(&cached) {
+                        if !r.is_empty() { return Ok(r); }
+                    }
+                }
+            }
             for name in &self.routing.cls_flash {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_cls_flash") {

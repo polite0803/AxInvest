@@ -17,8 +17,15 @@ pub fn calc_confidence(
     market_regime: f64,
     turnover_anomaly: f64,
 ) -> u8 {
-    // P3-1: sanitize inputs — NaN propagates through arithmetic and breaks .round() downstream.
-    let clean = |v: f64| if v.is_nan() { 0.0 } else { v };
+    // P3-1: sanitize inputs — NaN/Inf propagates through arithmetic and breaks .round() downstream.
+    // Rust 1.74+ f64::clamp(NaN, ...) panics, so we must catch both.
+    let clean = |v: f64| {
+        if v.is_nan() || v.is_infinite() {
+            0.0
+        } else {
+            v
+        }
+    };
     let score_consistency = clean(score_consistency);
     let signal_strength = clean(signal_strength);
     let liquidity_score = clean(liquidity_score);
@@ -35,7 +42,7 @@ pub fn calc_confidence(
         c *= 0.6;
     }
 
-    if c.is_nan() {
+    if c.is_nan() || c.is_infinite() {
         return 0;
     }
     (c * 100.0).clamp(0.0, 100.0).round() as u8

@@ -4,9 +4,12 @@
 //! 每次分析从模板加载 DAG 结构，注入实时行情数据，由 WorkEngine 并行执行。
 
 use crate::AppState;
+use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_core::entity::stock_analyses;
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
+use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
+use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
@@ -130,59 +133,8 @@ async fn load_and_inject_template(
     })
 }
 
-/// 从单个节点输出中提取"可读文本"。
-/// 节点类型不同，结构不同：
-///   - Agent：优先取 `output.content`（字符串）；否则回退到整个 output 的 JSON 字符串
-///   - Tool/Aggregator：直接序列化为 JSON 字符串
-fn extract_node_text(output: &serde_json::Value) -> String {
-    if let Some(content) = output.get("content").and_then(|v| v.as_str()) {
-        if !content.is_empty() {
-            return content.to_string();
-        }
-    }
-    output.to_string()
-}
-
-/// 工作流结果 → blackboard_snapshot（JSON 对象，键名采用约定前缀）
-///
-/// 键名约定（与 `stock_analysis.rs` 读取端保持一致）：
-///   - `report.<nodeId>`         分析师报告（如 `report.a-fundamentals`）
-///   - `report.investment-plan`  交易员方案（trader 节点映射到该键）
-///   - `value.assessment`        价值投资（巴菲特）评估
-///   - `rule_check.summary`      规则检查结果
-///   - `data_quality_summary`    数据质量总评
-///   - `raw.combined`            原始数据聚合
-///   - 其余节点（debate/risk/research-mgr/portfolio-mgr 等）按 nodeId 存
-///
-/// 每个 value 是 String 形态（便于 `HashMap<String, String>` 解析），
-/// 嵌套对象由后续 key_levels API 调用追加（用 Value 解析读取）。
-fn build_blackboard_snapshot(
-    results: &std::collections::HashMap<String, serde_json::Value>,
-) -> std::collections::HashMap<String, serde_json::Value> {
-    let mut bb: std::collections::HashMap<String, serde_json::Value> =
-        std::collections::HashMap::new();
-    for (node_id, raw_output) in results {
-        let text = extract_node_text(raw_output);
-        let key = match node_id.as_str() {
-            // 9 个分析师 + value-investor：归到 report.* 前缀
-            id if id.starts_with("a-") => format!("report.{id}"),
-            // 交易员：归到 report.investment-plan
-            "trader" => "report.investment-plan".to_string(),
-            // 价值投资评估
-            "value-investor" => "value.assessment".to_string(),
-            // 规则检查
-            "rule-check" => "rule_check.summary".to_string(),
-            // 数据质量
-            "data-quality" => "data_quality_summary".to_string(),
-            // 原始数据聚合
-            "raw-data" => "raw.combined".to_string(),
-            // 其余按 nodeId 直接存
-            _ => node_id.clone(),
-        };
-        bb.insert(key, serde_json::Value::String(text));
-    }
-    bb
-}
+/// 工作流结果 → blackboard_snapshot — 现已委托给 axagent-stock-analysis::blackboard 模块
+/// 此处保留占位以便未来重新内联
 
 fn extract_decision_fields(
     decision_json: &Option<String>,
@@ -210,12 +162,150 @@ fn extract_decision_fields(
     (action, position_pct, reasoning)
 }
 
+/// 解析 as_of_date 入参：None/空串 → None（live），Some(s) → 解析为 AsOfContext
+/// 抽出供单测：未来日期 / 错误格式必须 4xx-style 错误
+pub(crate) fn parse_asof_param(s: Option<String>) -> Result<Option<AsOfContext>, String> {
+    AsOfContext::parse_optional(s.as_deref())
+}
+
+/// 默认值，与 stock-analysis 模板的 defaults 保持一致；
+/// 改动这里请同步 `StockAnalysisConfigPanel.getDefaultVariables()`。
+const DEFAULT_MAX_CONCURRENT: usize = 12;
+const DEFAULT_STEP_TIMEOUT_SECS: u64 = 300;
+
+/// 从模板 variables 中解析 RunOptions 关键参数。
+///
+/// 用户在「股票分析设置 → 参数」中调整 `max_concurrent` /
+/// `agent_timeout_secs` 后，这里读到的就是新值；如果模板里没有这两个
+/// key（旧版本 / 用户清空）则用默认值。
+///
+/// 容错策略：
+///   * 越界 / 非法类型 → 用默认值；
+///   * max_concurrent ∈ [1, 32]，过小会让并发退化为串行，过大会拖垮 LLM 速率。
+///   * step_timeout ∈ [10, 3600] 秒，避免 0 或极端大值。
+pub(crate) fn resolve_runtime_options(
+    variables: Option<&[axagent_harness::workflow_types::Variable]>,
+) -> (usize, std::time::Duration) {
+    let lookup = |name: &str| -> Option<serde_json::Value> {
+        variables
+            .and_then(|vs| vs.iter().find(|v| v.name == name))
+            .map(|v| v.value.clone())
+    };
+
+    let max_concurrent = lookup("max_concurrent")
+        .and_then(|v| v.as_u64())
+        .map(|n| n.clamp(1, 32) as usize)
+        .unwrap_or(DEFAULT_MAX_CONCURRENT);
+
+    let step_timeout_secs = lookup("agent_timeout_secs")
+        .and_then(|v| v.as_u64())
+        .map(|n| n.clamp(10, 3600))
+        .unwrap_or(DEFAULT_STEP_TIMEOUT_SECS);
+
+    (max_concurrent, std::time::Duration::from_secs(step_timeout_secs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axagent_harness::workflow_types::Variable;
+    use serde_json::json;
+
+    #[test]
+    fn resolve_runtime_options_uses_defaults_when_missing() {
+        let (mc, to) = resolve_runtime_options(None);
+        assert_eq!(mc, DEFAULT_MAX_CONCURRENT);
+        assert_eq!(to.as_secs(), DEFAULT_STEP_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn resolve_runtime_options_reads_template_vars() {
+        let vars = vec![
+            Variable {
+                name: "max_concurrent".into(),
+                var_type: "number".into(),
+                value: json!(20),
+                description: None,
+                is_secret: false,
+            },
+            Variable {
+                name: "agent_timeout_secs".into(),
+                var_type: "number".into(),
+                value: json!(120),
+                description: None,
+                is_secret: false,
+            },
+        ];
+        let (mc, to) = resolve_runtime_options(Some(&vars));
+        assert_eq!(mc, 20);
+        assert_eq!(to.as_secs(), 120);
+    }
+
+    #[test]
+    fn resolve_runtime_options_clamps_extremes() {
+        let vars = vec![
+            Variable {
+                name: "max_concurrent".into(),
+                var_type: "number".into(),
+                value: json!(0), // 0 → clamp 到 1
+                description: None,
+                is_secret: false,
+            },
+            Variable {
+                name: "agent_timeout_secs".into(),
+                var_type: "number".into(),
+                value: json!(99999), // 过大 → clamp 到 3600
+                description: None,
+                is_secret: false,
+            },
+        ];
+        let (mc, to) = resolve_runtime_options(Some(&vars));
+        assert_eq!(mc, 1);
+        assert_eq!(to.as_secs(), 3600);
+    }
+
+    #[test]
+    fn resolve_runtime_options_falls_back_on_bad_types() {
+        let vars = vec![Variable {
+            name: "max_concurrent".into(),
+            var_type: "string".into(),
+            value: json!("not a number"),
+            description: None,
+            is_secret: false,
+        }];
+        let (mc, _) = resolve_runtime_options(Some(&vars));
+        assert_eq!(mc, DEFAULT_MAX_CONCURRENT);
+    }
+}
+
 #[tauri::command]
 pub async fn run_stock_workflow(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     stock_code: String,
     dry_run: Option<bool>,
+    as_of_date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    // 解析 as_of_date；非法或未来日期直接 4xx-style 错误
+    let as_of_ctx = parse_asof_param(as_of_date.clone())?;
+
+    if let Some(ctx) = as_of_ctx {
+        as_of::AS_OF
+            .scope(Some(ctx), async {
+                run_stock_workflow_inner(app, state, stock_code, dry_run, as_of_date).await
+            })
+            .await
+    } else {
+        run_stock_workflow_inner(app, state, stock_code, dry_run, None).await
+    }
+}
+
+async fn run_stock_workflow_inner(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    stock_code: String,
+    dry_run: Option<bool>,
+    as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let quote = state
         .astock_client
@@ -229,7 +319,11 @@ pub async fn run_stock_workflow(
         id: Set(analysis_id.clone()),
         stock_code: Set(stock_code.clone()),
         stock_name: Set(quote.name.clone()),
-        analysis_date: Set(chrono::Utc::now().format("%Y-%m-%d").to_string()),
+        // B12: 在 as-of 模式下,analysis_date 必须是 as-of 截止日,而不是 today
+        // —— spec §4.1 闭世界假设要求工作流产物日期 = 截断日,否则回放历史会串味
+        analysis_date: Set(as_of::current_as_of()
+            .map(|c| c.as_string())
+            .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string())),
         provider_id: Set("workflow".into()),
         conversation_id: Set(uuid::Uuid::new_v4().to_string()),
         status: Set("running".into()),
@@ -239,6 +333,15 @@ pub async fn run_stock_workflow(
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
         config_id: Set(None),
+        // Time-travel metadata: 标记该 analysis 为 replay 模式 + 截止日
+        analysis_kind: Set(if as_of_date.is_some() {
+            "replay".into()
+        } else {
+            "live".into()
+        }),
+        as_of_date: Set(as_of_date.clone()),
+        model_version: Set(None),
+        data_snapshot_id: Set(None),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }
@@ -302,6 +405,11 @@ pub async fn run_stock_workflow(
 
     let engine = Arc::clone(&state.work_engine);
 
+    // ── 从模板变量中解析执行参数 ──
+    // max_concurrent / step_timeout 之前在 RunOptions 中硬编码为 9/300，
+    // 现在通过模板变量 `max_concurrent` / `agent_timeout_secs` 让用户在设置面板调整。
+    let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
+
     let wf_name = format!("stock-analysis-{stock_code}");
     let workflow = engine
         .create_workflow(&wf_name, loaded.nodes, loaded.edges)
@@ -338,13 +446,22 @@ pub async fn run_stock_workflow(
     let output_schema = loaded.output_schema;
     let template_vars = loaded.variables;
 
+    // 读取 min_confidence 阈值（在 tokio::spawn 之外读取，捕获到闭包中）
+    // 来自 StockAnalysisConfigPanel 的 "min_confidence" 变量，默认 60
+    let min_confidence: u8 = template_vars
+        .as_deref()
+        .and_then(|vars| vars.iter().find(|v| v.name == "min_confidence"))
+        .and_then(|v| v.value.as_f64())
+        .map(|n| n.clamp(0.0, 100.0) as u8)
+        .unwrap_or(0);
+
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
     let sc_name_for_spawn = sc_name.clone();
     tokio::spawn(async move {
         let mut opts = RunOptions {
-            max_concurrent: 9,
-            step_timeout: std::time::Duration::from_secs(300),
+            max_concurrent,
+            step_timeout,
             progress_callback: Some(progress_cb),
             input: Some(json!({"stock_code": &stock_code})),
             input_schema: input_schema.clone(),
@@ -368,6 +485,15 @@ pub async fn run_stock_workflow(
                 is_secret: false,
             },
         ];
+        if let Some(d) = as_of_date.as_deref() {
+            merged_vars.push(axagent_harness::workflow_types::Variable {
+                name: "as_of_date".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(d.to_string()),
+                description: Some("时间旅行模式截止日 (YYYY-MM-DD)；live 模式为空".into()),
+                is_secret: false,
+            });
+        }
         if let Some(v) = template_vars {
             for tv in v {
                 if !merged_vars.iter().any(|mv| mv.name == tv.name) {
@@ -435,13 +561,39 @@ pub async fn run_stock_workflow(
                                     .get("portfolio-mgr")
                                     .and_then(|v| serde_json::to_string(v).ok())
                             });
-                        let (action, position_pct, reasoning) =
+                        let (mut action, position_pct, mut reasoning) =
                             extract_decision_fields(&decision_json);
+                        // Level 1: min_confidence 过滤 — 若 LLM 自报置信度低于阈值，
+                        // 将 action 覆盖为 "uncertain" 并标注在 reasoning 中
+                        if min_confidence > 0 {
+                            if let Some(conf) = decision_json
+                                .as_ref()
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+                            {
+                                if conf < min_confidence as f64 {
+                                    let orig_action = action.clone().unwrap_or_default();
+                                    let orig_reason = reasoning.clone().unwrap_or_default();
+                                    action = Some("uncertain".to_string());
+                                    reasoning = Some(format!(
+                                        "置信度 {:.0} 低于阈值 {min_confidence}，建议观望。原分析: {}\n原动作: {}",
+                                        conf, orig_reason, orig_action
+                                    ));
+                                }
+                            }
+                        }
                         // 持久化工作流结果到 blackboard_snapshot，供历史回放/报告
                         // 生成/跨日 key_levels 聚合使用。修复 Defect #2。
-                        let bb_snapshot =
-                            serde_json::to_string(&build_blackboard_snapshot(&result.results))
-                                .unwrap_or_else(|_| "{}".to_string());
+                        // B7: 消费 take_asof_degradation_report() 写入 `degraded` 块
+                        // (spec §4.1: vendor 降级报告)
+                        let as_of_for_meta: Option<AsOfContext> = as_of::current_as_of();
+                        let degradation_report = as_of::take_asof_degradation_report();
+                        let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
+                            &result.results,
+                            as_of_for_meta.as_ref(),
+                            &degradation_report,
+                        ))
+                        .unwrap_or_else(|_| "{}".to_string());
                         let _ = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
@@ -509,4 +661,161 @@ pub async fn cancel_stock_workflow(
         .await
         .map(|_| ())
         .map_err(|e| format!("取消工作流失败: {e}"))
+}
+
+// ── 批量/定时分析入口（无 Tauri State 依赖，供 CronExecutor 调用）──
+
+/// 对单只股票执行完整分析（无 Tauri 事件发射，适合批量定时扫描）
+///
+/// 与 `run_stock_workflow_inner` 逻辑相同但：
+/// - 不发射 `workflow-step-done` 事件（无前端监听）
+/// - 不需要 `as_of_date` 参数（使用当前时间，非回放模式）
+/// - 不需要 `dry_run`（总是完整执行）
+/// - 参数是独立引用而非 Tauri State
+pub async fn run_single_stock_analysis(
+    db: &DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    stock_code: &str,
+    stock_name: &str,
+) -> Result<String, String> {
+    // 1. 创建 stock_analyses 记录
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let analysis_id = uuid::Uuid::new_v4().to_string();
+
+    stock_analyses::ActiveModel {
+        id: Set(analysis_id.clone()),
+        stock_code: Set(stock_code.to_string()),
+        stock_name: Set(stock_name.to_string()),
+        analysis_date: Set(chrono::Utc::now().format("%Y-%m-%d").to_string()),
+        provider_id: Set("workflow".into()),
+        conversation_id: Set(uuid::Uuid::new_v4().to_string()),
+        status: Set("running".into()),
+        decision_action: Set(None),
+        decision_position_pct: Set(None),
+        decision_reasoning: Set(None),
+        decision_json: Set(None),
+        blackboard_snapshot: Set(None),
+        config_id: Set(None),
+        analysis_kind: Set("live".into()),
+        as_of_date: Set(None),
+        model_version: Set(None),
+        data_snapshot_id: Set(None),
+        created_at: Set(now_ms),
+        updated_at: Set(now_ms),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| format!("DB 写入失败: {e}"))?;
+
+    // 2. 获取行情（用于数据预检和 stock name）
+    let quote = client
+        .get_quote(stock_code)
+        .await
+        .map_err(|e| format!("行情获取失败: {e}"))?;
+
+    // 3. 数据质量预检
+    match data_quality_precheck(client, stock_code, &quote).await {
+        QualityPrecheckResult::Insufficient(reason) => {
+            let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
+                id: Set(analysis_id.clone()),
+                status: Set("failed".into()),
+                decision_json: Set(Some(
+                    json!({
+                        "action": "skip",
+                        "reasoning": format!("数据不足，跳过分析: {reason}"),
+                    })
+                    .to_string(),
+                )),
+                updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                ..Default::default()
+            })
+            .exec(db)
+            .await;
+            return Err(reason);
+        },
+        QualityPrecheckResult::Pass | QualityPrecheckResult::Partial(_) => {
+            // 继续执行
+        },
+    }
+
+    // 4. 加载模板并注入 stock_code
+    let loaded = load_and_inject_template(db, stock_code, stock_name).await?;
+
+    // 5. 解析运行时参数
+    let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
+
+    // 6. 创建并运行工作流
+    let wf_name = format!("stock-analysis-{stock_code}-batch");
+    let workflow = engine
+        .create_workflow(&wf_name, loaded.nodes, loaded.edges)
+        .await
+        .map_err(|e| format!("创建工作流失败: {e}"))?;
+    let wf_id = workflow.id.clone();
+
+    let opts = RunOptions {
+        max_concurrent,
+        step_timeout,
+        progress_callback: None,
+        input: Some(json!({"stock_code": stock_code})),
+        input_schema: loaded.input_schema.clone(),
+        output_schema: loaded.output_schema.clone(),
+        dry_run: false,
+        ..Default::default()
+    };
+
+    let result = engine.run_workflow(&wf_id, opts).await;
+
+    match result {
+        Ok(wf) => {
+            // 更新为完成状态
+            let decision_output = wf
+                .results
+                .get("portfolio-manager")
+                .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok());
+
+            let decision_action = decision_output.as_ref().and_then(|d| {
+                d.get("action")
+                    .and_then(|a| a.as_str().map(|s| s.to_string()))
+            });
+
+            let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
+                id: Set(analysis_id.clone()),
+                status: Set("completed".into()),
+                decision_action: Set(decision_action),
+                decision_json: Set(decision_output.map(|d| d.to_string())),
+                updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                ..Default::default()
+            })
+            .exec(db)
+            .await;
+
+            tracing::info!(
+                "[batch_analysis] {stock_code} ({stock_name}) 完成, status={:?}",
+                wf.status
+            );
+            Ok(analysis_id)
+        },
+        Err(e) => {
+            let err_msg = format!("{:?}", e);
+            let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
+                id: Set(analysis_id.clone()),
+                status: Set("failed".into()),
+                decision_json: Set(Some(
+                    json!({
+                        "action": "error",
+                        "reasoning": err_msg.clone(),
+                    })
+                    .to_string(),
+                )),
+                updated_at: Set(chrono::Utc::now().timestamp_millis()),
+                ..Default::default()
+            })
+            .exec(db)
+            .await;
+
+            tracing::error!("[batch_analysis] {stock_code} 失败: {err_msg}");
+            Err(err_msg)
+        },
+    }
 }

@@ -7518,7 +7518,16 @@
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "dryRun": "Dry Run",
+        "moat": "Moat",
+        "screener": "Screener",
+        "signals": "Signals",
+        "keylevels": "Key Levels",
+        "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading"
       },
       "panels": {
         "refresh": "Refresh",
@@ -7547,7 +7556,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "main": "Main",
+        "industryRank": "Industry Rank",
+        "noIndustry": "No industry data",
+        "hotStocks": "Hot Stocks",
+        "noHot": "No hot stock data",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "Screener",
@@ -7584,13 +7599,15 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "refresh": "Refresh"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -7811,7 +7828,10 @@
       "total": "total",
       "wrong": "wrong",
       "avgConfidence": "Avg Confidence",
-      "alpha": "Alpha"
+      "alpha": "Alpha",
+      "scopeAll": "الكل",
+      "scopeLive": "Live فقط",
+      "scopeReplay": "Replay فقط"
     },
     "chart": {
       "restore": "restore",
@@ -7966,7 +7986,25 @@
       "tagReal": "حقيقي",
       "tagSynthetic": "احتياطي",
       "crossCheckDivided": "المحللون منقسمون — راقب قبل التصرف",
-      "syntheticTooltip": "احتياطي بيانات متفرقة (K-line / مالية / رأس المال غير متوفرة، مركبة من السعر الحالي)"
+      "syntheticTooltip": "احتياطي بيانات متفرقة (K-line / مالية / رأس المال غير متوفرة، مركبة من السعر الحالي)",
+      "consensusDivided": "Divided",
+      "consensusBearish": "اتجاه هبوطي",
+      "crossCheckBearish": "الإجماع هبوطي — يتعارض مع توصية الشراء",
+      "consensusBullish": "إجماع صاعد",
+      "consensusNeutral": "محايد",
+      "bullish": "صاعد",
+      "bearish": "هابط",
+      "neutral": "محايد",
+      "bullishTooltip": "تطابقت إشارات الشراء/الوزن الزائد",
+      "bearishTooltip": "تطابقت إشارات البيع/الوزن الناقص",
+      "neutralTooltip": "لم تتطابق إشارات اتجاهية",
+      "reportCountSuffix": " تقرير",
+      "crossCheckAligned": "يتوافق مع إجماع المحللين",
+      "crossCheckNeutral": "{{neutral}} من {{total}} تقارير كانت محايدة — لا يؤكد توصية الشراء",
+      "crossCheckTitle": "التحقق المتبادل من المحللين (آخر {{updatedAt}})",
+      "dataQualitySummary": "{{real}} حقيقي + {{synthetic}} احتياطي",
+      "backtestWinrate": "نسبة الربح",
+      "bannerDegraded": "تم تخفيض دقة أنماط البيانات {{styles}} (as-of {{date}}). عامل ثقتها بأنها أقل من الأساليب غير المتدهورة."
     },
     "periodShort": "Short",
     "periodMid": "Mid",
@@ -7974,7 +8012,13 @@
     "generatedAt": "Generated at {time}",
     "bannerVendorDisabled": "Some styles are disabled: {styles}",
     "openSettings": "Open Settings",
-    "empty": "No recommendation data",
+    "empty": {
+      "replayDegradedTitle": "⏪ Degraded in Replay Mode",
+      "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
+      "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
+      "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
+      "_fallback": "No recommendation data"
+    },
     "styleDisabled": "(Disabled)",
     "styleDisabledReason": "Style {style} is disabled in settings",
     "row": {
@@ -8049,7 +8093,11 @@
   },
   "screener": {
     "title": "مُصفّي الأسهم",
-    "placeholder": "ابحث عن الأسهم حسب المعايير"
+    "placeholder": "ابحث عن الأسهم حسب المعايير",
+    "tab": {
+      "smartReco": "توصيات ذكية",
+      "myFilter": "تصفيتي"
+    }
   },
   "backtest": {
     "title": "اختبار رجعي",
@@ -8065,5 +8113,103 @@
     "expandToPanel": "توسيع إلى لوحة",
     "collapse": "طي",
     "collapseToBubble": "طي إلى فقاعة"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "مباشر",
+      "replay": "إعادة {{date}}",
+      "sweep": "اختبار رجعي دفعي",
+      "tooltipLive": "انقر للدخول إلى وضع الإعادة (تحليل في تاريخ سابق)",
+      "tooltipReplay": "انقر للعودة إلى الوضع المباشر",
+      "confirmTitle": "العودة إلى الوضع المباشر؟",
+      "confirmBody": "يستخدم الوضع المباشر بيانات في الوقت الفعلي، وقد تكون الاستنتاجات السابقة قد تم إبطالها بمعلومات جديدة. وضع الإعادة يغلق العالم عند تاريخ سابق مختار لمنع تحيز النظر إلى الأمام.",
+      "confirmOk": "الانتقال إلى المباشر",
+      "confirmCancel": "البقاء في الإعادة",
+      "currentlyInReplay": "تجري إعادة التشغيل عند {{date}}.",
+      "enteredReplay": "تم تفعيل وضع الإعادة: {{date}}",
+      "switchedToLive": "تم التبديل إلى الوضع المباشر"
+    },
+    "datePicker": {
+      "hint": "اختر يوم تداول سابق. يتم تعطيل اليوم والتواريخ المستقبلية (افتراض العالم المغلق).",
+      "placeholder": "اختر تاريخ as-of",
+      "ok": "بدء الإعادة",
+      "cancel": "إلغاء"
+    },
+    "pageAnchor": {
+      "live": "مباشر",
+      "replay": "إعادة",
+      "untilDate": "حتى {{date}}"
+    },
+    "replayBadge": {
+      "label": "إعادة · {{date}}",
+      "tooltip": "جميع البيانات والمطالبات والأحكام في هذا العرض مرساة في {{date}}. لا تستخدم للتداول المباشر."
+    },
+    "replayWatermark": {
+      "label": "حتى {{date}}"
+    },
+    "tour": {
+      "title": "وضع السفر عبر الزمن متاح الآن",
+      "body": "اربط جميع التحليلات والتوصيات بيوم تداول سابق لاختبار استراتيجياتك بأمان دون تحيز النظر إلى الأمام. سيرفض النظام التواريخ المستقبلية وسيتم تمييز انتهاكات الطوابع الزمنية على الجدول الزمني.",
+      "gotIt": "فهمت",
+      "stepAnchor": "انقر على حبة 'مباشر' في أي وقت للدخول إلى وضع الإعادة."
+    },
+    "violations": {
+      "chip": "⚠ {{n}} انتهاك",
+      "chip_plural": "⚠ {{n}} انتهاكات",
+      "chipAria": "{{n}} انتهاك(-ات) مرجعية مستقبلية في هذه العقدة",
+      "tooltip": "يشير مخرجات هذه العقدة إلى تواريخ بعد مرساة as-of. اعتبر نتيجتها غير موثوقة.",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "وضع الإعادة نشط. الاختيارات والأسعار ونطاقات الدخول مرساة في {{date}}. لا تستخدم للتداول المباشر.",
+    "backtestHint": "تجمع هذه الإحصائيات جميع التحليلات المكتملة (المباشر + الإعادة) حتى {{date}}. استخدم طاولة الإعادة للتصفية حسب الوضع.",
+    "degradedStyles": {
+      "title": "تدهور مصادر البيانات بسبب اقتطاع as-of",
+      "description": "تم تخفيض دقة أنماط البيانات التالية لأن تاريخ as-of {{date}} يقطع التاريخ اللازم للإشارة الكاملة.",
+      "reason": "السبب: {{reason}}",
+      "hint": "النتيجة المتدهورة ليست خاطئة؛ بل أقل إفادة. عامل ثقتها بأنها أقل من الأساليب غير المتدهورة.",
+      "vendor": "المورّد: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "متدهور · بعض البيانات بلا سجل",
+      "labelWithCount": "متدهور · {{n}} عناصر",
+      "tooltip": "في وضع الإعادة، تدفق الأموال/الهامش/حيازة الشمال ليس لها دلالات تاريخية وتم تخطيها."
+    }
+  },
+  "replayWorkbench": {
+    "title": "طاولة إعادة التشغيل",
+    "description": "اربط جميع البيانات بيوم سابق. سيرفض النظام التواريخ المستقبلية. اختبر استراتيجياتك بأمان دون تحيز النظر إلى الأمام.",
+    "step1": {
+      "title": "اختر تاريخ as-of",
+      "currentlyPicked": "حالياً تجري إعادة التشغيل عند {{date}}",
+      "reselect": "إعادة الاختيار"
+    },
+    "step2": {
+      "title": "شغّل تحليلاً مدركاً للإعادة",
+      "description": "جميع الإجراءات أدناه تحقن as_of_date = {{date}} في الواجهة الخلفية وتغلق العالم في ذلك اليوم.",
+      "analyze": "تحليل سهم واحد",
+      "backtest": "عرض إحصائيات الاختبار الرجعي",
+      "watchlist": "عرض قائمة المراقبة"
+    },
+    "sweep": {
+      "title": "مصفوفة المسح للإعادة",
+      "intro": "تشغيل الاختبار الرجعي دفعةً عبر الأسهم × تواريخ as-of. تفرض إعادة اختيار النطاق (لا ترث TimeAnchor العام).",
+      "codesLabel": "رموز الأسهم (واحد في كل سطر أو مفصولة بفواصل)",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "نطاق تواريخ as-of (أيام العمل فقط)",
+      "holdingDaysLabel": "أيام الحيازة",
+      "actionLabel": "قرار افتراضي",
+      "confidenceLabel": "ثقة القرار (0–1)",
+      "runBtn": "بدء المسح",
+      "running": "المسح جارٍ {{done}} / {{total}} …",
+      "summary": "اكتمل المسح: من {{total}},صالح {{valid}} / غير صالح {{invalid}}.",
+      "violationNotice": "تم تسجيل {{count}} انتهاكات as-of — راجع لوحة Invalid.",
+      "invalidTitle": "عينات غير صالحة",
+      "noInvalid": "لا توجد عينات غير صالحة.",
+      "exportCsv": "تصدير CSV",
+      "exportJson": "تصدير JSON"
+    },
+    "notice": "جميع البيانات والمطالبات والأحكام في هذه الطاولة مرساة في التاريخ المختار. تتطلب العودة إلى الوضع المباشر تأكيداً صريحاً.",
+    "exitHint": "لا تزال في وضع الإعادة. أي تحليل جديد يتم بدؤه في مكان آخر سيكون أيضاً مرساة في الإعادة.",
+    "exitBtn": "العودة إلى المباشر"
   }
 }

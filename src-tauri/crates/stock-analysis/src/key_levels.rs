@@ -100,17 +100,18 @@ impl KeyLevelTracker {
         Ok(id)
     }
 
-    /// 回测历史快照命中率
-    pub async fn backtest_key_levels(
+    /// 回测历史快照命中率（可配置参数）
+    pub async fn backtest_key_levels_with_config(
         &self,
         _lookback_days: u32,
+        cfg: &BacktestConfig,
     ) -> Result<KeyLevelBacktestStats, String> {
         use axagent_core::entity::stock_analyses;
         let analyses = stock_analyses::Entity::find()
             .filter(stock_analyses::Column::Status.eq("completed"))
             .filter(stock_analyses::Column::BlackboardSnapshot.is_not_null())
             .order_by_desc(stock_analyses::Column::CreatedAt)
-            .limit(Some(100))
+            .limit(Some(cfg.query_limit))
             .all(self.db.as_ref())
             .await
             .map_err(|e| e.to_string())?;
@@ -133,7 +134,7 @@ impl KeyLevelTracker {
                     // 获取快照日期之后的K线
                     if let Ok(klines) = self
                         .client
-                        .get_klines(&analysis.stock_code, "daily", 500)
+                        .get_klines(&analysis.stock_code, "daily", cfg.klines_count)
                         .await
                     {
                         let future: Vec<_> = klines
@@ -141,9 +142,9 @@ impl KeyLevelTracker {
                             .filter(|k| k.date.as_str() > snapshot_date)
                             .collect();
 
-                        let day1 = future.first();
-                        let day3 = future.get(2); // index 2 = 第3天
-                        let day5 = future.get(4); // index 4 = 第5天
+                        let day1 = future.get(cfg.day1_offset);
+                        let day3 = future.get(cfg.day3_offset);
+                        let day5 = future.get(cfg.day5_offset);
 
                         if let Some(k) = day1 {
                             if k.low <= support {
@@ -185,6 +186,36 @@ impl KeyLevelTracker {
         }
 
         Ok(stats)
+    }
+
+    /// 回测历史快照命中率（默认配置：limit 100，klines 500，1d/3d/5d）。
+    pub async fn backtest_key_levels(
+        &self,
+        lookback_days: u32,
+    ) -> Result<KeyLevelBacktestStats, String> {
+        self.backtest_key_levels_with_config(lookback_days, &BacktestConfig::default())
+            .await
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BacktestConfig {
+    pub query_limit: u64,
+    pub klines_count: u32,
+    pub day1_offset: usize,
+    pub day3_offset: usize,
+    pub day5_offset: usize,
+}
+
+impl Default for BacktestConfig {
+    fn default() -> Self {
+        Self {
+            query_limit: 100,
+            klines_count: 500,
+            day1_offset: 0,
+            day3_offset: 2,
+            day5_offset: 4,
+        }
     }
 }
 

@@ -4,6 +4,13 @@
 
 use serde::Serialize;
 
+/// 默认日频年化因子（252 个交易日）
+pub const ANNUALIZATION_FACTOR_DAILY: f64 = 252.0;
+/// 凯利公式默认重仓阈值
+pub const KELLY_HEAVY_THRESHOLD: f64 = 0.25;
+/// 凯利公式默认中仓阈值
+pub const KELLY_MEDIUM_THRESHOLD: f64 = 0.1;
+
 // ── 最大回撤 ──
 
 /// 计算峰值到谷底的最大回撤比例 (0.0~1.0)，复用 backtest.rs 中的逻辑。
@@ -33,8 +40,18 @@ pub fn max_drawdown(prices: &[f64]) -> f64 {
 // ── 夏普比率 ──
 
 /// 计算夏普比率：(mean_return - risk_free) / stddev_return。
-/// 假定 returns 为周期收益率序列。返回值的 annualized 字段将周期值年化（乘以 sqrt(252) for日频）。
+/// 使用 `ANNUALIZATION_FACTOR_DAILY` 作为默认年化因子。
 pub fn sharpe_ratio(returns: &[f64], risk_free: f64) -> SharpeResult {
+    sharpe_ratio_with_annualization(returns, risk_free, ANNUALIZATION_FACTOR_DAILY)
+}
+
+/// 带自定义年化因子的夏普比率。
+/// `annualization_factor` 为年化时的周期数（日频=252，周频=52，月频=12）。
+pub fn sharpe_ratio_with_annualization(
+    returns: &[f64],
+    risk_free: f64,
+    annualization_factor: f64,
+) -> SharpeResult {
     let n = returns.len();
     if n < 2 {
         return SharpeResult {
@@ -51,7 +68,7 @@ pub fn sharpe_ratio(returns: &[f64], risk_free: f64) -> SharpeResult {
     let sharpe = if stddev > 0.0 { excess / stddev } else { 0.0 };
     SharpeResult {
         sharpe: (sharpe * 1000.0).round() / 1000.0,
-        annualized: (sharpe * (252.0_f64.sqrt()) * 1000.0).round() / 1000.0,
+        annualized: (sharpe * (annualization_factor.sqrt()) * 1000.0).round() / 1000.0,
         mean_return: (mean * 10000.0).round() / 100.0,
         stddev: (stddev * 10000.0).round() / 100.0,
     }
@@ -184,8 +201,27 @@ pub struct PEGResult {
 // ── 凯利公式 ──
 
 /// Kelly Criterion: f* = p - q / (W/L) = p - (1-p) / (avg_win / avg_loss)
-/// 返回建议仓位比例。
+/// 返回建议仓位比例。使用 `KELLY_HEAVY_THRESHOLD` / `KELLY_MEDIUM_THRESHOLD` 作为默认阈值。
 pub fn kelly_criterion(win_rate: f64, avg_win: f64, avg_loss: f64) -> KellyResult {
+    kelly_criterion_with_thresholds(
+        win_rate,
+        avg_win,
+        avg_loss,
+        KELLY_HEAVY_THRESHOLD,
+        KELLY_MEDIUM_THRESHOLD,
+    )
+}
+
+/// 带自定义仓位信号阈值的凯利公式。
+/// - `heavy_threshold`: 超过此值视为"重仓"（默认 0.25）
+/// - `medium_threshold`: 超过此值视为"中等"（默认 0.1），低于此值且 >0 为"轻仓"
+pub fn kelly_criterion_with_thresholds(
+    win_rate: f64,
+    avg_win: f64,
+    avg_loss: f64,
+    heavy_threshold: f64,
+    medium_threshold: f64,
+) -> KellyResult {
     if avg_loss <= 0.0 || avg_win <= 0.0 || win_rate <= 0.0 {
         return KellyResult {
             kelly_fraction: 0.0,
@@ -197,9 +233,9 @@ pub fn kelly_criterion(win_rate: f64, avg_win: f64, avg_loss: f64) -> KellyResul
     let odds = avg_win / avg_loss;
     let kelly = ((win_rate * (odds + 1.0) - 1.0) / odds).max(0.0);
     let half = kelly / 2.0;
-    let signal = if kelly > 0.25 {
+    let signal = if kelly > heavy_threshold {
         "重仓"
-    } else if kelly > 0.1 {
+    } else if kelly > medium_threshold {
         "中等"
     } else if kelly > 0.0 {
         "轻仓"

@@ -1,4 +1,5 @@
 import { Tooltip } from "@/components/layout/Tooltip";
+import { ModeSwitch } from "@/components/time-travel/ModeSwitch";
 import { useHelpStore } from "@/stores/feature/helpStore";
 import { theme } from "antd";
 import { ArrowLeft, HelpCircle } from "lucide-react";
@@ -122,17 +123,20 @@ export function AppHeader() {
         )}
       </div>
 
-      <Tooltip title={t("help.title")}>
-        <button
-          type="button"
-          onClick={toggleHelp}
-          className="titlebar-btn"
-          aria-label={t("help.title")}
-          style={{ color: token.colorTextQuaternary, flexShrink: 0 }}
-        >
-          <HelpCircle size={16} />
-        </button>
-      </Tooltip>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <ModeSwitch />
+        <Tooltip title={t("help.title")}>
+          <button
+            type="button"
+            onClick={toggleHelp}
+            className="titlebar-btn"
+            aria-label={t("help.title")}
+            style={{ color: token.colorTextQuaternary, flexShrink: 0 }}
+          >
+            <HelpCircle size={16} />
+          </button>
+        </Tooltip>
+      </div>
     </div>
   );
 }

@@ -117,11 +117,27 @@ pub struct RecoResponse {
     pub period: Period,
     /// 按风格分组的 picks，每组 ≤ 10
     pub picks: std::collections::HashMap<Style, Vec<RecoPick>>,
-    /// 被 vendor 缺失禁用的风格
+    /// 被 vendor 缺失禁用的风格（live 模式下由 vendor 状态决定）
     pub disabled_styles: Vec<Style>,
+    /// 被时间锚定 / as-of 截断降级的风格（spec §8）
+    /// 与 `disabled_styles` 区别：disabled 是 vendor 完全不可用；
+    /// degraded 是该风格对当前 as_of_date 没有历史语义（如 PE-TTM 仅有快照、
+    /// 资金流无 N 日前对比等）。前端展示时用不同颜色(灰 / 橙)。
+    /// 仅在 as-of 模式下非空；live 模式恒为 `vec![]`。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub degraded_styles: Vec<Style>,
+    /// `degraded_styles` 中各风格的降级原因（key=style, value=降级原因文本）
+    /// 用于前端"⛔ 已降级：{reason}"提示。serde 序列化为 camelCase。
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub degraded_reasons: std::collections::HashMap<Style, String>,
     /// 生成时间戳（毫秒）
     pub generated_at: i64,
     /// **过滤前**的 seed pool 大小（hot + industry 龙头去重后）
     /// 实际参与扫描的池大小更小（流动性过滤会进一步剔除）
     pub raw_seed_pool_size: usize,
+    /// 时间旅行模式截止日 (YYYY-MM-DD)；live 模式为 None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub as_of_date: Option<String>,
+    /// 模式标签：live / replay / backtest_sweep
+    pub mode: String,
 }

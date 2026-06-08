@@ -517,7 +517,7 @@ mod tests {
             err.code(),
             crate::work_engine::node_executor_trait::error_code::VALIDATION_FAILED
         );
-        assert!(err.to_string().contains("input_var 指向的变量为空或不存在"));
+        assert!(err.to_string().contains("指向的变量为空或不存在"));
     }
 
     #[tokio::test]

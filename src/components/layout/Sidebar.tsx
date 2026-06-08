@@ -12,6 +12,7 @@ import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar } from "antd";
 import {
   ArrowLeftRight,
+  Clock,
   Eye,
   Filter,
   GitCompareArrows,
@@ -147,6 +148,13 @@ const builtinNavItems: NavItem[] = [
     icon: <History size={18} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.backtest",
     path: "/backtest",
+    isPlugin: false,
+  },
+  {
+    key: "replay-workbench",
+    icon: <Clock size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.replayWorkbench",
+    path: "/replay-workbench",
     isPlugin: false,
   },
   {

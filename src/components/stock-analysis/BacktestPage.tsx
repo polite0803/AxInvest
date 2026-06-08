@@ -14,7 +14,7 @@ export function BacktestPage() {
   return (
     <PageErrorBoundary title="Backtest">
       <div className="flex h-full flex-col">
-        <PageHeader titleKey="backtest.title" backTo="/stock-analysis" />
+        <PageHeader titleKey="stockAnalysis.backtest.title" backTo="/stock-analysis" />
         <div className="flex-1 overflow-auto p-4 space-y-4">
           <BacktestPanel />
           <HistoricalAnalysisPanel analysisId={analysisId ?? ""} />

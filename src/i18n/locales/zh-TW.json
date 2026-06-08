@@ -29,7 +29,8 @@
     "screener": "選股",
     "trade": "交易",
     "backtest": "回測",
-    "compare": "對比"
+    "compare": "對比",
+    "replayWorkbench": "回放工作台"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -7517,7 +7518,16 @@
         "riskModel": "风险模型",
         "agentRuntime": "Agent 运行时",
         "toolRuntime": "Tool 运行时",
-        "workflow": "工作流"
+        "workflow": "工作流",
+        "dryRun": "Dry Run",
+        "moat": "Moat",
+        "screener": "Screener",
+        "signals": "Signals",
+        "keylevels": "Key Levels",
+        "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading"
       },
       "panels": {
         "refresh": "刷新",
@@ -7546,7 +7556,13 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通"
+        "szFlow": "深股通",
+        "main": "Main",
+        "industryRank": "Industry Rank",
+        "noIndustry": "No industry data",
+        "hotStocks": "Hot Stocks",
+        "noHot": "No hot stock data",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "荐股",
@@ -7583,13 +7599,15 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元"
+        "unit10k": "万元",
+        "refresh": "Refresh"
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
-        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
+        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "股票分析工作流",
@@ -7810,7 +7828,10 @@
       "total": "total",
       "wrong": "wrong",
       "avgConfidence": "平均置信度",
-      "alpha": "超额收益"
+      "alpha": "Alpha",
+      "scopeAll": "全部",
+      "scopeLive": "僅 Live",
+      "scopeReplay": "僅 Replay"
     },
     "chart": {
       "restore": "restore",
@@ -8076,7 +8097,25 @@
       "tagReal": "真實",
       "tagSynthetic": "兜底",
       "crossCheckDivided": "分析師觀點分歧，建議觀望",
-      "syntheticTooltip": "數據稀疏兜底（K 線 / 財務 / 資金數據不可用，按現價合成）"
+      "syntheticTooltip": "數據稀疏兜底（K 線 / 財務 / 資金數據不可用，按現價合成）",
+      "consensusDivided": "Divided",
+      "consensusBearish": "看空",
+      "crossCheckBearish": "市場共識看空 — 與買入推薦矛盾",
+      "consensusBullish": "看多共識",
+      "consensusNeutral": "中性",
+      "bullish": "看多",
+      "bearish": "看空",
+      "neutral": "中性",
+      "bullishTooltip": "買入/加倉信號匹配",
+      "bearishTooltip": "賣出/減倉信號匹配",
+      "neutralTooltip": "無方向性信號匹配",
+      "reportCountSuffix": " 份報告",
+      "crossCheckAligned": "與分析師共識一致",
+      "crossCheckNeutral": "{{total}}份報告中{{neutral}}份中性",
+      "crossCheckTitle": "分析師交叉驗證 (更新於 {{updatedAt}})",
+      "dataQualitySummary": "{{real}} 真實 + {{synthetic}} 兜底",
+      "backtestWinrate": "勝率",
+      "bannerDegraded": "資料風格 {{styles}} 因 as-of {{date}} 截斷,已以降級模式輸出,請低於非降級風格的可信度處理。"
     },
     "periodShort": "短期",
     "periodMid": "中期",
@@ -8084,7 +8123,13 @@
     "generatedAt": "生成於 {time}",
     "bannerVendorDisabled": "部分風格已禁用: {styles}",
     "openSettings": "打開設定",
-    "empty": "暫無推薦數據",
+    "empty": {
+      "replayDegradedTitle": "⏪ Degraded in Replay Mode",
+      "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
+      "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
+      "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
+      "empty": "暫無推薦數據"
+    },
     "styleDisabled": "(已禁用)",
     "styleDisabledReason": "風格 {style} 已在設定中禁用",
     "row": {
@@ -8159,7 +8204,11 @@
   },
   "screener": {
     "title": "選股中心",
-    "placeholder": "依條件篩選股票"
+    "placeholder": "依條件篩選股票",
+    "tab": {
+      "smartReco": "智能薦股",
+      "myFilter": "我的篩選"
+    }
   },
   "backtest": {
     "title": "回測驗證",
@@ -8175,5 +8224,103 @@
     "expandToPanel": "展開為面板",
     "collapse": "折疊",
     "collapseToBubble": "折疊為氣泡"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "即時",
+      "replay": "回放 {{date}}",
+      "sweep": "批次回測",
+      "tooltipLive": "點擊進入回放模式（按過去某日分析）",
+      "tooltipReplay": "點擊切回即時模式",
+      "confirmTitle": "確認切回即時模式？",
+      "confirmBody": "即時模式使用最新行情，此前得出的結論可能已被新資訊推翻。回放模式把世界封在選定的過去某日，可避免前視偏差。",
+      "confirmOk": "切到即時",
+      "confirmCancel": "保持在回放",
+      "currentlyInReplay": "當前正以 {{date}} 為錨點回放。",
+      "enteredReplay": "已進入回放模式：{{date}}",
+      "switchedToLive": "已切到即時模式"
+    },
+    "datePicker": {
+      "hint": "請選擇過去的交易日。今天及未來日期被禁用（封閉世界假設）。",
+      "placeholder": "選擇截止日期",
+      "ok": "進入回放",
+      "cancel": "取消"
+    },
+    "pageAnchor": {
+      "live": "即時",
+      "replay": "回放",
+      "untilDate": "截至 {{date}}"
+    },
+    "replayBadge": {
+      "label": "回放 · {{date}}",
+      "tooltip": "此視圖中的所有資料、提示詞與結論都以 {{date}} 為錨點。不可用於實盤交易。"
+    },
+    "replayWatermark": {
+      "label": "截至 {{date}}"
+    },
+    "tour": {
+      "title": "時間旅行模式已上線",
+      "body": "把分析和薦股都錨定到過去的某一日，可以安全地回測策略、避免前視偏差。系統會拒絕未來日期，違反時間約束的輸出會在時間線上高亮。",
+      "gotIt": "知道了",
+      "stepAnchor": "隨時點擊「即時」膠囊進入回放模式。"
+    },
+    "violations": {
+      "chip": "⚠ {{n}} 處違規",
+      "chip_plural": "⚠ {{n}} 處違規",
+      "chipAria": "本節點有 {{n}} 處未來日期引用違規",
+      "tooltip": "本節點輸出提及了 as-of 錨點之後的日期。結論應視為不可信。",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "回放模式：薦股基於截至 {{date}} 的資料，今日及之後的行情不參與排序。",
+    "backtestHint": "回放模式：以下統計僅彙總 as-of 錨點 = {{date}} 的歷史回放。",
+    "degradedStyles": {
+      "title": "as-of 截斷導致的資料降級",
+      "description": "以下資料風格因 as-of 截止日 {{date}} 截斷了所需的全部歷史,在回放模式下以低可信度輸出。",
+      "reason": "原因: {{reason}}",
+      "hint": "降級不等於錯誤,只是資訊量變少,請低於非降級風格的可信度處理。",
+      "vendor": "資料源: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "已降級 · 部分資料無歷史",
+      "labelWithCount": "已降級 · {{n}} 項",
+      "tooltip": "回放模式下資金流向/融資融券/北向持倉等資料無歷史語意,已被跳過。詳見推薦面板的降級提示。"
+    }
+  },
+  "replayWorkbench": {
+    "title": "回放工作台",
+    "description": "把所有資料錨定到過去的某一天。系統會拒絕未來日期。可安全回測策略，避免前視偏差。",
+    "step1": {
+      "title": "選擇截止日期",
+      "currentlyPicked": "當前正以 {{date}} 為錨點回放",
+      "reselect": "重選"
+    },
+    "step2": {
+      "title": "執行回放感知分析",
+      "description": "下方所有操作都會把 as_of_date = {{date}} 注入後端，把世界封閉在該日。",
+      "analyze": "分析單股",
+      "backtest": "查看回測統計",
+      "watchlist": "查看自選股"
+    },
+    "sweep": {
+      "title": "回放矩陣",
+      "intro": "批次跑「股票 × as-of 截止日」回測矩陣。強制重選日期範圍（不沿用全域 TimeAnchor）。",
+      "codesLabel": "股票代碼（每行一個或逗號分隔）",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "As-of 截止日範圍（僅工作日）",
+      "holdingDaysLabel": "持有天數",
+      "actionLabel": "假設決策",
+      "confidenceLabel": "決策信心 (0–1)",
+      "runBtn": "開始 Sweep",
+      "running": "正在跑 sweep {{done}} / {{total}} …",
+      "summary": "Sweep 完成: 共 {{total}},有效 {{valid}}, 失敗 {{invalid}}。",
+      "violationNotice": "已記錄 {{count}} 處 as-of 違規 — 詳見 Invalid 折疊面板。",
+      "invalidTitle": "失敗樣本",
+      "noInvalid": "無失敗樣本。",
+      "exportCsv": "匯出 CSV",
+      "exportJson": "匯出 JSON"
+    },
+    "notice": "此工作台中的所有資料、提示詞與結論都以選定日期為錨點。切回 Live 模式需要顯式確認。",
+    "exitHint": "你仍在回放模式。在別處發起的任何新分析都會帶 as-of 錨點。",
+    "exitBtn": "切回 Live"
   }
 }

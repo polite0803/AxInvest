@@ -334,20 +334,19 @@ mod capability_tests {
     #[test]
     fn akshare_cls_flash_is_no_historical() {
         let v = make_vendor();
-        assert_eq!(
-            v.asof_capability("get_cls_flash"),
-            AsOfCapability::NoHistoricalSemantic
-        );
+        assert_eq!(v.asof_capability("get_cls_flash"), AsOfCapability::NoHistoricalSemantic);
     }
 
     #[test]
     fn akshare_others_are_fallthrough() {
         let v = make_vendor();
-        for m in &["get_financials", "get_news", "get_consensus_eps", "get_quote"] {
-            assert_eq!(
-                v.asof_capability(m),
-                AsOfCapability::Fallthrough
-            );
+        for m in &[
+            "get_financials",
+            "get_news",
+            "get_consensus_eps",
+            "get_quote",
+        ] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
     }
 }

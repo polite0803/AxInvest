@@ -967,10 +967,15 @@ pub fn run() {
             commands::stock_analysis::execute_stock_mcp_tool,
             commands::stock_analysis::backtest_analysis,
             commands::stock_analysis::backtest_all_history,
+            commands::stock_analysis::run_replay_backtest,
             commands::stock_analysis::create_stock_cron,
             commands::stock_analysis::list_stock_crons,
             commands::stock_analysis::toggle_stock_cron,
             commands::stock_analysis::delete_stock_cron,
+            commands::stock_analysis::create_watchlist_scan_cron,
+            commands::stock_analysis::list_watchlist_scan_crons,
+            commands::stock_analysis::toggle_watchlist_scan_cron,
+            commands::stock_analysis::delete_watchlist_scan_cron,
             commands::stock_analysis::create_price_alert,
             commands::stock_analysis::list_price_alerts,
             commands::stock_analysis::delete_price_alert,
@@ -1008,6 +1013,10 @@ pub fn run() {
             commands::stock_analysis::get_stock_peers,
             commands::stock_analysis::get_stock_option_pcr,
             commands::stock_analysis::check_vendor_health,
+            // 缺陷 E 修复: as-of 降级实时计数
+            commands::stock_analysis::get_asof_degradation_count,
+            commands::stock_analysis::get_asof_degradation_log,
+            commands::stock_analysis::clear_asof_degradation_log,
             // Service health check
             commands::health::get_service_health,
             // Personality commands

@@ -51,6 +51,9 @@ const LazyScreenerPage = lazy(() => import("@/pages/ScreenerPage").then((m) => (
 const LazyTradePage = lazy(() => import("@/pages/TradePage").then((m) => ({ default: m.TradePage })));
 const LazyBacktestPage = lazy(() => import("@/pages/BacktestPage").then((m) => ({ default: m.BacktestPage })));
 const LazyComparePage = lazy(() => import("@/pages/ComparePage").then((m) => ({ default: m.ComparePage })));
+const LazyReplayWorkbenchPage = lazy(() =>
+  import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
+);
 
 function PageLoader() {
   return (
@@ -142,6 +145,7 @@ export const ContentArea = memo(function ContentArea() {
     "/trade",
     "/backtest",
     "/compare",
+    "/replay-workbench",
   ]);
   const isStockPage = stockInvestmentPaths.has(location.pathname);
 
@@ -245,6 +249,10 @@ export const ContentArea = memo(function ContentArea() {
           <Route
             path="/compare"
             element={<SafeLazyPage Page={LazyComparePage} />}
+          />
+          <Route
+            path="/replay-workbench"
+            element={<SafeLazyPage Page={LazyReplayWorkbenchPage} />}
           />
           <Route
             path="/devtools/trace-explorer"

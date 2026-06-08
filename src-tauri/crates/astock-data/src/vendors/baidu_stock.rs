@@ -656,30 +656,35 @@ mod capability_tests {
     #[test]
     fn baidu_asof_capability_quote_is_synthesize() {
         let v = make_vendor();
-        assert_eq!(
-            v.asof_capability("get_quote"),
-            AsOfCapability::SynthesizeFromKline
-        );
+        assert_eq!(v.asof_capability("get_quote"), AsOfCapability::SynthesizeFromKline);
     }
 
     #[test]
     fn baidu_asof_capability_klines_is_native() {
         let v = make_vendor();
-        assert_eq!(
-            v.asof_capability("get_klines"),
-            AsOfCapability::NativeDateParam
-        );
+        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::NativeDateParam);
     }
 
     #[test]
     fn baidu_asof_capability_others_are_fallthrough() {
         let v = make_vendor();
         for m in &[
-            "get_financials", "get_news", "get_money_flow", "get_dragon_tiger",
-            "get_lockup_schedule", "get_margin_data", "get_north_bound_holding",
-            "get_sector_info", "get_shareholder_trades", "get_dividend_records",
-            "search_stock", "get_research_reports", "get_concept_blocks",
-            "get_hot_stocks", "get_industry_ranking", "get_north_bound_flow",
+            "get_financials",
+            "get_news",
+            "get_money_flow",
+            "get_dragon_tiger",
+            "get_lockup_schedule",
+            "get_margin_data",
+            "get_north_bound_holding",
+            "get_sector_info",
+            "get_shareholder_trades",
+            "get_dividend_records",
+            "search_stock",
+            "get_research_reports",
+            "get_concept_blocks",
+            "get_hot_stocks",
+            "get_industry_ranking",
+            "get_north_bound_flow",
         ] {
             assert_eq!(
                 v.asof_capability(m),

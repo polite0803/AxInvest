@@ -1,8 +1,40 @@
-use chrono::{Datelike, NaiveDate, Timelike, Weekday};
+use chrono::{Datelike, Duration, NaiveDate, Timelike, Weekday};
+use std::collections::HashSet;
+use std::sync::{LazyLock, RwLock};
 
-/// 判断是否为A股交易日
+/// 远程拉取的 A 股节假日缓存(YYYY-MM-DD 格式)。
+/// 启动时由 `init_holiday_calendar` 异步填充,is_trading_day 优先查这里。
+/// 用 RwLock 允许运行时刷新(每年初拉一次新年日历)。
+static REMOTE_HOLIDAYS: LazyLock<RwLock<HashSet<String>>> =
+    LazyLock::new(|| RwLock::new(HashSet::new()));
+
+/// 把东方财富返回的 "20250101" 格式转换为 "2025-01-01"
+fn em_date_to_iso(s: &str) -> String {
+    if s.len() == 8 && s.chars().all(|c| c.is_ascii_digit()) {
+        format!("{}-{}-{}", &s[0..4], &s[4..6], &s[6..8])
+    } else {
+        s.to_string()
+    }
+}
+
+/// 判断是否为A股交易日。
+///
+/// 优先级:
+/// 1. 远程节假日缓存(启动时由 init_holiday_calendar 异步填充,优先于硬编码)
+/// 2. 周末判断(Sat/Sun)
+/// 3. 调休工作日(周末但上班)
+/// 4. 2025-2026 年硬编码节假日
+///
+/// 缺陷 A 修复:2027 年及以后不再依赖硬编码,而是依赖远程缓存(由东方财富 API 拉取 365 天滚动)。
 pub fn is_trading_day(date: &NaiveDate) -> bool {
     let date_str = date.format("%Y-%m-%d").to_string();
+
+    // 1) 远程节假日缓存命中 → 非交易日
+    if let Ok(cache) = REMOTE_HOLIDAYS.read() {
+        if cache.contains(&date_str) {
+            return false;
+        }
+    }
 
     // 调休工作日（周末但上班）——优先于周末判断
     let workdays = [
@@ -80,6 +112,34 @@ pub fn is_trading_day(date: &NaiveDate) -> bool {
     true
 }
 
+/// 查找指定日期之前最近的交易日(若 date 本身是交易日,返回 date)
+/// 用于 as-of 模式下周末/节假日的 fallback: 用户选择回看周六,
+/// 真实数据应该取周五收盘。
+pub fn previous_trading_day(date: NaiveDate) -> NaiveDate {
+    let mut candidate = date;
+    for _ in 0..14 {
+        // 14 天上限(春节+调休极端情况)
+        if is_trading_day(&candidate) {
+            return candidate;
+        }
+        candidate -= Duration::days(1);
+    }
+    // 兜底:连续14天都不是交易日(极端硬编码漏洞),返回原 date
+    date
+}
+
+/// 查找指定日期之后最近的交易日(若 date 本身是交易日,返回 date)
+pub fn next_trading_day(date: NaiveDate) -> NaiveDate {
+    let mut candidate = date;
+    for _ in 0..14 {
+        if is_trading_day(&candidate) {
+            return candidate;
+        }
+        candidate += Duration::days(1);
+    }
+    date
+}
+
 /// 判断当前是否为交易时间
 pub fn is_trading_time() -> bool {
     let now = chrono::Utc::now();
@@ -139,7 +199,8 @@ pub async fn fetch_holiday_calendar() -> Result<Vec<String>, String> {
         .iter()
         .filter_map(|d| {
             let is_trading = d["IS_TRADING_DAY"].as_str().unwrap_or("1") == "0";
-            let date = d["TRADE_DATE"].as_str().unwrap_or("").to_string();
+            let date_raw = d["TRADE_DATE"].as_str().unwrap_or("");
+            let date = em_date_to_iso(date_raw);
             if !date.is_empty() && is_trading {
                 Some(date)
             } else {
@@ -149,6 +210,33 @@ pub async fn fetch_holiday_calendar() -> Result<Vec<String>, String> {
         .collect();
 
     Ok(holidays)
+}
+
+/// 把远程拉取的节假日写入全局缓存。
+/// 启动时调用一次,失败也不影响 is_trading_day(会 fallback 到硬编码 2025-2026)。
+/// 返回写入的节假日条数。
+pub fn populate_remote_holidays(holidays: Vec<String>) -> usize {
+    let count = holidays.len();
+    if let Ok(mut cache) = REMOTE_HOLIDAYS.write() {
+        cache.clear();
+        cache.extend(holidays);
+    }
+    count
+}
+
+/// 启动时初始化节假日缓存(异步,fire-and-forget)。
+/// 不阻塞主流程,失败时静默退化(走硬编码)。
+pub async fn init_holiday_calendar() -> Result<usize, String> {
+    let holidays = fetch_holiday_calendar().await?;
+    Ok(populate_remote_holidays(holidays))
+}
+
+/// 仅供测试:清空远程节假日缓存,恢复纯硬编码模式
+#[cfg(test)]
+pub fn clear_remote_holidays_for_test() {
+    if let Ok(mut cache) = REMOTE_HOLIDAYS.write() {
+        cache.clear();
+    }
 }
 
 /// 获取距离下一个交易时间的描述
@@ -205,5 +293,29 @@ mod tests {
     fn test_workday_override() {
         let workday = NaiveDate::from_ymd_opt(2025, 2, 8).unwrap(); // 春节调休上班
         assert!(is_trading_day(&workday));
+    }
+
+    /// 缺陷 A 修复:远程节假日缓存优先于硬编码
+    #[test]
+    fn test_remote_holiday_overrides_default() {
+        clear_remote_holidays_for_test();
+        // 2027-01-01 元旦 — 硬编码 2025-2026 没覆盖,默认会被认为"是交易日"
+        let future = NaiveDate::from_ymd_opt(2027, 1, 1).unwrap();
+        assert!(is_trading_day(&future), "默认(无远程缓存)2027 元旦应被当作交易日");
+        // 注入远程缓存后,应被识别为节假日
+        let n = populate_remote_holidays(vec!["2027-01-01".to_string()]);
+        assert_eq!(n, 1);
+        assert!(!is_trading_day(&future), "远程缓存应优先于硬编码");
+        // 清理,不影响其他测试
+        clear_remote_holidays_for_test();
+    }
+
+    #[test]
+    fn test_em_date_to_iso() {
+        assert_eq!(em_date_to_iso("20250101"), "2025-01-01");
+        assert_eq!(em_date_to_iso("20261231"), "2026-12-31");
+        // 非数字原样返回
+        assert_eq!(em_date_to_iso("2025-01-01"), "2025-01-01");
+        assert_eq!(em_date_to_iso(""), "");
     }
 }

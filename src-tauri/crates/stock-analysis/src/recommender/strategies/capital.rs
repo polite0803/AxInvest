@@ -3,11 +3,13 @@
 //! 注：v1 资金流向数据仅当日，逻辑上做了"日级窗口"近似；
 //! 真正多日窗口需后续扩 AStockClient 接口。
 
-use super::super::strategy::{RecoContext, RecommendStrategy};
+use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;
 use axagent_astock_data::AStockClient;
+use serde_json::Value;
+use std::collections::HashMap;
 
 pub struct CapitalStrategy {
     pub period: Period,
@@ -36,6 +38,7 @@ impl CapitalStrategy {
         code: &str,
         name: &str,
         sector: Option<String>,
+        vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
         let quote = client.get_quote(code).await.ok()?;
         let price = quote.price;
@@ -43,6 +46,11 @@ impl CapitalStrategy {
         let mf = client.get_money_flow(code).await.ok().flatten();
         let nb = client.get_north_bound_holding(code).await.ok().flatten();
         let dt = client.get_dragon_tiger(code).await.ok();
+
+        // 三个资金数据源至少有一个能拿到真实数据，否则视为数据缺失直接放弃
+        if mf.is_none() && nb.is_none() && dt.as_ref().map_or(true, |e| e.is_empty()) {
+            return None;
+        }
 
         // 主力净流入
         let main_inflow_wan = mf
@@ -59,13 +67,12 @@ impl CapitalStrategy {
 
         let (pass, reasons) = match self.period {
             Period::Short => {
-                // 主力净流入 1000 万 → 200 万（旧门槛太高，data sparse 时 0 也常见；
-                // 放宽到 200 万能让"温和流入"也入选）
-                if main_inflow_wan < 200.0 {
+                let main_inflow_min = read_f64(vars, "cap_short_main_inflow_min", 200.0);
+                if main_inflow_wan < main_inflow_min {
                     return None;
                 }
-                // 换手 5% → 2%（容许低活跃度的小盘股也入选）
-                if quote.turnover_rate < 2.0 {
+                let turnover_min = read_f64(vars, "cap_short_turnover_min", 2.0);
+                if quote.turnover_rate < turnover_min {
                     return None;
                 }
                 (
@@ -77,8 +84,9 @@ impl CapitalStrategy {
                 )
             },
             Period::Mid => {
-                // nb_ratio 1.0 → 0.3，main_inflow 3000 → 500
-                if nb_ratio < 0.3 && main_inflow_wan < 500.0 {
+                let nb_ratio_min = read_f64(vars, "cap_mid_nb_ratio_min", 0.3);
+                let main_inflow_min = read_f64(vars, "cap_mid_main_inflow_min", 500.0);
+                if nb_ratio < nb_ratio_min && main_inflow_wan < main_inflow_min {
                     return None;
                 }
                 let mut r = Vec::new();
@@ -94,8 +102,9 @@ impl CapitalStrategy {
                 (true, r)
             },
             Period::Long => {
-                // nb_ratio 0.5 → 0.1，main_inflow 1000 → 100
-                if nb_ratio < 0.1 && main_inflow_wan < 100.0 {
+                let nb_ratio_min = read_f64(vars, "cap_long_nb_ratio_min", 0.1);
+                let main_inflow_min = read_f64(vars, "cap_long_main_inflow_min", 100.0);
+                if nb_ratio < nb_ratio_min && main_inflow_wan < main_inflow_min {
                     return None;
                 }
                 let r = if nb_ratio > 0.0 {
@@ -112,12 +121,39 @@ impl CapitalStrategy {
         }
 
         let (entry_low, entry_high, stop_loss, target, base_position) = match self.period {
-            Period::Short => (price * 0.97, price * 1.03, price * 0.93, price * 1.10, 5.0),
-            Period::Mid => (price * 0.95, price * 1.05, price * 0.90, price * 1.20, 8.0),
-            Period::Long => (price * 0.95, price * 1.05, price * 0.88, price * 1.30, 10.0),
+            Period::Short => {
+                let el = read_f64(vars, "cap_short_entry_low", 0.97);
+                let eh = read_f64(vars, "cap_short_entry_high", 1.03);
+                let sl = read_f64(vars, "cap_short_stop", 0.93);
+                let tg = read_f64(vars, "cap_short_target", 1.10);
+                let bp = read_f64(vars, "cap_short_base_pos", 5.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
+            Period::Mid => {
+                let el = read_f64(vars, "cap_mid_entry_low", 0.95);
+                let eh = read_f64(vars, "cap_mid_entry_high", 1.05);
+                let sl = read_f64(vars, "cap_mid_stop", 0.90);
+                let tg = read_f64(vars, "cap_mid_target", 1.20);
+                let bp = read_f64(vars, "cap_mid_base_pos", 8.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
+            Period::Long => {
+                let el = read_f64(vars, "cap_long_entry_low", 0.95);
+                let eh = read_f64(vars, "cap_long_entry_high", 1.05);
+                let sl = read_f64(vars, "cap_long_stop", 0.88);
+                let tg = read_f64(vars, "cap_long_target", 1.30);
+                let bp = read_f64(vars, "cap_long_base_pos", 10.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
         };
 
-        let conf = calc_confidence(0.80, 0.7, 0.7, 0.0, 1.0);
+        let conf = calc_confidence(
+            read_f64(vars, "cap_conf_consistency", 0.80),
+            read_f64(vars, "cap_conf_signal", 0.7),
+            read_f64(vars, "cap_conf_direction", 0.7),
+            read_f64(vars, "cap_conf_market", 0.0),
+            read_f64(vars, "cap_conf_base", 1.0),
+        );
         let position = calc_position(base_position, conf, self.period);
 
         let risk = match self.period {
@@ -171,7 +207,10 @@ impl RecommendStrategy for CapitalStrategy {
         let mut picks = Vec::new();
         for (code, name, sector) in ctx.seed {
             let _g = ctx.per_code_locks.lock_for(code).await;
-            if let Some(p) = self.scan_one(ctx.client, code, name, sector.clone()).await {
+            if let Some(p) = self
+                .scan_one(ctx.client, code, name, sector.clone(), ctx.vars)
+                .await
+            {
                 picks.push(p);
             }
         }

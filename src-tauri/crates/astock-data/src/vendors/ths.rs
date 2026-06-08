@@ -355,7 +355,7 @@ impl StockVendor for ThsVendor {
         match method {
             "get_hot_stocks" | "get_industry_ranking" | "get_concept_blocks" => {
                 AsOfCapability::NoHistoricalSemantic
-            }
+            },
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -374,7 +374,11 @@ mod capability_tests {
     #[test]
     fn ths_no_historical_methods() {
         let v = make_vendor();
-        for m in &["get_hot_stocks", "get_industry_ranking", "get_concept_blocks"] {
+        for m in &[
+            "get_hot_stocks",
+            "get_industry_ranking",
+            "get_concept_blocks",
+        ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::NoHistoricalSemantic);
         }
     }
@@ -383,7 +387,8 @@ mod capability_tests {
     fn ths_real_date_methods_are_fallthrough() {
         let v = make_vendor();
         for m in &[
-            "get_market_dragon_tiger", "get_north_bound_flow",
+            "get_market_dragon_tiger",
+            "get_north_bound_flow",
             "get_consensus_eps",
         ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
@@ -393,7 +398,16 @@ mod capability_tests {
     #[test]
     fn ths_stub_methods_are_fallthrough() {
         let v = make_vendor();
-        for m in &["get_quote", "get_klines", "get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule", "search_stock"] {
+        for m in &[
+            "get_quote",
+            "get_klines",
+            "get_financials",
+            "get_news",
+            "get_money_flow",
+            "get_dragon_tiger",
+            "get_lockup_schedule",
+            "search_stock",
+        ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
     }

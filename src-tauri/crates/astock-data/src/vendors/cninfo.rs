@@ -142,18 +142,9 @@ mod capability_tests {
     #[test]
     fn cninfo_all_fallthrough() {
         let v = make_vendor();
-        assert_eq!(
-            v.asof_capability("get_announcements"),
-            AsOfCapability::Fallthrough
-        );
-        assert_eq!(
-            v.asof_capability("get_news"),
-            AsOfCapability::Fallthrough
-        );
-        assert_eq!(
-            v.asof_capability("nonexistent"),
-            AsOfCapability::Fallthrough
-        );
+        assert_eq!(v.asof_capability("get_announcements"), AsOfCapability::Fallthrough);
+        assert_eq!(v.asof_capability("get_news"), AsOfCapability::Fallthrough);
+        assert_eq!(v.asof_capability("nonexistent"), AsOfCapability::Fallthrough);
     }
 }
 

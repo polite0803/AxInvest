@@ -71,12 +71,39 @@ impl TradingEngine {
     // ── 交易校验 ──
 
     /// 校验一笔交易是否合法（涨跌停、手数、持仓充足性、交易日历）
+    /// 使用默认的 5% 目标价偏离阈值。
     pub async fn validate_trade(
         &self,
         stock_code: &str,
         direction: &str,
         quantity: i32,
         price: f64,
+    ) -> TradeValidation {
+        self.validate_trade_impl(stock_code, direction, quantity, price, 5.0)
+            .await
+    }
+
+    /// 带自定义目标价偏离阈值的交易校验。
+    /// `price_deviation_limit`: 入场价偏离分析目标价的允许百分比（默认 5.0）
+    pub async fn validate_trade_with_config(
+        &self,
+        stock_code: &str,
+        direction: &str,
+        quantity: i32,
+        price: f64,
+        price_deviation_limit: f64,
+    ) -> TradeValidation {
+        self.validate_trade_impl(stock_code, direction, quantity, price, price_deviation_limit)
+            .await
+    }
+
+    async fn validate_trade_impl(
+        &self,
+        stock_code: &str,
+        direction: &str,
+        quantity: i32,
+        price: f64,
+        price_deviation_limit: f64,
     ) -> TradeValidation {
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
@@ -185,7 +212,7 @@ impl TradingEngine {
 
                         if let Some(target) = suggested_target {
                             let deviation = ((price - target) / target).abs() * 100.0;
-                            if deviation > 5.0 {
+                            if deviation > price_deviation_limit {
                                 warnings.push(format!(
                                     "入场价 {:.2} 偏离分析目标价 {:.2} ({:.1}%)",
                                     price, target, deviation

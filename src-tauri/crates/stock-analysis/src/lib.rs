@@ -1,4 +1,5 @@
 pub mod backtest;
+pub mod blackboard;
 pub mod data_clean;
 pub mod decision;
 pub mod key_levels;

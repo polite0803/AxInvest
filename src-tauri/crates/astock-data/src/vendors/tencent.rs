@@ -349,7 +349,14 @@ mod capability_tests {
     #[test]
     fn tencent_others_are_fallthrough() {
         let v = make_vendor();
-        for m in &["get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule", "search_stock"] {
+        for m in &[
+            "get_financials",
+            "get_news",
+            "get_money_flow",
+            "get_dragon_tiger",
+            "get_lockup_schedule",
+            "search_stock",
+        ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
     }

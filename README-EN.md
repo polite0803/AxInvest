@@ -396,6 +396,21 @@ The workflow engine (rt-workflow crate) implements a DAG-based task orchestratio
 - **Strict Mode** — Strict mode testing + medium-risk reason naming + custom mode documentation
 - **Full Pipeline Integration** — Integrated into session / prompt / git / RAG workflows
 
+### ⏰ Time Travel / As-Of Mode
+
+> NEW 2026-06-08 — closes the analysis → recommendation → backtest look-ahead bias loop
+
+- **Global Time Anchor** — A `LIVE` pill in the AppHeader switches the analysis world-view across three modes: Live / Replay / Backtest Sweep
+- **Closed-World Assumption** — once a past date is picked, data after that date is invisible to the current analysis; all picks and backtests auto-anchor to as-of
+- **9 Vendors Fully Adapted** — EastMoney / Tencent / Sina / Baidu / AkShare / THS / Cninfo / iwencai / mootdx, every one aware of AsOfContext
+- **Two-Tier Cache Isolation** — L1 in-memory cache + L2 `market_data_history` table (with hash / TTL / access count); Live and Replay data never mix
+- **3-Stage LLM Future-Reference Detection** — regex absolute date → tense phrase dictionary → optional LLM judge; on hit, sets `partial-valid: false`
+- **HCI 4-Layer Visual Signals** — L1 header pill / L2 page-state bar / L3 timeline "⚠ N violation" chip / L4 data watermark
+- **Replay Workbench Forced Reselect** — `/replay-workbench` route, picker is always blank on entry
+- **First-Time Tour Bubble** — introduces the new capability, persisted via `tourSeen` so it never nags again
+- **Switch-Back-to-Live Confirm Modal** — prevents accidentally dragging invalidated conclusions back into Live
+- **Replay Visualization** — `ReplayBadge` shows "Replay · 2026-06-01"; `ReplayWatermark` stamps "as of ..." in the corner of panels
+
 ### 📱 Mobile Support
 
 - **Android Native** — APK/AAB builds, supporting arm64-v8a / armeabi-v7a / x86_64

@@ -254,55 +254,55 @@ export function StockScreenerPanel() {
       {loading
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
         : emptyKind
-          ? (
-            <PanelEmpty
-              kind={emptyKind}
-              vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
-              description={emptyKind === "noData"
-                ? t("stockAnalysis.settings.screener.screenHint")
-                : undefined}
-              onOpenSettings={openDataSourceSettings}
-            />
-          )
-          : results.length === 0
-          ? (
-            <PanelEmpty
-              kind="noData"
-              vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
-              description={t("stockAnalysis.settings.screener.screenHint")}
-              onOpenSettings={openDataSourceSettings}
-            />
-          )
-          : (
-            <List
-              size="small"
-              dataSource={results.slice(0, 15)}
-              renderItem={(r) => (
-                <List.Item
-                  style={{ cursor: "pointer", padding: "4px 0" }}
-                  onClick={() => handleAnalyze(r.stockCode)}
-                  actions={[
-                    <Tag key="score" color="blue" className="text-xs m-0">
-                      {t("stockAnalysis.settings.screener.score", { score: r.score })}
-                    </Tag>,
-                  ]}
-                >
-                  <div className="flex items-center gap-2 text-xs w-full">
-                    <Tag className="m-0 text-xs">{r.stockCode}</Tag>
-                    <span className="flex-1 truncate">{r.stockName}</span>
-                    <span className="font-mono">{r.price.toFixed(2)}</span>
-                    <span className={r.changePct >= 0 ? "text-red-500" : "text-green-500"}>
-                      {r.changePct >= 0 ? "+" : ""}
-                      {r.changePct.toFixed(2)}%
-                    </span>
-                    {r.reasons.slice(0, 2).map((reason, i) => (
-                      <Tag key={i} color="green" className="text-xs m-0">{reason}</Tag>
-                    ))}
-                  </div>
-                </List.Item>
-              )}
-            />
-          )}
+        ? (
+          <PanelEmpty
+            kind={emptyKind}
+            vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
+            description={emptyKind === "noData"
+              ? t("stockAnalysis.settings.screener.screenHint")
+              : undefined}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
+        : results.length === 0
+        ? (
+          <PanelEmpty
+            kind="noData"
+            vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
+            description={t("stockAnalysis.settings.screener.screenHint")}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
+        : (
+          <List
+            size="small"
+            dataSource={results.slice(0, 15)}
+            renderItem={(r) => (
+              <List.Item
+                style={{ cursor: "pointer", padding: "4px 0" }}
+                onClick={() => handleAnalyze(r.stockCode)}
+                actions={[
+                  <Tag key="score" color="blue" className="text-xs m-0">
+                    {t("stockAnalysis.settings.screener.score", { score: r.score })}
+                  </Tag>,
+                ]}
+              >
+                <div className="flex items-center gap-2 text-xs w-full">
+                  <Tag className="m-0 text-xs">{r.stockCode}</Tag>
+                  <span className="flex-1 truncate">{r.stockName}</span>
+                  <span className="font-mono">{r.price.toFixed(2)}</span>
+                  <span className={r.changePct >= 0 ? "text-red-500" : "text-green-500"}>
+                    {r.changePct >= 0 ? "+" : ""}
+                    {r.changePct.toFixed(2)}%
+                  </span>
+                  {r.reasons.slice(0, 2).map((reason, i) => (
+                    <Tag key={i} color="green" className="text-xs m-0">{reason}</Tag>
+                  ))}
+                </div>
+              </List.Item>
+            )}
+          />
+        )}
     </Card>
   );
 }

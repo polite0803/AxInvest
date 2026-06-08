@@ -7518,7 +7518,16 @@
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "dryRun": "Dry Run",
+        "moat": "Moat",
+        "screener": "Screener",
+        "signals": "Signals",
+        "keylevels": "Key Levels",
+        "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading"
       },
       "panels": {
         "refresh": "Refresh",
@@ -7547,7 +7556,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "main": "Main",
+        "industryRank": "Industry Rank",
+        "noIndustry": "No industry data",
+        "hotStocks": "Hot Stocks",
+        "noHot": "No hot stock data",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "Screener",
@@ -7584,13 +7599,15 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "refresh": "Refresh"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -7811,7 +7828,10 @@
       "total": "total",
       "wrong": "wrong",
       "avgConfidence": "Avg Confidence",
-      "alpha": "Alpha"
+      "alpha": "Alpha",
+      "scopeAll": "Todos",
+      "scopeLive": "Solo Live",
+      "scopeReplay": "Solo Replay"
     },
     "chart": {
       "restore": "restore",
@@ -7966,7 +7986,25 @@
       "tagReal": "Real",
       "tagSynthetic": "Fallback",
       "crossCheckDivided": "Analistas divididos — observe antes de actuar",
-      "syntheticTooltip": "Respaldo de datos dispersos (K-line / finanzas / capital no disponibles, sintetizado del precio actual)"
+      "syntheticTooltip": "Respaldo de datos dispersos (K-line / finanzas / capital no disponibles, sintetizado del precio actual)",
+      "consensusDivided": "Divided",
+      "consensusBearish": "Bajista",
+      "crossCheckBearish": "Consenso bajista — contradice la recomendación de compra",
+      "consensusBullish": "Consenso alcista",
+      "consensusNeutral": "Neutral",
+      "bullish": "Alcista",
+      "bearish": "Bajista",
+      "neutral": "Neutral",
+      "bullishTooltip": "Señales de compra/sobrepeso",
+      "bearishTooltip": "Señales de venta/infraponderación",
+      "neutralTooltip": "Sin señales direccionales",
+      "reportCountSuffix": " informes",
+      "crossCheckAligned": "Alineado con consenso de analistas",
+      "crossCheckNeutral": "{{neutral}} de {{total}} informes fueron neutrales",
+      "crossCheckTitle": "Verificación cruzada (últ. {{updatedAt}})",
+      "dataQualitySummary": "{{real}} real + {{synthetic}} respaldo",
+      "backtestWinrate": "Tasa de acierto",
+      "bannerDegraded": "Los estilos de datos {{styles}} se redujeron en fidelidad (as-of {{date}}). Trate su confianza como inferior a la de los estilos no degradados."
     },
     "periodShort": "Corto",
     "periodMid": "Medio",
@@ -7974,7 +8012,13 @@
     "generatedAt": "Generado a las {time}",
     "bannerVendorDisabled": "Algunos estilos están desactivados: {styles}",
     "openSettings": "Abrir configuración",
-    "empty": "Sin datos de recomendación",
+    "empty": {
+      "replayDegradedTitle": "⏪ Degraded in Replay Mode",
+      "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
+      "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
+      "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
+      "_fallback": "Sin datos de recomendación"
+    },
     "styleDisabled": "(Desactivado)",
     "styleDisabledReason": "El estilo {style} está desactivado en la configuración",
     "row": {
@@ -8049,7 +8093,11 @@
   },
   "screener": {
     "title": "Filtro de acciones",
-    "placeholder": "Buscar acciones por criterios"
+    "placeholder": "Buscar acciones por criterios",
+    "tab": {
+      "smartReco": "Recomendaciones",
+      "myFilter": "Mi filtro"
+    }
   },
   "backtest": {
     "title": "Backtest",
@@ -8065,5 +8113,103 @@
     "expandToPanel": "Expandir a panel",
     "collapse": "Contraer",
     "collapseToBubble": "Contraer a burbuja"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "EN VIVO",
+      "replay": "Replay {{date}}",
+      "sweep": "Backtest por lotes",
+      "tooltipLive": "Haga clic para entrar en modo Replay (analizar a una fecha pasada)",
+      "tooltipReplay": "Haga clic para volver al modo En vivo",
+      "confirmTitle": "¿Volver al modo En vivo?",
+      "confirmBody": "El modo En vivo usa datos en tiempo real y las conclusiones anteriores pueden haber sido invalidadas por nueva información. El modo Replay cierra el mundo en una fecha pasada elegida para evitar el sesgo de look-ahead.",
+      "confirmOk": "Cambiar a En vivo",
+      "confirmCancel": "Permanecer en Replay",
+      "currentlyInReplay": "Reproduciendo al {{date}}.",
+      "enteredReplay": "Modo Replay activado: {{date}}",
+      "switchedToLive": "Cambiado al modo En vivo"
+    },
+    "datePicker": {
+      "hint": "Elija un día de cotización pasado. Hoy y fechas futuras están deshabilitados (supuesto de mundo cerrado).",
+      "placeholder": "Seleccionar fecha de referencia",
+      "ok": "Iniciar Replay",
+      "cancel": "Cancelar"
+    },
+    "pageAnchor": {
+      "live": "En vivo",
+      "replay": "Replay",
+      "untilDate": "al {{date}}"
+    },
+    "replayBadge": {
+      "label": "Replay · {{date}}",
+      "tooltip": "Todos los datos, prompts y veredictos de esta vista están anclados al {{date}}. No usar para trading en vivo."
+    },
+    "replayWatermark": {
+      "label": "al {{date}}"
+    },
+    "tour": {
+      "title": "El modo Viaje en el tiempo está disponible",
+      "body": "Ancle todos los análisis y recomendaciones a un día de cotización pasado para backtestear estrategias de forma segura, sin sesgo de look-ahead. El sistema rechazará fechas futuras y las violaciones de marca temporal se resaltarán en la línea de tiempo.",
+      "gotIt": "Entendido",
+      "stepAnchor": "Haga clic en la píldora EN VIVO en cualquier momento para entrar al modo Replay."
+    },
+    "violations": {
+      "chip": "⚠ {{n}} violación",
+      "chip_plural": "⚠ {{n}} violaciones",
+      "chipAria": "{{n}} violación(es) de referencia futura en este nodo",
+      "tooltip": "La salida de este nodo menciona fechas posteriores al ancla as-of. Trate su conclusión como no confiable.",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "Modo Replay activo. Las selecciones, precios y bandas de entrada están ancladas al {{date}}. No usar para trading en vivo.",
+    "backtestHint": "Estas estadísticas agregan todos los análisis completados (en vivo + replay) al {{date}}. Use el Banco de Trabajo Replay para filtrar por modo.",
+    "degradedStyles": {
+      "title": "Fuentes de datos degradadas bajo truncamiento as-of",
+      "description": "Los siguientes estilos de datos se redujeron en fidelidad porque la fecha as-of {{date}} corta el historial necesario para la señal completa.",
+      "reason": "Motivo: {{reason}}",
+      "hint": "Un resultado degradado no es un resultado incorrecto; es menos informativo. Trate su confianza como inferior a la de los estilos no degradados.",
+      "vendor": "proveedor: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "Degradado · Algunos datos sin historial",
+      "labelWithCount": "Degradado · {{n}} elementos",
+      "tooltip": "En modo replay, flujo de dinero/margen/tenencia norte-bound etc. no tienen semántica histórica y se omitieron."
+    }
+  },
+  "replayWorkbench": {
+    "title": "Banco de Trabajo Replay",
+    "description": "Ancle todos los datos a un día pasado. El sistema rechazará fechas futuras. Backtestee sus estrategias de forma segura, sin sesgo de look-ahead.",
+    "step1": {
+      "title": "Elegir fecha de referencia",
+      "currentlyPicked": "Actualmente reproduciendo al {{date}}",
+      "reselect": "Volver a elegir"
+    },
+    "step2": {
+      "title": "Ejecutar análisis con conciencia de Replay",
+      "description": "Todas las acciones a continuación inyectan as_of_date = {{date}} en el backend y cierran el mundo en esa fecha.",
+      "analyze": "Analizar una sola acción",
+      "backtest": "Ver estadísticas de backtest",
+      "watchlist": "Ver watchlist"
+    },
+    "sweep": {
+      "title": "Matriz de barrido Replay",
+      "intro": "Ejecuta backtest en lote sobre acciones × fechas de referencia. Obliga a re-seleccionar el rango (no hereda del TimeAnchor global).",
+      "codesLabel": "Códigos de acciones (uno por línea o separados por comas)",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "Rango de fechas de referencia (solo días hábiles)",
+      "holdingDaysLabel": "Días de tenencia",
+      "actionLabel": "Decisión hipotética",
+      "confidenceLabel": "Confianza de la decisión (0–1)",
+      "runBtn": "Iniciar barrido",
+      "running": "Barrido en curso {{done}} / {{total}} …",
+      "summary": "Barrido terminado: de {{total}},{{valid}} válidos / {{invalid}} inválidos.",
+      "violationNotice": "{{count}} violaciones as-of registradas — ver el panel Invalid.",
+      "invalidTitle": "Muestras inválidas",
+      "noInvalid": "Sin muestras inválidas.",
+      "exportCsv": "Exportar CSV",
+      "exportJson": "Exportar JSON"
+    },
+    "notice": "Todos los datos, prompts y veredictos de este banco de trabajo están anclados a la fecha elegida. Volver al modo En vivo requiere confirmación explícita.",
+    "exitHint": "Aún está en modo Replay. Cualquier análisis nuevo iniciado en otro lugar también estará anclado al replay.",
+    "exitBtn": "Volver a En vivo"
   }
 }

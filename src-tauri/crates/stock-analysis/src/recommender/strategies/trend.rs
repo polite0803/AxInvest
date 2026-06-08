@@ -1,11 +1,13 @@
 //! 趋势跟踪子策略：MA 多头 + 突破 + 量能
 
-use super::super::strategy::{RecoContext, RecommendStrategy};
+use super::super::strategy::{read_f64, RecoContext, RecommendStrategy};
 use crate::recommender::indicators;
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;
 use axagent_astock_data::AStockClient;
+use serde_json::Value;
+use std::collections::HashMap;
 
 pub struct TrendStrategy {
     pub period: Period,
@@ -34,11 +36,12 @@ impl TrendStrategy {
         code: &str,
         name: &str,
         sector: Option<String>,
+        vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
-        let klines = client.get_klines(code, "daily", 250).await.ok()?;
-        // 放宽 K 线最低长度：60 → 30。理由：vendor 在数据稀疏时只能返回 ~30 日，
-        // 旧门槛会把几乎所有票直接 return None，导致面板"真实推荐"为 0。
-        if klines.len() < 30 {
+        let kline_limit = read_f64(vars, "trend_kline_limit", 250.0) as u32;
+        let klines = client.get_klines(code, "daily", kline_limit).await.ok()?;
+        let min_kline_len = read_f64(vars, "trend_min_kline_len", 30.0) as usize;
+        if klines.len() < min_kline_len {
             return None;
         }
         let cs = indicators::closes(&klines);
@@ -54,88 +57,118 @@ impl TrendStrategy {
         };
         let amount_ratio = turnover_anomaly; // 量比近似
 
-        let (entry_low, entry_high, stop_loss, target_price, base_position, reasons) = match self
-            .period
-        {
-            Period::Short => {
-                // MA5/10/20 多头
-                let ma5 = indicators::sma(&cs, 5)?;
-                let ma10 = indicators::sma(&cs, 10)?;
-                let ma20 = indicators::sma(&cs, 20)?;
-                if !(ma5 > ma10 && ma10 > ma20) {
-                    return None;
-                }
-                // 突破 20 日新高：放宽 0.998 → 0.99（旧门槛要求几乎贴 20 日高，
-                // 实际盘中常常差 0.3% 突破未确认）
-                let high_20 = indicators::highest(&klines, 20)?;
-                if last < high_20 * 0.99 {
-                    return None;
-                }
-                // 量比放宽：1.2 → 0.8。允许"温和放量"也入选（缩量反弹时也常有真信号）
-                if amount_ratio < 0.8 {
-                    return None;
-                }
-                let reasons = vec![
-                    format!("MA5 {:.2} > MA10 {:.2} > MA20 {:.2}", ma5, ma10, ma20),
-                    format!("突破 20 日高 {:.2}", high_20),
-                    format!("量比 {:.2}", amount_ratio),
-                ];
-                let _atr = (high_20 - indicators::lowest(&klines, 20).unwrap_or(ma20 * 0.95)) * 0.5;
-                (ma5 * 0.99, ma5 * 1.015, ma5 * 0.95, ma5 * 1.10, 5.0, reasons)
-            },
-            Period::Mid => {
-                let ma20 = indicators::sma(&cs, 20)?;
-                let ma60 = indicators::sma(&cs, 60)?;
-                // 放宽 ma60 NaN / 站上判断：容许 0.5% 内的浅回踩
-                if ma60.is_nan() || last < ma60 * 0.995 {
-                    return None;
-                }
-                // 突破 60 日高：0.995 → 0.98
-                let high_60 = indicators::highest(&klines, 60)?;
-                if last < high_60 * 0.98 {
-                    return None;
-                }
-                // MACD 红柱：DIF > DEA 即可，macd_bar 容许略 <= 0（红柱刚起时常见）
-                if let Some((dif, dea, macd_bar)) = indicators::macd(&klines, 12, 26, 9) {
-                    if dif <= dea {
+        let (entry_low, entry_high, stop_loss, target_price, base_position, reasons) =
+            match self.period {
+                Period::Short => {
+                    let ma_period_1 = read_f64(vars, "trend_ma_short_1", 5.0) as usize;
+                    let ma_period_2 = read_f64(vars, "trend_ma_short_2", 10.0) as usize;
+                    let ma_period_3 = read_f64(vars, "trend_ma_short_3", 20.0) as usize;
+                    let ma5 = indicators::sma(&cs, ma_period_1)?;
+                    let ma10 = indicators::sma(&cs, ma_period_2)?;
+                    let ma20 = indicators::sma(&cs, ma_period_3)?;
+                    if !(ma5 > ma10 && ma10 > ma20) {
+                        return None;
+                    }
+                    let high_period = read_f64(vars, "trend_high_20_period", 20.0) as usize;
+                    let high_threshold = read_f64(vars, "trend_high_20_threshold", 0.99);
+                    let high_20 = indicators::highest(&klines, high_period)?;
+                    if last < high_20 * high_threshold {
+                        return None;
+                    }
+                    let amount_ratio_min = read_f64(vars, "trend_amount_ratio_min", 0.8);
+                    if amount_ratio < amount_ratio_min {
                         return None;
                     }
                     let reasons = vec![
-                        format!("站上 MA60 {:.2}", ma60),
-                        format!("突破 60 日高 {:.2}", high_60),
-                        format!("MACD 红柱 {:.2}", macd_bar),
+                        format!(
+                            "MA{} {:.2} > MA{} {:.2} > MA{} {:.2}",
+                            ma_period_1, ma5, ma_period_2, ma10, ma_period_3, ma20
+                        ),
+                        format!("突破 {} 日高 {:.2}", high_period, high_20),
+                        format!("量比 {:.2}", amount_ratio),
                     ];
-                    (ma20 * 0.97, ma20 * 1.05, ma20 * 0.92, high_60 * 1.05, 8.0, reasons)
-                } else {
-                    return None;
-                }
-            },
-            Period::Long => {
-                let ma60 = indicators::sma(&cs, 60)?;
-                let ma250 = indicators::sma(&cs, 250)?;
-                // MA60 > MA250 放宽到 MA60 > MA250 * 0.95（容许 MA60 略低于 MA250 的
-                // "金叉前夕"形态，也算长期多头启动）
-                if ma250.is_nan() || ma60 < ma250 * 0.95 {
-                    return None;
-                }
-                // 不跌破 MA60：0.97 → 0.95
-                if last < ma60 * 0.95 {
-                    return None;
-                }
-                let reasons = vec![
-                    format!("MA60 {:.2} > MA250 {:.2} 长期多头", ma60, ma250),
-                    format!("回踩未破 MA60"),
-                ];
-                (ma60 * 0.95, ma60 * 1.03, ma60 * 0.85, last * 1.30, 10.0, reasons)
-            },
-        };
+                    let _atr = (high_20
+                        - indicators::lowest(&klines, high_period).unwrap_or(ma20 * 0.95))
+                        * 0.5;
+                    let el = read_f64(vars, "trend_short_entry_low", 0.99);
+                    let eh = read_f64(vars, "trend_short_entry_high", 1.015);
+                    let sl = read_f64(vars, "trend_short_stop", 0.95);
+                    let tg = read_f64(vars, "trend_short_target", 1.10);
+                    let bp = read_f64(vars, "trend_short_base_pos", 5.0);
+                    (ma5 * el, ma5 * eh, ma5 * sl, ma5 * tg, bp, reasons)
+                },
+                Period::Mid => {
+                    let ma_period_s = read_f64(vars, "trend_ma_mid_s", 20.0) as usize;
+                    let ma_period_l = read_f64(vars, "trend_ma_mid_l", 60.0) as usize;
+                    let ma20 = indicators::sma(&cs, ma_period_s)?;
+                    let ma60 = indicators::sma(&cs, ma_period_l)?;
+                    let ma60_threshold = read_f64(vars, "trend_ma60_threshold", 0.995);
+                    if ma60.is_nan() || last < ma60 * ma60_threshold {
+                        return None;
+                    }
+                    let high_period = read_f64(vars, "trend_high_60_period", 60.0) as usize;
+                    let high_threshold = read_f64(vars, "trend_high_60_threshold", 0.98);
+                    let high_60 = indicators::highest(&klines, high_period)?;
+                    if last < high_60 * high_threshold {
+                        return None;
+                    }
+                    if let Some((dif, dea, macd_bar)) = indicators::macd(&klines, 12, 26, 9) {
+                        if dif <= dea {
+                            return None;
+                        }
+                        let reasons = vec![
+                            format!("站上 MA{} {:.2}", ma_period_l, ma60),
+                            format!("突破 {} 日高 {:.2}", high_period, high_60),
+                            format!("MACD 红柱 {:.2}", macd_bar),
+                        ];
+                        let el = read_f64(vars, "trend_mid_entry_low", 0.97);
+                        let eh = read_f64(vars, "trend_mid_entry_high", 1.05);
+                        let sl = read_f64(vars, "trend_mid_stop", 0.92);
+                        let tg = read_f64(vars, "trend_mid_target", 1.05);
+                        let bp = read_f64(vars, "trend_mid_base_pos", 8.0);
+                        (ma20 * el, ma20 * eh, ma20 * sl, high_60 * tg, bp, reasons)
+                    } else {
+                        return None;
+                    }
+                },
+                Period::Long => {
+                    let ma_period_s = read_f64(vars, "trend_ma_long_s", 60.0) as usize;
+                    let ma_period_l = read_f64(vars, "trend_ma_long_l", 250.0) as usize;
+                    let ma60 = indicators::sma(&cs, ma_period_s)?;
+                    let ma250 = indicators::sma(&cs, ma_period_l)?;
+                    let ma60_ma250_mult = read_f64(vars, "trend_ma60_ma250_mult", 0.95);
+                    if ma250.is_nan() || ma60 < ma250 * ma60_ma250_mult {
+                        return None;
+                    }
+                    let ma60_break_mult = read_f64(vars, "trend_ma60_break_mult", 0.95);
+                    if last < ma60 * ma60_break_mult {
+                        return None;
+                    }
+                    let reasons = vec![
+                        format!(
+                            "MA{} {:.2} > MA{} {:.2} 长期多头",
+                            ma_period_s, ma60, ma_period_l, ma250
+                        ),
+                        format!("回踩未破 MA{}", ma_period_s),
+                    ];
+                    let el = read_f64(vars, "trend_long_entry_low", 0.95);
+                    let eh = read_f64(vars, "trend_long_entry_high", 1.03);
+                    let sl = read_f64(vars, "trend_long_stop", 0.85);
+                    let tg = read_f64(vars, "trend_long_target", 1.30);
+                    let bp = read_f64(vars, "trend_long_base_pos", 10.0);
+                    (ma60 * el, ma60 * eh, ma60 * sl, last * tg, bp, reasons)
+                },
+            };
 
         // 置信度
+        let conf_consistency = read_f64(vars, "trend_conf_consistency", 0.85);
+        let conf_signal = read_f64(vars, "trend_conf_signal", 0.7);
+        let conf_market = read_f64(vars, "trend_conf_market", 0.0);
         let conf = calc_confidence(
-            0.85, // 子策略内多因子方向一致
-            0.7,  // 信号强度
+            conf_consistency,
+            conf_signal,
             if amount_ratio > 1.5 { 0.8 } else { 0.5 },
-            0.0, // market_regime 占位，v1 简化为 0
+            conf_market,
             turnover_anomaly,
         );
         let position = calc_position(base_position, conf, self.period);
@@ -185,7 +218,10 @@ impl RecommendStrategy for TrendStrategy {
         let mut picks = Vec::new();
         for (code, name, sector) in ctx.seed {
             let _g = ctx.per_code_locks.lock_for(code).await;
-            if let Some(p) = self.scan_one(ctx.client, code, name, sector.clone()).await {
+            if let Some(p) = self
+                .scan_one(ctx.client, code, name, sector.clone(), ctx.vars)
+                .await
+            {
                 picks.push(p);
             }
         }

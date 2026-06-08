@@ -396,6 +396,21 @@ AxInvest 的核心特色模块，将 AI 智能体能力与专业投资分析深�
 - **Strict 模式** — 严格模式测试 + 中风险原因命名 + 自定义模式文档
 - **全管道集成** — 已集成到 session / prompt / git / RAG 各环节
 
+### ⏰ 时间旅行 / As-Of 模式
+
+> 2026-06-08 新增 — 闭合"分析 → 荐股 → 回测"的前视偏差闭环
+
+- **全局时间锚点** — AppHeader 右上角 `LIVE` pill 切换分析世界观,Live / Replay / Backtest Sweep 三态
+- **闭世界假设** — 选定过去某日后,该日及之后的行情对当前分析不可见,所有推荐/回测自动锚定 as-of
+- **9 vendor 完整适配** — EastMoney / Tencent / Sina / Baidu / AkShare / THS / Cninfo / iwencai / mootdx 全部感知 AsOfContext
+- **双层缓存隔离** — L1 内存缓存 + L2 `market_data_history` 表(带 hash / TTL / 访问计数),Live 与 Replay 数据完全隔离
+- **3 阶段 LLM 未来引用检测** — 正则绝对日期 → 时态短语词典 → 可选 LLM judge,检出后 `partial-valid: false`
+- **HCI 4 层视觉信号** — L1 顶栏 pill / L2 页面态细条 / L3 决策时间线"⚠ N 处违规" chip / L4 数据水印
+- **Replay Workbench 强制重选** — `/replay-workbench` 路由,进入时 picker 永远空白
+- **首次 Tour 引导** — 气泡提示用户新能力,`tourSeen` 持久化,不再骚扰
+- **切回 Live 二次确认 Modal** — 避免误触把已被新信息推翻的结论带回到 Live
+- **回放可视化** — `ReplayBadge` 显示"Replay · 2026-06-01",`ReplayWatermark` 在面板角落显示"as of ..."
+
 ### 📱 移动端支持
 
 - **Android 原生** — APK/AAB 构建，支持 arm64-v8a / armeabi-v7a / x86_64

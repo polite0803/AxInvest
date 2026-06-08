@@ -106,10 +106,16 @@ pub struct BreakoutResult {
     pub volume_confirmation: bool,
 }
 
-/// 检测价格是否突破支撑/阻力位。
+/// 检测价格是否突破支撑/阻力位（可配置成交量倍数）。
 /// klines_json: KLine JSON 数组字符串（最近至少 5 根用于计算成交量均值）。
 /// support/resistance: 支撑位和阻力位价格。
-pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> BreakoutResult {
+/// volume_mult: 成交量放大倍数阈值（用于判断高置信度）。
+pub fn detect_breakout_with_volume_mult(
+    klines_json: &str,
+    support: f64,
+    resistance: f64,
+    volume_mult: f64,
+) -> BreakoutResult {
     let klines: Vec<KLineRaw> = serde_json::from_str(klines_json).unwrap_or_default();
     if klines.is_empty() {
         return BreakoutResult {
@@ -148,14 +154,14 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
     };
 
     let (breakout_type, confidence) = if price > resistance {
-        let conf = if vol_ratio.unwrap_or(1.0) > 1.5 {
+        let conf = if vol_ratio.unwrap_or(1.0) > volume_mult {
             "high"
         } else {
             "medium"
         };
         ("resistance_break", conf)
     } else if price < support {
-        let conf = if vol_ratio.unwrap_or(1.0) > 1.5 {
+        let conf = if vol_ratio.unwrap_or(1.0) > volume_mult {
             "high"
         } else {
             "medium"
@@ -172,8 +178,15 @@ pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> Brea
         resistance,
         volume_ratio: vol_ratio.map(|v| (v * 100.0).round() / 100.0),
         confidence: confidence.into(),
-        volume_confirmation: vol_ratio.unwrap_or(1.0) > 1.5,
+        volume_confirmation: vol_ratio.unwrap_or(1.0) > volume_mult,
     }
+}
+
+/// 检测价格是否突破支撑/阻力位（默认成交量倍数 1.5）。
+/// klines_json: KLine JSON 数组字符串（最近至少 5 根用于计算成交量均值）。
+/// support/resistance: 支撑位和阻力位价格。
+pub fn detect_breakout(klines_json: &str, support: f64, resistance: f64) -> BreakoutResult {
+    detect_breakout_with_volume_mult(klines_json, support, resistance, 1.5)
 }
 
 // ── 测试 ──

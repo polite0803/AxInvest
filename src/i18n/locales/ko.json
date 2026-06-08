@@ -7518,7 +7518,16 @@
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "dryRun": "Dry Run",
+        "moat": "Moat",
+        "screener": "Screener",
+        "signals": "Signals",
+        "keylevels": "Key Levels",
+        "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading"
       },
       "panels": {
         "refresh": "Refresh",
@@ -7547,7 +7556,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "main": "Main",
+        "industryRank": "Industry Rank",
+        "noIndustry": "No industry data",
+        "hotStocks": "Hot Stocks",
+        "noHot": "No hot stock data",
+        "tags": "Tags"
       },
       "sheet": {
         "screener": "Screener",
@@ -7584,13 +7599,15 @@
           "rsiOversold": "RSI Oversold",
           "rsiOverbought": "RSI Overbought"
         },
-        "unit10k": "10k"
+        "unit10k": "10k",
+        "refresh": "Refresh"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
-        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"
+        "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)",
+        "disabledGeneric": "Data source not connected"
       },
       "workflow": {
         "title": "Stock Analysis Workflow",
@@ -7811,7 +7828,10 @@
       "total": "total",
       "wrong": "wrong",
       "avgConfidence": "Avg Confidence",
-      "alpha": "Alpha"
+      "alpha": "Alpha",
+      "scopeAll": "전체",
+      "scopeLive": "Live 전용",
+      "scopeReplay": "Replay 전용"
     },
     "chart": {
       "restore": "restore",
@@ -7966,7 +7986,25 @@
       "tagReal": "실제",
       "tagSynthetic": "폴백",
       "crossCheckDivided": "분석가 의견 분분 — 행동 전 관찰",
-      "syntheticTooltip": "데이터 부족 폴백(K-라인 / 재무 / 자금 데이터 없음, 현재 가격에서 합성)"
+      "syntheticTooltip": "데이터 부족 폴백(K-라인 / 재무 / 자금 데이터 없음, 현재 가격에서 합성)",
+      "consensusDivided": "Divided",
+      "consensusBearish": "약세",
+      "crossCheckBearish": "약세 consensus — 매수 추천과 상충",
+      "consensusBullish": "강세 consensus",
+      "consensusNeutral": "중립",
+      "bullish": "강세",
+      "bearish": "약세",
+      "neutral": "중립",
+      "bullishTooltip": "매수/비중확대 신호 일치",
+      "bearishTooltip": "매도/비중축소 신호 일치",
+      "neutralTooltip": "방향성 신호 없음",
+      "reportCountSuffix": " 보고서",
+      "crossCheckAligned": "애널리스트 consensus와 일치",
+      "crossCheckNeutral": "{{total}}개 중 {{neutral}}개 보고서 중립",
+      "crossCheckTitle": "애널리스트 교차 확인 (최종 {{updatedAt}})",
+      "dataQualitySummary": "실제 {{real}} + 대체 {{synthetic}}",
+      "backtestWinrate": "승률",
+      "bannerDegraded": "데이터 스타일 {{styles}} 은(는) as-of {{date}} 잘림으로 인해 저하되어 출력됩니다. 비저하 스타일보다 낮은 신뢰도로 다루십시오."
     },
     "periodShort": "단기",
     "periodMid": "중기",
@@ -7974,7 +8012,13 @@
     "generatedAt": "생성 시간: {time}",
     "bannerVendorDisabled": "일부 스타일 비활성화: {styles}",
     "openSettings": "설정 열기",
-    "empty": "추천 데이터 없음",
+    "empty": {
+      "replayDegradedTitle": "⏪ Degraded in Replay Mode",
+      "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
+      "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
+      "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
+      "empty": "추천 데이터 없음"
+    },
     "styleDisabled": "(비활성화)",
     "styleDisabledReason": "스타일 {style}이 설정에서 비활성화되었습니다",
     "row": {
@@ -8049,7 +8093,11 @@
   },
   "screener": {
     "title": "종목 스크리너",
-    "placeholder": "조건으로 종목을 검색"
+    "placeholder": "조건으로 종목을 검색",
+    "tab": {
+      "smartReco": "스마트 추천",
+      "myFilter": "내 필터"
+    }
   },
   "backtest": {
     "title": "백테스트",
@@ -8065,5 +8113,103 @@
     "expandToPanel": "패널로 펼치기",
     "collapse": "접기",
     "collapseToBubble": "버블로 접기"
+  },
+  "timeTravel": {
+    "modeSwitch": {
+      "live": "라이브",
+      "replay": "{{date}} 리플레이",
+      "sweep": "일괄 백테스트",
+      "tooltipLive": "클릭하여 리플레이 모드로 진입 (과거 날짜 기준 분석)",
+      "tooltipReplay": "클릭하여 라이브 모드로 돌아가기",
+      "confirmTitle": "라이브 모드로 돌아가시겠습니까?",
+      "confirmBody": "라이브 모드는 실시간 데이터를 사용하므로 이전에 도출된 결론이 새로운 정보로 무효화되었을 수 있습니다. 리플레이 모드는 선택한 과거 날짜에서 세계를 닫아 룩어헤드 편향을 방지합니다.",
+      "confirmOk": "라이브로 전환",
+      "confirmCancel": "리플레이 유지",
+      "currentlyInReplay": "{{date}} 기준으로 리플레이 중",
+      "enteredReplay": "리플레이 모드 진입: {{date}}",
+      "switchedToLive": "라이브 모드로 전환됨"
+    },
+    "datePicker": {
+      "hint": "과거 거래일을 선택하세요. 오늘 및 미래 날짜는 비활성화됩니다(닫힌 세계 가정).",
+      "placeholder": "기준일 선택",
+      "ok": "리플레이 시작",
+      "cancel": "취소"
+    },
+    "pageAnchor": {
+      "live": "라이브",
+      "replay": "리플레이",
+      "untilDate": "{{date}} 기준"
+    },
+    "replayBadge": {
+      "label": "리플레이 · {{date}}",
+      "tooltip": "이 뷰의 모든 데이터, 프롬프트 및 결론은 {{date}}을 기준으로 합니다. 실전 거래에 사용하지 마세요."
+    },
+    "replayWatermark": {
+      "label": "{{date}} 기준"
+    },
+    "tour": {
+      "title": "타임 트래블 모드를 사용할 수 있습니다",
+      "body": "분석과 추천을 과거 거래일에 고정하여 룩어헤드 편향 없이 전략을 안전하게 백테스트할 수 있습니다. 시스템은 미래 날짜를 거부하며 타임스탬프 위반은 타임라인에서 강조 표시됩니다.",
+      "gotIt": "확인",
+      "stepAnchor": "언제든지 '라이브' 알약을 클릭하여 리플레이 모드로 진입하세요."
+    },
+    "violations": {
+      "chip": "⚠ {{n}}건 위반",
+      "chip_plural": "⚠ {{n}}건 위반",
+      "chipAria": "이 노드에 {{n}}건의 미래 날짜 참조 위반",
+      "tooltip": "이 노드의 출력은 as-of 기준 이후의 날짜를 언급합니다. 결론을 신뢰할 수 없는 것으로 간주하세요.",
+      "markClass": "ax-violation-mark"
+    },
+    "recommendationBanner": "리플레이 모드 활성. 종목, 가격, 매수 구간은 모두 {{date}}을 기준으로 합니다. 실전 거래에 사용하지 마세요.",
+    "backtestHint": "이 통계는 {{date}} 기준으로 완료된 모든 분석(라이브 + 리플레이)을 집계합니다. 리플레이 워크벤치에서 모드별로 필터링하세요.",
+    "degradedStyles": {
+      "title": "as-of 잘림으로 인한 데이터 저하",
+      "description": "다음 데이터 스타일은 as-of 기준일 {{date}} 때문에 필요한 과거가 잘려, 리플레이 모드에서 낮은 신뢰도로 출력됩니다.",
+      "reason": "사유: {{reason}}",
+      "hint": "저하됨은 오류가 아니라 정보량이 줄어든 것뿐이므로 비저하 스타일보다 낮은 신뢰도로 다루십시오.",
+      "vendor": "벤더: {{name}}"
+    },
+    "degradedMarker": {
+      "label": "성능 저하 · 일부 데이터에 기록 없음",
+      "labelWithCount": "성능 저하 · {{n}}건",
+      "tooltip": "재생 모드에서 자금 흐름/마진/북향 보유 등에 기록이 없어 건너뛰었습니다."
+    }
+  },
+  "replayWorkbench": {
+    "title": "리플레이 워크벤치",
+    "description": "모든 데이터를 과거의 어느 날짜에 고정합니다. 미래 날짜는 시스템에서 거부됩니다. 룩어헤드 편향 없이 전략을 안전하게 백테스트할 수 있습니다.",
+    "step1": {
+      "title": "기준일 선택",
+      "currentlyPicked": "현재 {{date}} 기준으로 리플레이 중",
+      "reselect": "다시 선택"
+    },
+    "step2": {
+      "title": "리플레이 인지 분석 실행",
+      "description": "아래의 모든 작업은 as_of_date = {{date}}을 백엔드에 주입하여 그 날짜에 세계를 닫습니다.",
+      "analyze": "단일 종목 분석",
+      "backtest": "백테스트 통계 보기",
+      "watchlist": "워치리스트 보기"
+    },
+    "sweep": {
+      "title": "리플레이 스윕 매트릭스",
+      "intro": "여러 종목 × as-of 기준일의 백테스트를 일괄 실행. 날짜 범위를 강제 재선택 (글로벌 TimeAnchor 상속 안 함).",
+      "codesLabel": "종목 코드 (한 줄에 하나 또는 쉼표 구분)",
+      "codesPlaceholder": "600519\n000001\n000333",
+      "dateRangeLabel": "As-of 기준일 범위 (영업일만)",
+      "holdingDaysLabel": "보유 일수",
+      "actionLabel": "가정 결정",
+      "confidenceLabel": "결정 신뢰도 (0–1)",
+      "runBtn": "스윕 시작",
+      "running": "스윕 진행 중 {{done}} / {{total}} …",
+      "summary": "스윕 완료: 총 {{total}},유효 {{valid}}, 실패 {{invalid}}.",
+      "violationNotice": "{{count}}건의 as-of 위반이 기록되었습니다 — Invalid 패널을 참조하세요.",
+      "invalidTitle": "실패 샘플",
+      "noInvalid": "실패 샘플 없음.",
+      "exportCsv": "CSV 내보내기",
+      "exportJson": "JSON 내보내기"
+    },
+    "notice": "이 워크벤치의 모든 데이터, 프롬프트 및 결론은 선택한 날짜를 기준으로 합니다. 라이브 모드로 돌아가려면 명시적 확인이 필요합니다.",
+    "exitHint": "아직 리플레이 모드입니다. 다른 곳에서 시작한 새 분석도 리플레이 기준으로 진행됩니다.",
+    "exitBtn": "라이브로 돌아가기"
   }
 }

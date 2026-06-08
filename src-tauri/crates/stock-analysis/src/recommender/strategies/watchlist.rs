@@ -7,12 +7,14 @@
 //! 不做任何技术信号判定，所以"confidence"和"position"都给得保守（低 0.5 / 0.4 base），
 //! 真实仓位由用户在账户页面自己分配。
 
-use super::super::strategy::{PerCodeLocks, RecoContext, RecommendStrategy};
+use super::super::strategy::{read_f64, PerCodeLocks, RecoContext, RecommendStrategy};
 use crate::recommender::pool::SeedItem;
 use crate::recommender::scoring::{calc_confidence, calc_position};
 use crate::recommender::types::{Period, RecoPick, Style};
 use async_trait::async_trait;
 use axagent_astock_data::AStockClient;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct WatchlistStrategy {
@@ -42,6 +44,7 @@ impl WatchlistStrategy {
         code: &str,
         name: &str,
         sector: Option<String>,
+        vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
         // 只 fetch 实时 quote，不依赖 K 线 / 财务 / 资金流，确保尽量总有数据
         let quote = client.get_quote(code).await.ok()?;
@@ -56,37 +59,67 @@ impl WatchlistStrategy {
         // 按周期给不同的振幅
         let (entry_low, entry_high, stop_loss, target_price, base_position, holding_days, reason) =
             match self.period {
-                Period::Short => (
-                    price * 0.99,
-                    price * 1.01,
-                    price * 0.96,
-                    price * 1.06,
-                    4.0,
-                    5,
-                    "候选池初筛（短线：日内-1% 进场，+6% 目标）",
-                ),
-                Period::Mid => (
-                    price * 0.97,
-                    price * 1.03,
-                    price * 0.92,
-                    price * 1.15,
-                    6.0,
-                    28,
-                    "候选池初筛（中线：-3% 进场，+15% 目标）",
-                ),
-                Period::Long => (
-                    price * 0.95,
-                    price * 1.05,
-                    price * 0.88,
-                    price * 1.25,
-                    8.0,
-                    90,
-                    "候选池初筛（长线：-5% 进场，+25% 目标）",
-                ),
+                Period::Short => {
+                    let el = read_f64(vars, "wl_short_entry_low", 0.99);
+                    let eh = read_f64(vars, "wl_short_entry_high", 1.01);
+                    let sl = read_f64(vars, "wl_short_stop", 0.96);
+                    let tg = read_f64(vars, "wl_short_target", 1.06);
+                    let bp = read_f64(vars, "wl_short_base_pos", 4.0);
+                    let hd = read_f64(vars, "wl_short_holding_days", 5.0) as u32;
+                    (
+                        price * el,
+                        price * eh,
+                        price * sl,
+                        price * tg,
+                        bp,
+                        hd,
+                        "候选池初筛（短线：日内-1% 进场，+6% 目标）",
+                    )
+                },
+                Period::Mid => {
+                    let el = read_f64(vars, "wl_mid_entry_low", 0.97);
+                    let eh = read_f64(vars, "wl_mid_entry_high", 1.03);
+                    let sl = read_f64(vars, "wl_mid_stop", 0.92);
+                    let tg = read_f64(vars, "wl_mid_target", 1.15);
+                    let bp = read_f64(vars, "wl_mid_base_pos", 6.0);
+                    let hd = read_f64(vars, "wl_mid_holding_days", 28.0) as u32;
+                    (
+                        price * el,
+                        price * eh,
+                        price * sl,
+                        price * tg,
+                        bp,
+                        hd,
+                        "候选池初筛（中线：-3% 进场，+15% 目标）",
+                    )
+                },
+                Period::Long => {
+                    let el = read_f64(vars, "wl_long_entry_low", 0.95);
+                    let eh = read_f64(vars, "wl_long_entry_high", 1.05);
+                    let sl = read_f64(vars, "wl_long_stop", 0.88);
+                    let tg = read_f64(vars, "wl_long_target", 1.25);
+                    let bp = read_f64(vars, "wl_long_base_pos", 8.0);
+                    let hd = read_f64(vars, "wl_long_holding_days", 90.0) as u32;
+                    (
+                        price * el,
+                        price * eh,
+                        price * sl,
+                        price * tg,
+                        bp,
+                        hd,
+                        "候选池初筛（长线：-5% 进场，+25% 目标）",
+                    )
+                },
             };
 
         // 信心度低（0.55），因为没有技术信号支撑
-        let conf = calc_confidence(0.55, 0.5, 0.5, 0.0, 1.0);
+        let conf = calc_confidence(
+            read_f64(vars, "wl_conf_consistency", 0.55),
+            read_f64(vars, "wl_conf_signal", 0.5),
+            read_f64(vars, "wl_conf_direction", 0.5),
+            read_f64(vars, "wl_conf_market", 0.0),
+            read_f64(vars, "wl_conf_base", 1.0),
+        );
         let position = calc_position(base_position, conf, self.period);
 
         Some(RecoPick {
@@ -138,7 +171,10 @@ impl RecommendStrategy for WatchlistStrategy {
         let mut picks = Vec::new();
         for (code, name, sector) in ctx.seed {
             let _g = ctx.per_code_locks.lock_for(code).await;
-            if let Some(p) = self.scan_one(ctx.client, code, name, sector.clone()).await {
+            if let Some(p) = self
+                .scan_one(ctx.client, code, name, sector.clone(), ctx.vars)
+                .await
+            {
                 picks.push(p);
             }
         }
@@ -174,12 +210,14 @@ pub async fn emit_synthetic_picks(
     period: Period,
     raw_seed: &[SeedItem],
     per_code_locks: Arc<PerCodeLocks>,
+    vars: &HashMap<String, Value>,
 ) -> Vec<RecoPick> {
     let mut picks = Vec::new();
     for (code, name, sector) in raw_seed {
         let _g = per_code_locks.lock_for(code).await;
         if let Some(p) =
-            scan_synthetic_one(client.as_ref(), code, name, sector.clone(), style, period).await
+            scan_synthetic_one(client.as_ref(), code, name, sector.clone(), style, period, vars)
+                .await
         {
             picks.push(p);
         }
@@ -194,6 +232,7 @@ async fn scan_synthetic_one(
     sector: Option<String>,
     style: Style,
     period: Period,
+    vars: &HashMap<String, Value>,
 ) -> Option<RecoPick> {
     let quote = client.get_quote(code).await.ok()?;
     if quote.is_st {
@@ -214,37 +253,67 @@ async fn scan_synthetic_one(
 
     let (entry_low, entry_high, stop_loss, target_price, base_position, holding_days, reason) =
         match period {
-            Period::Short => (
-                price * 0.99,
-                price * 1.01,
-                price * 0.96,
-                price * 1.06,
-                4.0,
-                5u32,
-                format!("候选池初筛（短线 — {} 信号缺失，按现价合成）", style_label),
-            ),
-            Period::Mid => (
-                price * 0.97,
-                price * 1.03,
-                price * 0.92,
-                price * 1.15,
-                6.0,
-                28u32,
-                format!("候选池初筛（中线 — {} 信号缺失，按现价合成）", style_label),
-            ),
-            Period::Long => (
-                price * 0.95,
-                price * 1.05,
-                price * 0.88,
-                price * 1.25,
-                8.0,
-                90u32,
-                format!("候选池初筛（长线 — {} 信号缺失，按现价合成）", style_label),
-            ),
+            Period::Short => {
+                let el = read_f64(vars, "syn_short_entry_low", 0.99);
+                let eh = read_f64(vars, "syn_short_entry_high", 1.01);
+                let sl = read_f64(vars, "syn_short_stop", 0.96);
+                let tg = read_f64(vars, "syn_short_target", 1.06);
+                let bp = read_f64(vars, "syn_short_base_pos", 4.0);
+                let hd = read_f64(vars, "syn_short_holding_days", 5.0) as u32;
+                (
+                    price * el,
+                    price * eh,
+                    price * sl,
+                    price * tg,
+                    bp,
+                    hd,
+                    format!("候选池初筛（短线 — {} 信号缺失，按现价合成）", style_label),
+                )
+            },
+            Period::Mid => {
+                let el = read_f64(vars, "syn_mid_entry_low", 0.97);
+                let eh = read_f64(vars, "syn_mid_entry_high", 1.03);
+                let sl = read_f64(vars, "syn_mid_stop", 0.92);
+                let tg = read_f64(vars, "syn_mid_target", 1.15);
+                let bp = read_f64(vars, "syn_mid_base_pos", 6.0);
+                let hd = read_f64(vars, "syn_mid_holding_days", 28.0) as u32;
+                (
+                    price * el,
+                    price * eh,
+                    price * sl,
+                    price * tg,
+                    bp,
+                    hd,
+                    format!("候选池初筛（中线 — {} 信号缺失，按现价合成）", style_label),
+                )
+            },
+            Period::Long => {
+                let el = read_f64(vars, "syn_long_entry_low", 0.95);
+                let eh = read_f64(vars, "syn_long_entry_high", 1.05);
+                let sl = read_f64(vars, "syn_long_stop", 0.88);
+                let tg = read_f64(vars, "syn_long_target", 1.25);
+                let bp = read_f64(vars, "syn_long_base_pos", 8.0);
+                let hd = read_f64(vars, "syn_long_holding_days", 90.0) as u32;
+                (
+                    price * el,
+                    price * eh,
+                    price * sl,
+                    price * tg,
+                    bp,
+                    hd,
+                    format!("候选池初筛（长线 — {} 信号缺失，按现价合成）", style_label),
+                )
+            },
         };
 
     // 信心度低（0.45），比 Watchlist 真实初筛（0.55）更低，方便排序时真实 pick 优先
-    let conf = calc_confidence(0.45, 0.4, 0.4, 0.0, 1.0);
+    let conf = calc_confidence(
+        read_f64(vars, "syn_conf_consistency", 0.45),
+        read_f64(vars, "syn_conf_signal", 0.4),
+        read_f64(vars, "syn_conf_direction", 0.4),
+        read_f64(vars, "syn_conf_market", 0.0),
+        read_f64(vars, "syn_conf_base", 1.0),
+    );
     let position = calc_position(base_position, conf, period);
 
     Some(RecoPick {

@@ -1,7 +1,9 @@
+import { Tooltip } from "@/components/layout/Tooltip";
 import { useRightPanel } from "@/hooks/useRightPanel";
+import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import type { EvidenceRef, TimelineNode } from "@/types";
 import { ChevronDown, ChevronRight, Send } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
@@ -48,11 +50,68 @@ function EvidenceChip({ ref: ev }: { ref: EvidenceRef }) {
   );
 }
 
+/**
+ * 把 summary 中的违规片段包裹为 <mark>，用于 LLM 未来引用高亮。
+ * 替代引入 mark.js（避免 5KB 依赖 + DOM Mutation 风险）。
+ */
+function highlightViolations(
+  text: string,
+  snippets: string[],
+  markClass: string,
+): React.ReactNode {
+  if (!text || snippets.length === 0) { return text; }
+  // 按片段长度倒序，避免短片段先匹配覆盖长片段
+  const sorted = [...new Set(snippets)]
+    .filter((s) => s && s.length > 0)
+    .sort((a, b) => b.length - a.length);
+  if (sorted.length === 0) { return text; }
+  const escaped = sorted.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(${escaped.join("|")})`, "g");
+  const parts = text.split(re);
+  return parts.map((part, i) => {
+    if (sorted.includes(part)) {
+      return (
+        <mark
+          key={i}
+          className={markClass}
+          style={{
+            background: "rgba(239, 68, 68, 0.18)",
+            color: "var(--sa-red, #ef4444)",
+            padding: "0 2px",
+            borderRadius: 3,
+            fontWeight: 600,
+          }}
+        >
+          {part}
+        </mark>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 /** 节点卡片:紧凑态 1 行 / 展开态 3-5 行 */
 export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
+
+  const allViolations = useStockAnalysisStore((s) => s.violations);
+  const nodeViolations = useMemo(
+    () => allViolations.filter((v) => v.nodeId === node.id),
+    [allViolations, node.id],
+  );
+  const violationCount = nodeViolations.length;
+  const markClass = t("timeTravel.violations.markClass", { defaultValue: "ax-violation-mark" });
+  const summaryNodes = useMemo(
+    () =>
+      highlightViolations(
+        node.summary,
+        nodeViolations.map((v) => v.snippet),
+        markClass,
+      ),
+    [node.summary, nodeViolations, markClass],
+  );
 
   const statusColor = node.status === "done"
     ? "var(--sa-green)"
@@ -75,7 +134,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
       className="rounded border text-[11px] relative"
       style={{
         background: "var(--surface)",
-        borderColor: node.status === "failed" ? "var(--sa-red)" : "var(--border)",
+        borderColor: node.status === "failed" || violationCount > 0 ? "var(--sa-red)" : "var(--border)",
         borderLeft: `3px solid ${statusColor}`,
       }}
     >
@@ -92,6 +151,31 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
         <span className="font-medium truncate flex-1" title={node.title}>
           {node.title}
         </span>
+        {violationCount > 0 && (
+          <Tooltip
+            title={t("timeTravel.violations.tooltip")}
+            data-testid="violation-chip-tooltip"
+          >
+            <span
+              data-testid="violation-chip"
+              aria-label={t("timeTravel.violations.chipAria", { n: violationCount })}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "1px 6px",
+                borderRadius: 8,
+                fontSize: 10,
+                fontWeight: 700,
+                background: "rgba(239, 68, 68, 0.12)",
+                color: "var(--sa-red, #ef4444)",
+                border: "1px solid rgba(239, 68, 68, 0.35)",
+                flexShrink: 0,
+              }}
+            >
+              {t("timeTravel.violations.chip", { n: violationCount })}
+            </span>
+          </Tooltip>
+        )}
         <span style={{ color: statusColor, fontWeight: 600, flexShrink: 0 }}>
           {statusLabel}
         </span>
@@ -104,8 +188,35 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
               className="text-[11px] leading-relaxed"
               style={{ color: "var(--color-text-secondary)" }}
             >
-              {node.summary}
+              {summaryNodes}
             </div>
+          )}
+
+          {nodeViolations.length > 0 && (
+            <ul
+              data-testid="violation-snippets"
+              style={{
+                margin: 0,
+                paddingLeft: 16,
+                fontSize: 10,
+                color: "var(--sa-red, #ef4444)",
+              }}
+            >
+              {nodeViolations.map((v, i) => (
+                <li key={i}>
+                  <code
+                    style={{
+                      background: "rgba(239,68,68,0.08)",
+                      padding: "0 4px",
+                      borderRadius: 3,
+                    }}
+                  >
+                    {v.snippet}
+                  </code>{" "}
+                  <span style={{ opacity: 0.7 }}>({v.ruleHit})</span>
+                </li>
+              ))}
+            </ul>
           )}
 
           {node.confidence > 0 && (

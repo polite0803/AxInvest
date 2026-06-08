@@ -49,6 +49,7 @@ export const StockAction = {
   HOLD: "HOLD",
   REDUCE: "REDUCE",
   SELL: "SELL",
+  UNCERTAIN: "UNCERTAIN",
 } as const;
 
 export type StockActionType = (typeof StockAction)[keyof typeof StockAction];
@@ -65,6 +66,8 @@ export const STOCK_ACTION_LABELS: Record<string, StockActionType> = {
   "HOLD": StockAction.HOLD,
   "REDUCE": StockAction.REDUCE,
   "SELL": StockAction.SELL,
+  "uncertain": StockAction.UNCERTAIN,
+  "UNCERTAIN": StockAction.UNCERTAIN,
 };
 
 /** Action → i18n key */
@@ -75,8 +78,9 @@ export function getActionTKey(action: string): string {
     HOLD: "stockAnalysis.actionHold",
     REDUCE: "stockAnalysis.actionReduce",
     SELL: "stockAnalysis.actionSell",
+    UNCERTAIN: "stockAnalysis.actionUncertain",
   };
-  return map[action] ?? "stockAnalysis.actionHold";
+  return map[action] ?? "stockAnalysis.actionUncertain";
 }
 
 /** Action → Ant Design Tag 颜色 */
@@ -90,6 +94,8 @@ export function getActionColor(action: string): "red" | "green" | "orange" | "bl
       return "green";
     case StockAction.HOLD:
       return "blue";
+    case StockAction.UNCERTAIN:
+      return "default";
     default:
       return "default";
   }

@@ -1214,8 +1214,80 @@ fn start_cron_scheduler(state: &AppState) {
 
     let work_engine = state.work_engine.clone();
     let cron_store = state.cron_job_store.clone();
+    let astock_client = state.astock_client.clone();
+    let db = state.harness.db().clone();
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
+        // ── 分支 1：自选股自动扫描 ──
+        if job.task_type.as_deref() == Some("watchlist-scan") {
+            let engine = work_engine.clone();
+            let store = cron_store.clone();
+            let client = astock_client.clone();
+            let database = db.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let mut success_count = 0u32;
+                let mut fail_count = 0u32;
+                let mut errors = Vec::new();
+
+                use sea_orm::EntityTrait;
+                match axagent_core::entity::watchlist_items::Entity::find()
+                    .all(&database)
+                    .await
+                {
+                    Ok(items) => {
+                        for item in &items {
+                            let result =
+                                crate::commands::stock_workflow::run_single_stock_analysis(
+                                    &database,
+                                    &client,
+                                    &engine,
+                                    &item.stock_code,
+                                    &item.stock_name,
+                                )
+                                .await;
+                            match result {
+                                Ok(_) => success_count += 1,
+                                Err(e) => {
+                                    fail_count += 1;
+                                    errors.push(format!("{}: {}", item.stock_code, e));
+                                },
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("[watchlist_scan] 查询自选股失败: {e}");
+                    },
+                }
+
+                let summary = format!("自选股扫描完成: {success_count} 成功, {fail_count} 失败");
+                tracing::info!("[watchlist_scan] {summary}");
+
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: fail_count == 0,
+                    output: Some(summary),
+                    error: if errors.is_empty() {
+                        None
+                    } else {
+                        Some(errors.join("; "))
+                    },
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+
+        // ── 分支 2：工作流模板任务 ──
         if let Some(ref wf_id) = job.workflow_id {
             let engine = work_engine.clone();
             let store = cron_store.clone();

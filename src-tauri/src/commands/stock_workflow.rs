@@ -504,6 +504,53 @@ async fn run_stock_workflow_inner(
                 }
             }
         }
+        // 注入相似历史决策案例（失败案例优先，最多 5 条）
+        {
+            use chrono::NaiveDate;
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+            let three_months_ago = (chrono::Utc::now() - chrono::Duration::days(90))
+                .format("%Y-%m-%d")
+                .to_string();
+            let similar = stock_analyses::Entity::find()
+                .filter(stock_analyses::Column::StockCode.eq(&stock_code))
+                .filter(stock_analyses::Column::Outcome.eq("loss"))
+                .filter(stock_analyses::Column::AnalysisDate.gte(&three_months_ago))
+                .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
+                .limit(5)
+                .all(state.harness.db())
+                .await
+                .unwrap_or_default();
+            if !similar.is_empty() {
+                let mut lines: Vec<String> = Vec::new();
+                for s in similar {
+                    let conf = s
+                        .decision_json
+                        .as_deref()
+                        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+                        .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+                        .map(|c| format!("{}", c as u8))
+                        .unwrap_or_else(|| "?".to_string());
+                    let action = s.decision_action.as_deref().unwrap_or("?");
+                    let reasoning = s.decision_reasoning.as_deref().unwrap_or("");
+                    let abbr = if reasoning.len() > 60 {
+                        &reasoning[..60]
+                    } else {
+                        reasoning
+                    };
+                    lines.push(format!(
+                        "- 日期:{} 决策:{} 置信度:{} → 失败。要点:{}",
+                        s.analysis_date, action, conf, abbr
+                    ));
+                }
+                merged_vars.push(axagent_harness::workflow_types::Variable {
+                    name: "similar_cases".into(),
+                    var_type: "string".into(),
+                    value: serde_json::Value::String(lines.join("\n")),
+                    description: Some("相似历史决策（失败案例，供避免重复错误）".into()),
+                    is_secret: false,
+                });
+            }
+        }
         opts.variables = Some(merged_vars);
 
         match engine.run_workflow(&wf_id, opts).await {

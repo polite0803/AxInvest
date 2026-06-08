@@ -1216,6 +1216,8 @@ fn start_cron_scheduler(state: &AppState) {
     let cron_store = state.cron_job_store.clone();
     let astock_client = state.astock_client.clone();
     let db = state.harness.db().clone();
+    let vector_store = state.vector_store.clone();
+    let master_key = state.harness.master_key_owned();
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
         // ── 分支 1：自选股自动扫描 ──

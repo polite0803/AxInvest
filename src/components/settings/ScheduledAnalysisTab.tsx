@@ -171,14 +171,20 @@ export function ScheduledAnalysisTab() {
       </div>
 
       {/* watchlist auto scan */}
-      <Card size="small" title={t("stockAnalysis.scheduledAnalysis.watchlistScan")} styles={{ body: { padding: "8px 12px" } }}>
+      <Card
+        size="small"
+        title={t("stockAnalysis.scheduledAnalysis.watchlistScan")}
+        styles={{ body: { padding: "8px 12px" } }}
+      >
         <div className="flex items-center gap-3">
           <Switch
             checked={wlScanJobs.some((j) => j.status === "active")}
             onChange={(checked) => toggleWlScan(wlScanJobs.length > 0 ? wlScanJobs[0] : null, checked)}
           />
           <span className="text-xs text-gray-400">
-            {wlScanJobs.some((j) => j.status === "active") ? t("stockAnalysis.scheduledAnalysis.enabled") : t("stockAnalysis.scheduledAnalysis.disabled")}
+            {wlScanJobs.some((j) => j.status === "active")
+              ? t("stockAnalysis.scheduledAnalysis.enabled")
+              : t("stockAnalysis.scheduledAnalysis.disabled")}
           </span>
           <Select
             size="small"
@@ -222,7 +228,11 @@ export function ScheduledAnalysisTab() {
               <Input placeholder={t("stockAnalysis.scheduledAnalysis.placeholder.stockName")} style={{ width: 100 }} />
             </Form.Item>
             <Form.Item name="cronExpression" rules={[{ required: true }]} initialValue="0 9 * * *">
-              <Select style={{ width: 160 }} options={getCronPresets(t)} placeholder={t("stockAnalysis.scheduledAnalysis.placeholder.cron")} />
+              <Select
+                style={{ width: 160 }}
+                options={getCronPresets(t)}
+                placeholder={t("stockAnalysis.scheduledAnalysis.placeholder.cron")}
+              />
             </Form.Item>
             <Form.Item>
               <Button type="primary" htmlType="submit">{t("stockAnalysis.scheduledAnalysis.create")}</Button>

@@ -1291,11 +1291,13 @@ fn start_cron_scheduler(state: &AppState) {
         if job.task_type.as_deref() == Some("validate-decisions") {
             let client = astock_client.clone();
             let database = db.clone();
+            let store = cron_store.clone();
             let job_id = job.id.clone();
             let recurring = job.recurring;
             tokio::task::spawn(async move {
                 use axagent_core::entity::stock_analyses;
                 use chrono::NaiveDate;
+                use sea_orm::sea_query::Expr;
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
                 let started = axagent_runtime_core::cron_job::now_millis();
@@ -1381,9 +1383,9 @@ fn start_cron_scheduler(state: &AppState) {
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
                 };
-                let _ = cron_store.record_run(&job_id, result).await;
+                let _ = store.record_run(&job_id, result).await;
                 if !recurring {
-                    let _ = cron_store
+                    let _ = store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
                         .await;
                 }

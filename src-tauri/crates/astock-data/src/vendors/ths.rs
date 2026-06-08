@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -339,6 +340,62 @@ impl StockVendor for ThsVendor {
                 .get("time")
                 .and_then(|v| v.as_str().map(|s| s.to_string())),
         }))
+    }
+
+    // ── P3:ths 能力申报 ──
+    // 真实实现:
+    // - get_market_dragon_tiger:带 date 字段 → Fallthrough
+    // - get_hot_stocks:当下榜单 → NoHistoricalSemantic
+    // - get_industry_ranking:当下排名 → NoHistoricalSemantic
+    // - get_north_bound_flow:带 date 字段 → Fallthrough
+    // - get_consensus_eps:带 year 字段 → Fallthrough
+    // - get_concept_blocks:当下概念分类 → NoHistoricalSemantic
+    // 其他 stub:Fallthrough
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "get_hot_stocks" | "get_industry_ranking" | "get_concept_blocks" => {
+                AsOfCapability::NoHistoricalSemantic
+            }
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> ThsVendor {
+        ThsVendor {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn ths_no_historical_methods() {
+        let v = make_vendor();
+        for m in &["get_hot_stocks", "get_industry_ranking", "get_concept_blocks"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::NoHistoricalSemantic);
+        }
+    }
+
+    #[test]
+    fn ths_real_date_methods_are_fallthrough() {
+        let v = make_vendor();
+        for m in &[
+            "get_market_dragon_tiger", "get_north_bound_flow",
+            "get_consensus_eps",
+        ] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
+        }
+    }
+
+    #[test]
+    fn ths_stub_methods_are_fallthrough() {
+        let v = make_vendor();
+        for m in &["get_quote", "get_klines", "get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule", "search_stock"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
+        }
     }
 }
 

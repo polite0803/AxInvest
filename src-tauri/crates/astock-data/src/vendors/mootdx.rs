@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -700,5 +701,39 @@ impl StockVendor for MootdxVendor {
 
     async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {
         Ok(vec![])
+    }
+
+    // ── P3:mootdx 能力申报 ──
+    // get_quote:实时TCP行情 → SynthesizeFromKline
+    // get_klines:TCP协议,无日期参数 → Fallthrough(lib.rs按date字段截断)
+    // 其他 stub:Fallthrough
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "get_quote" => AsOfCapability::SynthesizeFromKline,
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> MootdxVendor {
+        MootdxVendor::default()
+    }
+
+    #[test]
+    fn mootdx_quote_is_synthesize() {
+        let v = make_vendor();
+        assert_eq!(v.asof_capability("get_quote"), AsOfCapability::SynthesizeFromKline);
+    }
+
+    #[test]
+    fn mootdx_others_are_fallthrough() {
+        let v = make_vendor();
+        for m in &["get_klines", "get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule", "search_stock"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
+        }
     }
 }

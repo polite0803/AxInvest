@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -314,5 +315,56 @@ impl StockVendor for IwencaiVendor {
             avg_pe: None,
             avg_pb: None,
         }))
+    }
+
+    // ── P3:iwencai 能力申报 ──
+    // 真实实现:
+    // - search_stock:搜索是当下语义 → NoHistoricalSemantic
+    // - get_consensus_eps:带 year 字段 → Fallthrough
+    // - get_concept_blocks:当下概念分类 → NoHistoricalSemantic
+    // - get_hot_stocks:当下热门榜单 → NoHistoricalSemantic
+    // - get_sector_info:当下行业分类 → NoHistoricalSemantic
+    // 其他 stub:Fallthrough
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "search_stock" | "get_concept_blocks" | "get_hot_stocks" | "get_sector_info" => {
+                AsOfCapability::NoHistoricalSemantic
+            }
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> IwencaiVendor {
+        IwencaiVendor {
+            http: reqwest::Client::new(),
+            api_key: "test".into(),
+        }
+    }
+
+    #[test]
+    fn iwencai_no_historical_methods() {
+        let v = make_vendor();
+        for m in &["search_stock", "get_concept_blocks", "get_hot_stocks", "get_sector_info"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::NoHistoricalSemantic);
+        }
+    }
+
+    #[test]
+    fn iwencai_real_date_methods_are_fallthrough() {
+        let v = make_vendor();
+        assert_eq!(v.asof_capability("get_consensus_eps"), AsOfCapability::Fallthrough);
+    }
+
+    #[test]
+    fn iwencai_stub_methods_are_fallthrough() {
+        let v = make_vendor();
+        for m in &["get_quote", "get_klines", "get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
+        }
     }
 }

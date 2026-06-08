@@ -218,6 +218,7 @@ const zhCN = {
       workflow: "工作流",
     },
     panels: {
+      main: "主面板",
       refresh: "刷新",
       noData: "暂无数据",
       dragonTiger: "龙虎榜",
@@ -285,6 +286,7 @@ const zhCN = {
     },
     vendor: {
       disabled: "数据源未开启：{{names}} 均未启用",
+      disabledGeneric: "数据源未启用，此面板不可用",
       connectionFailed: "数据源连接失败，请检查网络或稍后重试",
       backendOffline: "后端服务未就绪，请稍后重试",
       autoDisabled: "已自动关闭 {{count}} 个无法连接的数据源",
@@ -716,6 +718,7 @@ const enUS = {
       workflow: "Workflow",
     },
     panels: {
+      main: "Main Panel",
       refresh: "Refresh",
       noData: "No Data",
       dragonTiger: "Dragon & Tiger",
@@ -783,6 +786,7 @@ const enUS = {
     },
     vendor: {
       disabled: "No vendor enabled: {{names}}",
+      disabledGeneric: "No vendor enabled, this panel is unavailable",
       connectionFailed: "Connection failed, please check network and retry",
       backendOffline: "Backend not ready, please try again later",
       autoDisabled: "Auto-disabled {{count}} unreachable data source(s)",

@@ -7521,6 +7521,7 @@
         "workflow": "工作流"
       },
       "panels": {
+        "main": "主面板",
         "refresh": "刷新",
         "noData": "暂无数据",
         "dragonTiger": "龙虎榜",
@@ -7588,6 +7589,7 @@
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
+        "disabledGeneric": "数据源未启用，此面板不可用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
         "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"

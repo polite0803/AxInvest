@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -114,5 +115,41 @@ impl StockVendor for SinaVendor {
 
     async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {
         Ok(vec![])
+    }
+
+    // ── P3:sina 能力申报 ──
+    // get_quote:实时快照 → SynthesizeFromKline
+    // get_news:带 publish_date,lib.rs 截断正确 → Fallthrough
+    // 其他 stub:Fallthrough
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "get_quote" => AsOfCapability::SynthesizeFromKline,
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> SinaVendor {
+        SinaVendor {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn sina_quote_is_synthesize() {
+        let v = make_vendor();
+        assert_eq!(v.asof_capability("get_quote"), AsOfCapability::SynthesizeFromKline);
+    }
+
+    #[test]
+    fn sina_others_are_fallthrough() {
+        let v = make_vendor();
+        for m in &["get_news", "get_klines", "get_financials", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule", "search_stock"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
+        }
     }
 }

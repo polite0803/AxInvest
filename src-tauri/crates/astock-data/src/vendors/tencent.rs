@@ -1,3 +1,4 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::StockVendor;
@@ -307,5 +308,49 @@ impl StockVendor for TencentVendor {
 
     async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {
         Ok(vec![])
+    }
+
+    // ── P3:tencent 能力申报 ──
+    // get_quote/get_index_quotes:实时快照 → SynthesizeFromKline
+    // get_klines:原生支持日期范围 → NativeDateParam
+    // 其他 stub:Fallthrough
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        match method {
+            "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
+            "get_klines" => AsOfCapability::NativeDateParam,
+            _ => AsOfCapability::Fallthrough,
+        }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    fn make_vendor() -> TencentVendor {
+        TencentVendor {
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn tencent_quote_and_index_are_synthesize() {
+        let v = make_vendor();
+        assert_eq!(v.asof_capability("get_quote"), AsOfCapability::SynthesizeFromKline);
+        assert_eq!(v.asof_capability("get_index_quotes"), AsOfCapability::SynthesizeFromKline);
+    }
+
+    #[test]
+    fn tencent_klines_is_native() {
+        let v = make_vendor();
+        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::NativeDateParam);
+    }
+
+    #[test]
+    fn tencent_others_are_fallthrough() {
+        let v = make_vendor();
+        for m in &["get_financials", "get_news", "get_money_flow", "get_dragon_tiger", "get_lockup_schedule", "search_stock"] {
+            assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
+        }
     }
 }

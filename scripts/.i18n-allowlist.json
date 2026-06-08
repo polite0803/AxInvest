@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-08",
-  "total_entries": 354,
-  "total_files": 354,
+  "total_entries": 355,
+  "total_files": 355,
   "entries": [
     {
       "file": "amplitude",
@@ -85,6 +85,12 @@
     {
       "file": "backtest.runAll",
       "lines": "r,u,n,A,l",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "backtest.sectionTitle",
+      "lines": "s,e,c,t,i,o,n,T,l",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

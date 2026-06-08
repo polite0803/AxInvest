@@ -7518,10 +7518,24 @@
         "riskModel": "风险模型",
         "agentRuntime": "Agent 运行时",
         "toolRuntime": "Tool 运行时",
-        "workflow": "工作流"
+        "workflow": "工作流",
+        "moat": "护城河",
+        "screener": "选股筛选",
+        "signals": "信号检测",
+        "keylevels": "关键价位",
+        "recommender": "推荐器",
+        "indicators": "技术指标",
+        "strategyParams": "策略参数",
+        "trading": "交易决策",
+        "dryRun": "干跑模式"
       },
       "panels": {
         "main": "主面板",
+        "hotStocks": "热门题材",
+        "industryRank": "行业排名",
+        "noHot": "暂无热门题材",
+        "noIndustry": "暂无行业排名",
+        "tags": "标签",
         "refresh": "刷新",
         "noData": "暂无数据",
         "dragonTiger": "龙虎榜",
@@ -7816,7 +7830,8 @@
       "alpha": "Alpha",
       "scopeAll": "全部",
       "scopeLive": "僅 Live",
-      "scopeReplay": "僅 Replay"
+      "scopeReplay": "僅 Replay",
+      "sectionTitle": "回測"
     },
     "chart": {
       "restore": "restore",
@@ -8156,7 +8171,45 @@
       "ts:763:t(": "stockAnalysisStore.ts:763:t("
     },
     "avgRiskScore": "風險均值 {{score}}",
-    "highestRisk": "最高 {{label}} ({{score}})"
+    "highestRisk": "最高 {{label}} ({{score}})",
+    "scheduledAnalysis": {
+      "description": "基于上游 CronJobStore 持久化 — 按 Cron 表达式周期性对指定股票执行完整分析流程",
+      "watchlistScan": "自选股自动扫描",
+      "enabled": "已开启",
+      "disabled": "已关闭",
+      "confirmDelete": "删除此定时任务?",
+      "confirmDeleteTitle": "确认删除?",
+      "newTask": "新建任务",
+      "cancel": "取消",
+      "new": "新建",
+      "create": "创建",
+      "empty": "暂无定时任务",
+      "scanStarted": "自选股自动扫描已开启",
+      "scanPaused": "自选股自动扫描已暂停",
+      "taskCreated": "定时任务已创建",
+      "createFailed": "创建失败",
+      "operationFailed": "操作失败",
+      "cron": {
+        "daily9am": "每日 09:00",
+        "daily1530": "每日 15:30 (收盘)",
+        "weeklyMon": "每周一 09:00",
+        "hourly": "每小时",
+        "tradeDayClose": "交易日 21:00 (每日收盘)",
+        "dailyOpen": "每日 09:00 (开盘前)",
+        "dailyClose": "每日 15:30 (收盘)"
+      },
+      "column": {
+        "id": "ID",
+        "description": "描述",
+        "executed": "已执行",
+        "status": "状态"
+      },
+      "placeholder": {
+        "stockCode": "股票代码",
+        "stockName": "股票名称",
+        "cron": "Cron 表达式"
+      }
+    }
   },
   "trade": {
     "title": "交易日志",

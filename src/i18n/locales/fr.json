@@ -7518,10 +7518,24 @@
         "riskModel": "Risk Model",
         "agentRuntime": "Agent Runtime",
         "toolRuntime": "Tool Runtime",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "moat": "Moat",
+        "screener": "Screener",
+        "signals": "Signals",
+        "keylevels": "Key Levels",
+        "recommender": "Recommender",
+        "indicators": "Indicators",
+        "strategyParams": "Strategy Params",
+        "trading": "Trading",
+        "dryRun": "Dry Run"
       },
       "panels": {
         "main": "Main Panel",
+        "hotStocks": "Hot Stocks",
+        "industryRank": "Industry Rank",
+        "noHot": "No hot stocks",
+        "noIndustry": "No industry rank",
+        "tags": "Tags",
         "refresh": "Refresh",
         "noData": "No Data",
         "dragonTiger": "Dragon & Tiger",
@@ -7816,7 +7830,8 @@
       "alpha": "Alpha",
       "scopeAll": "Tout",
       "scopeLive": "Live uniquement",
-      "scopeReplay": "Replay uniquement"
+      "scopeReplay": "Replay uniquement",
+      "sectionTitle": "Backtest"
     },
     "chart": {
       "restore": "restore",
@@ -8045,7 +8060,45 @@
       "ts:763:t(": "Ts:763:T("
     },
     "avgRiskScore": "Risque moyen {{score}}",
-    "highestRisk": "Plus haut {{label}} ({{score}})"
+    "highestRisk": "Plus haut {{label}} ({{score}})",
+    "scheduledAnalysis": {
+      "description": "Persisted via CronJobStore — run full analysis periodically for specified stocks",
+      "watchlistScan": "Watchlist Auto Scan",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "confirmDelete": "Delete this cron job?",
+      "confirmDeleteTitle": "Confirm delete?",
+      "newTask": "New Task",
+      "cancel": "Cancel",
+      "new": "New",
+      "create": "Create",
+      "empty": "No scheduled tasks",
+      "scanStarted": "Watchlist auto scan started",
+      "scanPaused": "Watchlist auto scan paused",
+      "taskCreated": "Task created",
+      "createFailed": "Failed to create",
+      "operationFailed": "Operation failed",
+      "cron": {
+        "daily9am": "Daily 09:00",
+        "daily1530": "Daily 15:30 (Close)",
+        "weeklyMon": "Weekly Mon 09:00",
+        "hourly": "Hourly",
+        "tradeDayClose": "Trading Day 21:00 (Close)",
+        "dailyOpen": "Daily 09:00 (Pre-open)",
+        "dailyClose": "Daily 15:30 (Close)"
+      },
+      "column": {
+        "id": "ID",
+        "description": "Description",
+        "executed": "Executed",
+        "status": "Status"
+      },
+      "placeholder": {
+        "stockCode": "Stock code",
+        "stockName": "Stock name",
+        "cron": "Cron expression"
+      }
+    }
   },
   "trade": {
     "title": "Trading Log",

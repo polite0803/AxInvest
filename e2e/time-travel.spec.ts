@@ -47,16 +47,18 @@ test.describe("Time Travel / As-Of Mode", () => {
         /* noop */
       }
     });
-    await page.goto("/");
+    // AppHeader 仅在非聊天、非股票页面上渲染。
+    // 详见 ContentArea.tsx line 164 (`!isStockPage && <AppHeader />`) 和 AppHeader.tsx line 64 (`if (isChatPage) return null`)。
+    await page.goto("/settings");
     await page.waitForLoadState("domcontentloaded");
   });
 
-  test("AppHeader mounts the LIVE pill on every page", async ({ page }) => {
+  test("AppHeader mounts the LIVE pill on non-chat, non-stock pages", async ({ page }) => {
     await expect(page.locator('[data-testid="mode-switch"]')).toBeVisible({
       timeout: 30000,
     });
-    // Navigate to a different page and verify pill is still visible
-    await page.goto("/settings");
+    // Navigate to another non-chat, non-stock page and verify pill is still visible
+    await page.goto("/knowledge");
     await page.waitForLoadState("domcontentloaded");
     await expect(page.locator('[data-testid="mode-switch"]')).toBeVisible({
       timeout: 30000,
@@ -175,8 +177,8 @@ test.describe("Time Travel / As-Of Mode", () => {
       timeout: 30000,
     });
 
-    // Navigate
-    for (const path of ["/stock-analysis", "/backtest", "/watchlist", "/"]) {
+    // Navigate — only pages where AppHeader renders (not chat page `/`, not stock pages)
+    for (const path of ["/knowledge", "/workflow", "/settings/advanced"]) {
       await page.goto(path);
       await page.waitForLoadState("domcontentloaded");
       const pill = page.locator('[data-testid="mode-switch"]');

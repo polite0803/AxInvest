@@ -180,10 +180,11 @@ impl ConditionExecutor {
         node_id: &str,
     ) -> Result<NodeOutput, NodeError> {
         // 1. 构建上下文摘要
-        let vars_summary: String = context
-            .variables
-            .iter()
-            .filter(|(k, _)| !k.starts_with("__"))
+        // 重要：仅取"数据变量"（节点输出 + 已知用户输入），不要把 100+ 模板参数
+        // （如 `scoring_trend`/`fscore_roe_min` 等）全部硬灌进 LLM。
+        // 模板变量应该由 Tool 节点通过 `_template_vars` 消费，不应进入 LLM 上下文。
+        let vars_summary: String = super::collect_data_vars(&context.variables)
+            .into_iter()
             .map(|(k, v)| format!("  {k}: {v}"))
             .collect::<Vec<_>>()
             .join("\n");
@@ -394,11 +395,7 @@ fn evaluate_llm_heuristic(
     config: &axagent_harness::workflow_types::ConditionNodeConfig,
     context: &ExecutionState,
 ) -> bool {
-    let meaningful_vars = context
-        .variables
-        .iter()
-        .filter(|(k, _)| !k.starts_with("__"))
-        .count();
+    let meaningful_vars = super::collect_data_vars(&context.variables).len();
     if meaningful_vars > 0 {
         // 有变量但不足以判断，保守降级为 false（安全分支）
         return false;

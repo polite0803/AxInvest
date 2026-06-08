@@ -24,7 +24,7 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
 2. 引用系统预计算的 DCF/安全边际/F-Score/护城河分等指标。
 3. 与 A 股同行业历史分位、机构一致预期 EPS 对比。
 4. 检查 A 股特色风险（ST/退市/审计非标/商誉过高/质押比例）。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -43,6 +43,8 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

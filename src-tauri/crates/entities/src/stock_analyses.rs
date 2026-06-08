@@ -28,6 +28,8 @@ pub struct Model {
     pub model_version: Option<String>,
     /// 关联到 L2 disk-cache 的快照 ID
     pub data_snapshot_id: Option<String>,
+    /// 决策校验结果：pending / win / loss
+    pub outcome: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

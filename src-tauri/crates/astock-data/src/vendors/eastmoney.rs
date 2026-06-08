@@ -1390,7 +1390,7 @@ impl StockVendor for EastMoneyVendor {
         let as_of = crate::as_of::current_as_of()
             .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
         let trade_date = as_of.as_of_date.format("%Y-%m-%d").to_string();
-        let secid = to_em_secid(stock_code);
+        let _secid = to_em_secid(stock_code);
         // EM 融资融券:支持按个股 + 单日查询
         // 沪市 1.融券余额 3.融资余额;深市 secid 标识不同
         let url = format!(

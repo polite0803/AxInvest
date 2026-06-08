@@ -22,7 +22,7 @@ data_sources: [get_stock_kline, get_industry_ranking]
 1. 读 K 线数据（30/60/120/250 日均线状态、近期高低点、成交量变化）。
 2. 读行业排名（个股近 20 日相对行业强弱）。
 3. 判定趋势状态（上行/下行/震荡）+ 关键支撑/压力位。
-4. 输出 `bull_score / bear_score` 两个分量（0-10 整数），分别衡量"看多/看空触发条件成立的程度"。
+4. 输出 `bull_score / bear_score` 两个分量（0-100 整数），分别衡量"看多/看空触发条件成立的程度"。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -34,6 +34,8 @@ data_sources: [get_stock_kline, get_industry_ranking]
   "relative_strength": "强于行业 | 与行业同步 | 弱于行业",
   "bull_score": 0,
   "bear_score": 0,
+  "confidence": 0,
+  "if_data_gaps": false,
   "trigger_bull": "触发看多的具体条件（可证伪）",
   "trigger_bear": "触发看空的具本条件（可证伪）",
   "evidence": [
@@ -44,7 +46,9 @@ data_sources: [get_stock_kline, get_industry_ranking]
 ```
 
 字段口径：
-- `bull_score` / `bear_score`: 0-10 整数，分开打分（不是总分）
+- `bull_score` / `bear_score`: 0-100 整数，分开打分（不是总分）
+- `confidence`: 0-100 整数，你对自己这条分析的把握程度（基于数据完整度和信号清晰度自评）
+- `if_data_gaps`: 布尔值，当 `data_gaps` 非空时设为 `true`
 - `trigger_*`: 必须是可证伪的条件，例如"放量突破 X 元"，不是"看涨"
 - `evidence[*].weight`: 0-10 整数
 - `relative_strength`: 基于近 20 日 vs 行业指数涨跌幅
@@ -57,8 +61,10 @@ data_sources: [get_stock_kline, get_industry_ranking]
   "key_levels": { "support": 28.5, "resistance": 32.0 },
   "volume_signal": "缩量",
   "relative_strength": "与行业同步",
-  "bull_score": 4,
-  "bear_score": 5,
+  "bull_score": 40,
+  "bear_score": 50,
+  "confidence": 70,
+  "if_data_gaps": true,
   "trigger_bull": "放量突破 32.0 元并站稳 3 日",
   "trigger_bear": "缩量跌破 28.5 元且板块同步走弱",
   "evidence": [
@@ -82,7 +88,8 @@ data_sources: [get_stock_kline, get_industry_ranking]
 
 ## 自检（输出前必过）
 
-- ① `bull_score` 与 `bear_score` 是否分开？两个都接近 5 通常是"震荡"状态而不是"中性偏多"？
-- ② `trigger_bull` 与 `trigger_bear` 是否都是"如果 X 发生则..."的可证伪条件？
-- ③ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
-- ④ 是否回避了"目标价"、"涨幅预测"等不允许的输出？
+- ① `bull_score` 与 `bear_score` 是否分开？两个都接近 50 通常是"震荡"状态而不是"中性偏多"？
+- ② `confidence` 是否如实反映你对自己结论的把握（数据完整时高，数据缺失时低）？
+- ③ `trigger_bull` 与 `trigger_bear` 是否都是"如果 X 发生则..."的可证伪条件？
+- ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
+- ⑤ 是否回避了"目标价"、"涨幅预测"等不允许的输出？

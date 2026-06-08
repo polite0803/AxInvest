@@ -7788,6 +7788,7 @@
       "returnRate": "收益率",
       "run": "运行",
       "runAll": "全部回测",
+      "sectionTitle": "回测",
       "summary": "回测汇总",
       "title": "回测分析",
       "total": "分析次数",
@@ -8028,13 +8029,6 @@
     "progress.error": "❌ 分析出错: {{msg}}",
     "askAi.decision": "决策建议",
     "askAi.prompt": "提问",
-    "backtest.accuracy": "准确率",
-    "backtest.alpha": "超额收益",
-    "backtest.avgConfidence": "平均置信度",
-    "backtest.avgReturn": "平均收益率",
-    "backtest.maxDrawdown": "最大回撤",
-    "backtest.title": "回测分析",
-    "backtest.total": "分析次数",
     "export.analystReports": "analystReports",
     "export.date": "date",
     "export.debateRounds": "debateRounds",
@@ -8215,6 +8209,44 @@
       "replayDegraded": "此数据源在回放模式下无历史语义,已被自动跳过。",
       "replayDegradedWithCount": "回放模式下共 {{n}} 项数据源被跳过,本面板不显示。",
       "replayDegradedWithReason": "回放模式下降级: {{reason}}"
+    },
+    "scheduledAnalysis": {
+      "description": "基于上游 CronJobStore 持久化 — 按 Cron 表达式周期性对指定股票执行完整分析流程",
+      "watchlistScan": "自选股自动扫描",
+      "enabled": "已开启",
+      "disabled": "已关闭",
+      "confirmDelete": "删除此定时任务?",
+      "confirmDeleteTitle": "确认删除?",
+      "newTask": "新建任务",
+      "cancel": "取消",
+      "new": "新建",
+      "create": "创建",
+      "empty": "暂无定时任务",
+      "scanStarted": "自选股自动扫描已开启",
+      "scanPaused": "自选股自动扫描已暂停",
+      "taskCreated": "定时任务已创建",
+      "createFailed": "创建失败",
+      "operationFailed": "操作失败",
+      "cron": {
+        "daily9am": "每日 09:00",
+        "daily1530": "每日 15:30 (收盘)",
+        "weeklyMon": "每周一 09:00",
+        "hourly": "每小时",
+        "tradeDayClose": "交易日 21:00 (每日收盘)",
+        "dailyOpen": "每日 09:00 (开盘前)",
+        "dailyClose": "每日 15:30 (收盘)"
+      },
+      "column": {
+        "id": "ID",
+        "description": "描述",
+        "executed": "已执行",
+        "status": "状态"
+      },
+      "placeholder": {
+        "stockCode": "股票代码",
+        "stockName": "股票名称",
+        "cron": "Cron 表达式"
+      }
     }
   },
   "trade": {

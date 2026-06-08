@@ -195,6 +195,10 @@ impl DiskCache {
         self.inner.lock().map(|g| g.len()).unwrap_or(0)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// 清空所有条目(测试用)
     pub fn clear(&self) {
         if let Ok(mut g) = self.inner.lock() {

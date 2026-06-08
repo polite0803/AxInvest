@@ -1,5 +1,8 @@
 //! 金融分析工具 — 31 个：风险模型、信号、数据清洗、技术指标、蒙特卡洛等。
 //! 所有计算逻辑内联，不依赖 axagent-stock-analysis（避免循环依赖）。
+//!
+//! 参数消费：所有可调参数从 `input["_template_vars"]` 读取（tool_executor.rs 自动注入），
+//! 缺失时回退到默认行为，保持向后兼容。
 
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult, global_state};
 use async_trait::async_trait;
@@ -11,6 +14,30 @@ fn parse_f64s(val: &Value, key: &str) -> Vec<f64> {
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default()
+}
+
+/// 从 tool input 中提取 _template_vars 中指定 key 的 f64 值，取不到则返回默认值。
+/// 模板变量在 tool_executor.rs 构建 `resolved_args` 时自动注入。
+fn tv_f64(input: &Value, key: &str, default: f64) -> f64 {
+    input
+        .get("_template_vars")
+        .and_then(|tv| tv.get(key))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(default)
+}
+fn tv_i64(input: &Value, key: &str, default: i64) -> i64 {
+    input
+        .get("_template_vars")
+        .and_then(|tv| tv.get(key))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(default)
+}
+fn tv_str<'a>(input: &'a Value, key: &str, default: &'a str) -> &'a str {
+    input
+        .get("_template_vars")
+        .and_then(|tv| tv.get(key))
+        .and_then(|v| v.as_str())
+        .unwrap_or(default)
 }
 
 // ═══════════ 内联数学函数 ═══════════
@@ -45,7 +72,7 @@ struct SharpeR {
     mean_return: f64,
     stddev: f64,
 }
-fn sharpe_ratio(returns: &[f64], rf: f64) -> SharpeR {
+fn sharpe_ratio(returns: &[f64], rf: f64, annualization: f64) -> SharpeR {
     let n = returns.len();
     if n < 2 {
         return SharpeR {
@@ -61,7 +88,7 @@ fn sharpe_ratio(returns: &[f64], rf: f64) -> SharpeR {
     let sh = if std > 0.0 { (m - rf) / std } else { 0.0 };
     SharpeR {
         sharpe: (sh * 1000.0).round() / 1000.0,
-        annualized: (sh * (252.0f64).sqrt() * 1000.0).round() / 1000.0,
+        annualized: (sh * annualization.sqrt() * 1000.0).round() / 1000.0,
         mean_return: (m * 10000.0).round() / 100.0,
         stddev: (std * 10000.0).round() / 100.0,
     }
@@ -164,7 +191,7 @@ struct KellyR {
     position_pct: f64,
     signal: String,
 }
-fn kelly(wr: f64, aw: f64, al: f64) -> KellyR {
+fn kelly(wr: f64, aw: f64, al: f64, heavy_th: f64, med_th: f64) -> KellyR {
     if al <= 0.0 || aw <= 0.0 || wr <= 0.0 {
         return KellyR {
             kelly_fraction: 0.0,
@@ -180,9 +207,9 @@ fn kelly(wr: f64, aw: f64, al: f64) -> KellyR {
         kelly_fraction: (k * 1000.0).round() / 1000.0,
         half_kelly: (h * 1000.0).round() / 1000.0,
         position_pct: (h * 10000.0).round() / 100.0,
-        signal: if k > 0.25 {
+        signal: if k > heavy_th {
             "重仓"
-        } else if k > 0.1 {
+        } else if k > med_th {
             "中等"
         } else if k > 0.0 {
             "轻仓"
@@ -337,7 +364,7 @@ struct BrkR {
     confidence: String,
     volume_confirmation: bool,
 }
-fn detect_breakout(kj: &str, sup: f64, res: f64) -> BrkR {
+fn detect_breakout(kj: &str, sup: f64, res: f64, vol_confirm_th: f64) -> BrkR {
     #[derive(serde::Deserialize)]
     struct R {
         close: f64,
@@ -369,14 +396,14 @@ fn detect_breakout(kj: &str, sup: f64, res: f64) -> BrkR {
         None
     };
     let (bt, conf) = if price > res {
-        let c = if vr.unwrap_or(1.0) > 1.5 {
+        let c = if vr.unwrap_or(1.0) > vol_confirm_th {
             "high"
         } else {
             "medium"
         };
         ("resistance_break", c)
     } else if price < sup {
-        let c = if vr.unwrap_or(1.0) > 1.5 {
+        let c = if vr.unwrap_or(1.0) > vol_confirm_th {
             "high"
         } else {
             "medium"
@@ -389,7 +416,7 @@ fn detect_breakout(kj: &str, sup: f64, res: f64) -> BrkR {
         breakout_type: bt.into(),
         current_price: price,
         confidence: conf.into(),
-        volume_confirmation: vr.unwrap_or(1.0) > 1.5,
+        volume_confirmation: vr.unwrap_or(1.0) > vol_confirm_th,
     }
 }
 
@@ -630,7 +657,10 @@ fn compute_atr(args: &Value) -> Result<Value, String> {
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
-    let period = args.get("period").and_then(|v| v.as_u64()).unwrap_or(14) as usize;
+    let period = args
+        .get("period")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(tv_i64(args, "atr_period", 14) as u64) as usize;
     let n = kl.len();
     if n < 2 || period == 0 {
         return Ok(json!({"atr": 0.0, "period": period}));
@@ -666,7 +696,10 @@ fn compute_kdj(args: &Value) -> Result<Value, String> {
         .and_then(|v| v.as_str())
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
-    let n = args.get("n").and_then(|v| v.as_u64()).unwrap_or(9) as usize;
+    let n = args
+        .get("n")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(tv_i64(args, "kdj_n", 9) as u64) as usize;
     if kl.len() < n {
         return Ok(json!({"k": 50.0, "d": 50.0, "j": 50.0, "signal": "中性"}));
     }
@@ -760,17 +793,24 @@ fn detect_earnings(args: &Value) -> Result<Value, String> {
         return Ok(json!({"surprise_pct": 0.0, "level": "无预期"}));
     }
     let s = (a - c) / c.abs() * 100.0;
-    let l = if s > 50.0 {
+    // 业绩超预期分级阈值（用户可在设置面板中调整）
+    let th_huge = tv_f64(args, "earnings_th_huge_pos", 50.0);
+    let th_strong = tv_f64(args, "earnings_th_strong_pos", 20.0);
+    let th_mild = tv_f64(args, "earnings_th_mild_pos", 5.0);
+    let th_mild_neg = tv_f64(args, "earnings_th_mild_neg", -5.0);
+    let th_strong_neg = tv_f64(args, "earnings_th_strong_neg", -20.0);
+    let th_huge_neg = tv_f64(args, "earnings_th_huge_neg", -50.0);
+    let l = if s > th_huge {
         "大幅超预期"
-    } else if s > 20.0 {
+    } else if s > th_strong {
         "超预期"
-    } else if s > 5.0 {
+    } else if s > th_mild {
         "略超预期"
-    } else if s > -5.0 {
+    } else if s > th_mild_neg {
         "符合预期"
-    } else if s > -20.0 {
+    } else if s > th_strong_neg {
         "略低于预期"
-    } else if s > -50.0 {
+    } else if s > th_huge_neg {
         "低于预期"
     } else {
         "大幅低于预期"
@@ -785,21 +825,24 @@ fn detect_pledge(args: &Value) -> Result<Value, String> {
         .get("pledge_pct")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
+    // 质押风险阈值（用户可在设置面板中调整）
     let w = args
         .get("warning_line")
         .and_then(|v| v.as_f64())
-        .unwrap_or(50.0);
+        .unwrap_or(tv_f64(args, "pledge_warning_line", 50.0));
     let lq = args
         .get("liquidation_line")
         .and_then(|v| v.as_f64())
-        .unwrap_or(70.0);
+        .unwrap_or(tv_f64(args, "pledge_liquidation_line", 70.0));
+    let med = tv_f64(args, "pledge_medium_line", 30.0);
+    let low = tv_f64(args, "pledge_low_line", 10.0);
     let (r, wa) = if p >= lq {
         ("极高风险", "大股东质押濒临平仓线")
     } else if p >= w {
         ("高风险", "质押比例超过预警线")
-    } else if p >= 30.0 {
+    } else if p >= med {
         ("中风险", "质押比例偏高")
-    } else if p > 10.0 {
+    } else if p > low {
         ("低风险", "质押比例正常")
     } else {
         ("安全", "质押比例低")
@@ -873,23 +916,27 @@ fn normal_approx(s0: &mut u64, s1: &mut u64) -> f64 {
 }
 
 fn monte_carlo(args: &Value) -> Result<Value, String> {
+    // 蒙特卡洛参数（用户可在设置面板中调整默认值）
     let price = args
         .get("current_price")
         .and_then(|v| v.as_f64())
-        .unwrap_or(10.0);
+        .unwrap_or(tv_f64(args, "mc_default_price", 10.0));
     let ret = args
         .get("annual_return")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.08);
+        .unwrap_or(tv_f64(args, "mc_default_return", 0.08));
     let vol = args
         .get("annual_volatility")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.3);
-    let days = args.get("days").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
+        .unwrap_or(tv_f64(args, "mc_default_volatility", 0.3));
+    let days = args
+        .get("days")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(tv_i64(args, "mc_default_days", 30) as u64) as usize;
     let sims = args
         .get("simulations")
         .and_then(|v| v.as_u64())
-        .unwrap_or(1000) as usize;
+        .unwrap_or(tv_i64(args, "mc_default_simulations", 1000) as u64) as usize;
     let (dr, dv) = (ret / 252.0, vol / (252.0f64).sqrt());
     let mut outs = Vec::with_capacity(sims);
     let mut s0 = 1234567890123456789u64;
@@ -928,13 +975,17 @@ fn industry_pos(args: &Value) -> Result<Value, String> {
         return Ok(json!({"position": "数据无效"}));
     }
     let (pr, gr) = (sp / ip, sg / ig);
-    let score = if pr < 1.0 && gr > 1.0 {
+    // 行业内估值/增长对比的判定阈值（用户可调）
+    let pe_cheap = tv_f64(args, "industry_pe_cheap", 1.0);
+    let pe_expensive = tv_f64(args, "industry_pe_expensive", 1.5);
+    let gr_high = tv_f64(args, "industry_growth_high", 1.2);
+    let score = if pr < pe_cheap && gr > 1.0 {
         "质优价廉"
-    } else if pr < 1.0 {
+    } else if pr < pe_cheap {
         "低估值低增长"
-    } else if pr > 1.5 && gr > 1.2 {
+    } else if pr > pe_expensive && gr > gr_high {
         "高估值高增长"
-    } else if pr > 1.5 {
+    } else if pr > pe_expensive {
         "相对高估"
     } else {
         "相对合理"
@@ -961,9 +1012,9 @@ fn limit_up(args: &Value) -> Result<Value, String> {
         .and_then(|v| v.as_str())
         .unwrap_or("main");
     let lp = match mt {
-        "star" | "chinext" => 20.0,
-        "bj" => 30.0,
-        _ => 10.0,
+        "star" | "chinext" => tv_f64(args, "limit_pct_star", 20.0),
+        "bj" => tv_f64(args, "limit_pct_bj", 30.0),
+        _ => tv_f64(args, "limit_pct_main", 10.0),
     };
     if kl.len() < 10 {
         return Ok(json!({"potential": "数据不足", "confidence": 0.0}));
@@ -986,12 +1037,21 @@ fn limit_up(args: &Value) -> Result<Value, String> {
         .filter(|k| k.close > k.high * 0.99)
         .count();
     let trend = (up_d as f64 / 10.0 - 0.5) * 2.0;
-    let score = trend * 40.0 + (vr.min(3.0) - 1.0) * 20.0 + (hits as f64) * 15.0;
-    let pot = if score > 60.0 {
+    // 涨停潜力评分的权重（用户可调）
+    let w_trend = tv_f64(args, "limit_up_w_trend", 40.0);
+    let w_volume = tv_f64(args, "limit_up_w_volume", 20.0);
+    let w_hits = tv_f64(args, "limit_up_w_hits", 15.0);
+    let score = trend * w_trend
+        + (vr.min(3.0) - 1.0) * w_volume
+        + (hits as f64) * w_hits;
+    let th_high = tv_f64(args, "limit_up_th_high", 60.0);
+    let th_med = tv_f64(args, "limit_up_th_med", 30.0);
+    let th_low = tv_f64(args, "limit_up_th_low", 10.0);
+    let pot = if score > th_high {
         "高"
-    } else if score > 30.0 {
+    } else if score > th_med {
         "中"
-    } else if score > 10.0 {
+    } else if score > th_low {
         "低"
     } else {
         "极低"
@@ -1077,15 +1137,16 @@ calc_tool_r!(CalcSharpeRatioTool, "calc_sharpe_ratio", "计算夏普比率", |in
     let rf = input
         .get("risk_free")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.03);
-    serde_json::to_value(sharpe_ratio(&returns, rf)).unwrap_or_default()
+        .unwrap_or(tv_f64(&input, "risk_free_rate", 0.03));
+    let ann = tv_f64(&input, "risk_sharpe_annualization", 252.0);
+    serde_json::to_value(sharpe_ratio(&returns, rf, ann)).unwrap_or_default()
 });
 calc_tool_r!(CalcVarTool, "calc_var", "历史模拟法 VaR 计算", |input| {
     let returns = parse_f64s(&input, "returns_json");
     let conf = input
         .get("confidence")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.95);
+        .unwrap_or(tv_f64(&input, "var_confidence", 0.95));
     serde_json::to_value(value_at_risk(&returns, conf)).unwrap_or_default()
 });
 calc_tool_r!(CalcPEPercentileTool, "calc_pe_percentile", "PE 历史分位数", |input| {
@@ -1108,16 +1169,18 @@ calc_tool_r!(CalcKellyTool, "calc_kelly", "凯利公式仓位计算", |input| {
     let wr = input
         .get("win_rate")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.5);
+        .unwrap_or(tv_f64(&input, "kelly_default_win_rate", 0.5));
     let aw = input
         .get("avg_win")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.05);
+        .unwrap_or(tv_f64(&input, "kelly_default_avg_win", 0.05));
     let al = input
         .get("avg_loss")
         .and_then(|v| v.as_f64())
-        .unwrap_or(0.05);
-    serde_json::to_value(kelly(wr, aw, al)).unwrap_or_default()
+        .unwrap_or(tv_f64(&input, "kelly_default_avg_loss", 0.05));
+    let heavy = tv_f64(&input, "risk_kelly_heavy_threshold", 0.25);
+    let med = tv_f64(&input, "risk_kelly_medium_threshold", 0.1);
+    serde_json::to_value(kelly(wr, aw, al, heavy, med)).unwrap_or_default()
 });
 calc_tool_r!(CalcRiskParityTool, "calc_risk_parity", "风险平价权重计算", |input| {
     let vols = parse_f64s(&input, "volatilities_json");
@@ -1136,11 +1199,11 @@ calc_tool_r!(DetectMACrossTool, "detect_ma_cross", "MA 金叉死叉检测", |inp
     let fast = input
         .get("fast_period")
         .and_then(|v| v.as_u64())
-        .unwrap_or(5) as usize;
+        .unwrap_or(tv_i64(&input, "signal_ma_fast", 5) as u64) as usize;
     let slow = input
         .get("slow_period")
         .and_then(|v| v.as_u64())
-        .unwrap_or(20) as usize;
+        .unwrap_or(tv_i64(&input, "signal_ma_slow", 20) as u64) as usize;
     serde_json::to_value(detect_ma_cross(kj, fast, slow)).unwrap_or_default()
 });
 calc_tool_r!(DetectBreakoutTool, "detect_breakout", "支撑阻力突破检测", |input| {
@@ -1153,7 +1216,8 @@ calc_tool_r!(DetectBreakoutTool, "detect_breakout", "支撑阻力突破检测", 
         .get("resistance")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    serde_json::to_value(detect_breakout(kj, sup, res)).unwrap_or_default()
+    let vol_th = tv_f64(&input, "breakout_volume_threshold", 1.5);
+    serde_json::to_value(detect_breakout(kj, sup, res, vol_th)).unwrap_or_default()
 });
 
 calc_tool_r!(CleanOutliersTool, "clean_outliers", "异常值剔除 (zscore/iqr)", |input| {
@@ -1164,11 +1228,11 @@ calc_tool_r!(CleanOutliersTool, "clean_outliers", "异常值剔除 (zscore/iqr)"
     let method = input
         .get("method")
         .and_then(|v| v.as_str())
-        .unwrap_or("zscore");
+        .unwrap_or(tv_str(&input, "outlier_method", "zscore"));
     let th = input
         .get("threshold")
         .and_then(|v| v.as_f64())
-        .unwrap_or(2.0);
+        .unwrap_or(tv_f64(&input, "outlier_threshold", 2.0));
     serde_json::to_value(remove_outliers(pj, method, th)).unwrap_or_default()
 });
 calc_tool_r!(
@@ -1183,7 +1247,7 @@ calc_tool_r!(
         let method = input
             .get("method")
             .and_then(|v| v.as_str())
-            .unwrap_or("forward");
+            .unwrap_or(tv_str(&input, "fill_missing_method", "forward"));
         serde_json::to_value(fill_missing(pj, method)).unwrap_or_default()
     }
 );

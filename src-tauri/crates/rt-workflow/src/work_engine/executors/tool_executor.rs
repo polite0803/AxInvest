@@ -61,7 +61,7 @@ impl NodeExecutorTrait for ToolExecutor {
         };
 
         // 解析输入映射
-        let resolved_args: serde_json::Value =
+        let mut resolved_args: serde_json::Value =
             tool_node
                 .config
                 .input_mapping
@@ -71,6 +71,13 @@ impl NodeExecutorTrait for ToolExecutor {
                     acc[k] = resolved.unwrap_or(serde_json::Value::Null);
                     acc
                 });
+
+        // ── 注入模板参数：将 workflow template variables 作为 _template_vars
+        //    传递给工具函数，使 scoring/valuation/indicator 等层面可以
+        //    读取用户在设置面板中配置的参数（权重、阈值、周期等）。
+        if let Some(template_vars) = collect_template_vars(context) {
+            resolved_args["_template_vars"] = template_vars;
+        }
 
         let tool_name = &tool_node.config.tool_name;
 
@@ -184,4 +191,26 @@ fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::
     }
     // fallback：root 不是节点 ID，将整个 path 作为模板变量名直查
     context.variables.get(path).cloned()
+}
+
+/// 从 ExecutionState 中收集所有模板变量（非节点输出），用于注入工具函数的 _template_vars。
+///
+/// 判断逻辑：如果一个变量 key 不以节点 ID 前缀（如 t- / a- / d- / s- / j-/ m-/ r- ）开头，
+/// 且不在已知的系统变量列表中，则视为模板变量。工具函数通过 `input["_template_vars"]`
+/// 读取用户在设置面板中配置的权重 / 阈值 / 周期等参数。
+///
+/// 实现复用 `super::var_filter` 的反集（`is_data_var` 的否集）。
+fn collect_template_vars(context: &ExecutionState) -> Option<serde_json::Value> {
+    let vars: serde_json::Map<String, serde_json::Value> = context
+        .variables
+        .iter()
+        .filter(|(key, _)| !super::is_data_var(key))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if vars.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(vars))
+    }
 }

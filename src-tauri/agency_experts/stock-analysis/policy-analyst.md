@@ -24,7 +24,7 @@ data_sources: [get_policy_data, get_news_data]
 2. 按力度分级（国家级 / 部委级 / 地方级）。
 3. 评估每条政策的持续性（主题 vs 长期趋势）。
 4. 识别直接受益/间接受益/受损方向。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -41,6 +41,8 @@ data_sources: [get_policy_data, get_news_data]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

@@ -46,7 +46,7 @@ export function BacktestPanel() {
       size="small"
       title={
         <div className="flex items-center gap-2">
-          <span>📊 {t("stockAnalysis.backtest.title")}</span>
+          <span>📊 {t("stockAnalysis.backtest.sectionTitle")}</span>
           {isReplay && <ReplayBadge />}
         </div>
       }

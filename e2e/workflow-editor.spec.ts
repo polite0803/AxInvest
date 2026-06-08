@@ -15,6 +15,16 @@ async function dismissModals(page: import("@playwright/test").Page) {
 
 test.describe("Workflow Editor E2E Tests", () => {
   test.beforeEach(async ({ page }) => {
+    // Prevent TimeAnchorTour bubble (z-index 1100) from intercepting clicks
+    await page.addInitScript(() => {
+      try {
+        const key = "axagent-time-anchor";
+        const raw = localStorage.getItem(key);
+        const data = raw ? JSON.parse(raw) : { state: {}, version: 0 };
+        data.state = { ...data.state, tourSeen: true };
+        localStorage.setItem(key, JSON.stringify(data));
+      } catch { /* noop */ }
+    });
     await page.goto("/workflow");
     await page.waitForLoadState("networkidle");
     await dismissModals(page);
@@ -54,6 +64,16 @@ test.describe("Workflow Editor E2E Tests", () => {
 
 test.describe("Workflow Editor Canvas", () => {
   test.beforeEach(async ({ page }) => {
+    // Prevent TimeAnchorTour bubble (z-index 1100) from intercepting clicks
+    await page.addInitScript(() => {
+      try {
+        const key = "axagent-time-anchor";
+        const raw = localStorage.getItem(key);
+        const data = raw ? JSON.parse(raw) : { state: {}, version: 0 };
+        data.state = { ...data.state, tourSeen: true };
+        localStorage.setItem(key, JSON.stringify(data));
+      } catch { /* noop */ }
+    });
     await page.goto("/workflow");
     await page.waitForLoadState("networkidle");
     await dismissModals(page);

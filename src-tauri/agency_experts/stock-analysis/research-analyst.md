@@ -24,7 +24,7 @@ data_sources: [get_research_report_data]
 2. 评估研报质量（深度 vs 快评）和发布时点（公告后 vs 跟踪期）。
 3. 追踪 EPS 预测趋势（近 3-6 个月上调/下调方向）。
 4. 识别核心研报观点分歧（多空研报的关键分歧点）。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -41,6 +41,8 @@ data_sources: [get_research_report_data]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

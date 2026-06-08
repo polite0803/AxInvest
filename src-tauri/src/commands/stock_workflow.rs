@@ -342,6 +342,7 @@ async fn run_stock_workflow_inner(
         as_of_date: Set(as_of_date.clone()),
         model_version: Set(None),
         data_snapshot_id: Set(None),
+        outcome: Set(None),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }
@@ -458,6 +459,8 @@ async fn run_stock_workflow_inner(
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
     let sc_name_for_spawn = sc_name.clone();
+    let vector_store = state.vector_store.clone();
+    let master_key = state.harness.master_key_owned();
     tokio::spawn(async move {
         let mut opts = RunOptions {
             max_concurrent,
@@ -582,6 +585,10 @@ async fn run_stock_workflow_inner(
                                 }
                             }
                         }
+                        // 克隆决策字段供 Memory RAG 索引（原值将被 DB 写入消费）
+                        let mem_action = action.clone();
+                        let mem_reasoning = reasoning.clone();
+                        let mem_dj = decision_json.clone();
                         // 持久化工作流结果到 blackboard_snapshot，供历史回放/报告
                         // 生成/跨日 key_levels 聚合使用。修复 Defect #2。
                         // B7: 消费 take_asof_degradation_report() 写入 `degraded` 块
@@ -620,6 +627,37 @@ async fn run_stock_workflow_inner(
                             .filter(stock_analyses::Column::Id.eq(&aid))
                             .exec(&db)
                             .await;
+
+                        // 索引决策到 Memory RAG（best-effort，失败不阻塞）
+                        if let Some(ref dj) = mem_dj {
+                            if !dj.is_empty() {
+                                let confidence_str = serde_json::from_str::<serde_json::Value>(dj)
+                                    .ok()
+                                    .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+                                    .map(|c| format!("{:.0}", c))
+                                    .unwrap_or_else(|| "?".to_string());
+                                let memory_content = format!(
+                                    "股票:{} {} 决策:{} 置信度:{} 日期:{}\n{}",
+                                    stock_code,
+                                    sc_name_for_spawn,
+                                    mem_action.as_deref().unwrap_or(""),
+                                    confidence_str,
+                                    chrono::Utc::now().format("%Y-%m-%d"),
+                                    mem_reasoning.as_deref().unwrap_or(""),
+                                );
+                                let _ = crate::indexing::index_memory_item(
+                                    &db,
+                                    &master_key,
+                                    &vector_store,
+                                    "stock_decisions",
+                                    &aid,
+                                    &memory_content,
+                                    "openai::text-embedding-3-small",
+                                    None,
+                                )
+                                .await;
+                            }
+                        }
                     },
                 }
             },
@@ -701,6 +739,7 @@ pub async fn run_single_stock_analysis(
         as_of_date: Set(None),
         model_version: Set(None),
         data_snapshot_id: Set(None),
+        outcome: Set(None),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }

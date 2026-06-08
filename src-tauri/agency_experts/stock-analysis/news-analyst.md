@@ -24,7 +24,7 @@ data_sources: [get_news_data, get_announcement_data]
 2. 按影响层级和时效性排序。
 3. 评估每条消息对多/空的边际影响。
 4. 识别 A 股监管风险信号（ST/退市风险、立案调查等）。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -42,6 +42,8 @@ data_sources: [get_news_data, get_announcement_data]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

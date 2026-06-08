@@ -7,9 +7,9 @@ import { SettingsGroup } from "./SettingsGroup";
 
 const TEMPLATE_ID = "stock-analysis";
 
-/** 生成默认参数变量列表（首次初始化，与后端 stock-analysis 工作流模板 v19 同步）。
- * 命名约定：snake_case，且与 `stock_analysis_setup.rs` 中种子化的 key 一一对应。
- * 修改后端默认后请同步这里，避免 UI 与实际生效参数脱节。 */
+/** Generate default parameter variable list (initial load, sync with stock-analysis workflow template v19).
+ * Naming convention: snake_case, must match seed keys in `stock_analysis_setup.rs`.
+ * Update this when backend defaults change to keep UI in sync with actual runtime params. */
 function getDefaultVariables(): Variable[] {
   const vars: Variable[] = [];
   const b = (name: string, val: unknown, desc: string, type: string) =>
@@ -135,6 +135,63 @@ function getDefaultVariables(): Variable[] {
   b("risk_sharpe_annualization", 252, "夏普年化因子（252=日频，12=月频）", "number");
   b("risk_kelly_heavy_threshold", 0.25, "凯利重仓阈值", "number");
   b("risk_kelly_medium_threshold", 0.1, "凯利中仓阈值", "number");
+  // 风险组合（compute_portfolio_risk / compute_scoring / compute_valuation）
+  b("fscore_roe_min", 0.10, "F-Score ROE 最低要求 (小数)", "number");
+  b("fscore_gross_margin_min", 0.30, "F-Score 毛利率最低要求 (小数)", "number");
+  b("fscore_net_margin_min", 0.10, "F-Score 净利率最低要求 (小数)", "number");
+  b("fscore_debt_max", 0.60, "F-Score 负债率上限 (小数)", "number");
+  b("fscore_pe_max", 20, "F-Score PE 上限", "number");
+  b("val_pe_low", 15, "基本面修正 PE 低估阈值", "number");
+  b("val_pe_high", 50, "基本面修正 PE 高估阈值", "number");
+  b("val_pb_low", 1.0, "基本面修正 PB 低估阈值", "number");
+  b("val_pb_high", 6.0, "基本面修正 PB 高估阈值", "number");
+  b("risk_hhi_concentrated", 0.25, "组合 HHI 高度集中阈值 (0-1)", "number");
+  b("risk_hhi_medium", 0.15, "组合 HHI 中度集中阈值 (0-1)", "number");
+  b("risk_divers_high", 8, "组合有效股票数充分分散阈值", "number");
+  b("risk_divers_medium", 4, "组合有效股票数适度分散阈值", "number");
+  // 凯利公式默认值
+  b("kelly_default_win_rate", 0.5, "凯利公式默认胜率", "number");
+  b("kelly_default_avg_win", 0.05, "凯利公式默认平均盈利", "number");
+  b("kelly_default_avg_loss", 0.05, "凯利公式默认平均亏损", "number");
+  // 技术指标周期
+  b("atr_period", 14, "ATR 平均真实波幅周期", "number");
+  b("kdj_n", 9, "KDJ 随机指标 N 周期", "number");
+  // 数据清洗
+  b("fill_missing_method", "forward", "缺失值填充方法: forward / linear", "enum");
+  // 突破检测
+  b("breakout_volume_threshold", 1.5, "支撑阻力突破的成交量确认阈值", "number");
+  // 业绩超预期分级阈值
+  b("earnings_th_huge_pos", 50, "业绩超预期: 大幅超预期下界 (%)", "number");
+  b("earnings_th_strong_pos", 20, "业绩超预期: 强超预期下界 (%)", "number");
+  b("earnings_th_mild_pos", 5, "业绩超预期: 略超预期下界 (%)", "number");
+  b("earnings_th_mild_neg", -5, "业绩超预期: 略低于预期下界 (%)", "number");
+  b("earnings_th_strong_neg", -20, "业绩超预期: 强低于预期下界 (%)", "number");
+  b("earnings_th_huge_neg", -50, "业绩超预期: 大幅低于预期下界 (%)", "number");
+  // 质押风险分级阈值
+  b("pledge_warning_line", 50, "大股东质押比例预警线 (%)", "number");
+  b("pledge_liquidation_line", 70, "大股东质押比例平仓线 (%)", "number");
+  b("pledge_medium_line", 30, "大股东质押中风险阈值 (%)", "number");
+  b("pledge_low_line", 10, "大股东质押低风险阈值 (%)", "number");
+  // 蒙特卡洛模拟默认参数
+  b("mc_default_price", 10, "蒙特卡洛模拟默认价格", "number");
+  b("mc_default_return", 0.08, "蒙特卡洛模拟默认年化收益 (小数)", "number");
+  b("mc_default_volatility", 0.3, "蒙特卡洛模拟默认年化波动率 (小数)", "number");
+  b("mc_default_days", 30, "蒙特卡洛模拟默认天数", "number");
+  b("mc_default_simulations", 1000, "蒙特卡洛模拟默认路径数", "number");
+  // 行业内估值/增长对比阈值
+  b("industry_pe_cheap", 1.0, "行业内 PE 相对低估阈值", "number");
+  b("industry_pe_expensive", 1.5, "行业内 PE 相对高估阈值", "number");
+  b("industry_growth_high", 1.2, "行业内高增长阈值", "number");
+  // 涨停潜力评分
+  b("limit_pct_main", 10, "主板涨停幅度 (%)", "number");
+  b("limit_pct_star", 20, "创业板/科创板涨停幅度 (%)", "number");
+  b("limit_pct_bj", 30, "北交所涨停幅度 (%)", "number");
+  b("limit_up_w_trend", 40, "涨停潜力评分 - 趋势权重", "number");
+  b("limit_up_w_volume", 20, "涨停潜力评分 - 量能权重", "number");
+  b("limit_up_w_hits", 15, "涨停潜力评分 - 历史涨停权重", "number");
+  b("limit_up_th_high", 60, "涨停潜力 - 高潜力阈值", "number");
+  b("limit_up_th_med", 30, "涨停潜力 - 中潜力阈值", "number");
+  b("limit_up_th_low", 10, "涨停潜力 - 低潜力阈值", "number");
   // 注意：vendor_* 9 个开关 + iwencai_key 不在这里暴露，
   // 由「数据源」tab（DataVendorsTab）全权管理，避免两边同时写造成竞态。
   // 全局开关
@@ -157,7 +214,7 @@ function inferStep(v: Variable): number {
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 interface Props {}
 
-/** number 控件 — 窄屏竖排，宽屏横排 */
+/** number control — vertical on narrow screen, horizontal on wide */
 function NumberControl({ v, value, onChange }: {
   v: Variable;
   value: unknown;
@@ -232,7 +289,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
     invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID })
       .then(async (rsp) => {
         if (rsp && (!rsp.variables || rsp.variables.length === 0)) {
-          // 首次加载时，若模板无 variables，用默认值初始化并保存回模板
+          // Initial load: if template has no variables, init with defaults and save back
           const defaults = getDefaultVariables();
           const input: WorkflowTemplateInput = {
             name: rsp.name,
@@ -256,7 +313,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
           for (const v of rsp.variables) { map[v.name] = v.value; }
           setValues(map);
         } else {
-          // 模板不存在时（浏览器模式），直接用默认变量渲染
+          // Template not found (browser mode), render with defaults directly
           const defaults = getDefaultVariables();
           const map: Record<string, unknown> = {};
           for (const v of defaults) { map[v.name] = v.value; }
@@ -267,7 +324,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       .finally(() => setLoading(false));
   }, [t]);
 
-  // 工具 → 参数配对
+  // tool → parameter groups
   const toolGroups = useMemo(() => {
     const allVars = template?.variables ?? getDefaultVariables();
     const varMap: Record<string, Variable> = {};

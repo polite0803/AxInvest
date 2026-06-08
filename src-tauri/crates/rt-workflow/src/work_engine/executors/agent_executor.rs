@@ -452,13 +452,14 @@ impl NodeExecutorTrait for AgentExecutor {
             )
         })?;
 
-        // 5. 构建 user_prompt：仅包含 context_sources 的变量（更精准，减少噪声）
+        // 5. 构建 user_prompt：仅包含 context_sources 的变量（更精准，减少噪声）。
+        //    注意：兜底分支必须用 `collect_data_vars` 过滤掉模板变量（如
+        //    `scoring_trend`/`fscore_roe_min` 等用户设置），绝不能把 100+ 配置参数
+        //    全部以 `key: value` 形式硬灌给 LLM。模板变量应该由 Tool 节点通过
+        //    `_template_vars` 消费，不应进入 LLM 上下文。
         let user_prompt = if an.config.context_sources.is_empty() {
-            // 向后兼容：无 context_sources 时包含所有变量
-            context
-                .variables
-                .iter()
-                .filter(|(k, _)| !k.starts_with("__"))
+            super::collect_data_vars(&context.variables)
+                .into_iter()
                 .map(|(k, v)| format!("{k}: {v}"))
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -699,11 +700,12 @@ impl NodeExecutorTrait for AgentExecutor {
             && !final_content.is_empty()
         {
             // 构建源上下文：从 context_sources 变量提取
+            // 注意：仅取"数据变量"——模板变量（如 `scoring_trend: 30`）不应该
+            // 出现在源上下文里，否则 hallucination guard 可能会错误匹配 LLM 输出
+            // 中的相似 token，触发误报。
             let source_context: String = if an.config.context_sources.is_empty() {
-                context
-                    .variables
-                    .iter()
-                    .filter(|(k, _)| !k.starts_with("__"))
+                super::collect_data_vars(&context.variables)
+                    .into_iter()
                     .map(|(_, v)| v.to_string())
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -1362,9 +1364,10 @@ fn user_prompt_for_rag(
             .collect::<Vec<_>>()
             .join("\n")
     } else {
-        variables
-            .iter()
-            .filter(|(k, _)| !k.starts_with("__"))
+        // 兜底：仅取数据变量（节点输出 + 已知用户输入），不要把 100+ 模板参数
+        // 全部硬灌进 RAG 查询字符串，否则 RAG 检索会受噪声干扰。
+        super::collect_data_vars(variables)
+            .into_iter()
             .map(|(k, v)| format!("{k}: {v}"))
             .collect::<Vec<_>>()
             .join("\n")

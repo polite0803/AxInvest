@@ -374,6 +374,7 @@ impl AStockClient {
             .collect()
     }
 
+    #[expect(dead_code)]
     /// 按当前 AsOfContext 截断 LockupSchedule：保留 unlock_date <= as_of_date 的项
     /// (as_of 之后才解禁的"未来"事件过滤掉)；live 模式原样返回。
     fn truncate_lockup_by_asof(items: Vec<LockupSchedule>) -> Vec<LockupSchedule> {
@@ -387,6 +388,7 @@ impl AStockClient {
             .collect()
     }
 
+    #[expect(dead_code)]
     /// 按当前 AsOfContext 截断 DividendRecord：保留 ex_date <= as_of_date 的项；live 模式原样返回。
     fn truncate_dividend_by_asof(items: Vec<DividendRecord>) -> Vec<DividendRecord> {
         let Some(ctx) = crate::as_of::current_as_of() else {
@@ -538,7 +540,7 @@ impl AStockClient {
     /// 通用 as-of 模式分支 helper: vendor 调 *_with_asof
     /// 返回 Some(T) 表示 vendor 成功;None 表示该 vendor 在 as-of 模式下不可用
     /// 让调用方决定是否继续尝试下一个 vendor
-    pub async fn try_vendor_with_asof<'a, T, Fut>(
+    pub async fn try_vendor_with_asof<T, Fut>(
         &self,
         method_name: &str,
         vendor_name: &str,

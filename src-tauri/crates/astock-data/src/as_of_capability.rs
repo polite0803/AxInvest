@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// - `NativeDateParam`    — vendor 原生支持日期参数,as-of 模式调 `*_with_asof`
 /// - `SynthesizeFromKline` — 用 K 线最后一行合成(典型:实时报价类)
 /// - `NoHistoricalSemantic` — 概念性数据(热门股/概念板块/行业排名),无历史
-///                           as-of 模式查本地 SQLite 缓存;cache miss → 显式 record_degradation
+///  as-of 模式查本地 SQLite 缓存;cache miss → 显式 record_degradation
 /// - `Fallthrough`        — vendor 不支持,接受 "vendor 返回全量 + lib.rs 截断" 兜底
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AsOfCapability {

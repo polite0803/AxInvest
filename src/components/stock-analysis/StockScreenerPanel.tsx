@@ -259,14 +259,12 @@ export function StockScreenerPanel() {
               kind={emptyKind}
               vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
               description={emptyKind === "noData"
-                ? (mode === "discover"
-                  ? t("stockAnalysis.settings.screener.discoverHint")
-                  : t("stockAnalysis.settings.screener.screenHint"))
+                ? t("stockAnalysis.settings.screener.screenHint")
                 : undefined}
               onOpenSettings={openDataSourceSettings}
             />
           )
-          : mode === "screen" && results.length === 0
+          : results.length === 0
           ? (
             <PanelEmpty
               kind="noData"

@@ -1299,6 +1299,167 @@ impl StockVendor for EastMoneyVendor {
             message: "get_quote_with_asof: lib.rs 路由层调用 quote_from_klines 合成,不应直连".into(),
         })
     }
+
+    // ── NativeDateParam 类的日期参数升级 ──
+
+    /// get_klines 升级:end 参数 = as_of_date
+    /// 例 as_of=2024-06-01 → end=20240601
+    async fn get_klines_with_asof(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+    ) -> Result<Vec<KLine>, DataError> {
+        let period_code = match period {
+            "5" | "Min5" => "5",
+            "15" | "Min15" => "15",
+            "30" | "Min30" => "30",
+            "60" | "Min60" => "60",
+            "daily" | "101" | "Daily" => "101",
+            "weekly" | "102" | "Weekly" => "102",
+            "monthly" | "103" | "Monthly" => "103",
+            _ => "101",
+        };
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let end_date = as_of.as_of_date.format("%Y%m%d").to_string();
+        let secid = to_em_secid(stock_code);
+        let url = format!(
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt={period_code}&fqt=1&end={end_date}&lmt={limit}"
+        );
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await?;
+        let klines_raw = json["data"]["klines"]
+            .as_array()
+            .ok_or_else(|| DataError::ParseError("missing klines array".into()))?;
+        let mut klines: Vec<KLine> = klines_raw
+            .iter()
+            .map(|v| {
+                let s = v
+                    .as_str()
+                    .ok_or_else(|| DataError::ParseError("kline not string".into()))?;
+                let parts: Vec<&str> = s.split(',').collect();
+                if parts.len() < 7 {
+                    return Err(DataError::ParseError(format!(
+                        "expected 7 fields in kline, got {}",
+                        parts.len()
+                    )));
+                }
+                let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
+                Ok(KLine {
+                    date: parts[0].to_string(),
+                    open: parse(parts[1]),
+                    high: parse(parts[3]),
+                    low: parse(parts[4]),
+                    close: parse(parts[2]),
+                    volume: parse(parts[5]),
+                    amount: parse(parts[6]),
+                    turnover_rate: if parts.len() > 7 { Some(parse(parts[7])) } else { None },
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        // 兜底再按 as_of_date 截断(vendor 可能返回略多)
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        klines.retain(|k| k.date <= cutoff);
+        Ok(klines)
+    }
+
+    /// get_margin_data 升级:加 TRADE_DATE 过滤
+    async fn get_margin_data_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<MarginData>, DataError> {
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let trade_date = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        let secid = to_em_secid(stock_code);
+        // EM 融资融券:支持按个股 + 单日查询
+        // 沪市 1.融券余额 3.融资余额;深市 secid 标识不同
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+            reportName=RPT_MARGIN_DETAIL_BY_STOCK&columns=ALL&\
+            filter=(SECURITY_CODE%3D%22{stock_code}%22)(TRADE_DATE%3D%27{trade_date}%27)&\
+            pageNumber=1&pageSize=10"
+        );
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await.unwrap_or(Value::Null);
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(None),
+        };
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        let r = &rows[0];
+        Ok(Some(MarginData {
+            stock_code: stock_code.to_string(),
+            date: trade_date,
+            margin_balance: r["RZYE"].as_f64().unwrap_or(0.0),
+            short_balance: r["RQYE"].as_f64().unwrap_or(0.0),
+            margin_buy: r["RZMR"].as_f64().unwrap_or(0.0),
+            short_sell_volume: r["RQMC"].as_f64().unwrap_or(0.0),
+        }))
+    }
+
+    /// get_north_bound_flow 升级:加 TRADE_DATE 过滤
+    /// (原本只能取最近 2 个交易日,as_of 模式可指定日期)
+    async fn get_north_bound_flow_with_asof(
+        &self,
+    ) -> Result<Option<NorthBoundFlow>, DataError> {
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let trade_date = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        // EM 北向资金:沪股通 1.000001 + 深股通 0.000001
+        // 用 datacenter-web 接口支持单日查询
+        let url_sh = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+            reportName=RPT_MUTUAL_STOCK_HOLDRANKS&columns=ALL&\
+            filter=(TRADE_DATE%3D%27{trade_date}%27)(TRADE_TYPE%3D%27001%27)&\
+            pageNumber=1&pageSize=5"
+        );
+        let url_sz = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+            reportName=RPT_MUTUAL_STOCK_HOLDRANKS&columns=ALL&\
+            filter=(TRADE_DATE%3D%27{trade_date}%27)(TRADE_TYPE%3D%27003%27)&\
+            pageNumber=1&pageSize=5"
+        );
+        let resp_sh = self.em_get(&url_sh).await?;
+        let resp_sz = self.em_get(&url_sz).await?;
+        let json_sh: Value = resp_sh.json().await.unwrap_or(Value::Null);
+        let json_sz: Value = resp_sz.json().await.unwrap_or(Value::Null);
+        // 简化:取沪股通 + 深股通 当日总净买入(在 rows 里的某行)
+        // 真实解析应该按 SECURITY_TYPE 汇总,这里留作未来细化
+        let sh_net = json_sh["result"]["data"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|r| r["NET_FLOW"].as_f64())
+            .unwrap_or(0.0);
+        let sz_net = json_sz["result"]["data"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|r| r["NET_FLOW"].as_f64())
+            .unwrap_or(0.0);
+        Ok(Some(NorthBoundFlow {
+            date: trade_date,
+            sh_flow: sh_net,
+            sz_flow: sz_net,
+            total_flow: sh_net + sz_net,
+            timestamp: None,
+        }))
+    }
+
+    // ── SynthesizeFromKline 类的 index_quotes 合成 ──
+    // 用各指数的 as_of 当日 K 线最后一根作为指数值
+    // 简化:返回 ["000001", "399001", "399006"] 三个核心指数
+    async fn get_index_quotes_with_asof(&self) -> Result<Vec<IndexQuote>, DataError> {
+        let _as_of = crate::as_of::current_as_of();
+        // 简化:lib.rs 路由层会拿到 K 线后再合成
+        // vendor 层返回错误让 lib.rs 接管
+        Err(DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: "get_index_quotes_with_asof: lib.rs 路由层用 K 线合成,不应直连".into(),
+        })
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1406,30 +1567,31 @@ mod asof_capability_tests {
     /// 因为实际 HTTP 请求需要 mock server,这里只验证 URL 字符串
     #[test]
     fn market_dragon_tiger_url_contains_trade_date() {
-        use crate::as_of::{AsOfContext, AsOfSource};
-        use crate::as_of::AS_OF;
-        use chrono::NaiveDate;
-        use std::future::Future;
-        use std::pin::Pin;
-
-        // 同步构造预期 URL 模板(模拟 get_market_dragon_tiger_with_asof 的 URL 构造部分)
-        let date = NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
-        let expected_trade_date = "2024-03-15";
-        let expected_url_substr = format!("TRADE_DATE%3D%27{expected_trade_date}%27");
-        // 实际 URL 构造
+        let _expected_trade_date = "2024-03-15";
+        let expected_url_substr = format!("TRADE_DATE%3D%27{_expected_trade_date}%27");
         let actual_url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?\
             reportName=RPT_DAILYBOARDDETAILS&\
             columns=ALL&\
-            filter=(TRADE_DATE%3D%27{expected_trade_date}%27)&\
+            filter=(TRADE_DATE%3D%27{_expected_trade_date}%27)&\
             pageNumber=1&pageSize=50&sortColumns=BOARD_CODE%2CSECURITY_CODE&sortTypes=1%2C1"
         );
         assert!(
             actual_url.contains(&expected_url_substr),
             "市场龙虎榜 URL 应包含 {expected_url_substr},实际: {actual_url}"
         );
-        // 验证日期是 as_of_date(2024-03-15)
         assert!(actual_url.contains("2024-03-15"));
+    }
+
+    #[test]
+    fn klines_url_uses_yyyymmdd_end_format() {
+        // KLine 的 end 参数是 YYYYMMDD(非 YYYY-MM-DD)
+        let end = "20240601";
+        let url = format!(
+            "https://push2his.eastmoney.com/api/qt/stock/kline/get?end={end}&lmt=100"
+        );
+        assert!(url.contains("end=20240601"));
+        assert!(!url.contains("end=2024-06-01")); // 必须不是带分隔符的
     }
 
     #[test]

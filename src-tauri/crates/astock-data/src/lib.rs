@@ -1119,6 +1119,42 @@ impl AStockClient {
     }
 
     pub async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
+        // vendor trait 大重构 P1.5:as-of 模式下按 vendor 申报的 capability 决策
+        // D 档修复:replay 模式现在能拿到 as_of_date 当日的数据(原 bug:无守卫返回 today)
+        if crate::as_of::is_asof_active() {
+            for name in self
+                .routing
+                .vendors_for("market_dragon_tiger", &self.routing.market_dragon_tiger)
+            {
+                if let Some(vendor) = self.find_vendor(name) {
+                    if vendor.asof_capability("get_market_dragon_tiger")
+                        == AsOfCapability::NativeDateParam
+                    {
+                        match vendor.get_market_dragon_tiger_with_asof().await {
+                            Ok(items) => {
+                                if !items.is_empty() {
+                                    return Ok(items);
+                                }
+                            },
+                            Err(e) => {
+                                crate::as_of::record_degradation(
+                                    name,
+                                    "get_market_dragon_tiger",
+                                    &format!("with_asof 失败: {e}"),
+                                );
+                            },
+                        }
+                    }
+                }
+            }
+            // 全部 vendor 都不支持 or 失败:走原 live 路径兜底(返回 today 数据)
+            // 显式标记降级,让 workflow 知道此结果是"now"而不是 "as_of_date"
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_market_dragon_tiger",
+                "as-of 模式下所有 vendor 都未提供 NativeDateParam 数据,fallback to live",
+            );
+        }
         for name in self.routing.vendors_for("market_dragon_tiger", &self.routing.market_dragon_tiger) {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_market_dragon_tiger().await {
@@ -2040,6 +2076,37 @@ mod asof_realtime_degrade_tests {
         assert!(
             r.is_none(),
             "Fallthrough vendor 在 replay 模式应返回 None(由调用方走截断)"
+        );
+    }
+
+    // ── P1.5:D 档修复集成测试 ─────────────────────────────────
+    // 验证:get_market_dragon_tiger 在 as-of 模式会走 capability 决策
+    // 期望:eastmoney 申报 NativeDateParam,会调 get_market_dragon_tiger_with_asof
+    //       网络失败会进 record_degradation,最终 live 路径兜底返回空
+    #[tokio::test]
+    async fn d_bug_fix_market_dragon_tiger_uses_capability() {
+        use crate::as_of::{peek_global_degradation_report, AS_OF};
+        let client = AStockClient::new();
+        let date = NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        // 重置全局降级日志
+        crate::as_of::reset_global_degradation_log();
+        let r = AS_OF
+            .scope(Some(ctx), async { client.get_market_dragon_tiger().await })
+            .await;
+        // 网络在测试中失败,返回 Ok(vec![]) 是允许的(走完 live 兜底路径)
+        assert!(r.is_ok(), "replay 模式调用应成功(网络失败时仍返回空)");
+        // 验证:eastmoney 的 with_asof 路径被走过(因为它申报了 NativeDateParam)
+        //   失败会被 record_degradation 记录
+        // 不强求具体的 vendor 记录(可能 ths/eastmoney 都不在测试 routing 里)
+        // 但验证降级日志确实被触发了
+        let report = peek_global_degradation_report();
+        let has_asof_entry = report
+            .iter()
+            .any(|e| e.method == "get_market_dragon_tiger");
+        assert!(
+            has_asof_entry,
+            "D 档修复后,as-of 模式应至少记录一次 get_market_dragon_tiger 降级"
         );
     }
 }

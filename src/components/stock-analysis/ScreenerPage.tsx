@@ -57,7 +57,7 @@ export function ScreenerPage() {
                       {t("screener.tab.myFilter")}
                     </span>
                   ),
-                  children: <StockScreenerPanel mode="screen" />,
+                  children: <StockScreenerPanel />,
                 },
               ]}
             />

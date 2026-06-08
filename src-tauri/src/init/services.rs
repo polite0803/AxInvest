@@ -1318,8 +1318,7 @@ fn start_cron_scheduler(state: &AppState) {
                 for a in &pending {
                     let action = a.decision_action.as_deref().unwrap_or("");
                     let code = &a.stock_code;
-                    let date = a.analysis_date.as_str();
-                    let decision_json = a.decision_json.as_deref().unwrap_or("{}");
+                    let date = &a.analysis_date;
 
                     let klines = match client.get_klines(code, "daily", 60).await {
                         Ok(k) => k,
@@ -1328,7 +1327,8 @@ fn start_cron_scheduler(state: &AppState) {
                         },
                     };
 
-                    let price_after = match klines.iter().find(|k| k.date.as_str() > date) {
+                    let price_after = match klines.iter().find(|k| k.date.as_str() > date.as_str())
+                    {
                         Some(k) => k.close,
                         None => {
                             continue;
@@ -1344,7 +1344,7 @@ fn start_cron_scheduler(state: &AppState) {
                         .and_then(|td_str| {
                             klines
                                 .iter()
-                                .find(|k| k.date.as_str() >= td_str)
+                                .find(|k| k.date.as_str() >= td_str.as_str())
                                 .map(|k| k.close)
                         })
                         .unwrap_or(price_after);

@@ -7521,6 +7521,7 @@
         "workflow": "Workflow"
       },
       "panels": {
+        "main": "Main Panel",
         "refresh": "Refresh",
         "noData": "No Data",
         "dragonTiger": "Dragon & Tiger",
@@ -7588,6 +7589,7 @@
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
+        "disabledGeneric": "No vendor enabled, this panel is unavailable",
         "connectionFailed": "Connection failed, please check network and retry",
         "backendOffline": "Backend not ready, please try again later",
         "autoDisabled": "Auto-disabled {{count}} unreachable data source(s)"

@@ -7518,16 +7518,7 @@
         "riskModel": "风险模型",
         "agentRuntime": "Agent 运行时",
         "toolRuntime": "Tool 运行时",
-        "workflow": "工作流",
-        "dryRun": "Dry Run",
-        "moat": "Moat",
-        "screener": "Screener",
-        "signals": "Signals",
-        "keylevels": "Key Levels",
-        "recommender": "Recommender",
-        "indicators": "Indicators",
-        "strategyParams": "Strategy Params",
-        "trading": "Trading"
+        "workflow": "工作流"
       },
       "panels": {
         "refresh": "刷新",
@@ -7556,13 +7547,7 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通",
-        "main": "Main",
-        "industryRank": "Industry Rank",
-        "noIndustry": "No industry data",
-        "hotStocks": "Hot Stocks",
-        "noHot": "No hot stock data",
-        "tags": "Tags"
+        "szFlow": "深股通"
       },
       "sheet": {
         "screener": "荐股",
@@ -7599,15 +7584,13 @@
           "rsiOversold": "RSI 超卖",
           "rsiOverbought": "RSI 超买"
         },
-        "unit10k": "万元",
-        "refresh": "Refresh"
+        "unit10k": "万元"
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
         "connectionFailed": "数据源连接失败，请检查网络或稍后重试",
         "backendOffline": "后端服务未就绪，请稍后重试",
-        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源",
-        "disabledGeneric": "Data source not connected"
+        "autoDisabled": "已自动关闭 {{count}} 个无法连接的数据源"
       },
       "workflow": {
         "title": "股票分析工作流",

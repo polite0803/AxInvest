@@ -64,10 +64,12 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
         let c = &n.config;
 
         let input_text = if c.input_var.is_empty() {
-            context
-                .variables
-                .iter()
-                .filter(|(k, _)| !k.starts_with("__"))
+            // 兜底：仅取数据变量（节点输出 + 已知用户输入），过滤掉 100+ 模板参数
+            // （如 `scoring_trend`/`fscore_roe_min` 等）。模板变量本意是给 Tool 节点
+            // 通过 `_template_vars` 消费，**绝不能**全部以 `key: value` 形式硬灌进
+            // LLM input_text。
+            super::collect_data_vars(&context.variables)
+                .into_iter()
                 .map(|(k, v)| format!("{k}: {v}"))
                 .collect::<Vec<_>>()
                 .join("\n")

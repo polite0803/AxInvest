@@ -24,7 +24,7 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
 2. 识别当前市场主线题材（龙头股 + 资金持续 + 政策支持）。
 3. 评估目标股票的三维归属（行业 / 概念 / 地域）。
 4. 判断题材持续性（主线 vs 一日游）。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -41,6 +41,8 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

@@ -24,7 +24,7 @@ data_sources: [get_lockup_data, get_shareholder_data]
 2. 评估未来 3-6 个月解禁压力（按规模 × 概率 × 减持新规）。
 3. 分析大股东行为信号（主动 vs 被动，动机推断）。
 4. 评估质押风险敞口（平仓线距当前价距离、纾困可能性）。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -41,6 +41,8 @@ data_sources: [get_lockup_data, get_shareholder_data]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

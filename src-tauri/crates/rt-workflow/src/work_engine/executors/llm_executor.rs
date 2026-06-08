@@ -103,9 +103,11 @@ impl NodeExecutorTrait for LlmExecutor {
             .filter_map(|m| serde_json::from_value(m).ok())
             .collect();
         if messages.is_empty() {
-            let ctx_text = context
-                .variables
-                .iter()
+            // 兜底：仅取"数据变量"（节点输出 + 已知用户输入），过滤掉 100+ 模板参数
+            // （如 `scoring_trend`/`fscore_roe_min` 等）。模板变量由 Tool 节点通过
+            // `_template_vars` 消费，**绝不能**全部以 `key: value` 形式硬灌进 LLM。
+            let ctx_text = super::collect_data_vars(&context.variables)
+                .into_iter()
                 .map(|(k, v)| format!("{k}: {v}"))
                 .collect::<Vec<_>>()
                 .join("\n");

@@ -163,6 +163,7 @@ pub async fn start_analysis(
         as_of_date: Set(None),
         model_version: Set(None),
         data_snapshot_id: Set(None),
+        outcome: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     };

@@ -338,7 +338,7 @@ pub fn compute_indicators_with_config(
     };
 
     // Volume ratio — 取最近 volume_lookback 日均量
-    let avg_vol = if volumes.len() >= cfg.volume_lookback + 1 {
+    let avg_vol = if volumes.len() > cfg.volume_lookback {
         volumes[volumes.len() - cfg.volume_lookback - 1..volumes.len() - 1]
             .iter()
             .sum::<f64>()

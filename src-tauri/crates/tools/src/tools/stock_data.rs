@@ -9,6 +9,31 @@ fn te(msg: String) -> ToolError {
     ToolError::execution_failed(msg)
 }
 
+/// 从 tool input 中提取 _template_vars 中指定 key 的值，取不到则返回默认值。
+/// 模板变量在 tool_executor.rs 构建 `resolved_args` 时自动注入。
+fn tv_f64(input: &Value, key: &str, default: f64) -> f64 {
+    input
+        .get("_template_vars")
+        .and_then(|tv| tv.get(key))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(default)
+}
+fn tv_i64(input: &Value, key: &str, default: i64) -> i64 {
+    input
+        .get("_template_vars")
+        .and_then(|tv| tv.get(key))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(default)
+}
+#[allow(dead_code)]
+fn tv_bool(input: &Value, key: &str, default: bool) -> bool {
+    input
+        .get("_template_vars")
+        .and_then(|tv| tv.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default)
+}
+
 // ── 1. StockQuoteTool ──
 pub struct StockQuoteTool {
     pub client: Arc<AStockClient>,
@@ -398,6 +423,14 @@ impl Tool for ComputeScoringTool {
         let quote = quote_r.map_err(|e| te(e.to_string()))?;
         let indicators = axagent_astock_data::indicators::compute_indicators(code, &klines);
 
+        // ── 从 _template_vars 读取评分权重（用户在设置面板配置） ──
+        let w_trend = tv_f64(&input, "scoring_trend", 30.0);
+        let w_deviation = tv_f64(&input, "scoring_deviation", 20.0);
+        let w_macd = tv_f64(&input, "scoring_macd", 15.0);
+        let w_volume = tv_f64(&input, "scoring_volume", 15.0);
+        let w_rsi = tv_f64(&input, "scoring_rsi", 10.0);
+        let w_support = tv_f64(&input, "scoring_support", 10.0);
+
         let trend_score = match indicators.ma_alignment.as_str() {
             "多头排列" => 90.0,
             "弱多头" => 70.0,
@@ -460,27 +493,40 @@ impl Tool for ComputeScoringTool {
                 50.0
             };
 
+        // 基本面修正（从 _template_vars 读取估值阈值）
+        let pe_low = tv_f64(&input, "val_pe_low", 15.0);
+        let pe_high = tv_f64(&input, "val_pe_high", 50.0);
+        let pb_low = tv_f64(&input, "val_pb_low", 1.0);
+        let pb_high = tv_f64(&input, "val_pb_high", 6.0);
         let mut value_adj = 0.0;
         if let Some(pe) = quote.pe {
-            if pe > 0.0 && pe < 15.0 {
+            if pe > 0.0 && pe < pe_low {
                 value_adj = 10.0;
-            } else if (15.0..30.0).contains(&pe) {
+            } else if (pe_low..pe_high).contains(&pe) {
                 value_adj = 5.0;
-            } else if pe >= 50.0 {
+            } else if pe >= pe_high {
                 value_adj = -10.0;
             }
         }
         if let Some(pb) = quote.pb {
-            if pb > 0.0 && pb < 1.0 {
+            if pb > 0.0 && pb < pb_low {
                 value_adj += 10.0;
-            } else if (1.0..3.0).contains(&pb) {
+            } else if (pb_low..pb_high).contains(&pb) {
                 value_adj += 5.0;
-            } else if pb >= 6.0 {
+            } else if pb >= pb_high {
                 value_adj -= 5.0;
             }
         }
 
-        let weights = [0.20, 0.10, 0.20, 0.15, 0.15, 0.20];
+        // ── 使用用户配置的权重计算最终评分 ──
+        let weights = [
+            w_trend / 100.0,
+            w_deviation / 100.0,
+            w_macd / 100.0,
+            w_volume / 100.0,
+            w_rsi / 100.0,
+            w_support / 100.0,
+        ];
         let scores = [
             trend_score,
             deviation_score,
@@ -590,13 +636,10 @@ impl Tool for ComputeValuationTool {
         let revenue_yoy = latest_fin.and_then(|f| f.revenue_yoy).unwrap_or(0.0);
         let profit_yoy = latest_fin.and_then(|f| f.profit_yoy).unwrap_or(0.0);
 
-        let discount_rate = 0.10;
-        let growth_high = if revenue_yoy > 0.0 {
-            revenue_yoy.min(0.30)
-        } else {
-            0.05
-        };
-        let growth_stable = 0.03;
+        // ── 从 _template_vars 读取估值配置参数 ──
+        let discount_rate = tv_f64(&input, "value_dcf_discount_rate", 10.0) / 100.0;
+        let growth_stable = tv_f64(&input, "value_dcf_perpetual_rate", 3.0) / 100.0;
+        let dcf_growth_rate = tv_f64(&input, "value_dcf_growth_rate", 8.0) / 100.0;
         let high_years = 5.0;
         let terminal_multiple = 15.0;
 
@@ -604,11 +647,11 @@ impl Tool for ComputeValuationTool {
         if eps > 0.0 {
             let mut pv: f64 = 0.0;
             for year in 1..=(high_years as i32) {
-                let projected_eps = eps * (1.0_f64 + growth_high).powi(year);
+                let projected_eps = eps * (1.0_f64 + dcf_growth_rate).powi(year);
                 pv += projected_eps / (1.0_f64 + discount_rate).powi(year);
             }
             let terminal_eps =
-                eps * (1.0_f64 + growth_high).powi(high_years as i32) * (1.0_f64 + growth_stable);
+                eps * (1.0_f64 + dcf_growth_rate).powi(high_years as i32) * (1.0_f64 + growth_stable);
             let terminal_value = terminal_eps * terminal_multiple
                 / (1.0_f64 + discount_rate).powi(high_years as i32);
             dcf_value = pv + terminal_value;
@@ -620,6 +663,12 @@ impl Tool for ComputeValuationTool {
             0.0
         };
 
+        // F-Score: 从 _template_vars 读取阈值
+        let fscore_roe_min = tv_f64(&input, "fscore_roe_min", 0.10);
+        let fscore_gross_margin_min = tv_f64(&input, "fscore_gross_margin_min", 0.30);
+        let fscore_net_margin_min = tv_f64(&input, "fscore_net_margin_min", 0.10);
+        let fscore_debt_max = tv_f64(&input, "fscore_debt_max", 0.60);
+        let fscore_pe_max = tv_f64(&input, "fscore_pe_max", 20.0);
         let mut f_score = 0i32;
         if profit_yoy > 0.0 {
             f_score += 1;
@@ -627,16 +676,16 @@ impl Tool for ComputeValuationTool {
         if revenue_yoy > 0.0 {
             f_score += 1;
         }
-        if roe > 0.10 {
+        if roe > fscore_roe_min {
             f_score += 1;
         }
-        if gross_margin > 0.30 {
+        if gross_margin > fscore_gross_margin_min {
             f_score += 1;
         }
-        if net_margin > 0.10 {
+        if net_margin > fscore_net_margin_min {
             f_score += 1;
         }
-        if debt_ratio < 0.60 {
+        if debt_ratio < fscore_debt_max {
             f_score += 1;
         }
         if debt_ratio > 0.0
@@ -655,29 +704,35 @@ impl Tool for ComputeValuationTool {
         }
         if let Some(pe_val) = quote.pe
             && pe_val > 0.0
-            && pe_val < 20.0
+            && pe_val < fscore_pe_max
         {
             f_score += 1;
         }
 
+        // 护城河量化：从 _template_vars 读取阈值
+        let moat_gross_margin_high = tv_f64(&input, "moat_gross_margin_high", 0.40);
+        let moat_roe_high = tv_f64(&input, "moat_roe_high", 0.15);
+        let moat_roe_med = tv_f64(&input, "moat_roe_med", 0.10);
+        let moat_debt_low = tv_f64(&input, "moat_debt_low", 0.40);
+        let moat_debt_med = tv_f64(&input, "moat_debt_med", 0.60);
         let mut moat_score = 0i32;
-        if gross_margin > 0.40 {
+        if gross_margin > moat_gross_margin_high {
             moat_score += 3;
         } else if gross_margin > 0.25 {
             moat_score += 2;
         } else if gross_margin > 0.15 {
             moat_score += 1;
         }
-        if roe > 0.15 {
+        if roe > moat_roe_high {
             moat_score += 3;
-        } else if roe > 0.10 {
+        } else if roe > moat_roe_med {
             moat_score += 2;
         } else if roe > 0.05 {
             moat_score += 1;
         }
-        if debt_ratio < 0.40 {
+        if debt_ratio < moat_debt_low {
             moat_score += 2;
-        } else if debt_ratio < 0.60 {
+        } else if debt_ratio < moat_debt_med {
             moat_score += 1;
         }
         if profit_yoy > 0.10 {
@@ -759,7 +814,7 @@ impl Tool for ComputeValuationTool {
                 "upsidePct": (dcf_upside * 100.0).round() / 100.0 / 100.0,
                 "assumptions": {
                     "eps": eps,
-                    "highGrowthRate": growth_high,
+                    "highGrowthRate": dcf_growth_rate,
                     "stableGrowthRate": growth_stable,
                     "highGrowthYears": high_years,
                     "discountRate": discount_rate,
@@ -902,9 +957,14 @@ impl Tool for ComputeRiskTool {
             .map(|(k, _)| k.clone())
             .unwrap_or_default();
 
-        let concentration_label = if hhi > 0.25 {
+        // 组合风控阈值：从 _template_vars 读取
+        let hhi_concentrated = tv_f64(&input, "risk_hhi_concentrated", 0.25);
+        let hhi_medium = tv_f64(&input, "risk_hhi_medium", 0.15);
+        let divers_high = tv_f64(&input, "risk_divers_high", 8.0);
+        let divers_medium = tv_f64(&input, "risk_divers_medium", 4.0);
+        let concentration_label = if hhi > hhi_concentrated {
             "高度集中"
-        } else if hhi > 0.15 {
+        } else if hhi > hhi_medium {
             "中度集中"
         } else {
             "分散"
@@ -921,9 +981,9 @@ impl Tool for ComputeRiskTool {
             vec![]
         };
 
-        let diversification_label = if effective_n >= 8.0 {
+        let diversification_label = if effective_n >= divers_high {
             "充分分散"
-        } else if effective_n >= 4.0 {
+        } else if effective_n >= divers_medium {
             "适度分散"
         } else {
             "集中风险"

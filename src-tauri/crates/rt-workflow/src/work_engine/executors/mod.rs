@@ -77,3 +77,6 @@ pub const WORKFLOW_PROVIDER_ID_VAR: &str = "__workflow_provider_id__";
 // 抽成公共 helper 消除 4 处字节级同义代码。
 pub(crate) mod llm_resolve;
 pub(crate) use llm_resolve::resolve_provider_and_adapter;
+
+pub(crate) mod var_filter;
+pub(crate) use var_filter::{collect_data_vars, is_data_var};

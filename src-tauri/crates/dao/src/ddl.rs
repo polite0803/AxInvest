@@ -702,6 +702,7 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "ALTER TABLE stock_analyses ADD COLUMN as_of_date TEXT",
         "ALTER TABLE stock_analyses ADD COLUMN model_version TEXT",
         "ALTER TABLE stock_analyses ADD COLUMN data_snapshot_id TEXT",
+        "ALTER TABLE stock_analyses ADD COLUMN outcome TEXT DEFAULT 'pending'",
     ] {
         let _ = db.execute_unprepared(sql).await;
     }

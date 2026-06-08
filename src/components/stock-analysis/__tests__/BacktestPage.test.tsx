@@ -36,7 +36,7 @@ describe("BacktestPage", () => {
     const { container } = renderWithRouter();
     const title = container.querySelector(".sa-header-title");
     expect(title).toBeTruthy();
-    expect(title?.textContent).toBe("backtest.title");
+    expect(title?.textContent).toBe("stockAnalysis.backtest.title");
   });
 
   it("renders BacktestPanel and HistoricalAnalysisPanel in vertical stack", () => {

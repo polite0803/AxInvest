@@ -24,7 +24,7 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
 2. 区分资金性质（机构 / 游资 / 北向），分别评估。
 3. 评估持续性（单日 vs 连续 3-5 日趋势）。
 4. 识别题材轮动主线与涨停接力可持续性。
-5. 输出 `bull_score / bear_score` 分量（0-10 整数）。
+5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -41,6 +41,8 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```

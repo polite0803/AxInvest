@@ -22,7 +22,7 @@ data_sources: [get_sentiment_data, get_news_data]
 1. 读情绪类数据（散户情绪指数、舆情倾向分布、融资余额变化、一致预期分歧度）。
 2. 判定情绪状态（贪婪/中性/恐慌）以及一致性（一致/分化）。
 3. 评估情绪面对短线倾向的强化或削弱作用。
-4. 输出 `bull_score / bear_score` 分量（0-10 整数），分别衡量"情绪面对多/空的支持强度"。
+4. 输出 `bull_score / bear_score` 分量（0-100 整数），分别衡量"情绪面对多/空的支持强度"。
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
@@ -38,12 +38,16 @@ data_sources: [get_sentiment_data, get_news_data]
   "evidence": [
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
+  "if_data_gaps": false,
+  "confidence": 0,
   "data_gaps": ["信息缺失项"]
 }
 ```
 
 字段口径：
-- `bull_score` / `bear_score`: 0-10 整数，分开打分
+- `bull_score` / `bear_score`: 0-100 整数，分开打分
+- `confidence`: 0-100 整数，你对自己这条分析的把握程度（基于数据完整度和信号清晰度自评）
+- `if_data_gaps`: 布尔值，当 `data_gaps` 非空时设为 `true`
 - `amplifier_direction`: 情绪对既有倾向是放大还是抵消
 - `trigger_*`: 必须是可证伪的条件
 - `evidence[*].weight`: 0-10 整数

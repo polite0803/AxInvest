@@ -1216,8 +1216,6 @@ fn start_cron_scheduler(state: &AppState) {
     let cron_store = state.cron_job_store.clone();
     let astock_client = state.astock_client.clone();
     let db = state.harness.db().clone();
-    let vector_store = state.vector_store.clone();
-    let master_key = state.harness.master_key_owned();
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
         // ── 分支 1：自选股自动扫描 ──
@@ -1289,7 +1287,111 @@ fn start_cron_scheduler(state: &AppState) {
             return;
         }
 
-        // ── 分支 2：工作流模板任务 ──
+        // ── 分支 2：决策校验（30天回看）──
+        if job.task_type.as_deref() == Some("validate-decisions") {
+            let client = astock_client.clone();
+            let database = db.clone();
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                use axagent_core::entity::stock_analyses;
+                use chrono::NaiveDate;
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+                let cutoff_str = cutoff.format("%Y-%m-%d").to_string();
+
+                let pending = stock_analyses::Entity::find()
+                    .filter(stock_analyses::Column::Status.eq("completed"))
+                    .filter(stock_analyses::Column::AnalysisDate.lte(&cutoff_str))
+                    .filter(
+                        sea_orm::Condition::any()
+                            .add(stock_analyses::Column::Outcome.is_null())
+                            .add(stock_analyses::Column::Outcome.eq("pending")),
+                    )
+                    .all(&database)
+                    .await
+                    .unwrap_or_default();
+
+                let mut success = 0u32;
+                for a in &pending {
+                    let action = a.decision_action.as_deref().unwrap_or("");
+                    let code = &a.stock_code;
+                    let date = a.analysis_date.as_str();
+                    let decision_json = a.decision_json.as_deref().unwrap_or("{}");
+
+                    let klines = match client.get_klines(code, "daily", 60).await {
+                        Ok(k) => k,
+                        Err(_) => {
+                            continue;
+                        },
+                    };
+
+                    let price_after = match klines.iter().find(|k| k.date.as_str() > date) {
+                        Some(k) => k.close,
+                        None => {
+                            continue;
+                        },
+                    };
+
+                    let td = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                        .ok()
+                        .and_then(|d| d.checked_add_signed(chrono::Duration::days(15)))
+                        .map(|d| d.format("%Y-%m-%d").to_string());
+                    let later_close = td
+                        .as_ref()
+                        .and_then(|td_str| {
+                            klines
+                                .iter()
+                                .find(|k| k.date.as_str() >= td_str)
+                                .map(|k| k.close)
+                        })
+                        .unwrap_or(price_after);
+
+                    let is_bullish = matches!(action, "买入" | "增持" | "BUY" | "INCREASE");
+                    let is_bearish = matches!(action, "卖出" | "减持" | "SELL" | "REDUCE");
+                    let outcome = if is_bullish && later_close >= price_after * 0.98 {
+                        "win"
+                    } else if is_bearish && later_close <= price_after * 1.02 {
+                        "win"
+                    } else if is_bullish || is_bearish {
+                        "loss"
+                    } else {
+                        "pending"
+                    };
+
+                    let _ = stock_analyses::Entity::update_many()
+                        .col_expr(
+                            stock_analyses::Column::Outcome,
+                            sea_orm::sea_query::Expr::value(Some(outcome.to_string())),
+                        )
+                        .filter(stock_analyses::Column::Id.eq(&a.id))
+                        .exec(&database)
+                        .await;
+
+                    success += 1;
+                }
+
+                let summary = format!("决策校验完成: {} 条已校验", pending.len());
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: true,
+                    output: Some(summary),
+                    error: None,
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                let _ = cron_store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = cron_store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+
+        // ── 分支 3：工作流模板任务 ──
         if let Some(ref wf_id) = job.workflow_id {
             let engine = work_engine.clone();
             let store = cron_store.clone();

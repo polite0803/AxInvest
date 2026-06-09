@@ -409,6 +409,8 @@ pub async fn validate_workflow_template(
             WorkflowNode::Aggregator(t) => Some(t.base.id.clone()),
             WorkflowNode::Email(t) => Some(t.base.id.clone()),
             WorkflowNode::Debate(t) => Some(t.base.id.clone()),
+            WorkflowNode::Swarm(t) => Some(t.base.id.clone()),
+            WorkflowNode::Storage(t) => Some(t.base.id.clone()),
             WorkflowNode::WorkflowRef(t) => Some(t.base.id.clone()),
             WorkflowNode::End(t) => Some(t.base.id.clone()),
         })
@@ -1613,6 +1615,8 @@ async fn convert_n8n_to_axagent(
             WorkflowNode::Aggregator(t) => t.base.position.clone(),
             WorkflowNode::Email(t) => t.base.position.clone(),
             WorkflowNode::Debate(t) => t.base.position.clone(),
+            WorkflowNode::Swarm(t) => t.base.position.clone(),
+            WorkflowNode::Storage(t) => t.base.position.clone(),
             WorkflowNode::WorkflowRef(t) => t.base.position.clone(),
             WorkflowNode::End(t) => t.base.position.clone(),
         })

@@ -28,15 +28,16 @@ interface CronJobResponse {
   status: string;
 }
 
-const CRON_PRESETS = [
-  { label: t("stockAnalysis.reflection.daily0600"), value: "0 6 * * *" },
-  { label: t("stockAnalysis.reflection.daily1200"), value: "0 12 * * *" },
-  { label: t("stockAnalysis.reflection.daily1800"), value: "0 18 * * *" },
-  { label: t("stockAnalysis.reflection.weekday0600"), value: "0 6 * * 1-5" },
-];
-
 export function ReflectionPanel() {
   const { t } = useTranslation();
+
+  const CRON_PRESETS = [
+    { label: t("stockAnalysis.reflection.daily0600"), value: "0 6 * * *" },
+    { label: t("stockAnalysis.reflection.daily1200"), value: "0 12 * * *" },
+    { label: t("stockAnalysis.reflection.daily1800"), value: "0 18 * * *" },
+    { label: t("stockAnalysis.reflection.weekday0600"), value: "0 6 * * 1-5" },
+  ];
+
   const [reflections, setReflections] = useState<ReflectionRow[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJobResponse[]>([]);
   const [cronExpr, setCronExpr] = useState("0 6 * * *");

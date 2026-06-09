@@ -1225,7 +1225,7 @@ fn start_cron_scheduler(state: &AppState) {
             let client = astock_client.clone();
             let database = db.clone();
             let job_id = job.id.clone();
-            let job_name = job.name.clone();
+            let _job_name = job.name.clone();
             let recurring = job.recurring;
             tokio::task::spawn(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
@@ -1297,7 +1297,6 @@ fn start_cron_scheduler(state: &AppState) {
             tokio::task::spawn(async move {
                 use axagent_core::entity::stock_analyses;
                 use chrono::NaiveDate;
-                use sea_orm::sea_query::Expr;
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
                 let started = axagent_runtime_core::cron_job::now_millis();
@@ -1316,7 +1315,7 @@ fn start_cron_scheduler(state: &AppState) {
                     .await
                     .unwrap_or_default();
 
-                let mut success = 0u32;
+                let mut _success = 0u32;
                 for a in &pending {
                     let action = a.decision_action.as_deref().unwrap_or("");
                     let code = &a.stock_code;
@@ -1372,7 +1371,7 @@ fn start_cron_scheduler(state: &AppState) {
                         .exec(&database)
                         .await;
 
-                    success += 1;
+                    _success += 1;
                 }
 
                 let summary = format!("决策校验完成: {} 条已校验", pending.len());

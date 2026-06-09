@@ -286,10 +286,8 @@ pub async fn recommend_stocks(
 
     // 5. 合并
     let mut all_picks: Vec<types::RecoPick> = Vec::new();
-    for r in results {
-        if let Ok(mut picks) = r {
-            all_picks.append(&mut picks);
-        }
+    for mut picks in results.into_iter().flatten() {
+        all_picks.append(&mut picks);
     }
 
     // 6. 去重
@@ -342,7 +340,7 @@ pub async fn recommend_stocks(
             if disabled_styles_set.contains(&style) {
                 continue;
             }
-            let bucket_empty = by_style.get(&style).map_or(true, |v| v.is_empty());
+            let bucket_empty = by_style.get(&style).is_none_or(|v| v.is_empty());
             if !bucket_empty {
                 continue;
             }

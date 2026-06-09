@@ -123,8 +123,21 @@ impl VendorRouting {
             index_quotes: vec!["eastmoney".into(), "tencent".into()],
             peers: vec!["eastmoney".into()],
             option_pcr: vec!["eastmoney".into()],
-            // 缺陷 G 修复: 默认空,表示 replay 模式按默认 routing 走。
-            replay: HashMap::new(),
+            // P2-4 修复: 在 replay 模式下, 把 3 个核心方法切到对历史日期支持最好的 vendor。
+            // 依据 as_of_capability.rs:
+            //   - get_quote:        tencent 是 SynthesizeFromKline(replay 模式从 K 线最后一行
+            //                       合成, 数据确定性强; baidu_stock 是 Fallthrough)
+            //   - get_klines:       tencent 是 NativeDateParam(可显式传 as_of_date, 最准;
+            //                       其他 vendor 走 Fallthrough + 客户端截断)
+            //   - get_financials:   eastmoney 是 Fallthrough(已是最优)
+            // 其他方法保持默认 routing(只在 live 模式有意义的 vendor 排名)。
+            replay: {
+                let mut m: HashMap<&'static str, Vec<String>> = HashMap::new();
+                m.insert("quote", vec!["tencent".into(), "mootdx".into(), "eastmoney".into()]);
+                m.insert("klines", vec!["tencent".into(), "eastmoney".into(), "mootdx".into()]);
+                m.insert("financials", vec!["eastmoney".into(), "baidu_stock".into()]);
+                m
+            },
         }
     }
 }
@@ -2316,14 +2329,53 @@ mod asof_realtime_degrade_tests {
     #[tokio::test]
     async fn vendors_for_replay_without_override_falls_back() {
         use crate::as_of::AS_OF;
-        let routing = VendorRouting::default_routing(); // replay = 空
+        let routing = VendorRouting::default_routing();
+        // 用一个 P2-4 没加 override 的 method(例如 north_bound_flow)以验证
+        // 真正的"无 override" 路径还能 fallback 到 default
         let default = vec!["tencent".into(), "mootdx".into()];
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
         let chosen = AS_OF
-            .scope(Some(ctx), async { routing.vendors_for("klines", &default) })
+            .scope(Some(ctx), async { routing.vendors_for("north_bound_flow", &default) })
             .await;
         assert_eq!(chosen, &default, "replay 模式无 override 时应 fallback 到默认");
+    }
+
+    // P2-4: 默认 routing 的 replay 覆盖应在初始化时把 quote/klines/financials
+    // 切到对历史日期支持最好的 vendor。重要:覆盖存在时不能 fallback 默认,
+    // 否则 as-of 模式的 NativeDateParam 优势就拿不到了。
+    #[tokio::test]
+    async fn vendors_for_replay_default_routing_uses_replay_overrides() {
+        use crate::as_of::AS_OF;
+        let routing = VendorRouting::default_routing();
+        let quote_default = vec!["eastmoney".into()];
+        let klines_default = vec!["eastmoney".into()];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let (quote_chosen, klines_chosen) = AS_OF
+            .scope(Some(ctx), async {
+                (
+                    routing.vendors_for("quote", &quote_default).clone(),
+                    routing.vendors_for("klines", &klines_default).clone(),
+                )
+            })
+            .await;
+        // quote 的 replay 覆盖第一应是 tencent(SynthesizeFromKline)
+        assert_eq!(quote_chosen[0], "tencent", "quote replay 覆盖首 vendor 必须是 tencent");
+        // klines 的 replay 覆盖第一应是 tencent(NativeDateParam 唯一)
+        assert_eq!(klines_chosen[0], "tencent", "klines replay 覆盖首 vendor 必须是 tencent");
+        // 覆盖值不能等于 default(否则覆盖就是 noop, 修复没生效)
+        assert!(quote_chosen != quote_default, "quote replay 覆盖必须与 default 不同");
+        assert!(klines_chosen != klines_default, "klines replay 覆盖必须与 default 不同");
+    }
+
+    // P2-4: live 模式不受 replay 覆盖影响, 仍走 default
+    #[test]
+    fn vendors_for_live_unaffected_by_replay_overrides() {
+        let routing = VendorRouting::default_routing();
+        let default = vec!["eastmoney".into()];
+        let chosen = routing.vendors_for("quote", &default);
+        assert_eq!(chosen, &default, "live 模式不应使用 replay 覆盖");
     }
 
     #[test]

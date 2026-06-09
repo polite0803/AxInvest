@@ -1036,3 +1036,108 @@ async fn fetch_similar_cases(stock_code: &str, db: &sea_orm::DatabaseConnection)
     }
     Some(lines.join("\n"))
 }
+
+/// 反思复盘工作流：嵌套原股票分析工作流的 as-of，取后见信息对比，反思。
+///
+/// 加载与 [run_single_stock_analysis] 相同的 stock-analysis DAG，
+/// 设置 as_of_date 回到原始分析日期（数据与原分析一致），
+/// 注入 `actual_outcome` 变量让 portfolio-manager 产生反思而非交易决策。
+pub async fn run_reflection_workflow(
+    db: &DatabaseConnection,
+    _client: &axagent_astock_data::AStockClient,
+    engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    stock_code: &str,
+    stock_name: &str,
+    actual_outcome: &str,
+    as_of_date: &str,
+) -> Result<String, String> {
+    use axagent_astock_data::as_of;
+
+    // 1. 创建反思分析记录
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let analysis_id = uuid::Uuid::new_v4().to_string();
+    stock_analyses::ActiveModel {
+        id: Set(analysis_id.clone()),
+        stock_code: Set(stock_code.to_string()),
+        stock_name: Set(stock_name.to_string()),
+        analysis_date: Set(as_of_date.to_string()),
+        provider_id: Set("workflow".into()),
+        conversation_id: Set(uuid::Uuid::new_v4().to_string()),
+        status: Set("running".into()),
+        decision_action: Set(None),
+        decision_position_pct: Set(None),
+        decision_reasoning: Set(None),
+        decision_json: Set(None),
+        blackboard_snapshot: Set(None),
+        config_id: Set(None),
+        analysis_kind: Set("reflection".into()),
+        as_of_date: Set(Some(as_of_date.to_string())),
+        model_version: Set(None),
+        data_snapshot_id: Set(None),
+        outcome: Set(None),
+        created_at: Set(now_ms),
+        updated_at: Set(now_ms),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| format!("DB 写入失败: {e}"))?;
+
+    // 2. 加载原股票分析模板（同一 DAG，分析师 + 辩论 + 风险全量重放）
+    let loaded = load_and_inject_template(db, stock_code, stock_name).await?;
+    let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
+
+    // 3. 创建嵌套工作流
+    let wf_name = format!("stock-reflection-{stock_code}");
+    let workflow = engine
+        .create_workflow(&wf_name, loaded.nodes, loaded.edges)
+        .await
+        .map_err(|e| format!("创建反思工作流失败: {e}"))?;
+    let wf_id = workflow.id.clone();
+
+    // 4. 注入 post-hoc 变量
+    let mut opts = axagent_rt_workflow::work_engine::RunOptions {
+        max_concurrent,
+        step_timeout,
+        progress_callback: None,
+        input: Some(json!({"stock_code": stock_code})),
+        input_schema: loaded.input_schema,
+        output_schema: loaded.output_schema,
+        dry_run: false,
+        // 注入 actual_outcome — 告知 portfolio-manager 这是事后反思
+        variables: Some(vec![axagent_harness::workflow_types::Variable {
+            name: "actual_outcome".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(actual_outcome.to_string()),
+            description: Some("实际走势结果，格式如 '30天跌8% → 失败'".into()),
+            is_secret: false,
+        }]),
+        ..Default::default()
+    };
+
+    // 5. 在 as-of 范围运行（数据快照冻结在原始分析日期）
+    let ctx = AsOfContext::parse(as_of_date).map_err(|e| format!("as_of 解析失败: {e}"))?;
+    let result = as_of::AS_OF
+        .scope(Some(ctx), async move { engine.run_workflow(&wf_id, opts).await })
+        .await;
+
+    // 6. 处理结果（反思内容的 Memory RAG 索引由 worklfow-completed handler 自动完成）
+    match result {
+        Ok(wf) => {
+            let _ = stock_analyses::Entity::update_many()
+                .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
+                .filter(stock_analyses::Column::Id.eq(&analysis_id))
+                .exec(db)
+                .await;
+            Ok(analysis_id)
+        },
+        Err(e) => {
+            let err_msg = format!("反思工作流失败: {e}");
+            let _ = stock_analyses::Entity::update_many()
+                .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {err_msg}")))
+                .filter(stock_analyses::Column::Id.eq(&analysis_id))
+                .exec(db)
+                .await;
+            Err(err_msg)
+        },
+    }
+}

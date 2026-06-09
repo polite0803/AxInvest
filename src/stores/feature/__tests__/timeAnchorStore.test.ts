@@ -163,4 +163,22 @@ describe("useTimeAnchorStore — transitions", () => {
     expect(useTimeAnchorStore.getState().asOfDate).toBeNull();
     expect(useTimeAnchorStore.getState().mode).toBe("live");
   });
+
+  // P2-7: enterReplay 必须重置本地降级显示,避免上次 replay 残留
+  it("enterReplay resets degradation state (count and log to 0)", () => {
+    // 假装有残留降级
+    useTimeAnchorStore.setState({
+      degradationCount: 5,
+      degradationLog: [
+        { vendor: "old", method: "old_method", reason: "stale", as_of: "2026-01-01" },
+      ],
+    });
+    const past = new Date();
+    past.setDate(past.getDate() - 7);
+    const d = past.toISOString().slice(0, 10);
+    useTimeAnchorStore.getState().enterReplay(d);
+    const s = useTimeAnchorStore.getState();
+    expect(s.degradationCount).toBe(0, "P2-7: enterReplay 必须重置 degradationCount");
+    expect(s.degradationLog).toEqual([], "P2-7: enterReplay 必须重置 degradationLog");
+  });
 });

@@ -1247,6 +1247,8 @@ fn start_cron_scheduler(state: &AppState) {
                                     &engine,
                                     &item.stock_code,
                                     &item.stock_name,
+                                    None, // actual_outcome — 正常分析
+                                    None, // as_of_date — 正常分析
                                 )
                                 .await;
                             match result {
@@ -1289,6 +1291,7 @@ fn start_cron_scheduler(state: &AppState) {
 
         // ── 分支 2：决策校验（30天回看）──
         if job.task_type.as_deref() == Some("validate-decisions") {
+            let engine = work_engine.clone();
             let client = astock_client.clone();
             let database = db.clone();
             let store = cron_store.clone();
@@ -1370,6 +1373,25 @@ fn start_cron_scheduler(state: &AppState) {
                         .filter(stock_analyses::Column::Id.eq(&a.id))
                         .exec(&database)
                         .await;
+
+                    // 判定 loss → 触发反思工作流（嵌套原工作流 as-of 重放 + hindsight 注入）
+                    if outcome == "loss" {
+                        let pct = if price_after > 0.0 {
+                            format!("{:.1}%", (later_close / price_after - 1.0) * 100.0)
+                        } else {
+                            "下跌".to_string()
+                        };
+                        let _ = crate::commands::stock_workflow::run_reflection_workflow(
+                            &database,
+                            &client,
+                            &engine,
+                            code,
+                            a.stock_name.as_str(),
+                            &format!("30天后 {} → 失败", pct),
+                            date.as_str(),
+                        )
+                        .await;
+                    }
 
                     _success += 1;
                 }

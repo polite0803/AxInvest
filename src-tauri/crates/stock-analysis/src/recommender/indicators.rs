@@ -84,9 +84,9 @@ fn ema_series(prices: &[f64], period: usize) -> Vec<f64> {
     let init_n = period.min(prices.len());
     let init_sma: f64 = prices[..init_n].iter().sum::<f64>() / init_n as f64;
     emas.push(init_sma);
-    for i in 1..prices.len() {
+    for item in prices.iter().skip(1) {
         let prev = *emas.last().unwrap();
-        let cur = prices[i] * k + prev * (1.0 - k);
+        let cur = item * k + prev * (1.0 - k);
         emas.push(cur);
     }
     emas

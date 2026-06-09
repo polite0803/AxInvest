@@ -768,7 +768,7 @@ impl Tool for ComputeValuationTool {
             v_warnings
                 .push(Value::String(format!("财务数据仅{}期，估值模型依赖多期数据", fin_count)));
         }
-        let v_freshness = if let Some(ref lf) = latest_fin {
+        let v_freshness = if let Some(lf) = latest_fin {
             if lf
                 .report_date
                 .contains(&Local::now().format("%Y-%m").to_string())
@@ -778,7 +778,7 @@ impl Tool for ComputeValuationTool {
                 &Local::now().format("%Y-%m-%d").to_string(),
                 "%Y-%m-%d",
             ) {
-                if let Some(ref rd) = lf.report_date.strip_suffix("00:00:00") {
+                if let Some(rd) = lf.report_date.strip_suffix("00:00:00") {
                     if let Ok(report_date) =
                         chrono::NaiveDate::parse_from_str(rd.trim(), "%Y-%m-%d")
                     {

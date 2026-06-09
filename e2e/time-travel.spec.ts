@@ -82,15 +82,18 @@ test.describe("Time Travel / As-Of Mode", () => {
   test("clicking LIVE opens the As-Of date picker modal", async ({ page }) => {
     const modeSwitch = page.locator('[data-testid="mode-switch"]');
     await expect(modeSwitch).toBeVisible({ timeout: 30000 });
-    // Use force:true to bypass WelcomeWizard modal overlay
-    await modeSwitch.click({ force: true });
+    // Dismiss any overlay modal first so we can click normally
+    await dismissModals(page);
+    await modeSwitch.click();
     const picker = page.locator('[data-testid="asof-date-picker"]');
     await expect(picker).toBeVisible({ timeout: 10000 });
   });
 
   test("picking a past date enters Replay mode and shows the Replay badge", async ({ page }) => {
     const modeSwitch = page.locator('[data-testid="mode-switch"]');
-    await modeSwitch.click({ force: true });
+    // Dismiss any overlay modal first so we can click normally
+    await dismissModals(page);
+    await modeSwitch.click();
     const picker = page.locator('[data-testid="asof-date-picker"]');
     await expect(picker).toBeVisible({ timeout: 10000 });
 

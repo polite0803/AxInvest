@@ -7435,7 +7435,8 @@
       "decision": "decision",
       "market": "market",
       "risk": "risk",
-      "value": "value"
+      "value": "value",
+      "reflection": "Reflection"
     },
     "compare": "Compare",
     "stockCode1": "Stock Code 1",

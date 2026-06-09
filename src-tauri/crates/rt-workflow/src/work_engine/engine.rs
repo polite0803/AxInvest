@@ -1125,8 +1125,13 @@ impl WorkEngine {
             .await
             .map_err(|e| WorkflowError::SerializationError(e.to_string()))?;
 
-        // 若配置了 input_schema，校验输入参数
-        if let Some(ref schema) = options.input_schema
+        // 若配置了 input_schema，校验输入参数。
+        // 注意: dry_run 模式下跳过校验。dry_run 的目的是用 mock 输出验证工作流
+        // *结构*(节点连通性/拓扑/分支),不实际调用 LLM/Tool,不应要求调用方准备好
+        // 真实业务数据(如 stock_code),否则在 DebugPanel 反复迭代结构时会被卡住。
+        // 非 dry_run 路径仍保留严格校验,确保生产执行拿到合法 input。
+        if !options.dry_run
+            && let Some(ref schema) = options.input_schema
             && let Err(errors) = validate_input(&input, schema)
         {
             let detail = format!("input_schema 校验失败：{}", errors.join("; "));

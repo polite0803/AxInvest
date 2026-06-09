@@ -3,6 +3,7 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::agent as agent_err;
 use crate::commands::error_code::agent_status as agent_status_err;
 use crate::commands::error_code::steer as steer_err;
+use axagent_agent::reflector::TaskExecutionRecord;
 use axagent_agent::{AgentExecutionProgressSnapshot, AxAgentApiClient};
 use axagent_core::cloud_workspace::CloudWorkspace;
 use axagent_core::repo::{conversation, message, provider, search_provider};
@@ -689,6 +690,8 @@ pub async fn agent_query(
 ) -> Result<AgentQueryResponse, String> {
     let conversation_id = request.conversation_id.clone();
     info!("[agent_query] Starting for conversation: {}", conversation_id);
+    // 反思工作流：turn 起始时间（用于自动触发反思 + 真实时间戳）
+    let turn_started_at = chrono::Utc::now();
     emit_status(
         &app,
         &conversation_id,
@@ -1997,6 +2000,36 @@ pub async fn agent_query(
             };
             let _ = app.emit("agent-done", &payload);
 
+            // ── 自动触发反思 ──
+            // 提取本 turn 用过的工具名（用于反思）
+            let mut reflection_tools: Vec<String> = Vec::new();
+            for m in &summary.assistant_messages {
+                for b in &m.blocks {
+                    if let axagent_runtime::ContentBlock::ToolUse { name, .. } = b {
+                        reflection_tools.push(name.clone());
+                    }
+                }
+            }
+            for m in &summary.tool_results {
+                for b in &m.blocks {
+                    if let axagent_runtime::ContentBlock::ToolResult { tool_name, .. } = b {
+                        reflection_tools.push(tool_name.clone());
+                    }
+                }
+            }
+            spawn_reflection_task(
+                app.clone(),
+                app_state.reflector.clone(),
+                app_state.insight_system.clone(),
+                conversation_id.clone(),
+                trajectory_input.clone(),
+                true,
+                None,
+                summary.iterations,
+                reflection_tools,
+                turn_started_at,
+            );
+
             // Set workflow_status to "completed" for workflow-type sessions
             if conversation.session_type == "workflow" {
                 let _ = axagent_core::repo::conversation::update_conversation(
@@ -2289,6 +2322,20 @@ pub async fn agent_query(
                     assistant_message_id: None,
                     message: error_msg.clone(),
                 },
+            );
+
+            // ── 自动触发反思（失败路径）──
+            spawn_reflection_task(
+                app.clone(),
+                app_state.reflector.clone(),
+                app_state.insight_system.clone(),
+                conversation_id.clone(),
+                trajectory_input.clone(),
+                false,
+                Some(error_msg.clone()),
+                0,
+                Vec::new(),
+                turn_started_at,
             );
 
             Err(error_msg)
@@ -4562,4 +4609,119 @@ pub async fn agent_steer(
         .or_default()
         .push(instruction);
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 反思工作流：自动触发 helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 在 agent turn 结束后自动触发反思 + 桥接 insight_system + emit `reflection-updated`。
+///
+/// 此函数 spawn 一个 tokio 任务，不阻塞 agent 主流程。
+/// S1+S2: 桥接阶段直接使用 `reflect()` 返回的 `new_insights`（精确），
+/// 不再用 timestamp 过滤，避免跨对话污染。
+#[allow(clippy::too_many_arguments)]
+fn spawn_reflection_task(
+    app: tauri::AppHandle,
+    reflector: Arc<axagent_agent::Reflector>,
+    insight_system: Arc<tokio::sync::RwLock<axagent_trajectory::LearningInsightSystem>>,
+    conversation_id: String,
+    task_description: String,
+    success: bool,
+    error: Option<String>,
+    iterations: usize,
+    tools_used: Vec<String>,
+    started_at: chrono::DateTime<chrono::Utc>,
+) {
+    tauri::async_runtime::spawn(async move {
+        let now = chrono::Utc::now();
+        let task_id = format!("{}-{}", conversation_id, started_at.timestamp_millis());
+        let mut record =
+            TaskExecutionRecord::new(task_id.clone(), task_description, started_at, now)
+                .with_tools(tools_used)
+                .with_iterations(iterations);
+        if success && error.is_none() {
+            record = record.with_success(true);
+        }
+        if let Some(err) = error {
+            record = record.with_error(err);
+        }
+        record.compute_duration();
+
+        // 1) 反思（返回 (Reflection, Vec<Insight>)）
+        let (reflection, new_insights) = reflector.reflect(&record).await;
+
+        // 2) 桥接：把本次**新产生**的 insight 推入 AppState 的 LearningInsightSystem
+        //    S1+S2: 直接传精确列表，不再用 timestamp 过滤
+        let bridged =
+            bridge_reflection_to_insight_system_with(&insight_system, new_insights.clone()).await;
+
+        tracing::info!(
+            "[reflection-auto] task={} quality={} new_insights={} bridged={}",
+            task_id,
+            reflection.quality_score,
+            new_insights.len(),
+            bridged
+        );
+
+        // 3) 通知前端（ReflectionPanel 监听此事件以触发刷新）
+        let _ = app.emit(
+            "reflection-updated",
+            serde_json::json!({
+                "taskId": task_id,
+                "conversationId": conversation_id,
+                "qualityScore": reflection.quality_score,
+                "bridgedCount": bridged,
+                "newInsightsCount": new_insights.len(),
+                "reflection": serde_json::to_value(&reflection).ok(),
+            }),
+        );
+    });
+}
+
+/// M8: 把 `axagent_agent::insight_generator::InsightCategory` 映射到 `axagent_trajectory::InsightCategory`。
+/// **这是 insight → learning_insight 类别映射的唯一来源**。新增 category 时必须同时修改本函数
+/// 与 `axagent_agent::insight_generator::InsightCategory::as_str`。
+fn map_category_to_trajectory(
+    c: axagent_agent::insight_generator::InsightCategory,
+) -> axagent_trajectory::InsightCategory {
+    use axagent_agent::insight_generator::InsightCategory as A;
+    use axagent_trajectory::InsightCategory as B;
+    match c {
+        A::ErrorPattern => B::Warning,
+        A::SuccessPattern => B::Pattern,
+        A::Optimization => B::Improvement,
+        A::Knowledge => B::Pattern,
+        A::Workflow => B::Pattern,
+        A::ToolUsage => B::Pattern,
+    }
+}
+
+/// 把本次**新产生**的 insight 列表推入 insight_system。
+/// S1+S2: 不再用 timestamp 过滤，调用方负责提供精确列表。
+/// L10: 返回 `(bridged_ok, fail_reason)`，调用方可以拿到失败信息。
+pub(crate) async fn bridge_reflection_to_insight_system_with(
+    insight_system: &Arc<tokio::sync::RwLock<axagent_trajectory::LearningInsightSystem>>,
+    new_insights: Vec<axagent_agent::insight_generator::Insight>,
+) -> usize {
+    if new_insights.is_empty() {
+        return 0;
+    }
+    let mut is = insight_system.write().await;
+    let mut count = 0;
+    for ins in new_insights {
+        let category = map_category_to_trajectory(ins.category);
+        is.add_insight(axagent_trajectory::LearningInsight {
+            id: format!("reflector-{}", ins.id),
+            category,
+            title: ins.title,
+            description: ins.content,
+            confidence: (ins.confidence as f64).clamp(0.0, 1.0),
+            evidence: ins.tags.clone(),
+            suggested_action: None,
+            created_at: ins.created_at.timestamp_millis(),
+        });
+        count += 1;
+    }
+    count
 }

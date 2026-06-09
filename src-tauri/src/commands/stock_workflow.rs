@@ -11,7 +11,7 @@ use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgres
 use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
 use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -26,40 +26,105 @@ enum QualityPrecheckResult {
     Insufficient(String),
 }
 
+/// P1-3: 单数据源预检结果(供多源聚合用)
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourceCheck {
+    /// 该源充分
+    Ok,
+    /// 该源部分缺失,但可继续
+    Partial(String),
+    /// 该源完全失败(数据为零或 vendor 报错)
+    Failed(String),
+}
+
+/// P1-3: 聚合 5 个核心数据源的预检结果, 取最差等级
+fn aggregate_precheck(sources: Vec<(&str, SourceCheck)>) -> QualityPrecheckResult {
+    let mut partial_msgs: Vec<String> = Vec::new();
+    let mut first_failure: Option<String> = None;
+    for (name, c) in sources {
+        match c {
+            SourceCheck::Ok => {}
+            SourceCheck::Partial(reason) => partial_msgs.push(format!("{name}: {reason}")),
+            SourceCheck::Failed(reason) => {
+                if first_failure.is_none() {
+                    first_failure = Some(format!("{name}: {reason}"));
+                }
+            },
+        }
+    }
+    if let Some(reason) = first_failure {
+        QualityPrecheckResult::Insufficient(reason)
+    } else if !partial_msgs.is_empty() {
+        QualityPrecheckResult::Partial(partial_msgs.join("; "))
+    } else {
+        QualityPrecheckResult::Pass
+    }
+}
+
 /// 在启动 DAG 前执行快速数据质量检查。
-/// 仅查 quote + financials（最关键的两种数据），2 次 API 调用 vs 15~20 次 LLM 调用。
+///
+/// P1-3 修复: 扩展预检覆盖 5 个核心数据源(quote / financials / klines / news /
+/// money_flow),任一完全失败则整体 Insufficient;部分缺失则 Partial。as-of 模式下
+/// 所有 vendor 调用走 as-of scope, 预检结果反映"截至 as_of_date 的数据是否够用"。
+///
+/// API 调用成本: 5 次 vs 原 2 次, 仍远低于 15~20 次 LLM 调用。
 async fn data_quality_precheck(
     client: &axagent_astock_data::AStockClient,
     stock_code: &str,
     quote: &axagent_astock_data::StockQuote,
 ) -> QualityPrecheckResult {
-    // 1. 检查行情数据
-    if quote.price <= 0.0 && quote.name.is_empty() {
-        return QualityPrecheckResult::Insufficient(
-            "行情数据无效（价格为空、股票代码不存在或未上市）".into(),
-        );
-    }
+    // 1. quote — 已在参数中传入, 直接检查
+    let quote_check = if quote.price <= 0.0 && quote.name.is_empty() {
+        SourceCheck::Failed("价格为空、股票代码不存在或未上市".into())
+    } else {
+        SourceCheck::Ok
+    };
 
-    // 2. 检查财务数据
-    let fin_result = client.get_financials(stock_code).await;
-    match fin_result {
+    // 2. financials
+    let fin_check = match client.get_financials(stock_code).await {
         Ok(financials) => {
             let has_revenue = financials.iter().any(|f| f.revenue.unwrap_or(0.0) > 0.0);
             let has_profit = financials.iter().any(|f| f.net_profit.unwrap_or(0.0) > 0.0);
             if !has_revenue && !has_profit {
-                // 有行情但无财务数据（可能是新股或数据源限制）
-                QualityPrecheckResult::Partial(
-                    "有行情数据，但财务数据不完整（营收/利润缺失），分析置信度受限".into(),
-                )
+                SourceCheck::Partial("营收/利润缺失".into())
             } else {
-                QualityPrecheckResult::Pass
+                SourceCheck::Ok
             }
         },
-        Err(e) => {
-            // 财务数据获取失败但行情可读，可能是少量缺失，允许继续
-            QualityPrecheckResult::Partial(format!("财务数据获取失败: {e}，分析将基于行情数据"))
-        },
-    }
+        Err(e) => SourceCheck::Partial(format!("获取失败: {e}")),
+    };
+
+    // P1-3 新增: 3. klines (取 60 日, 验证历史数据可拉到)
+    let kline_check = match client.get_klines(stock_code, "daily", 60).await {
+        Ok(klines) if klines.len() >= 30 => SourceCheck::Ok,
+        Ok(klines) if !klines.is_empty() => {
+            SourceCheck::Partial(format!("仅 {} 行, 不足 30 日", klines.len()))
+        }
+        Ok(_) => SourceCheck::Failed("K 线为空".into()),
+        Err(e) => SourceCheck::Failed(format!("K 线获取失败: {e}")),
+    };
+
+    // P1-3 新增: 4. news (取最近 10 条)
+    let news_check = match client.get_news(stock_code, 10).await {
+        Ok(news) if !news.is_empty() => SourceCheck::Ok,
+        Ok(_) => SourceCheck::Partial("无新闻数据".into()),
+        Err(e) => SourceCheck::Partial(format!("新闻获取失败: {e}")),
+    };
+
+    // P1-3 新增: 5. money_flow
+    let money_flow_check = match client.get_money_flow(stock_code).await {
+        Ok(Some(_)) => SourceCheck::Ok,
+        Ok(None) => SourceCheck::Partial("无资金流数据".into()),
+        Err(e) => SourceCheck::Partial(format!("资金流获取失败: {e}")),
+    };
+
+    aggregate_precheck(vec![
+        ("quote", quote_check),
+        ("financials", fin_check),
+        ("klines", kline_check),
+        ("news", news_check),
+        ("money_flow", money_flow_check),
+    ])
 }
 
 struct LoadedTemplate {
@@ -68,6 +133,66 @@ struct LoadedTemplate {
     input_schema: Option<JsonSchema>,
     output_schema: Option<JsonSchema>,
     variables: Option<Vec<Variable>>,
+}
+
+#[cfg(test)]
+mod precheck_tests {
+    use super::*;
+
+    // P1-3: aggregate_precheck 取最差等级
+    #[test]
+    fn aggregate_all_ok_returns_pass() {
+        let r = aggregate_precheck(vec![
+            ("quote", SourceCheck::Ok),
+            ("financials", SourceCheck::Ok),
+            ("klines", SourceCheck::Ok),
+        ]);
+        assert!(matches!(r, QualityPrecheckResult::Pass));
+    }
+
+    #[test]
+    fn aggregate_one_partial_returns_partial_with_joined_message() {
+        let r = aggregate_precheck(vec![
+            ("quote", SourceCheck::Ok),
+            ("financials", SourceCheck::Partial("营收缺失".into())),
+            ("klines", SourceCheck::Ok),
+        ]);
+        match r {
+            QualityPrecheckResult::Partial(msg) => {
+                assert!(msg.contains("financials"), "partial msg 应含 source 名: {msg}");
+                assert!(msg.contains("营收缺失"));
+            }
+            _ => panic!("expected Partial"),
+        }
+    }
+
+    #[test]
+    fn aggregate_any_failure_returns_insufficient() {
+        let r = aggregate_precheck(vec![
+            ("quote", SourceCheck::Ok),
+            ("klines", SourceCheck::Failed("K 线获取失败".into())),
+        ]);
+        match r {
+            QualityPrecheckResult::Insufficient(msg) => {
+                assert!(msg.contains("klines"), "insufficient msg 应含 source 名: {msg}");
+                assert!(msg.contains("K 线获取失败"));
+            }
+            _ => panic!("expected Insufficient"),
+        }
+    }
+
+    #[test]
+    fn aggregate_failure_beats_partial() {
+        // 5 源: 2 partial + 1 failed → overall Insufficient
+        let r = aggregate_precheck(vec![
+            ("quote", SourceCheck::Ok),
+            ("financials", SourceCheck::Partial("缺".into())),
+            ("klines", SourceCheck::Failed("空了".into())),
+            ("news", SourceCheck::Partial("无".into())),
+            ("money_flow", SourceCheck::Ok),
+        ]);
+        assert!(matches!(r, QualityPrecheckResult::Insufficient(_)));
+    }
 }
 
 async fn load_and_inject_template(
@@ -505,51 +630,15 @@ async fn run_stock_workflow_inner(
             }
         }
         // 注入相似历史决策案例（失败案例优先，最多 5 条）
-        {
-            use chrono::NaiveDate;
-            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-            let three_months_ago = (chrono::Utc::now() - chrono::Duration::days(90))
-                .format("%Y-%m-%d")
-                .to_string();
-            let similar = stock_analyses::Entity::find()
-                .filter(stock_analyses::Column::StockCode.eq(&stock_code))
-                .filter(stock_analyses::Column::Outcome.eq("loss"))
-                .filter(stock_analyses::Column::AnalysisDate.gte(&three_months_ago))
-                .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
-                .limit(5)
-                .all(state.harness.db())
-                .await
-                .unwrap_or_default();
-            if !similar.is_empty() {
-                let mut lines: Vec<String> = Vec::new();
-                for s in similar {
-                    let conf = s
-                        .decision_json
-                        .as_deref()
-                        .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
-                        .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
-                        .map(|c| format!("{}", c as u8))
-                        .unwrap_or_else(|| "?".to_string());
-                    let action = s.decision_action.as_deref().unwrap_or("?");
-                    let reasoning = s.decision_reasoning.as_deref().unwrap_or("");
-                    let abbr = if reasoning.len() > 60 {
-                        &reasoning[..60]
-                    } else {
-                        reasoning
-                    };
-                    lines.push(format!(
-                        "- 日期:{} 决策:{} 置信度:{} → 失败。要点:{}",
-                        s.analysis_date, action, conf, abbr
-                    ));
-                }
-                merged_vars.push(axagent_harness::workflow_types::Variable {
-                    name: "similar_cases".into(),
-                    var_type: "string".into(),
-                    value: serde_json::Value::String(lines.join("\n")),
-                    description: Some("相似历史决策（失败案例，供避免重复错误）".into()),
-                    is_secret: false,
-                });
-            }
+        let similar_cases_str = fetch_similar_cases(&stock_code, state.harness.db()).await;
+        if let Some(ref cases) = similar_cases_str {
+            merged_vars.push(axagent_harness::workflow_types::Variable {
+                name: "similar_cases".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(cases.clone()),
+                description: Some("相似历史决策（失败案例，供避免重复错误）".into()),
+                is_secret: false,
+            });
         }
         opts.variables = Some(merged_vars);
 
@@ -904,4 +993,46 @@ pub async fn run_single_stock_analysis(
             Err(err_msg)
         },
     }
+}
+
+/// 从 stock_analyses 表查询同股票过去 3 个月的失败案例，返回格式化文本。
+async fn fetch_similar_cases(stock_code: &str, db: &sea_orm::DatabaseConnection) -> Option<String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    let three_months_ago = (chrono::Utc::now() - chrono::Duration::days(90))
+        .format("%Y-%m-%d")
+        .to_string();
+    let all = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::StockCode.eq(stock_code))
+        .filter(stock_analyses::Column::Outcome.eq("loss"))
+        .filter(stock_analyses::Column::AnalysisDate.gte(&three_months_ago))
+        .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
+        .all(db)
+        .await
+        .unwrap_or_default();
+    let similar: Vec<_> = all.into_iter().take(5).collect();
+    if similar.is_empty() {
+        return None;
+    }
+    let mut lines: Vec<String> = Vec::new();
+    for s in similar {
+        let conf = s
+            .decision_json
+            .as_deref()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+            .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+            .map(|c| format!("{}", c as u8))
+            .unwrap_or_else(|| "?".to_string());
+        let action = s.decision_action.as_deref().unwrap_or("?");
+        let reasoning = s.decision_reasoning.as_deref().unwrap_or("");
+        let abbr = if reasoning.len() > 60 {
+            &reasoning[..60]
+        } else {
+            reasoning
+        };
+        lines.push(format!(
+            "- 日期:{} 决策:{} 置信度:{} → 失败。要点:{}",
+            s.analysis_date, action, conf, abbr
+        ));
+    }
+    Some(lines.join("\n"))
 }

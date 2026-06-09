@@ -65,7 +65,7 @@ pub async fn get_stock_quote(
     stock_code: String,
     as_of_date: Option<String>,
 ) -> Result<axagent_astock_data::StockQuote, String> {
-    let as_of_ctx = axagent_astock_data::as_of::AsOfContext::parse_optional(as_of_date.as_deref())
+    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())
         .map_err(|e| format!("as_of_date 解析失败: {e}"))?;
     axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
         axagent_astock_data::as_of::with_degradation_log(async {
@@ -91,7 +91,7 @@ pub async fn get_stock_kline(
     limit: u32,
     as_of_date: Option<String>,
 ) -> Result<Vec<axagent_astock_data::KLine>, String> {
-    let as_of_ctx = axagent_astock_data::as_of::AsOfContext::parse_optional(as_of_date.as_deref())
+    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())
         .map_err(|e| format!("as_of_date 解析失败: {e}"))?;
     axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
         axagent_astock_data::as_of::with_degradation_log(async {
@@ -1275,7 +1275,7 @@ pub async fn recommend_stocks(
     as_of_date: Option<String>,
 ) -> Result<RecoResponse, String> {
     // 解析 as_of_date；非法/未来 → 4xx-style 错误
-    let as_of_ctx = axagent_astock_data::as_of::AsOfContext::parse_optional(as_of_date.as_deref())?;
+    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
 
     // 读取 workflow template 变量用于 vendor 启用检测
     let template = axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")

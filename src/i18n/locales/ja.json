@@ -9476,6 +9476,36 @@
         "stockName": "Stock name",
         "cron": "Cron expression"
       }
+    },
+    "reflection": {
+      "scheduleTitle": "Schedule Validation",
+      "scheduleDesc": "Auto-validate analysis results from 30 days ago, trigger reflection on loss",
+      "depthLight": "Light",
+      "depthDeep": "Deep",
+      "confidence": "Min Confidence",
+      "deleteBtn": "Delete Task",
+      "historyTitle": "Reflection History",
+      "refreshBtn": "Refresh",
+      "empty": "No reflection records",
+      "depthDeepLabel": "Deep Reflection",
+      "depthLightLabel": "Light Reflection",
+      "causeLabel": "Root Cause:",
+      "signalsLabel": "Missed Signals:",
+      "improveLabel": "Improvement:",
+      "colCode": "Code",
+      "colName": "Name",
+      "colAsOf": "Date",
+      "colResult": "Outcome",
+      "colCause": "Cause",
+      "colTime": "Time",
+      "scheduleDescFull": "Schedule: {schedule} | Status: {status}",
+      "running": "Running",
+      "paused": "Paused",
+      "daily0600": "Daily 6:00",
+      "daily1200": "Daily 12:00",
+      "daily1800": "Daily 18:00",
+      "weekday0600": "Weekdays 6:00",
+      "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}"
     }
   },
   "trade": {

@@ -6942,6 +6942,17 @@
     "useful": "Useful",
     "notUseful": "Not Useful",
     "deleteInsight": "Delete Insight",
+    "feedback": {
+      "thanksUseful": "Marked as useful",
+      "thanksNotUseful": "Marked as not useful",
+      "notFound": "Insight not found or already deleted",
+      "failed": "Feedback failed"
+    },
+    "delete": {
+      "confirm": "Delete this insight? This action cannot be undone.",
+      "success": "Insight deleted",
+      "failed": "Delete failed"
+    },
     "settings": {
       "title": "Reflection Settings",
       "subtitle": "Tune how the reflection workflow behaves. Changes take effect immediately.",

@@ -1316,12 +1316,11 @@ fn resolve_temperature(
     variables: &std::collections::HashMap<String, Value>,
     node_default: Option<f32>,
 ) -> Option<f64> {
-    if let Some(v) = variables.get("agent_temperature") {
-        if let Some(n) = v.as_f64() {
-            if n.is_finite() {
-                return Some(n.clamp(0.0, 2.0));
-            }
-        }
+    if let Some(v) = variables.get("agent_temperature")
+        && let Some(n) = v.as_f64()
+        && n.is_finite()
+    {
+        return Some(n.clamp(0.0, 2.0));
     }
     node_default.map(|t| t as f64)
 }
@@ -1336,17 +1335,16 @@ fn resolve_max_tokens(
     node_default: Option<u32>,
 ) -> Option<u32> {
     if let Some(v) = variables.get("agent_max_tokens") {
-        if let Some(n) = v.as_u64() {
-            if n > 0 && n <= u32::MAX as u64 {
-                return Some(n as u32);
-            }
+        if let Some(n) = v.as_u64()
+            && n > 0 && n <= u32::MAX as u64
+        {
+            return Some(n as u32);
         }
-        if let Some(s) = v.as_str() {
-            if let Ok(n) = s.trim().parse::<u32>() {
-                if n > 0 {
-                    return Some(n);
-                }
-            }
+        if let Some(s) = v.as_str()
+            && let Ok(n) = s.trim().parse::<u32>()
+            && n > 0
+        {
+            return Some(n);
         }
     }
     node_default

@@ -11,7 +11,7 @@ use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgres
 use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -630,7 +630,7 @@ async fn run_stock_workflow_inner(
             }
         }
         // 注入相似历史决策案例（失败案例优先，最多 5 条）
-        let similar_cases_str = fetch_similar_cases(&stock_code, state.harness.db()).await;
+        let similar_cases_str = fetch_similar_cases(&stock_code, &db).await;
         if let Some(ref cases) = similar_cases_str {
             merged_vars.push(axagent_harness::workflow_types::Variable {
                 name: "similar_cases".into(),

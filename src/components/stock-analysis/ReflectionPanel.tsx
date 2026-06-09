@@ -1,6 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Empty, Input, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
 
@@ -28,13 +29,14 @@ interface CronJobResponse {
 }
 
 const CRON_PRESETS = [
-  { label: "每天 6:00", value: "0 6 * * *" },
-  { label: "每天 12:00", value: "0 12 * * *" },
-  { label: "每天 18:00", value: "0 18 * * *" },
-  { label: "每工作日 6:00", value: "0 6 * * 1-5" },
+  { label: t("stockAnalysis.reflection.daily0600"), value: "0 6 * * *" },
+  { label: t("stockAnalysis.reflection.daily1200"), value: "0 12 * * *" },
+  { label: t("stockAnalysis.reflection.daily1800"), value: "0 18 * * *" },
+  { label: t("stockAnalysis.reflection.weekday0600"), value: "0 6 * * 1-5" },
 ];
 
 export function ReflectionPanel() {
+  const { t } = useTranslation();
   const [reflections, setReflections] = useState<ReflectionRow[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJobResponse[]>([]);
   const [cronExpr, setCronExpr] = useState("0 6 * * *");
@@ -87,11 +89,11 @@ export function ReflectionPanel() {
   return (
     <div style={{ padding: 16 }}>
       {/* 定时校验配置 */}
-      <Card title="定时校验配置" size="small" style={{ marginBottom: 16 }}>
+      <Card title={t("stockAnalysis.reflection.scheduleTitle")} size="small" style={{ marginBottom: 16 }}>
         <Space direction="vertical" style={{ width: "100%" }}>
           <Space>
             <Switch checked={isEnabled} onChange={toggleCron} />
-            <Text>每天自动校验30天前的分析结果，loss触发反思</Text>
+            <Text>{t("stockAnalysis.reflection.scheduleDesc")}</Text>
           </Space>
           <Space wrap>
             <Select
@@ -104,7 +106,10 @@ export function ReflectionPanel() {
             <Select
               value={depth}
               onChange={setDepth}
-              options={[{ label: "简要反思", value: "light" }, { label: "深度反思", value: "deep" }]}
+              options={[{ label: t("stockAnalysis.reflection.depthLight"), value: "light" }, {
+                label: t("stockAnalysis.reflection.depthDeep"),
+                value: "deep",
+              }]}
               style={{ width: 110 }}
               disabled={isEnabled}
             />
@@ -116,19 +121,30 @@ export function ReflectionPanel() {
               onChange={(e) => setThreshold(Number(e.target.value))}
               style={{ width: 100 }}
               disabled={isEnabled}
-              addonAfter="最低置信度"
+              addonAfter={t("stockAnalysis.reflection.confidence")}
             />
-            {activeCron && <Button danger size="small" onClick={deleteCron}>删除任务</Button>}
+            {activeCron && (
+              <Button danger size="small" onClick={deleteCron}>{t("stockAnalysis.reflection.deleteBtn")}</Button>
+            )}
           </Space>
           {activeCron && (
-            <Text type="secondary">当前调度: {activeCron.schedule} | 状态: {isEnabled ? "运行中" : "已暂停"}</Text>
+            <Text type="secondary">
+              {t("stockAnalysis.reflection.scheduleDescFull", {
+                schedule: activeCron.schedule,
+                status: isEnabled ? t("stockAnalysis.reflection.running") : t("stockAnalysis.reflection.paused"),
+              })}
+            </Text>
           )}
         </Space>
       </Card>
 
       {/* 反思历史 */}
-      <Card title="反思历史" size="small" extra={<Button size="small" onClick={load}>刷新</Button>}>
-        {reflections.length === 0 ? <Empty description="暂无反思记录" /> : (
+      <Card
+        title={t("stockAnalysis.reflection.historyTitle")}
+        size="small"
+        extra={<Button size="small" onClick={load}>{t("stockAnalysis.reflection.refreshBtn")}</Button>}
+      >
+        {reflections.length === 0 ? <Empty description={t("stockAnalysis.reflection.empty")} /> : (
           <Table
             dataSource={reflections}
             rowKey="id"
@@ -143,19 +159,25 @@ export function ReflectionPanel() {
                   <Space direction="vertical" style={{ width: "100%" }}>
                     <Space>
                       <Tag color="red">{r.actualOutcome}</Tag>
-                      <Tag>{r.reflectionDepth === "deep" ? "深度反思" : "简要反思"}</Tag>
-                      <Text type="secondary">as-of: {r.asOfDate} → 后见: {r.hindsightDate}</Text>
+                      <Tag>
+                        {r.reflectionDepth === "deep"
+                          ? t("stockAnalysis.reflection.depthDeepLabel")
+                          : t("stockAnalysis.reflection.depthLightLabel")}
+                      </Tag>
+                      <Text type="secondary">
+                        {t("stockAnalysis.reflection.asOfLabel", { asOf: r.asOfDate, hindsight: r.hindsightDate })}
+                      </Text>
                     </Space>
                     <div>
-                      <Text strong>错因分析：</Text>
+                      <Text strong>{t("stockAnalysis.reflection.causeLabel")}</Text>
                       <Text>{r.whatWentWrong || "-"}</Text>
                     </div>
                     <div>
-                      <Text strong>被忽视的信号：</Text>
+                      <Text strong>{t("stockAnalysis.reflection.signalsLabel")}</Text>
                       <Text>{formatJson(r.missedSignals)}</Text>
                     </div>
                     <div>
-                      <Text strong>改进建议：</Text>
+                      <Text strong>{t("stockAnalysis.reflection.improveLabel")}</Text>
                       <Text>{r.fixForFuture || "-"}</Text>
                     </div>
                   </Space>
@@ -163,18 +185,23 @@ export function ReflectionPanel() {
               ),
             }}
           >
-            <Table.Column title="代码" dataIndex="stockCode" width={90} />
-            <Table.Column title="名称" dataIndex="stockName" width={100} />
-            <Table.Column title="分析日" dataIndex="asOfDate" width={100} />
+            <Table.Column title={t("stockAnalysis.reflection.colCode")} dataIndex="stockCode" width={90} />
+            <Table.Column title={t("stockAnalysis.reflection.colName")} dataIndex="stockName" width={100} />
+            <Table.Column title={t("stockAnalysis.reflection.colAsOf")} dataIndex="asOfDate" width={100} />
             <Table.Column
-              title="结果"
+              title={t("stockAnalysis.reflection.colResult")}
               dataIndex="actualOutcome"
               width={160}
               render={(v: string) => <Text type="danger">{v}</Text>}
             />
-            <Table.Column title="错因" dataIndex="whatWentWrong" ellipsis render={(v: string | null) => v || "-"} />
             <Table.Column
-              title="时间"
+              title={t("stockAnalysis.reflection.colCause")}
+              dataIndex="whatWentWrong"
+              ellipsis
+              render={(v: string | null) => v || "-"}
+            />
+            <Table.Column
+              title={t("stockAnalysis.reflection.colTime")}
               dataIndex="createdAt"
               width={150}
               render={(v: number) => new Date(v).toLocaleDateString("zh-CN")}

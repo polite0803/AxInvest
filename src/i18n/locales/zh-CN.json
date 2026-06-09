@@ -8254,7 +8254,32 @@
     "backtest.avgReturn": "平均收益率",
     "backtest.maxDrawdown": "最大回撤",
     "backtest.title": "回测分析",
-    "backtest.total": "分析次数"
+    "backtest.total": "分析次数",
+    "reflection": {
+      "scheduleTitle": "定时校验配置",
+      "scheduleDesc": "每天自动校验30天前的分析结果，loss触发反思",
+      "depthLight": "简要反思",
+      "depthDeep": "深度反思",
+      "confidence": "最低置信度",
+      "deleteBtn": "删除任务",
+      "historyTitle": "反思历史",
+      "refreshBtn": "刷新",
+      "empty": "暂无反思记录",
+      "depthDeepLabel": "深度反思",
+      "depthLightLabel": "简要反思",
+      "causeLabel": "错因分析：",
+      "signalsLabel": "被忽视的信号：",
+      "improveLabel": "改进建议：",
+      "colCode": "代码",
+      "colName": "名称",
+      "colAsOf": "分析日",
+      "colResult": "结果",
+      "colCause": "错因",
+      "colTime": "时间",
+      "scheduleDescFull": "当前调度: {schedule} | 状态: {status}",
+      "running": "运行中",
+      "paused": "已暂停"
+    }
   },
   "trade": {
     "title": "交易日志",

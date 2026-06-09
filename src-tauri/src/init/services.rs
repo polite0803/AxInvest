@@ -1357,9 +1357,9 @@ fn start_cron_scheduler(state: &AppState) {
 
                     let is_bullish = matches!(action, "买入" | "增持" | "BUY" | "INCREASE");
                     let is_bearish = matches!(action, "卖出" | "减持" | "SELL" | "REDUCE");
-                    let outcome = if is_bullish && later_close >= price_after * 0.98 {
-                        "win"
-                    } else if is_bearish && later_close <= price_after * 1.02 {
+                    let outcome = if (is_bullish && later_close >= price_after * 0.98)
+                        || (is_bearish && later_close <= price_after * 1.02)
+                    {
                         "win"
                     } else if is_bullish || is_bearish {
                         "loss"

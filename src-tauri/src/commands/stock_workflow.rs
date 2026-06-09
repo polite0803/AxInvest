@@ -43,7 +43,7 @@ fn aggregate_precheck(sources: Vec<(&str, SourceCheck)>) -> QualityPrecheckResul
     let mut first_failure: Option<String> = None;
     for (name, c) in sources {
         match c {
-            SourceCheck::Ok => {}
+            SourceCheck::Ok => {},
             SourceCheck::Partial(reason) => partial_msgs.push(format!("{name}: {reason}")),
             SourceCheck::Failed(reason) => {
                 if first_failure.is_none() {
@@ -99,7 +99,7 @@ async fn data_quality_precheck(
         Ok(klines) if klines.len() >= 30 => SourceCheck::Ok,
         Ok(klines) if !klines.is_empty() => {
             SourceCheck::Partial(format!("仅 {} 行, 不足 30 日", klines.len()))
-        }
+        },
         Ok(_) => SourceCheck::Failed("K 线为空".into()),
         Err(e) => SourceCheck::Failed(format!("K 线获取失败: {e}")),
     };
@@ -161,7 +161,7 @@ mod precheck_tests {
             QualityPrecheckResult::Partial(msg) => {
                 assert!(msg.contains("financials"), "partial msg 应含 source 名: {msg}");
                 assert!(msg.contains("营收缺失"));
-            }
+            },
             _ => panic!("expected Partial"),
         }
     }
@@ -176,7 +176,7 @@ mod precheck_tests {
             QualityPrecheckResult::Insufficient(msg) => {
                 assert!(msg.contains("klines"), "insufficient msg 应含 source 名: {msg}");
                 assert!(msg.contains("K 线获取失败"));
-            }
+            },
             _ => panic!("expected Insufficient"),
         }
     }

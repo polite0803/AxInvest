@@ -708,8 +708,9 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
     }
 
     // --- 反思复盘表 ---
-    let _ = db.execute_unprepared(
-        "CREATE TABLE IF NOT EXISTS stock_reflections (\
+    let _ = db
+        .execute_unprepared(
+            "CREATE TABLE IF NOT EXISTS stock_reflections (\
             id TEXT NOT NULL PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
             original_analysis_id TEXT NOT NULL, \
             as_of_date TEXT NOT NULL, hindsight_date TEXT NOT NULL, \
@@ -720,8 +721,8 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             decision_json TEXT, blackboard_snapshot TEXT, \
             model_version TEXT, status TEXT NOT NULL DEFAULT 'completed', \
             created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
-    )
-    .await;
+        )
+        .await;
 
     // --- Time-travel mode: market_data_history L2 cache 表 ---
     db.execute_unprepared(

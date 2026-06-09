@@ -987,8 +987,8 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       // Fit view first so everything is visible
       reactFlowInstance.fitView({ padding: 0.2, duration: 0 });
 
-      // Wait a tick for React Flow to re-render after fitView
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait for React Flow to re-render after fitView
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
       const element = canvasContainerRef.current;
       if (!element) {
@@ -1003,15 +1003,42 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         backgroundColor: "#1a1a2e",
       });
 
-      // Download the image
-      const link = document.createElement("a");
-      link.download = `${currentTemplate?.name || "workflow"}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
+      const defaultName = `${currentTemplate?.name || "workflow"}.png`;
+
+      // Check if running in Tauri environment
+      const { isTauri } = await import("@/lib/invoke");
+      if (isTauri()) {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const { writeFile } = await import("@tauri-apps/plugin-fs");
+
+        const filePath = await save({
+          defaultPath: defaultName,
+          filters: [{ name: "PNG Image", extensions: ["png"] }],
+        });
+
+        if (!filePath) {
+          return; // User cancelled
+        }
+
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!blob) {
+          message.error(t("workflow.exportFailed"));
+          return;
+        }
+
+        await writeFile(filePath, new Uint8Array(await blob.arrayBuffer()));
+      } else {
+        // Browser fallback: direct download
+        const link = document.createElement("a");
+        link.download = defaultName;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      }
 
       message.success(t("workflow.exportSuccess"));
     } catch (error) {
-      message.error(t("workflow.exportFailed"));
+      console.error("[saveAsImage]", error);
+      message.error(`${t("workflow.exportFailed")}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, [reactFlowInstance, currentTemplate, t]);
 

@@ -3728,7 +3728,7 @@ fn merge_variable_values(
 /// 运行时 portfolio-manager 通过 `{{actual_outcome}}` 变量切换到反思模式。
 async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
-    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     // 查重
     if workflow_template::Entity::find_by_id("stock-reflection")

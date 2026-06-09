@@ -1133,13 +1133,14 @@ pub async fn run_reflection_workflow(
                 .map(|v| v.to_string());
 
             // 提取反思摘要（用于 content 字段）
-            let summary: String = reflection_json
-                .as_deref()
-                .unwrap_or("{}")
-                .to_string();
+            let summary: String = reflection_json.as_deref().unwrap_or("{}").to_string();
             let summary = serde_json::from_str::<serde_json::Value>(&summary)
                 .ok()
-                .and_then(|v| v.get("reflection").and_then(|r| r.get("what_went_wrong")).cloned())
+                .and_then(|v| {
+                    v.get("reflection")
+                        .and_then(|r| r.get("what_went_wrong"))
+                        .cloned()
+                })
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .unwrap_or_default();
 
@@ -1148,8 +1149,14 @@ pub async fn run_reflection_workflow(
             let _ = stock_analyses::Entity::update_many()
                 .col_expr(stock_analyses::Column::Status, Expr::value("completed".to_string()))
                 .col_expr(stock_analyses::Column::DecisionJson, Expr::value(reflection_json))
-                .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(Some(summary.clone())))
-                .col_expr(stock_analyses::Column::DecisionAction, Expr::value(Some("回顾".to_string())))
+                .col_expr(
+                    stock_analyses::Column::DecisionReasoning,
+                    Expr::value(Some(summary.clone())),
+                )
+                .col_expr(
+                    stock_analyses::Column::DecisionAction,
+                    Expr::value(Some("回顾".to_string())),
+                )
                 .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(bb_text))
                 .filter(stock_analyses::Column::Id.eq(&analysis_id))
                 .exec(db)

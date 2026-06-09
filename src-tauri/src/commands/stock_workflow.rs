@@ -1046,6 +1046,8 @@ pub async fn run_reflection_workflow(
     db: &DatabaseConnection,
     _client: &axagent_astock_data::AStockClient,
     engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    vector_store: &axagent_core::vector_store::VectorStore,
+    master_key: &[u8; 32],
     stock_code: &str,
     stock_name: &str,
     actual_outcome: &str,
@@ -1095,7 +1097,7 @@ pub async fn run_reflection_workflow(
     let wf_id = workflow.id.clone();
 
     // 4. 注入 post-hoc 变量
-    let mut opts = axagent_rt_workflow::work_engine::RunOptions {
+    let opts = axagent_rt_workflow::work_engine::RunOptions {
         max_concurrent,
         step_timeout,
         progress_callback: None,
@@ -1120,14 +1122,59 @@ pub async fn run_reflection_workflow(
         .scope(Some(ctx), async move { engine.run_workflow(&wf_id, opts).await })
         .await;
 
-    // 6. 处理结果（反思内容的 Memory RAG 索引由 worklfow-completed handler 自动完成）
+    // 6. 处理结果：写库 + 索引反思到 Memory RAG（独立 collection）
     match result {
         Ok(wf) => {
+            // 提取 portfolio-manager 的反思输出
+            let reflection_json = wf
+                .results
+                .get("portfolio-mgr")
+                .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok())
+                .map(|v| v.to_string());
+
+            // 提取反思摘要（用于 content 字段）
+            let summary: String = reflection_json
+                .as_deref()
+                .unwrap_or("{}")
+                .to_string();
+            let summary = serde_json::from_str::<serde_json::Value>(&summary)
+                .ok()
+                .and_then(|v| v.get("reflection").and_then(|r| r.get("what_went_wrong")).cloned())
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+
+            // 更新 stock_analyses 记录
+            let bb_text = serde_json::to_string(&wf.results).unwrap_or_default();
             let _ = stock_analyses::Entity::update_many()
-                .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
+                .col_expr(stock_analyses::Column::Status, Expr::value("completed".to_string()))
+                .col_expr(stock_analyses::Column::DecisionJson, Expr::value(reflection_json))
+                .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(Some(summary.clone())))
+                .col_expr(stock_analyses::Column::DecisionAction, Expr::value(Some("回顾".to_string())))
+                .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(bb_text))
                 .filter(stock_analyses::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
+
+            // 索引反思到 Memory RAG（独立于 stock-decisions 集合）
+            if !summary.is_empty() {
+                let memory_content = format!(
+                    "反思:股票:{} {} 原始决策时间:{} 结果:{}\n错因:{}",
+                    stock_code, stock_name, as_of_date, actual_outcome, summary
+                );
+                let _ = crate::indexing::index_memory_item(
+                    db,
+                    &master_key,
+                    &vector_store,
+                    "stock_reflections",
+                    &analysis_id,
+                    &memory_content,
+                    "openai::text-embedding-3-small",
+                    None,
+                )
+                .await;
+            }
+
+            tracing::info!("[reflection] {}: 反思完成", stock_code);
             Ok(analysis_id)
         },
         Err(e) => {

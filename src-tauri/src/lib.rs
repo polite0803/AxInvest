@@ -976,6 +976,7 @@ pub fn run() {
             commands::stock_analysis::list_watchlist_scan_crons,
             commands::stock_analysis::toggle_watchlist_scan_cron,
             commands::stock_analysis::delete_watchlist_scan_cron,
+            commands::stock_analysis::create_validate_decisions_cron,
             commands::stock_analysis::create_price_alert,
             commands::stock_analysis::list_price_alerts,
             commands::stock_analysis::delete_price_alert,

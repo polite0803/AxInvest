@@ -1216,6 +1216,8 @@ fn start_cron_scheduler(state: &AppState) {
     let cron_store = state.cron_job_store.clone();
     let astock_client = state.astock_client.clone();
     let db = state.harness.db().clone();
+    let vector_store = state.vector_store.clone();
+    let master_key = state.harness.master_key_owned();
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
         // ── 分支 1：自选股自动扫描 ──
@@ -1247,8 +1249,6 @@ fn start_cron_scheduler(state: &AppState) {
                                     &engine,
                                     &item.stock_code,
                                     &item.stock_name,
-                                    None, // actual_outcome — 正常分析
-                                    None, // as_of_date — 正常分析
                                 )
                                 .await;
                             match result {
@@ -1295,6 +1295,8 @@ fn start_cron_scheduler(state: &AppState) {
             let client = astock_client.clone();
             let database = db.clone();
             let store = cron_store.clone();
+            let vs = vector_store.clone();
+            let mk = master_key;
             let job_id = job.id.clone();
             let recurring = job.recurring;
             tokio::task::spawn(async move {
@@ -1385,6 +1387,8 @@ fn start_cron_scheduler(state: &AppState) {
                             &database,
                             &client,
                             &engine,
+                            &vs,
+                            &mk,
                             code,
                             a.stock_name.as_str(),
                             &format!("30天后 {} → 失败", pct),

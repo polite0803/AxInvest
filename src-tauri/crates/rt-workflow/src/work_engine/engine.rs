@@ -1851,8 +1851,6 @@ impl WorkEngine {
                             nr.elapsed_ms,
                         );
 
-                        // 修复 P0 #1: 节点完成时补发"completed"事件，
-                        // 让前端 stockAnalysisStore 能实时拿到该节点的输出。
                         if let Some(cb) = progress_cb.as_ref() {
                             let completed_count = {
                                 let workflows = self.workflows.read().await;

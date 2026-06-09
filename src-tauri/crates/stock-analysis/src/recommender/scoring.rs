@@ -100,7 +100,7 @@ pub fn group_by_style_and_trim(
         by_style.entry(p.style).or_default().push(p);
     }
     for v in by_style.values_mut() {
-        v.sort_by(|a, b| b.confidence.cmp(&a.confidence));
+        v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
         v.truncate(per_style_limit);
     }
     by_style

@@ -48,7 +48,7 @@ impl CapitalStrategy {
         let dt = client.get_dragon_tiger(code).await.ok();
 
         // 三个资金数据源至少有一个能拿到真实数据，否则视为数据缺失直接放弃
-        if mf.is_none() && nb.is_none() && dt.as_ref().map_or(true, |e| e.is_empty()) {
+        if mf.is_none() && nb.is_none() && dt.as_ref().is_none_or(|e| e.is_empty()) {
             return None;
         }
 

@@ -92,6 +92,10 @@ export const useTimeAnchorStore = create<TimeAnchorState>()(
           return;
         }
         set({ asOfDate: date, mode: "replay", pendingLiveConfirm: false });
+        // P2-7 修复: 切到 replay 时清空本地显示和后端全局缓冲(可能有上次
+        // replay 残留的降级条目),避免用户进入新 replay 时看到旧数字突变。
+        set({ degradationCount: 0, degradationLog: [] });
+        invoke<void>("clear_asof_degradation_log").catch(() => {});
         get().startDegradationPolling();
       },
 

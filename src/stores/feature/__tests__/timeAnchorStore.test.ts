@@ -178,7 +178,7 @@ describe("useTimeAnchorStore — transitions", () => {
     const d = past.toISOString().slice(0, 10);
     useTimeAnchorStore.getState().enterReplay(d);
     const s = useTimeAnchorStore.getState();
-    expect(s.degradationCount).toBe(0, "P2-7: enterReplay 必须重置 degradationCount");
-    expect(s.degradationLog).toEqual([], "P2-7: enterReplay 必须重置 degradationLog");
+    expect(s.degradationCount).toBe(0);
+    expect(s.degradationLog).toEqual([]);
   });
 });

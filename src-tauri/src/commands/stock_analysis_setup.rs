@@ -317,6 +317,7 @@ pub async fn ensure_stock_analysis_experts_seeded(
     seed_agent_roles(db).await?;
     seed_agent_profiles(db).await?;
     seed_stock_analysis_workflow_template(db).await?;
+    seed_reflection_workflow_template(db).await?;
     // seed_debate_subworkflow(db).await?;  // 辩论子工作流未引用，暂不种子化
     Ok(())
 }
@@ -3720,3 +3721,78 @@ fn merge_variable_values(
 }
 
 // seed_debate_subworkflow: 辩论已通过 DebateNode 容器直接嵌入主模板，旧独立模板已移除
+
+/// 种子化反思复盘工作流模板（stock-reflection）。
+///
+/// 从已存在的 "stock-analysis" 模板克隆 DAG 结构，修改 ID/名称/变量声明。
+/// 运行时 portfolio-manager 通过 `{{actual_outcome}}` 变量切换到反思模式。
+async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
+    use axagent_core::entity::workflow_template;
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+
+    // 查重
+    if workflow_template::Entity::find_by_id("stock-reflection")
+        .one(db)
+        .await
+        .map_err(|e| format!("查重失败: {e}"))?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    // 读取原模板
+    let src = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(db)
+        .await
+        .map_err(|e| format!("读取 stock-analysis 模板失败: {e}"))?
+        .ok_or_else(|| "stock-analysis 模板不存在，请先创建".to_string())?;
+
+    // 追加反思专用的变量声明
+    let mut variables: Vec<serde_json::Value> = src
+        .variables
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+    variables.push(serde_json::json!({
+        "name": "actual_outcome",
+        "type": "string",
+        "description": "实际走势结果，如 '30天跌8% → 失败'，非空时触发反思模式",
+        "default": "",
+    }));
+    variables.push(serde_json::json!({
+        "name": "reflection_depth",
+        "type": "string",
+        "description": "反思深度：light(简要) / deep(详细推理链)",
+        "default": "light",
+    }));
+
+    let now = chrono::Utc::now().timestamp_millis();
+    workflow_template::ActiveModel {
+        id: Set("stock-reflection".to_string()),
+        name: Set("A股反思复盘".to_string()),
+        description: Set(Some("嵌套原股票分析工作流的 as-of 重放，注入实际走势结果，portfolio-manager 输出反思而非交易决策".to_string())),
+        icon: Set("search".into()),
+        tags: Set(Some(serde_json::to_string(&["stock", "reflection", "A股"]).map_err(|e| format!("序列化标签失败: {e}"))?)),
+        version: Set(src.version),
+        is_preset: Set(true),
+        is_editable: Set(true),
+        is_public: Set(true),
+        trigger_config: Set(None),
+        nodes: Set(src.nodes),
+        edges: Set(src.edges),
+        input_schema: Set(src.input_schema),
+        output_schema: Set(src.output_schema),
+        variables: Set(Some(serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?)),
+        error_config: Set(src.error_config),
+        composite_source: Set(None),
+        tool_defs: Set(src.tool_defs),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| format!("写入反思模板失败: {e}"))?;
+
+    tracing::info!("[stock_analysis_setup] 反思复盘工作流模板已种子化 (stock-reflection)");
+    Ok(())
+}

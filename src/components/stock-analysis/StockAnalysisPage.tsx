@@ -5,7 +5,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
-import { ArrowLeftRight, Coins, LineChart, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
+import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -23,6 +23,7 @@ import { IndustryRankingPanel } from "./IndustryRankingPanel";
 import { KLineChart } from "./KLineChart";
 import { NorthBoundPanel } from "./NorthBoundPanel";
 import { OptionPcrPanel } from "./OptionPcrPanel";
+import { ReflectionPanel } from "./ReflectionPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
 import { StockAnalysisPageContext } from "./StockAnalysisPageContext";
@@ -179,6 +180,12 @@ export function StockAnalysisPage() {
       label: t("stockAnalysis.tab.decision"),
       icon: <TrendingUp size={14} />,
       children: <DecisionBanner />,
+    },
+    {
+      key: "reflection",
+      label: t("stockAnalysis.tab.reflection"),
+      icon: <RotateCcw size={14} />,
+      children: <ReflectionPanel />,
     },
   ];
 

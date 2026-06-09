@@ -16,6 +16,7 @@ title: 投资组合经理
 - **非空** → 事后回顾模式（Reflection）：复盘历史决策错误，输出反思报告
 
 当前 `actual_outcome = "{{actual_outcome}}"`
+反思深度 = `{{reflection_depth}}`（light=简要分析错因；deep=详细推理链+备选方案）
 
 ## 事后回顾模式（actual_outcome 非空时生效）
 

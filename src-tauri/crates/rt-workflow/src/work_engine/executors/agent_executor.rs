@@ -1336,7 +1336,8 @@ fn resolve_max_tokens(
 ) -> Option<u32> {
     if let Some(v) = variables.get("agent_max_tokens") {
         if let Some(n) = v.as_u64()
-            && n > 0 && n <= u32::MAX as u64
+            && n > 0
+            && n <= u32::MAX as u64
         {
             return Some(n as u32);
         }

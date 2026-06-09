@@ -7883,7 +7883,8 @@
       "decision": "decision",
       "market": "market",
       "risk": "risk",
-      "value": "value"
+      "value": "value",
+      "reflection": "Reflection"
     },
     "trade": {
       "pnlPercent": "pnlPercent",

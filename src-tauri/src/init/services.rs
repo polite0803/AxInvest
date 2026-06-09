@@ -1383,6 +1383,7 @@ fn start_cron_scheduler(state: &AppState) {
                         } else {
                             "下跌".to_string()
                         };
+                        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
                         let _ = crate::commands::stock_workflow::run_reflection_workflow(
                             &database,
                             &client,
@@ -1391,8 +1392,12 @@ fn start_cron_scheduler(state: &AppState) {
                             &mk,
                             code,
                             a.stock_name.as_str(),
-                            &format!("30天后 {} → 失败", pct),
-                            date.as_str(),
+                            &a.id,                             // original_analysis_id
+                            &format!("30天后 {} → 失败", pct), // actual_outcome
+                            date.as_str(),                     // as_of_date = 原始分析日期
+                            &today,                            // hindsight_date = 校验触发日期
+                            0u8,     // min_confidence_threshold (0 = 全部触发)
+                            "light", // reflection_depth
                         )
                         .await;
                     }

@@ -1402,10 +1402,17 @@ pub async fn delete_watchlist_scan_cron(
 ///
 /// 每天扫描 30 天前的分析结果，判定 win/loss。
 /// loss 自动触发 `run_reflection_workflow`（嵌套原股票分析工作流的 as-of 重放 + hindsight 注入）。
+///
+/// 参数：
+/// - `cron_expression`: cron 表达式，默认 "0 6 * * *"
+/// - `min_confidence_threshold`: 触发反思的最低置信度（0=全部触发）
+/// - `reflection_depth`: "light"(简要) 或 "deep"(详细推理链)
 #[tauri::command]
 pub async fn create_validate_decisions_cron(
     state: State<'_, AppState>,
     cron_expression: Option<String>,
+    min_confidence_threshold: Option<i32>,
+    reflection_depth: Option<String>,
     enabled: Option<bool>,
 ) -> Result<CronJobResponse, String> {
     let id = format!(
@@ -1417,16 +1424,107 @@ pub async fn create_validate_decisions_cron(
             .unwrap_or("x")
     );
     let expr = cron_expression.unwrap_or_else(|| "0 6 * * *".to_string());
-    let mut job = CronJob::new(
-        &id,
-        &expr,
-        "决策校验 + 反思复盘",
-        "扫描30天前的分析结果判定win/loss，loss自动触发反思工作流（as-of嵌套原分析DAG）",
-    )
-    .with_task_type("validate-decisions");
+    let threshold = min_confidence_threshold.unwrap_or(0);
+    let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
+    let desc = format!(
+        "扫描30天前的分析结果判定win/loss，loss自动触发反思工作流（阈值:{}, 深度:{})",
+        threshold, depth
+    );
+    let mut job =
+        CronJob::new(&id, &expr, "决策校验 + 反思复盘", &desc).with_task_type("validate-decisions");
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
     state.cron_job_store.add(job.clone()).await;
     Ok(CronJobResponse::from(&job))
+}
+
+/// 列出所有决策校验定时任务
+#[tauri::command]
+pub async fn list_validate_decisions_crons(
+    state: State<'_, AppState>,
+) -> Result<Vec<CronJobResponse>, String> {
+    let jobs = state.cron_job_store.list().await;
+    Ok(jobs
+        .iter()
+        .filter(|j| j.task_type.as_deref() == Some("validate-decisions"))
+        .map(CronJobResponse::from)
+        .collect())
+}
+
+/// 启停决策校验定时任务
+#[tauri::command]
+pub async fn toggle_validate_decisions_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .cron_job_store
+        .set_status(
+            &id,
+            if enabled {
+                CronJobStatus::Active
+            } else {
+                CronJobStatus::Paused
+            },
+        )
+        .await;
+    Ok(())
+}
+
+/// 删除决策校验定时任务
+#[tauri::command]
+pub async fn delete_validate_decisions_cron(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.cron_job_store.remove(&id).await;
+    Ok(())
+}
+
+/// 查询反思复盘记录列表
+#[tauri::command]
+pub async fn list_reflections(
+    state: State<'_, AppState>,
+    stock_code: Option<String>,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    use axagent_core::entity::stock_reflections;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let db = state.harness.db();
+    let mut query = stock_reflections::Entity::find()
+        .order_by(stock_reflections::Column::CreatedAt, sea_orm::Order::Desc);
+    if let Some(ref code) = stock_code {
+        query = query.filter(stock_reflections::Column::StockCode.eq(code));
+    }
+    let items = query
+        .all(db)
+        .await
+        .map_err(|e| format!("查询反思记录失败: {e}"))?;
+    let limit = limit.unwrap_or(50) as usize;
+    let result: Vec<serde_json::Value> = items
+        .into_iter()
+        .take(limit)
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "stockCode": r.stock_code,
+                "stockName": r.stock_name,
+                "originalAnalysisId": r.original_analysis_id,
+                "asOfDate": r.as_of_date,
+                "hindsightDate": r.hindsight_date,
+                "minConfidenceThreshold": r.min_confidence_threshold,
+                "reflectionDepth": r.reflection_depth,
+                "actualOutcome": r.actual_outcome,
+                "whatWentWrong": r.what_went_wrong,
+                "missedSignals": r.missed_signals,
+                "fixForFuture": r.fix_for_future,
+                "status": r.status,
+                "createdAt": r.created_at,
+            })
+        })
+        .collect();
+    Ok(result)
 }

@@ -199,14 +199,15 @@ async fn load_and_inject_template(
     db: &sea_orm::DatabaseConnection,
     stock_code: &str,
     _stock_name: &str,
+    template_id: &str,
 ) -> Result<LoadedTemplate, String> {
     use axagent_core::entity::workflow_template;
 
-    let template = workflow_template::Entity::find_by_id("stock-analysis")
+    let template = workflow_template::Entity::find_by_id(template_id)
         .one(db)
         .await
         .map_err(|e| format!("查询工作流模板失败: {e}"))?
-        .ok_or("股票分析工作流模板未种子化，请重启应用")?;
+        .ok_or(format!("工作流模板 {template_id} 未种子化，请重启应用"))?;
 
     let mut nodes: Vec<WorkflowNode> =
         serde_json::from_str(&template.nodes).map_err(|e| format!("解析模板节点失败: {e}"))?;
@@ -515,7 +516,9 @@ async fn run_stock_workflow_inner(
         },
     }
 
-    let loaded = load_and_inject_template(state.harness.db(), &stock_code, &quote.name).await?;
+    let loaded =
+        load_and_inject_template(state.harness.db(), &stock_code, &quote.name, "stock-analysis")
+            .await?;
 
     if let Some(ref vars) = loaded.variables {
         for v in vars {
@@ -915,7 +918,7 @@ pub async fn run_single_stock_analysis(
     }
 
     // 4. 加载模板并注入 stock_code
-    let loaded = load_and_inject_template(db, stock_code, stock_name).await?;
+    let loaded = load_and_inject_template(db, stock_code, stock_name, "stock-analysis").await?;
 
     // 5. 解析运行时参数
     let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
@@ -1041,7 +1044,9 @@ async fn fetch_similar_cases(stock_code: &str, db: &sea_orm::DatabaseConnection)
 ///
 /// 加载与 [run_single_stock_analysis] 相同的 stock-analysis DAG，
 /// 设置 as_of_date 回到原始分析日期（数据与原分析一致），
-/// 注入 `actual_outcome` 变量让 portfolio-manager 产生反思而非交易决策。
+/// 注入 `actual_outcome` 变量让 portfolio-manager 产生反思。
+///
+/// 结果写入独立的 `stock_reflections` 表。
 pub async fn run_reflection_workflow(
     db: &DatabaseConnection,
     _client: &axagent_astock_data::AStockClient,
@@ -1050,33 +1055,37 @@ pub async fn run_reflection_workflow(
     master_key: &[u8; 32],
     stock_code: &str,
     stock_name: &str,
+    original_analysis_id: &str,
     actual_outcome: &str,
     as_of_date: &str,
+    hindsight_date: &str,
+    min_confidence_threshold: u8,
+    reflection_depth: &str,
 ) -> Result<String, String> {
     use axagent_astock_data::as_of;
+    use axagent_core::entity::stock_reflections;
 
-    // 1. 创建反思分析记录
     let now_ms = chrono::Utc::now().timestamp_millis();
     let analysis_id = uuid::Uuid::new_v4().to_string();
-    stock_analyses::ActiveModel {
+
+    // 1. 插入反思记录（初始状态）
+    stock_reflections::ActiveModel {
         id: Set(analysis_id.clone()),
         stock_code: Set(stock_code.to_string()),
         stock_name: Set(stock_name.to_string()),
-        analysis_date: Set(as_of_date.to_string()),
-        provider_id: Set("workflow".into()),
-        conversation_id: Set(uuid::Uuid::new_v4().to_string()),
-        status: Set("running".into()),
-        decision_action: Set(None),
-        decision_position_pct: Set(None),
-        decision_reasoning: Set(None),
+        original_analysis_id: Set(original_analysis_id.to_string()),
+        as_of_date: Set(as_of_date.to_string()),
+        hindsight_date: Set(hindsight_date.to_string()),
+        min_confidence_threshold: Set(min_confidence_threshold as i32),
+        reflection_depth: Set(reflection_depth.to_string()),
+        actual_outcome: Set(actual_outcome.to_string()),
+        what_went_wrong: Set(None),
+        missed_signals: Set(None),
+        fix_for_future: Set(None),
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
-        config_id: Set(None),
-        analysis_kind: Set("reflection".into()),
-        as_of_date: Set(Some(as_of_date.to_string())),
         model_version: Set(None),
-        data_snapshot_id: Set(None),
-        outcome: Set(None),
+        status: Set("running".to_string()),
         created_at: Set(now_ms),
         updated_at: Set(now_ms),
     }
@@ -1084,8 +1093,8 @@ pub async fn run_reflection_workflow(
     .await
     .map_err(|e| format!("DB 写入失败: {e}"))?;
 
-    // 2. 加载原股票分析模板（同一 DAG，分析师 + 辩论 + 风险全量重放）
-    let loaded = load_and_inject_template(db, stock_code, stock_name).await?;
+    // 2. 加载反思复盘模板（stock-reflection，DAG 结构与 stock-analysis 一致）
+    let loaded = load_and_inject_template(db, stock_code, stock_name, "stock-reflection").await?;
     let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
 
     // 3. 创建嵌套工作流
@@ -1096,7 +1105,7 @@ pub async fn run_reflection_workflow(
         .map_err(|e| format!("创建反思工作流失败: {e}"))?;
     let wf_id = workflow.id.clone();
 
-    // 4. 注入 post-hoc 变量
+    // 4. 注入变量
     let opts = axagent_rt_workflow::work_engine::RunOptions {
         max_concurrent,
         step_timeout,
@@ -1105,73 +1114,83 @@ pub async fn run_reflection_workflow(
         input_schema: loaded.input_schema,
         output_schema: loaded.output_schema,
         dry_run: false,
-        // 注入 actual_outcome — 告知 portfolio-manager 这是事后反思
-        variables: Some(vec![axagent_harness::workflow_types::Variable {
-            name: "actual_outcome".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(actual_outcome.to_string()),
-            description: Some("实际走势结果，格式如 '30天跌8% → 失败'".into()),
-            is_secret: false,
-        }]),
+        variables: Some(vec![
+            axagent_harness::workflow_types::Variable {
+                name: "actual_outcome".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(actual_outcome.to_string()),
+                description: Some("实际走势结果，格式如 '30天跌8% → 失败'".into()),
+                is_secret: false,
+            },
+            axagent_harness::workflow_types::Variable {
+                name: "reflection_depth".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(reflection_depth.to_string()),
+                description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
+                is_secret: false,
+            },
+        ]),
         ..Default::default()
     };
 
-    // 5. 在 as-of 范围运行（数据快照冻结在原始分析日期）
+    // 5. as-of 范围执行
     let ctx = AsOfContext::parse(as_of_date).map_err(|e| format!("as_of 解析失败: {e}"))?;
     let result = as_of::AS_OF
         .scope(Some(ctx), async move { engine.run_workflow(&wf_id, opts).await })
         .await;
 
-    // 6. 处理结果：写库 + 索引反思到 Memory RAG（独立 collection）
+    // 6. 处理结果
     match result {
         Ok(wf) => {
-            // 提取 portfolio-manager 的反思输出
             let reflection_json = wf
                 .results
                 .get("portfolio-mgr")
-                .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok())
-                .map(|v| v.to_string());
+                .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok());
 
-            // 提取反思摘要（用于 content 字段）
-            let summary: String = reflection_json.as_deref().unwrap_or("{}").to_string();
-            let summary = serde_json::from_str::<serde_json::Value>(&summary)
-                .ok()
-                .and_then(|v| {
-                    v.get("reflection")
-                        .and_then(|r| r.get("what_went_wrong"))
-                        .cloned()
+            let (what_went_wrong, missed_signals, fix_for_future) = reflection_json
+                .as_ref()
+                .and_then(|v| v.get("reflection"))
+                .map(|r| {
+                    let w = r
+                        .get("what_went_wrong")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let m = r.get("missed_signals").map(|v| v.to_string());
+                    let f = r
+                        .get("fix_for_future")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    (w, m, f)
                 })
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .unwrap_or_default();
+                .unwrap_or((None, None, None));
 
-            // 更新 stock_analyses 记录
             let bb_text = serde_json::to_string(&wf.results).unwrap_or_default();
-            let _ = stock_analyses::Entity::update_many()
-                .col_expr(stock_analyses::Column::Status, Expr::value("completed".to_string()))
-                .col_expr(stock_analyses::Column::DecisionJson, Expr::value(reflection_json))
+            let dj_text = reflection_json.as_ref().map(|v| v.to_string());
+
+            let _ = stock_reflections::Entity::update_many()
+                .col_expr(stock_reflections::Column::Status, Expr::value("completed".to_string()))
+                .col_expr(stock_reflections::Column::DecisionJson, Expr::value(dj_text))
                 .col_expr(
-                    stock_analyses::Column::DecisionReasoning,
-                    Expr::value(Some(summary.clone())),
+                    stock_reflections::Column::WhatWentWrong,
+                    Expr::value(what_went_wrong.clone()),
                 )
-                .col_expr(
-                    stock_analyses::Column::DecisionAction,
-                    Expr::value(Some("回顾".to_string())),
-                )
-                .col_expr(stock_analyses::Column::BlackboardSnapshot, Expr::value(bb_text))
-                .filter(stock_analyses::Column::Id.eq(&analysis_id))
+                .col_expr(stock_reflections::Column::MissedSignals, Expr::value(missed_signals))
+                .col_expr(stock_reflections::Column::FixForFuture, Expr::value(fix_for_future))
+                .col_expr(stock_reflections::Column::BlackboardSnapshot, Expr::value(bb_text))
+                .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
 
-            // 索引反思到 Memory RAG（独立于 stock-decisions 集合）
-            if !summary.is_empty() {
+            // 索引到 Memory RAG
+            if let Some(ref w) = what_went_wrong {
                 let memory_content = format!(
                     "反思:股票:{} {} 原始决策时间:{} 结果:{}\n错因:{}",
-                    stock_code, stock_name, as_of_date, actual_outcome, summary
+                    stock_code, stock_name, as_of_date, actual_outcome, w
                 );
                 let _ = crate::indexing::index_memory_item(
                     db,
-                    &master_key,
-                    &vector_store,
+                    master_key,
+                    vector_store,
                     "stock_reflections",
                     &analysis_id,
                     &memory_content,
@@ -1186,9 +1205,12 @@ pub async fn run_reflection_workflow(
         },
         Err(e) => {
             let err_msg = format!("反思工作流失败: {e}");
-            let _ = stock_analyses::Entity::update_many()
-                .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {err_msg}")))
-                .filter(stock_analyses::Column::Id.eq(&analysis_id))
+            let _ = stock_reflections::Entity::update_many()
+                .col_expr(
+                    stock_reflections::Column::Status,
+                    Expr::value(format!("failed: {err_msg}")),
+                )
+                .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
             Err(err_msg)

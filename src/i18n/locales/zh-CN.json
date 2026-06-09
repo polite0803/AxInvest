@@ -6940,6 +6940,17 @@
     "useful": "有用",
     "notUseful": "无用",
     "deleteInsight": "删除洞察",
+    "feedback": {
+      "thanksUseful": "已记录为有用",
+      "thanksNotUseful": "已记录为无用",
+      "notFound": "洞察不存在或已删除",
+      "failed": "反馈失败"
+    },
+    "delete": {
+      "confirm": "确定要删除这条洞察吗？此操作不可撤销。",
+      "success": "洞察已删除",
+      "failed": "删除失败"
+    },
     "settings": {
       "title": "反思设置",
       "subtitle": "调优反思工作流的行为。修改后立即生效。",

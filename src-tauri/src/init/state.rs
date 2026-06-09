@@ -178,7 +178,9 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
     let astock_client = Arc::new(astock_client);
     axagent_tools::global_state::set_astock_client(astock_client.clone());
     // 启动 30s flush loop(后台 tokio task)
+    let _guard = rt.enter();
     axagent_astock_data::disk_cache::spawn_flush_loop(l2_handle);
+    drop(_guard);
     tracing::info!("[l2] 磁盘缓存已注入,后台 flush 任务已启动");
 
     // 缺陷 A 修复:启动后异步拉一次 A 股交易日历,填充 calendar.rs 远程节假日缓存。

@@ -1397,3 +1397,36 @@ pub async fn delete_watchlist_scan_cron(
     state.cron_job_store.remove(&id).await;
     Ok(())
 }
+
+/// 创建决策校验+反思复盘定时任务
+///
+/// 每天扫描 30 天前的分析结果，判定 win/loss。
+/// loss 自动触发 `run_reflection_workflow`（嵌套原股票分析工作流的 as-of 重放 + hindsight 注入）。
+#[tauri::command]
+pub async fn create_validate_decisions_cron(
+    state: State<'_, AppState>,
+    cron_expression: Option<String>,
+    enabled: Option<bool>,
+) -> Result<CronJobResponse, String> {
+    let id = format!(
+        "vldec-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("x")
+    );
+    let expr = cron_expression.unwrap_or_else(|| "0 6 * * *".to_string());
+    let mut job = CronJob::new(
+        &id,
+        &expr,
+        "决策校验 + 反思复盘",
+        "扫描30天前的分析结果判定win/loss，loss自动触发反思工作流（as-of嵌套原分析DAG）",
+    )
+    .with_task_type("validate-decisions");
+    if !enabled.unwrap_or(true) {
+        job.status = CronJobStatus::Paused;
+    }
+    state.cron_job_store.add(job.clone()).await;
+    Ok(CronJobResponse::from(&job))
+}

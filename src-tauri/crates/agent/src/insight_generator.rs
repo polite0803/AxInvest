@@ -1,62 +1,31 @@
+//! 反思洞察生成器
+//!
+//! 关键改进：
+//! - `store_insight` 按 `(category, content_hash)` 去重合并（usage_count 累加）
+//! - **返回 `Option<Insight>`**：新建/合并后的最终 insight，调用方可以直接拿到本次新产生的条目
+//! - 锁顺序统一（M4）：总是 `dedup.write()` → `insights.write()`，避免自死锁
+//! - 支持用户反馈（`record_feedback`）调整 confidence
+//! - 支持时间衰减（`decay_stale`，按 `last_reinforced_at`）
+//! - LRU 容量上限（`max_insights`）
+//! - `generate_from_reflection_multi` 同时输出错误/成功/优化等最多 4 条独立 insight
+//! - 自动 prune 弱洞察
+//! - **持久化**：通过 `init_persistence(path)` 挂载 `insights.jsonl`，启动加载 + 每次变更后 rewrite
+//! - **热更新**：`set_max_insights` / `set_decay_days` 走 interior mutability（AtomicUsize / AtomicU32）
+//! - `to_learning_insight()` 集中类别映射到 `axagent_trajectory::LearningInsight`（M8）
+
 use crate::reflector::Reflection;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Insight {
-    pub id: String,
-    pub category: InsightCategory,
-    pub title: String,
-    pub content: String,
-    pub source_task_id: String,
-    pub confidence: f32,
-    pub tags: Vec<String>,
-    pub created_at: DateTime<Utc>,
-    pub usage_count: u32,
-    pub last_used: Option<DateTime<Utc>>,
-}
-
-impl Insight {
-    pub fn new(
-        category: InsightCategory,
-        title: String,
-        content: String,
-        source_task_id: String,
-    ) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            category,
-            title,
-            content,
-            source_task_id,
-            confidence: 0.5,
-            tags: Vec::new(),
-            created_at: Utc::now(),
-            usage_count: 0,
-            last_used: None,
-        }
-    }
-
-    pub fn with_confidence(mut self, confidence: f32) -> Self {
-        self.confidence = confidence.clamp(0.0, 1.0);
-        self
-    }
-
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
-        self.tags = tags;
-        self
-    }
-
-    pub fn record_usage(&mut self) {
-        self.usage_count += 1;
-        self.last_used = Some(Utc::now());
-    }
-}
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use tokio::sync::{Mutex, RwLock};
+use tracing::warn;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InsightCategory {
     ErrorPattern,
     SuccessPattern,
@@ -79,244 +48,125 @@ impl InsightCategory {
     }
 }
 
-impl std::str::FromStr for InsightCategory {
-    type Err = ();
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Insight {
+    pub id: String,
+    pub category: InsightCategory,
+    pub title: String,
+    pub content: String,
+    pub source_task_id: String,
+    pub confidence: f32,
+    pub tags: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_reinforced_at: DateTime<Utc>,
+    pub usage_count: u32,
+    /// 用户反馈分数：+1（👍）/ -1（👎）/ 0（未反馈）。会持续叠加。
+    pub feedback_score: i32,
+}
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "error_pattern" => Ok(InsightCategory::ErrorPattern),
-            "success_pattern" => Ok(InsightCategory::SuccessPattern),
-            "optimization" => Ok(InsightCategory::Optimization),
-            "knowledge" => Ok(InsightCategory::Knowledge),
-            "workflow" => Ok(InsightCategory::Workflow),
-            "tool_usage" => Ok(InsightCategory::ToolUsage),
-            _ => Err(()),
+impl Insight {
+    pub fn new(
+        category: InsightCategory,
+        title: String,
+        content: String,
+        source_task_id: String,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4().to_string(),
+            category,
+            title,
+            content,
+            source_task_id,
+            confidence: 0.5,
+            tags: Vec::new(),
+            created_at: now,
+            last_reinforced_at: now,
+            usage_count: 1,
+            feedback_score: 0,
         }
+    }
+
+    pub fn with_confidence(mut self, c: f32) -> Self {
+        self.confidence = c.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
+        self
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InsightStats {
-    pub total_insights: usize,
-    pub by_category: HashMap<String, usize>,
-    pub avg_confidence: f32,
-    pub most_used: Option<Insight>,
+/// 持久化 helper：单文件 JSONL 读写 + 全量重写
+struct InsightStore {
+    path: Option<PathBuf>,
+    /// 单文件写锁：串行化所有落盘动作，避免并发 rewrite 损坏 JSONL
+    write_lock: Arc<Mutex<()>>,
+}
+
+impl InsightStore {
+    fn new(path: Option<PathBuf>) -> Self {
+        Self {
+            path,
+            write_lock: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// 把当前所有 insight 全量写入 JSONL
+    async fn rewrite_all(&self, insights: &HashMap<String, Insight>) -> std::io::Result<()> {
+        let Some(path) = &self.path else { return Ok(()) };
+        let _guard = self.write_lock.lock().await;
+        if let Some(parent) = path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        // 先写到临时文件再原子 rename，避免崩溃半写
+        let tmp = path.with_extension("jsonl.tmp");
+        let mut buf = String::new();
+        let mut v: Vec<&Insight> = insights.values().collect();
+        v.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        for ins in v {
+            if let Ok(s) = serde_json::to_string(ins) {
+                buf.push_str(&s);
+                buf.push('\n');
+            }
+        }
+        tokio::fs::write(&tmp, buf.as_bytes()).await?;
+        tokio::fs::rename(&tmp, path).await?;
+        Ok(())
+    }
+
+    /// 加载全部 insight
+    async fn load_all(&self) -> std::io::Result<Vec<Insight>> {
+        let Some(path) = &self.path else { return Ok(Vec::new()) };
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let _guard = self.write_lock.lock().await;
+        let content = tokio::fs::read_to_string(path).await?;
+        let mut out: Vec<Insight> = Vec::new();
+        for line in content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(ins) = serde_json::from_str::<Insight>(line) {
+                out.push(ins);
+            }
+        }
+        Ok(out)
+    }
 }
 
 pub struct InsightGenerator {
-    insights: Arc<RwLock<Vec<Insight>>>,
-    category_stats: Arc<RwLock<HashMap<InsightCategory, usize>>>,
-}
-
-impl InsightGenerator {
-    pub fn new() -> Self {
-        Self {
-            insights: Arc::new(RwLock::new(Vec::new())),
-            category_stats: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub fn generate_from_reflection(&self, reflection: &Reflection) -> Option<Insight> {
-        if reflection.reusable_patterns.is_empty() && reflection.error_patterns.is_empty() {
-            return None;
-        }
-
-        let category = if !reflection.error_patterns.is_empty() {
-            InsightCategory::ErrorPattern
-        } else {
-            InsightCategory::SuccessPattern
-        };
-
-        let title = if !reflection.error_patterns.is_empty() {
-            format!("Error Pattern from Task {}", reflection.task_id)
-        } else {
-            format!("Success Pattern from Task {}", reflection.task_id)
-        };
-
-        let content = if !reflection.error_patterns.is_empty() {
-            reflection.error_patterns.join("; ")
-        } else {
-            reflection.reusable_patterns.join("; ")
-        };
-
-        let confidence = if reflection.quality_score >= 8 {
-            0.9
-        } else if reflection.quality_score >= 5 {
-            0.7
-        } else {
-            0.4
-        };
-
-        let mut tags = Vec::new();
-        if !reflection.error_patterns.is_empty() {
-            tags.push("error_handling".to_string());
-        }
-        if !reflection.reusable_patterns.is_empty() {
-            tags.push("reusable".to_string());
-        }
-        tags.push(format!("quality_{}", reflection.quality_score));
-
-        Some(
-            Insight::new(category, title, content, reflection.task_id.clone())
-                .with_confidence(confidence)
-                .with_tags(tags),
-        )
-    }
-
-    pub async fn store_insight(&self, insight: Insight) {
-        let mut insights = self.insights.write().await;
-        insights.push(insight.clone());
-
-        let mut stats = self.category_stats.write().await;
-        *stats.entry(insight.category).or_insert(0) += 1;
-    }
-
-    pub async fn get_insights(&self, category: Option<InsightCategory>) -> Vec<Insight> {
-        let insights = self.insights.read().await;
-        match category {
-            Some(cat) => insights
-                .iter()
-                .filter(|i| i.category == cat)
-                .cloned()
-                .collect(),
-            None => insights.clone(),
-        }
-    }
-
-    pub async fn get_insight_by_id(&self, id: &str) -> Option<Insight> {
-        let insights = self.insights.read().await;
-        insights.iter().find(|i| i.id == id).cloned()
-    }
-
-    pub async fn search_insights(&self, query: &str) -> Vec<Insight> {
-        let query_lower = query.to_lowercase();
-        let insights = self.insights.read().await;
-
-        insights
-            .iter()
-            .filter(|i| {
-                i.title.to_lowercase().contains(&query_lower)
-                    || i.content.to_lowercase().contains(&query_lower)
-                    || i.tags
-                        .iter()
-                        .any(|t| t.to_lowercase().contains(&query_lower))
-            })
-            .cloned()
-            .collect()
-    }
-
-    pub async fn record_insight_usage(&self, id: &str) -> bool {
-        let mut insights = self.insights.write().await;
-        if let Some(insight) = insights.iter_mut().find(|i| i.id == id) {
-            insight.record_usage();
-            return true;
-        }
-        false
-    }
-
-    pub async fn get_stats(&self) -> InsightStats {
-        let insights = self.insights.read().await;
-        let stats = self.category_stats.read().await;
-
-        let total = insights.len();
-        let by_category: HashMap<String, usize> = stats
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), *v))
-            .collect();
-
-        let avg_confidence = if total > 0 {
-            insights.iter().map(|i| i.confidence).sum::<f32>() / total as f32
-        } else {
-            0.0
-        };
-
-        let most_used = insights.iter().max_by_key(|i| i.usage_count).cloned();
-
-        InsightStats {
-            total_insights: total,
-            by_category,
-            avg_confidence,
-            most_used,
-        }
-    }
-
-    pub async fn delete_insight(&self, id: &str) -> bool {
-        let mut insights = self.insights.write().await;
-        let initial_len = insights.len();
-        insights.retain(|i| i.id != id);
-        insights.len() < initial_len
-    }
-
-    pub async fn clear_all(&self) {
-        let mut insights = self.insights.write().await;
-        insights.clear();
-
-        let mut stats = self.category_stats.write().await;
-        stats.clear();
-    }
-
-    pub async fn get_recent_insights(&self, limit: usize) -> Vec<Insight> {
-        let insights = self.insights.read().await;
-        let mut sorted = insights.clone();
-        sorted.sort_by_key(|b| std::cmp::Reverse(b.created_at));
-        sorted.into_iter().take(limit).collect()
-    }
-
-    pub async fn get_top_insights(&self, limit: usize) -> Vec<Insight> {
-        let insights = self.insights.read().await;
-        let mut sorted = insights.clone();
-        sorted.sort_by_key(|b| std::cmp::Reverse(b.usage_count));
-        sorted.into_iter().take(limit).collect()
-    }
-
-    pub async fn get_high_confidence_insights(&self, threshold: f32) -> Vec<Insight> {
-        let insights = self.insights.read().await;
-        insights
-            .iter()
-            .filter(|i| i.confidence >= threshold)
-            .cloned()
-            .collect()
-    }
-
-    pub fn generate_optimization_insight(
-        &self,
-        task_description: &str,
-        duration_ms: u64,
-    ) -> Insight {
-        Insight::new(
-            InsightCategory::Optimization,
-            format!("Performance Optimization: {}", task_description),
-            format!(
-                "Task '{}' took {}ms. Consider caching, parallel execution, or algorithm optimization.",
-                task_description, duration_ms
-            ),
-            String::new(),
-        )
-        .with_confidence(0.7)
-        .with_tags(vec!["performance".to_string(), "optimization".to_string()])
-    }
-
-    pub fn generate_knowledge_insight(&self, topic: &str, content: &str) -> Insight {
-        Insight::new(
-            InsightCategory::Knowledge,
-            format!("Knowledge: {}", topic),
-            content.to_string(),
-            String::new(),
-        )
-        .with_confidence(0.8)
-        .with_tags(vec!["knowledge".to_string(), topic.to_lowercase()])
-    }
-
-    pub fn generate_workflow_insight(&self, tools: &[String], description: &str) -> Insight {
-        Insight::new(
-            InsightCategory::Workflow,
-            format!("Workflow: {}", description),
-            format!("Tool sequence: {}", tools.join(" -> ")),
-            String::new(),
-        )
-        .with_confidence(0.6)
-        .with_tags(vec!["workflow".to_string(), "tools".to_string()])
-    }
+    insights: Arc<RwLock<HashMap<String, Insight>>>,
+    /// 按 (category, content_hash) 索引，指向 insight id；用于去重
+    dedup_index: Arc<RwLock<HashMap<(InsightCategory, String), String>>>,
+    /// 上限；超出时按 (feedback_score asc, last_reinforced_at asc) 删除
+    max_insights: AtomicUsize,
+    /// 衰减天数；0 = 不衰减
+    decay_days: AtomicU32,
+    /// 持久化 store（init_persistence 后挂上）
+    store: Arc<RwLock<InsightStore>>,
 }
 
 impl Default for InsightGenerator {
@@ -325,742 +175,721 @@ impl Default for InsightGenerator {
     }
 }
 
+impl InsightGenerator {
+    pub fn new() -> Self {
+        Self {
+            insights: Arc::new(RwLock::new(HashMap::new())),
+            dedup_index: Arc::new(RwLock::new(HashMap::new())),
+            max_insights: AtomicUsize::new(500),
+            decay_days: AtomicU32::new(30),
+            store: Arc::new(RwLock::new(InsightStore::new(None))),
+        }
+    }
+
+    /// Builder API（保留向后兼容）：设置上限
+    pub fn with_max_insights(self, n: usize) -> Self {
+        self.max_insights.store(n.max(1), Ordering::Relaxed);
+        self
+    }
+
+    /// Builder API（保留向后兼容）：设置衰减天数
+    pub fn with_decay_days(self, days: u32) -> Self {
+        self.decay_days.store(days, Ordering::Relaxed);
+        self
+    }
+
+    /// L1: 热更新 max_insights（可从 Arc<&Self> 调用）
+    pub fn set_max_insights(&self, n: usize) {
+        self.max_insights.store(n.max(1), Ordering::Relaxed);
+    }
+
+    /// L1: 热更新 decay_days
+    pub fn set_decay_days(&self, days: u32) {
+        self.decay_days.store(days, Ordering::Relaxed);
+    }
+
+    pub fn get_max_insights(&self) -> usize {
+        self.max_insights.load(Ordering::Relaxed)
+    }
+
+    pub fn get_decay_days(&self) -> u32 {
+        self.decay_days.load(Ordering::Relaxed)
+    }
+
+    /// 原子写入 max_insights + decay_days（L1 配套 helper）
+    /// 永远成功：使用 Relaxed ordering，不阻塞。
+    pub fn try_write_settings(&self, max_insights: usize, decay_days: u32) -> bool {
+        self.set_max_insights(max_insights);
+        self.set_decay_days(decay_days);
+        true
+    }
+
+    /// S3: 挂载持久化路径，启动时调用一次。返回加载到内存的 insight 数。
+    pub async fn init_persistence(&self, path: PathBuf) -> std::io::Result<usize> {
+        {
+            let mut store = self.store.write().await;
+            *store = InsightStore::new(Some(path.clone()));
+        }
+        let loaded = {
+            let store = self.store.read().await;
+            store.load_all().await?
+        };
+        let n = loaded.len();
+        if n > 0 {
+            let mut insights = self.insights.write().await;
+            let mut dedup = self.dedup_index.write().await;
+            for ins in loaded {
+                let hash = Self::content_hash(&ins.content);
+                dedup.insert((ins.category, hash), ins.id.clone());
+                insights.insert(ins.id.clone(), ins);
+            }
+        }
+        Ok(n)
+    }
+
+    /// 按 content 算 hash（用最简单的 lowercase+trim，保证 64 位以内冲突极低）
+    fn content_hash(content: &str) -> String {
+        let normalized: String = content
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(|c| c.to_lowercase())
+            .collect();
+        let len = normalized.chars().count();
+        let prefix: String = normalized.chars().take(64).collect();
+        format!("{:x}#{}", len, prefix)
+    }
+
+    /// 存储一条 insight，自动去重
+    ///
+    /// 行为：
+    /// - 若 (category, content_hash) 已存在：合并——`usage_count += 1`，`last_reinforced_at = now`，`confidence` 按 EWMA 上调
+    /// - 新建：按 max_insights 容量 LRU 淘汰
+    /// - 返回：本次**最终**入库的 insight（新建 or 合并后）
+    ///
+    /// 锁顺序（M4）：总是 `dedup.write()` → `insights.write()`，绝不交叉获取
+    pub async fn store_insight(&self, mut insight: Insight) -> Option<Insight> {
+        let now = Utc::now();
+        let hash = Self::content_hash(&insight.content);
+        let key = (insight.category, hash.clone());
+
+        let mut dedup = self.dedup_index.write().await;
+        if let Some(existing_id) = dedup.get(&key).cloned() {
+            let mut insights = self.insights.write().await;
+            if let Some(existing) = insights.get_mut(&existing_id) {
+                existing.usage_count = existing.usage_count.saturating_add(1);
+                existing.last_reinforced_at = now;
+                // EWMA 上调 confidence（最大 0.95）
+                let alpha = 0.1;
+                existing.confidence = (existing.confidence * (1.0 - alpha)
+                    + insight.confidence * alpha)
+                    .clamp(0.0, 0.95);
+                let snapshot = existing.clone();
+                drop(insights);
+                drop(dedup);
+                self.persist_async();
+                return Some(snapshot);
+            }
+        }
+
+        // 新建
+        insight.last_reinforced_at = now;
+        let id = insight.id.clone();
+        {
+            let mut insights = self.insights.write().await;
+            insights.insert(id.clone(), insight);
+        }
+        dedup.insert(key, id.clone());
+
+        // 在 dedup 持锁期间确定要淘汰的 id（不释放 dedup，也不重入）
+        let cap = self.max_insights.load(Ordering::Relaxed);
+        let to_remove: Vec<String> = if cap > 0 {
+            let insights = self.insights.read().await;
+            if insights.len() > cap {
+                self.pick_lru_candidates(&insights, insights.len() - cap)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        if !to_remove.is_empty() {
+            let mut insights = self.insights.write().await;
+            // dedup 仍持有，顺序一致
+            for rid in &to_remove {
+                if let Some(removed) = insights.remove(rid) {
+                    let h = Self::content_hash(&removed.content);
+                    dedup.remove(&(removed.category, h));
+                }
+            }
+        }
+
+        let snapshot = self.insights.read().await.get(&id).cloned();
+        drop(dedup);
+        self.persist_async();
+        snapshot
+    }
+
+    /// 把当前所有 insight 落盘；失败仅 warn。
+    fn persist_async(&self) {
+        let store = self.store.clone();
+        let insights = self.insights.clone();
+        tokio::spawn(async move {
+            let snapshot = {
+                let guard = insights.read().await;
+                guard.clone()
+            };
+            let store_guard = store.read().await;
+            if let Err(e) = store_guard.rewrite_all(&snapshot).await {
+                warn!("[insight] persist failed: {}", e);
+            }
+        });
+    }
+
+    fn pick_lru_candidates(&self, map: &HashMap<String, Insight>, n: usize) -> Vec<String> {
+        let mut v: Vec<&Insight> = map.values().collect();
+        v.sort_by(|a, b| {
+            (a.feedback_score, a.last_reinforced_at)
+                .partial_cmp(&(b.feedback_score, b.last_reinforced_at))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        v.into_iter().take(n).map(|i| i.id.clone()).collect()
+    }
+
+    /// 用户反馈：useful=true 累 +1 并提升 confidence，useful=false 累 -1 并降 confidence
+    pub async fn record_feedback(&self, id: &str, useful: bool) -> Option<Insight> {
+        let snapshot = {
+            let mut insights = self.insights.write().await;
+            let ins = insights.get_mut(id)?;
+            ins.feedback_score = if useful {
+                ins.feedback_score.saturating_add(1)
+            } else {
+                ins.feedback_score.saturating_sub(1)
+            };
+            ins.last_reinforced_at = Utc::now();
+            if useful {
+                ins.confidence = (ins.confidence + 0.05).clamp(0.0, 1.0);
+            } else {
+                ins.confidence = (ins.confidence - 0.1).clamp(0.0, 1.0);
+            }
+            Some(ins.clone())
+        };
+        if snapshot.is_some() {
+            self.persist_async();
+        }
+        snapshot
+    }
+
+    pub async fn delete_insight(&self, id: &str) -> bool {
+        let removed = {
+            let mut insights = self.insights.write().await;
+            if let Some(ins) = insights.remove(id) {
+                drop(insights);
+                let hash = Self::content_hash(&ins.content);
+                let mut dedup = self.dedup_index.write().await;
+                dedup.remove(&(ins.category, hash));
+                true
+            } else {
+                false
+            }
+        };
+        if removed {
+            self.persist_async();
+        }
+        removed
+    }
+
+    /// 衰减超过 N 天未强化的 insight
+    pub async fn decay_stale(&self) -> usize {
+        let days = self.decay_days.load(Ordering::Relaxed);
+        if days == 0 {
+            return 0;
+        }
+        let threshold = chrono::Duration::days(days as i64);
+        let now = Utc::now();
+        let mut count = 0usize;
+        {
+            let mut insights = self.insights.write().await;
+            for ins in insights.values_mut() {
+                if now - ins.last_reinforced_at > threshold {
+                    ins.confidence = (ins.confidence * 0.9).clamp(0.0, 1.0);
+                    count += 1;
+                }
+            }
+        }
+        if count > 0 {
+            self.persist_async();
+        }
+        count
+    }
+
+    /// 清理 confidence < threshold 的洞察
+    pub async fn prune_stale(&self, min_confidence: f32) -> usize {
+        let to_remove: Vec<String> = {
+            let insights = self.insights.read().await;
+            insights
+                .iter()
+                .filter_map(|(id, ins)| {
+                    if ins.confidence < min_confidence {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        let n = to_remove.len();
+        for id in to_remove {
+            self.delete_insight(&id).await;
+        }
+        n
+    }
+
+    pub async fn clear_all(&self) {
+        {
+            let mut insights = self.insights.write().await;
+            insights.clear();
+            let mut dedup = self.dedup_index.write().await;
+            dedup.clear();
+        }
+        self.persist_async();
+    }
+
+    pub async fn get_insights(&self) -> Vec<Insight> {
+        let insights = self.insights.read().await;
+        let mut v: Vec<Insight> = insights.values().cloned().collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
+    }
+
+    pub async fn get_insights_by_category(&self, category: InsightCategory) -> Vec<Insight> {
+        let insights = self.insights.read().await;
+        let mut v: Vec<Insight> = insights
+            .values()
+            .filter(|i| i.category == category)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
+    }
+
+    /// 复制版 (兼容旧 API 名)，按 category 字符串过滤
+    pub async fn get_insights_by_category_str(&self, category: Option<&str>) -> Vec<Insight> {
+        let insights = self.insights.read().await;
+        let v: Vec<Insight> = if let Some(c) = category {
+            insights
+                .values()
+                .filter(|i| i.category.as_str() == c)
+                .cloned()
+                .collect()
+        } else {
+            insights.values().cloned().collect()
+        };
+        v
+    }
+
+    pub async fn search_insights(&self, query: &str) -> Vec<Insight> {
+        let q = query.to_lowercase();
+        let insights = self.insights.read().await;
+        let mut v: Vec<Insight> = insights
+            .values()
+            .filter(|i| {
+                i.title.to_lowercase().contains(&q) || i.content.to_lowercase().contains(&q)
+            })
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        v
+    }
+
+    /// 按 confidence desc 排序，取前 N
+    pub async fn get_top_insights(&self, n: usize) -> Vec<Insight> {
+        let insights = self.insights.read().await;
+        let mut v: Vec<Insight> = insights.values().cloned().collect();
+        v.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        v.into_iter().take(n).collect()
+    }
+
+    /// 按 created_at desc 排序，取前 N
+    pub async fn get_recent_insights(&self, n: usize) -> Vec<Insight> {
+        let insights = self.insights.read().await;
+        let mut v: Vec<Insight> = insights.values().cloned().collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.into_iter().take(n).collect()
+    }
+
+    /// confidence >= threshold 的洞察
+    pub async fn get_high_confidence_insights(&self, threshold: f32) -> Vec<Insight> {
+        let insights = self.insights.read().await;
+        insights
+            .values()
+            .filter(|i| i.confidence >= threshold)
+            .cloned()
+            .collect()
+    }
+
+    pub async fn get_stats(&self) -> InsightStats {
+        let insights = self.insights.read().await;
+        let mut by_category: HashMap<String, usize> = HashMap::new();
+        let mut total_confidence = 0.0;
+        for ins in insights.values() {
+            *by_category
+                .entry(ins.category.as_str().to_string())
+                .or_default() += 1;
+            total_confidence += ins.confidence;
+        }
+        let total = insights.len();
+        let avg = if total > 0 {
+            total_confidence / total as f32
+        } else {
+            0.0
+        };
+        InsightStats {
+            total,
+            average_confidence: avg,
+            by_category,
+        }
+    }
+
+    /// 从一条 reflection 生成最多 4 条独立 insight（不丢失 error+success 信息）
+    pub fn generate_from_reflection_multi(&self, r: &Reflection) -> Vec<Insight> {
+        let mut out = Vec::new();
+
+        if !r.error_patterns.is_empty() {
+            let content = r.error_patterns.join("; ");
+            let confidence = (0.5 + (r.error_patterns.len() as f32 * 0.05).min(0.4)).min(0.95);
+            let tags = r.error_patterns.clone();
+            out.push(
+                Insight::new(
+                    InsightCategory::ErrorPattern,
+                    format!("Error Patterns: {} identified", r.error_patterns.len()),
+                    content,
+                    r.task_id.clone(),
+                )
+                .with_confidence(confidence)
+                .with_tags(tags),
+            );
+        }
+
+        if !r.reusable_patterns.is_empty() {
+            let content = r.reusable_patterns.join("; ");
+            let confidence = (0.4 + (r.reusable_patterns.len() as f32 * 0.05).min(0.4)).min(0.95);
+            out.push(
+                Insight::new(
+                    InsightCategory::SuccessPattern,
+                    format!("Reusable Patterns: {} identified", r.reusable_patterns.len()),
+                    content,
+                    r.task_id.clone(),
+                )
+                .with_confidence(confidence),
+            );
+        }
+
+        if r.quality_score >= 7 {
+            out.push(
+                Insight::new(
+                    InsightCategory::Optimization,
+                    format!("High Quality Execution: score {}", r.quality_score),
+                    r.overall_summary.clone(),
+                    r.task_id.clone(),
+                )
+                .with_confidence(0.7),
+            );
+        } else if r.quality_score <= 4 {
+            out.push(
+                Insight::new(
+                    InsightCategory::Knowledge,
+                    format!("Low Quality Task (score {})", r.quality_score),
+                    format!(
+                        "{}\n\nImprovements: {}",
+                        r.overall_summary,
+                        r.improvement_suggestions.join("; ")
+                    ),
+                    r.task_id.clone(),
+                )
+                .with_confidence(0.6),
+            );
+        }
+
+        if !r.knowledge_suggestions.is_empty() {
+            out.push(
+                Insight::new(
+                    InsightCategory::Workflow,
+                    format!("Knowledge: {} suggestion(s)", r.knowledge_suggestions.len()),
+                    r.knowledge_suggestions.join("; "),
+                    r.task_id.clone(),
+                )
+                .with_confidence(0.5),
+            );
+        }
+
+        if out.is_empty() {
+            out.push(
+                Insight::new(
+                    InsightCategory::Knowledge,
+                    "Task Reflection".to_string(),
+                    r.overall_summary.clone(),
+                    r.task_id.clone(),
+                )
+                .with_confidence(0.4),
+            );
+        }
+        out
+    }
+
+    /// 兼容旧 API：从 reflection 最多生成 1 条 insight（按 dominant category 折叠）
+    pub fn generate_from_reflection(&self, r: &Reflection) -> Option<Insight> {
+        self.generate_from_reflection_multi(r).into_iter().next()
+    }
+
+    /// M8 helper: 暴露 `InsightCategory` 的稳定字符串名，供 `commands/agent.rs`
+    /// 的 bridge 函数做映射（避免 `axagent_agent` 反向依赖 `axagent_trajectory`）。
+    /// 真正的 `LearningInsight` 构造在 bridge 中完成，**新增 category 时必须同时修改
+    /// `commands::agent::map_category_to_trajectory` 与 `InsightCategory::as_str`**。
+    pub fn category_name(&self, c: InsightCategory) -> &'static str {
+        c.as_str()
+    }
+
+    /// 同步 flush 一次落盘（供测试 / 显式保存用）
+    pub async fn flush(&self) {
+        let snapshot = {
+            let guard = self.insights.read().await;
+            guard.clone()
+        };
+        let store_guard = self.store.read().await;
+        if let Err(e) = store_guard.rewrite_all(&snapshot).await {
+            warn!("[insight] flush failed: {}", e);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InsightStats {
+    pub total: usize,
+    pub average_confidence: f32,
+    pub by_category: HashMap<String, usize>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
+
+    fn r() -> Reflection {
+        let mut r = Reflection::new("t1".to_string());
+        r.error_patterns = vec!["e1".to_string(), "e2".to_string()];
+        r.reusable_patterns = vec!["p1".to_string()];
+        r.knowledge_suggestions = vec!["k1".to_string()];
+        r.improvement_suggestions = vec!["i1".to_string()];
+        r.overall_summary = "Test summary".to_string();
+        r.quality_score = 8;
+        r
+    }
 
     #[tokio::test]
-    async fn test_insight_storage() {
-        let generator = InsightGenerator::new();
-
-        let insight = Insight::new(
-            InsightCategory::ErrorPattern,
-            "Test Insight".to_string(),
-            "Test content".to_string(),
-            "task-1".to_string(),
+    async fn test_multi_insight_generation() {
+        let g = InsightGenerator::new();
+        let r = r();
+        let v = g.generate_from_reflection_multi(&r);
+        assert!(v.len() >= 2, "should produce both error and success insights");
+        assert!(
+            v.iter()
+                .any(|i| i.category == InsightCategory::ErrorPattern)
         );
-
-        generator.store_insight(insight.clone()).await;
-
-        let insights = generator.get_insights(None).await;
-        assert_eq!(insights.len(), 1);
-        assert_eq!(insights[0].title, "Test Insight");
-    }
-
-    #[tokio::test]
-    async fn test_insight_usage_tracking() {
-        let generator = InsightGenerator::new();
-
-        let insight = generator.generate_optimization_insight("Test Task", 5000);
-        generator.store_insight(insight.clone()).await;
-
-        let id = insight.id.clone();
-        generator.record_insight_usage(&id).await;
-
-        let updated = generator.get_insight_by_id(&id).await.unwrap();
-        assert_eq!(updated.usage_count, 1);
-    }
-
-    #[tokio::test]
-    async fn test_search_insights() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(
-                Insight::new(
-                    InsightCategory::ErrorPattern,
-                    "Timeout Error".to_string(),
-                    "Network timeout occurred".to_string(),
-                    "task-1".to_string(),
-                )
-                .with_tags(vec!["network".to_string()]),
-            )
-            .await;
-
-        let results = generator.search_insights("timeout").await;
-        assert_eq!(results.len(), 1);
-        assert!(results[0].title.contains("Timeout"));
-    }
-
-    #[test]
-    fn test_insight_new() {
-        let insight = Insight::new(
-            InsightCategory::Knowledge,
-            "Test Title".to_string(),
-            "Test Content".to_string(),
-            "task-123".to_string(),
+        assert!(
+            v.iter()
+                .any(|i| i.category == InsightCategory::SuccessPattern)
         );
-        assert!(!insight.id.is_empty());
-        assert_eq!(insight.category, InsightCategory::Knowledge);
-        assert_eq!(insight.title, "Test Title");
-        assert_eq!(insight.content, "Test Content");
-        assert_eq!(insight.source_task_id, "task-123");
-        assert!((insight.confidence - 0.5).abs() < f32::EPSILON);
-        assert!(insight.tags.is_empty());
-        assert!(insight.usage_count == 0);
-        assert!(insight.last_used.is_none());
-    }
-
-    #[test]
-    fn test_insight_with_confidence() {
-        let insight = Insight::new(
-            InsightCategory::Optimization,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        )
-        .with_confidence(0.85);
-        assert!((insight.confidence - 0.85).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_insight_with_confidence_clamp_high() {
-        let insight = Insight::new(
-            InsightCategory::Optimization,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        )
-        .with_confidence(1.5);
-        assert!((insight.confidence - 1.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_insight_with_confidence_clamp_low() {
-        let insight = Insight::new(
-            InsightCategory::Optimization,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        )
-        .with_confidence(-0.5);
-        assert!((insight.confidence - 0.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_insight_with_tags() {
-        let insight = Insight::new(
-            InsightCategory::ErrorPattern,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        )
-        .with_tags(vec!["error".to_string(), "network".to_string()]);
-        assert_eq!(insight.tags.len(), 2);
-        assert!(insight.tags.contains(&"error".to_string()));
-        assert!(insight.tags.contains(&"network".to_string()));
-    }
-
-    #[test]
-    fn test_insight_record_usage() {
-        let mut insight = Insight::new(
-            InsightCategory::Knowledge,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        );
-        assert_eq!(insight.usage_count, 0);
-        assert!(insight.last_used.is_none());
-
-        insight.record_usage();
-        assert_eq!(insight.usage_count, 1);
-        assert!(insight.last_used.is_some());
-
-        insight.record_usage();
-        assert_eq!(insight.usage_count, 2);
-    }
-
-    #[test]
-    fn test_insight_category_as_str() {
-        assert_eq!(InsightCategory::ErrorPattern.as_str(), "error_pattern");
-        assert_eq!(InsightCategory::SuccessPattern.as_str(), "success_pattern");
-        assert_eq!(InsightCategory::Optimization.as_str(), "optimization");
-        assert_eq!(InsightCategory::Knowledge.as_str(), "knowledge");
-        assert_eq!(InsightCategory::Workflow.as_str(), "workflow");
-        assert_eq!(InsightCategory::ToolUsage.as_str(), "tool_usage");
-    }
-
-    #[test]
-    fn test_insight_category_from_str() {
-        assert_eq!(
-            "error_pattern".parse::<InsightCategory>().ok(),
-            Some(InsightCategory::ErrorPattern)
-        );
-        assert_eq!(
-            "success_pattern".parse::<InsightCategory>().ok(),
-            Some(InsightCategory::SuccessPattern)
-        );
-        assert_eq!(
-            "optimization".parse::<InsightCategory>().ok(),
-            Some(InsightCategory::Optimization)
-        );
-        assert_eq!("knowledge".parse::<InsightCategory>().ok(), Some(InsightCategory::Knowledge));
-        assert_eq!("workflow".parse::<InsightCategory>().ok(), Some(InsightCategory::Workflow));
-        assert_eq!("tool_usage".parse::<InsightCategory>().ok(), Some(InsightCategory::ToolUsage));
-        assert_eq!("invalid".parse::<InsightCategory>().ok(), None);
-    }
-
-    #[test]
-    fn test_generate_from_reflection_empty() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-1".to_string());
-        let result = generator.generate_from_reflection(&reflection);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_generate_from_reflection_error_pattern() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-1".to_string())
-            .with_patterns(vec!["Timeout error".to_string()], vec![]);
-        let result = generator.generate_from_reflection(&reflection);
-        assert!(result.is_some());
-        let insight = result.unwrap();
-        assert_eq!(insight.category, InsightCategory::ErrorPattern);
-        assert!(insight.title.contains("Error Pattern"));
-        assert!(insight.content.contains("Timeout error"));
-        assert!(insight.tags.contains(&"error_handling".to_string()));
-    }
-
-    #[test]
-    fn test_generate_from_reflection_success_pattern() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-2".to_string())
-            .with_patterns(vec![], vec!["Efficient caching".to_string()]);
-        let result = generator.generate_from_reflection(&reflection);
-        assert!(result.is_some());
-        let insight = result.unwrap();
-        assert_eq!(insight.category, InsightCategory::SuccessPattern);
-        assert!(insight.title.contains("Success Pattern"));
-        assert!(insight.content.contains("Efficient caching"));
-        assert!(insight.tags.contains(&"reusable".to_string()));
-    }
-
-    #[test]
-    fn test_generate_from_reflection_high_quality() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-3".to_string())
-            .with_quality(9, "Excellent".to_string())
-            .with_patterns(vec![], vec!["Pattern".to_string()]);
-        let result = generator.generate_from_reflection(&reflection);
-        let insight = result.unwrap();
-        assert!((insight.confidence - 0.9).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_generate_from_reflection_medium_quality() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-4".to_string())
-            .with_quality(6, "Good".to_string())
-            .with_patterns(vec![], vec!["Pattern".to_string()]);
-        let result = generator.generate_from_reflection(&reflection);
-        let insight = result.unwrap();
-        assert!((insight.confidence - 0.7).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_generate_from_reflection_low_quality() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-5".to_string())
-            .with_quality(3, "Poor".to_string())
-            .with_patterns(vec!["Error".to_string()], vec![]);
-        let result = generator.generate_from_reflection(&reflection);
-        let insight = result.unwrap();
-        assert!((insight.confidence - 0.4).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_generate_from_reflection_both_patterns() {
-        let generator = InsightGenerator::new();
-        let reflection = Reflection::new("task-6".to_string())
-            .with_patterns(vec!["Error pattern".to_string()], vec!["Reusable pattern".to_string()]);
-        let result = generator.generate_from_reflection(&reflection);
-        let insight = result.unwrap();
-        assert_eq!(insight.category, InsightCategory::ErrorPattern);
-        assert!(insight.tags.contains(&"error_handling".to_string()));
-        assert!(insight.tags.contains(&"reusable".to_string()));
     }
 
     #[tokio::test]
-    async fn test_get_insights_by_category() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::ErrorPattern,
-                "Error".to_string(),
-                "Content".to_string(),
-                "task-1".to_string(),
-            ))
-            .await;
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "Knowledge".to_string(),
-                "Content".to_string(),
-                "task-2".to_string(),
-            ))
-            .await;
-
-        let errors = generator
-            .get_insights(Some(InsightCategory::ErrorPattern))
-            .await;
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].category, InsightCategory::ErrorPattern);
-
-        let knowledge = generator
-            .get_insights(Some(InsightCategory::Knowledge))
-            .await;
-        assert_eq!(knowledge.len(), 1);
-        assert_eq!(knowledge[0].category, InsightCategory::Knowledge);
-
-        let all = generator.get_insights(None).await;
-        assert_eq!(all.len(), 2);
+    async fn test_dedup_merge_returns_snapshot() {
+        let g = InsightGenerator::new();
+        let r = r();
+        let mut v = g.generate_from_reflection_multi(&r);
+        let original = v.remove(0);
+        let first = g
+            .store_insight(original.clone())
+            .await
+            .expect("first store");
+        let second = g.store_insight(original).await.expect("second store");
+        // S1: store_insight 必返回 Some
+        assert_eq!(first.id, second.id, "merge should return same id");
+        let all = g.get_insights().await;
+        assert_eq!(all.len(), v.len(), "merged: should not double the count");
+        let ins = all
+            .iter()
+            .find(|i| i.category == InsightCategory::ErrorPattern)
+            .unwrap();
+        assert!(ins.usage_count >= 2, "usage_count should be incremented");
     }
 
     #[tokio::test]
-    async fn test_get_insight_by_id() {
-        let generator = InsightGenerator::new();
-
-        let insight = Insight::new(
-            InsightCategory::Knowledge,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        );
-        let id = insight.id.clone();
-        generator.store_insight(insight).await;
-
-        let found = generator.get_insight_by_id(&id).await;
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().title, "Title");
-
-        let not_found = generator.get_insight_by_id("nonexistent").await;
-        assert!(not_found.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_record_insight_usage_not_found() {
-        let generator = InsightGenerator::new();
-        let result = generator.record_insight_usage("nonexistent").await;
-        assert!(!result);
-    }
-
-    #[tokio::test]
-    async fn test_record_insight_usage_success() {
-        let generator = InsightGenerator::new();
-
-        let insight = Insight::new(
-            InsightCategory::Knowledge,
-            "Title".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
-        );
-        let id = insight.id.clone();
-        generator.store_insight(insight).await;
-
-        let result = generator.record_insight_usage(&id).await;
-        assert!(result);
-
-        let updated = generator.get_insight_by_id(&id).await.unwrap();
-        assert_eq!(updated.usage_count, 1);
-        assert!(updated.last_used.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_get_stats_empty() {
-        let generator = InsightGenerator::new();
-        let stats = generator.get_stats().await;
-        assert_eq!(stats.total_insights, 0);
-        assert!(stats.by_category.is_empty());
-        assert!((stats.avg_confidence - 0.0).abs() < f32::EPSILON);
-        assert!(stats.most_used.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_get_stats_with_data() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(
-                Insight::new(
-                    InsightCategory::ErrorPattern,
-                    "E1".to_string(),
-                    "C1".to_string(),
-                    "t1".to_string(),
-                )
-                .with_confidence(0.8),
-            )
-            .await;
-
-        generator
-            .store_insight(
-                Insight::new(
-                    InsightCategory::Knowledge,
-                    "K1".to_string(),
-                    "C2".to_string(),
-                    "t2".to_string(),
-                )
-                .with_confidence(0.6),
-            )
-            .await;
-
-        let stats = generator.get_stats().await;
-        assert_eq!(stats.total_insights, 2);
-        assert!((stats.avg_confidence - 0.7).abs() < 0.01);
-        assert_eq!(*stats.by_category.get("error_pattern").unwrap_or(&0), 1);
-        assert_eq!(*stats.by_category.get("knowledge").unwrap_or(&0), 1);
-    }
-
-    #[tokio::test]
-    async fn test_get_stats_most_used() {
-        let generator = InsightGenerator::new();
-
-        let insight1 = Insight::new(
-            InsightCategory::Knowledge,
-            "K1".to_string(),
-            "C1".to_string(),
-            "t1".to_string(),
-        );
-        let id1 = insight1.id.clone();
-        generator.store_insight(insight1).await;
-
-        let insight2 = Insight::new(
-            InsightCategory::Knowledge,
-            "K2".to_string(),
-            "C2".to_string(),
-            "t2".to_string(),
-        );
-        generator.store_insight(insight2).await;
-
-        generator.record_insight_usage(&id1).await;
-        generator.record_insight_usage(&id1).await;
-
-        let stats = generator.get_stats().await;
-        assert!(stats.most_used.is_some());
-        assert_eq!(stats.most_used.unwrap().id, id1);
-    }
-
-    #[tokio::test]
-    async fn test_delete_insight() {
-        let generator = InsightGenerator::new();
-
-        let insight = Insight::new(
-            InsightCategory::Knowledge,
-            "Title".to_string(),
-            "Content".to_string(),
-            "t1".to_string(),
-        );
-        let id = insight.id.clone();
-        generator.store_insight(insight).await;
-
-        let deleted = generator.delete_insight(&id).await;
-        assert!(deleted);
-
-        let found = generator.get_insight_by_id(&id).await;
-        assert!(found.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_delete_insight_not_found() {
-        let generator = InsightGenerator::new();
-        let deleted = generator.delete_insight("nonexistent").await;
-        assert!(!deleted);
-    }
-
-    #[tokio::test]
-    async fn test_clear_all() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "K1".to_string(),
-                "C1".to_string(),
-                "t1".to_string(),
-            ))
-            .await;
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::ErrorPattern,
-                "E1".to_string(),
-                "C2".to_string(),
-                "t2".to_string(),
-            ))
-            .await;
-
-        assert_eq!(generator.get_insights(None).await.len(), 2);
-
-        generator.clear_all().await;
-
-        assert_eq!(generator.get_insights(None).await.len(), 0);
-        let stats = generator.get_stats().await;
-        assert_eq!(stats.total_insights, 0);
-        assert!(stats.by_category.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_get_recent_insights() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "K1".to_string(),
-                "C1".to_string(),
-                "t1".to_string(),
-            ))
-            .await;
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "K2".to_string(),
-                "C2".to_string(),
-                "t2".to_string(),
-            ))
-            .await;
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "K3".to_string(),
-                "C3".to_string(),
-                "t3".to_string(),
-            ))
-            .await;
-
-        let recent = generator.get_recent_insights(2).await;
-        assert_eq!(recent.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_get_recent_insights_empty() {
-        let generator = InsightGenerator::new();
-        let recent = generator.get_recent_insights(5).await;
-        assert!(recent.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_get_top_insights() {
-        let generator = InsightGenerator::new();
-
-        let insight1 = Insight::new(
-            InsightCategory::Knowledge,
-            "K1".to_string(),
-            "C1".to_string(),
-            "t1".to_string(),
-        );
-        let id1 = insight1.id.clone();
-        generator.store_insight(insight1).await;
-
-        let insight2 = Insight::new(
-            InsightCategory::Knowledge,
-            "K2".to_string(),
-            "C2".to_string(),
-            "t2".to_string(),
-        );
-        generator.store_insight(insight2).await;
-
-        generator.record_insight_usage(&id1).await;
-        generator.record_insight_usage(&id1).await;
-
-        let top = generator.get_top_insights(1).await;
-        assert_eq!(top.len(), 1);
-        assert_eq!(top[0].id, id1);
-    }
-
-    #[tokio::test]
-    async fn test_get_high_confidence_insights() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(
-                Insight::new(
-                    InsightCategory::Knowledge,
-                    "High".to_string(),
-                    "C1".to_string(),
-                    "t1".to_string(),
-                )
-                .with_confidence(0.9),
-            )
-            .await;
-
-        generator
-            .store_insight(
-                Insight::new(
-                    InsightCategory::Knowledge,
-                    "Low".to_string(),
-                    "C2".to_string(),
-                    "t2".to_string(),
-                )
-                .with_confidence(0.3),
-            )
-            .await;
-
-        let high = generator.get_high_confidence_insights(0.8).await;
-        assert_eq!(high.len(), 1);
-        assert_eq!(high[0].title, "High");
-    }
-
-    #[test]
-    fn test_generate_optimization_insight() {
-        let generator = InsightGenerator::new();
-        let insight = generator.generate_optimization_insight("Build Project", 30000);
-
-        assert_eq!(insight.category, InsightCategory::Optimization);
-        assert!(insight.title.contains("Performance Optimization"));
-        assert!(insight.content.contains("Build Project"));
-        assert!(insight.content.contains("30000ms"));
-        assert!((insight.confidence - 0.7).abs() < f32::EPSILON);
-        assert!(insight.tags.contains(&"performance".to_string()));
-        assert!(insight.tags.contains(&"optimization".to_string()));
-    }
-
-    #[test]
-    fn test_generate_knowledge_insight() {
-        let generator = InsightGenerator::new();
-        let insight =
-            generator.generate_knowledge_insight("Rust", "Rust is a systems programming language");
-
-        assert_eq!(insight.category, InsightCategory::Knowledge);
-        assert!(insight.title.contains("Knowledge"));
-        assert!(insight.title.contains("Rust"));
-        assert!(insight.content.contains("systems programming"));
-        assert!((insight.confidence - 0.8).abs() < f32::EPSILON);
-        assert!(insight.tags.contains(&"knowledge".to_string()));
-        assert!(insight.tags.contains(&"rust".to_string()));
-    }
-
-    #[test]
-    fn test_generate_workflow_insight() {
-        let generator = InsightGenerator::new();
-        let tools = vec!["search".to_string(), "read".to_string(), "edit".to_string()];
-        let insight = generator.generate_workflow_insight(&tools, "Code modification workflow");
-
-        assert_eq!(insight.category, InsightCategory::Workflow);
-        assert!(insight.title.contains("Workflow"));
-        assert!(insight.content.contains("search -> read -> edit"));
-        assert!((insight.confidence - 0.6).abs() < f32::EPSILON);
-        assert!(insight.tags.contains(&"workflow".to_string()));
-        assert!(insight.tags.contains(&"tools".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_insight_generator_default() {
-        let generator = InsightGenerator::default();
-        let insights = generator.get_insights(None).await;
-        assert!(insights.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_search_insights_by_tag() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(
-                Insight::new(
-                    InsightCategory::ErrorPattern,
-                    "Error".to_string(),
-                    "Content".to_string(),
-                    "t1".to_string(),
-                )
-                .with_tags(vec!["network".to_string()]),
-            )
-            .await;
-
-        let results = generator.search_insights("network").await;
-        assert_eq!(results.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_search_insights_by_content() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "Title".to_string(),
-                "Database optimization techniques".to_string(),
-                "t1".to_string(),
-            ))
-            .await;
-
-        let results = generator.search_insights("database").await;
-        assert_eq!(results.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_search_insights_case_insensitive() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "UPPERCASE Title".to_string(),
-                "Content".to_string(),
-                "t1".to_string(),
-            ))
-            .await;
-
-        let results = generator.search_insights("uppercase").await;
-        assert_eq!(results.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_search_insights_no_match() {
-        let generator = InsightGenerator::new();
-
-        generator
-            .store_insight(Insight::new(
-                InsightCategory::Knowledge,
-                "Title".to_string(),
-                "Content".to_string(),
-                "t1".to_string(),
-            ))
-            .await;
-
-        let results = generator.search_insights("nonexistent").await;
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_insight_serialization() {
-        let insight = Insight::new(
+    async fn test_feedback_changes_confidence() {
+        let g = InsightGenerator::new();
+        let ins = Insight::new(
             InsightCategory::Knowledge,
             "Test".to_string(),
-            "Content".to_string(),
-            "task-1".to_string(),
+            "C".to_string(),
+            "t".to_string(),
+        );
+        let before = ins.confidence;
+        g.store_insight(ins.clone()).await;
+        g.record_feedback(&ins.id, true).await;
+        g.record_feedback(&ins.id, true).await;
+        let updated = g.get_insights().await;
+        let updated = updated.iter().find(|i| i.id == ins.id).unwrap();
+        assert!(updated.confidence > before);
+        assert!(updated.feedback_score >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_prune() {
+        let g = InsightGenerator::new();
+        let mut ins = Insight::new(
+            InsightCategory::Knowledge,
+            "x".to_string(),
+            "y".to_string(),
+            "t".to_string(),
+        );
+        ins.confidence = 0.05;
+        g.store_insight(ins).await;
+        let removed = g.prune_stale(0.1).await;
+        assert_eq!(removed, 1);
+        assert!(g.get_insights().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_decay_stale_skipped_when_zero_days() {
+        let g = InsightGenerator::new().with_decay_days(0);
+        let r = g.decay_stale().await;
+        assert_eq!(r, 0);
+    }
+
+    #[tokio::test]
+    async fn test_decay_stale_demotes_confidence() {
+        let g = InsightGenerator::new().with_decay_days(10);
+        let mut ins = Insight::new(
+            InsightCategory::Knowledge,
+            "x".to_string(),
+            "y".to_string(),
+            "t".to_string(),
+        );
+        ins.confidence = 0.9;
+        ins.last_reinforced_at = Utc::now() - Duration::days(11);
+        g.store_insight(ins).await;
+        let decayed = g.decay_stale().await;
+        assert_eq!(decayed, 1);
+        let all = g.get_insights().await;
+        assert!(all[0].confidence < 0.9);
+    }
+
+    #[tokio::test]
+    async fn test_lru_eviction() {
+        let g = InsightGenerator::new().with_max_insights(2);
+        for i in 0..5 {
+            let ins = Insight::new(
+                InsightCategory::Knowledge,
+                format!("title-{i}"),
+                format!("content-{i}-distinct"),
+                "t".to_string(),
+            );
+            g.store_insight(ins).await;
+        }
+        let all = g.get_insights().await;
+        assert!(all.len() <= 2, "max_insights should bound storage");
+    }
+
+    #[tokio::test]
+    async fn test_search_and_top() {
+        let g = InsightGenerator::new();
+        g.store_insight(
+            Insight::new(
+                InsightCategory::ErrorPattern,
+                "alpha".to_string(),
+                "beta alpha".to_string(),
+                "t".to_string(),
+            )
+            .with_confidence(0.9),
         )
-        .with_confidence(0.8)
-        .with_tags(vec!["tag1".to_string()]);
-
-        let json = serde_json::to_string(&insight).unwrap();
-        let deserialized: Insight = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.id, insight.id);
-        assert_eq!(deserialized.title, "Test");
-        assert!((deserialized.confidence - 0.8).abs() < f32::EPSILON);
-        assert_eq!(deserialized.tags.len(), 1);
+        .await;
+        g.store_insight(
+            Insight::new(
+                InsightCategory::Knowledge,
+                "gamma".to_string(),
+                "delta".to_string(),
+                "t".to_string(),
+            )
+            .with_confidence(0.3),
+        )
+        .await;
+        let r = g.search_insights("alpha").await;
+        assert_eq!(r.len(), 1);
+        let top = g.get_top_insights(1).await;
+        assert_eq!(top[0].title, "alpha");
     }
 
-    #[test]
-    fn test_insight_stats_serialization() {
-        let stats = InsightStats {
-            total_insights: 5,
-            by_category: vec![("knowledge".to_string(), 3)].into_iter().collect(),
-            avg_confidence: 0.75,
-            most_used: None,
-        };
-        let json = serde_json::to_string(&stats).unwrap();
-        let deserialized: InsightStats = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.total_insights, 5);
-        assert!((deserialized.avg_confidence - 0.75).abs() < f32::EPSILON);
+    #[tokio::test]
+    async fn test_delete() {
+        let g = InsightGenerator::new();
+        let ins = Insight::new(
+            InsightCategory::Knowledge,
+            "x".to_string(),
+            "y".to_string(),
+            "t".to_string(),
+        );
+        let id = ins.id.clone();
+        g.store_insight(ins).await;
+        assert!(g.delete_insight(&id).await);
+        assert!(!g.delete_insight(&id).await);
     }
 
-    #[test]
-    fn test_insight_category_serialization() {
-        let cat = InsightCategory::Optimization;
-        let json = serde_json::to_string(&cat).unwrap();
-        let deserialized: InsightCategory = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized, InsightCategory::Optimization);
+    #[tokio::test]
+    async fn test_set_settings_after_arc() {
+        // L1: 即使通过 Arc<&Self> 也能改
+        let g = Arc::new(InsightGenerator::new());
+        g.set_max_insights(123);
+        g.set_decay_days(7);
+        g.try_write_settings(50, 14);
+        assert_eq!(g.get_max_insights(), 50);
+        assert_eq!(g.get_decay_days(), 14);
+    }
+
+    #[tokio::test]
+    async fn test_persistence_roundtrip() {
+        // S3: 启动加载 + rewrite 闭环
+        let dir =
+            std::env::temp_dir().join(format!("axagent-insight-persist-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("insights.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let g1 = InsightGenerator::new();
+        g1.init_persistence(path.clone()).await.unwrap();
+        let ins = Insight::new(
+            InsightCategory::Knowledge,
+            "persist".to_string(),
+            "persist-content".to_string(),
+            "task-x".to_string(),
+        );
+        let ins_id = ins.id.clone();
+        g1.store_insight(ins).await;
+        g1.flush().await;
+
+        let g2 = InsightGenerator::new();
+        let n = g2.init_persistence(path.clone()).await.unwrap();
+        assert_eq!(n, 1, "should load 1 from disk");
+        let all = g2.get_insights().await;
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, ins_id);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

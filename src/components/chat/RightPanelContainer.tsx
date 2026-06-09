@@ -336,8 +336,8 @@ export function RightPanelContainer({
         icon: <Eye size={ICON} />,
         labelKey: "chatRightPanel.reflection",
         category: "extra",
-        shouldRender: true,
-        render: () => <ReflectionPanel />,
+        shouldRender: isAgent,
+        render: () => <ReflectionPanel conversationId={conversationId} />,
       },
       {
         key: "researchSources",

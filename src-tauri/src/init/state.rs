@@ -238,7 +238,33 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         agent_cancel_tokens: Arc::new(Mutex::new(std::collections::HashMap::new())),
         agent_paused: Arc::new(Mutex::new(std::collections::HashSet::new())),
         running_agents: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
-        reflector: Arc::new(axagent_agent::Reflector::new()),
+        reflector: {
+            let r = Arc::new(axagent_agent::Reflector::new());
+            // 异步加载历史反思（不阻塞主流程）
+            // 注意:此处必须用 `rt.spawn` 而非裸 `tokio::spawn`。
+            // create_app_state 由 lib.rs 中的 `std::thread::spawn` 调用,
+            // 当前线程不是 Tokio 线程、没有 reactor,裸 tokio::spawn 会 panic:
+            //   "there is no reactor running, must be called from the context of a Tokio 1.x runtime"
+            let r_clone = r.clone();
+            let reflection_path: std::path::PathBuf = app_dir.join("reflections.jsonl");
+            // S3: 同时挂载 insight 持久化路径
+            let insight_path: std::path::PathBuf = app_dir.join("insights.jsonl");
+            let ig_clone = r_clone.get_insight_generator();
+            rt.spawn(async move {
+                if let Err(e) = r_clone.init_persistence(reflection_path, 200).await {
+                    tracing::warn!("[reflector] init_persistence failed: {}", e);
+                }
+                match ig_clone.init_persistence(insight_path).await {
+                    Ok(n) => {
+                        tracing::info!("[insight] loaded {} insights from disk", n);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[insight] init_persistence failed: {}", e);
+                    },
+                }
+            });
+            r
+        },
         shared_memory: Arc::new(TokioRwLock::new(
             axagent_runtime::shared_memory::SharedMemory::new(),
         )),

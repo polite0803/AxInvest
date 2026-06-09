@@ -8278,7 +8278,11 @@
       "colTime": "时间",
       "scheduleDescFull": "当前调度: {schedule} | 状态: {status}",
       "running": "运行中",
-      "paused": "已暂停"
+      "paused": "已暂停",
+      "weekday0600": "每工作日 6:00",
+      "daily0600": "每天 6:00",
+      "daily1200": "每天 12:00",
+      "daily1800": "每天 18:00"
     }
   },
   "trade": {

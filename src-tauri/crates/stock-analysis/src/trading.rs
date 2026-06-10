@@ -272,6 +272,7 @@ impl TradingEngine {
         trade_date: &str,
         trade_time: &str,
         notes: Option<&str>,
+        analysis_id: Option<&str>,
     ) -> Result<trades::Model, String> {
         // 从 settings 表读取交易开关状态
         let enabled: bool =
@@ -351,6 +352,7 @@ impl TradingEngine {
             fee: Set(None),
             realized_pnl: Set(realized_pnl),
             notes: Set(notes.map(|s| s.to_string())),
+            analysis_id: Set(analysis_id.map(|s| s.to_string())),
             created_at: Set(now),
         };
 

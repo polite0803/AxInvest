@@ -6,6 +6,7 @@
 use crate::AppState;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_core::entity::stock_analyses;
+use axagent_core::entity::stock_reflections;
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
@@ -588,6 +589,22 @@ async fn run_stock_workflow_inner(
     let sc_name_for_spawn = sc_name.clone();
     let vector_store = state.vector_store.clone();
     let master_key = state.harness.master_key_owned();
+    // 在 spawn 前拉取市场状态（沪深300判断牛/熊/震荡），捕获到闭包中
+    let market_regime_json: Option<serde_json::Value> = state
+        .astock_client
+        .get_klines("000300", "daily", 60)
+        .await
+        .ok()
+        .and_then(|klines| {
+            if klines.is_empty() { return None; }
+            let r = axagent_stock_analysis::market_regime::classify_regime(&klines);
+            Some(serde_json::json!({
+                "regime": r.regime,
+                "confidence": r.confidence,
+                "volatility": r.volatility,
+                "description": r.description,
+            }))
+        });
     tokio::spawn(async move {
         let mut opts = RunOptions {
             max_concurrent,
@@ -639,6 +656,27 @@ async fn run_stock_workflow_inner(
                 var_type: "string".into(),
                 value: serde_json::Value::String(cases.clone()),
                 description: Some("相似历史决策（失败案例，供避免重复错误）".into()),
+                is_secret: false,
+            });
+        }
+        // 注入市场状态（沪深300判断牛/熊/震荡）
+        if let Some(ref regime) = market_regime_json {
+            merged_vars.push(axagent_harness::workflow_types::Variable {
+                name: "market_regime".into(),
+                var_type: "object".into(),
+                value: regime.clone(),
+                description: Some("当前市场状态(bull/bear/sideways)+波动率+描述".into()),
+                is_secret: false,
+            });
+        }
+        // 注入历史反思教训（从 stock_reflections 表取最近的结构化反思结果）
+        let lessons_str = fetch_stock_lessons(&stock_code, &db).await;
+        if let Some(ref lessons) = lessons_str {
+            merged_vars.push(axagent_harness::workflow_types::Variable {
+                name: "stock_lessons".into(),
+                var_type: "string".into(),
+                value: serde_json::Value::String(lessons.clone()),
+                description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
                 is_secret: false,
             });
         }
@@ -1035,6 +1073,35 @@ async fn fetch_similar_cases(stock_code: &str, db: &sea_orm::DatabaseConnection)
             "- 日期:{} 决策:{} 置信度:{} → 失败。要点:{}",
             s.analysis_date, action, conf, abbr
         ));
+    }
+    Some(lines.join("\n"))
+}
+/// 从 stock_reflections 表查询该股最近的结构化反思教训（错因/被忽视信号/改进建议），返回格式化文本。
+async fn fetch_stock_lessons(stock_code: &str, db: &sea_orm::DatabaseConnection) -> Option<String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    use chrono::Utc;
+    let three_months_ago = Utc::now() - chrono::Duration::days(90);
+    let all = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::StockCode.eq(stock_code))
+        .filter(stock_reflections::Column::CreatedAt.gte(three_months_ago.timestamp_millis()))
+        .order_by_desc(stock_reflections::Column::CreatedAt)
+        .all(db)
+        .await
+        .unwrap_or_default();
+    let lessons: Vec<_> = all.into_iter().take(3).collect();
+    if lessons.is_empty() { return None; }
+    let mut lines: Vec<String> = Vec::new();
+    for (i, l) in lessons.iter().enumerate() {
+        lines.push(format!("#{} 反思于 {}", i + 1, l.hindsight_date));
+        if let Some(ref w) = l.what_went_wrong {
+            lines.push(format!("  - 错因：{}", w));
+        }
+        if let Some(ref m) = l.missed_signals {
+            lines.push(format!("  - 被忽视信号：{}", m));
+        }
+        if let Some(ref f) = l.fix_for_future {
+            lines.push(format!("  - 改进建议：{}", f));
+        }
     }
     Some(lines.join("\n"))
 }

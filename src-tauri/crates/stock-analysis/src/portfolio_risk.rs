@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 
-/// 组合风险指标
+use crate::trading::PositionSummary;
+
+/// 组合风险指标（保持向后兼容的旧 API）
+///
+/// 实际计算已迁到 `portfolio_monitor` 纯函数模块，本文件只做数据
+/// 结构定义 + 薄封装调用。R2 起所有组合层算法都走 `portfolio_monitor`。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortfolioRiskMetrics {
@@ -17,92 +22,32 @@ pub struct PortfolioRiskMetrics {
 pub struct PortfolioRiskManager;
 
 impl PortfolioRiskManager {
-    /// 计算组合风险指标
-    pub fn compute_from_positions(
-        positions: &[super::trading::PositionSummary],
-    ) -> PortfolioRiskMetrics {
-        let total_positions = positions.len();
-        if total_positions == 0 {
-            return PortfolioRiskMetrics {
-                total_positions: 0,
-                total_market_value: 0.0,
-                top_concentration_pct: 0.0,
-                sector_exposure: HashMap::new(),
-                diversification_score: 0,
-                risk_level: "无持仓".to_string(),
-                warning: Some("暂无持仓记录，请先添加交易记录或手动录入持仓。".to_string()),
-                correlation_risk: "无持仓".to_string(),
-            };
-        }
-        let total_mv: f64 = positions
+    /// 组合风险指标（薄封装 → 实际算法在 portfolio_monitor）
+    pub fn compute_from_positions(positions: &[PositionSummary]) -> PortfolioRiskMetrics {
+        let (top_concentration_pct, sector_exposure, max_sector_pct) =
+            crate::portfolio_monitor::compute_concentration(positions);
+        let total_market_value: f64 = positions
             .iter()
             .map(|p| p.market_value.unwrap_or(0.0))
             .sum();
+        let n = positions.len();
 
-        let max_mv = positions
-            .iter()
-            .map(|p| p.market_value.unwrap_or(0.0))
-            .fold(0.0f64, f64::max);
-        let concentration = if total_mv > 0.0 {
-            (max_mv / total_mv) * 100.0
-        } else {
-            0.0
-        };
+        let risk_level =
+            crate::portfolio_monitor::compute_risk_level(top_concentration_pct, max_sector_pct, n);
+        let diversification_score = crate::portfolio_monitor::compute_diversification_score(
+            n,
+            top_concentration_pct,
+            max_sector_pct,
+        );
+        let warning = crate::portfolio_monitor::compute_concentration_warning(
+            top_concentration_pct,
+            max_sector_pct,
+            n,
+        );
 
-        // 分散度评分
-        let diversification = if total_positions >= 8 && concentration <= 15.0 {
-            90
-        } else if total_positions >= 5 && concentration <= 25.0 {
-            70
-        } else if total_positions >= 3 && concentration <= 35.0 {
-            50
-        } else if total_positions >= 1 {
-            30
-        } else {
-            0
-        };
-
-        // 风险等级
-        let risk_level = if concentration > 50.0 {
-            "高风险".to_string()
-        } else if concentration > 30.0 {
-            "中高风险".to_string()
-        } else if concentration > 20.0 {
-            "中等风险".to_string()
-        } else {
-            "低风险".to_string()
-        };
-
-        // 生成警告
-        let mut warning = None;
-        if concentration > 40.0 {
-            warning = Some(format!(
-                "单股集中度 {:.0}% 过高，建议 ≤30%。当前最大持仓占比过高。",
-                concentration
-            ));
-        } else if concentration > 30.0 {
-            warning = Some(format!("单股集中度 {:.0}% 偏高，关注分散风险。", concentration));
-        }
-        if total_positions < 3 && total_positions > 0 {
-            let msg = format!("仅{}只持仓，分散度不足，建议 ≥3 只。", total_positions);
-            warning = Some(warning.map_or(msg.clone(), |w| format!("{} {}", w, msg)));
-        }
-
-        // 行业暴露计算
-        let mut sector_exposure: HashMap<String, f64> = HashMap::new();
-        for p in positions {
-            if let (Some(mv), Some(sector)) = (p.market_value, &p.sector_name) {
-                if !sector.is_empty() && total_mv > 0.0 {
-                    *sector_exposure.entry(sector.clone()).or_default() += (mv / total_mv) * 100.0;
-                }
-            }
-        }
-
-        let _sector_count = sector_exposure.len();
-        let max_sector_pct = sector_exposure.values().cloned().fold(0.0f64, f64::max);
-        let correlation_risk = if total_positions >= 5 && max_sector_pct < 30.0 {
+        let correlation_risk = if n >= 5 && max_sector_pct < 30.0 {
             "低"
-        } else if total_positions >= 3 && max_sector_pct < 50.0 {
+        } else if n >= 3 && max_sector_pct < 50.0 {
             "中"
         } else {
             "高"
@@ -110,11 +55,11 @@ impl PortfolioRiskManager {
         .to_string();
 
         PortfolioRiskMetrics {
-            total_positions,
-            total_market_value: total_mv,
-            top_concentration_pct: concentration,
+            total_positions: n,
+            total_market_value,
+            top_concentration_pct,
             sector_exposure,
-            diversification_score: diversification,
+            diversification_score,
             risk_level,
             warning,
             correlation_risk,

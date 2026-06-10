@@ -84,6 +84,10 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "rule-checker",
         include_str!("../../agency_experts/stock-analysis/rule-checker.md"),
     ),
+    (
+        "catalyst-analyst",
+        include_str!("../../agency_experts/stock-analysis/catalyst-analyst.md"),
+    ),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -109,6 +113,7 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("value-investor", "stock-analyst"),
     ("data-quality-inspector", "stock-analyst"),
     ("rule-checker", "risk-evaluator"),
+    ("catalyst-analyst", "stock-analyst"),
 ];
 
 struct StockRoleDef {
@@ -126,9 +131,9 @@ const STOCK_ROLES: &[StockRoleDef] = &[
         name: "股票分析师",
         description: "A股多维分析",
         system_prompt: "你是专业的 A 股分析师，基于行情数据、财务数据、新闻资讯等对股票进行深度分析。",
-        // 修复 Defect #6: 提升到 12 以容纳 9 个 a-* + value-investor + data-quality-inspector
-        // （共 11 个 stock-analyst 角色节点），留 1 槽位余量。
-        max_concurrent: 12,
+        // 修复 Defect #6: 提升到 12 以容纳 9 个 a-* + value-investor + data-quality-inspector + catalyst-analyst
+        // （共 12 个 stock-analyst 角色节点），留 1 槽位余量。
+        max_concurrent: 13,
         timeout_seconds: 600,
     },
     StockRoleDef {
@@ -305,6 +310,20 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "compute_scoring",
             "compute_valuation",
             "compute_portfolio_risk",
+            "search_stock",
+        ],
+    ),
+    // ── Catalyst & Narrative Analyst ──
+    // 需要读取新闻/公告做催化剂判断 + K线/量价做机构行为分析
+    (
+        "catalyst-analyst",
+        &[
+            "get_stock_news",
+            "get_announcements",
+            "get_concept_blocks",
+            "get_stock_peers",
+            "get_stock_kline",
+            "get_stock_quote",
             "search_stock",
         ],
     ),
@@ -1079,7 +1098,7 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
 
-    // 9 个分析师
+    // 9 个分析师 + catalyst-analyst
     let analysts = [
         (
             "a-market-analyst",
@@ -1125,6 +1144,11 @@ async fn seed_stock_analysis_workflow_template(
             "a-sector",
             "分析该股票所属行业的景气度、板块轮动趋势、同业竞争格局",
             "sector-analyst",
+        ),
+        (
+            "a-catalyst",
+            "评估近期新闻/公告是否构成催化剂、判断叙事完整度、识别机构建仓痕迹",
+            "catalyst-analyst",
         ),
     ];
     let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
@@ -1173,6 +1197,7 @@ async fn seed_stock_analysis_workflow_template(
         // F-8 重排: a-research 前置改为研报工具
         ("t-research-data", "获取研报+新闻", "get_research_reports", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
+        ("t-catalyst-data", "获取公司公告", "get_announcements", "stock_code"),
     ];
 
     // ── Phase 1: ParallelNode 作为视觉分组，包裹 9 组 Tool + Agent ──
@@ -1222,6 +1247,7 @@ async fn seed_stock_analysis_workflow_template(
     }
 
     // 工具由模板节点 config.tools 统一管理
+    // 第 10 个 a-catalyst 放置在 3×3 网格下方（col 0, row 3），作为额外独立行
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
         let _fixed_tool_name = tool_assignments[i].2;
@@ -1232,7 +1258,12 @@ async fn seed_stock_analysis_workflow_template(
         let mut an = agent(id, title, _expert, Some("p-analysts"), x_agent, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
-            a.config.max_tool_rounds = Some(2);
+            // catalyst-analyst 需要 3 轮：R1 读公告→确认催化剂,R2 调 K线/概念验证,R3 综合评估叙事
+            a.config.max_tool_rounds = if *id == "a-catalyst" {
+                Some(3)
+            } else {
+                Some(2)
+            };
             a.config.model_role = Some("stock-analyst".into());
             let tool_names = PROFILE_TOOLS
                 .iter()
@@ -1275,8 +1306,8 @@ async fn seed_stock_analysis_workflow_template(
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
             id: "p-analysts".into(),
-            title: "9 维度分析师分组".into(),
-            description: Some("行情/情绪/新闻/基本面/政策/游资/解禁/研报/行业".into()),
+            title: "10 维度分析师分组".into(),
+            description: Some("行情/情绪/新闻/基本面/政策/游资/解禁/研报/行业/催化剂".into()),
             // F-1 修复: 原 (300, 200) 恰好压在 a-fundamentals (240, 200) 上。
             //   3×3 网格范围 x∈[40, 1400] y∈[100, 460],容器左上放 (20, 80),
             //   让前端能正确按 bbox 渲染分组框。
@@ -1689,6 +1720,7 @@ async fn seed_stock_analysis_workflow_template(
                 "a-lockup".into(),
                 "a-research".into(),
                 "a-sector".into(),
+                "a-catalyst".into(),
                 format!("bull-r{debate_max_rounds}"),
                 format!("bear-r{debate_max_rounds}"),
                 "t-scoring".into(),
@@ -1902,6 +1934,7 @@ async fn seed_stock_analysis_workflow_template(
                 "a-lockup".into(),
                 "a-research".into(),
                 "a-sector".into(),
+                "a-catalyst".into(),
                 // 注入算法工具节点的 credibility 元数据，支持数据质量检查员
                 // 评估工具可信度分的 4 个维度（freshness/completeness/warnings/source）
                 "t-scoring".into(),
@@ -3916,6 +3949,7 @@ fn expert_id_to_display(id: &str) -> String {
         "trader" => "交易员".to_string(),
         "portfolio-manager" => "投资组合经理".to_string(),
         "value-investor" => "价值投资者（巴菲特框架）".to_string(),
+        "catalyst-analyst" => "催化剂与叙事分析师".to_string(),
         o => o.to_string(),
     }
 }

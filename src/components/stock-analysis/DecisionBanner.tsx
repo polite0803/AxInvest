@@ -266,6 +266,79 @@ export function DecisionBanner() {
           </div>
         </div>
 
+        {/* 快速交易录入 — 决策日可直接在此录入买卖 */}
+        {stockCode && (decision as any)?.action && (decision as any).action !== "HOLD" && (
+          <div
+            className="flex items-center gap-2 p-2 mt-2 rounded"
+            style={{ background: "var(--surface)" }}
+          >
+            <span className="text-xs whitespace-nowrap" style={{ color: "var(--muted)" }}>
+              {t("stockAnalysis.trade.quickRecord")}
+            </span>
+            <input
+              type="number"
+              placeholder={t("trade.price")}
+              defaultValue={(decision as any)?.targetPrice ?? undefined}
+              id="trade-price-input"
+              className="text-xs"
+              style={{
+                width: 70,
+                padding: "2px 6px",
+                border: "1px solid var(--color-border-tertiary)",
+                borderRadius: 4,
+                background: "transparent",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <input
+              type="number"
+              placeholder={t("trade.quantity")}
+              defaultValue={100}
+              id="trade-qty-input"
+              className="text-xs"
+              style={{
+                width: 60,
+                padding: "2px 6px",
+                border: "1px solid var(--color-border-tertiary)",
+                borderRadius: 4,
+                background: "transparent",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <Button
+              size="small"
+              type="primary"
+              style={{ fontSize: 11, lineHeight: "18px", height: 22, padding: "0 8px" }}
+              onClick={async () => {
+                const priceEl = document.getElementById("trade-price-input") as HTMLInputElement;
+                const qtyEl = document.getElementById("trade-qty-input") as HTMLInputElement;
+                const price = parseFloat(priceEl?.value ?? "0");
+                const qty = parseInt(qtyEl?.value ?? "100", 10);
+                if (price <= 0 || qty <= 0) return;
+                const analysisId = useStockAnalysisStore.getState().analysisId;
+                try {
+                  await invoke("record_trade", {
+                    stockCode,
+                    stockName,
+                    direction: (decision as any).action === "SELL" ? "sell" : "buy",
+                    price,
+                    quantity: Math.round(qty / 100) * 100,
+                    tradeDate: new Date().toISOString().slice(0, 10),
+                    tradeTime: new Date().toISOString().slice(11, 16),
+                    notes: `${t("stockAnalysis.trade.fromDecision")} (${t("stockAnalysis.confidence")}: ${confidencePct}%)`,
+                    analysisId: analysisId ?? null,
+                  });
+                  message.success(t("trade.recorded"));
+                } catch (e: any) {
+                  message.error(String(e));
+                }
+              }}
+            >
+              {t("stockAnalysis.trade.record")}
+            </Button>
+          </div>
+        )}
+
         <div className="flex gap-2 items-center flex-wrap">
           {stockCode && !watchlisted && (
             <Button size="small" type="dashed" loading={adding} onClick={addToWatchlist}>

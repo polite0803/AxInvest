@@ -61,6 +61,39 @@ describe("detectFutureReferences — stage B (tense phrases)", () => {
       ruleHit: "tense-phrase",
     });
   });
+
+  it("flags Chinese future tense 明天", () => {
+    const hits = detectFutureReferences(
+      "预计明天市场将反弹。",
+      "2026-06-01",
+    );
+    expect(hits).toContainEqual({
+      snippet: "明天",
+      ruleHit: "tense-phrase",
+    });
+  });
+
+  it("flags Chinese future tense 下周", () => {
+    const hits = detectFutureReferences(
+      "下周有望突破前高。",
+      "2026-06-01",
+    );
+    expect(hits).toContainEqual({
+      snippet: "下周",
+      ruleHit: "tense-phrase",
+    });
+  });
+
+  it("flags Chinese future tense 即将", () => {
+    const hits = detectFutureReferences(
+      "公司即将发布季报。",
+      "2026-06-01",
+    );
+    expect(hits).toContainEqual({
+      snippet: "即将",
+      ruleHit: "tense-phrase",
+    });
+  });
 });
 
 describe("detectFutureReferences — stage C (vague future)", () => {
@@ -71,6 +104,28 @@ describe("detectFutureReferences — stage C (vague future)", () => {
     );
     expect(hits).toContainEqual({
       snippet: "soon",
+      ruleHit: "vague-future",
+    });
+  });
+
+  it("flags Chinese vague future 未来", () => {
+    const hits = detectFutureReferences(
+      "未来发展前景良好。",
+      "2026-06-01",
+    );
+    expect(hits).toContainEqual({
+      snippet: "未来",
+      ruleHit: "vague-future",
+    });
+  });
+
+  it("flags Chinese vague future 展望", () => {
+    const hits = detectFutureReferences(
+      "展望后市，机构看好。",
+      "2026-06-01",
+    );
+    expect(hits).toContainEqual({
+      snippet: "展望",
       ruleHit: "vague-future",
     });
   });

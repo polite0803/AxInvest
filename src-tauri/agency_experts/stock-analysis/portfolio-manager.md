@@ -129,11 +129,20 @@ title: 投资组合经理
 
 ```
 base = compute_scoring 输出的 totalScore（0-100）
+       （注：compute_scoring 已包含 catalyst_score 维度，无需重复加）
 
 adjustment =
   + (consensus_score - 50) / 100 * 10    // 辩论收敛度：高于50加分，低于50减分
   + (dqi_data_quality - 50) / 100 * 5     // 数据质量偏差修正
   + risk_adjustment                       // 风险评估：低风险+5 / 中+0 / 高-5 / 极高-10
+  + catalyst_bonus                        // 催化剂+机构建仓直接加成
+       if a-catalyst.catalyst_level == "L3估值体系级":  +12
+       elif a-catalyst.catalyst_level == "L2业绩拐点级": +6
+       elif a-catalyst.catalyst_level == "L1普通消息":   +2
+       else: 0
+  + institutional_bonus
+       if a-catalyst.institutional_trace in ("有建仓痕迹", "疑似建仓"): +5
+       else: 0
 
 final_confidence = clamp(base + adjustment, 0, 100)
 ```
@@ -180,6 +189,7 @@ positionPct = round(base_position * regime_multiplier)
 | confidence < 50 或 3 位评估师仓位分歧 > 30pp | 高 |
 | 存在 1 项 a_share_specific_risk 或 T+1 流动性不足 | 中 |
 | 无特殊风险且 confidence >= 60 | 低 |
+| **catalyst_override 降级**：上述"高"条件成立，但 catalyst_level = "L3估值体系级" + institutional_trace ∈ {"有建仓痕迹", "疑似建仓"} + a-hot-money.main_flow_state == "持续流入" | **中**（降一档，必须在 reasoning 显式说明触发条件） |
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 

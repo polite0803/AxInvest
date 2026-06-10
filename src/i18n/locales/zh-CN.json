@@ -33,15 +33,20 @@
     "stockAnalysis": "股票分析",
     "watchlist": "自选",
     "screener": "选股",
+    "recommend": "智能荐股",
     "trade": "交易",
     "backtest": "回测",
     "compare": "对比",
-    "replayWorkbench": "回放工作台"
+    "replayWorkbench": "回放工作台",
+    "review": "每日复盘"
   },
   "sidebar": {
     "sectionWork": "工作",
     "sectionTools": "工具",
     "sectionInvest": "投资",
+    "sectionInvestDiscover": "🔍 发现与分析",
+    "sectionInvestExecute": "📋 持仓与交易",
+    "sectionInvestReview": "📈 复盘与进化",
     "sectionInfrastructure": "基础设施",
     "sectionPlugins": "插件",
     "expand": "展开侧边栏",
@@ -5297,6 +5302,13 @@
       "topic_var": "辩题变量"
     },
     "searchNodes": "搜索节点",
+    "search": {
+      "prev": "上一个匹配",
+      "next": "下一个匹配",
+      "close": "关闭搜索",
+      "placeholder": "搜索节点..."
+    },
+    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}",
     "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}",
     "canvasTitle": {
       "clickToRename": "点击重命名"
@@ -5319,14 +5331,7 @@
     "swarmNode": {
       "agents": "代理",
       "rounds": "轮次"
-    },
-    "search": {
-      "prev": "上一个匹配",
-      "next": "下一个匹配",
-      "close": "关闭搜索",
-      "placeholder": "搜索节点..."
-    },
-    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}"
+    }
   },
   "atomicSkill": {
     "entryType": "入口类型",
@@ -7619,6 +7624,9 @@
     "riskAssessCount": "{{count}} 项评估",
     "offlineMode": "离线模式 (LLM Driver 未连接，占位数据)",
     "charCount": "{{count}} 字",
+    "holdingsSheet": "持仓快照",
+    "noHoldings": "暂无持仓，点击下方开启交易录入",
+    "goToTrade": "去交易",
     "title": "股票分析",
     "searchPlaceholder": "输入股票代码或名称",
     "startAnalysis": "开始分析",
@@ -7673,7 +7681,17 @@
       "alerts": "触发告警",
       "watchlist": "自选股复盘 ({{count}})",
       "noWatchlist": "无自选股",
-      "recommendations": "建议"
+      "recommendations": "建议",
+      "lastAnalysis": "上次分析",
+      "decisionAction": "决策",
+      "target": "目标价",
+      "stopLoss": "止损",
+      "daysSince": "已过",
+      "stopLossHit": "已触发止损",
+      "targetHit": "已达目标",
+      "inZone": "在目标区间",
+      "reflect": "反思",
+      "backtest": "回测此决策"
     },
     "retry": "重试",
     "completed": "已完成",
@@ -7687,6 +7705,21 @@
       "debate": "多空辩论",
       "risk": "风险评估",
       "decision": "投资决策"
+    },
+    "dashboard": {
+      "title": "投资仪表盘",
+      "marketState": "大盘状态",
+      "bull": "牛市",
+      "bear": "熊市",
+      "sideways": "震荡",
+      "confidence": "置信度",
+      "highVol": "高波动",
+      "viewAll": "查看全部",
+      "recommendations": "今日推荐",
+      "analyzeStock": "分析个股",
+      "recordTrade": "录入交易",
+      "dailyReview": "每日复盘",
+      "recentAnalyses": "最近分析"
     },
     "debate": "多空辩论",
     "debateRound": "第{{round}}轮",
@@ -7722,7 +7755,70 @@
       "market": "行情",
       "risk": "风险",
       "value": "估值",
-      "reflection": "反思复盘"
+      "reflection": "反思复盘",
+      "evolution": "进化漂移"
+    },
+    "evolutionDrift": {
+      "title": "进化漂移",
+      "recalcNow": "立即重算",
+      "recalculating": "正在重算...",
+      "recalcSuccess": "重算完成",
+      "loading": "正在加载仪表盘...",
+      "error": "加载失败: {{msg}}",
+      "lastRecalcAt": "最近重算: {{time}}",
+      "neverRecalculated": "尚未重算",
+      "replayMode": "回放模式 · {{date}}",
+      "summaryTitle": "策略摘要",
+      "summarySamples": "{{n}} 个样本",
+      "summaryWinRate": "{{p}}% 胜率",
+      "tableTitle": "各策略权重",
+      "table": {
+        "strategy": "策略",
+        "period": "周期",
+        "oldWeight": "原权重",
+        "newWeight": "现权重",
+        "delta": "变化",
+        "winRate": "胜率",
+        "sampleSize": "样本",
+        "rationale": "解释",
+        "confidenceLabel": "置信度"
+      },
+      "timelineTitle": "权重时间线 - {{key}}",
+      "noTimeline": "暂无时间线数据",
+      "noData": "暂无数据",
+      "reasonsTitle": "最近调整 (Top 5)",
+      "noReasons": "暂无权重调整记录"
+    },
+    "portfolioMonitor": {
+      "title": "组合监控",
+      "empty": "暂无快照，点击“刷新快照”计算",
+      "loadError": "加载仪表盘失败",
+      "refresh": "刷新快照",
+      "warningTitle": "集中度预警",
+      "historicalTitle": "历史快照 · {{date}}",
+      "historicalDesc": "数值为回放日期之前（含当日）最近一次快照。",
+      "totalMv": "总市值",
+      "totalPnl": "总盈亏",
+      "totalPnlPct": "盈亏 %",
+      "topConcentration": "最大持仓占比",
+      "topConcentrationTip": "最大单只持仓占组合的百分比",
+      "beta": "Beta (相对沪深 300)",
+      "betaTip": "组合相对沪深 300 的敏感度（基于 K 线数据计算）",
+      "diversificationScore": "分散度",
+      "diversificationTip": "0-100 评分，综合持仓数 / 集中度 / 行业分布",
+      "riskLevel": "风险等级",
+      "correlationAvg": "平均相关性",
+      "sharpe30d": "30 日夏普",
+      "snapshotAt": "快照时间",
+      "sectorExposure": "行业暴露",
+      "noSector": "暂无行业数据",
+      "correlationHighlights": "高相关性持仓 (|ρ|)",
+      "noCorrelation": "暂无相关性快照",
+      "stressTest": "压测情景",
+      "worstHit": "最差冲击",
+      "m10": "大盘 -10%",
+      "m20": "大盘 -20%",
+      "blackSwan": "黑天鹅 (-30%)"
     },
     "tradingTitle": "交易记录",
     "compare": "多股对比",
@@ -7950,7 +8046,12 @@
         "empty": "暂无符合条件的推荐",
         "valueNaN": "—",
         "generatedAt": "更新于 {{time}}",
-        "consensusDivided": "意见分歧"
+        "consensusDivided": "意见分歧",
+        "lastAnalysis": "{{date}} 分析结论：{{action}}（置信度{{confidence}}）",
+        "lastAnalysisNone": "暂无历史分析",
+        "outcome": "结果",
+        "outcomeWin": "✓ 判断正确",
+        "outcomeLoss": "✗ 判断失误"
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
@@ -8003,6 +8104,39 @@
       "1y": "1年",
       "weekly": "周",
       "monthly": "月"
+    },
+    "adj": {
+      "auto": "自动复权",
+      "none": "不复权",
+      "forward": "前复权",
+      "backward": "后复权",
+      "tip": "除权除息价格调整"
+    },
+    "calendar": {
+      "filter": {
+        "all": "全部",
+        "earnings": "财报",
+        "lockup": "解禁",
+        "dividend": "分红"
+      },
+      "earningsPre": "业绩预告",
+      "earningsExpress": "业绩快报",
+      "earningsFormal": "正式财报",
+      "shareholdersMeeting": "股东大会",
+      "noDataForFilter": "该分类暂无事件"
+    },
+    "valuationBand": {
+      "title": "估值带",
+      "current": "当前",
+      "noData": "暂无估值数据",
+      "pePercentile": "PE 分位",
+      "pbPercentile": "PB 分位",
+      "verdictDeepValue": "深度低估",
+      "verdictUndervalued": "低估",
+      "verdictFair": "合理",
+      "verdictExpensive": "偏高",
+      "verdictOvervalued": "高估",
+      "verdictInsufficient": "数据不足"
     },
     "subtitle": "AxInvest · 智能驱动 · 多维分析",
     "riskScore": "风险分: {{score}}",
@@ -8070,7 +8204,22 @@
       "alpha": "Alpha",
       "scopeAll": "全部",
       "scopeLive": "仅 Live",
-      "scopeReplay": "仅 Replay"
+      "scopeReplay": "仅 Replay",
+      "strategyFailed": "回测失败",
+      "strategyTitle": "策略回测（两组对比）",
+      "strategyRunning": "回测中...",
+      "strategyRun": "运行回测",
+      "strategyPositive": "正向: {{count}} 只",
+      "strategyNegative": "负向: {{count}} 只",
+      "strategySkipped": "跳过 {{count}} 个",
+      "colStrategy": "策略",
+      "colSignalCount": "信号数",
+      "colWinRate": "胜率",
+      "colAvgReturn": "平均收益",
+      "colTotalReturn": "累计收益",
+      "colMaxDrawdown": "最大回撤",
+      "colMaxLossStreak": "连亏",
+      "colProfitFactor": "盈亏比"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -8104,6 +8253,8 @@
     "trade": {
       "pnlPercent": "盈亏比例",
       "quickRecord": "快速记录",
+      "record": "录入",
+      "fromDecision": "来自分析决策",
       "stopLoss": "止损",
       "totalPnl": "总盈亏",
       "totalTrades": "交易笔数",
@@ -8556,6 +8707,13 @@
       "daily0600": "每天 6:00",
       "daily1200": "每天 12:00",
       "daily1800": "每天 18:00"
+    },
+    "strategyNames": {
+      "trend_short": "趋势·短",
+      "trend_mid": "趋势·中",
+      "trend_long": "趋势·长",
+      "rev_short": "超跌·短",
+      "rev_mid": "超跌·中"
     }
   },
   "trade": {
@@ -8573,6 +8731,7 @@
     "recorded": "已记录",
     "fillRequired": "请填写必要信息",
     "toggleFailed": "切换失败",
+    "limitsBlocked": "仓位限制阻止了此次下单",
     "agentRole.coordinator": "协调者",
     "agentRole.researcher": "研究员",
     "agentRole.planner": "规划者",

@@ -33,15 +33,20 @@
     "stockAnalysis": "Stock Analysis",
     "watchlist": "Watchlist",
     "screener": "Screener",
+    "recommend": "Recommendations",
     "trade": "Trade",
     "backtest": "Backtest",
     "compare": "Compare",
-    "replayWorkbench": "Replay Workbench"
+    "replayWorkbench": "Replay Workbench",
+    "review": "Daily Review"
   },
   "sidebar": {
     "sectionWork": "Work",
     "sectionTools": "Tools",
     "sectionInvest": "Invest",
+    "sectionInvestDiscover": "Discover & Analyze",
+    "sectionInvestExecute": "Portfolio & Execute",
+    "sectionInvestReview": "Review & Evolve",
     "sectionInfrastructure": "Infrastructure",
     "sectionPlugins": "Plugins",
     "expand": "Expand sidebar",
@@ -4948,6 +4953,13 @@
       "topic_var": "Topic variable"
     },
     "searchNodes": "Search nodes",
+    "search": {
+      "prev": "Previous match",
+      "next": "Next match",
+      "close": "Close search",
+      "placeholder": "Search nodes..."
+    },
+    "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
     "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
     "canvasTitle": {
       "clickToRename": "Click to rename"
@@ -4970,14 +4982,7 @@
     "swarmNode": {
       "agents": "Agents",
       "rounds": "rounds"
-    },
-    "search": {
-      "prev": "Previous match",
-      "next": "Next match",
-      "close": "Close search",
-      "placeholder": "Search nodes..."
-    },
-    "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}"
+    }
   },
   "atomicSkill": {
     "entryType": "Entry Type",
@@ -5032,11 +5037,11 @@
     "statusPaused": "Paused",
     "statusPending": "Pending",
     "statusRunning": "Running",
-    "nodes": "Nodes",
     "unsavedTitle": "Unsaved changes",
     "unsavedContent": "You have unsaved changes. Are you sure you want to discard them?",
     "discard": "Discard",
-    "keepEditing": "Continue editing"
+    "keepEditing": "Continue editing",
+    "nodes": "Nodes"
   },
   "rl": {
     "policyDashboard": "RL Policy Dashboard",
@@ -7620,6 +7625,9 @@
     "riskAssessCount": "{{count}} assessments",
     "offlineMode": "Offline mode",
     "charCount": "{{count}} chars",
+    "holdingsSheet": "Holdings",
+    "noHoldings": "No holdings. Enable trading to record positions.",
+    "goToTrade": "Go to Trade",
     "title": "Stock Analysis",
     "searchPlaceholder": "Enter stock code or name",
     "startAnalysis": "Start Analysis",
@@ -7675,7 +7683,17 @@
       "alerts": "Triggered alerts",
       "watchlist": "Watchlist review ({{count}})",
       "noWatchlist": "No watchlist",
-      "recommendations": "Recommendations"
+      "recommendations": "Recommendations",
+      "lastAnalysis": "Last analysis",
+      "decisionAction": "Decision",
+      "target": "Target",
+      "stopLoss": "Stop loss",
+      "daysSince": "Days since",
+      "stopLossHit": "Stop loss triggered",
+      "targetHit": "Target reached",
+      "inZone": "In target zone",
+      "reflect": "Reflect",
+      "backtest": "Backtest"
     },
     "retry": "Retry",
     "completed": "Completed",
@@ -7689,6 +7707,21 @@
       "debate": "Debate",
       "risk": "Risk Assessment",
       "decision": "Decision"
+    },
+    "dashboard": {
+      "title": "Investment Dashboard",
+      "marketState": "Market",
+      "bull": "Bull",
+      "bear": "Bear",
+      "sideways": "Sideways",
+      "confidence": "Confidence",
+      "highVol": "High Volatility",
+      "viewAll": "View All",
+      "recommendations": "Today's Picks",
+      "analyzeStock": "Analyze Stock",
+      "recordTrade": "Record Trade",
+      "dailyReview": "Daily Review",
+      "recentAnalyses": "Recent Analyses"
     },
     "debate": "Debate",
     "debateRound": "Round {{round}}",
@@ -7717,7 +7750,70 @@
       "market": "market",
       "risk": "risk",
       "value": "value",
-      "reflection": "Reflection"
+      "reflection": "Reflection",
+      "evolution": "Evolution"
+    },
+    "evolutionDrift": {
+      "title": "Evolution Drift",
+      "recalcNow": "Recalculate Now",
+      "recalculating": "Recalculating...",
+      "recalcSuccess": "Recalculation complete",
+      "loading": "Loading dashboard...",
+      "error": "Failed to load: {{msg}}",
+      "lastRecalcAt": "Last recalc: {{time}}",
+      "neverRecalculated": "Never recalculated",
+      "replayMode": "Replay · {{date}}",
+      "summaryTitle": "Strategy Summary",
+      "summarySamples": "{{n}} samples",
+      "summaryWinRate": "{{p}}% win",
+      "tableTitle": "Per-strategy Weights",
+      "table": {
+        "strategy": "Strategy",
+        "period": "Period",
+        "oldWeight": "Old",
+        "newWeight": "New",
+        "delta": "Delta",
+        "winRate": "Win%",
+        "sampleSize": "Samples",
+        "rationale": "Rationale",
+        "confidenceLabel": "Confidence weighting"
+      },
+      "timelineTitle": "Weight Timeline - {{key}}",
+      "noTimeline": "No timeline points",
+      "noData": "No data",
+      "reasonsTitle": "Recent Changes (Top 5)",
+      "noReasons": "No weight changes recorded yet"
+    },
+    "portfolioMonitor": {
+      "title": "Portfolio Monitor",
+      "empty": "No snapshot yet. Click Refresh to compute.",
+      "loadError": "Failed to load dashboard",
+      "refresh": "Refresh Snapshot",
+      "warningTitle": "Concentration Warning",
+      "historicalTitle": "Historical Snapshot · {{date}}",
+      "historicalDesc": "Values come from the latest snapshot at or before the replay date.",
+      "totalMv": "Total Market Value",
+      "totalPnl": "Total P&L",
+      "totalPnlPct": "P&L %",
+      "topConcentration": "Top Concentration",
+      "topConcentrationTip": "Largest single position as % of portfolio",
+      "beta": "Beta (vs CSI 300)",
+      "betaTip": "Portfolio sensitivity to CSI 300 (computed from K-line data)",
+      "diversificationScore": "Diversification",
+      "diversificationTip": "0-100 score based on position count, top concentration, and sector spread",
+      "riskLevel": "Risk",
+      "correlationAvg": "Avg Correlation",
+      "sharpe30d": "Sharpe 30d",
+      "snapshotAt": "Snapshot",
+      "sectorExposure": "Sector Exposure",
+      "noSector": "No sector data",
+      "correlationHighlights": "Top Correlations (|ρ|)",
+      "noCorrelation": "No correlation snapshot yet",
+      "stressTest": "Stress Test",
+      "worstHit": "Worst hit",
+      "m10": "Market -10%",
+      "m20": "Market -20%",
+      "blackSwan": "Black Swan (-30%)"
     },
     "compare": "Compare",
     "stockCode1": "Stock Code 1",
@@ -7941,7 +8037,12 @@
         "empty": "No qualifying picks at the moment",
         "valueNaN": "—",
         "generatedAt": "Updated {{time}}",
-        "consensusDivided": "意见分歧"
+        "consensusDivided": "Divided",
+        "lastAnalysis": "{{date}} analysis: {{action}} (confidence {{confidence}})",
+        "lastAnalysisNone": "No history",
+        "outcome": "Result",
+        "outcomeWin": "✓ Correct",
+        "outcomeLoss": "✗ Wrong"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
@@ -8002,6 +8103,39 @@
       "1y": "1Y",
       "weekly": "W",
       "monthly": "M"
+    },
+    "adj": {
+      "auto": "Auto Adj",
+      "none": "None",
+      "forward": "Forward",
+      "backward": "Backward",
+      "tip": "Price adjustment for dividends and stock splits"
+    },
+    "calendar": {
+      "filter": {
+        "all": "All",
+        "earnings": "Earnings",
+        "lockup": "Unlock",
+        "dividend": "Dividend"
+      },
+      "earningsPre": "Prelim",
+      "earningsExpress": "Express",
+      "earningsFormal": "Report",
+      "shareholdersMeeting": "AGM",
+      "noDataForFilter": "No events for this filter"
+    },
+    "valuationBand": {
+      "title": "Valuation Band",
+      "current": "Now",
+      "noData": "No valuation data",
+      "pePercentile": "PE pct",
+      "pbPercentile": "PB pct",
+      "verdictDeepValue": "Deep value",
+      "verdictUndervalued": "Undervalued",
+      "verdictFair": "Fair",
+      "verdictExpensive": "Expensive",
+      "verdictOvervalued": "Overvalued",
+      "verdictInsufficient": "Insufficient data"
     },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
@@ -8069,7 +8203,22 @@
       "alpha": "Alpha",
       "scopeAll": "All",
       "scopeLive": "Live only",
-      "scopeReplay": "Replay only"
+      "scopeReplay": "Replay only",
+      "strategyFailed": "Backtest failed",
+      "strategyTitle": "Strategy backtest (two-group comparison)",
+      "strategyRunning": "Backtesting...",
+      "strategyRun": "Run backtest",
+      "strategyPositive": "Positive: {{count}}",
+      "strategyNegative": "Negative: {{count}}",
+      "strategySkipped": "{{count}} skipped",
+      "colStrategy": "Strategy",
+      "colSignalCount": "Signals",
+      "colWinRate": "Win Rate",
+      "colAvgReturn": "Avg Return",
+      "colTotalReturn": "Total Return",
+      "colMaxDrawdown": "Max Drawdown",
+      "colMaxLossStreak": "Max Losses",
+      "colProfitFactor": "Profit Factor"
     },
     "export": {
       "analystReports": "analystReports",
@@ -8104,6 +8253,8 @@
     "trade": {
       "pnlPercent": "pnlPercent",
       "quickRecord": "quickRecord",
+      "record": "record",
+      "fromDecision": "fromDecision",
       "stopLoss": "stopLoss",
       "totalPnl": "totalPnl",
       "totalTrades": "totalTrades",
@@ -8442,6 +8593,13 @@
       "daily1800": "Daily 18:00",
       "weekday0600": "Weekdays 6:00",
       "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}"
+    },
+    "strategyNames": {
+      "trend_short": "Trend · Short",
+      "trend_mid": "Trend · Mid",
+      "trend_long": "Trend · Long",
+      "rev_short": "Reversal · Short",
+      "rev_mid": "Reversal · Mid"
     }
   },
   "trade": {
@@ -8459,6 +8617,7 @@
     "recorded": "Recorded",
     "fillRequired": "Fill required fields",
     "toggleFailed": "Toggle failed",
+    "limitsBlocked": "Position limits blocked this order",
     "agentRole.coordinator": "Coordinator",
     "agentRole.researcher": "Researcher",
     "agentRole.planner": "Planner",

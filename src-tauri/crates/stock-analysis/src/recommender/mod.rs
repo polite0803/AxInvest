@@ -37,6 +37,52 @@ use crate::recommender::strategies::{
 };
 use crate::recommender::strategy::PerCodeLocks;
 
+/// 从 template_vars 中解析 "reco_strategy_weights" 权重表。
+///
+/// 这是复盘 → 进化（R1）的注入点：recommend_stocks 会按 (style, period)
+/// 对每条 pick 的 confidence 乘上对应的权重，让近期胜率低的策略自然被降权。
+///
+/// 格式：`reco_strategy_weights` 是一个 JSON 对象：
+/// ```json
+/// { "trend_short": 1.2, "value_mid": 0.8, ... }
+/// ```
+/// 缺失的 (style, period) 默认 1.0（不调整）。
+pub(crate) fn parse_strategy_weights(
+    template_vars: &[(String, serde_json::Value)],
+) -> HashMap<(Style, Period), f64> {
+    let mut out: HashMap<(Style, Period), f64> = HashMap::new();
+    for (name, value) in template_vars {
+        if name != "reco_strategy_weights" {
+            continue;
+        }
+        let Some(obj) = value.as_object() else { continue };
+        for (key, val) in obj {
+            let Some(weight) = val.as_f64() else { continue };
+            // key 形如 "trend_short" / "value_mid" / "watchlist_long"
+            let parts: Vec<&str> = key.split('_').collect();
+            if parts.len() != 2 {
+                continue;
+            }
+            let style = match parts[0] {
+                "trend" => Style::Trend,
+                "value" => Style::Value,
+                "capital" => Style::Capital,
+                "reversion" => Style::Reversion,
+                "watchlist" => Style::Watchlist,
+                _ => continue,
+            };
+            let period = match parts[1] {
+                "short" => Period::Short,
+                "mid" => Period::Mid,
+                "long" => Period::Long,
+                _ => continue,
+            };
+            out.insert((style, period), weight.clamp(0.0, 2.0));
+        }
+    }
+    out
+}
+
 // ── 缓存 ──
 //
 // 缓存 key 由 (period, as_of) 二元组组成，确保 live / replay 互相隔离。
@@ -230,6 +276,8 @@ pub async fn recommend_stocks(
     };
 
     let reco_cfg = parse_reco_config(template_vars);
+    // 复盘→进化：按 (style, period) 注入自适应权重
+    let strategy_weights = parse_strategy_weights(template_vars);
     let mut disabled_styles_set: std::collections::HashSet<Style> =
         std::collections::HashSet::new();
     let enabled: Vec<Box<dyn RecommendStrategy>> = all_strategies
@@ -269,6 +317,11 @@ pub async fn recommend_stocks(
         };
         let period_val = period;
         let vars_for_future = vars_map.clone();
+        // 复盘→进化：该 (style, period) 当前的权重
+        let style_weight = strategy_weights
+            .get(&(s.style(), period))
+            .copied()
+            .unwrap_or(1.0);
         let fut = async move {
             let ctx = RecoContext {
                 client: &client_ref,
@@ -277,7 +330,14 @@ pub async fn recommend_stocks(
                 period: period_val,
                 vars: &vars_for_future,
             };
-            s_ref.scan(&ctx).await
+            let mut raw = s_ref.scan(&ctx).await?;
+            // 应用自适应权重：confidence 与 position_pct 同步缩放
+            for p in raw.iter_mut() {
+                let new_conf = (p.confidence as f64 * style_weight).clamp(0.0, 100.0) as u8;
+                p.confidence = new_conf;
+                p.position_pct = (p.position_pct * style_weight).clamp(0.0, 100.0);
+            }
+            Ok::<_, String>(raw)
         };
         futures.push(fut);
     }
@@ -576,5 +636,51 @@ mod tests {
         picks.retain(|p| p.target_price >= p.price * 0.995);
         let codes: Vec<&str> = picks.iter().map(|p| p.stock_code.as_str()).collect();
         assert_eq!(picks.len(), 4, "保留: {codes:?}");
+    }
+
+    #[test]
+    fn parse_strategy_weights_basic() {
+        let vars = vec![(
+            "reco_strategy_weights".to_string(),
+            serde_json::json!({
+                "trend_short": 1.2,
+                "value_mid": 0.5,
+                "watchlist_long": 0.0
+            }),
+        )];
+        let m = parse_strategy_weights(&vars);
+        assert_eq!(m.get(&(Style::Trend, Period::Short)).copied(), Some(1.2));
+        assert_eq!(m.get(&(Style::Value, Period::Mid)).copied(), Some(0.5));
+        assert_eq!(m.get(&(Style::Watchlist, Period::Long)).copied(), Some(0.0));
+        assert!(m.get(&(Style::Capital, Period::Short)).is_none(), "缺失 key 不应有值");
+    }
+
+    #[test]
+    fn parse_strategy_weights_clamps_to_2x() {
+        let vars =
+            vec![("reco_strategy_weights".to_string(), serde_json::json!({ "trend_short": 10.0 }))];
+        let m = parse_strategy_weights(&vars);
+        assert_eq!(m.get(&(Style::Trend, Period::Short)).copied(), Some(2.0), "应 clamp 到 2.0");
+    }
+
+    #[test]
+    fn parse_strategy_weights_ignores_malformed_keys() {
+        let vars = vec![(
+            "reco_strategy_weights".to_string(),
+            serde_json::json!({
+                "trend_extra_short": 1.5,
+                "unknown_short": 1.0,
+                "trend_week": 1.0
+            }),
+        )];
+        let m = parse_strategy_weights(&vars);
+        assert!(m.is_empty(), "所有 key 都应被忽略");
+    }
+
+    #[test]
+    fn parse_strategy_weights_absent_var_returns_empty() {
+        let vars = vec![("reco_trend_enabled".to_string(), serde_json::json!(true))];
+        let m = parse_strategy_weights(&vars);
+        assert!(m.is_empty());
     }
 }

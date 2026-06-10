@@ -432,6 +432,23 @@ impl Tool for ComputeScoringTool {
         let w_rsi = tv_f64(&input, "scoring_rsi", 10.0);
         let w_support = tv_f64(&input, "scoring_support", 10.0);
 
+        // ── 从 _template_vars 读取催化剂维度（由 a-catalyst 节点注入） ──
+        // 修复：compute_scoring 之前只算纯技术分，a-catalyst 报告再强也加不进 base
+        // 默认 50 表示中性；a-catalyst 输出 bull_score (0-100) 直接作为分值
+        let catalyst_score = tv_f64(&input, "catalyst_analyst_score", 50.0);
+        let catalyst_level = input
+            .get("_template_vars")
+            .and_then(|tv| tv.get("catalyst_level"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("无")
+            .to_string();
+        let institutional_trace = input
+            .get("_template_vars")
+            .and_then(|tv| tv.get("institutional_trace"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("无")
+            .to_string();
+
         let trend_score = match indicators.ma_alignment.as_str() {
             "多头排列" => 90.0,
             "弱多头" => 70.0,
@@ -460,6 +477,7 @@ impl Tool for ComputeScoringTool {
         };
 
         let volume_score = match indicators.volume_signal.as_str() {
+            "放量突破" => 95.0, // 新增：突破型最高分（与 scoring.rs 保持一致）
             "放量上涨" => 90.0,
             "缩量回调" => 60.0,
             "正常" => 50.0,
@@ -537,7 +555,25 @@ impl Tool for ComputeScoringTool {
             support_score,
         ];
         let weighted: f64 = scores.iter().zip(weights.iter()).map(|(s, w)| s * w).sum();
-        let total_score = (weighted + value_adj).clamp(0.0, 100.0);
+
+        // 催化剂加成：技术 6 维归 0.85，催化剂 1 维占 0.15
+        // L3/L2 + 机构建仓时额外 +3~5 分（突破保守派的"安全边际"卡口）
+        let catalyst_weight = 0.15;
+        let technical_weight = 1.0 - catalyst_weight;
+        let mut catalyst_bonus = 0.0;
+        if catalyst_level == "L3估值体系级" {
+            catalyst_bonus += 3.0;
+        } else if catalyst_level == "L2业绩拐点级" {
+            catalyst_bonus += 2.0;
+        }
+        if institutional_trace == "有建仓痕迹" || institutional_trace == "疑似建仓" {
+            catalyst_bonus += 2.0;
+        }
+        let total_score = ((weighted * technical_weight)
+            + (catalyst_score * catalyst_weight * 100.0)
+            + value_adj
+            + catalyst_bonus)
+            .clamp(0.0, 100.0);
 
         let mut warnings: Vec<Value> = Vec::new();
         if indicators.bias_ma5.is_nan() || indicators.bias_ma20.is_nan() {
@@ -584,6 +620,9 @@ impl Tool for ComputeScoringTool {
                 "support": {"score": support_score, "detail": format!("支撑={:?} 压力={:?} 布林={}", indicators.support_levels, indicators.resistance_levels, indicators.boll_position)},
             },
             "valueAdjustment": value_adj,
+            "catalystScore": (catalyst_score * 10.0).round() / 10.0,
+            "catalystLevel": catalyst_level,
+            "institutionalTrace": institutional_trace,
             "indicators": indicators,
             "credibility": {
                 "dataCompleteness": 100.0,

@@ -124,8 +124,118 @@ function parseWorkflowResults(results: Record<string, unknown>) {
 
 // ── Store ──
 
+/** R1 复盘→进化：dashboard 中单条 (strategy, period) 的统计行 */
+export interface EvolutionStrategyStatRow {
+  strategyId: string;
+  period: string;
+  oldWeight: number;
+  newWeight: number;
+  deltaPct: number;
+  winRate: number;
+  sampleSize: number;
+  rationale: string;
+}
+
+/** R1 复盘→进化：recent changes 中的一条历史调整 */
+export interface EvolutionRecentChangeRow {
+  id: number;
+  strategyId: string;
+  period: string;
+  oldWeight: number;
+  newWeight: number;
+  deltaPct: number;
+  trigger: string;
+  appliedAt: number;
+  rationale: string;
+}
+
+/** R1 复盘→进化：strategy 维度聚合卡片 */
+export interface EvolutionStrategySummaryRow {
+  strategyId: string;
+  avgWeight: number;
+  avgWinRate: number;
+  totalSamples: number;
+  trend: "up" | "down" | "stable";
+}
+
+/** R1 复盘→进化：dashboard 完整结构 */
+export interface EvolutionDriftDashboard {
+  currentWeights: Record<string, number>;
+  lastRecalcAt: number;
+  stats: EvolutionStrategyStatRow[];
+  recentChanges: EvolutionRecentChangeRow[];
+  strategySummary: EvolutionStrategySummaryRow[];
+}
+
 /** getDryRun 模块级缓存 (60s TTL) */
 let dryRunCache: { value: boolean; ts: number } | null = null;
+
+// ── R2 组合监控类型 ──
+
+/** R2 压测单条结果 */
+export interface PortfolioStressResult {
+  scenario: string;
+  label: string;
+  portfolioPnl: number;
+  portfolioPnlPct: number;
+  topHit?: { stockCode: string; stockName: string; pnlPct: number };
+  note: string;
+}
+
+export interface PortfolioStressBundle {
+  m10?: PortfolioStressResult;
+  m20?: PortfolioStressResult;
+  blackSwan?: PortfolioStressResult;
+}
+
+export interface PortfolioPositionRow {
+  stockCode: string;
+  stockName: string;
+  totalShares: number;
+  avgCost: number;
+  currentPrice?: number;
+  marketValue?: number;
+  unrealizedPnl?: number;
+  unrealizedPnlPct?: number;
+  totalRealizedPnl: number;
+  sectorName?: string;
+}
+
+export interface PortfolioDashboard {
+  isHistorical: boolean;
+  asOfDate?: string;
+  totalMarketValue: number;
+  totalPnl: number;
+  totalPnlPct: number;
+  cashPct: number;
+  maxDrawdownPct: number;
+  beta?: number;
+  sharpe30d?: number;
+  correlationAvg?: number;
+  topConcentrationPct: number;
+  sectorExposure: Record<string, number>;
+  concentrationWarning?: string;
+  riskLevel: string;
+  diversificationScore: number;
+  stressTest: PortfolioStressBundle;
+  positions: PortfolioPositionRow[];
+  snapshotAt: number;
+}
+
+export interface PortfolioCorrelationCell {
+  codeA: string;
+  codeB: string;
+  correlation: number;
+}
+
+export interface PositionLimitsCheck {
+  ok: boolean;
+  reason?: string;
+  maxSingleStockPct: number;
+  maxTotalPositions: number;
+  maxSectorExposurePct: number;
+  newPositionValue: number;
+}
 const DRY_RUN_TTL_MS = 60_000;
 
 interface StockAnalysisState {
@@ -167,6 +277,10 @@ interface StockAnalysisState {
   // Phase 1: K-line period persistence cross-mount
   klinePeriod: string;
   setKlinePeriod: (period: string) => void;
+
+  // R3-A: K-line adjustment type (复权)
+  klineAdj: "auto" | "none" | "forward" | "backward";
+  setKlineAdj: (adj: "auto" | "none" | "forward" | "backward") => void;
 
   // Phase 1: Auto-refresh toggle
   autoRefresh: boolean;
@@ -213,7 +327,12 @@ interface StockAnalysisState {
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
-  getStockKline: (code: string, period: string, limit: number) => Promise<void>;
+  getStockKline: (
+    code: string,
+    period: string,
+    limit: number,
+    adj?: "auto" | "none" | "forward" | "backward",
+  ) => Promise<void>;
   startAnalysis: (stockCode: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
   getDryRun: () => Promise<boolean>;
@@ -221,6 +340,28 @@ interface StockAnalysisState {
   loadAnalysis: (analysisId: string) => Promise<void>;
   reset: () => void;
   dismissChatIndicator: () => void;
+
+  // R1 复盘→进化
+  evolutionDashboard: EvolutionDriftDashboard | null;
+  evolutionRecalculating: boolean;
+  evolutionLastError: string | null;
+  fetchEvolutionDashboard: (asOfDate?: string | null) => Promise<void>;
+  recalcEvolutionNow: (asOfDate?: string | null) => Promise<void>;
+  loadRecoStrategyWeights: () => Promise<Record<string, number>>;
+
+  // R2 组合监控
+  portfolioDashboard: PortfolioDashboard | null;
+  portfolioCorrelations: PortfolioCorrelationCell[];
+  portfolioRefreshing: boolean;
+  portfolioLastError: string | null;
+  fetchPortfolioDashboard: (asOfDate?: string | null) => Promise<void>;
+  refreshPortfolioMetrics: (asOfDate?: string | null) => Promise<void>;
+  fetchPortfolioCorrelations: (asOfDate?: string | null) => Promise<void>;
+  checkPositionLimits: (
+    stockCode: string,
+    proposedShares: number,
+    proposedPrice: number,
+  ) => Promise<PositionLimitsCheck | null>;
 
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
@@ -257,6 +398,7 @@ const initialState = {
   llmStatus: "unknown" as const,
   chatIndicatorDismissed: false,
   klinePeriod: "6m",
+  klineAdj: "auto" as const,
   autoRefresh: false,
   klineIndicators: { ma5: true, ma10: true, ma20: true },
   sidebarCollapsed: {},
@@ -267,6 +409,13 @@ const initialState = {
   asOfDate: null,
   mode: "live" as const,
   violations: [],
+  evolutionDashboard: null,
+  evolutionRecalculating: false,
+  evolutionLastError: null,
+  portfolioDashboard: null,
+  portfolioCorrelations: [],
+  portfolioRefreshing: false,
+  portfolioLastError: null,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -304,7 +453,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  getStockKline: async (code: string, period: string, limit: number) => {
+  getStockKline: async (
+    code: string,
+    period: string,
+    limit: number,
+    adj?: "auto" | "none" | "forward" | "backward",
+  ) => {
     try {
       // 时间旅行：K 线按 as_of_date 截断
       const asOfDate = useTimeAnchorStore.getState().asOfDate;
@@ -313,6 +467,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         period,
         limit,
         asOfDate,
+        adj: adj ?? get().klineAdj,
       });
       set({ klineData });
     } catch (e) {
@@ -506,6 +661,109 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({ chatIndicatorDismissed: true });
   },
 
+  // R1 复盘→进化
+  fetchEvolutionDashboard: async (asOfDate?: string | null) => {
+    try {
+      const data = await invoke<EvolutionDriftDashboard>("get_evolution_drift_dashboard", {
+        asOfDate: asOfDate ?? null,
+      });
+      set({ evolutionDashboard: data, evolutionLastError: null });
+    } catch (e) {
+      set({ evolutionLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[EvolutionDrift] fetch dashboard failed:", e);
+    }
+  },
+
+  recalcEvolutionNow: async (asOfDate?: string | null) => {
+    set({ evolutionRecalculating: true, evolutionLastError: null });
+    try {
+      await invoke<{ written: number; currentWeights: Array<[string, string, number]> }>(
+        "manual_recalc_strategy_weights",
+        { asOfDate: asOfDate ?? null },
+      );
+      // 重算后立即拉一次新 dashboard
+      await get().fetchEvolutionDashboard(asOfDate ?? null);
+    } catch (e) {
+      set({ evolutionLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[EvolutionDrift] manual recalc failed:", e);
+    } finally {
+      set({ evolutionRecalculating: false });
+    }
+  },
+
+  loadRecoStrategyWeights: async () => {
+    try {
+      const data = await invoke<Record<string, number>>("get_reco_strategy_weights");
+      return data;
+    } catch (e) {
+      console.warn("[EvolutionDrift] load reco strategy weights failed:", e);
+      return {};
+    }
+  },
+
+  // R2 组合监控
+  fetchPortfolioDashboard: async (asOfDate?: string | null) => {
+    try {
+      const data = await invoke<PortfolioDashboard>("get_portfolio_dashboard", {
+        asOfDate: asOfDate ?? null,
+      });
+      set({ portfolioDashboard: data, portfolioLastError: null });
+    } catch (e) {
+      set({ portfolioLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[PortfolioMonitor] fetch dashboard failed:", e);
+    }
+  },
+
+  refreshPortfolioMetrics: async (asOfDate?: string | null) => {
+    set({ portfolioRefreshing: true, portfolioLastError: null });
+    try {
+      await invoke<{
+        metricsId: string;
+        positionsSnapshotted: number;
+        correlationPairsWritten: number;
+        asOfDate: string | null;
+      }>("refresh_portfolio_metrics", { asOfDate: asOfDate ?? null });
+      await Promise.all([
+        get().fetchPortfolioDashboard(asOfDate ?? null),
+        get().fetchPortfolioCorrelations(asOfDate ?? null),
+      ]);
+    } catch (e) {
+      set({ portfolioLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[PortfolioMonitor] refresh failed:", e);
+    } finally {
+      set({ portfolioRefreshing: false });
+    }
+  },
+
+  fetchPortfolioCorrelations: async (asOfDate?: string | null) => {
+    try {
+      const data = await invoke<PortfolioCorrelationCell[]>(
+        "get_portfolio_correlations",
+        { asOfDate: asOfDate ?? null },
+      );
+      set({ portfolioCorrelations: data });
+    } catch (e) {
+      console.error("[PortfolioMonitor] fetch correlations failed:", e);
+    }
+  },
+
+  checkPositionLimits: async (
+    stockCode: string,
+    proposedShares: number,
+    proposedPrice: number,
+  ) => {
+    try {
+      return await invoke<PositionLimitsCheck>("check_position_limits", {
+        stockCode,
+        proposedShares,
+        proposedPrice,
+      });
+    } catch (e) {
+      console.error("[PortfolioMonitor] check position limits failed:", e);
+      return null;
+    }
+  },
+
   bumpWatchlistVersion: () => {
     set((s) => ({ watchlistVersion: s.watchlistVersion + 1 }));
   },
@@ -550,6 +808,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   setKlinePeriod: (period: string) => {
     set({ klinePeriod: period });
+  },
+
+  setKlineAdj: (adj) => {
+    set({ klineAdj: adj });
   },
 
   setAutoRefresh: (enabled: boolean) => {

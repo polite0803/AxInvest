@@ -5,7 +5,18 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
-import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Coins,
+  LineChart,
+  RotateCcw,
+  Settings,
+  Shield,
+  Sparkles,
+  TrendingUp,
+  Users,
+  X,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -18,11 +29,14 @@ import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
 import "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";
+import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
+import { InvestDashboard } from "./InvestDashboard";
 import { KLineChart } from "./KLineChart";
 import { NorthBoundPanel } from "./NorthBoundPanel";
 import { OptionPcrPanel } from "./OptionPcrPanel";
+import { PositionsMiniPanel } from "./PositionsMiniPanel";
 import { ReflectionPanel } from "./ReflectionPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
@@ -187,9 +201,16 @@ export function StockAnalysisPage() {
       icon: <RotateCcw size={14} />,
       children: <ReflectionPanel />,
     },
+    {
+      key: "evolution",
+      label: t("stockAnalysis.tab.evolution"),
+      icon: <Sparkles size={14} />,
+      children: <EvolutionDriftPanel />,
+    },
   ];
 
   const allSheetPanels: SheetPanel[] = [
+    { key: "holdings", label: t("stockAnalysis.holdingsSheet"), element: <PositionsMiniPanel /> },
     { key: "index", label: t("stockAnalysis.indexQuotes"), element: <IndexQuotesPanel /> },
     { key: "sectors", label: t("stockAnalysis.settings.sheet.sectors"), element: <SectorHeatmapPanel /> },
     { key: "north", label: t("stockAnalysis.settings.sheet.north"), element: <NorthBoundPanel /> },
@@ -295,12 +316,7 @@ export function StockAnalysisPage() {
                       )}
 
                       {status === "idle" && (
-                        <div className="sa-empty">
-                          <div>
-                            <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
-                            <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
-                          </div>
-                        </div>
+                        <InvestDashboard />
                       )}
 
                       {status === "error" && (

@@ -137,6 +137,13 @@ const builtinNavItems: NavItem[] = [
     isPlugin: false,
   },
   {
+    key: "recommend",
+    icon: <Icon icon="fluent:star-20-filled" size={17} />,
+    labelKey: "nav.recommend",
+    path: "/screener?tab=recommend",
+    isPlugin: false,
+  },
+  {
     key: "trade",
     icon: <ArrowLeftRight size={18} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.trade",
@@ -162,6 +169,13 @@ const builtinNavItems: NavItem[] = [
     icon: <GitCompareArrows size={18} color={NAV_ICON_COLORS.Router} />,
     labelKey: "nav.compare",
     path: "/compare",
+    isPlugin: false,
+  },
+  {
+    key: "review",
+    icon: <RotateCcw size={18} color={NAV_ICON_COLORS.Router} />,
+    labelKey: "nav.review",
+    path: "/watchlist",
     isPlugin: false,
   },
 ];
@@ -438,11 +452,26 @@ export function Sidebar() {
     });
 
     sections.push({
-      key: "invest",
-      labelKey: "sidebar.sectionInvest",
+      key: "invest-discover",
+      labelKey: "sidebar.sectionInvestDiscover",
       items: builtinNavItems.filter((n) =>
-        n.key === "stock-analysis" || n.key === "watchlist" || n.key === "screener"
-        || n.key === "trade" || n.key === "backtest" || n.key === "compare"
+        n.key === "stock-analysis" || n.key === "screener"
+      ),
+    });
+
+    sections.push({
+      key: "invest-execute",
+      labelKey: "sidebar.sectionInvestExecute",
+      items: builtinNavItems.filter((n) =>
+        n.key === "trade"
+      ),
+    });
+
+    sections.push({
+      key: "invest-review",
+      labelKey: "sidebar.sectionInvestReview",
+      items: builtinNavItems.filter((n) =>
+        n.key === "watchlist" || n.key === "review" || n.key === "backtest" || n.key === "compare" || n.key === "replay-workbench"
       ),
     });
 

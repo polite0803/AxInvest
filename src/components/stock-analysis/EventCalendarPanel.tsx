@@ -1,19 +1,25 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Card, Spin, Tag } from "antd";
+import { Button, Card, Segmented, Spin, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 
+type EventType = "lockup" | "dividend" | "earnings";
+type FilterKey = "all" | "earnings" | "lockup" | "dividend";
+
 interface EventItem {
-  type: "lockup" | "dividend";
+  type: EventType;
   code: string;
   name: string;
   date: string;
   detail: string;
+  /// 仅 earnings 类型有
+  earningsType?: "preliminary" | "express" | "formal" | "shareholders_meeting" | "other";
+  period?: string;
 }
 
 export function EventCalendarPanel() {
@@ -28,6 +34,7 @@ export function EventCalendarPanel() {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
+  const [filter, setFilter] = useState<FilterKey>("all");
 
   const fetchOneStock = useCallback(async (code: string, name: string, items: EventItem[]) => {
     try {
@@ -62,6 +69,26 @@ export function EventCalendarPanel() {
             detail: `${(Number(d.dividendPerShare ?? d.dividend_per_share ?? 0)).toFixed(2)}${
               t("stockAnalysis.settings.panels.perShare")
             }`,
+          });
+        }
+      }
+    } catch { /* */ }
+    // R3-B 接入:财报披露事件
+    try {
+      const evs: any[] = await invoke("get_earnings_calendar", { stockCode: code });
+      if (Array.isArray(evs)) {
+        for (const e of evs.slice(0, 6)) {
+          const ed = e.eventDate ?? e.event_date ?? "";
+          if (!ed) { continue; }
+          const evType = e.eventType ?? e.event_type ?? "other";
+          items.push({
+            type: "earnings",
+            code,
+            name: e.stockName ?? e.stock_name ?? name,
+            date: ed,
+            detail: e.detail ?? "",
+            earningsType: evType,
+            period: e.period ?? undefined,
           });
         }
       }
@@ -119,6 +146,34 @@ export function EventCalendarPanel() {
     startAnalysis(code);
   };
 
+  const filtered = filter === "all" ? events : events.filter((e) => e.type === filter);
+
+  const typeLabel = (it: EventItem) => {
+    if (it.type === "lockup") { return t("stockAnalysis.settings.panels.lockup"); }
+    if (it.type === "dividend") { return t("stockAnalysis.settings.panels.dividend"); }
+    if (it.type === "earnings") {
+      const sub = it.earningsType;
+      if (sub === "preliminary") { return t("stockAnalysis.calendar.earningsPre"); }
+      if (sub === "express") { return t("stockAnalysis.calendar.earningsExpress"); }
+      if (sub === "formal") { return t("stockAnalysis.calendar.earningsFormal"); }
+      if (sub === "shareholders_meeting") { return t("stockAnalysis.calendar.shareholdersMeeting"); }
+      return t("stockAnalysis.calendar.earningsFormal");
+    }
+    return it.type;
+  };
+
+  const typeColor = (it: EventItem) => {
+    if (it.type === "lockup") { return "orange"; }
+    if (it.type === "dividend") { return "blue"; }
+    if (it.type === "earnings") {
+      if (it.earningsType === "preliminary") { return "magenta"; }
+      if (it.earningsType === "express") { return "purple"; }
+      if (it.earningsType === "shareholders_meeting") { return "cyan"; }
+      return "geekblue";
+    }
+    return "default";
+  };
+
   return (
     <Card
       size="small"
@@ -130,9 +185,22 @@ export function EventCalendarPanel() {
         </Button>
       }
     >
+      <div style={{ marginBottom: 4 }}>
+        <Segmented
+          size="small"
+          value={filter}
+          onChange={(v) => setFilter(v as FilterKey)}
+          options={[
+            { label: t("stockAnalysis.calendar.filter.all"), value: "all" },
+            { label: t("stockAnalysis.calendar.filter.earnings"), value: "earnings" },
+            { label: t("stockAnalysis.calendar.filter.lockup"), value: "lockup" },
+            { label: t("stockAnalysis.calendar.filter.dividend"), value: "dividend" },
+          ]}
+        />
+      </div>
       {loading
         ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
-        : emptyKind
+        : emptyKind && events.length === 0
         ? (
           <PanelEmpty
             kind={emptyKind}
@@ -143,27 +211,36 @@ export function EventCalendarPanel() {
             onOpenSettings={openDataSourceSettings}
           />
         )
+        : filtered.length === 0
+        ? (
+          <div className="text-xs text-gray-400 text-center py-3">
+            {t("stockAnalysis.calendar.noDataForFilter")}
+          </div>
+        )
         : (
           <List
             size="small"
-            dataSource={events}
+            dataSource={filtered}
             renderItem={(ev) => (
               <List.Item
                 style={{ cursor: "pointer", padding: "3px 0" }}
                 onClick={() => analyze(ev.code)}
                 actions={[
-                  <Tag key="type" color={ev.type === "lockup" ? "orange" : "blue"} className="text-xs m-0">
-                    {ev.type === "lockup"
-                      ? t("stockAnalysis.settings.panels.lockup")
-                      : t("stockAnalysis.settings.panels.dividend")}
+                  <Tag key="type" color={typeColor(ev)} className="text-xs m-0">
+                    {typeLabel(ev)}
                   </Tag>,
                 ]}
               >
                 <div className="flex items-center gap-2 text-xs w-full">
                   <Tag className="m-0 text-xs">{ev.code}</Tag>
-                  <span className="flex-1 truncate">{ev.name}</span>
+                  <span className="flex-1 truncate">
+                    {ev.name}
+                    {ev.type === "earnings" && ev.period
+                      ? <span className="ml-1 text-gray-400">· {ev.period}</span>
+                      : null}
+                  </span>
                   <span className="text-gray-400">{ev.date}</span>
-                  <span className="text-gray-500">{ev.detail}</span>
+                  <span className="text-gray-500 truncate max-w-[40%]">{ev.detail}</span>
                 </div>
               </List.Item>
             )}

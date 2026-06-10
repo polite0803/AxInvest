@@ -38,6 +38,8 @@ export function TradePanel() {
   const storeStockCode = useStockAnalysisStore((s) => s.stockCode);
   const storeStockName = useStockAnalysisStore((s) => s.stockName);
   const storeDecision = useStockAnalysisStore((s) => s.decision);
+  // R2: 买入前 position_limits 校验
+  const checkPositionLimits = useStockAnalysisStore((s) => s.checkPositionLimits);
   const [enabled, setEnabled] = useState(false);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<PositionSummary[]>([]);
@@ -97,7 +99,19 @@ export function TradePanel() {
 
   const handleRecord = async () => {
     if (!form.stockCode || form.price <= 0) { return message.warning(t("trade.fillRequired")); }
+    // R2: 买入前先做 position_limits 校验
+    if (form.direction === "buy") {
+      const check = await checkPositionLimits(
+        form.stockCode,
+        form.quantity,
+        form.price,
+      );
+      if (check && !check.ok) {
+        return message.warning(`${t("trade.limitsBlocked")}: ${check.reason ?? ""}`);
+      }
+    }
     const now = dayjs();
+    const analysisId = useStockAnalysisStore.getState().analysisId;
     try {
       await invoke("record_trade", {
         stockCode: form.stockCode,
@@ -108,6 +122,7 @@ export function TradePanel() {
         tradeDate: now.format("YYYY-MM-DD"),
         tradeTime: now.format("HH:mm"),
         notes: form.notes || null,
+        analysisId: analysisId ?? null,
       });
       message.success(t("trade.recorded"));
       loadData();

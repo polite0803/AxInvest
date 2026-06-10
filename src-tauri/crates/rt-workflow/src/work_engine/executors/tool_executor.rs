@@ -199,14 +199,46 @@ fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::
 /// 且不在已知的系统变量列表中，则视为模板变量。工具函数通过 `input["_template_vars"]`
 /// 读取用户在设置面板中配置的权重 / 阈值 / 周期等参数。
 ///
-/// 实现复用 `super::var_filter` 的反集（`is_data_var` 的否集）。
+/// v23: 同时抽取 a-catalyst / a-hot-money 节点的关键字段（catalyst_score / catalyst_level
+///      / institutional_trace / main_flow_state / dragon_tiger_signal），以 `catalyst_*` 前缀
+///      注入模板变量，供 compute_scoring 等工具读取，把催化剂信号加进基础评分。
+///      修复 301302 类案例：纯技术分压制催化剂信号导致全判高风险。
 fn collect_template_vars(context: &ExecutionState) -> Option<serde_json::Value> {
-    let vars: serde_json::Map<String, serde_json::Value> = context
+    let mut vars: serde_json::Map<String, serde_json::Value> = context
         .variables
         .iter()
         .filter(|(key, _)| !super::is_data_var(key))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+
+    // 抽取 a-catalyst 节点的输出字段（如果存在）→ catalyst_* 模板变量
+    // a-catalyst 输出 JSON 形如：{"catalyst_level": "L3估值体系级", "institutional_trace": "疑似建仓",
+    //   "bull_score": 78, "is_concept_driven": true, ...}
+    if let Some(cat_val) = context.variables.get("a-catalyst") {
+        if let Some(obj) = cat_val.as_object() {
+            if let Some(v) = obj.get("bull_score").and_then(|x| x.as_f64()) {
+                vars.insert("catalyst_analyst_score".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = obj.get("catalyst_level").and_then(|x| x.as_str()) {
+                vars.insert("catalyst_level".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = obj.get("institutional_trace").and_then(|x| x.as_str()) {
+                vars.insert("institutional_trace".to_string(), serde_json::json!(v));
+            }
+        }
+    }
+
+    // 抽取 a-hot-money 节点的资金面字段
+    if let Some(hm_val) = context.variables.get("a-hot-money") {
+        if let Some(obj) = hm_val.as_object() {
+            if let Some(v) = obj.get("main_flow_state").and_then(|x| x.as_str()) {
+                vars.insert("main_flow_state".to_string(), serde_json::json!(v));
+            }
+            if let Some(v) = obj.get("dragon_tiger_signal").and_then(|x| x.as_str()) {
+                vars.insert("dragon_tiger_signal".to_string(), serde_json::json!(v));
+            }
+        }
+    }
 
     if vars.is_empty() {
         None

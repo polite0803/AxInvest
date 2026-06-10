@@ -177,12 +177,13 @@ impl ScoringEngine {
         }
     }
 
-    /// 量能评分 (满分15) -- 缩量回调最佳
+    /// 量能评分 (满分15) -- 放量突破与缩量回调并列最佳
     fn score_volume(signal: &str) -> u32 {
         match signal {
+            "放量突破" => 15,    // 新增：突破型主升浪不应被压低
             "缩量回调" => 15,
+            "放量上涨" => 12,    // 8 → 12，主升浪信号
             "缩量上涨" => 10,
-            "放量上涨" => 8,
             "正常" => 7,
             "放量下跌" => 0,
             _ => 7,
@@ -618,5 +619,26 @@ mod tests {
             "Low PE + low PB + high ROE should yield positive adjustment"
         );
         assert!(score.total >= before || score.total <= 100, "Score should be capped at 0-100");
+    }
+
+    // ── v23 新增：放量突破信号单元测试 ──
+    #[test]
+    fn test_score_volume_breakout_top_score() {
+        // 修复 P1-2：放量突破与缩量回调并列最高（15 分）
+        assert_eq!(ScoringEngine::score_volume("放量突破"), 15);
+        assert_eq!(ScoringEngine::score_volume("放量上涨"), 12);
+        assert_eq!(ScoringEngine::score_volume("缩量回调"), 15);
+    }
+
+    #[test]
+    fn test_breakout_stock_not_misjudged_low_score() {
+        // 模拟 301302 启动期：弱多头 + bias 4.5% + 金叉 + 放量突破 + RSI 75
+        let ind = make_indicators("弱多头", 4.5, "金叉", 0.5, "放量突破", 75.0, vec![9.0]);
+        let score = ScoringEngine::score(&ind, 11.0, None);
+        assert!(
+            score.total >= 50,
+            "启动期放量突破+弱多头+金叉 50MA5附近 不应判 < 50 分，实际 {} 分",
+            score.total
+        );
     }
 }

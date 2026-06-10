@@ -16,6 +16,8 @@ category: risk
 4. **放量下跌禁买**：若 volume_signal = "放量下跌" 且 action 是买入 → 违规，等待缩量企稳
 5. **空头排列 + 低分**：若 ma_alignment = "空头排列" 且 score < bear_low_score（默认 30）→ 违规
 6. **bear 低分警告**：若 score < bear_low_score → 警告
+7. **放量突破容忍（catalyst_override 路径）**：若 volume_signal = "放量突破" 且 a-catalyst.catalyst_level ∈ {"L2业绩拐点级", "L3估值体系级"} 且 a-catalyst.institutional_trace ∈ {"有建仓痕迹", "疑似建仓"}，则乖离率超限不视为违规，仅作为修正建议（建议减仓至 50%，止损设于 MA10）。RSI 超买阈值放宽到 95，仍超 95 才发 block_buy。
+8. **强制重读 catalyst**：在触发 block_buy / block_all 之前，必须先验证 a-catalyst 与 a-hot-money 报告是否齐备；若 catalyst_level = "L3估值体系级" + 机构建仓 + 资金共振，却仍发 block_buy，视为遗漏 catalyst_override 路径，必须在 corrections 中说明。
 
 ## 检查流程
 

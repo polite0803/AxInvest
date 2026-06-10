@@ -17,6 +17,9 @@ pub struct RuleEngine;
 
 impl RuleEngine {
     /// 检查交易方案是否违反硬性规则
+    /// - `catalyst_level`: a-catalyst 输出的催化剂等级（None=中性）
+    /// - `institutional_trace`: a-catalyst 输出的机构建仓痕迹（None=无）
+    /// 当 L2+ 催化剂 + 机构建仓 + "放量突破" 同时出现时，乖离率/RSI 改发 correction 而非 violation
     pub fn check(
         indicators: &TechnicalIndicators,
         score: &ObjectiveScore,
@@ -24,6 +27,8 @@ impl RuleEngine {
         proposed_stop_loss: Option<f64>,
         proposed_entry_price: Option<f64>,
         config: &RuleConfig,
+        catalyst_level: Option<&str>,
+        institutional_trace: Option<&str>,
     ) -> RuleCheckResult {
         let mut violations = Vec::new();
         let mut corrections = Vec::new();
@@ -31,20 +36,38 @@ impl RuleEngine {
 
         let is_buy = matches!(proposed_action, "买入" | "增持");
 
-        if is_buy && indicators.rsi6 > config.rsi_overbought {
+        // catalyst_override 路径：L2+ 催化剂 + 机构建仓 + 放量突破 → 容忍追高
+        let catalyst_override = matches!(catalyst_level, Some("L2业绩拐点级") | Some("L3估值体系级"))
+            && matches!(institutional_trace, Some("有建仓痕迹") | Some("疑似建仓"))
+            && indicators.volume_signal == "放量突破";
+        let effective_rsi_limit = if catalyst_override { 95.0 } else { config.rsi_overbought };
+        let effective_bias_limit = if catalyst_override { 12.0 } else { config.bias_limit };
+
+        if is_buy && indicators.rsi6 > effective_rsi_limit {
             violations.push(format!(
                 "RSI6={:.1}>{:.0}处于严重超买，禁止买入。",
-                indicators.rsi6, config.rsi_overbought
+                indicators.rsi6, effective_rsi_limit
             ));
             force_signals.push("block_buy".to_string());
         }
 
-        if is_buy && indicators.bias_ma5 > config.bias_limit {
-            violations.push(format!(
-                "乖离MA5={:.1}%>{:.0}%，禁止追高。建议等待回调至MA5（{:.2}）附近。",
-                indicators.bias_ma5, config.bias_limit, indicators.ma5
-            ));
-            force_signals.push("block_buy".to_string());
+        if is_buy && indicators.bias_ma5 > effective_bias_limit {
+            if catalyst_override {
+                // 突破 + 催化剂共振：只发 correction，不发 violation
+                corrections.push(format!(
+                    "乖离MA5={:.1}%>{:.0}%，但出现放量突破+L{}+机构建仓三重共振，\
+                     容忍追高；建议减仓至 50%，止损设于 MA10={:.2}。",
+                    indicators.bias_ma5, effective_bias_limit,
+                    if catalyst_level == Some("L3估值体系级") { "3" } else { "2" },
+                    indicators.ma10
+                ));
+            } else {
+                violations.push(format!(
+                    "乖离MA5={:.1}%>{:.0}%，禁止追高。建议等待回调至MA5（{:.2}）附近。",
+                    indicators.bias_ma5, effective_bias_limit, indicators.ma5
+                ));
+                force_signals.push("block_buy".to_string());
+            }
         }
 
         if proposed_stop_loss.is_none() || proposed_stop_loss == Some(0.0) {

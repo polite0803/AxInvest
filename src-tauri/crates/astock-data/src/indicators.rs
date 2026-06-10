@@ -354,7 +354,15 @@ pub fn compute_indicators_with_config(
         1.0
     };
 
-    let volume_signal = if volume_ratio > cfg.volume_surge_ratio && price_change > 0.0 {
+    // "放量突破"：放量 + 收盘 > MA5 > MA10（典型突破型态，优先级最高）
+    // 修复：原 5 种信号无"突破"标签，导致 scoring / rule_checker 误判主升浪
+    let volume_signal = if volume_ratio > cfg.volume_surge_ratio
+        && price_change > 0.0
+        && latest_close > ma5
+        && ma5 > ma10
+    {
+        "放量突破".to_string()
+    } else if volume_ratio > cfg.volume_surge_ratio && price_change > 0.0 {
         "放量上涨".to_string()
     } else if volume_ratio < cfg.volume_shrink_ratio && price_change < 0.0 {
         "缩量回调".to_string()

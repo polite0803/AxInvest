@@ -47,6 +47,20 @@ elif safety_margin_pct < 30:
 else:                        # 充足安全边际
     safety_filter = 1.0
 
+# 2.5 催化剂+机构+资金三重共振豁免（A股特色，叠加在安全边际之上）
+# 解决 301302 类案例：PE 负值无安全边际，但 L3 催化剂+机构建仓+资金持续流入
+if all of (以下同时满足):
+    a-catalyst.catalyst_level in ("L3估值体系级", "L2业绩拐点级")
+    a-catalyst.institutional_trace in ("有建仓痕迹", "疑似建仓")
+    a-hot-money.main_flow_state == "持续流入"
+    a-hot-money.dragon_tiger_signal in ("机构扫货", "多方共振")
+then:
+    safety_filter = max(safety_filter, 0.6)  # 兜底给到 0.6
+    veto_triggered = false
+    # 必须在 reasoning 显式说明：
+    # "催化剂+机构+资金三重共振，保守派允许 60% 仓位（突破常规零仓位）"
+    # 同时在 tail_risks 列出 3 条预警（政策转向/资金撤离/业绩证伪）
+
 # 3. 一票否决项
 if any of:  ST / *ST / 立案调查 / 退市预警 / 质押率 > 70%:
     veto = true  →  positionPct = 0

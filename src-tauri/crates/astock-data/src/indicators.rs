@@ -430,6 +430,7 @@ mod tests {
             volume,
             amount: volume * close,
             turnover_rate: None,
+            adj_factor: None,
         }
     }
 

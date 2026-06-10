@@ -44,6 +44,7 @@ fn test_kline_serialization() {
         volume: 3820000.0,
         amount: 6400000000.0,
         turnover_rate: Some(0.52),
+        adj_factor: None,
     };
     let json = serde_json::to_string(&kline).unwrap();
     let parsed: KLine = serde_json::from_str(&json).unwrap();

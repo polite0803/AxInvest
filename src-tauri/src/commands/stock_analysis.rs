@@ -1,7 +1,8 @@
 use crate::AppState;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_core::entity::{
-    portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades, watchlist_items,
+    financial_snapshots, portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades,
+    watchlist_items,
 };
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
@@ -93,14 +94,27 @@ pub async fn get_stock_kline(
     period: String,
     limit: u32,
     as_of_date: Option<String>,
+    adj: Option<String>,
 ) -> Result<Vec<axagent_astock_data::KLine>, String> {
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())
         .map_err(|e| format!("as_of_date 解析失败: {e}"))?;
+    let adj_type = match adj.as_deref() {
+        None | Some("") | Some("auto") => None,
+        Some("none") | Some("forward") | Some("backward") => {
+            let parsed: axagent_astock_data::types::AdjType =
+                serde_json::from_value(serde_json::Value::String(adj.unwrap()))
+                    .map_err(|e| format!("adj 解析失败: {e}"))?;
+            Some(parsed)
+        },
+        Some(other) => {
+            return Err(format!("adj 必须是 none/forward/backward/auto, 收到: {other}"));
+        },
+    };
     axagent_astock_data::as_of::with_optional_asof(as_of_ctx, async {
         axagent_astock_data::as_of::with_degradation_log(async {
             state
                 .astock_client
-                .get_klines(&stock_code, &period, limit)
+                .get_klines_with_adj(&stock_code, &period, limit, adj_type)
                 .await
                 .map_err(|e| e.to_string())
         })
@@ -1296,6 +1310,118 @@ pub async fn get_stock_announcements(
         .get_announcements(&stock_code)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 财报披露日历(R3-B):
+///
+/// 复用 `get_announcements` vendor 链路(优先 cninfo),按标题归类成
+/// preliminary / express / formal / shareholders_meeting,过滤其它类。
+#[tauri::command]
+pub async fn get_earnings_calendar(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<Vec<axagent_astock_data::EarningsEvent>, String> {
+    state
+        .astock_client
+        .get_earnings_calendar(&stock_code)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 估值带(R3-C):
+///
+/// - years: 回溯窗口(默认 5 年);内部按 EOD 快照表统计 PE/PB/PS 的 5/10/25/50/75/90/95
+///   分位 + 当前分位。
+/// - 数据来源:本机 `financial_snapshots` 表(DB),表为空时返回 verdict = "insufficient"。
+#[tauri::command]
+pub async fn compute_valuation_band(
+    state: State<'_, AppState>,
+    stock_code: String,
+    years: Option<u32>,
+) -> Result<axagent_astock_data::ValuationBand, String> {
+    use axagent_astock_data::valuation_band::FinancialSnapshotLike;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let years = years.unwrap_or(5);
+    let since_date = chrono::Local::now()
+        .date_naive()
+        .checked_sub_signed(chrono::Duration::days(365 * years as i64))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "0000-00-00".to_string());
+
+    let db = state.harness.db();
+    let stock_code_c = stock_code.clone();
+    let since_date_c = since_date.clone();
+    let historical: Vec<financial_snapshots::Model> = financial_snapshots::Entity::find()
+        .filter(financial_snapshots::Column::StockCode.eq(stock_code_c.clone()))
+        .filter(financial_snapshots::Column::SnapshotDate.gte(since_date_c.clone()))
+        .order_by_asc(financial_snapshots::Column::SnapshotDate)
+        .all(db)
+        .await
+        .map_err(|e| format!("query financial_snapshots failed: {e}"))?;
+
+    // 把 ORM Model 转换为本地 struct 实现 trait
+    struct SnapAdapter {
+        date: String,
+        pe: Option<f64>,
+        pb: Option<f64>,
+        ps: Option<f64>,
+    }
+    impl FinancialSnapshotLike for SnapAdapter {
+        fn snapshot_date(&self) -> &str {
+            &self.date
+        }
+        fn pe_ttm(&self) -> Option<f64> {
+            self.pe
+        }
+        fn pb(&self) -> Option<f64> {
+            self.pb
+        }
+        fn ps_ttm(&self) -> Option<f64> {
+            self.ps
+        }
+    }
+    let samples: Vec<SnapAdapter> = historical
+        .into_iter()
+        .map(|m| SnapAdapter {
+            date: m.snapshot_date,
+            pe: m.pe_ttm,
+            pb: m.pb,
+            ps: m.ps_ttm,
+        })
+        .collect();
+
+    let band = axagent_astock_data::valuation_band::compute_valuation_band(
+        &stock_code,
+        &samples,
+        None, // 不传 current,让 UI 调用方自行叠加最新值
+    );
+    Ok(band)
+}
+
+/// 列估值快照原始行(R3-C 辅助):返回 financial_snapshots 表中某只股票在区间内的全部快照。
+#[tauri::command]
+pub async fn list_financial_snapshots(
+    state: State<'_, AppState>,
+    stock_code: String,
+    start: Option<String>,
+    end: Option<String>,
+) -> Result<Vec<financial_snapshots::Model>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    let mut q = financial_snapshots::Entity::find()
+        .filter(financial_snapshots::Column::StockCode.eq(stock_code.clone()));
+    if let Some(s) = start {
+        q = q.filter(financial_snapshots::Column::SnapshotDate.gte(s));
+    }
+    if let Some(e) = end {
+        q = q.filter(financial_snapshots::Column::SnapshotDate.lte(e));
+    }
+    let rows = q
+        .order_by_asc(financial_snapshots::Column::SnapshotDate)
+        .all(state.harness.db())
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(rows)
 }
 
 #[tauri::command]

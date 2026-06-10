@@ -7391,6 +7391,39 @@
     },
     "watchlistEmpty": "Нет отслеживаемых акций. Поищите и нажмите +",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "Авто корр.",
+      "none": "Без корр.",
+      "forward": "Прямая",
+      "backward": "Обратная",
+      "tip": "Корректировка цены на дивиденды и сплиты"
+    },
+    "calendar": {
+      "filter": {
+        "all": "Все",
+        "earnings": "Отчёты",
+        "lockup": "Разблок.",
+        "dividend": "Дивиденды"
+      },
+      "earningsPre": "Прогноз",
+      "earningsExpress": "Экспресс",
+      "earningsFormal": "Отчёт",
+      "shareholdersMeeting": "Собрание",
+      "noDataForFilter": "Нет событий для этого фильтра"
+    },
+    "valuationBand": {
+      "title": "Полоса оценки",
+      "current": "Текущее",
+      "noData": "Нет данных",
+      "pePercentile": "PE процентиль",
+      "pbPercentile": "PB процентиль",
+      "verdictDeepValue": "Глубокая недооценка",
+      "verdictUndervalued": "Недооценка",
+      "verdictFair": "Справедливо",
+      "verdictExpensive": "Дороговато",
+      "verdictOvervalued": "Переоценка",
+      "verdictInsufficient": "Мало данных"
+    },
     "history": "History",
     "historyEmpty": "Нет истории анализа",
     "debateHistory": "Debate History",

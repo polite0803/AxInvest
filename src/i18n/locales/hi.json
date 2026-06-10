@@ -7391,6 +7391,39 @@
     },
     "watchlistEmpty": "वॉचलिस्ट में कोई स्टॉक नहीं। खोजें और + पर क्लिक करें",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "ऑटो समायोजन",
+      "none": "बिना",
+      "forward": "अग्र",
+      "backward": "पश्च",
+      "tip": "लाभांश और विभाजन के लिए मूल्य समायोजन"
+    },
+    "calendar": {
+      "filter": {
+        "all": "सभी",
+        "earnings": "आय",
+        "lockup": "मुक्ति",
+        "dividend": "लाभांश"
+      },
+      "earningsPre": "पूर्वानुमान",
+      "earningsExpress": "एक्सप्रेस",
+      "earningsFormal": "रिपोर्ट",
+      "shareholdersMeeting": "AGM",
+      "noDataForFilter": "इस फ़िल्टर के लिई कोई ईवेंट नहीं"
+    },
+    "valuationBand": {
+      "title": "वैल्यूएशन बैंड",
+      "current": "वर्तमान",
+      "noData": "डेटा नहीं",
+      "pePercentile": "PE प्रतिशत",
+      "pbPercentile": "PB प्रतिशत",
+      "verdictDeepValue": "गहरा अंडरवैल्यूड",
+      "verdictUndervalued": "कम कीमत",
+      "verdictFair": "उचित",
+      "verdictExpensive": "महंगा",
+      "verdictOvervalued": "अधिक कीमत",
+      "verdictInsufficient": "अपर्याप्त डेटा"
+    },
     "history": "History",
     "historyEmpty": "कोई विश्लेषण इतिहास नहीं",
     "debateHistory": "Debate History",

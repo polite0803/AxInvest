@@ -470,6 +470,7 @@ export const ANALYST_NAMES: Record<string, string> = {
   "research": "研报分析师",
   "trader": "交易规划师",
   "investment-plan": "投资计划",
+  "catalyst-analyst": "催化剂与叙事分析师",
 };
 
 // ── 回测类型 ──────────────────────────────────────────────
@@ -529,6 +530,19 @@ export interface BacktestComparisonResponse {
 }
 
 // ── Decision Timeline（Phase 8）──
+
+// ── 荐股面板历史分析关联（P0-1）──
+
+/** 个股最近一次分析的摘要，用于荐股 panel 展示 */
+export interface LatestAnalysisSummary {
+  analysisId: string;
+  analysisDate: string;
+  decisionAction: string; // BUY / HOLD / SELL / uncertain
+  decisionPositionPct: number | null;
+  confidence: number | null; // 加权置信度 0-100
+  status: string;
+  outcome: string | null; // win / loss / pending
+}
 
 /** 时间线 4 阶段：扫描 → 诊断 → 辩论 → 决策 */
 export type TimelinePhase = "scan" | "diagnose" | "debate" | "decide";

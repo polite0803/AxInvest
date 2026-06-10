@@ -1,10 +1,12 @@
+import { invoke } from "@/lib/invoke";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
-import { ExpandOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
+import { ExpandOutlined, LineChartOutlined } from "@ant-design/icons";
+import { Button, Card, Collapse, Empty, Modal, Spin, Tag } from "antd";
 import NodeRenderer from "markstream-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
+import { ValuationBandChart, type ValuationBandData } from "./ValuationBandChart";
 
 /* ------------------------------------------------------------------ */
 /*  估值报告 JSON 解析                                                  */
@@ -298,6 +300,34 @@ export function ValueAssessmentPanel() {
   const rawData = useStockAnalysisStore((s) => s.rawData);
   const [expanded, setExpanded] = useState(false);
 
+  // R3-C: 估值带
+  const [valuationBand, setValuationBand] = useState<ValuationBandData | null>(null);
+  const [valuationBandLoading, setValuationBandLoading] = useState(false);
+
+  useEffect(() => {
+    const code = (rawData?.stockCode as string | undefined) ?? (rawData?.code as string | undefined) ?? "";
+    if (!code) {
+      setValuationBand(null);
+      return;
+    }
+    let cancelled = false;
+    setValuationBandLoading(true);
+    invoke<ValuationBandData>("compute_valuation_band", { stockCode: code, years: 5 })
+      .then((d) => {
+        if (!cancelled) { setValuationBand(d); }
+      })
+      .catch((err) => {
+        console.warn("[ValueAssessmentPanel] compute_valuation_band failed:", err);
+        if (!cancelled) { setValuationBand(null); }
+      })
+      .finally(() => {
+        if (!cancelled) { setValuationBandLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawData]);
+
   // 类型保护：确保 valueReport 始终是字符串
   const rawValue = valueAssessments["value-investor"];
   const valueReport: string = typeof rawValue === "string"
@@ -398,6 +428,24 @@ export function ValueAssessmentPanel() {
 
   return (
     <div className="p-4 space-y-3">
+      {/* R3-C 估值带(在估值报告之上) */}
+      {(valuationBand || valuationBandLoading) && (
+        <Card
+          size="small"
+          title={
+            <div className="flex items-center gap-2">
+              <LineChartOutlined style={{ color: "#f97316" }} />
+              <span className="text-sm">{t("stockAnalysis.valuationBand.title")}</span>
+              <Tag color="orange" className="m-0 text-xs">PE / PB</Tag>
+            </div>
+          }
+        >
+          <Spin spinning={valuationBandLoading} size="small">
+            <ValuationBandChart data={valuationBand} loading={valuationBandLoading} />
+          </Spin>
+        </Card>
+      )}
+
       {hasValue && (
         <Card
           size="small"

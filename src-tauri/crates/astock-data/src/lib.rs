@@ -4,6 +4,7 @@
     clippy::let_and_return,
     clippy::if_same_then_else
 )]
+pub mod adjustment;
 pub mod as_of;
 pub mod as_of_capability;
 pub mod calendar;
@@ -12,7 +13,8 @@ pub mod disk_cache;
 mod error;
 pub mod indicators;
 pub mod mcp_tools;
-mod types;
+pub mod types;
+pub mod valuation_band;
 mod vendors;
 
 use chrono::Local;
@@ -24,6 +26,9 @@ use tokio::sync::RwLock;
 use crate::as_of_capability::AsOfCapability;
 pub use error::DataError;
 pub use types::*;
+pub use valuation_band::{
+    compute_valuation_band, current_percentile, FinancialSnapshotLike, MetricBand, ValuationBand,
+};
 use vendors::akshare::AkshareVendor;
 use vendors::baidu_stock::BaiduStockVendor;
 use vendors::cninfo::CninfoVendor;
@@ -387,7 +392,6 @@ impl AStockClient {
             .collect()
     }
 
-    #[expect(dead_code)]
     /// 按当前 AsOfContext 截断 LockupSchedule：保留 unlock_date <= as_of_date 的项
     /// (as_of 之后才解禁的"未来"事件过滤掉)；live 模式原样返回。
     fn truncate_lockup_by_asof(items: Vec<LockupSchedule>) -> Vec<LockupSchedule> {
@@ -401,7 +405,6 @@ impl AStockClient {
             .collect()
     }
 
-    #[expect(dead_code)]
     /// 按当前 AsOfContext 截断 DividendRecord：保留 ex_date <= as_of_date 的项；live 模式原样返回。
     fn truncate_dividend_by_asof(items: Vec<DividendRecord>) -> Vec<DividendRecord> {
         let Some(ctx) = crate::as_of::current_as_of() else {
@@ -695,11 +698,33 @@ impl AStockClient {
         }))
     }
 
+    /// 获取 K 线 (R3-A: 支持复权)
+    ///
+    /// 复权方式: 优先用 `adj` 参数;若为 None 则根据复权事件是否存在自动选择
+    /// (有事件 → Forward,无事件 → None)。
+    /// 复权事件来源: `get_dividend_records()` 返回的 `DividendRecord`,
+    /// 已在 `truncate_dividend_by_asof` 后过滤 as_of。
     pub async fn get_klines(
         &self,
         stock_code: &str,
         period: &str,
         limit: u32,
+    ) -> Result<Vec<KLine>, DataError> {
+        self.get_klines_with_adj(stock_code, period, limit, None)
+            .await
+    }
+
+    /// 获取 K 线 (R3-A 显式复权版)
+    ///
+    /// `adj` 为 None 时按 forward 复权(若至少有 1 个除权事件);
+    /// 为 `Some(AdjType::None)` 时强制不复权;
+    /// 为 `Some(AdjType::Forward)` / `Some(AdjType::Backward)` 时强制该方式。
+    pub async fn get_klines_with_adj(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+        adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let cache_key = Self::kline_cache_key(stock_code, period);
         let fetch_limit = limit.max(500);
@@ -709,7 +734,10 @@ impl AStockClient {
                 if let Ok(klines) = serde_json::from_str::<Vec<KLine>>(&cached) {
                     if klines.len() >= limit as usize {
                         let start = klines.len().saturating_sub(limit as usize);
-                        return Ok(klines[start..].to_vec());
+                        // 应用 adj:cache miss 时走完整 apply, hit 时也走(无副作用且 cache 是 adj-agnostic)
+                        return self
+                            .apply_klines_adj(&klines[start..], stock_code, adj)
+                            .await;
                     }
                 }
             }
@@ -722,16 +750,18 @@ impl AStockClient {
                     Ok(result) if !result.is_empty() => {
                         let result = Self::truncate_klines_by_asof(result);
                         if result.is_empty() {
-                            tracing::warn!("[asof] {} K线全部晚于截止日，尝试下一源", name);
+                            tracing::warn!("[asof] {} K线全部晚于截止日,尝试下一源", name);
                             continue;
                         }
                         let json = serde_json::to_string(&result).unwrap_or_default();
                         self.cache_set(cache_key, json, 300).await;
                         let start = result.len().saturating_sub(limit as usize);
-                        return Ok(result[start..].to_vec());
+                        return self
+                            .apply_klines_adj(&result[start..], stock_code, adj)
+                            .await;
                     },
                     Ok(_) => {
-                        tracing::warn!("[降级] {} K线返回空，尝试下一源", name);
+                        tracing::warn!("[降级] {} K线返回空,尝试下一源", name);
                     },
                     Err(e) => {
                         tracing::warn!("[降级] {} K线失败: {}", name, e);
@@ -744,6 +774,60 @@ impl AStockClient {
             vendor: "all".into(),
             message: "所有K线数据源均不可用".into(),
         }))
+    }
+
+    /// R3-A 内部: 应用复权到 K 线
+    ///
+    /// 1. 拉取除权除息事件(已 asof 截断)
+    /// 2. 计算复权因子
+    /// 3. 应用到 K 线价格
+    async fn apply_klines_adj(
+        &self,
+        klines: &[KLine],
+        stock_code: &str,
+        adj: Option<AdjType>,
+    ) -> Result<Vec<KLine>, DataError> {
+        if klines.is_empty() {
+            return Ok(klines.to_vec());
+        }
+        // 决定实际复权方式
+        let resolved_adj = match adj {
+            Some(t) => t,
+            None => {
+                // 自动:有事件 forward,无事件 None
+                let events = self.get_dividend_records(stock_code).await?;
+                if events.is_empty() {
+                    AdjType::None
+                } else {
+                    AdjType::Forward
+                }
+            },
+        };
+        if resolved_adj == AdjType::None {
+            return Ok(klines.to_vec());
+        }
+        // 拉事件并 asof 过滤
+        let events = self.get_dividend_records(stock_code).await?;
+        let as_of_cutoff = klines.last().map(|k| k.date.as_str());
+        let as_of_cutoff = if crate::as_of::is_asof_active() {
+            crate::as_of::current_as_of().map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+        } else {
+            as_of_cutoff.map(|s| s.to_string())
+        };
+        // 转 AdjustmentEvent,然后过滤
+        let adj_events: Vec<crate::types::AdjustmentEvent> = events
+            .iter()
+            .map(|d| crate::types::AdjustmentEvent {
+                stock_code: d.stock_code.clone(),
+                ex_date: d.ex_date.clone(),
+                cash_dividend_per_share: d.dividend_per_share,
+                bonus_share_ratio: d.bonus_share_ratio,
+            })
+            .collect();
+        let adj_events =
+            crate::adjustment::filter_events_by_asof(&adj_events, as_of_cutoff.as_deref());
+        let factors = crate::adjustment::compute_adj_factors(klines, &adj_events, resolved_adj);
+        Ok(crate::adjustment::apply_adjustment(klines, &factors, resolved_adj))
     }
 
     pub async fn get_financials(
@@ -942,6 +1026,8 @@ impl AStockClient {
         for name in &self.routing.lockup {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_lockup_schedule(stock_code).await {
+                    // 修复: as-of 模式下截断未来解禁事件
+                    let result = Self::truncate_lockup_by_asof(result);
                     let cache_key = Self::cache_key_for("lockup", stock_code);
                     let json = serde_json::to_string(&result).unwrap_or_default();
                     self.cache_set(cache_key, json, 86400).await;
@@ -1193,6 +1279,11 @@ impl AStockClient {
         for name in &self.routing.dividend {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_dividend_records(stock_code).await {
+                    // 修复: as-of 模式下截断未来除权除息事件
+                    let result = Self::truncate_dividend_by_asof(result);
+                    let cache_key = Self::cache_key_for("dividend", stock_code);
+                    let json = serde_json::to_string(&result).unwrap_or_default();
+                    self.cache_set(cache_key, json, 3600).await;
                     return Ok(result);
                 }
             }
@@ -1365,6 +1456,39 @@ impl AStockClient {
         Ok(vec![])
     }
 
+    /// 财报披露日历(R3-B):
+    ///
+    /// 直接复用 `get_announcements` 的 vendor 链路(优先 cninfo / ths),对返回的公告按
+    /// `EarningsEvent::classify` 归类成 preliminary / express / formal / shareholders_meeting。
+    /// live 模式按 announce_date 升序;replay 模式由 `truncate_announcements_by_asof` 截断。
+    pub async fn get_earnings_calendar(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<EarningsEvent>, DataError> {
+        let announcements = self.get_announcements(stock_code).await?;
+        let events: Vec<EarningsEvent> = announcements
+            .into_iter()
+            .filter_map(|a| {
+                let event_type = EarningsEvent::classify(&a.title).to_string();
+                // 过滤出"财报相关" + 股东大会;其它类型不展示
+                if event_type == "other" {
+                    return None;
+                }
+                let period = crate::types::extract_report_period(&a.title);
+                Some(EarningsEvent {
+                    stock_code: a.stock_code,
+                    stock_name: a.stock_name.unwrap_or_default(),
+                    event_date: a.announce_date,
+                    event_type,
+                    period,
+                    detail: Some(a.title),
+                    source: Some("cninfo".to_string()),
+                })
+            })
+            .collect();
+        Ok(events)
+    }
+
     pub async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
         // vendor trait 大重构 P1.5:as-of 模式下按 vendor 申报的 capability 决策
         // D 档修复:replay 模式现在能拿到 as_of_date 当日的数据(原 bug:无守卫返回 today)
@@ -1394,13 +1518,14 @@ impl AStockClient {
                     }
                 }
             }
-            // 全部 vendor 都不支持 or 失败:走原 live 路径兜底(返回 today 数据)
-            // 显式标记降级,让 workflow 知道此结果是"now"而不是 "as_of_date"
+            // 全部 vendor 都不支持 or 失败:as-of 模式下禁止 fallback 到 live 数据
+            //（返回 today 数据会污染回放世界观的封闭性）
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_market_dragon_tiger",
-                "as-of 模式下所有 vendor 都未提供 NativeDateParam 数据,fallback to live",
+                "as-of 模式下所有 vendor 都未提供 NativeDateParam 数据,返回空",
             );
+            return Ok(vec![]);
         }
         for name in self
             .routing
@@ -1442,11 +1567,13 @@ impl AStockClient {
                             }
                         },
                         AsOfCapability::Fallthrough => {
-                            if let Ok(r) = vendor.get_hot_stocks().await {
-                                if !r.is_empty() {
-                                    return Ok(r);
-                                }
-                            }
+                            // as-of 模式下禁止返回 live 热门股数据（后见信息）
+                            crate::as_of::record_degradation(
+                                name,
+                                "get_hot_stocks",
+                                "Fallthrough vendor 不支持历史语义,跳过",
+                            );
+                            continue;
                         },
                         _ => {
                             crate::as_of::record_degradation(
@@ -1654,6 +1781,15 @@ impl AStockClient {
     }
 
     pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        if crate::as_of::is_asof_active() {
+            // as-of 模式下指数行情无历史语义，返回空 + 降级记录
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_index_quotes",
+                "指数行情无历史语义，as-of 模式下跳过",
+            );
+            return Ok(vec![]);
+        }
         for name in &self.routing.index_quotes {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_index_quotes().await {
@@ -1671,9 +1807,9 @@ impl AStockClient {
     }
 
     pub async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
-        // P4: 按 vendor 申报的 capability 决策
-        // eastmoney Fallthrough(同行对比带 date 字段,可截断),as-of 模式调用 live + truncate
         if crate::as_of::is_asof_active() {
+            // P4: 按 vendor 申报的 capability 决策
+            // eastmoney NativeDateParam 已适配,其余 vendor Fallthrough 无历史语义
             for name in self.routing.vendors_for("peers", &self.routing.peers) {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_peers") {
@@ -1681,13 +1817,6 @@ impl AStockClient {
                             if let Ok(r) = vendor.get_peers_with_asof(stock_code).await {
                                 if !r.is_empty() {
                                     return Ok(r);
-                                }
-                            }
-                        },
-                        AsOfCapability::Fallthrough => {
-                            if let Ok(result) = vendor.get_peers(stock_code).await {
-                                if !result.is_empty() {
-                                    return Ok(result);
                                 }
                             }
                         },
@@ -1705,7 +1834,7 @@ impl AStockClient {
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_peers",
-                "as-of 模式所有 vendor 均未提供同行对比",
+                "as-of 模式所有 vendor 均未提供历史同行对比",
             );
             return Ok(vec![]);
         }
@@ -1726,19 +1855,14 @@ impl AStockClient {
     }
 
     pub async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
-        // P4: 按 vendor 申报的 capability 决策
-        // eastmoney Fallthrough(date 字段可用),as-of 模式调用 live + 取最新
         if crate::as_of::is_asof_active() {
+            // P4: 按 vendor 申报的 capability 决策
+            // eastmoney NativeDateParam 已适配,其余 vendor Fallthrough 无历史语义
             for name in &self.routing.option_pcr {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_option_pcr") {
                         AsOfCapability::NativeDateParam => {
                             if let Ok(Some(r)) = vendor.get_option_pcr_with_asof(stock_code).await {
-                                return Ok(Some(r));
-                            }
-                        },
-                        AsOfCapability::Fallthrough => {
-                            if let Ok(Some(r)) = vendor.get_option_pcr(stock_code).await {
                                 return Ok(Some(r));
                             }
                         },
@@ -2053,6 +2177,7 @@ mod asof_truncate_tests {
             volume: 0.0,
             amount: 0.0,
             turnover_rate: None,
+            adj_factor: None,
         }
     }
 
@@ -2207,6 +2332,7 @@ mod asof_realtime_degrade_tests {
             volume: 1000.0,
             amount: 10000.0,
             turnover_rate: Some(0.01),
+            adj_factor: None,
         }
     }
 

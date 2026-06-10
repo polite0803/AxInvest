@@ -7391,6 +7391,39 @@
     },
     "watchlistEmpty": "관심 종목이 없습니다. 검색 후 + 클릭",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "자동 조정",
+      "none": "조정 안 함",
+      "forward": "전방 조정",
+      "backward": "후방 조정",
+      "tip": "배당·분할에 따른 주가 조정"
+    },
+    "calendar": {
+      "filter": {
+        "all": "전체",
+        "earnings": "실적",
+        "lockup": "금지",
+        "dividend": "배당"
+      },
+      "earningsPre": "실적 예고",
+      "earningsExpress": "잠정 실적",
+      "earningsFormal": "정식 실적",
+      "shareholdersMeeting": "주주총회",
+      "noDataForFilter": "이 분류에는 이벤트 없음"
+    },
+    "valuationBand": {
+      "title": "밸류에이션 밴드",
+      "current": "현재",
+      "noData": "데이터 없음",
+      "pePercentile": "PE 백분위",
+      "pbPercentile": "PB 백분위",
+      "verdictDeepValue": "심각한 저평가",
+      "verdictUndervalued": "저평가",
+      "verdictFair": "적정",
+      "verdictExpensive": "다소 높음",
+      "verdictOvervalued": "고평가",
+      "verdictInsufficient": "데이터 부족"
+    },
     "history": "History",
     "historyEmpty": "분석 기록이 없습니다",
     "debateHistory": "Debate History",

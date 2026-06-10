@@ -52,6 +52,9 @@ export function KLineChart() {
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const klinePeriod = useStockAnalysisStore((s) => s.klinePeriod);
   const setKlinePeriod = useStockAnalysisStore((s) => s.setKlinePeriod);
+  // R3-A: 复权切换
+  const klineAdj = useStockAnalysisStore((s) => s.klineAdj);
+  const setKlineAdj = useStockAnalysisStore((s) => s.setKlineAdj);
   const indicators = useStockAnalysisStore((s) => s.klineIndicators);
   const toggleIndicator = useStockAnalysisStore((s) => s.toggleIndicator);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
@@ -403,6 +406,48 @@ export function KLineChart() {
             }}
           >
             {t(`stockAnalysis.period.${opt.key}`)}
+          </button>
+        ))}
+        {/* R3-A 复权切换 */}
+        <span className="ml-2" />
+        {(
+          [
+            { key: "auto", label: t("stockAnalysis.adj.auto") },
+            { key: "none", label: t("stockAnalysis.adj.none") },
+            { key: "forward", label: t("stockAnalysis.adj.forward") },
+            { key: "backward", label: t("stockAnalysis.adj.backward") },
+          ] as const
+        ).map((opt) => (
+          <button
+            key={opt.key}
+            data-testid={`kline-adj-${opt.key}`}
+            onClick={() => {
+              setKlineAdj(opt.key);
+              if (stockCode) {
+                const cur = PERIOD_OPTIONS.find((o) => o.key === klinePeriod);
+                if (cur) {
+                  // 清缓存强制重拉
+                  for (const k of Array.from(klineCache.keys())) {
+                    if (k.startsWith(`${stockCode}|`)) { klineCache.delete(k); }
+                  }
+                  getStockKline(stockCode, cur.periodType, cur.limit, opt.key);
+                }
+              }
+            }}
+            style={{
+              padding: "2px 8px",
+              fontSize: 12,
+              border: "1px solid",
+              borderColor: klineAdj === opt.key ? "var(--accent)" : "var(--border)",
+              borderRadius: 4,
+              background: klineAdj === opt.key ? "var(--accent-bg)" : "transparent",
+              color: klineAdj === opt.key ? "var(--accent)" : "var(--muted)",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+            title={t("stockAnalysis.adj.tip")}
+          >
+            {opt.label}
           </button>
         ))}
       </div>

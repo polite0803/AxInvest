@@ -141,6 +141,7 @@ impl StockVendor for BaiduStockVendor {
                     volume,
                     amount,
                     turnover_rate,
+                    adj_factor: None,
                 })
             })
             .collect())

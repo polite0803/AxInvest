@@ -7391,6 +7391,39 @@
     },
     "watchlistEmpty": "Keine Watchlist-Einträge. Suchen und + klicken",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "Auto-Ber.",
+      "none": "Keine",
+      "forward": "Vorwärts",
+      "backward": "Rückwärts",
+      "tip": "Preisanpassung für Dividenden und Splits"
+    },
+    "calendar": {
+      "filter": {
+        "all": "Alle",
+        "earnings": "Berichte",
+        "lockup": "Freigabe",
+        "dividend": "Dividende"
+      },
+      "earningsPre": "Vorab",
+      "earningsExpress": "Schnell",
+      "earningsFormal": "Bericht",
+      "shareholdersMeeting": "HV",
+      "noDataForFilter": "Keine Ereignisse für diesen Filter"
+    },
+    "valuationBand": {
+      "title": "Bewertungsband",
+      "current": "Aktuell",
+      "noData": "Keine Daten",
+      "pePercentile": "PE Perzentil",
+      "pbPercentile": "PB Perzentil",
+      "verdictDeepValue": "Tief bewertet",
+      "verdictUndervalued": "Unterbewertet",
+      "verdictFair": "Fair",
+      "verdictExpensive": "Teuer",
+      "verdictOvervalued": "Überbewertet",
+      "verdictInsufficient": "Daten unzureichend"
+    },
     "history": "History",
     "historyEmpty": "Keine Analyse-Historie",
     "debateHistory": "Debate History",

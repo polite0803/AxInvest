@@ -824,6 +824,47 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
     )
     .await?;
 
+    // --- R3 数据层：财务快照（用于估值带） ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS financial_snapshots (\
+            id TEXT NOT NULL PRIMARY KEY, \
+            stock_code TEXT NOT NULL, \
+            snapshot_date TEXT NOT NULL, \
+            pe_ttm REAL, pb REAL, ps_ttm REAL, pcf REAL, ev_ebitda REAL, \
+            roe REAL, gross_margin REAL, debt_ratio REAL, \
+            revenue_yoy REAL, profit_yoy REAL, \
+            source TEXT, \
+            created_at INTEGER NOT NULL)",
+    )
+    .await?;
+    db.execute_unprepared(
+        "CREATE INDEX IF NOT EXISTS idx_financial_snapshots_code_date \
+         ON financial_snapshots(stock_code, snapshot_date)",
+    )
+    .await?;
+
+    // --- R3 数据层：财报披露事件 ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS earnings_events (\
+            id TEXT NOT NULL PRIMARY KEY, \
+            stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
+            event_date TEXT NOT NULL, \
+            event_type TEXT NOT NULL, \
+            period TEXT, detail TEXT, source TEXT, \
+            created_at INTEGER NOT NULL)",
+    )
+    .await?;
+    db.execute_unprepared(
+        "CREATE INDEX IF NOT EXISTS idx_earnings_events_code_date \
+         ON earnings_events(stock_code, event_date)",
+    )
+    .await?;
+    db.execute_unprepared(
+        "CREATE INDEX IF NOT EXISTS idx_earnings_events_date \
+         ON earnings_events(event_date)",
+    )
+    .await?;
+
     // ========================================================================
     // SECTION K: Indexes
     // ========================================================================

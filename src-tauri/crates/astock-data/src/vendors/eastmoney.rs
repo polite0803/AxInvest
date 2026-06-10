@@ -144,6 +144,7 @@ impl StockVendor for EastMoneyVendor {
                     volume: parse(parts[5]),
                     amount: parse(parts[6]),
                     turnover_rate: Some(parse(parts[10])),
+                    adj_factor: None,
                 })
             })
             .collect::<Result<Vec<_>, DataError>>()?;
@@ -1373,6 +1374,7 @@ impl StockVendor for EastMoneyVendor {
                     } else {
                         None
                     },
+                    adj_factor: None,
                 })
             })
             .collect::<Result<_, _>>()?;

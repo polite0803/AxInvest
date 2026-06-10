@@ -8072,6 +8072,39 @@
       "weekly": "周",
       "monthly": "月"
     },
+    "adj": {
+      "auto": "自动复权",
+      "none": "不复权",
+      "forward": "前复权",
+      "backward": "后复权",
+      "tip": "除权除息价格调整"
+    },
+    "calendar": {
+      "filter": {
+        "all": "全部",
+        "earnings": "财报",
+        "lockup": "解禁",
+        "dividend": "分红"
+      },
+      "earningsPre": "业绩预告",
+      "earningsExpress": "业绩快报",
+      "earningsFormal": "正式财报",
+      "shareholdersMeeting": "股东大会",
+      "noDataForFilter": "该分类暂无事件"
+    },
+    "valuationBand": {
+      "title": "估值带",
+      "current": "当前",
+      "noData": "暂无估值数据",
+      "pePercentile": "PE 分位",
+      "pbPercentile": "PB 分位",
+      "verdictDeepValue": "深度低估",
+      "verdictUndervalued": "低估",
+      "verdictFair": "合理",
+      "verdictExpensive": "偏高",
+      "verdictOvervalued": "高估",
+      "verdictInsufficient": "数据不足"
+    },
     "subtitle": "AxInvest · 智能驱动 · 多维分析",
     "riskScore": "风险分: {{score}}",
     "buyShort": "买",

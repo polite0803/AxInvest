@@ -654,6 +654,7 @@ impl StockVendor for MootdxVendor {
                                     volume: b.vol,
                                     amount: b.amount,
                                     turnover_rate: None,
+                                    adj_factor: None,
                                 })
                                 .collect());
                         },

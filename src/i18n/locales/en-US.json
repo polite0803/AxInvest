@@ -8071,6 +8071,39 @@
       "weekly": "W",
       "monthly": "M"
     },
+    "adj": {
+      "auto": "Auto Adj",
+      "none": "None",
+      "forward": "Forward",
+      "backward": "Backward",
+      "tip": "Price adjustment for dividends and stock splits"
+    },
+    "calendar": {
+      "filter": {
+        "all": "All",
+        "earnings": "Earnings",
+        "lockup": "Unlock",
+        "dividend": "Dividend"
+      },
+      "earningsPre": "Prelim",
+      "earningsExpress": "Express",
+      "earningsFormal": "Report",
+      "shareholdersMeeting": "AGM",
+      "noDataForFilter": "No events for this filter"
+    },
+    "valuationBand": {
+      "title": "Valuation Band",
+      "current": "Now",
+      "noData": "No valuation data",
+      "pePercentile": "PE pct",
+      "pbPercentile": "PB pct",
+      "verdictDeepValue": "Deep value",
+      "verdictUndervalued": "Undervalued",
+      "verdictFair": "Fair",
+      "verdictExpensive": "Expensive",
+      "verdictOvervalued": "Overvalued",
+      "verdictInsufficient": "Insufficient data"
+    },
     "subtitle": "AxInvest · AI-Powered Multi-Dimensional Analysis",
     "riskScore": "Risk Score: {{score}}",
     "buyShort": "Buy",

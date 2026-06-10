@@ -7391,6 +7391,39 @@
     },
     "watchlistEmpty": "لا توجد أسهم في قائمة المراقبة. ابحث وانقر على +",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "تعديل تلقائي",
+      "none": "بدون تعديل",
+      "forward": "تعديل أمامي",
+      "backward": "تعديل خلفي",
+      "tip": "تعديل السعر حسب الأرباح وتجزئة الأسهم"
+    },
+    "calendar": {
+      "filter": {
+        "all": "الكل",
+        "earnings": "أرباح",
+        "lockup": "تحرير",
+        "dividend": "توزيعات"
+      },
+      "earningsPre": "توقعات",
+      "earningsExpress": "أولية",
+      "earningsFormal": "البيان",
+      "shareholdersMeeting": "الجمعية",
+      "noDataForFilter": "لا توجد أحداث لهذا التصنيف"
+    },
+    "valuationBand": {
+      "title": "نطاق التقييم",
+      "current": "الحالي",
+      "noData": "لا توجد بيانات",
+      "pePercentile": "نسبة PE",
+      "pbPercentile": "نسبة PB",
+      "verdictDeepValue": "تقييم متدنٍ",
+      "verdictUndervalued": "أقل من القيمة",
+      "verdictFair": "عادل",
+      "verdictExpensive": "مرتفع قليلاً",
+      "verdictOvervalued": "مبالغ فيه",
+      "verdictInsufficient": "بيانات غير كافية"
+    },
     "history": "History",
     "historyEmpty": "لا يوجد سجل تحليل",
     "debateHistory": "Debate History",

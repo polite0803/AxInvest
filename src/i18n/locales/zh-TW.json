@@ -7392,6 +7392,39 @@
     },
     "watchlistEmpty": "暂无自选股，搜索股票后点击 + 添加",
     "loadHistory": "点击載入历史分析报告",
+    "adj": {
+      "auto": "自動復權",
+      "none": "不復權",
+      "forward": "前復權",
+      "backward": "後復權",
+      "tip": "除權除息價格調整"
+    },
+    "calendar": {
+      "filter": {
+        "all": "全部",
+        "earnings": "財報",
+        "lockup": "解鎖",
+        "dividend": "分紅"
+      },
+      "earningsPre": "業績預告",
+      "earningsExpress": "業績快報",
+      "earningsFormal": "正式財報",
+      "shareholdersMeeting": "股東大會",
+      "noDataForFilter": "該分類暫無事件"
+    },
+    "valuationBand": {
+      "title": "估值帶",
+      "current": "當前",
+      "noData": "暫無估值數據",
+      "pePercentile": "PE 分位",
+      "pbPercentile": "PB 分位",
+      "verdictDeepValue": "深度低估",
+      "verdictUndervalued": "低估",
+      "verdictFair": "合理",
+      "verdictExpensive": "偏高",
+      "verdictOvervalued": "高估",
+      "verdictInsufficient": "數據不足"
+    },
     "history": "历史分析",
     "historyEmpty": "暂无历史分析记录",
     "debateHistory": "历史辯論",

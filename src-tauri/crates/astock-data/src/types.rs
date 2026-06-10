@@ -91,6 +91,52 @@ pub struct KLine {
     pub volume: f64,
     pub amount: f64,
     pub turnover_rate: Option<f64>,
+    /// 复权因子(R3-A):
+    ///   - None 表示不复权
+    ///   - Some(1.0) 表示原始价格
+    ///   - Some(2.5) 表示相对基准日已折算 2.5 倍
+    ///
+    ///   前复权:以最近一日为基准,历史价 * adj_factor
+    ///   后复权:以最早一日为基准,后续价 / adj_factor
+    ///   等比前复权(ETF/指数常用):同前复权
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adj_factor: Option<f64>,
+}
+
+/// 复权类型(R3-A)
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AdjType {
+    /// 不复权
+    None,
+    /// 前复权(以最近一日为基准,历史价 *= adj_factor)
+    #[default]
+    Forward,
+    /// 后复权(以最早一日为基准,后续价 /= adj_factor)
+    Backward,
+}
+
+impl AdjType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AdjType::None => "none",
+            AdjType::Forward => "forward",
+            AdjType::Backward => "backward",
+        }
+    }
+}
+
+/// 除权除息调整事件(用于计算复权因子)(R3-A)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentEvent {
+    pub stock_code: String,
+    /// 调整生效日(除权除息日 ex_date)
+    pub ex_date: String,
+    /// 每股现金分红(元),送转后每股/10股或1股
+    pub cash_dividend_per_share: f64,
+    /// 送股比例 (例如 0.2 = 每10股送2股, = 每1股送0.2股)
+    pub bonus_share_ratio: f64,
 }
 
 /// 财务报告
@@ -203,6 +249,163 @@ pub struct LockupSchedule {
     pub unlock_shares: f64,
     pub unlock_ratio: f64,
     pub shareholder: Option<String>,
+}
+
+/// 财报披露事件(R3-B)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EarningsEvent {
+    pub stock_code: String,
+    pub stock_name: String,
+    /// 披露日期(YYYY-MM-DD)
+    pub event_date: String,
+    /// 事件子类型: "preliminary" | "express" | "formal" | "shareholders_meeting"
+    pub event_type: String,
+    /// 财报期间(可选):"2025Q3" / "2025年报"
+    pub period: Option<String>,
+    /// 摘要/标题(可选)
+    pub detail: Option<String>,
+    /// 来源 vendor 标识
+    pub source: Option<String>,
+}
+
+impl EarningsEvent {
+    /// 推断事件子类型(从标题/分类)
+    ///
+    /// 输入是公告原始 `ann_type` 或 `title` 字符串,粗略归类:
+    /// - "业绩预告" → "preliminary"
+    /// - "业绩快报" → "express"
+    /// - "年度报告" / "季度报告" / "半年度" → "formal"
+    /// - "股东大会" → "shareholders_meeting"
+    /// - 其它 → "other"
+    pub fn classify(title_or_type: &str) -> &'static str {
+        let s = title_or_type;
+        if s.contains("业绩预告") || s.contains("预增") || s.contains("预减") {
+            "preliminary"
+        } else if s.contains("业绩快报") {
+            "express"
+        } else if s.contains("年度报告")
+            || s.contains("年报")
+            || s.contains("季度报告")
+            || s.contains("一季报")
+            || s.contains("半年报")
+            || s.contains("三季报")
+            || s.contains("中报")
+        {
+            "formal"
+        } else if s.contains("股东大会") {
+            "shareholders_meeting"
+        } else {
+            "other"
+        }
+    }
+}
+
+/// 从公告标题推断"报告期间"(2024年报 / 2025Q1 / 2025半年报 ...)
+///
+/// 用于把"2024年年度报告"统一为 "2024年报"。
+pub fn extract_report_period(title: &str) -> Option<String> {
+    // 抓取"YYYY年"+"报告类型"片段
+    let mut year_start: Option<usize> = None;
+    {
+        let chars: Vec<char> = title.chars().collect();
+        let mut i = 0;
+        while i + 5 <= chars.len() {
+            if chars[i].is_ascii_digit()
+                && chars[i + 1].is_ascii_digit()
+                && chars[i + 2].is_ascii_digit()
+                && chars[i + 3].is_ascii_digit()
+                && chars[i + 4] == '年'
+            {
+                year_start = Some(i);
+                break;
+            }
+            i += 1;
+        }
+    }
+    let yi = year_start?;
+    let year: String = title.chars().skip(yi).take(4).collect();
+    // 取"年"之后的所有字符作为 rest
+    let rest_chars: String = title.chars().skip(yi + 5).collect();
+    let rest = rest_chars.as_str();
+
+    // 半年报 → year + "半年报"；一季/中报/三季报 → year + "Q1/2/3"
+    if rest.starts_with("第一季度报告") || rest.starts_with("一季报") {
+        return Some(format!("{year}Q1"));
+    }
+    if rest.starts_with("半年度报告") || rest.starts_with("半年报") || rest.starts_with("中期报告")
+    {
+        return Some(format!("{year}半年报"));
+    }
+    if rest.starts_with("第三季度报告") || rest.starts_with("三季报") {
+        return Some(format!("{year}Q3"));
+    }
+    if rest.starts_with("年度报告") || rest.starts_with("年报") {
+        return Some(format!("{year}年报"));
+    }
+    // 业绩预告/快报:用 "预告/快报" 作为标记,期间不细化
+    if rest.contains("业绩预告") {
+        return Some(format!("{year}业绩预告"));
+    }
+    if rest.contains("业绩快报") {
+        return Some(format!("{year}业绩快报"));
+    }
+    None
+}
+
+#[cfg(test)]
+mod earnings_event_tests {
+    use super::*;
+
+    #[test]
+    fn classify_preliminary() {
+        assert_eq!(EarningsEvent::classify("2025年业绩预告"), "preliminary");
+        assert_eq!(EarningsEvent::classify("关于2025年预增公告"), "preliminary");
+    }
+
+    #[test]
+    fn classify_express() {
+        assert_eq!(EarningsEvent::classify("2025年业绩快报"), "express");
+    }
+
+    #[test]
+    fn classify_formal() {
+        assert_eq!(EarningsEvent::classify("2024年年度报告"), "formal");
+        assert_eq!(EarningsEvent::classify("2025年第一季度报告"), "formal");
+        assert_eq!(EarningsEvent::classify("2025年半年报"), "formal");
+        assert_eq!(EarningsEvent::classify("2025年三季报"), "formal");
+    }
+
+    #[test]
+    fn classify_meeting() {
+        assert_eq!(EarningsEvent::classify("2025年第一次临时股东大会"), "shareholders_meeting");
+    }
+
+    #[test]
+    fn classify_other() {
+        assert_eq!(EarningsEvent::classify("关于公司名称变更的公告"), "other");
+    }
+
+    #[test]
+    fn extract_period_yearly() {
+        assert_eq!(extract_report_period("2024年年度报告"), Some("2024年报".to_string()));
+    }
+
+    #[test]
+    fn extract_period_q1_q3() {
+        assert_eq!(extract_report_period("2025年第一季度报告"), Some("2025Q1".to_string()));
+        assert_eq!(extract_report_period("2025年三季报"), Some("2025Q3".to_string()));
+    }
+
+    #[test]
+    fn extract_period_half() {
+        assert_eq!(extract_report_period("2025年半年度报告"), Some("2025半年报".to_string()));
+    }
+
+    #[test]
+    fn extract_period_none_for_unrelated() {
+        assert_eq!(extract_report_period("公司名称变更"), None);
+    }
 }
 
 /// 融资融券数据
@@ -632,9 +835,11 @@ mod tests {
             volume: 10000.0,
             amount: 105000.0,
             turnover_rate: Some(0.5),
+            adj_factor: None,
         };
         let json = serde_json::to_string(&kline).unwrap();
         assert!(json.contains("2025-01-15"));
+        assert!(!json.contains("adjFactor"), "adj_factor=None 应被 skip");
         let _parsed: KLine = serde_json::from_str(&json).unwrap();
     }
 

@@ -180,6 +180,7 @@ fn parse_klines(raw: &str, _stock_code: &str) -> Result<Vec<KLine>, DataError> {
             volume: parse(5),
             amount: parse(6),
             turnover_rate: None,
+            adj_factor: None,
         });
     }
     Ok(result)

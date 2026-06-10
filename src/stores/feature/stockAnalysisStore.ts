@@ -278,6 +278,10 @@ interface StockAnalysisState {
   klinePeriod: string;
   setKlinePeriod: (period: string) => void;
 
+  // R3-A: K-line adjustment type (复权)
+  klineAdj: "auto" | "none" | "forward" | "backward";
+  setKlineAdj: (adj: "auto" | "none" | "forward" | "backward") => void;
+
   // Phase 1: Auto-refresh toggle
   autoRefresh: boolean;
   setAutoRefresh: (enabled: boolean) => void;
@@ -323,7 +327,12 @@ interface StockAnalysisState {
   // Actions
   searchStock: (keyword: string) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
-  getStockKline: (code: string, period: string, limit: number) => Promise<void>;
+  getStockKline: (
+    code: string,
+    period: string,
+    limit: number,
+    adj?: "auto" | "none" | "forward" | "backward",
+  ) => Promise<void>;
   startAnalysis: (stockCode: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
   getDryRun: () => Promise<boolean>;
@@ -389,6 +398,7 @@ const initialState = {
   llmStatus: "unknown" as const,
   chatIndicatorDismissed: false,
   klinePeriod: "6m",
+  klineAdj: "auto" as const,
   autoRefresh: false,
   klineIndicators: { ma5: true, ma10: true, ma20: true },
   sidebarCollapsed: {},
@@ -443,7 +453,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  getStockKline: async (code: string, period: string, limit: number) => {
+  getStockKline: async (
+    code: string,
+    period: string,
+    limit: number,
+    adj?: "auto" | "none" | "forward" | "backward",
+  ) => {
     try {
       // 时间旅行：K 线按 as_of_date 截断
       const asOfDate = useTimeAnchorStore.getState().asOfDate;
@@ -452,6 +467,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         period,
         limit,
         asOfDate,
+        adj: adj ?? get().klineAdj,
       });
       set({ klineData });
     } catch (e) {
@@ -792,6 +808,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   setKlinePeriod: (period: string) => {
     set({ klinePeriod: period });
+  },
+
+  setKlineAdj: (adj) => {
+    set({ klineAdj: adj });
   },
 
   setAutoRefresh: (enabled: boolean) => {

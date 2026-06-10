@@ -7391,6 +7391,39 @@
     },
     "watchlistEmpty": "Sin valores en seguimiento. Busque y haga clic en +",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "Auto Ajuste",
+      "none": "Sin ajuste",
+      "forward": "Adelante",
+      "backward": "Atrás",
+      "tip": "Ajuste de precio por dividendos y splits"
+    },
+    "calendar": {
+      "filter": {
+        "all": "Todos",
+        "earnings": "Resultados",
+        "lockup": "Vencim.",
+        "dividend": "Dividendo"
+      },
+      "earningsPre": "Previos",
+      "earningsExpress": "Exprés",
+      "earningsFormal": "Informe",
+      "shareholdersMeeting": "Junta",
+      "noDataForFilter": "Sin eventos en este filtro"
+    },
+    "valuationBand": {
+      "title": "Banda de Valoración",
+      "current": "Actual",
+      "noData": "Sin datos",
+      "pePercentile": "PE pct",
+      "pbPercentile": "PB pct",
+      "verdictDeepValue": "Infravalorado",
+      "verdictUndervalued": "Por debajo",
+      "verdictFair": "Justo",
+      "verdictExpensive": "Algo caro",
+      "verdictOvervalued": "Sobrevalorado",
+      "verdictInsufficient": "Datos insuficientes"
+    },
     "history": "History",
     "historyEmpty": "Sin historial de análisis",
     "debateHistory": "Debate History",

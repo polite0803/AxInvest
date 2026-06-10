@@ -8761,6 +8761,39 @@
     },
     "watchlistEmpty": "お気に入り銘柄はありません。検索して+をクリック",
     "loadHistory": "Click to load history",
+    "adj": {
+      "auto": "自動調整",
+      "none": "調整なし",
+      "forward": "前方調整",
+      "backward": "後方調整",
+      "tip": "配当・分割の株価調整"
+    },
+    "calendar": {
+      "filter": {
+        "all": "すべて",
+        "earnings": "決算",
+        "lockup": "解禁",
+        "dividend": "配当"
+      },
+      "earningsPre": "業績予想",
+      "earningsExpress": "速報",
+      "earningsFormal": "本決算",
+      "shareholdersMeeting": "株主総会",
+      "noDataForFilter": "該当イベントなし"
+    },
+    "valuationBand": {
+      "title": "バリュエーション帯",
+      "current": "現在",
+      "noData": "データなし",
+      "pePercentile": "PE分位",
+      "pbPercentile": "PB分位",
+      "verdictDeepValue": "深掘り割安",
+      "verdictUndervalued": "割安",
+      "verdictFair": "妥当",
+      "verdictExpensive": "高め",
+      "verdictOvervalued": "割高",
+      "verdictInsufficient": "データ不足"
+    },
     "history": "History",
     "historyEmpty": "履歴分析記録はありません",
     "debateHistory": "Debate History",

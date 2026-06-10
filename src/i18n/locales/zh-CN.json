@@ -3834,6 +3834,7 @@
     "search": "搜索..."
   },
   "workflow": {
+    "loopBackCycleDetected": "回环边会形成闭环，请调整目标节点",
     "aiPanel": {
       "enterWorkflowDesc": "请输入工作流描述",
       "workflowGenerated": "工作流已生成",
@@ -3845,6 +3846,7 @@
       "recommendationGenerated": "推荐已生成",
       "recommendationFailed": "推荐失败",
       "copiedToClipboard": "已复制到剪贴板",
+      "lockedByExpert": "系统提示词由所选专家提供，无法修改",
       "tabGenerateWorkflow": "生成工作流",
       "describeWorkflow": "描述你的工作流",
       "generatePlaceholder": "例如：创建一个代码审查工作流，探索代码库结构...",
@@ -3994,6 +3996,7 @@
       "nodesTab": "节点",
       "searchNodes": "搜索节点",
       "legacySuffix": " (旧版)",
+      "layout": "布局辅助",
       "templatesTab": "模板",
       "searchTemplates": "搜索模板",
       "layout": "布局"
@@ -4546,9 +4549,12 @@
       "debate": "辩论",
       "databaseQuery": "数据库查询",
       "switch": "分支",
+      "swarm": "群智协作",
+      "storage": "持久化存储",
+      "workflowRef": "工作流引用",
+      "phaseSeparator": "阶段分隔线",
       "groupFrame": "分组框",
-      "phaseSeparator": "阶段分隔",
-      "storage": "存储"
+      "toolSetSelector": "工具集"
     },
     "templateList": {
       "deleted": "已删除",
@@ -4659,7 +4665,10 @@
       "routingPrompt": "路由提示词",
       "routingPromptPlaceholder": "描述 LLM 判断分支的依据...",
       "routingModel": "路由模型（可选）",
-      "routingModelPlaceholder": "留空使用系统默认模型"
+      "routingModelPlaceholder": "留空使用系统默认模型",
+      "deleteNode": "删除此节点",
+      "edgeTypeDebateRound": "辩论回合",
+      "edgeTypeGrouping": "分组"
     },
     "statusBar": {
       "unsaved": "未保存",
@@ -4781,6 +4790,33 @@
       "waitAll": "等待全部",
       "waitAny": "等待任一",
       "decorative": "装饰"
+    },
+    "containerNode": {
+      "nodes": "节点",
+      "branchTimeout": "已配置分支超时"
+    },
+    "swarmNode": {
+      "agents": "智能体",
+      "rounds": "轮"
+    },
+    "groupNode": {
+      "untitled": "分组",
+      "folded": "已折叠"
+    },
+    "phaseSeparator": {
+      "defaultLabel": "阶段"
+    },
+    "canvasTitle": {
+      "clickToRename": "点击重命名"
+    },
+    "node": {
+      "inputs": "输入",
+      "outputs": "输出",
+      "type": "类型",
+      "clickToExpandPorts": "点击展开端口",
+      "clickToCollapsePorts": "点击折叠端口",
+      "tickMode": "Tick模式",
+      "retryEnabled": "重试已启用"
     },
     "debateNode": {
       "debaters": "辩手",
@@ -5235,6 +5271,22 @@
     },
     "batchEditMode": "批量编辑模式",
     "noExecutionHistory": "无执行历史",
+    "legend": {
+      "title": "工作流图例",
+      "toggleLabel": "{{action}}图例",
+      "expand": "展开",
+      "collapse": "收起"
+    },
+    "caseLabel": "分支 {{n}}",
+    "paramKey": "参数_{{n}}",
+    "subWorkflowLabel": "子工作流",
+    "nodesCount": "{{count}} 个节点",
+    "contextMenu": {
+      "label": "节点操作"
+    },
+    "templateList": {
+      "moreActions": "「{{name}}」的更多操作"
+    },
     "nodeConfig": {
       "add_debater": "添加辩手",
       "convergence_model_role": "收敛模型角色",
@@ -5268,6 +5320,15 @@
       "agents": "代理",
       "rounds": "轮次"
     }
+=======
+    "search": {
+      "prev": "上一个匹配",
+      "next": "下一个匹配",
+      "close": "关闭搜索",
+      "placeholder": "搜索节点..."
+    },
+    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}"
+>>>>>>> upstream/master
   },
   "atomicSkill": {
     "entryType": "入口类型",
@@ -5321,7 +5382,11 @@
     "statusFailed": "失败",
     "statusPaused": "已暂停",
     "statusPending": "待执行",
-    "statusRunning": "运行中"
+    "statusRunning": "运行中",
+    "unsavedTitle": "未保存的更改",
+    "unsavedContent": "你有未保存的更改，确定放弃吗？",
+    "discard": "放弃",
+    "keepEditing": "继续编辑"
   },
   "rl": {
     "policyDashboard": "RL 策略面板",

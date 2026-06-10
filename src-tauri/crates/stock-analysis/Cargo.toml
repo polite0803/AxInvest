@@ -20,6 +20,7 @@ axagent-tools = { path = "../tools" }
 axagent-providers = { path = "../providers" }
 axagent-core = { path = "../core" }
 axagent-harness = { path = "../harness" }
+axagent-entities = { path = "../entities" }
 sea-orm = { workspace = true }
 uuid = { workspace = true }
 futures = "0.3"

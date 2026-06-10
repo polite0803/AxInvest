@@ -169,6 +169,73 @@ export interface EvolutionDriftDashboard {
 
 /** getDryRun 模块级缓存 (60s TTL) */
 let dryRunCache: { value: boolean; ts: number } | null = null;
+
+// ── R2 组合监控类型 ──
+
+/** R2 压测单条结果 */
+export interface PortfolioStressResult {
+  scenario: string;
+  label: string;
+  portfolioPnl: number;
+  portfolioPnlPct: number;
+  topHit?: { stockCode: string; stockName: string; pnlPct: number };
+  note: string;
+}
+
+export interface PortfolioStressBundle {
+  m10?: PortfolioStressResult;
+  m20?: PortfolioStressResult;
+  blackSwan?: PortfolioStressResult;
+}
+
+export interface PortfolioPositionRow {
+  stockCode: string;
+  stockName: string;
+  totalShares: number;
+  avgCost: number;
+  currentPrice?: number;
+  marketValue?: number;
+  unrealizedPnl?: number;
+  unrealizedPnlPct?: number;
+  totalRealizedPnl: number;
+  sectorName?: string;
+}
+
+export interface PortfolioDashboard {
+  isHistorical: boolean;
+  asOfDate?: string;
+  totalMarketValue: number;
+  totalPnl: number;
+  totalPnlPct: number;
+  cashPct: number;
+  maxDrawdownPct: number;
+  beta?: number;
+  sharpe30d?: number;
+  correlationAvg?: number;
+  topConcentrationPct: number;
+  sectorExposure: Record<string, number>;
+  concentrationWarning?: string;
+  riskLevel: string;
+  diversificationScore: number;
+  stressTest: PortfolioStressBundle;
+  positions: PortfolioPositionRow[];
+  snapshotAt: number;
+}
+
+export interface PortfolioCorrelationCell {
+  codeA: string;
+  codeB: string;
+  correlation: number;
+}
+
+export interface PositionLimitsCheck {
+  ok: boolean;
+  reason?: string;
+  maxSingleStockPct: number;
+  maxTotalPositions: number;
+  maxSectorExposurePct: number;
+  newPositionValue: number;
+}
 const DRY_RUN_TTL_MS = 60_000;
 
 interface StockAnalysisState {
@@ -273,6 +340,20 @@ interface StockAnalysisState {
   recalcEvolutionNow: (asOfDate?: string | null) => Promise<void>;
   loadRecoStrategyWeights: () => Promise<Record<string, number>>;
 
+  // R2 组合监控
+  portfolioDashboard: PortfolioDashboard | null;
+  portfolioCorrelations: PortfolioCorrelationCell[];
+  portfolioRefreshing: boolean;
+  portfolioLastError: string | null;
+  fetchPortfolioDashboard: (asOfDate?: string | null) => Promise<void>;
+  refreshPortfolioMetrics: (asOfDate?: string | null) => Promise<void>;
+  fetchPortfolioCorrelations: (asOfDate?: string | null) => Promise<void>;
+  checkPositionLimits: (
+    stockCode: string,
+    proposedShares: number,
+    proposedPrice: number,
+  ) => Promise<PositionLimitsCheck | null>;
+
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
   _searchTimer: ReturnType<typeof setTimeout> | null;
@@ -321,6 +402,10 @@ const initialState = {
   evolutionDashboard: null,
   evolutionRecalculating: false,
   evolutionLastError: null,
+  portfolioDashboard: null,
+  portfolioCorrelations: [],
+  portfolioRefreshing: false,
+  portfolioLastError: null,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -597,6 +682,69 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     } catch (e) {
       console.warn("[EvolutionDrift] load reco strategy weights failed:", e);
       return {};
+    }
+  },
+
+  // R2 组合监控
+  fetchPortfolioDashboard: async (asOfDate?: string | null) => {
+    try {
+      const data = await invoke<PortfolioDashboard>("get_portfolio_dashboard", {
+        asOfDate: asOfDate ?? null,
+      });
+      set({ portfolioDashboard: data, portfolioLastError: null });
+    } catch (e) {
+      set({ portfolioLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[PortfolioMonitor] fetch dashboard failed:", e);
+    }
+  },
+
+  refreshPortfolioMetrics: async (asOfDate?: string | null) => {
+    set({ portfolioRefreshing: true, portfolioLastError: null });
+    try {
+      await invoke<{
+        metricsId: string;
+        positionsSnapshotted: number;
+        correlationPairsWritten: number;
+        asOfDate: string | null;
+      }>("refresh_portfolio_metrics", { asOfDate: asOfDate ?? null });
+      await Promise.all([
+        get().fetchPortfolioDashboard(asOfDate ?? null),
+        get().fetchPortfolioCorrelations(asOfDate ?? null),
+      ]);
+    } catch (e) {
+      set({ portfolioLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[PortfolioMonitor] refresh failed:", e);
+    } finally {
+      set({ portfolioRefreshing: false });
+    }
+  },
+
+  fetchPortfolioCorrelations: async (asOfDate?: string | null) => {
+    try {
+      const data = await invoke<PortfolioCorrelationCell[]>(
+        "get_portfolio_correlations",
+        { asOfDate: asOfDate ?? null },
+      );
+      set({ portfolioCorrelations: data });
+    } catch (e) {
+      console.error("[PortfolioMonitor] fetch correlations failed:", e);
+    }
+  },
+
+  checkPositionLimits: async (
+    stockCode: string,
+    proposedShares: number,
+    proposedPrice: number,
+  ) => {
+    try {
+      return await invoke<PositionLimitsCheck>("check_position_limits", {
+        stockCode,
+        proposedShares,
+        proposedPrice,
+      });
+    } catch (e) {
+      console.error("[PortfolioMonitor] check position limits failed:", e);
+      return null;
     }
   },
 

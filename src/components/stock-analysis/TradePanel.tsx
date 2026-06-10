@@ -38,6 +38,8 @@ export function TradePanel() {
   const storeStockCode = useStockAnalysisStore((s) => s.stockCode);
   const storeStockName = useStockAnalysisStore((s) => s.stockName);
   const storeDecision = useStockAnalysisStore((s) => s.decision);
+  // R2: 买入前 position_limits 校验
+  const checkPositionLimits = useStockAnalysisStore((s) => s.checkPositionLimits);
   const [enabled, setEnabled] = useState(false);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [positions, setPositions] = useState<PositionSummary[]>([]);
@@ -97,6 +99,17 @@ export function TradePanel() {
 
   const handleRecord = async () => {
     if (!form.stockCode || form.price <= 0) { return message.warning(t("trade.fillRequired")); }
+    // R2: 买入前先做 position_limits 校验
+    if (form.direction === "buy") {
+      const check = await checkPositionLimits(
+        form.stockCode,
+        form.quantity,
+        form.price,
+      );
+      if (check && !check.ok) {
+        return message.warning(`${t("trade.limitsBlocked")}: ${check.reason ?? ""}`);
+      }
+    }
     const now = dayjs();
     try {
       await invoke("record_trade", {

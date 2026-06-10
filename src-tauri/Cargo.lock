@@ -1478,6 +1478,7 @@ dependencies = [
  "axagent-agent",
  "axagent-astock-data",
  "axagent-core",
+ "axagent-entities",
  "axagent-harness",
  "axagent-providers",
  "axagent-runtime-core",

@@ -798,6 +798,32 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
     )
     .await?;
 
+    // --- R2 组合监控：每日快照 ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS portfolio_metrics_daily (\
+            id TEXT NOT NULL PRIMARY KEY, snapshot_date TEXT NOT NULL, \
+            total_market_value REAL NOT NULL DEFAULT 0, cash_pct REAL NOT NULL DEFAULT 0, \
+            total_pnl REAL NOT NULL DEFAULT 0, total_pnl_pct REAL NOT NULL DEFAULT 0, \
+            max_drawdown_pct REAL NOT NULL DEFAULT 0, \
+            beta REAL, sharpe_30d REAL, correlation_avg REAL, \
+            top_concentration_pct REAL NOT NULL DEFAULT 0, \
+            sector_exposure_json TEXT NOT NULL DEFAULT '{}', \
+            stress_test_json TEXT, \
+            created_at INTEGER NOT NULL)",
+    )
+    .await?;
+
+    // --- R2 组合监控：两两相关性快照 ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS portfolio_correlation_snapshot (\
+            id TEXT NOT NULL PRIMARY KEY, snapshot_date TEXT NOT NULL, \
+            lookback_days INTEGER NOT NULL DEFAULT 60, \
+            code_a TEXT NOT NULL, code_b TEXT NOT NULL, \
+            correlation REAL NOT NULL DEFAULT 0, \
+            created_at INTEGER NOT NULL)",
+    )
+    .await?;
+
     // ========================================================================
     // SECTION K: Indexes
     // ========================================================================
@@ -877,6 +903,11 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "CREATE INDEX IF NOT EXISTS idx_strategy_weight_strategy_period ON strategy_weight_history(strategy_id, period, applied_at)",
         "CREATE INDEX IF NOT EXISTS idx_strategy_weight_applied ON strategy_weight_history(applied_at)",
         "CREATE INDEX IF NOT EXISTS idx_strategy_weight_source_reflection ON strategy_weight_history(source_reflection_id)",
+        // R2 组合监控索引
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_metrics_date ON portfolio_metrics_daily(snapshot_date)",
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_metrics_created ON portfolio_metrics_daily(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_corr_date ON portfolio_correlation_snapshot(snapshot_date)",
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_corr_pair ON portfolio_correlation_snapshot(code_a, code_b, snapshot_date)",
     ] {
         db.execute_unprepared(sql).await?;
     }

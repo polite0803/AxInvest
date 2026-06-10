@@ -8,6 +8,9 @@ use axagent_stock_analysis::backtest::{
 };
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::plugin::AnalystPluginManager;
+use axagent_stock_analysis::portfolio_monitor::{
+    self, CorrelationCell, PortfolioDashboard, StressTestBundle,
+};
 use axagent_stock_analysis::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
 use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::recommender::{self, RecoResponse};
@@ -1005,6 +1008,161 @@ pub async fn get_portfolio_risk(
     let engine = state.trading_engine.read().await;
     let positions = engine.get_positions().await?;
     Ok(PortfolioRiskManager::compute_from_positions(&positions))
+}
+
+// ── R2 组合监控 ──
+
+/// 拉取最近一次组合监控快照（按 as_of_date 时间旅行）
+#[tauri::command]
+pub async fn get_portfolio_dashboard(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<PortfolioDashboard, String> {
+    let as_of = as_of_date.as_deref();
+    let mut dashboard = portfolio_monitor::get_dashboard(state.harness.db(), as_of).await?;
+    // 当天实时数据叠加：当前持仓/总市值（历史快照保留）
+    if as_of.is_none() {
+        let engine = state.trading_engine.read().await;
+        let positions = engine.get_positions().await?;
+        let (top, _sector, max_sec) = portfolio_monitor::compute_concentration(&positions);
+        let n = positions.len();
+        dashboard.top_concentration_pct = top;
+        dashboard.positions = positions.clone();
+        dashboard.total_market_value = positions
+            .iter()
+            .map(|p| p.market_value.unwrap_or(0.0))
+            .sum();
+        dashboard.total_pnl = positions
+            .iter()
+            .map(|p| p.unrealized_pnl.unwrap_or(0.0))
+            .sum();
+        let cost: f64 = positions
+            .iter()
+            .map(|p| p.avg_cost * p.total_shares as f64)
+            .sum();
+        dashboard.total_pnl_pct = if cost > 0.0 {
+            (dashboard.total_pnl / cost) * 100.0
+        } else {
+            0.0
+        };
+        dashboard.risk_level = portfolio_monitor::compute_risk_level(top, max_sec, n);
+        dashboard.diversification_score =
+            portfolio_monitor::compute_diversification_score(n, top, max_sec);
+        dashboard.concentration_warning =
+            portfolio_monitor::compute_concentration_warning(top, max_sec, n);
+        dashboard.sector_exposure = portfolio_monitor::compute_concentration(&positions).1;
+        // 实时 stress test
+        dashboard.stress_test =
+            portfolio_monitor::run_all_scenarios(&positions, &dashboard.sector_exposure);
+        dashboard.snapshot_at = chrono::Utc::now().timestamp_millis();
+    }
+    Ok(dashboard)
+}
+
+/// 立即刷新组合监控快照（写 portfolio_metrics_daily + correlation_snapshot）
+#[tauri::command]
+pub async fn refresh_portfolio_metrics(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let engine = state.trading_engine.read().await;
+    let positions = engine.get_positions().await?;
+    drop(engine);
+    let as_of = as_of_date.as_deref();
+
+    let (id, count) = portfolio_monitor::refresh_metrics(
+        state.harness.db(),
+        &positions,
+        &PositionLimits::default(),
+        None,
+        None,
+        None,
+        as_of,
+    )
+    .await?;
+
+    let corr_count = portfolio_monitor::refresh_correlation(
+        state.harness.db(),
+        &state.astock_client,
+        &positions,
+        60,
+        as_of,
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "metricsId": id,
+        "positionsSnapshotted": count,
+        "correlationPairsWritten": corr_count,
+        "asOfDate": as_of,
+    }))
+}
+
+/// 拉取最近一次两两相关性快照（按 as_of_date 时间旅行）
+#[tauri::command]
+pub async fn get_portfolio_correlations(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<Vec<CorrelationCell>, String> {
+    portfolio_monitor::get_correlation_snapshot(state.harness.db(), as_of_date.as_deref()).await
+}
+
+/// 压测（无 DB 副作用，纯计算）
+#[tauri::command]
+pub async fn run_portfolio_stress_test(
+    state: State<'_, AppState>,
+) -> Result<StressTestBundle, String> {
+    let engine = state.trading_engine.read().await;
+    let positions = engine.get_positions().await?;
+    let (top, sector, _max) = portfolio_monitor::compute_concentration(&positions);
+    let _ = top;
+    Ok(portfolio_monitor::run_all_scenarios(&positions, &sector))
+}
+
+/// 校验能否新开仓（position_limits）
+#[tauri::command]
+pub async fn check_position_limits(
+    state: State<'_, AppState>,
+    stock_code: String,
+    proposed_shares: i32,
+    proposed_price: f64,
+) -> Result<serde_json::Value, String> {
+    let _ = stock_code; // sector lookup not used yet; keep on signature for forward-compat
+    let engine = state.trading_engine.read().await;
+    let positions = engine.get_positions().await?;
+    let total_mv: f64 = positions
+        .iter()
+        .map(|p| p.market_value.unwrap_or(0.0))
+        .sum();
+    let (top, sector_exposures, _max_sec) = portfolio_monitor::compute_concentration(&positions);
+    let _ = top;
+    let sector_pairs: Vec<(String, f64)> = sector_exposures.into_iter().collect();
+    let limits = PositionLimits::default();
+    let new_position_value = proposed_shares as f64 * proposed_price;
+    let res = limits.check_new_position(
+        new_position_value,
+        total_mv,
+        positions.len(),
+        None,
+        &sector_pairs,
+    );
+    match res {
+        Ok(()) => Ok(serde_json::json!({
+            "ok": true,
+            "maxSingleStockPct": limits.max_single_stock_pct,
+            "maxTotalPositions": limits.max_total_positions,
+            "maxSectorExposurePct": limits.max_sector_exposure_pct,
+            "newPositionValue": new_position_value,
+        })),
+        Err(reason) => Ok(serde_json::json!({
+            "ok": false,
+            "reason": reason,
+            "maxSingleStockPct": limits.max_single_stock_pct,
+            "maxTotalPositions": limits.max_total_positions,
+            "maxSectorExposurePct": limits.max_sector_exposure_pct,
+            "newPositionValue": new_position_value,
+        })),
+    }
 }
 
 // ── Value Investing ──

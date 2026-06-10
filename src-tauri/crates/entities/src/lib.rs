@@ -44,7 +44,9 @@ pub mod memory_namespaces;
 pub mod retrieval_hits;
 pub mod rl_policies;
 
+pub mod portfolio_correlation_snapshot;
 pub mod portfolio_holdings;
+pub mod portfolio_metrics_daily;
 pub mod price_alerts;
 pub mod reco_picks;
 pub mod stock_analyses;

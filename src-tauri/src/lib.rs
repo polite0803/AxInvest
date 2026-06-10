@@ -999,6 +999,12 @@ pub fn run() {
             commands::stock_analysis::get_evolution_drift_timeline,
             commands::stock_analysis::manual_recalc_strategy_weights,
             commands::stock_analysis::get_reco_strategy_weights,
+            // R2 组合监控
+            commands::stock_analysis::get_portfolio_dashboard,
+            commands::stock_analysis::refresh_portfolio_metrics,
+            commands::stock_analysis::get_portfolio_correlations,
+            commands::stock_analysis::run_portfolio_stress_test,
+            commands::stock_analysis::check_position_limits,
             commands::stock_analysis::list_reflections,
             commands::stock_analysis::create_price_alert,
             commands::stock_analysis::list_price_alerts,

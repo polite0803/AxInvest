@@ -277,6 +277,16 @@ export function KLineChart() {
           const k = ohlc[idx];
           if (!k) { return ""; }
           const dateStr = dates[idx] || "";
+          const raw = klineData[idx];
+          const prevClose = idx > 0 ? klineData[idx - 1]?.close : null;
+          const changePct = raw && prevClose ? ((raw.close - prevClose) / prevClose * 100) : null;
+          const changeLabel = t("stockAnalysis.changePct");
+          const changeDisplay = changePct != null
+            ? `<span style="color:${changePct >= 0 ? "#ef4444" : "#22c55e"}">${changePct >= 0 ? "+" : ""}${
+              changePct.toFixed(2)
+            }%</span>`
+            : "";
+
           const openLabel = t("stockAnalysis.open");
           const closeLabel = t("stockAnalysis.close");
           const highLabel = t("stockAnalysis.high");
@@ -285,8 +295,10 @@ export function KLineChart() {
           const volUnit = t("stockAnalysis.volumeUnit");
           const lines = [
             `<div style="font-weight:600;margin-bottom:4px">${dateStr}</div>`,
-            `${openLabel}: ${k[0].toFixed(2)} &nbsp; ${closeLabel}: ${k[1].toFixed(2)}`,
-            `${highLabel}: ${k[2].toFixed(2)} &nbsp; ${lowLabel}: ${k[3].toFixed(2)}`,
+            `${openLabel}: ${k[0].toFixed(2)} &nbsp; ${closeLabel}: ${k[1].toFixed(2)}${
+              changePct != null ? ` &nbsp; ${changeLabel}: ${changeDisplay}` : ""
+            }`,
+            `${highLabel}: ${k[3].toFixed(2)} &nbsp; ${lowLabel}: ${k[2].toFixed(2)}`,
             vol ? `${volLabel}: ${(vol.value / 10000).toFixed(1)}${volUnit}` : "",
           ];
           if (indicators.ma5 && ma5[idx] != null) {

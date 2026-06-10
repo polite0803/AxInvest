@@ -739,7 +739,6 @@ export function find_safe_position(
   // 最后手段：右移 100px 后 snap，避开密集重叠区域
   return snap_to_grid(candidate.x + 100, candidate.y);
 }
-}
 
 /** 间距常量 */
 const RANK_SEP = 140; // 层间垂直间距

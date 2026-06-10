@@ -361,9 +361,10 @@ async fn seed_stock_analysis_workflow_template(
         DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode,
         LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
         OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
-        RetryPolicy, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
-        ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
-        WorkflowNode, WorkflowNodeBase,
+        RetryPolicy, StorageNode, StorageNodeConfig, SubGraph, SwitchCase, SwitchNode,
+        SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
+        TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable,
+        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -410,7 +411,20 @@ async fn seed_stock_analysis_workflow_template(
     //   修复 trader 节点输出纯文本导致前端无法解析（改为 JSON 输出）。
     // v19: 修复情绪类数据工具（get_news JSONP 解析 bug + t-sentiment-data 调用错误工具）。
     //   修复 trader 节点输出纯文本导致前端无法解析（改为 JSON 输出）。
-    const TEMPLATE_VERSION: i32 = 19;
+    // v20: 全面布局与连接修复
+    //   F-1  3×3 网格重排 trigger/p-analysts/9 组 tool+agent,消除重叠
+    //   F-2  tool 节点 title 由硬编码"获取数据"改为 tool_assignments 中已声明的描述
+    //   F-3  p-risk-assess / t-risk 同名,分别改名为"三档风险评估分组"/"组合风险计算"
+    //   F-5  raw-data aggregator 补 e-raw-data-portfolio-mgr 显式出边
+    //   F-6  data-quality 注释明确"context_sources 消费"为预期设计
+    //   F-8  a-hot-money / a-lockup / a-research 与 tool_assignments 索引错位修正
+    //   F-9  trigger_config.enabled: false → true(启用 schedule)
+    //   F-10 反思复盘 trigger_config: None → Manual + as_of_date 必填参数
+    // v22: stock-analysis 模板补充 actual_outcome / reflection_depth 变量声明，
+    //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
+    //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
+    //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
+    const TEMPLATE_VERSION: i32 = 22;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -1050,7 +1064,9 @@ async fn seed_stock_analysis_workflow_template(
             id: "trigger".into(),
             title: "开始分析".into(),
             description: Some("输入股票代码启动分析".into()),
-            position: Position { x: 250.0, y: 0.0 },
+            // F-1 修复: 3×3 网格总宽 1200 (col_x 40..1000 + 节点宽 200),
+            // 居中后 trigger x = 580 - 100 = 580。y=0 保持画布最顶部。
+            position: Position { x: 580.0, y: 0.0 },
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
@@ -1116,6 +1132,19 @@ async fn seed_stock_analysis_workflow_template(
     // 为每个分析师插入对应的数据获取 Tool 节点
     // 注：节点工具决定了下游 analyst 拿到的"前置数据"。LLM agent 自身仍可调用
     // PROFILE_TOOLS 中的工具，但首屏/冷启动数据由这些 tool 节点预拉。
+    //
+    // F-8 修复: 顺序必须与上面的 `analysts` 数组完全一致：
+    //   [0] a-market-analyst   ↔ t-market-data
+    //   [1] a-sentiment        ↔ t-sentiment-data
+    //   [2] a-news             ↔ t-news-data
+    //   [3] a-fundamentals     ↔ t-fundamentals-data
+    //   [4] a-policy           ↔ t-policy-data
+    //   [5] a-hot-money        ↔ t-hotmoney-data   (原: t-research-data 错位)
+    //   [6] a-lockup           ↔ t-lockup-data     (原: t-hotmoney-data 错位)
+    //   [7] a-research         ↔ t-research-data   (原: t-lockup-data 错位)
+    //   [8] a-sector           ↔ t-sector-data
+    // 错位会导致 hot-money analyst 拿到研报数据、research analyst 拿到解禁数据，
+    // 9 个分析师产出的报告与各自的角色语义不符。
     let tool_assignments: &[(&str, &str, &str, &str)] = &[
         ("t-market-data", "获取K线+行情", "get_stock_kline", "stock_code"),
         // 修复: t-sentiment-data 原调用 get_hot_stocks（热门股票列表，非个股新闻），
@@ -1129,32 +1158,57 @@ async fn seed_stock_analysis_workflow_template(
         // 修复 P1: 政策分析师前置数据改用 get_stock_news（新闻）而非
         // get_announcements（公告）。新闻覆盖宏观/产业政策动态更广，
         // 与 a-news 的公告视角形成互补。
-        ("t-policy-data", "获取新闻", "get_stock_news", "stock_code"),
-        // 修复 P1: 研报分析师前置数据改用 get_research_reports（研报），
-        // 让 a-research 启动时就能拿到券商研报的核心结论与目标价。
-        ("t-research-data", "获取研报+新闻", "get_research_reports", "stock_code"),
+        //
+        // F-4 待办: 当前 get_stock_news 与 t-sentiment-data 完全重复调用,
+        //   实际差异化靠 a-policy 的 system_prompt 提示词过滤"政策类"新闻。
+        //   理想方案: 在 src-tauri/src/tools/finance.rs 注册新工具
+        //   `get_policy_news`,接受参数 category=policy 走单独数据源(政府/官媒/
+        //   监管公告),此处把 tool_name 改为 "get_policy_news" 即可。
+        //   本次仅修 title 让 a-policy 与 a-sentiment 在画布上可区分。
+        ("t-policy-data", "获取政策新闻", "get_stock_news", "stock_code"),
+        // F-8 重排: a-hot-money 前置改为资金流向工具
         ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
-        ("t-lockup-data", "获取解禁质押数据", "get_stock_lockup", "stock_code"),
+        // F-8 重排: a-lockup 前置改为解禁质押工具
+        ("t-lockup-data", "获取解禁质押", "get_stock_lockup", "stock_code"),
+        // F-8 重排: a-research 前置改为研报工具
+        ("t-research-data", "获取研报+新闻", "get_research_reports", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
     ];
 
     // ── Phase 1: ParallelNode 作为视觉分组，包裹 9 组 Tool + Agent ──
-    // 布局：2 列 9 行网格（tool 左列、agent 右列）
-    //   - tool 列 x = 20，agent 列 x = 240（容器内边距 + 节点宽度 + 间距）
-    //   - 行起始 y = 40，行高 80（节点高度 + 间距）
+    // F-1 修复: 布局从"2 列 9 行"改为"3 列 3 行"网格。
+    //   原布局 (x=20 单一列, 9 行 80px) 存在 3 类重叠：
+    //     1) trigger (x=250, y=0) 与 a-market-analyst (x=240, y=40) 边界框重叠 ~7600 px²
+    //     2) p-analysts 容器 (x=300, y=200) 与 a-fundamentals (x=240, y=200)
+    //        等 3 行 analyst 节点重叠
+    //     3) 单一纵列 9 行总高 720px 浪费大量垂直空间
+    //   新布局: 3×3 网格,col_width=480 (tool 200 + gap 40 + agent 200 + 余量 40)
+    //     col_x = [40, 520, 1000]
+    //     tool x = col_x[col], agent x = col_x[col] + 240
+    //     row_y = 100 + row*120  (节点高 80, 行距 40)
+    //   trigger 居中放置 x=580 (3 列总宽 1200, 居中后左侧 580),y=0
+    //   p-analysts 容器 (20, 80) 起,完整包络 3×3 网格
+    let col_x = [40.0_f64, 520.0, 1000.0];
+    let row_y_base = 100.0;
+    let row_dy = 120.0;
     let mut analyst_branches: Vec<Branch> = Vec::with_capacity(tool_assignments.len());
     for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {
         let analyst_id = a_ids[i];
-        let row_y = 40.0 + i as f64 * 80.0;
+        let col = i % 3;
+        let row = i / 3;
+        let x_tool = col_x[col];
+        let y = row_y_base + row as f64 * row_dy;
         nodes.push(tool_node(
             tool_id,
-            "获取数据",
+            // F-2 修复: 原本硬编码 "获取数据" 导致 9 个 tool 节点 title 完全一致、
+            // 编辑器画布无法区分。改用 tool_assignments 中已经声明的中文描述。
+            tool_title,
             tool_name,
             tool_id,
             arg_key,
             Some("p-analysts"),
-            20.0,
-            row_y,
+            x_tool,
+            y,
         ));
         edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
         edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
@@ -1162,6 +1216,8 @@ async fn seed_stock_analysis_workflow_template(
             id: format!("branch-{analyst_id}"),
             title: tool_title.to_string(),
             steps: vec![tool_id.to_string(), analyst_id.to_string()],
+            branch_timeout_ms: None,
+            degrade_strategy: Default::default(),
         });
     }
 
@@ -1169,8 +1225,11 @@ async fn seed_stock_analysis_workflow_template(
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
         let tool_id = tool_assignments[i].0;
         let _fixed_tool_name = tool_assignments[i].2;
-        let row_y = 40.0 + i as f64 * 80.0;
-        let mut an = agent(id, title, _expert, Some("p-analysts"), 240.0, row_y);
+        let col = i % 3;
+        let row = i / 3;
+        let x_agent = col_x[col] + 240.0;
+        let row_y = row_y_base + row as f64 * row_dy;
+        let mut an = agent(id, title, _expert, Some("p-analysts"), x_agent, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
             a.config.max_tool_rounds = Some(2);
@@ -1218,7 +1277,10 @@ async fn seed_stock_analysis_workflow_template(
             id: "p-analysts".into(),
             title: "9 维度分析师分组".into(),
             description: Some("行情/情绪/新闻/基本面/政策/游资/解禁/研报/行业".into()),
-            position: Position { x: 300.0, y: 200.0 },
+            // F-1 修复: 原 (300, 200) 恰好压在 a-fundamentals (240, 200) 上。
+            //   3×3 网格范围 x∈[40, 1400] y∈[100, 460],容器左上放 (20, 80),
+            //   让前端能正确按 bbox 渲染分组框。
+            position: Position { x: 20.0, y: 80.0 },
             retry: RetryConfig::default(),
             timeout: Some(120),
             enabled: true,
@@ -1231,6 +1293,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(600),
             aggregation: Some(MergeStrategy::All),
             auto_input_from_parent: false, // 不自动从父节点接收输入
+            sub_graph: None,               // 稍后从子节点 parent_id 注入
         },
     }));
 
@@ -1311,6 +1374,7 @@ async fn seed_stock_analysis_workflow_template(
             convergence_model_role: Some("decision-maker".into()),
             topic_var: "trigger.output".into(),
             output_var: "debate-result".into(),
+            sub_graph: None, // 稍后从子节点 parent_id 注入
         },
     }));
 
@@ -1510,7 +1574,9 @@ async fn seed_stock_analysis_workflow_template(
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
             id: "p-risk-assess".into(),
-            title: "风险评估".into(),
+            // F-3 修复: 原本 title="风险评估" 与下面的 t-risk (compute_portfolio_risk) 同名，
+            // 编辑器画布上无法区分视觉分组与单 tool。改为"三档风险评估分组"。
+            title: "三档风险评估分组".into(),
             description: Some("三种风险偏好并行评估".into()),
             position: Position {
                 x: 300.0,
@@ -1528,22 +1594,29 @@ async fn seed_stock_analysis_workflow_template(
                     id: "risk-agg".into(),
                     title: "激进评估".into(),
                     steps: vec!["risk-agg".into()],
+                    branch_timeout_ms: None,
+                    degrade_strategy: Default::default(),
                 },
                 Branch {
                     id: "risk-con".into(),
                     title: "保守评估".into(),
                     steps: vec!["risk-con".into()],
+                    branch_timeout_ms: None,
+                    degrade_strategy: Default::default(),
                 },
                 Branch {
                     id: "risk-neu".into(),
                     title: "中性评估".into(),
                     steps: vec!["risk-neu".into()],
+                    branch_timeout_ms: None,
+                    degrade_strategy: Default::default(),
                 },
             ],
             wait_for_all: true,
             aggregation: Some(MergeStrategy::All),
             auto_input_from_parent: false,
             timeout: Some(600),
+            sub_graph: None, // 稍后从子节点 parent_id 注入
         },
     }));
     edges.push(edge(
@@ -1647,6 +1720,11 @@ async fn seed_stock_analysis_workflow_template(
             strategy: "all".into(),
             input_sources: vec!["risk-agg".into(), "risk-con".into(), "risk-neu".into()],
             output_var: "risk-aggregated".into(),
+            wait_for_all: true,
+            weights: vec![],
+            summarize_prompt: None,
+            summarize_model: None,
+            sub_graph: None,
         },
     }));
     for rid in &["risk-agg", "risk-con", "risk-neu"] {
@@ -1658,7 +1736,9 @@ async fn seed_stock_analysis_workflow_template(
     let algo_tools: &[(&str, &str, &str, &str, f64, f64)] = &[
         ("t-scoring", "技术评分", "compute_scoring", "stock_code", 300.0, 2700.0),
         ("t-valuation", "估值计算", "compute_valuation", "stock_code", 480.0, 2700.0),
-        ("t-risk", "风险评估", "compute_portfolio_risk", "stock_codes", 660.0, 2700.0),
+        // F-3 修复: title 由 "风险评估" 改为 "组合风险计算"，避免与
+        // 上面的 p-risk-assess 容器（"三档风险评估分组"）同名混淆。
+        ("t-risk", "组合风险计算", "compute_portfolio_risk", "stock_codes", 660.0, 2700.0),
     ];
     for (tool_id, title, tool_name, arg_key, x, y) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key, None, *x, *y));
@@ -1668,8 +1748,16 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 
     // ── P3 (real-nodes): raw-data 聚合节点 ──
-    // 把 12 个 t-* tool 节点的输出聚合成单个 raw 对象，供前端 rawData["raw-data"] 展示
-    // 不接 LLM，纯数据合并（Aggregator 节点），与 cls-risk-level 并行
+    // 把 12 个 t-* tool 节点的输出聚合成单个 raw 对象，供 portfolio-mgr 决策时
+    // 通过 context_sources 读取 "raw-data-aggregated" 变量。
+    //
+    // F-5 修复: 显式追加 e-raw-data-portfolio-mgr 边。
+    //   原设计 raw-data 入度 12、出度 0，仅靠 portfolio-mgr.context_sources 消费。
+    //   1) 上游 validate_workflow 会把 raw-data 标为"data_blackhole"硬错误
+    //   2) 画布上 raw-data 与 portfolio-mgr 之间无连线，可视化上看像断头
+    //   aggregator 节点本身是纯数据合并（不调 LLM），调度等待成本可忽略；
+    //   加边后 portfolio-mgr 启动前的等待时间依然是 max(trader, raw-data)，
+    //   raw-data 远快于 trader，无可观察的延迟变化。
     let raw_input_sources: Vec<String> = algo_tools
         .iter()
         .map(|(id, _, _, _, _, _)| id.to_string())
@@ -1694,6 +1782,11 @@ async fn seed_stock_analysis_workflow_template(
             strategy: "all".into(),
             input_sources: raw_input_sources,
             output_var: "raw-data-aggregated".into(),
+            wait_for_all: true,
+            weights: vec![],
+            summarize_prompt: None,
+            summarize_model: None,
+            sub_graph: None,
         },
     }));
     // 修复 Defect #8: 为 raw-data 显式添加 12 个 tool 节点的入边。
@@ -1708,6 +1801,11 @@ async fn seed_stock_analysis_workflow_template(
     {
         edges.push(edge(&format!("e-{src}-raw-data"), src, "raw-data"));
     }
+    // F-5: 显式出边到 portfolio-mgr，让上游 validate_workflow 的"data_blackhole"
+    //      规则不再误报，同时让画布上能看到 raw-data → portfolio-mgr 的连线。
+    //      注意：portfolio-mgr.config.context_sources 仍保留 "raw-data"，不影响
+    //      数据读取路径，只补一条调度提示边。
+    edges.push(edge("e-raw-data-portfolio-mgr", "raw-data", "portfolio-mgr"));
 
     // ── LlmClassifierNode: 风险等级分类 ──
     nodes.push(WorkflowNode::LlmClassifier(LlmClassifierNode {
@@ -1778,6 +1876,16 @@ async fn seed_stock_analysis_workflow_template(
     // 然后评估所有分析师报告的覆盖度、字数、占位检测、一致性。
     // 与 research-mgr 并行启动，输出通过 portfolio-mgr.context_sources 注入
     // 最终决策（见 portfolio-mgr 节点的 context_sources 配置）。
+    //
+    // F-6 修复: data-quality 是有意"仅靠 context_sources 消费"的终态。
+    //   data-quality 是慢速 LLM agent（约 5-10s）,与 research-mgr → trader 链路
+    //   并行执行。如果加 e-data-quality-portfolio-mgr 显式边,调度器会强制
+    //   portfolio-mgr 等待 data-quality 完成,串行化整条路径,引入不必要的延迟。
+    //   正确做法是保持 context_sources 消费模式,允许并行。
+    //   画布上 data-quality 看似"断头"是预期设计,非真实 bug。
+    //
+    //   注: 如果未来上游 validate_workflow 把 data-quality 标为 data_blackhole
+    //       或 orphan,可考虑给节点加 kind="context_sink" 标记让校验跳过。
     {
         let dq_id = "data-quality";
         let dq_title = "评估本次分析的 9 个分析师报告的覆盖度、字数、占位检测与一致性，输出 A/B/C/D/F 质量等级与数据缺口清单";
@@ -1988,8 +2096,103 @@ async fn seed_stock_analysis_workflow_template(
         // ── NotificationNode 由 rule-check 完成后触发（不再保留 portfolio-mgr → notify
         // 直连，避免通知在规则检查改写决策之前发出）──
         edges.push(edge("e-portfolio-mgr-rule-check", "portfolio-mgr", rc_id));
-        edges.push(edge("e-rule-check-notify", rc_id, "notify-result"));
+        edges.push(edge("e-rule-check-quality-gate", rc_id, "quality-gate"));
     }
+
+    // ── SwitchNode: 数据质量门禁 ──
+    // 检查 data-quality Agent 的输出等级（A/B/C/D/F），C 级以上继续，D/F 走降级路径。
+    // data-quality 输出为文本，包含质量等级标签如 "A", "B", "C" 等。
+    nodes.push(WorkflowNode::Switch(SwitchNode {
+        base: WorkflowNodeBase {
+            id: "quality-gate".into(),
+            title: "数据质量门禁".into(),
+            description: Some("检查数据质量等级，A/B/C 级以上继续，D/F 走保守降级路径".into()),
+            position: Position {
+                x: 840.0,
+                y: 4500.0,
+            },
+            retry: RetryConfig::default(),
+            timeout: Some(10),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: SwitchNodeConfig {
+            input_var: "data-quality".into(),
+            cases: vec![SwitchCase {
+                value: "_value == \"A\" || _value == \"B\" || _value == \"C\"".into(),
+                label: "acceptable".into(),
+            }],
+            default_case: Some("low-quality".into()),
+            match_mode: "expression".into(),
+            use_llm: None,
+            llm_prompt: None,
+            llm_model: None,
+            output_var: "quality-gate-result".into(),
+        },
+    }));
+
+    // ── Agent: 降级处理路径（数据质量不足时生成保守决策）──
+    {
+        let fq_id = "quality-fallback";
+        let fq_title = "数据质量不足，基于已有信息生成保守交易决策（持仓不变 / 减仓观望）";
+        let fq_y = 4500.0;
+        let mut fq = agent(
+            fq_id,
+            fq_title,
+            "portfolio-manager", // 复用投资决策专家提示词
+            None,
+            20.0,
+            fq_y,
+        );
+        if let WorkflowNode::Agent(ref mut a) = fq {
+            a.config.context_sources = vec![
+                "rule-check".into(),
+                "data-quality".into(),
+                "t-scoring".into(),
+                "t-valuation".into(),
+                "t-risk".into(),
+            ];
+            a.config.output_mode = OutputMode::Json;
+            a.config.model_role = Some("decision-maker".into());
+            a.config.tools = vec![td_quote.clone(), td_kline.clone(), td_score.clone()];
+            a.config.system_prompt = format!(
+                "数据质量评估为 D 或 F，上游分析数据不可靠。你需要在数据不足的情况下做出最保守的投资决策。\
+                 输出JSON格式（严格模式）：{{\"action\":\"持有/减持/卖出\",\"positionPct\":0-20,\"reasoning\":\"保守决策理由\"}}\
+                 只输出上述JSON对象，前后不要有任何其他文字",
+            );
+            a.config.exposed_tools = vec![
+                "get_stock_quote".into(),
+                "get_stock_kline".into(),
+                "compute_scoring".into(),
+            ];
+            a.config.max_tool_rounds = Some(1);
+        }
+        nodes.push(fq);
+        // Switch 出边：
+        //   case "acceptable" → notify-result（source_handle = 匹配的 case label）
+        //   default → quality-fallback（无 source_handle）
+        edges.push(WorkflowEdge {
+            id: "e-quality-gate-notify".into(),
+            source: "quality-gate".into(),
+            source_handle: Some("acceptable".into()),
+            target: "notify-result".into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: Some("通过 ✓".into()),
+        });
+        edges.push(WorkflowEdge {
+            id: "e-quality-gate-quality-fallback".into(),
+            source: "quality-gate".into(),
+            source_handle: None,
+            target: fq_id.into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: Some("降级 →".into()),
+        });
+    }
+    // quality-fallback 降级完成后同样触发通知
+    edges.push(edge("e-quality-fallback-notify", "quality-fallback", "notify-result"));
 
     // ── NotificationNode: 分析完成通知 ──
     nodes.push(WorkflowNode::Notification(NotificationNode {
@@ -2018,6 +2221,38 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
     // 注：移除 e-portfolio-mgr-notify 直连，notify-result 现在仅由 rule-check 完成后触发
+
+    // ── StorageNode: 分析结果持久化 ──
+    // 将完整分析结果（portfolio-mgr 决策）写入 SQLite history 表，供后续回测/复盘引用。
+    nodes.push(WorkflowNode::Storage(StorageNode {
+        base: WorkflowNodeBase {
+            id: "store-result".into(),
+            title: "分析结果持久化".into(),
+            description: Some("写入分析结果到历史记录表".into()),
+            position: Position {
+                x: 300.0,
+                y: 4800.0,
+            },
+            retry: RetryConfig {
+                enabled: true,
+                max_retries: 2,
+                ..Default::default()
+            },
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: StorageNodeConfig {
+            backend: "sqlite".into(),
+            operation: "insert".into(),
+            input_var: "portfolio-mgr".into(),
+            collection: "analysis_history".into(),
+            key_var: None,
+            output_var: "storage-result".into(),
+        },
+    }));
+    edges.push(edge("e-notify-store-result", "notify-result", "store-result"));
 
     // 构建 input_schema / output_schema / variables
     let mut input_props = std::collections::HashMap::new();
@@ -3315,6 +3550,21 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("涨停潜力 - 低潜力阈值".into()),
             is_secret: false,
         },
+        // ── 反思复盘参数（quality-fallback / portfolio-mgr 复用 portfolio-manager 模板）──
+        Variable {
+            name: "actual_outcome".into(),
+            var_type: "string".into(),
+            value: serde_json::json!(""),
+            description: Some("实际走势结果，如 '30天跌8% → 失败'，非空时切换反思模式".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reflection_depth".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("light"),
+            description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
+            is_secret: false,
+        },
     ];
     let variables_val =
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;
@@ -3373,6 +3623,55 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     let error_config_val = serde_json::to_string(&error_config)
         .map_err(|e| format!("序列化 ErrorConfig 失败: {e}"))?;
 
+    // ── 注入容器节点子图（subGraph），确保编辑器正确渲染为可展开/折叠容器 ──
+    // 子图仅在编辑器中用于嵌套渲染，运行时仍使用同一份 flat nodes/edges 列表。
+    let container_nodes: &[&str] = &["p-analysts", "debate-bull-bear", "p-risk-assess"];
+    for &cid in container_nodes {
+        let child_ids: Vec<String> = nodes
+            .iter()
+            .filter(|n| n.base().parent_id.as_deref() == Some(cid))
+            .map(|n| n.base_id().to_string())
+            .collect();
+        if child_ids.is_empty() {
+            continue;
+        }
+        let child_node_ids: std::collections::HashSet<&str> =
+            child_ids.iter().map(|s| s.as_str()).collect();
+        let sub_edges: Vec<WorkflowEdge> = edges
+            .iter()
+            .filter(|e| {
+                child_node_ids.contains(e.source.as_str())
+                    && child_node_ids.contains(e.target.as_str())
+            })
+            .cloned()
+            .collect();
+        let sub_nodes: Vec<WorkflowNode> = nodes
+            .iter()
+            .filter(|n| child_node_ids.contains(n.base_id()))
+            .cloned()
+            .collect();
+        let sub_graph = SubGraph {
+            nodes: sub_nodes,
+            edges: sub_edges,
+        };
+        // 注入到容器节点 config 中
+        for n in nodes.iter_mut() {
+            if n.base_id() != cid {
+                continue;
+            }
+            match n {
+                WorkflowNode::Parallel(p) => {
+                    p.config.sub_graph = Some(sub_graph);
+                },
+                WorkflowNode::Debate(d) => {
+                    d.config.sub_graph = Some(sub_graph);
+                },
+                _ => {},
+            }
+            break;
+        }
+    }
+
     // 写入 DB
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
     // DEBUG: 验证前几个 Tool 节点的 type 字段
@@ -3410,7 +3709,10 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
                         "morning": "0 9 * * 1-5",
                         "afternoon": "0 14 * * 1-5",
                     },
-                    "enabled": false,
+                    // F-9 修复: 原 enabled=false 导致工作流不会自动调度。
+                    //   既然有 schedule 配置,就应该是自动跑。改为 true,
+                    //   用户仍可在 UI 切换到 "未启用" 状态临时停止。
+                    "enabled": true,
                     "timezone": "Asia/Shanghai",
                 }),
             })
@@ -3728,6 +4030,7 @@ fn merge_variable_values(
 /// 运行时 portfolio-manager 通过 `{{actual_outcome}}` 变量切换到反思模式。
 async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
+    use axagent_harness::workflow_types::{TriggerConfig, TriggerType};
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     // 查重
@@ -3777,7 +4080,32 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         is_preset: Set(true),
         is_editable: Set(true),
         is_public: Set(true),
-        trigger_config: Set(None),
+        // F-10 修复: 反思复盘是"as-of 重放"语义,需要手动触发并指定回放日期,
+        //   不应该被 schedule 自动跑(那样会污染当前真实市场状态)。
+        //   trigger_config 改为 Manual 类型,带 required 字段 as_of_date,
+        //   触发器面板会要求用户输入日期,作为 context 注入到 a-* 工具调用。
+        //   原设计 trigger_config: Set(None) 让人困惑(看起来是未配置),现在显式
+        //   声明为 Manual + 必填参数,触发器 UI 看到 🟡 disabled 徽章。
+        trigger_config: Set(Some(
+            serde_json::to_string(&TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({
+                    "description": "as-of 重放: 选择历史日期重跑分析",
+                    "required_params": ["as_of_date", "stock_codes"],
+                    "param_schema": {
+                        "as_of_date": {
+                            "type": "date",
+                            "description": "回放日期,格式 YYYY-MM-DD,决定数据时间锚点"
+                        },
+                        "stock_codes": {
+                            "type": "string[]",
+                            "description": "要复盘的股票代码列表"
+                        }
+                    }
+                }),
+            })
+            .unwrap_or_default(),
+        )),
         nodes: Set(src.nodes),
         edges: Set(src.edges),
         input_schema: Set(src.input_schema),

@@ -163,8 +163,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const degradedStyleSet = useMemo(() => new Set(data?.degradedStyles ?? []), [data]);
   const hasDegraded = degradedStyleSet.size > 0;
 
-  // 真实 / 兜底 picks 统计：用于顶部 banner 提示用户当前数据是真实策略命中
-  // 还是数据稀疏兜底合成（vendor K 线 / 财务 / 资金不可用时）。
+  // 数据质量统计：所有 picks 总数（包含兜底合成）
   const dataQuality = useMemo(() => {
     if (!data) { return { real: 0, synthetic: 0 }; }
     let real = 0;
@@ -250,8 +249,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           />
         )}
 
-        {/* 数据质量提示：当存在兜底 picks 时提示用户当前数据稀疏 */}
-        {data && dataQuality.synthetic > 0 && (
+        {/* 当所有推荐均为兜底合成时提示用户（已自动过滤兜底数据） */}
+        {data && dataQuality.real === 0 && dataQuality.synthetic > 0 && (
           <Alert
             type="info"
             showIcon
@@ -310,7 +309,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
               )
                 .slice(0, 2)}
               items={STYLE_KEYS.map((style) => {
-                const picks = (data?.picks?.[style]) ?? [];
+                const picks = (data?.picks?.[style])?.filter(p => !p.synthetic) ?? [];
                 const isDisabled = disabledStyleSet.has(style);
                 const isDegraded = degradedStyleSet.has(style);
                 // P2-3: when a style is disabled, still show the section (expandable)

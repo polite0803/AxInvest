@@ -3987,13 +3987,16 @@
     "saving": "保存中",
     "save": "保存",
     "saveAsImage": "导出为图片",
+    "run": "运行",
+    "settings": "设置",
     "exportEmpty": "暂无节点可导出",
     "leftPanel": {
       "nodesTab": "节点",
       "searchNodes": "搜索节点",
       "legacySuffix": " (旧版)",
       "templatesTab": "模板",
-      "searchTemplates": "搜索模板"
+      "searchTemplates": "搜索模板",
+      "layout": "布局"
     },
     "preset": "预设",
     "custom": "自定义",
@@ -4034,7 +4037,12 @@
       "diffNodeTypeChanged": "节点类型变更",
       "diffNodeConfigChanged": "节点配置变更",
       "diffEdgeAdded": "新增边 ({{type}})",
-      "diffEdgeRemoved": "删除边 ({{type}})"
+      "diffEdgeRemoved": "删除边 ({{type}})",
+      "latest": "最新",
+      "rollback": "回滚",
+      "rollbackConfirm": "确认回滚到版本 {{version}}？",
+      "rollbackTo": "回滚到 {{v}}",
+      "rolledBack": "已回滚到版本 {{version}}"
     },
     "versionHistoryLoadFailed": "版本历史加载失败",
     "versionLoaded": "版本已加载",
@@ -4353,7 +4361,39 @@
       "to": "收件人",
       "emailToPlaceholder": "user@example.com",
       "inputVarPlaceholder": "node_id.field",
-      "urlPlaceholder": "https://api.example.com/data"
+      "urlPlaceholder": "https://api.example.com/data",
+      "aggregAll": "全部（数组）",
+      "aggregConcat": "拼接（字符串）",
+      "aggregConcatHint": "将字符串拼接",
+      "aggregCount": "计数",
+      "aggregLlmHint": "使用大模型总结各分支",
+      "aggregLlmSummarize": "LLM 总结",
+      "aggregMerge": "合并（对象）",
+      "aggregMergeHint": "将多个对象合并成一个",
+      "aggregStrategy": "聚合策略",
+      "aggregSum": "求和（数值）",
+      "aggregWeighted": "加权（数值）",
+      "aggregWeightedHint": "按权重对各输入求加权和",
+      "branchTimeoutMs": "超时（毫秒）",
+      "defaultCase": "默认分支（兜底）",
+      "defaultModel": "使用默认模型",
+      "degradeOnTimeout": "超时降级",
+      "expressionHint": "表达式基于上一节点的 _value 计算，返回布尔值",
+      "expressionPlaceholder": "_value > 100",
+      "llmRoutingModel": "模型（可选）",
+      "llmRoutingPrompt": "路由提示词",
+      "llmRoutingPromptPlaceholder": "请根据输入选择最匹配的分支：{{branches}}",
+      "matchModeContains": "包含",
+      "matchModeExact": "精确",
+      "matchModeExpression": "表达式",
+      "matchModeRegex": "正则",
+      "summarizeModel": "模型（可选）",
+      "summarizePrompt": "总结提示词",
+      "summarizePromptPlaceholder": "请总结以下输入：{{inputs}}",
+      "useLlmRouting": "LLM 智能路由",
+      "waitForAll": "等待所有输入",
+      "weights": "权重（逗号分隔）",
+      "weightsPlaceholder": "例如 0.5, 0.3, 0.2"
     },
     "debug": {
       "title": "工作流调试",
@@ -4505,7 +4545,10 @@
       "email": "邮件",
       "debate": "辩论",
       "databaseQuery": "数据库查询",
-      "switch": "分支"
+      "switch": "分支",
+      "groupFrame": "分组框",
+      "phaseSeparator": "阶段分隔",
+      "storage": "存储"
     },
     "templateList": {
       "deleted": "已删除",
@@ -4736,7 +4779,8 @@
       "expand": "展开",
       "collapse": "折叠",
       "waitAll": "等待全部",
-      "waitAny": "等待任一"
+      "waitAny": "等待任一",
+      "decorative": "装饰"
     },
     "debateNode": {
       "debaters": "辩手",
@@ -4760,7 +4804,12 @@
       "manual": "手动",
       "schedule": "定时",
       "event": "事件",
-      "title": "触发器"
+      "title": "触发器",
+      "configure": "配置",
+      "configureHint": "点击配置触发器",
+      "statusActive": "已启用",
+      "statusDisabled": "已禁用",
+      "statusUnconfigured": "未配置"
     },
     "documentParserNode": {
       "notSet": "未设置",
@@ -4806,7 +4855,12 @@
     "node": {
       "tickMode": "Tick 模式",
       "breakpoint": "断点",
-      "retryEnabled": "重试已启用"
+      "retryEnabled": "重试已启用",
+      "clickToCollapsePorts": "点击折叠端口",
+      "clickToExpandPorts": "点击展开端口",
+      "inputs": "输入",
+      "outputs": "输出",
+      "type": "类型"
     },
     "code": {
       "rhaiDynamicTool": "🦀 Rhai (动态工具)",
@@ -5191,7 +5245,29 @@
       "topic_var": "辩题变量"
     },
     "searchNodes": "搜索节点",
-    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}"
+    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}",
+    "canvasTitle": {
+      "clickToRename": "点击重命名"
+    },
+    "containerNode": {
+      "branchTimeout": "分支超时",
+      "nodes": "节点"
+    },
+    "decorativeContainerNoEdges": "装饰容器不能有边",
+    "groupNode": {
+      "folded": "已折叠",
+      "untitled": "分组"
+    },
+    "legend": {
+      "title": "节点颜色"
+    },
+    "phaseSeparator": {
+      "defaultLabel": "阶段"
+    },
+    "swarmNode": {
+      "agents": "代理",
+      "rounds": "轮次"
+    }
   },
   "atomicSkill": {
     "entryType": "入口类型",
@@ -7490,6 +7566,7 @@
     "high": "高",
     "low": "低",
     "close": "收",
+    "changePct": "涨跌幅",
     "volume": "量",
     "volumeUnit": "万手",
     "volumeChart": "成交量",

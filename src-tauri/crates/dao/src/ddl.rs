@@ -699,6 +699,12 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             trade_date TEXT NOT NULL, trade_time TEXT NOT NULL, \
             fee REAL, realized_pnl REAL, notes TEXT, \
             created_at INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS reco_picks (\
+            id TEXT NOT NULL PRIMARY KEY, generated_at TEXT NOT NULL, \
+            period TEXT NOT NULL, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
+            style TEXT NOT NULL, confidence INTEGER NOT NULL DEFAULT 0, \
+            synthetic INTEGER NOT NULL DEFAULT 0, \
+            seed_pool_json TEXT, created_at TEXT NOT NULL)",
     ] {
         db.execute_unprepared(sql).await?;
     }

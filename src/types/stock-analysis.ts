@@ -496,6 +496,38 @@ export interface BacktestStats {
   alphaPct: number | null;
 }
 
+// ── 荐股策略回测（Strategy Backtest）──
+
+export interface StrategyStats {
+  strategyId: string;
+  style: string;
+  period: string;
+  totalSignals: number;
+  winCount: number;
+  lossCount: number;
+  winRatePct: number;
+  avgReturnPct: number;
+  totalReturnPct: number;
+  avgMaxDrawdownPct: number;
+  maxConsecutiveLosses: number;
+  sharpeRatio: number | null;
+  profitFactor: number | null;
+}
+
+export interface GroupBacktestResult {
+  label: string;
+  stockCount: number;
+  strategies: Record<string, StrategyStats>;
+}
+
+export interface BacktestComparisonResponse {
+  positive: GroupBacktestResult;
+  negative: GroupBacktestResult;
+  positiveStocks: string[];
+  negativeStocks: string[];
+  skipped: string[];
+}
+
 // ── Decision Timeline（Phase 8）──
 
 /** 时间线 4 阶段：扫描 → 诊断 → 辩论 → 决策 */

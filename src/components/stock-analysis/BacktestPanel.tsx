@@ -51,7 +51,7 @@ export function BacktestPanel() {
       const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
       setStrategyResult(result);
     } catch (e: any) {
-      setStrategyError(typeof e === "string" ? e : e?.message ?? "回测失败");
+      setStrategyError(typeof e === "string" ? e : e?.message ?? t("stockAnalysis.backtest.strategyFailed"));
     }
     setStrategyLoading(false);
   }, []);
@@ -147,7 +147,7 @@ export function BacktestPanel() {
       {/* ── 荐股策略回测（两组对比） ── */}
       <div className="mt-4 pt-3 border-t border-gray-700/30">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">📈 策略回测（两组对比）</span>
+          <span className="text-sm font-medium">📈 {t("stockAnalysis.backtest.strategyTitle")}</span>
           <Button
             size="small"
             type="primary"
@@ -155,7 +155,7 @@ export function BacktestPanel() {
             loading={strategyLoading}
             onClick={runStrategyBacktest}
           >
-            {strategyLoading ? "回测中..." : "运行回测"}
+            {strategyLoading ? t("stockAnalysis.backtest.strategyRunning") : t("stockAnalysis.backtest.strategyRun")}
           </Button>
         </div>
 
@@ -171,11 +171,12 @@ export function BacktestPanel() {
         {strategyResult && (
           <>
             <div className="text-xs text-gray-500 mb-2">
-              正向: {strategyResult.positive.stockCount} 只 | 负向: {strategyResult.negative.stockCount} 只
+              {t("stockAnalysis.backtest.strategyPositive", { count: strategyResult.positive.stockCount })} |{" "}
+              {t("stockAnalysis.backtest.strategyNegative", { count: strategyResult.negative.stockCount })}
               {strategyResult.skipped.length > 0 && (
                 <Tooltip title={strategyResult.skipped.join("\n")}>
                   <Tag className="ml-1 cursor-help" color="warning" style={{ fontSize: 10 }}>
-                    跳过 {strategyResult.skipped.length} 个
+                    {t("stockAnalysis.backtest.strategySkipped", { count: strategyResult.skipped.length })}
                   </Tag>
                 </Tooltip>
               )}
@@ -205,34 +206,29 @@ export function BacktestPanel() {
 
 /** 单组策略回测表格 */
 function StrategyTable({ data }: { data: GroupBacktestResult }) {
+  const { t } = useTranslation();
   const entries = Object.entries(data.strategies);
 
   const columns = [
     {
-      title: "策略",
+      title: t("stockAnalysis.backtest.colStrategy"),
       dataIndex: "strategyId",
       key: "strategyId",
       width: 100,
       render: (v: string) => {
-        const nameMap: Record<string, string> = {
-          trend_short: "趋势·短",
-          trend_mid: "趋势·中",
-          trend_long: "趋势·长",
-          rev_short: "超跌·短",
-          rev_mid: "超跌·中",
-        };
-        return <span className="text-xs font-medium">{nameMap[v] ?? v}</span>;
+        const nameKey = `stockAnalysis.strategyNames.${v}` as const;
+        return <span className="text-xs font-medium">{t(nameKey)}</span>;
       },
     },
     {
-      title: "信号数",
+      title: t("stockAnalysis.backtest.colSignalCount"),
       dataIndex: "totalSignals",
       key: "totalSignals",
       width: 60,
       render: (v: number) => <span className="text-xs">{v}</span>,
     },
     {
-      title: "胜率",
+      title: t("stockAnalysis.backtest.colWinRate"),
       dataIndex: "winRatePct",
       key: "winRatePct",
       width: 70,
@@ -242,7 +238,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       },
     },
     {
-      title: "平均收益",
+      title: t("stockAnalysis.backtest.colAvgReturn"),
       dataIndex: "avgReturnPct",
       key: "avgReturnPct",
       width: 80,
@@ -252,7 +248,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       },
     },
     {
-      title: "累计收益",
+      title: t("stockAnalysis.backtest.colTotalReturn"),
       dataIndex: "totalReturnPct",
       key: "totalReturnPct",
       width: 80,
@@ -262,14 +258,14 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       },
     },
     {
-      title: "最大回撤",
+      title: t("stockAnalysis.backtest.colMaxDrawdown"),
       dataIndex: "avgMaxDrawdownPct",
       key: "avgMaxDrawdownPct",
       width: 80,
       render: (v: number) => <span className="text-xs" style={{ color: "var(--sa-green)" }}>{v.toFixed(1)}%</span>,
     },
     {
-      title: "连亏",
+      title: t("stockAnalysis.backtest.colMaxLossStreak"),
       dataIndex: "maxConsecutiveLosses",
       key: "maxConsecutiveLosses",
       width: 50,
@@ -287,7 +283,7 @@ function StrategyTable({ data }: { data: GroupBacktestResult }) {
       },
     },
     {
-      title: "盈亏比",
+      title: t("stockAnalysis.backtest.colProfitFactor"),
       dataIndex: "profitFactor",
       key: "profitFactor",
       width: 65,

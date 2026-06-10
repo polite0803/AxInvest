@@ -2131,7 +2131,7 @@
     {
       "file": "src/components/time-travel/ReplaySweep.tsx",
       "lines": "71,251",
-      "reason": "硬编码中文字符串",
+      "reason": "硬编码中文字符串"
     },
     {
       "file": "src/stores/__tests__/workflowEditorStore.test.ts",

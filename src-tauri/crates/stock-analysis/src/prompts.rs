@@ -28,6 +28,7 @@ pub const EXPERT_IDS: &[&str] = &[
     "value-investor",
     "data-quality-inspector",
     "rule-checker",
+    "catalyst-analyst",
 ];
 
 /// 股票分析硬约束文本（HEAD 锚定——利用 LLM primacy 效应）。
@@ -57,26 +58,6 @@ pub fn asof_system_prompt(as_of_date: &str) -> String {
     )
 }
 
-/// 拼装完整 system prompt：可选注入 as-of 锚定 + 硬约束 + 软约束。
-/// - `as_of_date`: None → live 模式，不注入锚定（保持向后兼容）
-/// - `as_of_date`: Some("2026-06-01") → 注入锚定 + 强提示
-pub fn compose_system_prompt(base: &str, role: &str, as_of_date: Option<&str>) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(d) = as_of_date {
-        parts.push(asof_system_prompt(d));
-    }
-    if is_stock_role(role) {
-        parts.push(STOCK_HARD_CONSTRAINTS.to_string());
-    }
-    if !base.is_empty() {
-        parts.push(base.to_string());
-    }
-    if is_stock_role(role) {
-        parts.push(STOCK_COLLAB_REMINDER.to_string());
-    }
-    parts.join("\n\n")
-}
-
 /// 判断角色名是否为 stock-analysis 工作流下注入了 A 股约束的 5 个角色。
 /// 与 `agent_executor.rs` 4a-pre 的 matches! 完全一致。
 pub fn is_stock_role(role: &str) -> bool {
@@ -96,44 +77,6 @@ mod asof_prompt_tests {
         assert!(p.contains("2026-06-01"));
         assert!(p.contains("时间锚定"));
         assert!(p.contains("禁止"));
-    }
-
-    #[test]
-    fn compose_live_mode_includes_stock_constraints_but_no_asof_block() {
-        let p = compose_system_prompt("你是分析师", "stock-analyst", None);
-        assert!(p.contains("你是分析师"));
-        assert!(p.contains("反幻觉"));
-        assert!(p.contains("协作与自检"));
-        assert!(!p.contains("时间锚定"));
-    }
-
-    #[test]
-    fn compose_asof_mode_prepends_asof_block_and_keeps_role_constraints() {
-        let p = compose_system_prompt("你是分析师", "stock-analyst", Some("2026-06-01"));
-        // as-of block 在最前
-        assert!(p.starts_with("## 时间锚定"));
-        assert!(p.contains("2026-06-01"));
-        // 仍然包含股票角色约束
-        assert!(p.contains("反幻觉"));
-        assert!(p.contains("协作与自检"));
-        // 原始 base 仍然在中间
-        assert!(p.contains("你是分析师"));
-    }
-
-    #[test]
-    fn compose_non_stock_role_skips_role_constraints() {
-        let p = compose_system_prompt("你是一般助手", "general", Some("2026-06-01"));
-        assert!(p.starts_with("## 时间锚定"));
-        assert!(p.contains("你是一般助手"));
-        assert!(!p.contains("反幻觉"));
-        assert!(!p.contains("协作与自检"));
-    }
-
-    #[test]
-    fn compose_empty_base_with_asof_still_works() {
-        let p = compose_system_prompt("", "stock-analyst", Some("2026-06-01"));
-        assert!(p.contains("## 时间锚定"));
-        assert!(p.contains("反幻觉"));
     }
 
     /// Snapshot: 防止 as-of 文案被意外删改；变更需 review 升级

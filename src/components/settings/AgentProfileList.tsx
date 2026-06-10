@@ -61,6 +61,7 @@ const PROFILE_NAMES: Record<string, string> = {
   "stock-research-manager": "研究经理",
   "stock-trader": "交易员",
   "stock-portfolio-manager": "投资组合经理",
+  "stock-catalyst-analyst": "催化剂与叙事分析师",
 };
 
 const PROFILE_ROLES: Record<string, string> = {
@@ -81,6 +82,7 @@ const PROFILE_ROLES: Record<string, string> = {
   "stock-research-manager": "决策者",
   "stock-trader": "交易员",
   "stock-portfolio-manager": "决策者",
+  "stock-catalyst-analyst": "股票分析师",
 };
 
 const PROFILE_ROLE_IDS: Record<string, string> = {
@@ -101,6 +103,7 @@ const PROFILE_ROLE_IDS: Record<string, string> = {
   "stock-research-manager": "decision-maker",
   "stock-trader": "trader",
   "stock-portfolio-manager": "decision-maker",
+  "stock-catalyst-analyst": "stock-analyst",
 };
 
 export function AgentProfileList() {

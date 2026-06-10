@@ -484,6 +484,7 @@ mod tests {
             volume: 1_000_000.0,
             amount: a,
             turnover_rate: Some(1.0),
+            adj_factor: None,
         }
     }
 

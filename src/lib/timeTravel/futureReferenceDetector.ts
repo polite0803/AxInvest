@@ -25,9 +25,10 @@ const ABSOLUTE_DATE_RE = /\b(20\d{2})-(\d{2})-(\d{2})\b/g;
 
 /**
  * spec §6.2 阶段 B:相对时态短语
- * 仅作粗略检测(英文为主);中文常见说法以 mock 形式简化处理。
+ * 中英文全覆盖。
  */
 const TENSE_PHRASES: string[] = [
+  // 英文
   "tomorrow",
   "next quarter",
   "next month",
@@ -40,12 +41,38 @@ const TENSE_PHRASES: string[] = [
   "in the coming",
   "down the road",
   "ahead of",
+  // 中文 — 明确未来时态
+  "明天",
+  "下周",
+  "下月",
+  "下个季度",
+  "下个季",
+  "下季度",
+  "明年",
+  "下一年",
+  "未来几天",
+  "未来几周",
+  "未来几个月",
+  "未来几个季度",
+  "未来几年",
+  "即将",
+  "将要",
+  "会涨到",
+  "会跌到",
+  "有望突破",
+  "预期将",
+  "预计将",
+  "有望在",
+  "短期内",
+  "中长期",
 ];
 
 /**
  * spec §6.2 阶段 C:模糊未来指向
+ * 中英文全覆盖。
  */
 const VAGUE_FUTURE_PHRASES: string[] = [
+  // 英文
   "soon",
   "later",
   "future",
@@ -56,6 +83,23 @@ const VAGUE_FUTURE_PHRASES: string[] = [
   "in days ahead",
   "in weeks ahead",
   "in months ahead",
+  // 中文 — 模糊未来指向
+  "未来",
+  "随后",
+  "随后将",
+  "后期",
+  "后续",
+  "接下来",
+  "下一步",
+  "展望",
+  "前景",
+  "趋势向好",
+  "值得期待",
+  "看涨",
+  "看跌",
+  "反弹",
+  "回调",
+  "突破",
 ];
 
 /**

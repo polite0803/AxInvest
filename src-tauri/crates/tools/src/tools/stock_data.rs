@@ -477,7 +477,7 @@ impl Tool for ComputeScoringTool {
         };
 
         let volume_score = match indicators.volume_signal.as_str() {
-            "放量突破" => 95.0,   // 新增：突破型最高分（与 scoring.rs 保持一致）
+            "放量突破" => 95.0, // 新增：突破型最高分（与 scoring.rs 保持一致）
             "放量上涨" => 90.0,
             "缩量回调" => 60.0,
             "正常" => 50.0,
@@ -569,7 +569,11 @@ impl Tool for ComputeScoringTool {
         if institutional_trace == "有建仓痕迹" || institutional_trace == "疑似建仓" {
             catalyst_bonus += 2.0;
         }
-        let total_score = ((weighted * technical_weight) + (catalyst_score * catalyst_weight * 100.0) + value_adj + catalyst_bonus).clamp(0.0, 100.0);
+        let total_score = ((weighted * technical_weight)
+            + (catalyst_score * catalyst_weight * 100.0)
+            + value_adj
+            + catalyst_bonus)
+            .clamp(0.0, 100.0);
 
         let mut warnings: Vec<Value> = Vec::new();
         if indicators.bias_ma5.is_nan() || indicators.bias_ma20.is_nan() {

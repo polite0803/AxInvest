@@ -3,7 +3,8 @@ import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBad
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { StockConsensus } from "@/types";
+import type { LatestAnalysisSummary, StockConsensus } from "@/types";
+import { parseAction } from "@/types";
 import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -94,6 +95,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [generatedAtText, setGeneratedAtText] = useState<string>("");
+  // P0-1: 荐股面板关联历史分析数据
+  const [latestAnalyses, setLatestAnalyses] = useState<Record<string, LatestAnalysisSummary | null>>({});
 
   // P1-2: monotonically increasing request token — discard stale results.
   const reqTokenRef = useRef(0);
@@ -128,6 +131,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
             minute: "2-digit",
           }),
         );
+
+        // P0-1: 批量加载历史分析结论
+        fetchLatestAnalyses(r);
       } catch (e: any) {
         // P3-2: don't swallow the error
         // eslint-disable-next-line no-console
@@ -149,6 +155,32 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     await getStockQuote(code);
     await getStockKline(code, "daily", 120);
     startAnalysis(code);
+  };
+
+  // P0-1: 批量加载所有 picks 的最近分析结果
+  const fetchLatestAnalyses = async (resp: RecoResponse) => {
+    const allCodes = new Set<string>();
+    for (const arr of Object.values(resp.picks ?? {})) {
+      if (!arr) { continue; }
+      for (const p of arr) {
+        if (!p.synthetic) { allCodes.add(p.stockCode); }
+      }
+    }
+    if (allCodes.size === 0) { return; }
+
+    try {
+      const result = await invoke<Record<string, LatestAnalysisSummary | null>>(
+        "get_latest_analyses_for_stocks",
+        {
+          stockCodes: Array.from(allCodes),
+          asOfDate,
+        },
+      );
+      setLatestAnalyses(result ?? {});
+    } catch (e) {
+      console.warn("[RecommendationPanel] Failed to load latest analyses:", e);
+      // 降级：显示为空，不影响主流程
+    }
   };
 
   const disabledStyleSet = useMemo(() => new Set(data?.disabledStyles ?? []), [data]);
@@ -354,7 +386,13 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                       <List
                         size="small"
                         dataSource={picks}
-                        renderItem={(p) => <PickRow pick={p} onAnalyze={handleAnalyze} />}
+                        renderItem={(p) => (
+                          <PickRow
+                            pick={p}
+                            onAnalyze={handleAnalyze}
+                            latestAnalysis={latestAnalyses[p.stockCode] ?? null}
+                          />
+                        )}
                       />
                     ),
                 };
@@ -444,17 +482,82 @@ function CrossCheckBadge({
   );
 }
 
-function PickRow({ pick, onAnalyze }: { pick: RecoPick; onAnalyze: (code: string) => void }) {
+function PickRow(
+  { pick, onAnalyze, latestAnalysis }: {
+    pick: RecoPick;
+    onAnalyze: (code: string) => void;
+    latestAnalysis: LatestAnalysisSummary | null;
+  },
+) {
   const { t } = useTranslation();
   // 读荐股 ↔ 分析师交叉验证缓存（仅当该股已有最近一次工作流结果时存在）
   const stockCodeConsensus = useStockAnalysisStore((s) => s.stockCodeConsensus);
   const consensus = stockCodeConsensus[pick.stockCode];
+
+  // P0-1: 上次分析结论的视觉展示
+  const historyBadge = useMemo(() => {
+    if (!latestAnalysis || latestAnalysis.status !== "completed") { return null; }
+    const action = parseAction(latestAnalysis.decisionAction);
+    let color: string;
+    let label: string;
+    switch (action) {
+      case "BUY":
+      case "INCREASE":
+        color = "red";
+        label = t("stockAnalysis.actionBuy");
+        break;
+      case "SELL":
+      case "REDUCE":
+        color = "green";
+        label = t("stockAnalysis.actionSell");
+        break;
+      case "UNCERTAIN":
+        color = "default";
+        label = t("stockAnalysis.actionUncertain");
+        break;
+      default:
+        color = "blue";
+        label = t("stockAnalysis.actionHold");
+    }
+    const confText = latestAnalysis.confidence != null ? ` ${latestAnalysis.confidence}` : "";
+
+    return (
+      <Tooltip
+        title={
+          <div className="text-[11px] space-y-0.5">
+            <div>
+              {t("stockAnalysis.recommendation.lastAnalysis", {
+                date: latestAnalysis.analysisDate,
+                action: label,
+                confidence: confText,
+              })}
+            </div>
+            {latestAnalysis.outcome && latestAnalysis.outcome !== "pending" && (
+              <div>
+                {t("stockAnalysis.recommendation.outcome")}: {latestAnalysis.outcome === "win"
+                  ? t("stockAnalysis.recommendation.outcomeWin")
+                  : t("stockAnalysis.recommendation.outcomeLoss")}
+              </div>
+            )}
+          </div>
+        }
+      >
+        <Tag color={color} className="m-0 text-[10px]" style={{ opacity: 0.8 }}>
+          {label}
+          {confText}
+          {latestAnalysis.outcome === "win" && " ✓"}
+          {latestAnalysis.outcome === "loss" && " ✗"}
+        </Tag>
+      </Tooltip>
+    );
+  }, [latestAnalysis, t]);
   const content = (
     <div className="text-xs w-full flex flex-col gap-0.5 py-0.5">
       <div className="flex items-center gap-1.5">
         <Tag className="m-0 text-[10px]">{pick.stockCode}</Tag>
         <span className="font-medium truncate flex-1">{pick.stockName}</span>
         <Tag color="volcano" className="m-0 text-[10px]">BUY</Tag>
+        {historyBadge}
         {consensus && <CrossCheckBadge consensus={consensus} recAction="BUY" />}
         {pick.synthetic
           ? (

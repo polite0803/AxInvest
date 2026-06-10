@@ -7722,7 +7722,39 @@
       "market": "行情",
       "risk": "风险",
       "value": "估值",
-      "reflection": "反思复盘"
+      "reflection": "反思复盘",
+      "evolution": "进化漂移"
+    },
+    "evolutionDrift": {
+      "title": "进化漂移",
+      "recalcNow": "立即重算",
+      "recalculating": "正在重算...",
+      "recalcSuccess": "重算完成",
+      "loading": "正在加载仪表盘...",
+      "error": "加载失败: {{msg}}",
+      "lastRecalcAt": "最近重算: {{time}}",
+      "neverRecalculated": "尚未重算",
+      "replayMode": "回放模式 · {{date}}",
+      "summaryTitle": "策略摘要",
+      "summarySamples": "{{n}} 个样本",
+      "summaryWinRate": "{{p}}% 胜率",
+      "tableTitle": "各策略权重",
+      "table": {
+        "strategy": "策略",
+        "period": "周期",
+        "oldWeight": "原权重",
+        "newWeight": "现权重",
+        "delta": "变化",
+        "winRate": "胜率",
+        "sampleSize": "样本",
+        "rationale": "解释",
+        "confidenceLabel": "置信度"
+      },
+      "timelineTitle": "权重时间线 - {{key}}",
+      "noTimeline": "暂无时间线数据",
+      "noData": "暂无数据",
+      "reasonsTitle": "最近调整 (Top 5)",
+      "noReasons": "暂无权重调整记录"
     },
     "tradingTitle": "交易记录",
     "compare": "多股对比",
@@ -7950,7 +7982,12 @@
         "empty": "暂无符合条件的推荐",
         "valueNaN": "—",
         "generatedAt": "更新于 {{time}}",
-        "consensusDivided": "意见分歧"
+        "consensusDivided": "意见分歧",
+        "lastAnalysis": "{{date}} 分析结论：{{action}}（置信度{{confidence}}）",
+        "lastAnalysisNone": "暂无历史分析",
+        "outcome": "结果",
+        "outcomeWin": "✓ 判断正确",
+        "outcomeLoss": "✗ 判断失误"
       },
       "vendor": {
         "disabled": "数据源未开启：{{names}} 均未启用",
@@ -8070,7 +8107,22 @@
       "alpha": "Alpha",
       "scopeAll": "全部",
       "scopeLive": "仅 Live",
-      "scopeReplay": "仅 Replay"
+      "scopeReplay": "仅 Replay",
+      "strategyFailed": "回测失败",
+      "strategyTitle": "策略回测（两组对比）",
+      "strategyRunning": "回测中...",
+      "strategyRun": "运行回测",
+      "strategyPositive": "正向: {{count}} 只",
+      "strategyNegative": "负向: {{count}} 只",
+      "strategySkipped": "跳过 {{count}} 个",
+      "colStrategy": "策略",
+      "colSignalCount": "信号数",
+      "colWinRate": "胜率",
+      "colAvgReturn": "平均收益",
+      "colTotalReturn": "累计收益",
+      "colMaxDrawdown": "最大回撤",
+      "colMaxLossStreak": "连亏",
+      "colProfitFactor": "盈亏比"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -8556,6 +8608,13 @@
       "daily0600": "每天 6:00",
       "daily1200": "每天 12:00",
       "daily1800": "每天 18:00"
+    },
+    "strategyNames": {
+      "trend_short": "趋势·短",
+      "trend_mid": "趋势·中",
+      "trend_long": "趋势·长",
+      "rev_short": "超跌·短",
+      "rev_mid": "超跌·中"
     }
   },
   "trade": {

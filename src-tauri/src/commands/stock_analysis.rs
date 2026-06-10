@@ -1423,6 +1423,136 @@ pub fn invalidate_recommendation_cache() {
     recommender::invalidate_cache();
 }
 
+/// 个股最近一次分析摘要 — 用于荐股面板等场景展示"上次分析结论"
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LatestAnalysisSummary {
+    pub analysis_id: String,
+    pub analysis_date: String,
+    pub decision_action: String, // BUY / HOLD / SELL / uncertain
+    pub decision_position_pct: Option<f64>,
+    pub confidence: Option<i32>, // 加权置信度 0-100，从 decision_json 提取
+    pub status: String,          // completed / running / failed
+    pub outcome: Option<String>, // win / loss / pending
+}
+
+/// 查询个股最近一次已完成分析的决策摘要
+///
+/// 若 `as_of_date` 不为 None 则只返回到该日期为止的分析（时间旅行兼容）。
+#[tauri::command]
+pub async fn get_latest_analysis_for_stock(
+    state: tauri::State<'_, AppState>,
+    stock_code: String,
+    as_of_date: Option<String>,
+) -> Result<Option<LatestAnalysisSummary>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+
+    let db = state.harness.db();
+    let mut query = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::StockCode.eq(&stock_code))
+        .filter(stock_analyses::Column::Status.eq("completed"));
+
+    // 时间旅行模式：只返回截止日之前的分析
+    if let Some(ref cutoff) = as_of_date {
+        query = query.filter(stock_analyses::Column::AnalysisDate.lte(cutoff));
+    }
+
+    let row = query
+        .order_by_desc(stock_analyses::Column::CreatedAt)
+        .limit(1)
+        .one(db)
+        .await
+        .map_err(|e| format!("查询 stock_analyses 失败: {e}"))?;
+
+    let Some(model) = row else {
+        return Ok(None);
+    };
+
+    // 从 decision_json 提取 confidence
+    let confidence: Option<i32> = model.decision_json.as_ref().and_then(|raw| {
+        serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .and_then(|v| {
+                v.get("confidence")
+                    .or_else(|| v.get("weighted_confidence"))
+                    .and_then(|c| c.as_i64())
+                    .map(|i| i as i32)
+            })
+    });
+
+    Ok(Some(LatestAnalysisSummary {
+        analysis_id: model.id,
+        analysis_date: model.analysis_date,
+        decision_action: model.decision_action.unwrap_or_else(|| "uncertain".into()),
+        decision_position_pct: model.decision_position_pct,
+        confidence,
+        status: model.status,
+        outcome: model.outcome,
+    }))
+}
+
+/// 批量查询多只个股的最近分析摘要
+///
+/// 一次 SQL 查询返回 HashMap，key 为 stock_code。
+/// `as_of_date` 语义同 `get_latest_analysis_for_stock`。
+#[tauri::command]
+pub async fn get_latest_analyses_for_stocks(
+    state: tauri::State<'_, AppState>,
+    stock_codes: Vec<String>,
+    as_of_date: Option<String>,
+) -> Result<std::collections::HashMap<String, Option<LatestAnalysisSummary>>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let db = state.harness.db();
+    let mut result: std::collections::HashMap<String, Option<LatestAnalysisSummary>> =
+        std::collections::HashMap::new();
+
+    // 批量查询：循环查询每只 stock_code，利用连接池和 SQLite 的行级缓存，40 只以内足够快
+    for code in &stock_codes {
+        let mut query = stock_analyses::Entity::find()
+            .filter(stock_analyses::Column::StockCode.eq(code))
+            .filter(stock_analyses::Column::Status.eq("completed"));
+
+        if let Some(ref cutoff) = as_of_date {
+            query = query.filter(stock_analyses::Column::AnalysisDate.lte(cutoff));
+        }
+
+        let row = query
+            .order_by_desc(stock_analyses::Column::CreatedAt)
+            .limit(1)
+            .one(db)
+            .await
+            .map_err(|e| format!("批量查询 stock_analyses({code}) 失败: {e}"))?;
+
+        let summary = row.map(|model| {
+            let confidence: Option<i32> = model.decision_json.as_ref().and_then(|raw| {
+                serde_json::from_str::<serde_json::Value>(raw)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("confidence")
+                            .or_else(|| v.get("weighted_confidence"))
+                            .and_then(|c| c.as_i64())
+                            .map(|i| i as i32)
+                    })
+            });
+
+            LatestAnalysisSummary {
+                analysis_id: model.id,
+                analysis_date: model.analysis_date,
+                decision_action: model.decision_action.unwrap_or_else(|| "uncertain".into()),
+                decision_position_pct: model.decision_position_pct,
+                confidence,
+                status: model.status,
+                outcome: model.outcome,
+            }
+        });
+
+        result.insert(code.clone(), summary);
+    }
+
+    Ok(result)
+}
+
 /// 从 workflow_template 实体提取 (name, value) 列表
 fn extract_template_vars(
     t: &axagent_core::entity::workflow_template::Model,
@@ -1645,4 +1775,76 @@ pub async fn list_reflections(
         })
         .collect();
     Ok(result)
+}
+
+// ── R1 复盘→进化：EvolutionDriftPanel 命令 ──
+
+/// 查询进化漂移仪表盘（前端 EvolutionDriftPanel 主页用）
+#[tauri::command]
+pub async fn get_evolution_drift_dashboard(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<axagent_stock_analysis::evolution_drift::EvolutionDriftDashboard, String> {
+    let db = state.harness.db();
+    axagent_stock_analysis::evolution_drift::get_dashboard(db, as_of_date.as_deref()).await
+}
+
+/// 拉取某条 (strategy, period) 的权重时间线
+#[tauri::command]
+pub async fn get_evolution_drift_timeline(
+    state: State<'_, AppState>,
+    strategy_id: String,
+    period: String,
+    limit: Option<u32>,
+) -> Result<Vec<axagent_stock_analysis::evolution_drift::TimelinePoint>, String> {
+    let db = state.harness.db();
+    axagent_stock_analysis::evolution_drift::get_timeline(
+        db,
+        &strategy_id,
+        &period,
+        limit.unwrap_or(60),
+    )
+    .await
+}
+
+/// 手动触发权重重算（用户在前端 EvolutionDriftPanel 点"立即重算"时使用）
+#[tauri::command]
+pub async fn manual_recalc_strategy_weights(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let db = state.harness.db();
+    let (written, new_weights) = axagent_stock_analysis::evolution_drift::recalc_and_persist(
+        db,
+        "manual",
+        None,
+        as_of_date.as_deref(),
+    )
+    .await?;
+    // 同时返回当前生效的 weights 便于前端 refresh
+    let flat: Vec<(String, String, f64)> = new_weights
+        .into_iter()
+        .map(|((s, p), w)| (s, p, w))
+        .collect();
+    Ok(serde_json::json!({
+        "written": written,
+        "currentWeights": flat,
+    }))
+}
+
+/// 把"当前生效的策略权重"组装成 reco_strategy_weights JSON,
+/// 由前端 recommendStocks 时一并传给模板 vars。
+#[tauri::command]
+pub async fn get_reco_strategy_weights(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.harness.db();
+    let weights = axagent_stock_analysis::evolution_drift::load_current_weights(db).await?;
+    // 转成 JSON 对象 {"trend_short": 1.2, ...}
+    let mut obj = serde_json::Map::new();
+    for ((s, p), w) in weights {
+        let key = format!("{s}_{p}");
+        obj.insert(key, serde_json::json!(w));
+    }
+    Ok(serde_json::Value::Object(obj))
 }

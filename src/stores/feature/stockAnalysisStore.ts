@@ -124,6 +124,49 @@ function parseWorkflowResults(results: Record<string, unknown>) {
 
 // ── Store ──
 
+/** R1 复盘→进化：dashboard 中单条 (strategy, period) 的统计行 */
+export interface EvolutionStrategyStatRow {
+  strategyId: string;
+  period: string;
+  oldWeight: number;
+  newWeight: number;
+  deltaPct: number;
+  winRate: number;
+  sampleSize: number;
+  rationale: string;
+}
+
+/** R1 复盘→进化：recent changes 中的一条历史调整 */
+export interface EvolutionRecentChangeRow {
+  id: number;
+  strategyId: string;
+  period: string;
+  oldWeight: number;
+  newWeight: number;
+  deltaPct: number;
+  trigger: string;
+  appliedAt: number;
+  rationale: string;
+}
+
+/** R1 复盘→进化：strategy 维度聚合卡片 */
+export interface EvolutionStrategySummaryRow {
+  strategyId: string;
+  avgWeight: number;
+  avgWinRate: number;
+  totalSamples: number;
+  trend: "up" | "down" | "stable";
+}
+
+/** R1 复盘→进化：dashboard 完整结构 */
+export interface EvolutionDriftDashboard {
+  currentWeights: Record<string, number>;
+  lastRecalcAt: number;
+  stats: EvolutionStrategyStatRow[];
+  recentChanges: EvolutionRecentChangeRow[];
+  strategySummary: EvolutionStrategySummaryRow[];
+}
+
 /** getDryRun 模块级缓存 (60s TTL) */
 let dryRunCache: { value: boolean; ts: number } | null = null;
 const DRY_RUN_TTL_MS = 60_000;
@@ -222,6 +265,14 @@ interface StockAnalysisState {
   reset: () => void;
   dismissChatIndicator: () => void;
 
+  // R1 复盘→进化
+  evolutionDashboard: EvolutionDriftDashboard | null;
+  evolutionRecalculating: boolean;
+  evolutionLastError: string | null;
+  fetchEvolutionDashboard: (asOfDate?: string | null) => Promise<void>;
+  recalcEvolutionNow: (asOfDate?: string | null) => Promise<void>;
+  loadRecoStrategyWeights: () => Promise<Record<string, number>>;
+
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
   _searchTimer: ReturnType<typeof setTimeout> | null;
@@ -267,6 +318,9 @@ const initialState = {
   asOfDate: null,
   mode: "live" as const,
   violations: [],
+  evolutionDashboard: null,
+  evolutionRecalculating: false,
+  evolutionLastError: null,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -504,6 +558,46 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   dismissChatIndicator: () => {
     set({ chatIndicatorDismissed: true });
+  },
+
+  // R1 复盘→进化
+  fetchEvolutionDashboard: async (asOfDate?: string | null) => {
+    try {
+      const data = await invoke<EvolutionDriftDashboard>("get_evolution_drift_dashboard", {
+        asOfDate: asOfDate ?? null,
+      });
+      set({ evolutionDashboard: data, evolutionLastError: null });
+    } catch (e) {
+      set({ evolutionLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[EvolutionDrift] fetch dashboard failed:", e);
+    }
+  },
+
+  recalcEvolutionNow: async (asOfDate?: string | null) => {
+    set({ evolutionRecalculating: true, evolutionLastError: null });
+    try {
+      await invoke<{ written: number; currentWeights: Array<[string, string, number]> }>(
+        "manual_recalc_strategy_weights",
+        { asOfDate: asOfDate ?? null },
+      );
+      // 重算后立即拉一次新 dashboard
+      await get().fetchEvolutionDashboard(asOfDate ?? null);
+    } catch (e) {
+      set({ evolutionLastError: e instanceof Error ? e.message : String(e) });
+      console.error("[EvolutionDrift] manual recalc failed:", e);
+    } finally {
+      set({ evolutionRecalculating: false });
+    }
+  },
+
+  loadRecoStrategyWeights: async () => {
+    try {
+      const data = await invoke<Record<string, number>>("get_reco_strategy_weights");
+      return data;
+    } catch (e) {
+      console.warn("[EvolutionDrift] load reco strategy weights failed:", e);
+      return {};
+    }
   },
 
   bumpWatchlistVersion: () => {

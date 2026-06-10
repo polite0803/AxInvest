@@ -1321,6 +1321,7 @@ fn start_cron_scheduler(state: &AppState) {
                     .unwrap_or_default();
 
                 let mut _success = 0u32;
+                let mut perfs_logged: u32 = 0;
                 for a in &pending {
                     let action = a.decision_action.as_deref().unwrap_or("");
                     let code = &a.stock_code;
@@ -1402,7 +1403,76 @@ fn start_cron_scheduler(state: &AppState) {
                         .await;
                     }
 
+                    // ── R1 复盘→进化：把每次决策校验的结果写入 strategy_performance ──
+                    if outcome == "win" || outcome == "loss" {
+                        // 推断 strategy_id（action 1:1 映射到 5 大策略的近似）
+                        let strategy_id = match action {
+                            "买入" | "BUY" | "增持" | "INCREASE" => "trend",
+                            "卖出" | "SELL" | "减持" | "REDUCE" => "reversion",
+                            "持有" | "HOLD" => "value",
+                            "观望" | "UNCERTAIN" => "capital",
+                            _ => "watchlist",
+                        };
+                        let period = "short"; // 第一版统一 short
+                        let return_pct = if price_after > 0.0 {
+                            (later_close / price_after - 1.0) * 100.0
+                        } else {
+                            0.0
+                        };
+                        let was_correct = if outcome == "win" { 1 } else { 0 };
+                        let decision_ms = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                            .ok()
+                            .and_then(|d| d.and_hms_opt(0, 0, 0))
+                            .map(|d| d.and_utc().timestamp_millis())
+                            .unwrap_or(0);
+                        let horizon_json = serde_json::json!({
+                            "d1": price_after,
+                            "d15": later_close,
+                            "returnPct": return_pct,
+                        })
+                        .to_string();
+                        let _ = axagent_stock_analysis::evolution_drift::record_performance(
+                            &database,
+                            strategy_id,
+                            period,
+                            code,
+                            &a.stock_name,
+                            decision_ms,
+                            started as i64,
+                            15,
+                            return_pct,
+                            was_correct,
+                            a.decision_position_pct.unwrap_or(0.0) as i32,
+                            Some(&horizon_json),
+                        )
+                        .await
+                        .map(|_| perfs_logged += 1)
+                        .map_err(|e| tracing::warn!("[evolution_drift] 写入 strategy_performance 失败: {e}"));
+                    }
+
                     _success += 1;
+                }
+
+                // ── R1 复盘→进化：决策校验完成后重算所有 (strategy, period) 权重 ──
+                if perfs_logged > 0 {
+                    match axagent_stock_analysis::evolution_drift::recalc_and_persist(
+                        &database,
+                        "cron",
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok((written, _)) => {
+                            tracing::info!(
+                                "[evolution_drift] validate-decisions 钩子触发重算: perfs={}, weight_changes={}",
+                                perfs_logged, written
+                            );
+                        },
+                        Err(e) => {
+                            tracing::warn!("[evolution_drift] 重算权重失败: {e}");
+                        },
+                    }
                 }
 
                 let summary = format!("决策校验完成: {} 条已校验", pending.len());

@@ -17,7 +17,8 @@ function getDefaultVariables(): Variable[] {
   // 分析流程
   b("analysis_depth", "standard", "分析深度: quick / standard / deep", "enum");
   b("debate_rounds", 3, "多空辩论轮数 (1-10)", "number");
-  b("max_concurrent", 12, "并行分析的 Agent 数量上限 (1-32)", "number");
+  b("max_concurrent", 13, "并行分析的 Agent 数量上限 (1-32)", "number");
+  b("catalyst_enabled", true, "启用催化剂与叙事分析", "boolean");
   // 数据源参数
   b("kline_period", "daily", "K线周期: daily / weekly / monthly", "enum");
   b("kline_limit", 120, "K线数量 (60-500)", "number");
@@ -107,6 +108,9 @@ function getDefaultVariables(): Variable[] {
   b("reco_min_confidence", 60, "推荐器最低置信度 (0-100)，低于此值不入选", "number");
   // 决策回溯（decision_tracker.rs）
   b("decision_max_history_per_stock", 50, "每只股票保留的历史决策条数 (10-200)", "number");
+  // 反思复盘工作流模板变量（reflection.rs / portfolio-manager）
+  b("actual_outcome", "", "实际走势结果，如 '30天跌8% → 失败'，非空时切换反思模式", "string");
+  b("reflection_depth", "light", "反思深度：light(简要) / deep(详细推理链)", "enum");
   // 技术指标周期（indicators.rs IndicatorConfig）
   b("macd_fast", 12, "MACD 快线周期 (5-30)", "number");
   b("macd_slow", 26, "MACD 慢线周期 (10-60)", "number");
@@ -499,6 +503,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "analysis_depth",
           "debate_rounds",
           "max_concurrent",
+          "catalyst_enabled",
         ]),
       },
       {

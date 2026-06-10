@@ -49,6 +49,8 @@ pub mod price_alerts;
 pub mod reco_picks;
 pub mod stock_analyses;
 pub mod stock_reflections;
+pub mod strategy_performance;
+pub mod strategy_weight_history;
 pub mod trades;
 pub mod watchlist_items;
 

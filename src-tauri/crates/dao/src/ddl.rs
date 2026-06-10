@@ -705,6 +705,34 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             style TEXT NOT NULL, confidence INTEGER NOT NULL DEFAULT 0, \
             synthetic INTEGER NOT NULL DEFAULT 0, \
             seed_pool_json TEXT, created_at TEXT NOT NULL)",
+        // --- Evolution drift: 复盘→进化反馈 (R1) ---
+        "CREATE TABLE IF NOT EXISTS strategy_performance (\
+            id TEXT NOT NULL PRIMARY KEY, \
+            strategy_id TEXT NOT NULL, \
+            period TEXT NOT NULL, \
+            stock_code TEXT NOT NULL, \
+            stock_name TEXT NOT NULL, \
+            decision_at INTEGER NOT NULL, \
+            exit_at INTEGER NOT NULL, \
+            holding_days INTEGER NOT NULL, \
+            return_pct REAL NOT NULL, \
+            was_correct INTEGER NOT NULL, \
+            decision_confidence INTEGER NOT NULL DEFAULT 0, \
+            horizon_pnl_json TEXT, \
+            created_at INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS strategy_weight_history (\
+            id TEXT NOT NULL PRIMARY KEY, \
+            strategy_id TEXT NOT NULL, \
+            period TEXT NOT NULL, \
+            old_weight REAL NOT NULL, \
+            new_weight REAL NOT NULL, \
+            delta_pct REAL NOT NULL, \
+            trigger TEXT NOT NULL, \
+            source_reflection_id TEXT, \
+            sample_size INTEGER NOT NULL DEFAULT 0, \
+            win_rate REAL NOT NULL DEFAULT 0, \
+            rationale TEXT, \
+            applied_at INTEGER NOT NULL)",
     ] {
         db.execute_unprepared(sql).await?;
     }
@@ -842,6 +870,13 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "CREATE INDEX IF NOT EXISTS idx_mdh_accessed ON market_data_history(last_accessed_at)",
         "CREATE INDEX IF NOT EXISTS idx_mdh_expires ON market_data_history(expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_replay_runs_created ON replay_runs(created_at)",
+        // Evolution drift indexes
+        "CREATE INDEX IF NOT EXISTS idx_strategy_perf_strategy_period ON strategy_performance(strategy_id, period, exit_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_perf_stock ON strategy_performance(stock_code, decision_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_perf_exit_at ON strategy_performance(exit_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_weight_strategy_period ON strategy_weight_history(strategy_id, period, applied_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_weight_applied ON strategy_weight_history(applied_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_weight_source_reflection ON strategy_weight_history(source_reflection_id)",
     ] {
         db.execute_unprepared(sql).await?;
     }

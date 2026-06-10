@@ -5,7 +5,18 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
-import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, TrendingUp, Users, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Coins,
+  LineChart,
+  RotateCcw,
+  Settings,
+  Shield,
+  Sparkles,
+  TrendingUp,
+  Users,
+  X,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -18,6 +29,7 @@ import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
 import "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";
+import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
 import { KLineChart } from "./KLineChart";
@@ -186,6 +198,12 @@ export function StockAnalysisPage() {
       label: t("stockAnalysis.tab.reflection"),
       icon: <RotateCcw size={14} />,
       children: <ReflectionPanel />,
+    },
+    {
+      key: "evolution",
+      label: t("stockAnalysis.tab.evolution"),
+      icon: <Sparkles size={14} />,
+      children: <EvolutionDriftPanel />,
     },
   ];
 

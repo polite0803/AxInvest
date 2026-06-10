@@ -9273,7 +9273,39 @@
       "market": "market",
       "risk": "risk",
       "value": "value",
-      "reflection": "Reflection"
+      "reflection": "Reflection",
+      "evolution": "evolution"
+    },
+    "evolutionDrift": {
+      "title": "evolution",
+      "recalcNow": "recalcNow",
+      "recalculating": "recalculating",
+      "recalcSuccess": "recalcSuccess",
+      "loading": "loading",
+      "error": "error",
+      "lastRecalcAt": "lastRecalcAt",
+      "neverRecalculated": "neverRecalculated",
+      "replayMode": "replayMode",
+      "summaryTitle": "summaryTitle",
+      "summarySamples": "summarySamples",
+      "summaryWinRate": "summaryWinRate",
+      "tableTitle": "tableTitle",
+      "table": {
+        "strategy": "strategy",
+        "period": "period",
+        "oldWeight": "oldWeight",
+        "newWeight": "newWeight",
+        "delta": "delta",
+        "winRate": "winRate",
+        "sampleSize": "sampleSize",
+        "rationale": "rationale",
+        "confidenceLabel": "confidenceLabel"
+      },
+      "timelineTitle": "timelineTitle",
+      "noTimeline": "noTimeline",
+      "noData": "noData",
+      "reasonsTitle": "reasonsTitle",
+      "noReasons": "noReasons"
     },
     "trade": {
       "pnlPercent": "pnlPercent",

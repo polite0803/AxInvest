@@ -7717,7 +7717,39 @@
       "market": "market",
       "risk": "risk",
       "value": "value",
-      "reflection": "Reflection"
+      "reflection": "Reflection",
+      "evolution": "Evolution"
+    },
+    "evolutionDrift": {
+      "title": "Evolution Drift",
+      "recalcNow": "Recalculate Now",
+      "recalculating": "Recalculating...",
+      "recalcSuccess": "Recalculation complete",
+      "loading": "Loading dashboard...",
+      "error": "Failed to load: {{msg}}",
+      "lastRecalcAt": "Last recalc: {{time}}",
+      "neverRecalculated": "Never recalculated",
+      "replayMode": "Replay · {{date}}",
+      "summaryTitle": "Strategy Summary",
+      "summarySamples": "{{n}} samples",
+      "summaryWinRate": "{{p}}% win",
+      "tableTitle": "Per-strategy Weights",
+      "table": {
+        "strategy": "Strategy",
+        "period": "Period",
+        "oldWeight": "Old",
+        "newWeight": "New",
+        "delta": "Delta",
+        "winRate": "Win%",
+        "sampleSize": "Samples",
+        "rationale": "Rationale",
+        "confidenceLabel": "Confidence weighting"
+      },
+      "timelineTitle": "Weight Timeline - {{key}}",
+      "noTimeline": "No timeline points",
+      "noData": "No data",
+      "reasonsTitle": "Recent Changes (Top 5)",
+      "noReasons": "No weight changes recorded yet"
     },
     "compare": "Compare",
     "stockCode1": "Stock Code 1",
@@ -7941,7 +7973,12 @@
         "empty": "No qualifying picks at the moment",
         "valueNaN": "—",
         "generatedAt": "Updated {{time}}",
-        "consensusDivided": "意见分歧"
+        "consensusDivided": "Divided",
+        "lastAnalysis": "{{date}} analysis: {{action}} (confidence {{confidence}})",
+        "lastAnalysisNone": "No history",
+        "outcome": "Result",
+        "outcomeWin": "✓ Correct",
+        "outcomeLoss": "✗ Wrong"
       },
       "vendor": {
         "disabled": "No vendor enabled: {{names}}",
@@ -8069,7 +8106,22 @@
       "alpha": "Alpha",
       "scopeAll": "All",
       "scopeLive": "Live only",
-      "scopeReplay": "Replay only"
+      "scopeReplay": "Replay only",
+      "strategyFailed": "Backtest failed",
+      "strategyTitle": "Strategy backtest (two-group comparison)",
+      "strategyRunning": "Backtesting...",
+      "strategyRun": "Run backtest",
+      "strategyPositive": "Positive: {{count}}",
+      "strategyNegative": "Negative: {{count}}",
+      "strategySkipped": "{{count}} skipped",
+      "colStrategy": "Strategy",
+      "colSignalCount": "Signals",
+      "colWinRate": "Win Rate",
+      "colAvgReturn": "Avg Return",
+      "colTotalReturn": "Total Return",
+      "colMaxDrawdown": "Max Drawdown",
+      "colMaxLossStreak": "Max Losses",
+      "colProfitFactor": "Profit Factor"
     },
     "export": {
       "analystReports": "analystReports",
@@ -8442,6 +8494,13 @@
       "daily1800": "Daily 18:00",
       "weekday0600": "Weekdays 6:00",
       "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}"
+    },
+    "strategyNames": {
+      "trend_short": "Trend · Short",
+      "trend_mid": "Trend · Mid",
+      "trend_long": "Trend · Long",
+      "rev_short": "Reversal · Short",
+      "rev_mid": "Reversal · Mid"
     }
   },
   "trade": {

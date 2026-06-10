@@ -1,0 +1,18 @@
+{
+  "$schema": "https://dprint.dev/schemas/v0.json",
+  "plugins": [
+    "node_modules/@dprint/typescript/plugin.wasm",
+    "node_modules/@dprint/json/plugin.wasm"
+  ],
+  "excludes": [
+    "node_modules/**/*",
+    "dist/**/*",
+    "target/**/*",
+    "public/**/*"
+  ],
+  "typescript": {
+    "quoteStyle": "preferDouble",
+    "useBraces": "always"
+  },
+  "json": {}
+}

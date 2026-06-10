@@ -1,0 +1,164 @@
+import { isTauri, logIpcError } from "@/lib/invoke";
+import { useConversationStore, useSettingsStore } from "@/stores";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { App, Button, Divider, Popconfirm, Typography } from "antd";
+import { AlertTriangle, Share2, Trash2, Upload } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { SettingsGroup } from "./SettingsGroup";
+
+const { Text } = Typography;
+
+export function DataManager() {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+
+  const handleExport = async () => {
+    try {
+      const conversations = useConversationStore.getState().conversations;
+      const settings = useSettingsStore.getState().settings;
+
+      const exportData = {
+        version: "1.0.0",
+        exportedAt: new Date().toISOString(),
+        conversations,
+        settings,
+      };
+
+      const jsonStr = JSON.stringify(exportData, null, 2);
+
+      if (isTauri()) {
+        const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+        const filePath = await save({
+          defaultPath: `axagent-export-${new Date().toISOString().slice(0, 10)}.json`,
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        });
+        if (filePath) {
+          await writeTextFile(filePath, jsonStr);
+          message.success(t("settings.exportSuccess"));
+        }
+      } else {
+        const blob = new Blob([jsonStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `axagent-export-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        message.success(t("settings.exportSuccess"));
+      }
+    } catch (e) {
+      logIpcError("导出数据")(e);
+      message.error(t("error.unknown"));
+    }
+  };
+
+  const handleImport = async () => {
+    try {
+      let jsonStr: string | null = null;
+
+      if (isTauri()) {
+        const { readTextFile } = await import("@tauri-apps/plugin-fs");
+        const filePath = await open({
+          filters: [{ name: "JSON", extensions: ["json"] }],
+          multiple: false,
+        });
+        if (filePath) {
+          jsonStr = await readTextFile(filePath as string);
+        }
+      } else {
+        jsonStr = await new Promise<string | null>((resolve) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".json";
+          input.onchange = () => {
+            const file = input.files?.[0];
+            if (!file) {
+              return resolve(null);
+            }
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsText(file);
+          };
+          input.click();
+        });
+      }
+
+      if (!jsonStr) {
+        return;
+      }
+
+      const data = JSON.parse(jsonStr);
+      if (!data.version) {
+        message.error(t("error.invalidFormat"));
+        return;
+      }
+
+      if (data.settings) {
+        await useSettingsStore.getState().saveSettings(data.settings);
+      }
+
+      message.success(t("settings.importSuccess"));
+    } catch (e) {
+      logIpcError("导入数据")(e);
+      message.error(t("error.unknown"));
+    }
+  };
+
+  const handleClear = async () => {
+    try {
+      const conversations = useConversationStore.getState().conversations;
+      await Promise.all(
+        conversations.map((conv) => useConversationStore.getState().deleteConversation(conv.id)),
+      );
+      message.success(t("settings.clearSuccess"));
+    } catch (e) {
+      logIpcError("清除数据")(e);
+      message.error(t("error.unknown"));
+    }
+  };
+
+  const rowStyle = { padding: "4px 0" };
+
+  return (
+    <div className="p-6 pb-12">
+      <SettingsGroup title={t("settings.groupData")}>
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.exportData")}</span>
+          <Button icon={<Share2 size={16} />} onClick={handleExport}>
+            {t("settings.exportData")}
+          </Button>
+        </div>
+        <Divider style={{ margin: "4px 0" }} />
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.importData")}</span>
+          <Button icon={<Upload size={16} />} onClick={handleImport}>
+            {t("settings.importData")}
+          </Button>
+        </div>
+      </SettingsGroup>
+      <SettingsGroup
+        title={
+          <Text type="danger">
+            <AlertTriangle size={14} className="mr-2" />
+            {t("settings.dangerZone")}
+          </Text>
+        }
+      >
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.clearData")}</span>
+          <Popconfirm
+            title={t("settings.clearConfirm")}
+            onConfirm={handleClear}
+            okText={t("common.confirm")}
+            cancelText={t("common.cancel")}
+            okButtonProps={{ danger: true }}
+          >
+            <Button danger icon={<Trash2 size={16} />}>
+              {t("settings.clearData")}
+            </Button>
+          </Popconfirm>
+        </div>
+      </SettingsGroup>
+    </div>
+  );
+}

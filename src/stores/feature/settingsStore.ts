@@ -1,0 +1,228 @@
+import { invoke } from "@/lib/invoke";
+import { DEFAULT_SHORTCUT_BINDINGS } from "@/lib/shortcuts";
+import type { AppSettings } from "@/types";
+import { create } from "zustand";
+
+const DEFAULT_SETTINGS: AppSettings = {
+  language: "zh-CN",
+  theme_mode: "dark",
+  theme_preset: "deep-dusk",
+  primary_color: "#17A93D",
+  border_radius: 6,
+  auto_start: false,
+  show_on_start: true,
+  minimize_to_tray: true,
+  font_size: 14,
+  font_weight: 400,
+  font_family: "",
+  code_font_family: "",
+  bubble_style: "minimal",
+  code_theme: "poimandres",
+  code_theme_light: "github-light",
+  default_provider_id: null,
+  default_model_id: null,
+  default_temperature: null,
+  default_max_tokens: null,
+  default_top_p: null,
+  default_frequency_penalty: null,
+  default_context_count: null,
+  title_summary_provider_id: null,
+  title_summary_model_id: null,
+  title_summary_temperature: null,
+  title_summary_max_tokens: null,
+  title_summary_top_p: null,
+  title_summary_frequency_penalty: null,
+  title_summary_context_count: null,
+  title_summary_prompt: null,
+  compression_provider_id: null,
+  compression_model_id: null,
+  compression_temperature: null,
+  compression_max_tokens: null,
+  compression_top_p: null,
+  compression_frequency_penalty: null,
+  compression_prompt: null,
+  proxy_type: null,
+  proxy_address: null,
+  proxy_port: null,
+  global_shortcut: DEFAULT_SHORTCUT_BINDINGS.toggleCurrentWindow,
+  shortcut_toggle_current_window: DEFAULT_SHORTCUT_BINDINGS.toggleCurrentWindow,
+  shortcut_toggle_all_windows: DEFAULT_SHORTCUT_BINDINGS.toggleAllWindows,
+  shortcut_close_window: DEFAULT_SHORTCUT_BINDINGS.closeWindow,
+  shortcut_new_conversation: DEFAULT_SHORTCUT_BINDINGS.newConversation,
+  shortcut_open_settings: DEFAULT_SHORTCUT_BINDINGS.openSettings,
+  shortcut_toggle_model_selector: DEFAULT_SHORTCUT_BINDINGS.toggleModelSelector,
+  shortcut_fill_last_message: DEFAULT_SHORTCUT_BINDINGS.fillLastMessage,
+  shortcut_clear_context: DEFAULT_SHORTCUT_BINDINGS.clearContext,
+  shortcut_clear_conversation_messages: DEFAULT_SHORTCUT_BINDINGS.clearConversationMessages,
+  shortcut_toggle_gateway: DEFAULT_SHORTCUT_BINDINGS.toggleGateway,
+  shortcut_toggle_mode: DEFAULT_SHORTCUT_BINDINGS.toggleMode,
+  shortcut_show_quick_bar: DEFAULT_SHORTCUT_BINDINGS.showQuickBar,
+  gateway_auto_start: false,
+  gateway_listen_address: "127.1.0.0",
+  gateway_port: 8080,
+  gateway_ssl_enabled: false,
+  gateway_ssl_mode: "upload",
+  gateway_ssl_cert_path: null,
+  gateway_ssl_key_path: null,
+  gateway_ssl_port: 8443,
+  gateway_force_ssl: false,
+  always_on_top: false,
+  tray_enabled: true,
+  global_shortcuts_enabled: true,
+  shortcut_registration_logs_enabled: false,
+  shortcut_trigger_toast_enabled: false,
+  notifications_enabled: true,
+  mini_window_enabled: false,
+  start_minimized: false,
+  close_to_tray: true,
+  notify_backup: true,
+  notify_import: true,
+  notify_errors: true,
+  last_selected_conversation_id: null,
+  documents_root_override: null,
+  update_check_interval: 60,
+  default_system_prompt: null,
+  chat_minimap_enabled: false,
+  chat_minimap_style: "faq",
+  agent_panel_enabled: true,
+  agent_panel_compact: false,
+  onboarding_completed: false,
+  onboarding_wizard_dismissed: false,
+  onboarding_tutorial_completed: false,
+  onboarding_selected_preset: null,
+  multi_model_display_mode: "tabs",
+  render_user_markdown: false,
+  default_workspace_dir: null,
+  // WebDAV sync settings — must be present so stale saves never omit them
+  webdav_host: null,
+  webdav_username: null,
+  webdav_path: null,
+  webdav_accept_invalid_certs: false,
+  webdav_sync_enabled: false,
+  webdav_sync_interval_minutes: 60,
+  webdav_max_remote_backups: 10,
+  webdav_include_documents: false,
+  // Closed-loop nudge scheduler settings
+  closed_loop_enabled: true,
+  closed_loop_interval_minutes: 5,
+  screen_perception_enabled: false,
+  rl_optimizer_enabled: false,
+  lora_finetune_enabled: false,
+  proactive_nudge_enabled: true,
+  thought_chain_enabled: true,
+  error_recovery_enabled: true,
+  // Cloud workspace settings
+  workspace_uri: null,
+  cloud_backend: null,
+  s3_provider_preset: null,
+  s3_secret_access_key: null,
+  webdav_password: null,
+  cloud_sync_enabled: false,
+  s3_use_path_style: false,
+  // RAG pipeline config
+  rag_pipeline_config: {
+    queryEnhancement: {
+      enabled: false,
+      strategy: "auto" as const,
+      maxVariants: 3,
+      combinedCall: true,
+    },
+    rerank: {
+      enabled: true,
+      backend: "rule" as const,
+      crossEncoderModel: "bge-reranker-v2-m3",
+      topN: 5,
+      candidateK: 30,
+      ruleFilterKeep: 15,
+      scoreThreshold: null,
+      ollamaEndpoint: "http://localhost:11434",
+    },
+    selfRag: {
+      enabled: false,
+      judgeModel: "qwen2.5:0.5b",
+      ollamaEndpoint: "http://localhost:11434",
+      relevanceThreshold: 0.5,
+      qualityThreshold: 0.6,
+      maxRetryRounds: 2,
+    },
+  },
+};
+
+export interface GlobalShortcutDiagnostic {
+  timestamp: string;
+  phase: "env" | "register" | "cleanup";
+  level: "info" | "warn" | "error";
+  message: string;
+  action?: string;
+  shortcut?: string;
+  reason?: string;
+}
+
+export interface GlobalShortcutStatus {
+  enabled: boolean;
+  registered: string[];
+  failed: Array<{ shortcut: string; reason: string }>;
+  diagnostics: GlobalShortcutDiagnostic[];
+}
+
+interface SettingsState {
+  settings: AppSettings;
+  loading: boolean;
+  /** Set once after the first successful fetchSettings; guards saveSettings from writing stale data. */
+  _loaded: boolean;
+  error: string | null;
+  globalShortcutStatus: GlobalShortcutStatus;
+  fetchSettings: () => Promise<void>;
+  saveSettings: (settings: Partial<AppSettings>) => Promise<void>;
+  setGlobalShortcutStatus: (status: GlobalShortcutStatus) => void;
+}
+
+export const useSettingsStore = create<SettingsState>((set, get) => ({
+  settings: DEFAULT_SETTINGS,
+  loading: true,
+  _loaded: false,
+  error: null,
+  globalShortcutStatus: {
+    enabled: false,
+    registered: [],
+    failed: [],
+    diagnostics: [],
+  },
+
+  fetchSettings: async () => {
+    set({ loading: true });
+    try {
+      const fetched = await invoke<Partial<AppSettings>>("get_settings");
+      set({
+        settings: { ...DEFAULT_SETTINGS, ...fetched },
+        loading: false,
+        _loaded: true,
+        error: null,
+      });
+    } catch (e) {
+      set({ error: String(e), loading: false, _loaded: true });
+    }
+  },
+
+  saveSettings: async (partial) => {
+    if (!get()._loaded) {
+      // Settings haven't been hydrated from the DB yet; dropping silently would
+      // make the change look "persisted" in the UI but vanish on next launch.
+      console.warn(
+        "[settingsStore] saveSettings called before fetchSettings finished — skipping",
+        { keys: Object.keys(partial) },
+      );
+      return;
+    }
+    set((s) => ({ settings: { ...s.settings, ...partial }, error: null }));
+    try {
+      await invoke("save_settings", { settings: get().settings });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  setGlobalShortcutStatus: (status) => {
+    set({ globalShortcutStatus: status });
+  },
+}));

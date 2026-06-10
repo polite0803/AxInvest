@@ -1,0 +1,1612 @@
+use crate::AppState;
+use chrono;
+use notify::{Event, RecursiveMode, Watcher};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::Emitter;
+
+pub fn start_background_services(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    app_dir: std::path::PathBuf,
+    _tray_language: String,
+) {
+    start_auto_backup(app, state, app_dir.clone());
+    start_webdav_sync(app, state, app_dir);
+    #[cfg(not(mobile))]
+    start_tray(app, &_tray_language);
+    start_closed_loop_service(app, state);
+    start_insight_generation(state);
+    start_pattern_learning(state);
+    start_cross_session_learning(state);
+    start_rl_reward_computation(state);
+    start_batch_processing(state);
+    start_user_profile_persistence(state);
+    start_skill_evolution(state);
+    start_auto_tool_observation(state);
+    start_text_grad_analysis(state);
+    start_cron_scheduler(state);
+    start_platform_adapters(state);
+    start_skill_watcher(app, state);
+    start_memory_decay_tick(state);
+    start_memory_maintenance_tick(state);
+    start_trajectory_cleanup(state);
+}
+
+fn start_auto_backup(_app: &tauri::AppHandle, state: &AppState, app_dir: std::path::PathBuf) {
+    let db = state.harness.db().clone();
+    let app_data = app_dir.clone();
+    let handle = state.auto_backup_handle.clone();
+    let shutdown_token = state.shutdown_token.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(settings) = axagent_core::repo::settings::get_settings(&db).await {
+            if settings.auto_backup_enabled && settings.auto_backup_interval_hours > 0 {
+                let backup_dir_setting =
+                    axagent_core::path_vars::decode_path_opt(&settings.backup_dir);
+                let interval = settings.auto_backup_interval_hours;
+                let max_count = settings.auto_backup_max_count;
+                let interval_secs = interval as u64 * 3600;
+                let db2 = db.clone();
+                let app_dir2 = app_data.clone();
+                let shutdown_token = shutdown_token.clone();
+
+                let initial_delay_secs = match axagent_core::repo::backup::list_backups(&db).await {
+                    Ok(backups) if !backups.is_empty() => {
+                        let last_ts = &backups[0].created_at;
+                        if let Ok(last_time) =
+                            chrono::NaiveDateTime::parse_from_str(last_ts, "%Y-%m-%d %H:%M:%S")
+                        {
+                            let elapsed = chrono::Utc::now()
+                                .naive_utc()
+                                .signed_duration_since(last_time)
+                                .num_seconds()
+                                .max(0) as u64;
+                            interval_secs.saturating_sub(elapsed)
+                        } else {
+                            interval_secs
+                        }
+                    },
+                    _ => interval_secs,
+                };
+
+                let task = tokio::spawn(async move {
+                    let dur = std::time::Duration::from_secs(interval_secs);
+                    tokio::time::sleep(std::time::Duration::from_secs(initial_delay_secs)).await;
+                    loop {
+                        tokio::select! {
+                            _ = shutdown_token.cancelled() => {
+                                tracing::info!("[auto_backup] 收到关闭信号，停止自动备份");
+                                break;
+                            }
+                            _ = tokio::time::sleep(dur) => {
+                                let backup_dir = axagent_core::repo::backup::resolve_backup_dir(
+                                    backup_dir_setting.as_deref(),
+                                    &app_dir2,
+                                );
+                                if let Err(e) =
+                                    axagent_core::repo::backup::create_backup(&db2, "sqlite", &backup_dir)
+                                        .await
+                                {
+                                    tracing::warn!("Auto-backup failed: {}", e);
+                                } else {
+                                    tracing::info!("Auto-backup created");
+                                    let _ =
+                                        axagent_core::repo::backup::cleanup_old_backups(&db2, max_count)
+                                            .await;
+                                }
+                            }
+                        }
+                    }
+                });
+                *handle.lock().await = Some(task);
+            }
+        }
+    });
+}
+
+fn start_memory_maintenance_tick(state: &AppState) {
+    let memory_service = state.memory_service.clone();
+    let token = state.shutdown_token.clone();
+    state.task_manager.spawn("memory_maintenance", async move {
+        let interval = std::time::Duration::from_secs(7200);
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    tracing::info!("[memory_maintenance] 收到关闭信号");
+                    break;
+                }
+                _ = tokio::time::sleep(interval) => {
+                    let ms = memory_service.read().await;
+                    let disambiguation = ms.disambiguate_entities();
+                    drop(ms);
+                    if disambiguation.merged > 0 {
+                        tracing::info!(
+                            "[memory_maintenance] Disambiguated entities: merged {} of {}",
+                            disambiguation.merged,
+                            disambiguation.total
+                        );
+                    }
+                    let ms = memory_service.read().await;
+                    let clusters = ms.find_similar_clusters(0.75);
+                    drop(ms);
+                    if !clusters.is_empty() {
+                        tracing::info!(
+                            "[memory_maintenance] Found {} similar memory clusters (potential duplicates)",
+                            clusters.len()
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn start_platform_adapters(state: &AppState) {
+    let platform_manager = state.platform_manager.clone();
+    let db = state.harness.db().clone();
+
+    tauri::async_runtime::spawn(async move {
+        let config = axagent_core::repo::platform_config::get_platform_config(&db).await;
+        match platform_manager.reconcile(&config).await {
+            Ok(report) => {
+                if !report.started.is_empty() {
+                    tracing::info!(
+                        "[PlatformManager] boot reconcile: started {:?}",
+                        report.started
+                    );
+                }
+                if !report.errors.is_empty() {
+                    for (name, err) in &report.errors {
+                        tracing::error!(
+                            "[PlatformManager] boot reconcile: {} error: {}",
+                            name,
+                            err
+                        );
+                    }
+                }
+            },
+            Err(e) => {
+                tracing::error!("[PlatformManager] boot reconcile failed: {}", e);
+            },
+        }
+    });
+}
+
+fn start_webdav_sync(_app: &tauri::AppHandle, state: &AppState, app_dir: std::path::PathBuf) {
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
+    let app_data_dir = app_dir.clone();
+    let handle = state.webdav_sync_handle.clone();
+    let shutdown_token = state.shutdown_token.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(settings) = axagent_core::repo::settings::get_settings(&db).await {
+            if settings.webdav_sync_enabled && settings.webdav_sync_interval_minutes > 0 {
+                let db2 = db.clone();
+                let interval = settings.webdav_sync_interval_minutes;
+                let interval_secs = interval as u64 * 60;
+
+                let initial_delay_secs =
+                    match axagent_core::repo::settings::get_setting(&db, "webdav_last_sync_time")
+                        .await
+                    {
+                        Ok(Some(ts)) => {
+                            if let Ok(last_time) = chrono::DateTime::parse_from_rfc3339(&ts) {
+                                let elapsed = chrono::Utc::now()
+                                    .signed_duration_since(last_time)
+                                    .num_seconds()
+                                    .max(0) as u64;
+                                interval_secs.saturating_sub(elapsed)
+                            } else {
+                                interval_secs
+                            }
+                        },
+                        _ => interval_secs,
+                    };
+
+                let task = crate::commands::webdav::spawn_webdav_sync_task(
+                    db2,
+                    master_key,
+                    app_data_dir,
+                    interval,
+                    initial_delay_secs,
+                    shutdown_token,
+                );
+                *handle.lock().await = Some(task);
+            }
+        }
+    });
+}
+
+#[cfg(not(mobile))]
+fn start_tray(app: &tauri::AppHandle, tray_language: &str) {
+    if let Err(e) = crate::tray::create_tray(app, tray_language) {
+        tracing::warn!("Failed to create system tray: {}", e);
+    }
+}
+
+fn start_closed_loop_service(_app: &tauri::AppHandle, state: &AppState) {
+    let db = state.harness.db().clone();
+    let closed_loop = state.closed_loop_service.clone();
+    let nudge_service = state.nudge_service.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Ok(settings) = axagent_core::repo::settings::get_settings(&db).await {
+            if settings.closed_loop_enabled {
+                closed_loop.start();
+                let interval_minutes = settings.closed_loop_interval_minutes.max(1);
+                let interval = std::time::Duration::from_secs(interval_minutes as u64 * 60);
+                loop {
+                    tokio::time::sleep(interval).await;
+                    let new_nudges: Vec<axagent_trajectory::PeriodicNudge> =
+                        closed_loop.tick().await;
+                    if !new_nudges.is_empty() {
+                        tracing::info!(
+                            "[closed_loop] Generated {} periodic nudges",
+                            new_nudges.len()
+                        );
+                        let candidates: Vec<axagent_trajectory::NudgeCandidate> = new_nudges
+                            .iter()
+                            .map(|pn| axagent_trajectory::NudgeCandidate {
+                                entity: axagent_trajectory::NudgeEntity {
+                                    id: pn.id.clone(),
+                                    name: pn.title.clone(),
+                                    entity_type: format!("{:?}", pn.nudge_type),
+                                    confidence: if pn.urgency == "high" {
+                                        0.9
+                                    } else if pn.urgency == "medium" {
+                                        0.7
+                                    } else {
+                                        0.5
+                                    },
+                                },
+                                reason: pn.description.clone(),
+                                urgency: match pn.urgency.as_str() {
+                                    "high" => axagent_trajectory::Urgency::High,
+                                    "medium" => axagent_trajectory::Urgency::Medium,
+                                    _ => axagent_trajectory::Urgency::Low,
+                                },
+                                suggested_action: Some(pn.suggested_action.clone()),
+                            })
+                            .collect();
+                        let mut ns: tokio::sync::MutexGuard<'_, axagent_trajectory::NudgeService> =
+                            nudge_service.lock().await;
+                        let ctx = axagent_trajectory::NudgeContext {
+                            current_task: None,
+                            recent_entities: None,
+                            session_id: "closed_loop_bg".to_string(),
+                        };
+                        ns.generate_nudges(ctx, candidates);
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn start_insight_generation(state: &AppState) {
+    let realtime_learning = state.realtime_learning.clone();
+    let insight_system = state.insight_system.clone();
+    tauri::async_runtime::spawn(async move {
+        let interval = std::time::Duration::from_secs(10 * 60);
+        loop {
+            tokio::time::sleep(interval).await;
+            let new_insights = {
+                let rl: tokio::sync::MutexGuard<'_, axagent_trajectory::RealTimeLearning> =
+                    realtime_learning.lock().await;
+                rl.generate_insights()
+            };
+            if !new_insights.is_empty() {
+                tracing::info!(
+                    "[insight] Generated {} learning insights from feedback",
+                    new_insights.len()
+                );
+                let mut is = insight_system.write().await;
+                for insight in new_insights {
+                    is.add_insight(insight);
+                }
+            }
+        }
+    });
+}
+
+fn start_pattern_learning(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let pattern_learner = state.pattern_learner.clone();
+    tauri::async_runtime::spawn(async move {
+        let interval = std::time::Duration::from_secs(15 * 60);
+        loop {
+            tokio::time::sleep(interval).await;
+            let trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(20)) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("[pattern] Failed to fetch trajectories: {}", e);
+                        continue;
+                    },
+                };
+            if trajectories.is_empty() {
+                continue;
+            }
+            let mut pl = pattern_learner.write().await;
+            let new_patterns = pl.update_from_batch(&trajectories);
+            drop(pl);
+            if !new_patterns.is_empty() {
+                tracing::info!(
+                    "[pattern] Learned {} new patterns from {} trajectories",
+                    new_patterns.len(),
+                    trajectories.len()
+                );
+                for pattern in &new_patterns {
+                    if let Err(e) = trajectory_storage.save_pattern(pattern) {
+                        tracing::warn!("[pattern] Failed to persist pattern: {}", e);
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn start_cross_session_learning(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let cross_session_learner = state.cross_session_learner.clone();
+    let insight_system = state.insight_system.clone();
+    tauri::async_runtime::spawn(async move {
+        let interval = std::time::Duration::from_secs(30 * 60);
+        loop {
+            tokio::time::sleep(interval).await;
+            let trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(50)) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("[cross_session] Failed to fetch trajectories: {}", e);
+                        continue;
+                    },
+                };
+            if trajectories.len() < 3 {
+                continue;
+            }
+            let mut by_session: std::collections::HashMap<
+                String,
+                Vec<axagent_trajectory::Trajectory>,
+            > = std::collections::HashMap::new();
+            for t in trajectories {
+                by_session.entry(t.session_id.clone()).or_default().push(t);
+            }
+            if by_session.len() < 2 {
+                continue;
+            }
+            let mut csl = cross_session_learner.write().await;
+            let new_patterns = csl.learn_from_sessions(by_session);
+            drop(csl);
+            if !new_patterns.is_empty() {
+                tracing::info!(
+                    "[cross_session] Discovered {} cross-session patterns",
+                    new_patterns.len()
+                );
+                let mut is = insight_system.write().await;
+                for pattern in &new_patterns {
+                    if let Err(e) = trajectory_storage.save_pattern(pattern) {
+                        tracing::warn!("[cross_session] Failed to persist pattern: {}", e);
+                    }
+                    if pattern.success_rate >= 0.7 && pattern.frequency >= 3 {
+                        is.add_insight(axagent_trajectory::LearningInsight {
+                            id: format!("cs_{}", pattern.id),
+                            category: axagent_trajectory::InsightCategory::Pattern,
+                            title: format!("Cross-session pattern: {}", pattern.name),
+                            description: pattern.description.clone(),
+                            confidence: pattern.success_rate,
+                            evidence: pattern.trajectory_ids.iter().take(3).cloned().collect(),
+                            suggested_action: Some(
+                                "Consider creating a skill for this recurring pattern".to_string(),
+                            ),
+                            created_at: chrono::Utc::now().timestamp_millis(),
+                        });
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn start_rl_reward_computation(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let rl_engine = state.rl_engine.clone();
+    let insight_system = state.insight_system.clone();
+    let process_reward_model = state.process_reward_model.clone();
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
+    tauri::async_runtime::spawn(async move {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
+            {
+                let mut rl = rl_engine.write().await;
+                rl.set_llm_judge(Box::new(bridge.clone()));
+            }
+            tracing::info!("[rl] LLM judge injected into RLEngine");
+
+            {
+                let mut prm = process_reward_model.lock().await;
+                prm.set_provider(Box::new(bridge));
+            }
+            tracing::info!("[rl] LLM PRM provider injected into ProcessRewardModel");
+        }
+
+        let interval = std::time::Duration::from_secs(20 * 60);
+        let mut reward_normalizer = axagent_trajectory::RewardNormalizer::new();
+        loop {
+            tokio::time::sleep(interval).await;
+            let mut trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(15)) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("[rl] Failed to fetch trajectories: {}", e);
+                        continue;
+                    },
+                };
+            if trajectories.is_empty() {
+                continue;
+            }
+            let rl = rl_engine.read().await;
+            let mut total_rewards = 0;
+            let mut total_advantages = 0;
+            let mut total_prm_rewards = 0;
+            for trajectory in &mut trajectories {
+                if trajectory.rewards.is_empty() {
+                    let mut rewards = rl.compute_rewards(trajectory);
+                    total_rewards += rewards.len();
+                    rl.shape_rewards(&mut rewards);
+                    reward_normalizer.normalize(&mut rewards);
+                    trajectory.rewards = rewards;
+
+                    {
+                        let prm = process_reward_model.lock().await;
+                        let prm_result = prm.compute_trajectory_rewards(trajectory).await;
+                        if !prm_result.step_rewards.is_empty() {
+                            total_prm_rewards += prm_result.step_rewards.len();
+                            let combined_value =
+                                trajectory.value_score * 0.5 + prm_result.weighted_reward * 0.5;
+                            trajectory.value_score = combined_value;
+                            tracing::debug!(
+                                "[rl] PRM for trajectory {}: aggregate={:.3}, outcome={:.3}, weighted={:.3}",
+                                &trajectory.id[..trajectory.id.len().min(8)],
+                                prm_result.aggregate_reward,
+                                prm_result.outcome_reward,
+                                prm_result.weighted_reward
+                            );
+                        }
+                    }
+
+                    let values = rl.estimate_value_function(trajectory);
+                    if !values.is_empty() {
+                        let advantages = rl.compute_advantages(&trajectory.rewards, &values);
+                        total_advantages += advantages.len();
+                        let avg_advantage: f64 = if !advantages.is_empty() {
+                            advantages.iter().sum::<f64>() / advantages.len() as f64
+                        } else {
+                            0.0
+                        };
+                        if avg_advantage > 0.3 {
+                            let gradients = rl.compute_policy_gradient(trajectory, &advantages);
+                            tracing::debug!(
+                                "[rl] High-advantage trajectory {}: avg_adv={:.3}, gradients={:?}",
+                                &trajectory.id[..trajectory.id.len().min(8)],
+                                avg_advantage,
+                                gradients
+                            );
+                        }
+                    }
+                    let total_reward: f64 = trajectory.rewards.iter().map(|r| r.value).sum();
+                    trajectory.value_score = (trajectory.value_score + total_reward) / 2.0;
+                    if let Err(e) = trajectory_storage.save_trajectory(trajectory) {
+                        tracing::warn!("[rl] Failed to update trajectory: {}", e);
+                    }
+                }
+            }
+            drop(rl);
+            if total_rewards > 0 {
+                tracing::info!(
+                    "[rl] Computed {} rewards, {} advantages, {} PRM step-evals across {} trajectories",
+                    total_rewards,
+                    total_advantages,
+                    total_prm_rewards,
+                    trajectories.len()
+                );
+                let reward_trajectories: Vec<_> = trajectories
+                    .iter()
+                    .filter(|t| !t.rewards.is_empty())
+                    .collect();
+                if reward_trajectories.len() >= 3 {
+                    let avg_reward: f64 = reward_trajectories
+                        .iter()
+                        .map(|t| t.rewards.iter().map(|r| r.value).sum::<f64>())
+                        .sum::<f64>()
+                        / reward_trajectories.len() as f64;
+                    let high_reward_count = reward_trajectories
+                        .iter()
+                        .filter(|t| t.rewards.iter().map(|r| r.value).sum::<f64>() > avg_reward)
+                        .count();
+                    let mut is = insight_system.write().await;
+                    is.add_insight(axagent_trajectory::LearningInsight {
+                        id: format!("rl_{}", chrono::Utc::now().timestamp_millis()),
+                        category: if avg_reward > 0.0 { axagent_trajectory::InsightCategory::Pattern } else { axagent_trajectory::InsightCategory::Warning },
+                        title: format!("RL reward analysis: avg={:.2}", avg_reward),
+                        description: format!("{} trajectories analyzed, {} above average reward. Average reward: {:.3}",
+                            reward_trajectories.len(), high_reward_count, avg_reward),
+                        confidence: (avg_reward.abs() * 2.0).min(0.9),
+                        evidence: vec![],
+                        suggested_action: if avg_reward < 0.0 {
+                            Some("Recent interactions have negative reward signals. Consider adjusting tool usage patterns.".to_string())
+                        } else { None },
+                        created_at: chrono::Utc::now().timestamp_millis(),
+                    });
+                }
+            }
+        }
+    });
+}
+
+fn start_batch_processing(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let batch_processor = state.batch_processor.clone();
+    let insight_system = state.insight_system.clone();
+    let token = state.shutdown_token.clone();
+    state.task_manager.spawn("batch_processing", async move {
+        let interval = std::time::Duration::from_secs(60 * 60);
+        loop {
+            tokio::select! {
+                _ = token.cancelled() => {
+                    tracing::info!("[batch_processing] 收到关闭信号");
+                    break;
+                }
+                _ = tokio::time::sleep(interval) => {
+            let bp = &*batch_processor;
+            let trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(50)) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+            if trajectories.len() < 5 {
+                continue;
+            }
+            let quality_filtered = bp.filter_by_quality(&trajectories, 0.3);
+            if quality_filtered.is_empty() {
+                continue;
+            }
+            let analysis = bp.analyze_batch(&quality_filtered);
+            let mut is = insight_system.write().await;
+            is.add_insight(axagent_trajectory::LearningInsight {
+                id: format!("batch_{}", chrono::Utc::now().timestamp_millis()),
+                category: axagent_trajectory::InsightCategory::Improvement,
+                title: format!("Batch analysis: {} trajectories, {:.0}% success",
+                    analysis.total,
+                    if analysis.total > 0 { analysis.outcome_counts.values().sum::<usize>() as f64 / analysis.total as f64 * 100.0 } else { 0.0 }),
+                description: format!("Quality: avg={:.2}, value={:.2}. Patterns: {}.",
+                    analysis.avg_quality, analysis.avg_value, analysis.top_patterns.len().min(5)),
+                confidence: (analysis.avg_quality * 1.5).min(0.9),
+                evidence: vec![],
+                suggested_action: if analysis.avg_quality < 0.4 {
+                    Some("Batch quality is low. Consider reviewing recent interactions for improvement opportunities.".to_string())
+                } else { None },
+                created_at: chrono::Utc::now().timestamp_millis(),
+            });
+                }
+            }
+        }
+    });
+}
+
+fn start_user_profile_persistence(state: &AppState) {
+    let user_profile = state.user_profile.clone();
+    tauri::async_runtime::spawn(async move {
+        let interval = std::time::Duration::from_secs(10 * 60);
+        loop {
+            tokio::time::sleep(interval).await;
+            let profile = user_profile.read().await;
+            let md_content = profile.to_user_md();
+            drop(profile);
+            if let Some(home) = {
+                #[cfg(mobile)]
+                {
+                    dirs::data_dir().or_else(dirs::home_dir)
+                }
+                #[cfg(not(mobile))]
+                {
+                    dirs::home_dir()
+                }
+            } {
+                let user_md_path = home.join(".axinvest").join("USER.md");
+                if let Some(parent) = user_md_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(e) = std::fs::write(&user_md_path, &md_content) {
+                    tracing::warn!("[user-profile] Failed to write USER.md: {}", e);
+                }
+            }
+        }
+    });
+}
+
+fn start_skill_evolution(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let skill_evolution_engine = state.skill_evolution_engine.clone();
+    let insight_system = state.insight_system.clone();
+    let constitution = state.constitution.clone();
+    let intrinsic_motivation = state.intrinsic_motivation.clone();
+    let coevolution_env = state.coevolution_env.clone();
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
+    tauri::async_runtime::spawn(async move {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
+            let mut engine = skill_evolution_engine.lock().await;
+            engine.set_llm_provider(std::sync::Arc::new(bridge));
+            drop(engine);
+            tracing::info!("[evolution] LLM provider injected into SkillEvolutionEngine");
+        }
+
+        let interval = std::time::Duration::from_secs(45 * 60);
+        let success_threshold = 0.5;
+        let min_usages = 3;
+        loop {
+            tokio::time::sleep(interval).await;
+            let skills: Vec<axagent_trajectory::Skill> = match trajectory_storage.get_skills() {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("[evolution] Failed to fetch skills: {}", e);
+                    continue;
+                },
+            };
+            let weak_skills: Vec<_> = skills
+                .into_iter()
+                .filter(|s| s.total_usages >= min_usages && s.success_rate < success_threshold)
+                .collect();
+            if weak_skills.is_empty() {
+                continue;
+            }
+            tracing::info!(
+                "[evolution] Found {} skills below success threshold ({:.0}%)",
+                weak_skills.len(),
+                success_threshold * 100.0
+            );
+            let test_trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(30)) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+            let test_refs: Vec<&axagent_trajectory::Trajectory> =
+                test_trajectories.iter().collect();
+            for skill in weak_skills.iter().take(2) {
+                let mut engine: tokio::sync::MutexGuard<
+                    '_,
+                    axagent_trajectory::SkillEvolutionEngine,
+                > = skill_evolution_engine.lock().await;
+                let result = engine.run(skill, &test_refs).await;
+                if let Some(modification) = result {
+                    if let Err(violations) = constitution.validate_evolution(&modification) {
+                        let has_fatal = violations
+                            .iter()
+                            .any(|v| v.severity == axagent_trajectory::ViolationSeverity::Fatal);
+                        let has_critical = violations
+                            .iter()
+                            .any(|v| v.severity == axagent_trajectory::ViolationSeverity::Critical);
+                        if has_fatal || has_critical {
+                            tracing::warn!(
+                                "[evolution] Constitution blocked skill '{}' evolution: {} violations (fatal={}, critical={})",
+                                skill.name,
+                                violations.len(),
+                                has_fatal,
+                                has_critical
+                            );
+                            continue;
+                        }
+                        tracing::info!(
+                            "[evolution] Constitution warnings for skill '{}' evolution: {:?}",
+                            skill.name,
+                            violations
+                                .iter()
+                                .map(|v| &v.description)
+                                .collect::<Vec<_>>()
+                        );
+                    }
+                    if modification
+                        .validation_result
+                        .as_ref()
+                        .is_some_and(|v| v.success)
+                    {
+                        tracing::info!(
+                            "[evolution] Skill '{}' evolved: {} (confidence={:.3})",
+                            skill.name,
+                            modification.reason,
+                            modification.confidence
+                        );
+                        let mut updated_skill = skill.clone();
+                        updated_skill.content = modification.new_content.clone();
+                        updated_skill.quality_score = modification.confidence;
+                        updated_skill.version = format!(
+                            "{}.e{}",
+                            updated_skill
+                                .version
+                                .trim_end_matches(|c: char| c == '.' || c.is_ascii_digit()),
+                            chrono::Utc::now().timestamp_millis() % 10000
+                        );
+                        if let Err(e) = trajectory_storage.save_skill(&updated_skill) {
+                            tracing::warn!("[evolution] Failed to save evolved skill: {}", e);
+                        }
+
+                        {
+                            let mut im = intrinsic_motivation.lock().await;
+                            for traj in &test_trajectories {
+                                let _intrinsic_reward = im.compute_intrinsic_reward(traj);
+                            }
+                        }
+
+                        {
+                            let mut env = coevolution_env.lock().await;
+                            env.update_performance(modification.confidence);
+                        }
+
+                        let mut is = insight_system.write().await;
+                        is.add_insight(axagent_trajectory::LearningInsight {
+                            id: format!("evo_{}", chrono::Utc::now().timestamp_millis()),
+                            category: axagent_trajectory::InsightCategory::Improvement,
+                            title: format!("Skill '{}' auto-evolved", skill.name),
+                            description: modification.reason.clone(),
+                            confidence: modification.confidence,
+                            evidence: vec![],
+                            suggested_action: Some(format!(
+                                "Review evolved skill '{}' for correctness",
+                                skill.name
+                            )),
+                            created_at: chrono::Utc::now().timestamp_millis(),
+                        });
+                    } else {
+                        tracing::info!(
+                            "[evolution] Skill '{}' evolution did not improve fitness",
+                            skill.name
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn start_skill_watcher(app: &tauri::AppHandle, state: &AppState) {
+    let home = {
+        #[cfg(mobile)]
+        {
+            dirs::data_dir().or_else(dirs::home_dir).unwrap_or_default()
+        }
+        #[cfg(not(mobile))]
+        {
+            dirs::home_dir().unwrap_or_default()
+        }
+    };
+    let skill_dirs: Vec<std::path::PathBuf> = vec![
+        home.join(".axinvest").join("skills"),
+        home.join(".claude").join("skills"),
+        home.join(".trae").join("skills"),
+        home.join(".codebuddy").join("skills"),
+        home.join(".workbuddy").join("skills"),
+        home.join(".agents").join("skills"),
+    ];
+
+    let app_handle = app.clone();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let _ = state.skill_watcher_shutdown.set(shutdown.clone());
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let mut watcher =
+            match notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
+                if let Ok(event) = res {
+                    let _ = tx.send(event);
+                }
+            }) {
+                Ok(w) => w,
+                Err(e) => {
+                    tracing::warn!("Failed to create skill watcher: {}", e);
+                    return;
+                },
+            };
+
+        for dir in &skill_dirs {
+            if dir.exists() {
+                if let Err(e) = watcher.watch(dir, RecursiveMode::NonRecursive) {
+                    tracing::warn!("Failed to watch skill dir {:?}: {}", dir, e);
+                }
+            }
+        }
+
+        tracing::info!("Skill file watcher started");
+
+        let mut pending: std::collections::HashMap<String, std::time::Instant> =
+            std::collections::HashMap::new();
+        let debounce = std::time::Duration::from_secs(2);
+
+        loop {
+            if shutdown.load(Ordering::Relaxed) {
+                tracing::info!("Skill file watcher 收到关闭信号");
+                return;
+            }
+            match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(event) => {
+                    if !event.kind.is_modify() {
+                        continue;
+                    }
+                    for path in &event.paths {
+                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        let is_skill_file = matches!(
+                            name,
+                            "SKILL.md" | "manifest.json" | "skill-manifest.json" | "frontend.json"
+                        );
+                        if !is_skill_file {
+                            continue;
+                        }
+
+                        if let Some(parent) = path.parent() {
+                            if let Some(skill_name) = parent.file_name().and_then(|n| n.to_str()) {
+                                pending
+                                    .entry(skill_name.to_string())
+                                    .or_insert(std::time::Instant::now());
+                            }
+                        }
+                    }
+                },
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // 检查是否有到期的事件需要发送
+                    let now = std::time::Instant::now();
+                    let mut ready: Vec<String> = vec![];
+                    pending.retain(|name, ts| {
+                        if now.duration_since(*ts) >= debounce {
+                            ready.push(name.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+
+                    if ready.is_empty() {
+                        continue;
+                    }
+
+                    let app = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        for name in ready {
+                            let _ = app.emit("skill:file-changed", name);
+                        }
+                    });
+                },
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    tracing::info!("Skill file watcher stopped");
+                    return;
+                },
+            }
+        }
+    });
+}
+
+fn start_memory_decay_tick(state: &AppState) {
+    let memory_service = state.memory_service.clone();
+    tauri::async_runtime::spawn(async move {
+        let interval = std::time::Duration::from_secs(3600);
+        loop {
+            tokio::time::sleep(interval).await;
+            let ms = memory_service.read().await;
+            let evicted = ms.apply_decay_tick();
+            drop(ms);
+            if evicted > 0 {
+                tracing::info!("[memory_decay] Evicted {} expired/decayed memories", evicted);
+            }
+        }
+    });
+}
+
+fn start_auto_tool_observation(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let auto_tool_creator = state.auto_tool_creator.clone();
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
+    tauri::async_runtime::spawn(async move {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
+            let mut atc = auto_tool_creator.lock().await;
+            atc.set_llm_provider(Box::new(bridge));
+            drop(atc);
+            tracing::info!("[auto_tool] LLM provider injected into AutoToolCreator");
+        }
+
+        let interval = std::time::Duration::from_secs(60 * 60);
+        loop {
+            tokio::time::sleep(interval).await;
+            let trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(30)) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("[auto_tool] Failed to fetch trajectories: {}", e);
+                        continue;
+                    },
+                };
+
+            let mut atc = auto_tool_creator.lock().await;
+            for trajectory in &trajectories {
+                atc.observe_trajectory(trajectory);
+            }
+
+            let frequent = atc.get_frequent_patterns(3);
+            if !frequent.is_empty() {
+                tracing::info!(
+                    "[auto_tool] Observed {} frequent tool patterns (top: {:?})",
+                    frequent.len(),
+                    &frequent[..frequent.len().min(5)]
+                );
+
+                for (pattern, count) in frequent.iter().take(2) {
+                    if atc
+                        .get_tool(&axagent_trajectory::slugify(pattern))
+                        .is_none()
+                    {
+                        match atc
+                            .create_tool_from_pattern(
+                                pattern,
+                                &format!("Auto-observed pattern ({} occurrences)", count),
+                                vec![],
+                            )
+                            .await
+                        {
+                            Ok(tool) => {
+                                tracing::info!(
+                                    "[auto_tool] Created tool '{}' from pattern '{}' (freq={})",
+                                    tool.name,
+                                    pattern,
+                                    count
+                                );
+                            },
+                            Err(e) => {
+                                tracing::debug!(
+                                    "[auto_tool] Could not create tool from '{}': {}",
+                                    pattern,
+                                    e
+                                );
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn start_text_grad_analysis(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let text_grad_engine = state.text_grad_engine.clone();
+    let db = state.harness.db().clone();
+    let master_key = state.harness.master_key_owned();
+    tauri::async_runtime::spawn(async move {
+        if let Some(bridge) =
+            axagent_runtime::llm_bridge::build_llm_bridge_from_db(&db, &master_key).await
+        {
+            let mut engine = text_grad_engine.lock().await;
+            engine.set_provider(bridge);
+            drop(engine);
+            tracing::info!("[text_grad] LLM provider injected into TextGradEngine");
+        }
+
+        let interval = std::time::Duration::from_secs(2 * 60 * 60);
+        loop {
+            tokio::time::sleep(interval).await;
+            let trajectories: Vec<axagent_trajectory::Trajectory> =
+                match trajectory_storage.get_trajectories(Some(10)) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::warn!("[text_grad] Failed to fetch trajectories: {}", e);
+                        continue;
+                    },
+                };
+
+            let mut engine = text_grad_engine.lock().await;
+            for trajectory in &trajectories {
+                if trajectory.steps.len() < 3 {
+                    continue;
+                }
+                let session_id = &trajectory.session_id;
+                let topic = &trajectory.topic;
+
+                for (i, step) in trajectory.steps.iter().enumerate() {
+                    let content_summary: String = step.content.chars().take(200).collect();
+                    let node_id = format!("{}_{}", &session_id[..session_id.len().min(8)], i);
+                    engine.add_node(node_id.clone(), content_summary, Some(format!("step_{}", i)));
+                    if i > 0 {
+                        let prev_id =
+                            format!("{}_{}", &session_id[..session_id.len().min(8)], i - 1);
+                        engine.add_edge(prev_id, node_id, 1.0);
+                    }
+                }
+
+                if !trajectory.steps.is_empty() {
+                    let last_step = trajectory
+                        .steps
+                        .last()
+                        .expect("is_empty check guarantees Some");
+                    let feedback = match trajectory.outcome {
+                        axagent_trajectory::TrajectoryOutcome::Success => {
+                            format!("Task succeeded: {}", topic)
+                        },
+                        axagent_trajectory::TrajectoryOutcome::Failure => {
+                            format!(
+                                "Task failed: {} - last step: {}",
+                                topic,
+                                &last_step.content.chars().take(100).collect::<String>()
+                            )
+                        },
+                        axagent_trajectory::TrajectoryOutcome::Partial => {
+                            format!("Task partially completed: {}", topic)
+                        },
+                        axagent_trajectory::TrajectoryOutcome::Abandoned => {
+                            format!("Task abandoned: {}", topic)
+                        },
+                    };
+                    let last_id = format!(
+                        "{}_{}",
+                        &session_id[..session_id.len().min(8)],
+                        trajectory.steps.len() - 1
+                    );
+                    let _ = engine.forward();
+                    let _ = engine.backward(&last_id, &feedback).await;
+                }
+            }
+
+            let stats = engine.stats();
+            tracing::info!(
+                "[text_grad] Graph stats: {} nodes, {} edges, {} gradients computed",
+                stats.node_count,
+                stats.edge_count,
+                stats.gradient_count
+            );
+        }
+    });
+}
+
+fn start_cron_scheduler(state: &AppState) {
+    use axagent_runtime::cron::{CronExecutor, CronScheduler};
+    use std::sync::Arc;
+
+    let store = state.cron_job_store.clone();
+
+    // 注入共享存储到 tools crate，使 CronCreateTool 等可用
+    axagent_tools::tools::cron::init_cron_store(store.clone());
+
+    // 设置工具解析器（从全局 registry 按需自动注册工作流中引用的工具）
+    {
+        let rt = tokio::runtime::Runtime::new()
+            .expect("Failed to create tokio runtime for tool resolver");
+
+        // 先注册股票数据工具到全局注册表
+        {
+            let mut reg = rt.block_on(state.local_tool_registry.lock());
+            axagent_tools::tools::stock_data::register_stock_tools(
+                &mut reg.tools,
+                state.astock_client.clone(),
+            );
+            // 注册金融计算工具（供股票分析工作流风险节点使用）
+            use axagent_tools::tools::finance::*;
+            reg.tools.register_all(vec![
+                std::sync::Arc::new(CalcMaxDrawdownTool),
+                std::sync::Arc::new(CalcSharpeRatioTool),
+                std::sync::Arc::new(CalcVarTool),
+                std::sync::Arc::new(CalcPEPercentileTool),
+                std::sync::Arc::new(CalcPEGTool),
+                std::sync::Arc::new(CalcKellyTool),
+                std::sync::Arc::new(CalcRiskParityTool),
+                std::sync::Arc::new(DetectMACrossTool),
+                std::sync::Arc::new(DetectBreakoutTool),
+            ]);
+        }
+
+        let registry = state.local_tool_registry.clone();
+        let work_engine = state.work_engine.clone();
+        let resolver: axagent_runtime::work_engine::ToolResolver =
+            std::sync::Arc::new(move |tool_name: String| {
+                let registry = registry.clone();
+                let work_engine = work_engine.clone();
+                Box::pin(async move {
+                    let reg = registry.lock().await;
+                    let known = reg.list_all_tool_names().contains(&tool_name)
+                        || reg.mcp_tools.contains_key(&tool_name);
+                    if known {
+                        let registry = registry.clone();
+                        let cb: axagent_runtime::work_engine::ToolCallback =
+                            std::sync::Arc::new(move |tn: String, args: serde_json::Value| {
+                                let registry = registry.clone();
+                                Box::pin(async move {
+                                    let mut reg = registry.lock().await;
+                                    let input_str = serde_json::to_string(&args)
+                                        .unwrap_or_else(|_| "{}".to_string());
+                                    match reg.execute(&tn, &input_str).await {
+                                        Ok(output) => {
+                                            Ok(serde_json::json!({"content": output.content}))
+                                        },
+                                        Err(e) => Err(format!("Tool execution error: {}", e)),
+                                    }
+                                })
+                            });
+                        Some(cb)
+                    } else if let Some(template_id) = tool_name.strip_prefix("workflow::") {
+                        // 工作流注册为工具：workflow::<template_id>
+                        let engine = work_engine.clone();
+                        let template_id = template_id.to_string();
+                        let cb: axagent_runtime::work_engine::ToolCallback =
+                            std::sync::Arc::new(move |_tn: String, args: serde_json::Value| {
+                                let engine = engine.clone();
+                                let tid = template_id.clone();
+                                Box::pin(async move {
+                                    let mut opts =
+                                        axagent_runtime::work_engine::RunOptions::default();
+                                    if let Some(input) = args.get("input") {
+                                        opts.input = Some(input.clone());
+                                    }
+                                    match engine.run_workflow(&tid, opts).await {
+                                        Ok(wf) => Ok(serde_json::json!({
+                                            "content": serde_json::json!({
+                                                "status": format!("{:?}", wf.status),
+                                                "results": wf.results,
+                                            }).to_string()
+                                        })),
+                                        Err(e) => {
+                                            Err(format!("Workflow tool '{}' failed: {:?}", tid, e))
+                                        },
+                                    }
+                                })
+                            });
+                        Some(cb)
+                    } else {
+                        None
+                    }
+                })
+            });
+        rt.block_on(state.work_engine.set_tool_resolver(resolver));
+
+        // 同时注入 ToolRegistry 本体，供 AgentExecutor::execute_tool 回退路径使用
+        {
+            let reg = rt.block_on(state.local_tool_registry.lock());
+            let tool_registry: std::sync::Arc<dyn axagent_harness::ToolRegistry> =
+                std::sync::Arc::new(reg.clone());
+            rt.block_on(state.work_engine.set_tool_registry(tool_registry));
+        }
+    }
+
+    // 设置 RAG 知识源检索回调（供工作流 Agent 节点从知识库/记忆/Wiki 检索上下文）
+    {
+        let db = state.harness.db().clone();
+        let master_key = state.harness.master_key_owned();
+        let vector_store = state.vector_store.clone();
+        let rag_callback: axagent_rt_workflow::work_engine::RagCallback = std::sync::Arc::new(
+            move |kb_ids: Vec<String>,
+                  mem_ids: Vec<String>,
+                  wiki_ids: Vec<String>,
+                  query: String| {
+                let db = db.clone();
+                let vector_store = vector_store.clone();
+                Box::pin(async move {
+                    let embed_fn = crate::indexing::ProviderEmbedFn;
+                    let result = axagent_core::rag::collect_rag_context(
+                        &db,
+                        &master_key,
+                        &vector_store,
+                        &kb_ids,
+                        &mem_ids,
+                        &wiki_ids,
+                        &query,
+                        5,
+                        embed_fn,
+                    )
+                    .await;
+                    Ok(result)
+                })
+            },
+        );
+        let rt = tokio::runtime::Runtime::new()
+            .expect("Failed to create tokio runtime for RAG callback");
+        rt.block_on(state.work_engine.set_rag_callback(rag_callback));
+    }
+
+    let work_engine = state.work_engine.clone();
+    let cron_store = state.cron_job_store.clone();
+    let astock_client = state.astock_client.clone();
+    let db = state.harness.db().clone();
+    let vector_store = state.vector_store.clone();
+    let master_key = state.harness.master_key_owned();
+    let mut executor = CronExecutor::new();
+    executor.set_handler(move |job| {
+        // ── 分支 1：自选股自动扫描 ──
+        if job.task_type.as_deref() == Some("watchlist-scan") {
+            let engine = work_engine.clone();
+            let store = cron_store.clone();
+            let client = astock_client.clone();
+            let database = db.clone();
+            let job_id = job.id.clone();
+            let _job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let mut success_count = 0u32;
+                let mut fail_count = 0u32;
+                let mut errors = Vec::new();
+
+                use sea_orm::EntityTrait;
+                match axagent_core::entity::watchlist_items::Entity::find()
+                    .all(&database)
+                    .await
+                {
+                    Ok(items) => {
+                        for item in &items {
+                            let result =
+                                crate::commands::stock_workflow::run_single_stock_analysis(
+                                    &database,
+                                    &client,
+                                    &engine,
+                                    &item.stock_code,
+                                    &item.stock_name,
+                                )
+                                .await;
+                            match result {
+                                Ok(_) => success_count += 1,
+                                Err(e) => {
+                                    fail_count += 1;
+                                    errors.push(format!("{}: {}", item.stock_code, e));
+                                },
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("[watchlist_scan] 查询自选股失败: {e}");
+                    },
+                }
+
+                let summary = format!("自选股扫描完成: {success_count} 成功, {fail_count} 失败");
+                tracing::info!("[watchlist_scan] {summary}");
+
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: fail_count == 0,
+                    output: Some(summary),
+                    error: if errors.is_empty() {
+                        None
+                    } else {
+                        Some(errors.join("; "))
+                    },
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+
+        // ── 分支 2：决策校验（30天回看）──
+        if job.task_type.as_deref() == Some("validate-decisions") {
+            let engine = work_engine.clone();
+            let client = astock_client.clone();
+            let database = db.clone();
+            let store = cron_store.clone();
+            let vs = vector_store.clone();
+            let mk = master_key;
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                use axagent_core::entity::stock_analyses;
+                use chrono::NaiveDate;
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+                let cutoff_str = cutoff.format("%Y-%m-%d").to_string();
+
+                let pending = stock_analyses::Entity::find()
+                    .filter(stock_analyses::Column::Status.eq("completed"))
+                    .filter(stock_analyses::Column::AnalysisDate.lte(&cutoff_str))
+                    .filter(
+                        sea_orm::Condition::any()
+                            .add(stock_analyses::Column::Outcome.is_null())
+                            .add(stock_analyses::Column::Outcome.eq("pending")),
+                    )
+                    .all(&database)
+                    .await
+                    .unwrap_or_default();
+
+                let mut _success = 0u32;
+                let mut perfs_logged: u32 = 0;
+                for a in &pending {
+                    let action = a.decision_action.as_deref().unwrap_or("");
+                    let code = &a.stock_code;
+                    let date = &a.analysis_date;
+
+                    let klines = match client.get_klines(code, "daily", 60).await {
+                        Ok(k) => k,
+                        Err(_) => {
+                            continue;
+                        },
+                    };
+
+                    let price_after = match klines.iter().find(|k| k.date.as_str() > date.as_str())
+                    {
+                        Some(k) => k.close,
+                        None => {
+                            continue;
+                        },
+                    };
+
+                    let td = NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                        .ok()
+                        .and_then(|d| d.checked_add_signed(chrono::Duration::days(15)))
+                        .map(|d| d.format("%Y-%m-%d").to_string());
+                    let later_close = td
+                        .as_ref()
+                        .and_then(|td_str| {
+                            klines
+                                .iter()
+                                .find(|k| k.date.as_str() >= td_str.as_str())
+                                .map(|k| k.close)
+                        })
+                        .unwrap_or(price_after);
+
+                    let is_bullish = matches!(action, "买入" | "增持" | "BUY" | "INCREASE");
+                    let is_bearish = matches!(action, "卖出" | "减持" | "SELL" | "REDUCE");
+                    let outcome = if (is_bullish && later_close >= price_after * 0.98)
+                        || (is_bearish && later_close <= price_after * 1.02)
+                    {
+                        "win"
+                    } else if is_bullish || is_bearish {
+                        "loss"
+                    } else {
+                        "pending"
+                    };
+
+                    let _ = stock_analyses::Entity::update_many()
+                        .col_expr(
+                            stock_analyses::Column::Outcome,
+                            sea_orm::sea_query::Expr::value(Some(outcome.to_string())),
+                        )
+                        .filter(stock_analyses::Column::Id.eq(&a.id))
+                        .exec(&database)
+                        .await;
+
+                    // 判定 loss → 触发反思工作流（嵌套原工作流 as-of 重放 + hindsight 注入）
+                    if outcome == "loss" {
+                        let pct = if price_after > 0.0 {
+                            format!("{:.1}%", (later_close / price_after - 1.0) * 100.0)
+                        } else {
+                            "下跌".to_string()
+                        };
+                        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                        let _ = crate::commands::stock_workflow::run_reflection_workflow(
+                            &database,
+                            &client,
+                            &engine,
+                            &vs,
+                            &mk,
+                            code,
+                            a.stock_name.as_str(),
+                            &a.id,                             // original_analysis_id
+                            &format!("30天后 {} → 失败", pct), // actual_outcome
+                            date.as_str(),                     // as_of_date = 原始分析日期
+                            &today,                            // hindsight_date = 校验触发日期
+                            0u8,     // min_confidence_threshold (0 = 全部触发)
+                            "light", // reflection_depth
+                        )
+                        .await;
+                    }
+
+                    // ── R1 复盘→进化：把每次决策校验的结果写入 strategy_performance ──
+                    if outcome == "win" || outcome == "loss" {
+                        // 推断 strategy_id（action 1:1 映射到 5 大策略的近似）
+                        let strategy_id = match action {
+                            "买入" | "BUY" | "增持" | "INCREASE" => "trend",
+                            "卖出" | "SELL" | "减持" | "REDUCE" => "reversion",
+                            "持有" | "HOLD" => "value",
+                            "观望" | "UNCERTAIN" => "capital",
+                            _ => "watchlist",
+                        };
+                        let period = "short"; // 第一版统一 short
+                        let return_pct = if price_after > 0.0 {
+                            (later_close / price_after - 1.0) * 100.0
+                        } else {
+                            0.0
+                        };
+                        let was_correct = if outcome == "win" { 1 } else { 0 };
+                        let decision_ms = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                            .ok()
+                            .and_then(|d| d.and_hms_opt(0, 0, 0))
+                            .map(|d| d.and_utc().timestamp_millis())
+                            .unwrap_or(0);
+                        let horizon_json = serde_json::json!({
+                            "d1": price_after,
+                            "d15": later_close,
+                            "returnPct": return_pct,
+                        })
+                        .to_string();
+                        let _ = axagent_stock_analysis::evolution_drift::record_performance(
+                            &database,
+                            strategy_id,
+                            period,
+                            code,
+                            &a.stock_name,
+                            decision_ms,
+                            started as i64,
+                            15,
+                            return_pct,
+                            was_correct,
+                            a.decision_position_pct.unwrap_or(0.0) as i32,
+                            Some(&horizon_json),
+                        )
+                        .await
+                        .map(|_| perfs_logged += 1)
+                        .map_err(|e| tracing::warn!("[evolution_drift] 写入 strategy_performance 失败: {e}"));
+                    }
+
+                    _success += 1;
+                }
+
+                // ── R1 复盘→进化：决策校验完成后重算所有 (strategy, period) 权重 ──
+                if perfs_logged > 0 {
+                    match axagent_stock_analysis::evolution_drift::recalc_and_persist(
+                        &database,
+                        "cron",
+                        None,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok((written, _)) => {
+                            tracing::info!(
+                                "[evolution_drift] validate-decisions 钩子触发重算: perfs={}, weight_changes={}",
+                                perfs_logged, written
+                            );
+                        },
+                        Err(e) => {
+                            tracing::warn!("[evolution_drift] 重算权重失败: {e}");
+                        },
+                    }
+                }
+
+                let summary = format!("决策校验完成: {} 条已校验", pending.len());
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: true,
+                    output: Some(summary),
+                    error: None,
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                let _ = store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+
+        // ── 分支 3：工作流模板任务 ──
+        if let Some(ref wf_id) = job.workflow_id {
+            let engine = work_engine.clone();
+            let store = cron_store.clone();
+            let wf_id = wf_id.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let opts = axagent_runtime::work_engine::RunOptions::default();
+                let result = match engine.run_workflow(&wf_id, opts).await {
+                    Ok(workflow) => {
+                        tracing::info!(
+                            "[CronScheduler] 工作流任务 '{}' 完成: {:?}",
+                            job_name,
+                            workflow.status
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some(format!("{:?}", workflow.status)),
+                            error: None,
+                            duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
+                                as u64,
+                            executed_at: started,
+                        }
+                    },
+                    Err(e) => {
+                        let err_msg = format!("{:?}", e);
+                        tracing::error!(
+                            "[CronScheduler] 工作流任务 '{}' 失败: {err_msg}",
+                            job_name
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(err_msg),
+                            duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
+                                as u64,
+                            executed_at: started,
+                        }
+                    },
+                };
+                store.record_run(&job_id, result).await;
+                // 非循环任务执行后禁用
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+        } else {
+            tracing::info!(
+                "[CronScheduler] 触发任务 '{}': {}",
+                job.name,
+                &job.prompt[..std::cmp::min(job.prompt.len(), 200)]
+            );
+        }
+    });
+
+    let scheduler = Arc::new(CronScheduler::new(store, Arc::new(executor)));
+
+    tauri::async_runtime::spawn(async move {
+        scheduler.start().await;
+    });
+
+    tracing::info!("[CronScheduler] 已启动（统一 Cron + ScheduledTask），每30秒轮询一次");
+}
+
+fn start_trajectory_cleanup(state: &AppState) {
+    let trajectory_storage = state.trajectory_storage.clone();
+    let handle = state.trajectory_cleanup_handle.clone();
+    let shutdown_token = state.shutdown_token.clone();
+    let config = axagent_trajectory::TrajectoryCleanupConfig::default();
+    let config_for_log = config.clone();
+    let interval = std::time::Duration::from_secs(24 * 3600);
+
+    tauri::async_runtime::spawn(async move {
+        let task = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(interval);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {
+                        match trajectory_storage.cleanup(&config) {
+                            Ok(count) if count > 0 => {
+                                tracing::info!(
+                                    "[trajectory_cleanup] Cleaned up {} old trajectories",
+                                    count
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!(
+                                    "[trajectory_cleanup] cleanup failed: {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    _ = shutdown_token.cancelled() => {
+                        tracing::info!(
+                            "[trajectory_cleanup] Received shutdown signal, stopping"
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+        *handle.lock().await = Some(task);
+    });
+    tracing::info!(
+        "[trajectory_cleanup] Started with max_age_days={:?}, max_trajectories={:?}, interval=24h",
+        config_for_log.max_age_days,
+        config_for_log.max_trajectories
+    );
+}

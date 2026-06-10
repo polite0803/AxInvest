@@ -1,0 +1,452 @@
+import { useWorkflowEditorStore } from "@/stores";
+import { Button, Divider, Input, message, Select, Switch, Tag, theme } from "antd";
+import { GripVertical, Plus, Trash2, X } from "lucide-react";
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { AIAssistButton, useNodeAIAssist } from "../../Hooks";
+import type { Branch, DegradeStrategy, ParallelNode, WorkflowNode } from "../../types";
+import { DEGRADE_LABELS } from "../../types";
+import { BasePropertyPanel } from "./BasePropertyPanel";
+
+interface ParallelPropertyPanelProps {
+  node: WorkflowNode;
+  onUpdate: (updates: Partial<WorkflowNode>) => void;
+  onDelete: () => void;
+}
+
+export const ParallelPropertyPanel: React.FC<ParallelPropertyPanelProps> = ({
+  node,
+  onUpdate,
+  onDelete,
+}) => {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const parallelNode = node as ParallelNode;
+  const config = parallelNode.config || {
+    branches: [],
+    wait_for_all: true,
+    aggregation: undefined,
+    auto_input_from_parent: true,
+  };
+
+  const { nodes } = useWorkflowEditorStore();
+
+  const { generate: aiGenerate, generating: aiGenerating } = useNodeAIAssist();
+  const [messageApi, contextHolder] = message.useMessage();
+
+  const handleAISuggestBranches = async () => {
+    const result = await aiGenerate({
+      systemPrompt: t("workflow.aiAssist.parallel.systemPrompt", {
+        schema: '{"id": "string", "title": "string", "steps": ["node_id", ...]}',
+      }),
+      userPrompt: t("workflow.aiAssist.parallel.branchesHint", {
+        current: config.branches.length,
+        available: nodes
+          .filter((n) => n.type !== "trigger" && n.type !== "end")
+          .map((n) => `${n.id}(${n.title || n.type})`)
+          .join(", "),
+      }),
+    });
+    if (!result) {
+      messageApi.error(t("workflow.aiAssist.failed"));
+      return;
+    }
+    try {
+      const cleaned = result.replace(/^```\w*\s*|\s*```$/g, "").trim();
+      const parsed = JSON.parse(cleaned) as Branch[];
+      onUpdate({ config: { ...config, branches: parsed } });
+      messageApi.success(t("workflow.aiAssist.applied"));
+    } catch {
+      messageApi.error(t("workflow.aiAssist.subWorkflow.parseFailed"));
+    }
+  };
+
+  const getNodeLabel = (nodeId: string) => {
+    const found = nodes.find((n) => n.id === nodeId);
+    return found ? `${found.title || found.id} (${found.type})` : nodeId;
+  };
+
+  const getAvailableNodes = (excludeIds: string[]) => {
+    return nodes.filter((n) => !excludeIds.includes(n.id));
+  };
+
+  const handleAddBranch = () => {
+    const newBranch: Branch = {
+      id: `branch-${Date.now()}`,
+      title: t("workflow.props.branchName"),
+      steps: [],
+    };
+    onUpdate({
+      config: {
+        ...config,
+        branches: [...config.branches, newBranch],
+      },
+    });
+  };
+
+  const handleUpdateBranch = (index: number, updates: Partial<Branch>) => {
+    const newBranches = [...config.branches];
+    newBranches[index] = { ...newBranches[index], ...updates };
+    onUpdate({
+      config: {
+        ...config,
+        branches: newBranches,
+      },
+    });
+  };
+
+  const handleDeleteBranch = (index: number) => {
+    const newBranches = config.branches.filter((_, i) => i !== index);
+    onUpdate({
+      config: {
+        ...config,
+        branches: newBranches,
+      },
+    });
+  };
+
+  const handleAddStepToBranch = (branchIndex: number, nodeId: string) => {
+    const branch = config.branches[branchIndex];
+    if (!branch.steps.includes(nodeId)) {
+      handleUpdateBranch(branchIndex, { steps: [...branch.steps, nodeId] });
+    }
+  };
+
+  const handleRemoveStepFromBranch = (branchIndex: number, nodeId: string) => {
+    const branch = config.branches[branchIndex];
+    handleUpdateBranch(branchIndex, {
+      steps: branch.steps.filter((id) => id !== nodeId),
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {contextHolder}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <label style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+          {t("workflow.props.autoInputFromParent")}
+        </label>
+        <Switch
+          size="small"
+          checked={config.auto_input_from_parent !== false}
+          onChange={(checked) =>
+            onUpdate({
+              config: {
+                ...config,
+                auto_input_from_parent: checked,
+              },
+            })}
+        />
+      </div>
+      <div style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+        {t("workflow.props.autoInputFromParentHint")}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <label style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+          {t("workflow.props.waitForAllBranches")}
+        </label>
+        <Switch
+          size="small"
+          checked={config.wait_for_all}
+          onChange={(checked) =>
+            onUpdate({
+              config: {
+                ...config,
+                wait_for_all: checked,
+              },
+            })}
+        />
+      </div>
+      <div style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+        {config.wait_for_all
+          ? t("workflow.props.waitForAllHint")
+          : t("workflow.props.waitForAnyHint")}
+      </div>
+
+      <div>
+        <label
+          style={{
+            display: "block",
+            color: token.colorTextTertiary,
+            fontSize: 12,
+            marginBottom: 4,
+          }}
+        >
+          {t("workflow.props.timeoutSeconds")}
+        </label>
+        <Input
+          id="parallel-property-panel-input-105"
+          type="number"
+          value={config.timeout ?? ""}
+          onChange={(e) =>
+            onUpdate({
+              config: {
+                ...config,
+                timeout: e.target.value ? parseInt(e.target.value) : undefined,
+              },
+            })}
+          size="small"
+          placeholder={t("workflow.props.notSet")}
+        />
+      </div>
+
+      <div>
+        <label
+          style={{
+            display: "block",
+            color: token.colorTextTertiary,
+            fontSize: 12,
+            marginBottom: 4,
+          }}
+        >
+          {t("workflow.props.aggregation")}
+        </label>
+        <Select
+          value={config.aggregation ?? "all"}
+          onChange={(v) =>
+            onUpdate({
+              config: {
+                ...config,
+                aggregation: v === "all" ? undefined : v,
+              },
+            })}
+          size="small"
+          style={{ width: "100%" }}
+          options={[
+            { value: "all", label: t("workflow.props.aggregationAll") },
+            { value: "any", label: t("workflow.props.aggregationAny") },
+            { value: "race", label: t("workflow.props.aggregationRace") },
+            { value: "majority", label: t("workflow.props.aggregationMajority") },
+          ]}
+        />
+        <div style={{ fontSize: 11, color: token.colorTextQuaternary, margin: "2px 0 8px" }}>
+          {t(`workflow.props.aggregationHint`)}
+        </div>
+      </div>
+
+      <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
+          <label style={{ color: token.colorTextTertiary, fontSize: 12 }}>
+            {t("workflow.props.branches")}
+          </label>
+          <div style={{ display: "flex", gap: 4 }}>
+            <AIAssistButton
+              labelKey="suggest"
+              loading={aiGenerating}
+              onClick={handleAISuggestBranches}
+              compact
+            />
+            <Button
+              type="dashed"
+              size="small"
+              icon={<Plus size={12} />}
+              onClick={handleAddBranch}
+            >
+              {t("workflow.props.addBranch")}
+            </Button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {config.branches.map((branch, index) => {
+            const availableNodes = getAvailableNodes(branch.steps);
+            return (
+              <div
+                key={branch.id || index}
+                style={{
+                  padding: 8,
+                  background: token.colorBgElevated,
+                  borderRadius: 6,
+                  border: "1px solid #333",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    marginBottom: 8,
+                  }}
+                >
+                  <GripVertical size={12} color={token.colorTextTertiary} />
+                  <Input
+                    id="parallel-property-panel-input-106"
+                    value={branch.title}
+                    onChange={(e) => handleUpdateBranch(index, { title: e.target.value })}
+                    size="small"
+                    placeholder={t("workflow.props.branchName")}
+                    style={{ flex: 1 }}
+                  />
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<Trash2 size={12} />}
+                    onClick={() => handleDeleteBranch(index)}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    paddingLeft: 20,
+                  }}
+                >
+                  <label style={{ fontSize: 12, color: token.colorTextTertiary }}>
+                    {t("workflow.props.steps")}
+                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {branch.steps.map((stepId) => (
+                      <Tag
+                        key={stepId}
+                        closable
+                        onClose={() => handleRemoveStepFromBranch(index, stepId)}
+                        style={{
+                          background: token.colorFillQuaternary,
+                          border: "1px solid #444",
+                          color: token.colorTextQuaternary,
+                        }}
+                        closeIcon={<X size={10} />}
+                      >
+                        {getNodeLabel(stepId)}
+                      </Tag>
+                    ))}
+                    {branch.steps.length === 0 && (
+                      <span style={{ fontSize: 12, color: token.colorTextTertiary }}>
+                        {t("workflow.props.noSteps")}
+                      </span>
+                    )}
+                  </div>
+                  {availableNodes.length > 0 && (
+                    <Select
+                      placeholder={t("workflow.props.addStep")}
+                      size="small"
+                      style={{ width: "100%", marginTop: 4 }}
+                      onChange={(nodeId) => handleAddStepToBranch(index, nodeId)}
+                      options={availableNodes.map((n) => ({
+                        value: n.id,
+                        label: `${n.title || n.id} (${n.type})`,
+                      }))}
+                    />
+                  )}
+                </div>
+
+                {/* 超时和降级策略配置 */}
+                <div
+                  style={{
+                    paddingLeft: 20,
+                    marginTop: 8,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        color: token.colorTextTertiary,
+                        display: "block",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {t("workflow.props.branchTimeoutMs", { defaultValue: "Timeout (ms)" })}
+                    </label>
+                    <Input
+                      type="number"
+                      size="small"
+                      value={branch.branchTimeoutMs ?? ""}
+                      onChange={(e) =>
+                        handleUpdateBranch(index, {
+                          branchTimeoutMs: e.target.value
+                            ? parseInt(e.target.value)
+                            : undefined,
+                        })}
+                      placeholder={t("workflow.props.notSet")}
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        color: token.colorTextTertiary,
+                        display: "block",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {t("workflow.props.degradeOnTimeout", {
+                        defaultValue: "On timeout",
+                      })}
+                    </label>
+                    <Select
+                      value={branch.degradeStrategy ?? "skip"}
+                      size="small"
+                      style={{ width: "100%" }}
+                      onChange={(v: DegradeStrategy) =>
+                        handleUpdateBranch(index, {
+                          degradeStrategy: v === "skip" ? undefined : v,
+                        })}
+                      options={[
+                        { value: "skip", label: DEGRADE_LABELS.skip },
+                        { value: "useDefault", label: DEGRADE_LABELS.useDefault },
+                        { value: "strict", label: DEGRADE_LABELS.strict },
+                      ]}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {config.branches.length === 0 && (
+            <div
+              style={{
+                color: token.colorTextTertiary,
+                fontSize: 12,
+                textAlign: "center",
+                padding: 16,
+              }}
+            >
+              {t("workflow.props.clickToAddBranch")}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Divider style={{ margin: "8px 0", borderColor: token.colorBorderSecondary }} />
+
+      <div
+        style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 12, marginTop: 4 }}
+      >
+        <BasePropertyPanel
+          node={node}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+        />
+      </div>
+    </div>
+  );
+};

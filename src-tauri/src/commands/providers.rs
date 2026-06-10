@@ -1,0 +1,475 @@
+use crate::AppState;
+use crate::commands::error::ErrorResponse;
+use crate::commands::error_code::provider as provider_err;
+use axagent_harness::types::*;
+use std::time::Instant;
+use tauri::State;
+
+#[tauri::command]
+pub async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderConfig>, String> {
+    axagent_core::repo::provider::list_providers_merged(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_provider(
+    state: State<'_, AppState>,
+    input: CreateProviderInput,
+) -> Result<ProviderConfig, String> {
+    axagent_core::repo::provider::create_provider(state.harness.db(), input)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_provider(
+    state: State<'_, AppState>,
+    id: String,
+    input: UpdateProviderInput,
+) -> Result<ProviderConfig, String> {
+    let real_id = axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &id)
+        .await
+        .map_err(|e| e.to_string())?;
+    axagent_core::repo::provider::update_provider(state.harness.db(), &real_id, input)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_provider(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    // Virtual built-in providers have no DB row — deletion is a no-op (they'll reappear)
+    if id.starts_with("builtin_") {
+        return Ok(());
+    }
+    axagent_core::repo::provider::delete_provider(state.harness.db(), &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn toggle_provider(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let real_id = axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &id)
+        .await
+        .map_err(|e| e.to_string())?;
+    axagent_core::repo::provider::toggle_provider(state.harness.db(), &real_id, enabled)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_provider_key(
+    state: State<'_, AppState>,
+    provider_id: String,
+    raw_key: String,
+) -> Result<ProviderKey, String> {
+    let real_id =
+        axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    let encrypted = axagent_core::crypto::encrypt_key(&raw_key, state.harness.master_key())
+        .map_err(|e| e.to_string())?;
+    let prefix = if raw_key.len() >= 8 {
+        format!("{}...", &raw_key[..8])
+    } else {
+        raw_key.clone()
+    };
+    axagent_core::repo::provider::add_provider_key(
+        state.harness.db(),
+        &real_id,
+        &encrypted,
+        &prefix,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_provider_key(
+    state: State<'_, AppState>,
+    key_id: String,
+    raw_key: String,
+) -> Result<ProviderKey, String> {
+    let encrypted = axagent_core::crypto::encrypt_key(&raw_key, state.harness.master_key())
+        .map_err(|e| e.to_string())?;
+    let prefix = if raw_key.len() >= 8 {
+        format!("{}...", &raw_key[..8])
+    } else {
+        raw_key.clone()
+    };
+    axagent_core::repo::provider::update_provider_key(
+        state.harness.db(),
+        &key_id,
+        &encrypted,
+        &prefix,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_provider_key(state: State<'_, AppState>, key_id: String) -> Result<(), String> {
+    axagent_core::repo::provider::delete_provider_key(state.harness.db(), &key_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn toggle_provider_key(
+    state: State<'_, AppState>,
+    key_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    axagent_core::repo::provider::toggle_provider_key(state.harness.db(), &key_id, enabled)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_decrypted_provider_key(
+    state: State<'_, AppState>,
+    key_id: String,
+) -> Result<String, String> {
+    let key_row = axagent_core::repo::provider::get_provider_key(state.harness.db(), &key_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    axagent_core::crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn validate_provider_key(
+    state: State<'_, AppState>,
+    key_id: String,
+) -> Result<bool, String> {
+    let key_row = axagent_core::repo::provider::get_provider_key(state.harness.db(), &key_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let decrypted =
+        axagent_core::crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
+            .map_err(|e| e.to_string())?;
+    let provider =
+        axagent_core::repo::provider::get_provider(state.harness.db(), &key_row.provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    // Use the registry to validate by listing models
+
+    let provider_type_str = match provider.provider_type {
+        ProviderType::OpenAI => "openai",
+        ProviderType::OpenAIResponses => "openai_responses",
+        ProviderType::Anthropic => "anthropic",
+        ProviderType::Gemini => "gemini",
+        ProviderType::OpenClaw => "openclaw",
+        ProviderType::Hermes => "hermes",
+        ProviderType::Ollama => "ollama",
+    };
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(provider_type_str)
+        .ok_or_else(|| format!("No adapter for provider type: {}", provider_type_str))?;
+    let global_settings = axagent_core::repo::settings::get_settings(state.harness.db())
+        .await
+        .unwrap_or_default();
+    let resolved_proxy = axagent_harness::types::ProviderProxyConfig::resolve(
+        &provider.proxy_config,
+        &global_settings,
+    );
+    let ctx = axagent_harness::ProviderRequestContext {
+        api_key: decrypted,
+        key_id: key_id.clone(),
+        provider_id: provider.id.clone(),
+        base_url: Some(axagent_harness::resolve_base_url_for_type(
+            &provider.api_host,
+            &provider.provider_type,
+        )),
+        api_path: provider.api_path.clone(),
+        proxy_config: resolved_proxy,
+        custom_headers: provider
+            .custom_headers
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok()),
+        api_mode: None,
+        conversation: None,
+        previous_response_id: None,
+        store_response: None,
+    };
+    let valid = match adapter.validate_key(&ctx).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("Key validation failed for key {}: {}", key_id, e);
+            // Update as invalid, then return the error
+            let _ = axagent_core::repo::provider::update_key_validation(
+                state.harness.db(),
+                &key_id,
+                false,
+            )
+            .await;
+            return Err(e.to_string());
+        },
+    };
+    // Update validation timestamp
+    axagent_core::repo::provider::update_key_validation(state.harness.db(), &key_id, valid)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(valid)
+}
+
+#[tauri::command]
+pub async fn save_models(
+    state: State<'_, AppState>,
+    provider_id: String,
+    models: Vec<Model>,
+) -> Result<(), String> {
+    let real_id =
+        axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    axagent_core::repo::provider::save_models(state.harness.db(), &real_id, &models)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn toggle_model(
+    state: State<'_, AppState>,
+    provider_id: String,
+    model_id: String,
+    enabled: bool,
+) -> Result<Model, String> {
+    let real_id =
+        axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    axagent_core::repo::provider::toggle_model(state.harness.db(), &real_id, &model_id, enabled)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_model_params(
+    state: State<'_, AppState>,
+    provider_id: String,
+    model_id: String,
+    overrides: ModelParamOverrides,
+) -> Result<Model, String> {
+    let real_id =
+        axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    axagent_core::repo::provider::update_model_params(
+        state.harness.db(),
+        &real_id,
+        &model_id,
+        overrides,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn fetch_remote_models(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> Result<Vec<Model>, String> {
+    let real_id =
+        axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    let provider = axagent_core::repo::provider::get_provider(state.harness.db(), &real_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    // Get an enabled key for the provider
+    let key_row = axagent_core::repo::provider::get_active_key(state.harness.db(), &real_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let decrypted =
+        axagent_core::crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
+            .map_err(|e| e.to_string())?;
+
+    let provider_type_str = match provider.provider_type {
+        ProviderType::OpenAI => "openai",
+        ProviderType::OpenAIResponses => "openai_responses",
+        ProviderType::Anthropic => "anthropic",
+        ProviderType::Gemini => "gemini",
+        ProviderType::OpenClaw => "openclaw",
+        ProviderType::Hermes => "hermes",
+        ProviderType::Ollama => "ollama",
+    };
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(provider_type_str)
+        .ok_or_else(|| format!("No adapter for provider type: {}", provider_type_str))?;
+    let global_settings = axagent_core::repo::settings::get_settings(state.harness.db())
+        .await
+        .unwrap_or_default();
+    let resolved_proxy = axagent_harness::types::ProviderProxyConfig::resolve(
+        &provider.proxy_config,
+        &global_settings,
+    );
+    let ctx = axagent_harness::ProviderRequestContext {
+        api_key: decrypted,
+        key_id: key_row.id.clone(),
+        provider_id: provider.id.clone(),
+        base_url: Some(axagent_harness::resolve_base_url_for_type(
+            &provider.api_host,
+            &provider.provider_type,
+        )),
+        api_path: provider.api_path.clone(),
+        proxy_config: resolved_proxy,
+        custom_headers: provider
+            .custom_headers
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok()),
+        api_mode: None,
+        conversation: None,
+        previous_response_id: None,
+        store_response: None,
+    };
+    // Android 网络延迟更高，超时放宽到 60s；桌面端保持 30s
+    let model_timeout_secs = if cfg!(target_os = "android") { 60 } else { 30 };
+    let mut models = tokio::time::timeout(
+        std::time::Duration::from_secs(model_timeout_secs),
+        adapter.list_models(&ctx),
+    )
+    .await
+    .map_err(|_| {
+        ErrorResponse::new(provider_err::MODEL_LIST_TIMEOUT).with_detail(format!(
+            "获取模型列表超时 ({}s)。请检查网络连接和 API 地址是否正确。",
+            model_timeout_secs
+        ))
+    })?
+    .map_err(|e| e.to_string())?;
+    for model in &mut models {
+        if model.max_tokens.is_none() {
+            model.max_tokens =
+                axagent_core::model_knowledge::get_model_context_window(&model.model_id);
+        }
+    }
+    // Deduplicate by model_id (keep last occurrence)
+    let mut seen = std::collections::HashSet::new();
+    let mut deduped: Vec<Model> = Vec::with_capacity(models.len());
+    for model in models.into_iter().rev() {
+        if seen.insert(model.model_id.clone()) {
+            deduped.push(model);
+        }
+    }
+    deduped.reverse();
+    Ok(deduped)
+}
+
+/// Test a single model's availability by sending a minimal chat request.
+/// Returns latency in milliseconds on success.
+#[tauri::command]
+pub async fn test_model(
+    state: State<'_, AppState>,
+    provider_id: String,
+    model_id: String,
+) -> Result<u64, String> {
+    let real_id =
+        axagent_core::repo::provider::resolve_provider_id(state.harness.db(), &provider_id)
+            .await
+            .map_err(|e| e.to_string())?;
+    let provider = axagent_core::repo::provider::get_provider(state.harness.db(), &real_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let key_row = axagent_core::repo::provider::get_active_key(state.harness.db(), &real_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let decrypted =
+        axagent_core::crypto::decrypt_key(&key_row.key_encrypted, state.harness.master_key())
+            .map_err(|e| e.to_string())?;
+
+    let provider_type_str = match provider.provider_type {
+        ProviderType::OpenAI => "openai",
+        ProviderType::OpenAIResponses => "openai_responses",
+        ProviderType::Anthropic => "anthropic",
+        ProviderType::Gemini => "gemini",
+        ProviderType::OpenClaw => "openclaw",
+        ProviderType::Hermes => "hermes",
+        ProviderType::Ollama => "ollama",
+    };
+    let adapter = state
+        .harness
+        .provider_registry()
+        .get(provider_type_str)
+        .ok_or_else(|| format!("No adapter for provider type: {}", provider_type_str))?;
+    let global_settings = axagent_core::repo::settings::get_settings(state.harness.db())
+        .await
+        .unwrap_or_default();
+    let resolved_proxy = axagent_harness::types::ProviderProxyConfig::resolve(
+        &provider.proxy_config,
+        &global_settings,
+    );
+    let ctx = axagent_harness::ProviderRequestContext {
+        api_key: decrypted,
+        key_id: key_row.id.clone(),
+        provider_id: provider.id.clone(),
+        base_url: Some(axagent_harness::resolve_base_url_for_type(
+            &provider.api_host,
+            &provider.provider_type,
+        )),
+        api_path: provider.api_path.clone(),
+        proxy_config: resolved_proxy,
+        custom_headers: provider
+            .custom_headers
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok()),
+        api_mode: None,
+        conversation: None,
+        previous_response_id: None,
+        store_response: None,
+    };
+    let request = ChatRequest {
+        model: model_id,
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: ChatContent::Text("hi".into()),
+            tool_calls: None,
+            tool_call_id: None,
+            thinking: None,
+        }],
+        stream: false,
+        temperature: None,
+        top_p: None,
+        max_tokens: Some(1),
+        tools: None,
+        thinking_budget: None,
+        use_max_completion_tokens: None,
+        thinking_param_style: None,
+        api_mode: None,
+        instructions: None,
+        conversation: None,
+        previous_response_id: None,
+        store: None,
+    };
+    let start = Instant::now();
+    adapter
+        .chat(&ctx, request)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(start.elapsed().as_millis() as u64)
+}
+
+#[tauri::command]
+pub async fn reorder_providers(
+    state: State<'_, AppState>,
+    provider_ids: Vec<String>,
+) -> Result<(), String> {
+    // Materialize any virtual built-in providers so sort_order can be persisted
+    let mut real_ids = Vec::with_capacity(provider_ids.len());
+    for id in &provider_ids {
+        let real_id = axagent_core::repo::provider::resolve_provider_id(state.harness.db(), id)
+            .await
+            .map_err(|e| e.to_string())?;
+        real_ids.push(real_id);
+    }
+    axagent_core::repo::provider::reorder_providers(state.harness.db(), &real_ids)
+        .await
+        .map_err(|e| e.to_string())
+}

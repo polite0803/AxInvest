@@ -1,0 +1,52 @@
+# git-cliff configuration for AxAgent
+# https://git-cliff.org/docs/configuration
+
+[changelog]
+header = "# Changelog\n\nAll notable changes to AxAgent will be documented in this file.\n"
+body = """
+{%- if version -%}\
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{%- else -%}\
+## [unreleased]
+{%- endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits -%}
+- {{ commit.message | split(pat="\n") | first | trim }}
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+postprocessors = [
+  { pattern = '<REPO>', replace = "https://github.com/polite0803/AxAgent" },
+]
+
+[git]
+# Commit parsers: map conventional commit prefixes + emoji to groups
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+
+# AxAgent 使用中文 emoji 前缀，映射规则:
+# 🚀 → feat / ✨ New Features
+# 🐛 → fix  / 🐛 Bug Fixes
+# 🔨 → refactor
+# ⚡ → perf
+# 📝 → docs
+# 🎨 → style
+# 🔧 → ci
+# 📦 → chore
+
+commit_parsers = [
+  { message = "^(🚀|feat)", group = "✨ New Features" },
+  { message = "^(🐛|fix)", group = "🐛 Bug Fixes" },
+  { message = "^(🔨|refactor)", group = "🔨 Refactoring" },
+  { message = "^(⚡|perf)", group = "⚡ Performance" },
+  { message = "^(📝|docs)", group = "📝 Documentation" },
+  { message = "^(🎨|style)", group = "🎨 Styling" },
+  { message = "^(🔧|ci)", group = "🔧 CI / Build" },
+  { message = "^(📦|chore)", group = "📦 Miscellaneous" },
+  { message = "^(🏗️|build)", group = "🏗️ Build" },
+  { message = "^(🧪|test)", group = "🧪 Testing" },
+  { message = ".*", group = "📦 Miscellaneous" },
+]

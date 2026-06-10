@@ -1,0 +1,514 @@
+import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
+import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
+import { invoke } from "@/lib/invoke";
+import { useStockAnalysisStore, useUIStore } from "@/stores";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { Button, Collapse, Dropdown } from "antd";
+import {
+  ArrowLeftRight,
+  Coins,
+  LineChart,
+  RotateCcw,
+  Settings,
+  Shield,
+  Sparkles,
+  TrendingUp,
+  Users,
+  X,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AnalysisProgress } from "./AnalysisProgress";
+import { AnalystReportGrid } from "./AnalystReportGrid";
+import { AnnouncementsPanel } from "./AnnouncementsPanel";
+import { ClsFlashPanel } from "./ClsFlashPanel";
+import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
+import { DebatePanel } from "./DebatePanel";
+import { DecisionBanner } from "./DecisionBanner";
+import "./dual-view";
+import { EventCalendarPanel } from "./EventCalendarPanel";
+import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
+import { IndexQuotesPanel } from "./IndexQuotesPanel";
+import { IndustryRankingPanel } from "./IndustryRankingPanel";
+import { KLineChart } from "./KLineChart";
+import { NorthBoundPanel } from "./NorthBoundPanel";
+import { OptionPcrPanel } from "./OptionPcrPanel";
+import { PositionsMiniPanel } from "./PositionsMiniPanel";
+import { ReflectionPanel } from "./ReflectionPanel";
+import { RiskMatrix } from "./RiskMatrix";
+import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
+import { StockAnalysisPageContext } from "./StockAnalysisPageContext";
+import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
+import { StockQuoteCard } from "./StockQuoteCard";
+import { StockSearchBar } from "./StockSearchBar";
+import { ValueAssessmentPanel } from "./ValueAssessmentPanel";
+
+const PERIOD_MAP: Record<string, { period: string; limit: number }> = {
+  "1m": { period: "daily", limit: 22 },
+  "3m": { period: "daily", limit: 66 },
+  "6m": { period: "daily", limit: 120 },
+  "1y": { period: "daily", limit: 250 },
+  "weekly": { period: "weekly", limit: 104 },
+  "monthly": { period: "monthly", limit: 60 },
+};
+
+interface SheetPanel {
+  key: string;
+  label: string;
+  element: ReactNode;
+}
+
+export function StockAnalysisPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
+  const status = useStockAnalysisStore((s) => s.status);
+  const error = useStockAnalysisStore((s) => s.error);
+  const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
+  const failedNodeErrors = useStockAnalysisStore((s) => s.failedNodeErrors);
+  const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
+  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
+  const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
+  const klinePeriod = useStockAnalysisStore((s) => s.klinePeriod);
+
+  const deviceLayout = useUIStore((s) => s.deviceLayout);
+  const isMobile = deviceLayout === "mobile" || deviceLayout === "tablet";
+
+  // 时间旅行: 监听全局 TimeAnchor,用于 sa-header 的 L2 视觉信号(回放半透紫色遮罩)
+  const timeAnchorMode = useTimeAnchorStore((s) => s.mode);
+  const isReplay = timeAnchorMode === "replay" || timeAnchorMode === "backtest_sweep";
+
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState("market");
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetTab, setSheetTab] = useState("trade");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDefaultTab, setSettingsDefaultTab] = useState<string | undefined>(undefined);
+  const [marketStatus, setMarketStatus] = useState("");
+  const [expandedFailedNode, setExpandedFailedNode] = useState<string | null>(null);
+
+  const openDataSourceSettings = useCallback(() => {
+    setSettingsDefaultTab("data");
+    setSettingsOpen(true);
+  }, []);
+
+  useEffect(() => {
+    invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
+  }, []);
+
+  // 注意：setupEventListener 改为仅在 startAnalysis 内调�? ?
+  // 之前 L76-78 在页面挂载时也调用， ? startAnalysis  ? await setupEventListener
+  // 存在竞态——两 ? listen 会同时进行，后一 ? set({_unlisten}) 覆盖前一次，
+  // 前一次的 3 个监听句柄变成孤儿（永远不会 ? unlisten�? ?
+  // 现在挂载时不再注册，只在用户点击"开始分 ?"时由 startAnalysis 负责注册 ?
+
+  useEffect(() => {
+    const code = searchParams.get("code");
+    if (code) {
+      getStockQuote(code);
+      const kp = PERIOD_MAP[klinePeriod] ?? PERIOD_MAP["6m"];
+      getStockKline(code, kp.period, kp.limit);
+    }
+  }, [searchParams, getStockQuote, getStockKline, klinePeriod]);
+
+  useEffect(() => {
+    if (id) {
+      loadAnalysis(id).then(() => {
+        const code = useStockAnalysisStore.getState().stockCode;
+        if (code) {
+          getStockQuote(code);
+          const kp = PERIOD_MAP[useStockAnalysisStore.getState().klinePeriod] ?? PERIOD_MAP["6m"];
+          getStockKline(code, kp.period, kp.limit);
+        }
+      });
+    }
+  }, [id, loadAnalysis, getStockQuote, getStockKline]);
+
+  // Decision Timeline 证据芯片 → 切换主 tab（useRightPanel 派发的 timeline-jump 事件）
+  // 格式: timelineJump = "<tabKey>:<panelKey>"（tabKey 为 market/analyze/execute）
+  // 映射:analyze 的子 panelKey 决定具体 tab(execute 默认落到 decision)
+  useEffect(() => {
+    const handle = () => {
+      const raw = searchParams.get("timelineJump");
+      if (!raw) { return; }
+      const [tabKey, panelKey] = raw.split(":");
+      let next: string | null = null;
+      if (tabKey === "market") {
+        next = "market";
+      } else if (tabKey === "execute") {
+        next = "decision";
+      } else if (tabKey === "analyze") {
+        if (
+          panelKey === "analysts" || panelKey === "debate" || panelKey === "value"
+          || panelKey === "risk" || panelKey === "decision"
+        ) {
+          next = panelKey;
+        } else {
+          next = "decision";
+        }
+      }
+      if (next) { setActiveTab(next); }
+    };
+    window.addEventListener("timeline-jump", handle);
+    return () => window.removeEventListener("timeline-jump", handle);
+  }, [searchParams]);
+
+  const tabs = [
+    {
+      key: "market",
+      label: t("stockAnalysis.tab.market"),
+      icon: <LineChart size={14} />,
+      children: (
+        <>
+          <StockQuoteCard />
+          <KLineChart />
+        </>
+      ),
+    },
+    {
+      key: "analysts",
+      label: t("stockAnalysis.tab.analysts"),
+      icon: <Users size={14} />,
+      children: <AnalystReportGrid />,
+    },
+    {
+      key: "debate",
+      label: t("stockAnalysis.tab.debate"),
+      icon: <ArrowLeftRight size={14} />,
+      children: <DebatePanel />,
+    },
+    {
+      key: "value",
+      label: t("stockAnalysis.tab.value"),
+      icon: <Coins size={14} />,
+      children: <ValueAssessmentPanel />,
+    },
+    { key: "risk", label: t("stockAnalysis.tab.risk"), icon: <Shield size={14} />, children: <RiskMatrix /> },
+    {
+      key: "decision",
+      label: t("stockAnalysis.tab.decision"),
+      icon: <TrendingUp size={14} />,
+      children: <DecisionBanner />,
+    },
+    {
+      key: "reflection",
+      label: t("stockAnalysis.tab.reflection"),
+      icon: <RotateCcw size={14} />,
+      children: <ReflectionPanel />,
+    },
+    {
+      key: "evolution",
+      label: t("stockAnalysis.tab.evolution"),
+      icon: <Sparkles size={14} />,
+      children: <EvolutionDriftPanel />,
+    },
+  ];
+
+  const allSheetPanels: SheetPanel[] = [
+    { key: "holdings", label: t("stockAnalysis.holdingsSheet"), element: <PositionsMiniPanel /> },
+    { key: "index", label: t("stockAnalysis.indexQuotes"), element: <IndexQuotesPanel /> },
+    { key: "sectors", label: t("stockAnalysis.settings.sheet.sectors"), element: <SectorHeatmapPanel /> },
+    { key: "north", label: t("stockAnalysis.settings.sheet.north"), element: <NorthBoundPanel /> },
+    { key: "events", label: t("stockAnalysis.settings.sheet.events"), element: <EventCalendarPanel /> },
+    {
+      key: "announcements",
+      label: t("stockAnalysis.announcements"),
+      element: <AnnouncementsPanel stockCode={stockCode} />,
+    },
+    { key: "concepts", label: t("stockAnalysis.conceptBlocks"), element: <ConceptBlocksPanel stockCode={stockCode} /> },
+    { key: "optionpcr", label: t("stockAnalysis.optionPcr"), element: <OptionPcrPanel stockCode={stockCode} /> },
+    { key: "industry", label: t("stockAnalysis.industryRanking"), element: <IndustryRankingPanel /> },
+    { key: "flash", label: t("stockAnalysis.clsFlash"), element: <ClsFlashPanel /> },
+  ];
+  // 桌面全部显示，移动端只直接显示 3 个核心面板，其余通过"更多"下拉菜单访问
+  // 总面板数 = 3 + 6 = 9
+  // 注: 荐股面板已迁出 —— 选股中心用 Tabs 统一了"智能荐股 / 我的筛选",
+  // 避免"两处都看到荐股"的歧义。
+  const mobileCoreKeys = [
+    "index",
+    "sectors",
+    "north",
+  ];
+  const sheetPanels = isMobile ? allSheetPanels.filter((p) => mobileCoreKeys.includes(p.key)) : allSheetPanels;
+
+  const activePanel = allSheetPanels.find((p) => p.key === sheetTab);
+  const activeContent = tabs.find((t) => t.key === activeTab);
+
+  return (
+    <PageErrorBoundary title={t("error.page")}>
+      <StockAnalysisPageContext.Provider value={{ openDataSourceSettings }}>
+        <div className="sa-layout">
+          <div className="sa-header">
+            <button type="button" className="sa-header-back" onClick={() => navigate("/")}>
+              ? {t("nav.chat")}
+            </button>
+            <h2 className="sa-header-title">{t("stockAnalysis.title")}</h2>
+            <span className="sa-header-meta">{marketStatus || t("stockAnalysis.subtitle")}</span>
+            <PageTimeAnchor />
+            <button
+              type="button"
+              className="sa-header-back"
+              onClick={() => navigate("/trade")}
+              title={t("nav.trade")}
+            >
+              <ArrowLeftRight size={14} /> {t("nav.trade")}
+            </button>
+            <button
+              type="button"
+              className="sa-header-back"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              title={t("stockAnalysis.settings.title")}
+              style={settingsOpen && !isMobile ? { background: "var(--accent-bg)", color: "var(--accent)" } : undefined}
+            >
+              {settingsOpen && !isMobile ? <X size={16} /> : <Settings size={16} />}
+            </button>
+          </div>
+          {isReplay && (
+            // L2 视觉信号: 页面态细条 — 顶部 1px 紫色细线 + 极淡紫色背景,让用户一眼看到当前是回放模式
+            <div
+              data-testid="sa-replay-stripe"
+              style={{
+                height: 2,
+                background: "linear-gradient(90deg, #7c3aed 0%, #a855f7 50%, #7c3aed 100%)",
+                opacity: 0.85,
+              }}
+            />
+          )}
+
+          <div
+            className="sa-body"
+            style={isReplay
+              ? {
+                backgroundImage:
+                  "linear-gradient(180deg, rgba(124,58,237,0.04) 0%, rgba(124,58,237,0.01) 30%, transparent 100%)",
+              }
+              : undefined}
+          >
+            <StockSearchBar />
+
+            <div className="sa-body-inner">
+              <div className="sa-main">
+                {settingsOpen && !isMobile
+                  ? (
+                    <div className="sa-settings-inline">
+                      <div className="sa-settings-header">
+                        <span className="sa-settings-title">{t("stockAnalysis.settings.title")}</span>
+                        <button type="button" className="sa-header-back" onClick={() => setSettingsOpen(false)}>
+                          <X size={14} /> {t("common.close")}
+                        </button>
+                      </div>
+                      <div className="sa-settings-body">
+                        <StockAnalysisSettings key={settingsDefaultTab ?? "default"} defaultTab={settingsDefaultTab} />
+                      </div>
+                    </div>
+                  )
+                  : (
+                    <>
+                      {status === "loading" && (
+                        <div className="sa-loading">
+                          <AnalysisProgress />
+                        </div>
+                      )}
+
+                      {status === "idle" && (
+                        <div className="sa-empty">
+                          <div>
+                            <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
+                            <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {status === "error" && (
+                        <div
+                          style={{
+                            padding: 16,
+                            margin: 16,
+                            border: "1px solid var(--sa-red)",
+                            borderRadius: 8,
+                            background: "var(--surface)",
+                          }}
+                        >
+                          <h3 style={{ margin: "0 0 8px 0", color: "var(--sa-red)" }}>
+                            {failedNodes.length > 0
+                              ? t("stockAnalysis.workflow.partialFailed", { count: failedNodes.length })
+                              : t("stockAnalysis.workflow.startFailed")}
+                          </h3>
+                          <p style={{ margin: "0 0 12px 0", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
+                            {error ?? t("common.unknownError")}
+                          </p>
+                          {failedNodes.length > 0 && (
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--sa-red)", marginBottom: 4 }}>
+                                {t("stockAnalysis.workflow.failedSteps")}
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                {failedNodes.map((id) => (
+                                  <div key={id}>
+                                    <span
+                                      onClick={() =>
+                                        setExpandedFailedNode(
+                                          expandedFailedNode === id ? null : id,
+                                        )}
+                                      style={{
+                                        fontSize: 11,
+                                        padding: "2px 6px",
+                                        borderRadius: 4,
+                                        background: "var(--sa-red-bg)",
+                                        color: "var(--sa-red)",
+                                        cursor: "pointer",
+                                        display: "inline-block",
+                                      }}
+                                    >
+                                      {id} {expandedFailedNode === id ? "▼" : "▶"}
+                                    </span>
+                                    {expandedFailedNode === id && (
+                                      <div
+                                        style={{
+                                          marginTop: 4,
+                                          padding: 8,
+                                          background: "var(--surface)",
+                                          borderRadius: 6,
+                                          border: "1px solid var(--sa-red)",
+                                          fontSize: 11,
+                                          color: "var(--muted)",
+                                          whiteSpace: "pre-wrap",
+                                          lineHeight: 1.5,
+                                        }}
+                                      >
+                                        {failedNodeErrors[id] || error || t("common.unknownError")}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <Button
+                            type="primary"
+                            disabled={!stockCode}
+                            onClick={() => stockCode && startAnalysis(stockCode)}
+                          >
+                            {t("common.retry")}
+                          </Button>
+                        </div>
+                      )}
+
+                      {(status === "running" || status === "completed") && (
+                        <>
+                          {status === "running" && (
+                            <div
+                              style={{
+                                padding: "12px 16px",
+                                margin: "12px 16px 0 16px",
+                                border: "1px solid var(--border, #e0e0e0)",
+                                borderRadius: 8,
+                                background: "var(--surface)",
+                              }}
+                            >
+                              <AnalysisProgress />
+                            </div>
+                          )}
+                          <div className="sa-tabs">
+                            {tabs.map((tab) => (
+                              <button
+                                key={tab.key}
+                                type="button"
+                                className={`sa-tab${tab.key === activeTab ? " active" : ""}`}
+                                onClick={() => setActiveTab(tab.key)}
+                              >
+                                {tab.icon}
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          {activeContent?.children}
+                        </>
+                      )}
+                    </>
+                  )}
+              </div>
+
+              <div className="sa-sidebar">
+                <Collapse
+                  size="small"
+                  ghost
+                  defaultActiveKey={["screener"]}
+                  items={sheetPanels.map((p) => ({
+                    key: p.key,
+                    label: <span className="text-xs font-medium">{p.label}</span>,
+                    children: <div className="sa-panel-body">{p.element}</div>,
+                  }))}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 底部滑出面板  ? 平板/移动 ? */}
+          <div className={`sa-bottom-sheet${sheetOpen ? " open" : ""}`}>
+            <div className="sa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)}>
+              <div className="sa-sheet-handle-bar" />
+            </div>
+
+            <div className="sa-sheet-tabs">
+              {sheetPanels.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className={`sa-sheet-tab${sheetTab === p.key ? " active" : ""}`}
+                  onClick={() => {
+                    setSheetTab(p.key);
+                    if (!sheetOpen) { setSheetOpen(true); }
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+              {isMobile && (
+                <Dropdown
+                  menu={{
+                    items: allSheetPanels.filter((p) => !mobileCoreKeys.includes(p.key)).map((p) => ({
+                      key: p.key,
+                      label: p.label,
+                      onClick: () => {
+                        setSheetTab(p.key);
+                        if (!sheetOpen) { setSheetOpen(true); }
+                      },
+                    })),
+                  }}
+                  trigger={["click"]}
+                >
+                  <button type="button" className="sa-sheet-tab">{t("stockAnalysis.settings.sheet.more")} ?</button>
+                </Dropdown>
+              )}
+            </div>
+
+            <div className="sa-sheet-body">
+              {activePanel?.element}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="sa-sheet-toggle"
+            onClick={() => setSheetOpen(!sheetOpen)}
+          >
+            {sheetOpen ? " ?" : "+"}
+          </button>
+        </div>
+        {isMobile && (
+          <StockAnalysisSettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            defaultTab={settingsDefaultTab}
+          />
+        )}
+      </StockAnalysisPageContext.Provider>
+    </PageErrorBoundary>
+  );
+}

@@ -1,0 +1,28 @@
+{
+  "name": "axagent-website",
+  "private": true,
+  "version": "1.4.2",
+  "description": "AxAgent Website",
+  "author": "刘小平 <polite0803@outlook.com>",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev docs",
+    "build": "vitepress build docs",
+    "preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.13"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild@<=0.24.2": ">=0.25.0"
+    }
+  },
+  "dependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "lucide-vue-next": "^1.0.0",
+    "swiper": "^12.1.3"
+  }
+}

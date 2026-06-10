@@ -1,0 +1,260 @@
+import logoUrl from "@/assets/image/logo.png";
+import { useUpdateChecker } from "@/hooks/useUpdateChecker";
+import { invoke, isTauri, logIpcError } from "@/lib/invoke";
+import { useOnboardingStore, useSettingsStore } from "@/stores";
+import { Button, Divider, InputNumber, Tag, Typography } from "antd";
+import { Activity, GraduationCap, RefreshCw, Terminal } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { SettingsGroup } from "./SettingsGroup";
+
+const { Text } = Typography;
+
+interface ServiceHealthCheck {
+  name: string;
+  status: "healthy" | "degraded" | "unhealthy";
+  latencyMs?: number;
+  message?: string;
+}
+
+interface ServiceHealthReport {
+  overall: "healthy" | "degraded" | "unhealthy";
+  checks: ServiceHealthCheck[];
+  version: string;
+}
+
+const STATUS_COLOR: Record<string, string> = {
+  healthy: "green",
+  degraded: "orange",
+  unhealthy: "red",
+};
+
+const CHECK_LABELS: Record<string, string> = {
+  database: "Database",
+  vectorStore: "Vector Store",
+  agents: "Agent Runtime",
+  gateway: "API Gateway",
+  mcp: "MCP Servers",
+};
+
+function ServiceHealthSection() {
+  const { t } = useTranslation();
+  const [report, setReport] = useState<ServiceHealthReport | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const runCheck = useCallback(async () => {
+    if (!isTauri()) { return; }
+    setLoading(true);
+    try {
+      const result = await invoke<ServiceHealthReport>("get_service_health");
+      setReport(result);
+    } catch (e) {
+      logIpcError("get_service_health")(e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isTauri()) {
+      runCheck();
+    }
+  }, [runCheck]);
+
+  const rowStyle = { padding: "4px 0" };
+
+  return (
+    <SettingsGroup title={t("settings.groupServiceHealth")}>
+      {report && (
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.overallStatus")}</span>
+          <Tag color={STATUS_COLOR[report.overall]}>
+            {report.overall.toUpperCase()}
+          </Tag>
+        </div>
+      )}
+      {report?.checks.map((check) => (
+        <div key={check.name}>
+          <Divider style={{ margin: "4px 0" }} />
+          <div style={rowStyle} className="flex items-center justify-between">
+            <span>{CHECK_LABELS[check.name] ?? check.name}</span>
+            <div className="flex items-center gap-2">
+              {check.latencyMs != null && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {check.latencyMs}ms
+                </Text>
+              )}
+              {check.message && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {check.message}
+                </Text>
+              )}
+              <Tag
+                color={STATUS_COLOR[check.status]}
+                style={{ margin: 0, minWidth: 28, textAlign: "center" }}
+              >
+                {check.status === "healthy"
+                  ? "OK"
+                  : check.status === "degraded"
+                  ? "WARN"
+                  : "ERR"}
+              </Tag>
+            </div>
+          </div>
+        </div>
+      ))}
+      <Divider style={{ margin: "4px 0" }} />
+      <div style={rowStyle} className="flex items-center justify-end">
+        <Button
+          icon={<Activity size={16} />}
+          onClick={runCheck}
+          loading={loading}
+          size="small"
+        >
+          {t("settings.recheckHealth")}
+        </Button>
+      </div>
+    </SettingsGroup>
+  );
+}
+
+export function AboutPage() {
+  const { t } = useTranslation();
+  const [checking, setChecking] = useState(false);
+  const [appVersion, setAppVersion] = useState("...");
+  const { checkForUpdate } = useUpdateChecker();
+  const updateCheckInterval = useSettingsStore(
+    (s) => s.settings.update_check_interval ?? 60,
+  );
+  const saveSettings = useSettingsStore((s) => s.saveSettings);
+  const navigate = useNavigate();
+  const startTutorial = useOnboardingStore((s) => s.startTutorial);
+
+  useEffect(() => {
+    if (isTauri()) {
+      import("@tauri-apps/api/app").then(({ getVersion }) => {
+        getVersion().then((v) => setAppVersion(v));
+      });
+    }
+  }, []);
+
+  const handleCheckUpdate = useCallback(async () => {
+    setChecking(true);
+    try {
+      await checkForUpdate();
+    } finally {
+      setChecking(false);
+    }
+  }, [checkForUpdate]);
+
+  const rowStyle = { padding: "4px 0" };
+
+  const handleOpenDevTools = useCallback(async () => {
+    if (isTauri()) {
+      try {
+        await invoke("open_devtools");
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const handleReplayTutorial = useCallback(() => {
+    useSettingsStore.getState().saveSettings({
+      onboarding_tutorial_completed: false,
+      onboarding_completed: true,
+    });
+    startTutorial();
+    navigate("/");
+  }, [startTutorial, navigate]);
+
+  return (
+    <div className="p-6 pb-12">
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          padding: "32px 0 24px",
+        }}
+      >
+        <img
+          src={logoUrl}
+          alt={t("app.name")}
+          style={{ width: 96, height: 96, borderRadius: 20, marginBottom: 16 }}
+          draggable={false}
+        />
+        <div style={{ fontSize: 22, fontWeight: 600 }}>{t("app.title")}</div>
+        <Text type="secondary" style={{ marginTop: 4 }}>
+          {t("settings.version")} {appVersion}
+        </Text>
+      </div>
+
+      <SettingsGroup title={t("settings.groupAppInfo")}>
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.version")}</span>
+          <Text type="secondary">{appVersion}</Text>
+        </div>
+        <Divider style={{ margin: "4px 0" }} />
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.openSource")}</span>
+          <Text type="secondary">AGPL-3.0</Text>
+        </div>
+      </SettingsGroup>
+
+      {isTauri() && <ServiceHealthSection />}
+
+      <SettingsGroup title={t("settings.groupLinks")}>
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.checkUpdate")}</span>
+          <Button
+            icon={<RefreshCw size={16} className={checking ? "animate-spin" : ""} />}
+            onClick={handleCheckUpdate}
+            loading={checking}
+          >
+            {t("settings.checkUpdate")}
+          </Button>
+        </div>
+        <Divider style={{ margin: "4px 0" }} />
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("settings.updateCheckInterval")}</span>
+          <InputNumber
+            id="about-page-inputnumber-1"
+            min={1}
+            max={1440}
+            value={updateCheckInterval}
+            onChange={(val) => val != null && saveSettings({ update_check_interval: val })}
+            style={{ width: 100 }}
+            addonAfter={t("settings.minutes")}
+          />
+        </div>
+        {isTauri() && (
+          <>
+            <Divider style={{ margin: "4px 0" }} />
+            <div style={rowStyle} className="flex items-center justify-between">
+              <span>{t("settings.developerTools")}</span>
+              <Button
+                icon={<Terminal size={16} />}
+                onClick={handleOpenDevTools}
+              >
+                {t("settings.openDevTools")}
+              </Button>
+            </div>
+          </>
+        )}
+      </SettingsGroup>
+      <SettingsGroup title={t("help.onboardingReplay")}>
+        <div style={rowStyle} className="flex items-center justify-between">
+          <span>{t("help.onboardingReplayDesc")}</span>
+          <Button
+            icon={<GraduationCap size={16} />}
+            onClick={handleReplayTutorial}
+          >
+            {t("help.onboardingReplay")}
+          </Button>
+        </div>
+      </SettingsGroup>
+    </div>
+  );
+}

@@ -1,0 +1,42 @@
+.plan-card {
+  transition: box-shadow 0.2s ease;
+}
+
+.plan-card:hover {
+  box-shadow: 0 1px 3px
+    color-mix(in srgb, var(--ant-color-bg-mask, #000) 4%, transparent);
+}
+
+.plan-step-item {
+  border-left: 2px solid transparent;
+  transition:
+    border-color 0.2s,
+    background-color 0.15s;
+}
+
+.plan-step-item:hover {
+  border-left-color: var(--ant-color-primary, #1677ff);
+}
+
+.plan-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Animation for running steps */
+@keyframes plan-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.plan-step-item--running .plan-step-dot {
+  animation: plan-pulse 1.5s ease-in-out infinite;
+}

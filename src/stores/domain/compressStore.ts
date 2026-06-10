@@ -1,0 +1,84 @@
+import { invoke, logIpcError } from "@/lib/invoke";
+import type { ConversationSummary, MessagePage } from "@/types";
+import { create } from "zustand";
+import { useConversationStore } from "./conversationStore";
+
+const MESSAGE_PAGE_SIZE = 100;
+
+interface CompressState {
+  compressing: boolean;
+  compressContext: () => Promise<void>;
+  getCompressionSummary: (
+    conversationId: string,
+  ) => Promise<ConversationSummary | null>;
+  deleteCompression: () => Promise<void>;
+}
+
+export const useCompressStore = create<CompressState>((set) => ({
+  compressing: false,
+
+  compressContext: async () => {
+    const conversationId = useConversationStore.getState().activeConversationId;
+    if (!conversationId) {
+      return;
+    }
+    set({ compressing: true });
+    try {
+      await invoke<ConversationSummary>("compress_context", { conversationId });
+      // Reload messages to get the new compression marker
+      const page = await invoke<MessagePage>("list_messages_page", {
+        conversationId,
+        limit: MESSAGE_PAGE_SIZE,
+        beforeMessageId: null,
+      });
+      useConversationStore.setState({
+        messages: page.messages,
+        hasOlderMessages: page.has_older,
+        totalActiveCount: page.total_active_count,
+        oldestLoadedMessageId: page.messages.length > 0 ? page.messages[0].id : null,
+      });
+      set({ compressing: false });
+    } catch (e) {
+      set({ compressing: false });
+      logIpcError("Failed to compress context")(e);
+      throw e;
+    }
+  },
+
+  getCompressionSummary: async (conversationId: string) => {
+    try {
+      return await invoke<ConversationSummary | null>(
+        "get_compression_summary",
+        { conversationId },
+      );
+    } catch (e) {
+      logIpcError("Failed to get compression summary")(e);
+      return null;
+    }
+  },
+
+  deleteCompression: async () => {
+    const conversationId = useConversationStore.getState().activeConversationId;
+    if (!conversationId) {
+      return;
+    }
+    try {
+      await invoke("delete_compression", { conversationId });
+      // Reload messages to remove the compression marker
+      const page = await invoke<MessagePage>("list_messages_page", {
+        conversationId,
+        limit: MESSAGE_PAGE_SIZE,
+        beforeMessageId: null,
+      });
+      useConversationStore.setState({
+        messages: page.messages,
+        hasOlderMessages: page.has_older,
+        totalActiveCount: page.total_active_count,
+        oldestLoadedMessageId: page.messages.length > 0 ? page.messages[0].id : null,
+      });
+    } catch (e) {
+      logIpcError("Failed to delete compression")(e);
+      throw e;
+    }
+  },
+}));

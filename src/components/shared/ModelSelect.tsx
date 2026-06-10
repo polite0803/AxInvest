@@ -1,0 +1,140 @@
+import { SmartProviderIcon } from "@/lib/providerIcons";
+import { useProviderStore } from "@/stores";
+import { ModelIcon } from "@lobehub/icons";
+import { Select, theme } from "antd";
+import { useCallback, useMemo } from "react";
+
+/** Parse a combined `providerId::model_id` value. */
+export function parseModelValue(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+  const idx = value.indexOf("::");
+  if (idx < 0) {
+    return null;
+  }
+  return { providerId: value.slice(0, idx), model_id: value.slice(idx + 2) };
+}
+
+/** Hook: returns grouped Select options (Provider → Models) */
+export function useGroupedModelOptions() {
+  const providers = useProviderStore((s) => s.providers);
+  return useMemo(() => {
+    return providers.flatMap((p) =>
+      p.enabled && p.models.some((m) => m.enabled)
+        ? [
+          {
+            label: (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <SmartProviderIcon provider={p} size={16} type="avatar" />
+                {p.name}
+              </span>
+            ),
+            title: p.name,
+            options: p.models.flatMap((m) =>
+              m.enabled
+                ? [
+                  {
+                    label: m.name,
+                    value: `${p.id}::${m.model_id}`,
+                    model_id: m.model_id,
+                    providerName: p.name,
+                  },
+                ]
+                : []
+            ),
+          },
+        ]
+        : []
+    );
+  }, [providers]);
+}
+
+/** Hook: returns Map<providerId, providerName> */
+export function useProviderNameMap() {
+  const providers = useProviderStore((s) => s.providers);
+  return useMemo(() => {
+    const map = new Map<string, string>();
+    providers.forEach((p) => map.set(p.id, p.name));
+    return map;
+  }, [providers]);
+}
+
+/**
+ * Reusable model selector with provider-grouped options, ModelIcon rendering,
+ * and search support. Value format: `providerId::model_id`.
+ */
+export function ModelSelect({
+  value,
+  onChange,
+  placeholder,
+  allowClear = true,
+  style,
+}: {
+  value?: string;
+  onChange: (value: string | undefined) => void;
+  placeholder?: string;
+  allowClear?: boolean;
+  style?: React.CSSProperties;
+}) {
+  const { token } = theme.useToken();
+  const groupedOptions = useGroupedModelOptions();
+  const providerNameMap = useProviderNameMap();
+
+  const optionRender = useCallback(
+    (
+      oriOption: { label?: React.ReactNode; value?: string | number },
+      _info: { index: number },
+    ) => {
+      const model_id = String(oriOption.value ?? "").split("::")[1] ?? "";
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <ModelIcon model={model_id} size={18} type="avatar" />
+          {oriOption.label}
+        </span>
+      );
+    },
+    [],
+  );
+
+  const labelRender = useCallback(
+    (props: { label?: React.ReactNode; value?: string | number }) => {
+      const parsed = parseModelValue(String(props.value ?? ""));
+      if (!parsed) {
+        return <span>{props.label}</span>;
+      }
+      const providerName = providerNameMap.get(parsed.providerId) ?? "";
+      return (
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ModelIcon model={parsed.model_id} size={18} type="avatar" />
+          {props.label}
+          <span style={{ fontSize: 12, color: token.colorTextSecondary }}>
+            ({providerName})
+          </span>
+        </span>
+      );
+    },
+    [providerNameMap, token.colorTextSecondary],
+  );
+
+  return (
+    <Select
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      allowClear={allowClear}
+      showSearch
+      optionFilterProp="label"
+      optionRender={optionRender}
+      labelRender={labelRender}
+      options={groupedOptions}
+      style={style}
+    />
+  );
+}

@@ -1,0 +1,65 @@
+import { Divider, Input, theme } from "antd";
+import React from "react";
+import { useTranslation } from "react-i18next";
+import type { EndNode, WorkflowNode } from "../../types";
+import { BasePropertyPanel } from "./BasePropertyPanel";
+
+interface EndPropertyPanelProps {
+  node: WorkflowNode;
+  onUpdate: (updates: Partial<WorkflowNode>) => void;
+  onDelete: () => void;
+}
+
+export const EndPropertyPanel: React.FC<EndPropertyPanelProps> = ({
+  node,
+  onUpdate,
+  onDelete,
+}) => {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+  const endNode = node as EndNode;
+  const config = endNode.config || {};
+
+  const handleConfigChange = (key: string, value: unknown) => {
+    onUpdate({ config: { ...config, [key]: value } });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div>
+        <label
+          style={{
+            display: "block",
+            color: token.colorTextTertiary,
+            fontSize: 12,
+            marginBottom: 4,
+          }}
+        >
+          {t("workflow.props.outputVariable")}
+        </label>
+        <Input
+          id="end-property-panel-input-95"
+          value={config.output_var || ""}
+          onChange={(e) => handleConfigChange("output_var", e.target.value)}
+          size="small"
+          placeholder={t("workflow.props.outputVarWorkflow")}
+        />
+        <div style={{ fontSize: 12, color: token.colorTextTertiary, marginTop: 4 }}>
+          {t("workflow.props.finalOutputHint")}
+        </div>
+      </div>
+
+      <Divider style={{ margin: "8px 0", borderColor: token.colorBorderSecondary }} />
+
+      <div
+        style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 12, marginTop: 4 }}
+      >
+        <BasePropertyPanel
+          node={node}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+        />
+      </div>
+    </div>
+  );
+};

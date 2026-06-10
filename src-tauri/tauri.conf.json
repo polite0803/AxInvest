@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AxInvest",
+  "version": "2.6.0",
+  "identifier": "top.axinvest.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:skip-typecheck",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "security": {
+      "csp": "default-src 'self' https://tauri.localhost asset: tauri: ipc: https: wss: http: data: blob: filesystem:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://tauri.localhost asset: tauri: ipc: https: http:; style-src 'self' 'unsafe-inline' https://tauri.localhost asset: tauri: ipc: https: http:; img-src 'self' data: https: asset:; connect-src 'self' http: https: wss: https://tauri.localhost tauri: ipc:; frame-src 'self';"
+    },
+    "windows": [
+      {
+        "title": "AxInvest",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "visible": true,
+        "focus": true,
+        "useHttpsScheme": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "pricing.toml"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "active": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU0OThDNDAyMUU5OTQwNTcKUldSWFFKa2VBc1NZVkZlU2lBTS8wU1pqUFFuODhKNUFzd3owZFNlTUFXelJXM1VBNndmN2hKQ0cK",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

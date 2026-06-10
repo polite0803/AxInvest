@@ -1,0 +1,57 @@
+[package]
+name = "axagent-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+tokio = { workspace = true }
+async-trait = "0.1"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+futures = "0.3"
+chrono = { workspace = true }
+regex = "1"
+glob = "0.3"
+reqwest = { workspace = true, features = ["multipart", "cookies"] }
+encoding_rs = "0.8"
+scraper = "0.22"
+ego-tree = "0.10"
+url = "2"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+diff = "0.1"
+base64 = "0.22"
+walkdir = "2"
+which = "7"
+dirs = "5"
+rhai = { version = "1", features = ["sync"] }
+pdf-extract = "0.8"
+parking_lot = "0.12"
+sea-orm = { workspace = true }
+image = { workspace = true }
+infer = "0.16"
+sha2 = { workspace = true }
+lazy_static = { workspace = true }
+axagent-core = { path = "../core" }
+axagent-astock-data = { path = "../astock-data" }
+axagent-harness = { path = "../harness" }
+axagent-runtime-core = { path = "../runtime-core" }
+axagent-plugins = { path = "../plugins" }
+axagent-migration = { path = "../migration" }
+rusqlite = { version = "0.32", features = ["bundled"] }
+docx-rs = "0.4"
+pulldown-cmark = "0.13"
+rust_xlsxwriter = "0.95"
+zip = "2"
+lopdf = "0.34"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]

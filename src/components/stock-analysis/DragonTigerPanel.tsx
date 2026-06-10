@@ -1,0 +1,150 @@
+import { List } from "@/components/common/AntdList";
+import { invoke } from "@/lib/invoke";
+import { useStockAnalysisStore } from "@/stores";
+import { Button, Card, Spin, Tag } from "antd";
+import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { useStockAnalysisPage } from "./StockAnalysisPageContext";
+import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
+
+interface DragonTigerEntry {
+  code: string;
+  name: string;
+  date: string;
+  netBuy: number;
+  buyAmount: number;
+  sellAmount: number;
+  reason?: string;
+}
+
+function fmtYi(v: number): string {
+  if (Math.abs(v) >= 1e8) { return `${(v / 1e8).toFixed(2)}亿`; }
+  if (Math.abs(v) >= 1e4) { return `${(v / 1e4).toFixed(0)}万`; }
+  return `${v.toFixed(0)}`;
+}
+
+interface DragonTigerPanelProps {
+  /** 是否显示外边框(ScreenerPage Collapse 内嵌时传 false) */
+  bordered?: boolean;
+}
+
+export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}) {
+  const { t } = useTranslation();
+  const { openDataSourceSettings } = useStockAnalysisPage();
+  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
+  const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
+  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
+  const [entries, setEntries] = useState<DragonTigerEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
+  const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
+
+  const load = useCallback(async (silent = false) => {
+    setLoading(true);
+    setEmptyKind(null);
+    setEmptyVendors(undefined);
+    try {
+      const check = await checkVendorEnabled("dragontiger", { silent });
+      if (check.status === "disabled") {
+        setEntries([]);
+        setEmptyKind("vendorDisabled");
+        setEmptyVendors(check.vendors);
+        setLoading(false);
+        return;
+      }
+      if (check.status === "backend_offline") {
+        setEntries([]);
+        setEmptyKind("backendOffline");
+        setLoading(false);
+        return;
+      }
+      const data = await invoke<any[]>("get_market_dragon_tiger");
+      if (!Array.isArray(data)) { throw new Error("bad data"); }
+      const list: DragonTigerEntry[] = data.slice(0, 30).map((e: any) => ({
+        code: e.stockCode ?? e.stock_code ?? "",
+        name: e.stockName ?? e.stock_name ?? "",
+        date: e.date ?? "",
+        netBuy: Number(e.netBuy ?? e.net_buy ?? 0),
+        buyAmount: Number(e.buyAmount ?? e.buy_amount ?? 0),
+        sellAmount: Number(e.sellAmount ?? e.sell_amount ?? 0),
+        reason: e.reason,
+      }));
+      // 按净买额降序
+      list.sort((a, b) => b.netBuy - a.netBuy);
+      setEntries(list);
+      if (list.length === 0) { setEmptyKind("noData"); }
+    } catch {
+      setEntries([]);
+      setEmptyKind("connectionFailed");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load(true);
+  }, [load]);
+
+  const analyze = async (code: string) => {
+    await getStockQuote(code);
+    await getStockKline(code, "daily", 120);
+    startAnalysis(code);
+  };
+
+  return (
+    <Card
+      size="small"
+      bordered={bordered}
+      title={`🐉 ${t("stockAnalysis.settings.panels.dragonTiger")}`}
+      styles={{ body: { padding: "4px 8px" } }}
+      extra={
+        <Button size="small" loading={loading} onClick={() => load()}>
+          {t("stockAnalysis.settings.panels.refresh")}
+        </Button>
+      }
+    >
+      {loading
+        ? <Spin size="small" style={{ display: "block", margin: "16px auto" }} />
+        : emptyKind
+        ? (
+          <PanelEmpty
+            kind={emptyKind}
+            vendorNames={emptyVendors ?? PANEL_VENDORS.dragontiger}
+            description={emptyKind === "noData" ? t("stockAnalysis.settings.panels.noDragonTiger") : undefined}
+            onOpenSettings={openDataSourceSettings}
+          />
+        )
+        : (
+          <List
+            size="small"
+            dataSource={entries}
+            renderItem={(e) => {
+              const up = e.netBuy >= 0;
+              return (
+                <List.Item
+                  style={{ cursor: "pointer", padding: "3px 0" }}
+                  onClick={() => analyze(e.code)}
+                  actions={[
+                    <Tag
+                      key="net"
+                      color={up ? "red" : "green"}
+                      className="text-xs m-0"
+                    >
+                      {up ? t("stockAnalysis.settings.panels.netBuy") : t("stockAnalysis.settings.panels.netSell")}{" "}
+                      {fmtYi(e.netBuy)}
+                    </Tag>,
+                  ]}
+                >
+                  <div className="flex items-center gap-2 text-xs w-full">
+                    <Tag className="m-0 text-xs">{e.code}</Tag>
+                    <span className="flex-1 truncate">{e.name}</span>
+                    <span className="text-gray-500 truncate max-w-[140px]">{e.reason ?? ""}</span>
+                  </div>
+                </List.Item>
+              );
+            }}
+          />
+        )}
+    </Card>
+  );
+}

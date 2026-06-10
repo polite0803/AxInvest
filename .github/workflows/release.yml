@@ -1,0 +1,605 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to release (e.g., v1.5.9)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  actions: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NDK_VERSION: 'r27d'
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  # ── Resolve tag name for both tag push and manual dispatch ──
+  resolve-tag:
+    name: Resolve Tag Name
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.out.outputs.value }}
+    steps:
+      - id: out
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice::Resolved tag: $TAG"
+
+  # ── Validate tag matches package.json version ──────────
+  check-version:
+    name: Check Version
+    needs: [resolve-tag]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Validate tag vs package.json
+        run: |
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
+          # 从 tag 中提取纯净版号: v2.5.0-beta.1 → 2.5.0
+          CLEAN_TAG=$(echo "$TAG" | sed 's/^v//' | sed 's/-.*//')
+          PKG_VERSION=$(jq -r .version package.json)
+          if [[ "$CLEAN_TAG" != "$PKG_VERSION" ]]; then
+            echo "❌ Tag $TAG (clean: $CLEAN_TAG) does not match package.json $PKG_VERSION"
+            exit 1
+          fi
+          echo "✅ Version $TAG is consistent with package.json $PKG_VERSION"
+
+  # ── Generate release notes via git-cliff ─────────────
+  draft-release-notes:
+    name: Generate Release Notes
+    needs: [resolve-tag, check-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      body: ${{ steps.cliff.outputs.content }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+          CLIFF_REPO: ${{ github.repository }}
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          name: 'AxInvest ${{ needs.resolve-tag.outputs.tag }}'
+          body: ${{ steps.cliff.outputs.content }}
+          draft: true
+          prerelease: ${{ contains(needs.resolve-tag.outputs.tag, '-rc') || contains(needs.resolve-tag.outputs.tag, '-beta') || contains(needs.resolve-tag.outputs.tag, '-alpha') }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Build for macOS / Windows / Linux x86_64 ───────────
+  release:
+    name: Build (${{ matrix.target }})
+    needs: [resolve-tag, check-version, draft-release-notes]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+          # Linux x86_64
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1'
+          key: '${{ matrix.os }}-${{ matrix.target }}'
+          workspaces: src-tauri -> target
+          cache-targets: ${{ matrix.os != 'windows-latest' }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libpipewire-0.3-dev || {
+            echo "::warning::First apt-get attempt failed, retrying..."
+            sudo apt-get update --fix-missing
+            sudo apt-get install -y --fix-missing \
+              libwebkit2gtk-4.1-dev \
+              libayatana-appindicator3-dev \
+              librsvg2-dev \
+              patchelf \
+              libpipewire-0.3-dev
+          }
+
+      - name: Install x86_64 OpenSSL (macOS Intel cross-compile)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          arch -x86_64 brew install openssl@3
+          echo "OPENSSL_DIR=$(arch -x86_64 brew --prefix openssl@3)" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=$(arch -x86_64 brew --prefix openssl@3)/include" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=$(arch -x86_64 brew --prefix openssl@3)/lib" >> $GITHUB_ENV
+
+      - name: Install Protoc (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install protobuf
+
+      - name: Install create-dmg (macOS DMG bundling)
+        if: matrix.os == 'macos-latest'
+        run: brew install create-dmg
+
+      - name: Install Protoc (Ubuntu)
+        if: matrix.os == 'ubuntu-24.04'
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Install Protoc (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $ver = '27.3'
+          Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v$ver/protoc-$ver-win64.zip" -OutFile protoc.zip
+          Expand-Archive protoc.zip -DestinationPath "$env:RUNNER_TOOL_CACHE\protoc"
+          echo "$env:RUNNER_TOOL_CACHE\protoc\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build with Tauri
+        uses: tauri-apps/tauri-action@v0.5
+        env:
+          NODE_OPTIONS: '--max_old_space_size=4096'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && '-' || '' }}
+        with:
+          # NOTE: Do NOT set tagName/releaseDraft here — tauri-action manages
+          # releases via softprops/action-gh-release internally, and running
+          # 6+ parallel builds all creating/updating the same draft release
+          # causes duplicate-draft race conditions that lose artifacts.
+          # The draft is created once by the `draft-release-notes` job, and
+          # artifacts are uploaded by explicit softprops/action-gh-release steps below.
+          tauriScript: npm run tauri
+          args: --target ${{ matrix.target }}
+          includeUpdaterJson: true
+
+      - name: Package Windows artifacts
+        if: contains(matrix.target, 'windows')
+        shell: pwsh
+        run: |
+          $exe = "src-tauri/target/${{ matrix.target }}/release/AxAgent.exe"
+          $arch = if ("${{ matrix.target }}" -match "aarch64") { "arm64" } else { "x64" }
+          $zipName = "AxInvest_${{ needs.resolve-tag.outputs.tag }}_windows-${arch}-portable.zip"
+          Compress-Archive -Path $exe -DestinationPath $zipName
+
+          $msiPath = "src-tauri/target/${{ matrix.target }}/release/bundle/msi"
+          if (Test-Path $msiPath) {
+            cd $msiPath
+            $msiFiles = Get-ChildItem -Filter "*.msi"
+            foreach ($msi in $msiFiles) {
+              $newMsiName = "AxInvest_${{ needs.resolve-tag.outputs.tag }}_windows-${arch}.msi"
+              Rename-Item -Path $msi.Name -NewName $newMsiName
+              Move-Item -Path $newMsiName -Destination "../../$newMsiName"
+            }
+          }
+
+      - name: Package Linux x86_64 artifacts
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          if [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cd src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb
+            for deb in *.deb; do
+              new_name="AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-x64.deb"
+              mv "$deb" "$new_name"
+              mv "$new_name" "../../$new_name"
+            done
+          fi
+
+          if [ -d "src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm" ]; then
+            cd src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm
+            for rpm in *.rpm; do
+              new_name="AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-x64.rpm"
+              mv "$rpm" "$new_name"
+              mv "$new_name" "../../$new_name"
+            done
+          fi
+
+      - name: Upload Windows artifacts to release
+        if: contains(matrix.target, 'windows')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          draft: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            AxInvest_${{ needs.resolve-tag.outputs.tag }}_windows-*-portable.zip
+            src-tauri/target/${{ matrix.target }}/release/AxInvest_${{ needs.resolve-tag.outputs.tag }}_windows-*.msi
+
+      - name: Package macOS artifacts
+        if: contains(matrix.target, 'apple-darwin')
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle/dmg
+          for dmg in *.dmg; do
+            if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+              new_name="AxInvest_${{ needs.resolve-tag.outputs.tag }}_macos-arm64.dmg"
+            else
+              new_name="AxInvest_${{ needs.resolve-tag.outputs.tag }}_macos-x64.dmg"
+            fi
+            mv "$dmg" "$new_name"
+            mv "$new_name" "../../$new_name"
+          done
+
+      - name: Upload Linux x86_64 artifacts
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          draft: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-x64.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-x64.rpm
+
+      - name: Upload macOS artifacts
+        if: contains(matrix.target, 'apple-darwin')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          draft: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            src-tauri/target/${{ matrix.target }}/release/AxInvest_${{ needs.resolve-tag.outputs.tag }}_macos-*.dmg
+
+  # ── Build for Linux ARM64 (cross-compile) ──────────────
+  release-linux-arm:
+    name: Build (aarch64-unknown-linux-gnu)
+    needs: [resolve-tag, check-version, draft-release-notes]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1'
+          key: 'ubuntu-22.04-aarch64-unknown-linux-gnu'
+          workspaces: src-tauri -> target
+
+      - name: Setup cross-compilation sources
+        run: |
+          cat > /tmp/sources.list << 'EOF'
+          deb [arch=amd64,i386] http://archive.ubuntu.com/ubuntu jammy main multiverse universe restricted
+          deb [arch=amd64,i386] http://security.ubuntu.com/ubuntu jammy-security main multiverse universe restricted
+          deb [arch=amd64,i386] http://archive.ubuntu.com/ubuntu jammy-updates main multiverse universe restricted
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main multiverse universe restricted
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-security main multiverse universe restricted
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main multiverse universe restricted
+          EOF
+          sudo mv /etc/apt/sources.list /etc/apt/sources.list.bak
+          sudo mv /tmp/sources.list /etc/apt/sources.list
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+
+      - name: Install ARM64 dependencies
+        run: |
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            protobuf-compiler \
+            patchelf \
+            libwebkit2gtk-4.1-dev:arm64 \
+            libayatana-appindicator3-dev:arm64 \
+            librsvg2-dev:arm64 \
+            libssl-dev:arm64 \
+            libpipewire-0.3-dev:arm64 || {
+            echo "::warning::First apt-get attempt failed, retrying after update..."
+            sudo apt-get update --fix-missing
+            sudo apt-get install -y --fix-missing \
+              gcc-aarch64-linux-gnu \
+              g++-aarch64-linux-gnu \
+              protobuf-compiler \
+              patchelf \
+              libwebkit2gtk-4.1-dev:arm64 \
+              libayatana-appindicator3-dev:arm64 \
+              librsvg2-dev:arm64 \
+              libssl-dev:arm64 \
+              libpipewire-0.3-dev:arm64
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build for Linux ARM64
+        run: |
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/:$PKG_CONFIG_PATH
+          export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu/
+          npm run tauri build -- --target aarch64-unknown-linux-gnu --bundles deb,rpm
+        env:
+          NODE_OPTIONS: '--max_old_space_size=4096'
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Package Linux ARM64 artifacts
+        run: |
+          if [ -d "src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb" ]; then
+            cd src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb
+            for deb in *.deb; do
+              new_name="AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-arm64.deb"
+              mv "$deb" "$new_name"
+              mv "$new_name" "../../$new_name"
+            done
+          fi
+
+          if [ -d "src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm" ]; then
+            cd src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/rpm
+            for rpm in *.rpm; do
+              new_name="AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-arm64.rpm"
+              mv "$rpm" "$new_name"
+              mv "$new_name" "../../$new_name"
+            done
+          fi
+
+      - name: Upload Linux ARM64 artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          name: 'AxInvest ${{ needs.resolve-tag.outputs.tag }}'
+          draft: true
+          prerelease: ${{ contains(needs.resolve-tag.outputs.tag, '-rc') || contains(needs.resolve-tag.outputs.tag, '-beta') || contains(needs.resolve-tag.outputs.tag, '-alpha') }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            src-tauri/target/aarch64-unknown-linux-gnu/release/AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-arm64.deb
+            src-tauri/target/aarch64-unknown-linux-gnu/release/AxInvest_${{ needs.resolve-tag.outputs.tag }}_linux-arm64.rpm
+
+  # ── Build for Android ──────────────────────────────────
+  build-android:
+    name: Build Android (${{ matrix.abi }})
+    needs: [resolve-tag, draft-release-notes]
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.abi == 'arm64-v8a' && 'aarch64-linux-android' || matrix.abi == 'armeabi-v7a' && 'armv7-linux-androideabi' || 'x86_64-linux-android' }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v1-android'
+          key: 'ubuntu-22.04-${{ matrix.abi }}'
+          workspaces: src-tauri -> target
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: '27.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+
+      - name: Setup JDK 23 (Zulu)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '23'
+          distribution: 'zulu'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Setup Android NDK toolchain PATH
+        run: |
+          TOOLCHAIN="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "$TOOLCHAIN" >> $GITHUB_PATH
+
+      - name: Initialize Android project
+        run: |
+          cd src-tauri
+          npx tauri android init
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Setup keystore and signing config
+        run: |
+          mkdir -p src-tauri/gen/android/app
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 -d > src-tauri/gen/android/app/release.p12
+          printf 'storeFile=release.p12\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "${{ secrets.KEYSTORE_PASSWORD }}" "${{ secrets.KEY_ALIAS }}" "${{ secrets.KEY_PASSWORD }}" \
+            > src-tauri/gen/android/keystore.properties
+          python3 scripts/patch-android-signing.py src-tauri/gen/android/app/build.gradle.kts
+
+          # 添加 ProGuard 规则，防止 R8 混淆/剥离 JNI 桥接类导致闪退
+          cp src-tauri/proguard-rules.pro src-tauri/gen/android/app/proguard-rules.pro
+
+      - name: Build frontend (Vite)
+        run: npm run build:skip-typecheck
+
+      - name: Build Android APK
+        run: |
+          cd src-tauri
+          npx tauri android build \
+            --target ${{ matrix.abi == 'arm64-v8a' && 'aarch64' || matrix.abi == 'armeabi-v7a' && 'armv7' || 'x86_64' }} \
+            --apk
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Build Android AAB (for Play Store)
+        if: matrix.abi == 'arm64-v8a'
+        run: |
+          cd src-tauri
+          npx tauri android build \
+            --target aarch64 \
+            --aab
+        env:
+          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload APK and AAB to release
+        continue-on-error: true
+        run: |
+          # Find release APK from gen/android outputs
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk/release -name "*.apk" -type f 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            # Fallback: search all apk directories for release APKs
+            APK=$(find src-tauri/gen/android/app/build/outputs/apk -path "*/release/*" -name "*.apk" -type f 2>/dev/null | head -1)
+          fi
+          
+          if [ -n "$APK" ]; then
+            ABI="${{ matrix.abi }}"
+            NEW_NAME="AxInvest_${{ needs.resolve-tag.outputs.tag }}_android-${ABI}.apk"
+            cp "$APK" "$GITHUB_WORKSPACE/$NEW_NAME"
+            echo "Uploading APK: $NEW_NAME from $APK"
+            cd "$GITHUB_WORKSPACE"
+            gh release upload "${{ needs.resolve-tag.outputs.tag }}" "$NEW_NAME" --clobber
+          else
+            echo "APK not found in gen/android/outputs/apk"
+            ls -la src-tauri/gen/android/app/build/outputs/apk/ 2>/dev/null || true
+            find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -type f 2>/dev/null || true
+            exit 1
+          fi
+          
+          # Find and upload AAB (only for arm64-v8a)
+          if [ "${{ matrix.abi }}" = "arm64-v8a" ]; then
+            AAB=$(find src-tauri/gen/android/app/build/outputs/bundle -name "*.aab" -type f 2>/dev/null | head -1)
+            if [ -n "$AAB" ]; then
+              AAB_NAME="AxInvest_${{ needs.resolve-tag.outputs.tag }}_android-play-store.aab"
+              cp "$AAB" "$GITHUB_WORKSPACE/$AAB_NAME"
+              echo "Uploading AAB: $AAB_NAME"
+              cd "$GITHUB_WORKSPACE"
+              gh release upload "${{ needs.resolve-tag.outputs.tag }}" "$AAB_NAME" --clobber
+            else
+              echo "AAB not found, uploading APK only"
+            fi
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Publish draft release as latest ────────────────────
+  publish-release:
+    name: Publish Release
+    needs: [resolve-tag, release, release-linux-arm, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(needs.resolve-tag.outputs.tag, '-rc') || contains(needs.resolve-tag.outputs.tag, '-beta') || contains(needs.resolve-tag.outputs.tag, '-alpha') }}
+          make_latest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Deploy website after release ────────────────────────
+  deploy-website:
+    name: Deploy Website
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger website deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'deploy-website.yml',
+              ref: 'master',
+            });

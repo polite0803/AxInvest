@@ -1,0 +1,148 @@
+[workspace]
+members = [".", "crates/cache", "crates/core", "crates/crypto", "crates/dao", "crates/disk-cache", "crates/document-parser", "crates/entities", "crates/harness", "crates/kit", "crates/mcp", "crates/providers", "crates/gateway", "crates/migration", "crates/agent", "crates/runtime-core", "crates/runtime", "crates/search", "crates/storage", "crates/trajectory", "crates/telemetry", "crates/plugins", "crates/tools", "crates/prompt-guard", "crates/rt-workflow", "crates/rt-messaging", "crates/rt-webhook", "crates/rt-dashboard", "crates/rt-theme", "crates/npm", "crates/astock-data", "crates/stock-analysis", "schema-gen"]
+resolver = "2"
+
+[workspace.package]
+version = "2.6.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[workspace.dependencies]
+tauri = { version = "2.11.1", features = ["tray-icon", "image-png", "devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sea-orm = { version = "2.0.0-rc.38", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"] }
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+reqwest = { version = "0.13", features = ["json", "cookies"] }
+sqlite-vec = "0.1.8-alpha.1"
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+lazy_static = "1"
+sha2 = "0.10"
+hex = "0.4"
+image = { version = "0.25", features = ["png"] }
+xcap = "0.9.4"
+enigo = "0.6"
+
+[package]
+name = "axagent"
+version = "2.6.0"
+description = "AxAgent - AI Chat Desktop App"
+authors = ["刘小平 <polite0803@outlook.com>"]
+license = "AGPL-3.0-only"
+edition = "2024"
+default-run = "AxAgent"
+
+[features]
+default = ["notification"]
+notification = ["dep:tauri-plugin-notification"]
+
+[lib]
+name = "axagent_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "AxAgent"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = ["tray-icon", "image-png", "devtools"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2.7"
+tauri-plugin-fs = "2.5"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+axagent-core = { path = "crates/core" }
+axagent-harness = { path = "crates/harness" }
+axagent-providers = { path = "crates/providers" }
+axagent-agent = { path = "crates/agent" }
+axagent-migration = { path = "crates/migration" }
+axagent-gateway = { path = "crates/gateway" }
+axagent-runtime-core = { path = "crates/runtime-core" }
+axagent-runtime = { path = "crates/runtime" }
+axagent-rt-workflow = { path = "crates/rt-workflow" }
+axagent-rt-messaging = { path = "crates/rt-messaging" }
+axagent-rt-webhook = { path = "crates/rt-webhook" }
+axagent-rt-dashboard = { path = "crates/rt-dashboard" }
+axagent-rt-theme = { path = "crates/rt-theme" }
+axagent-trajectory = { path = "crates/trajectory" }
+axagent-telemetry = { path = "crates/telemetry" }
+axagent-tools = { path = "crates/tools" }
+axagent-plugins = { path = "crates/plugins" }
+axagent-astock-data = { path = "crates/astock-data" }
+axagent-stock-analysis = { path = "crates/stock-analysis" }
+axagent-prompt-guard = { path = "crates/prompt-guard" }
+tokio = { workspace = true }
+tokio-util = { version = "0.7", features = ["rt"] }
+uuid = { workspace = true }
+sea-orm = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+async-trait = "0.1"
+futures = "0.3"
+base64 = "0.22"
+toml = "0.8"
+zeroize = "1"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "ring"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = { version = "2", optional = true }
+reqwest = { workspace = true }
+zip = "2"
+tempfile = "3"
+open = "5"
+urlencoding = "2"
+dirs = "5"
+hostname = "0.3"
+lazy_static = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+notify = "8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+font-kit = "0.14"
+tauri-plugin-mcp-bridge = "0.2"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2 = { version = "0.6", features = ["relax-sign-encoding"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+android_logger = "0.14"
+log = { version = "0.4" }
+tracing-log = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 0

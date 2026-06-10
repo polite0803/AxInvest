@@ -1,0 +1,205 @@
+import { Tooltip } from "@/components/layout/Tooltip";
+import { useLocalToolStore } from "@/stores";
+import type { LocalToolGroupInfo, LocalToolInfo } from "@/types";
+import { Alert, Collapse, Empty, Spin, Switch, Tag, Typography } from "antd";
+import {
+  BookOpen,
+  Bot,
+  ExternalLink,
+  FileEdit,
+  FileSearch,
+  GitBranch,
+  Globe,
+  HardDrive,
+  Image,
+  MessageSquare,
+  MousePointer,
+  Shield,
+  Terminal,
+  Timer,
+  Wrench,
+} from "lucide-react";
+import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
+
+const { Text, Paragraph } = Typography;
+
+const GROUP_ICONS: Record<string, React.ReactNode> = {
+  "builtin-file-read": <FileSearch size={16} />,
+  "builtin-file-write": <FileEdit size={16} />,
+  "builtin-shell": <Terminal size={16} />,
+  "builtin-network": <Globe size={16} />,
+  "builtin-system-tools": <Wrench size={16} />,
+  "builtin-agent": <Bot size={16} />,
+  "builtin-vcs": <GitBranch size={16} />,
+  "builtin-automation": <Timer size={16} />,
+  "builtin-communication": <MessageSquare size={16} />,
+  "builtin-ai-media": <Image size={16} />,
+  "builtin-integration": <ExternalLink size={16} />,
+  "builtin-storage": <HardDrive size={16} />,
+  "builtin-knowledge": <BookOpen size={16} />,
+  "builtin-browser": <Globe size={16} />,
+  "builtin-desktop": <MousePointer size={16} />,
+};
+
+function ToolItem({
+  tool,
+  groupEnabled,
+  onToggle,
+}: {
+  tool: LocalToolInfo;
+  groupEnabled: boolean;
+  onToggle: (name: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-start justify-between py-2.5 px-3 border-b border-border/50 last:border-b-0 hover:bg-bg-container-hover transition-colors">
+      <div className="flex-1 min-w-0 mr-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Text strong className="text-sm">
+            {tool.name}
+          </Text>
+          {tool.isDestructive && (
+            <Tooltip title={t("toolManager.destructiveTooltip")}>
+              <Tag color="red" className="text-[10px] leading-none px-1 py-0">
+                <Shield size={10} className="inline mr-0.5" />
+                {t("toolManager.destructive")}
+              </Tag>
+            </Tooltip>
+          )}
+          {tool.isReadOnly && (
+            <Tag color="green" className="text-[10px] leading-none px-1 py-0">
+              {t("toolManager.readOnly")}
+            </Tag>
+          )}
+        </div>
+        <Paragraph
+          type="secondary"
+          className="text-xs mt-0.5 mb-0 leading-snug"
+          ellipsis={{ rows: 2 }}
+        >
+          {tool.description}
+        </Paragraph>
+      </div>
+      <Tooltip
+        title={groupEnabled
+          ? tool.enabled
+            ? t("toolManager.clickToDisable")
+            : t("toolManager.clickToEnable")
+          : t("toolManager.groupDisabled")}
+      >
+        <Switch
+          id="local-tool-settings-switch-90"
+          size="small"
+          checked={tool.enabled && groupEnabled}
+          disabled={!groupEnabled}
+          onChange={() => onToggle(tool.name)}
+        />
+      </Tooltip>
+    </div>
+  );
+}
+
+function GroupHeader({
+  group,
+  onToggleGroup,
+}: {
+  group: LocalToolGroupInfo;
+  onToggleGroup: (id: string) => void;
+}) {
+  const icon = GROUP_ICONS[group.groupId] ?? <Wrench size={16} />;
+  const enabledCount = group.tools.filter((t) => t.enabled).length;
+  const totalCount = group.tools.length;
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex items-center gap-3 w-full">
+      <span className="text-text-secondary shrink-0">{icon}</span>
+      <div className="flex-1 min-w-0">
+        <Text strong>{group.groupName}</Text>
+        <Text type="secondary" className="text-xs ml-2">
+          {enabledCount}/{totalCount} {t("toolManager.enabled")}
+        </Text>
+        <Paragraph
+          type="secondary"
+          className="text-xs mt-0.5 mb-0 leading-snug"
+        >
+          {group.description}
+        </Paragraph>
+      </div>
+      <Tooltip
+        title={group.enabled
+          ? t("toolManager.disableGroup")
+          : t("toolManager.enableGroup")}
+      >
+        <Switch
+          id="local-tool-settings-switch-91"
+          checked={group.enabled}
+          onChange={() => onToggleGroup(group.groupId)}
+          onClick={(_, e) => e.stopPropagation()}
+        />
+      </Tooltip>
+    </div>
+  );
+}
+
+export function LocalToolSettings() {
+  const { t } = useTranslation();
+  const { groups, loading, error, loadGroups, toggleGroup, toggleTool } = useLocalToolStore();
+
+  useEffect(() => {
+    loadGroups();
+  }, [loadGroups]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6">
+      <Typography.Title level={4}>
+        {t("settings.localTools.title")}
+      </Typography.Title>
+      <Paragraph type="secondary" className="mb-4">
+        {t("settings.localTools.description")}
+      </Paragraph>
+
+      {error && (
+        <Alert
+          message={error}
+          type="error"
+          showIcon
+          className="mb-4"
+          closable
+        />
+      )}
+
+      {groups.length === 0 ? <Empty description={t("toolManager.noTools")} /> : (
+        <Collapse
+          size="small"
+          expandIconPosition="end"
+          items={groups.map((group) => ({
+            key: group.groupId,
+            label: <GroupHeader group={group} onToggleGroup={toggleGroup} />,
+            children: (
+              <div className="border border-border rounded-lg overflow-hidden -mt-2">
+                {group.tools.map((tool) => (
+                  <ToolItem
+                    key={tool.name}
+                    tool={tool}
+                    groupEnabled={group.enabled}
+                    onToggle={toggleTool}
+                  />
+                ))}
+              </div>
+            ),
+          }))}
+        />
+      )}
+    </div>
+  );
+}

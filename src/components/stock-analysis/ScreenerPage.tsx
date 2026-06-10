@@ -1,0 +1,106 @@
+import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { Collapse, Grid, Tabs } from "antd";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { PageHeader } from "./_shared/PageHeader";
+import { DragonTigerPanel } from "./DragonTigerPanel";
+import { HotStocksPanel } from "./HotStocksPanel";
+import { LimitUpPanel } from "./LimitUpPanel";
+import { RecommendationPanel } from "./RecommendationPanel";
+import { StockScreenerPanel } from "./StockScreenerPanel";
+
+const { useBreakpoint } = Grid;
+
+/**
+ * ScreenerPage — 选股中心
+ *
+ * 顶部单卡 + Tabs:
+ *   - 智能荐股:多周期 × 多风格的策略驱动推荐(原 RecommendationPanel)
+ *   - 我的筛选:多因子条件筛选(原 StockScreenerPanel screen 模式)
+ *
+ * 底部折叠:HotStocks / LimitUp / DragonTiger — 默认收起的折叠面板
+ *
+ * 设计原则:系统被动推荐 与 用户主动筛选 走同一个入口,消除
+ * "今日荐股 / 全市场发现" 这种重复暴露。
+ */
+export function ScreenerPage() {
+  const { t } = useTranslation();
+  const screens = useBreakpoint();
+  const isMobile = !screens.md;
+  const [activeTab, setActiveTab] = useState<string>("reco");
+
+  return (
+    <PageErrorBoundary title="Screener">
+      <div className="flex h-full flex-col">
+        <PageHeader titleKey="screener.title" backTo="/stock-analysis" />
+        <div className={["flex-1 overflow-auto space-y-4", isMobile ? "p-2" : "p-4"].join(" ")}>
+          {/* 顶部:统一入口的"智能荐股 / 我的筛选"切换 */}
+          <div>
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              size={isMobile ? "small" : "middle"}
+              items={[
+                {
+                  key: "reco",
+                  label: (
+                    <span className="text-sm font-medium">
+                      {t("screener.tab.smartReco")}
+                    </span>
+                  ),
+                  children: <RecommendationPanel />,
+                },
+                {
+                  key: "screen",
+                  label: (
+                    <span className="text-sm font-medium">
+                      {t("screener.tab.myFilter")}
+                    </span>
+                  ),
+                  children: <StockScreenerPanel />,
+                },
+              ]}
+            />
+          </div>
+
+          {/* 底部:三个市场氛围面板(手风琴,默认全部收起) */}
+          <Collapse
+            accordion
+            defaultActiveKey={[]}
+            bordered={false}
+            size={isMobile ? "small" : "middle"}
+            items={[
+              {
+                key: "hot",
+                label: (
+                  <span className="text-sm font-medium">
+                    🔥 {t("stockAnalysis.settings.panels.hotStocks")}
+                  </span>
+                ),
+                children: <HotStocksPanel bordered={false} />,
+              },
+              {
+                key: "limitup",
+                label: (
+                  <span className="text-sm font-medium">
+                    🏆 {t("stockAnalysis.settings.panels.limitUp")}
+                  </span>
+                ),
+                children: <LimitUpPanel bordered={false} />,
+              },
+              {
+                key: "dragontiger",
+                label: (
+                  <span className="text-sm font-medium">
+                    🐉 {t("stockAnalysis.settings.panels.dragonTiger")}
+                  </span>
+                ),
+                children: <DragonTigerPanel bordered={false} />,
+              },
+            ]}
+          />
+        </div>
+      </div>
+    </PageErrorBoundary>
+  );
+}

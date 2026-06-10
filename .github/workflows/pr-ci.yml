@@ -1,0 +1,246 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+  push:
+    branches:
+      - master
+      - develop
+    tags-ignore:
+      - 'v*.*.*'
+      - 'test-v*.*.*'
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}'
+  cancel-in-progress: false
+
+jobs:
+  should-run-heavy:
+    name: Check if heavy jobs should run
+    runs-on: ubuntu-24.04
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - id: check
+        run: |
+          if [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::notice::Skipping heavy CI for dependabot PR"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  frontend-check:
+    name: Frontend Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check frontend formatting (dprint)
+        run: npm run format:check
+
+      - name: TypeScript type check
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check i18n hardcoded strings
+        run: bash scripts/check-hardcoded-i18n.sh --strict
+
+  rust-check:
+    name: Rust Check
+    needs: [should-run-heavy]
+    if: needs.should-run-heavy.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          df -h /
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v2'
+          key: 'ubuntu-2404-rust-check'
+          workspaces: src-tauri -> target
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgtk-3-dev libpipewire-0.3-dev \
+            libwayland-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev protobuf-compiler
+
+      - name: Check formatting
+        run: |
+          cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+      - name: Clippy (deny warnings)
+        run: |
+          cargo clippy --all-targets --all-features --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Check build
+        run: cargo check --workspace --manifest-path src-tauri/Cargo.toml
+
+  test-unit:
+    name: Unit Tests
+    needs: [should-run-heavy]
+    if: needs.should-run-heavy.outputs.skip != 'true'
+    timeout-minutes: 120
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add swap space
+        run: |
+          if [ -f /swapfile ]; then
+            echo "Swap file already exists, skipping"
+          else
+            sudo fallocate -l 8G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile || true
+          fi
+          echo "Swap status: $(free -h | grep Swap)"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          df -h /
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: 'v2'
+          key: 'ubuntu-2404-unit-tests'
+          workspaces: src-tauri -> target
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev libgtk-3-dev libpipewire-0.3-dev libwayland-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev protobuf-compiler
+
+      - name: Run Rust tests
+        run: cargo nextest run --workspace --manifest-path src-tauri/Cargo.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm run test:run
+
+  test-e2e:
+    name: E2E Tests (macOS)
+    needs: [should-run-heavy]
+    if: needs.should-run-heavy.outputs.skip != 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install Playwright browsers
+        run: npx --yes playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+  cargo-audit:
+    name: Security Audit
+    needs: [should-run-heavy]
+    if: needs.should-run-heavy.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      # 忽略说明:
+      #   RUSTSEC-2023-0071: rsa crate 来自 sqlx-mysql 未启用的功能（SQLite only），不编译进二进制。上游无可用修复。
+      - name: Run cargo audit
+        working-directory: src-tauri
+        run: |
+          cargo audit \
+            --ignore RUSTSEC-2023-0071
+
+  cargo-deny:
+    name: License Check
+    needs: [should-run-heavy]
+    if: needs.should-run-heavy.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny
+
+      - name: Run cargo deny check
+        working-directory: src-tauri
+        run: cargo deny check licenses bans sources

@@ -1,0 +1,319 @@
+import { invoke, isTauri } from "@/lib/invoke";
+import type {
+  CodeStyleTemplate,
+  CodeTemplate,
+  DocumentFormat,
+  DocumentStyleProfile,
+  LearnedPattern,
+  LearnedPatternType,
+  PatternType,
+  StyleDimensions,
+  StylePattern,
+  StyleVector,
+  UserStyleProfile,
+} from "@/types";
+import { create } from "zustand";
+
+export type {
+  CodeStyleTemplate,
+  CodeTemplate,
+  DocumentFormat,
+  DocumentStyleProfile,
+  LearnedPattern,
+  LearnedPatternType,
+  PatternType,
+  StyleDimensions,
+  StylePattern,
+  StyleVector,
+  UserStyleProfile,
+};
+
+export interface StyleMigratorStats {
+  total_profiles: number;
+  total_samples: number;
+  average_confidence: number;
+}
+
+interface StyleStore {
+  currentProfile: UserStyleProfile | null;
+  appliedStyle: StyleVector | null;
+  isApplying: boolean;
+  isLoading: boolean;
+  error: string | null;
+
+  loadStyleProfile: (userId: string) => Promise<void>;
+  applyStyleToCode: (code: string, userId?: string) => Promise<string>;
+  applyStyleToDocument: (content: string, userId?: string) => Promise<string>;
+  adjustStyleDimension: (
+    dimension: keyof StyleDimensions,
+    value: number,
+  ) => void;
+  resetToDefaults: () => void;
+  learnFromCodeSamples: (
+    userId: string,
+    samples: CodeSample[],
+  ) => Promise<void>;
+  learnFromMessages: (
+    userId: string,
+    messages: MessageSample[],
+  ) => Promise<void>;
+  exportProfile: (userId: string) => Promise<string | null>;
+  importProfile: (userId: string, json: string) => Promise<void>;
+  getStats: () => Promise<StyleMigratorStats | null>;
+}
+
+export interface CodeSample {
+  code: string;
+  language: string;
+  timestamp: string;
+}
+
+export interface MessageSample {
+  content: string;
+  role: string;
+  timestamp: string;
+}
+
+export const useStyleStore = create<StyleStore>((set, get) => ({
+  currentProfile: null,
+  appliedStyle: null,
+  isApplying: false,
+  isLoading: false,
+  error: null,
+
+  loadStyleProfile: async (userId: string) => {
+    if (!isTauri()) {
+      const defaultDimensions: StyleDimensions = {
+        naming_score: 0.5,
+        density_score: 0.5,
+        comment_ratio: 0.5,
+        abstraction_level: 0.5,
+        formality_score: 0.5,
+        structure_score: 0.5,
+        technical_depth: 0.5,
+        explanation_length: 0.5,
+      };
+      const defaultVector: StyleVector = {
+        dimensions: defaultDimensions,
+        source_confidence: 0.5,
+        learned_at: new Date().toISOString(),
+        sample_count: 0,
+      };
+      const defaultDocumentProfile: DocumentStyleProfile = {
+        formality_level: 0.5,
+        structure_level: 0.5,
+        technical_vocabulary_ratio: 0.5,
+        explanation_detail_level: 0.5,
+        preferred_format: "Markdown",
+      };
+      const defaultProfile: UserStyleProfile = {
+        id: "default",
+        user_id: userId,
+        code_style_vector: defaultVector,
+        document_style_profile: defaultDocumentProfile,
+        code_templates: [],
+        learned_patterns: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        total_samples: 0,
+        confidence: 0.5,
+      };
+      set({ currentProfile: defaultProfile, isLoading: false });
+      return;
+    }
+    set({ isLoading: true, error: null });
+    try {
+      const profile = await invoke<UserStyleProfile | null>(
+        "style_get_profile",
+        {
+          userId,
+        },
+      );
+      set({ currentProfile: profile, isLoading: false });
+    } catch (error) {
+      set({
+        error: error instanceof Error
+          ? error.message
+          : "Failed to load style profile",
+        isLoading: false,
+      });
+    }
+  },
+
+  applyStyleToCode: async (code: string, userId?: string) => {
+    set({ isApplying: true, error: null });
+    try {
+      const result = await invoke<string>("style_apply_code", {
+        code,
+        userId: userId || "default",
+      });
+      set({ isApplying: false });
+      return result;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to apply style",
+        isApplying: false,
+      });
+      return code;
+    }
+  },
+
+  applyStyleToDocument: async (content: string, userId?: string) => {
+    set({ isApplying: true, error: null });
+    try {
+      const result = await invoke<string>("style_apply_document", {
+        content,
+        userId: userId || "default",
+      });
+      set({ isApplying: false });
+      return result;
+    } catch (error) {
+      set({
+        error: error instanceof Error
+          ? error.message
+          : "Failed to apply document style",
+        isApplying: false,
+      });
+      return content;
+    }
+  },
+
+  adjustStyleDimension: (dimension: keyof StyleDimensions, value: number) => {
+    const { currentProfile } = get();
+    if (!currentProfile) {
+      return;
+    }
+
+    const updatedDimensions = {
+      ...currentProfile.code_style_vector.dimensions,
+      [dimension]: Math.max(0, Math.min(1, value)),
+    };
+
+    set({
+      currentProfile: {
+        ...currentProfile,
+        code_style_vector: {
+          ...currentProfile.code_style_vector,
+          dimensions: updatedDimensions,
+        },
+      },
+      appliedStyle: {
+        ...currentProfile.code_style_vector,
+        dimensions: updatedDimensions,
+      },
+    });
+  },
+
+  resetToDefaults: () => {
+    const defaultDimensions: StyleDimensions = {
+      naming_score: 0.5,
+      density_score: 0.5,
+      comment_ratio: 0.5,
+      abstraction_level: 0.5,
+      formality_score: 0.5,
+      structure_score: 0.5,
+      technical_depth: 0.5,
+      explanation_length: 0.5,
+    };
+
+    const defaultVector: StyleVector = {
+      dimensions: defaultDimensions,
+      source_confidence: 0,
+      learned_at: new Date().toISOString(),
+      sample_count: 0,
+    };
+
+    set({
+      currentProfile: null,
+      appliedStyle: defaultVector,
+    });
+  },
+
+  learnFromCodeSamples: async (userId: string, samples: CodeSample[]) => {
+    set({ isLoading: true, error: null });
+    try {
+      const profile = await invoke<UserStyleProfile>("style_learn_code", {
+        userId,
+        samples,
+      });
+      set({ currentProfile: profile, isLoading: false });
+    } catch (error) {
+      set({
+        error: error instanceof Error
+          ? error.message
+          : "Failed to learn from samples",
+        isLoading: false,
+      });
+    }
+  },
+
+  learnFromMessages: async (userId: string, messages: MessageSample[]) => {
+    set({ isLoading: true, error: null });
+    try {
+      const profile = await invoke<DocumentStyleProfile>(
+        "style_learn_messages",
+        {
+          userId,
+          messages,
+        },
+      );
+      const { currentProfile } = get();
+      if (currentProfile) {
+        set({
+          currentProfile: {
+            ...currentProfile,
+            document_style_profile: profile,
+          },
+          isLoading: false,
+        });
+      }
+    } catch (error) {
+      set({
+        error: error instanceof Error
+          ? error.message
+          : "Failed to learn from messages",
+        isLoading: false,
+      });
+    }
+  },
+
+  exportProfile: async (userId: string) => {
+    try {
+      const json = await invoke<string>("style_export_profile", { userId });
+      return json;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to export profile",
+      });
+      return null;
+    }
+  },
+
+  importProfile: async (userId: string, json: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      await invoke("style_import_profile", { userId, json });
+      await get().loadStyleProfile(userId);
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to import profile",
+        isLoading: false,
+      });
+    }
+  },
+
+  getStats: async () => {
+    if (!isTauri()) {
+      return { total_profiles: 1, total_samples: 0, average_confidence: 0.5 };
+    }
+    try {
+      const stats = await invoke<StyleMigratorStats>("style_get_stats");
+      return stats;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to get stats",
+      });
+      return null;
+    }
+  },
+}));

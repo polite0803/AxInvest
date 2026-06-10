@@ -1,0 +1,20 @@
+{
+  "rustc": 13986988774957648592,
+  "features": "[]",
+  "declared_features": "[]",
+  "target": 10620166500288925791,
+  "profile": 4333757155065362140,
+  "path": 8162007062175436700,
+  "deps": [],
+  "local": [
+    {
+      "CheckDepInfo": {
+        "dep_info": "debug\\.fingerprint\\find-msvc-tools-8953c81d6c88b55e\\dep-lib-find_msvc_tools",
+        "checksum": false
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 9396254390672932401,
+  "compile_kind": 0
+}

@@ -1,0 +1,133 @@
+use std::path::{Path, PathBuf};
+
+#[cfg(all(unix, not(mobile)))]
+use std::os::unix::fs::PermissionsExt;
+
+pub struct DatabaseInitResult {
+    pub db_handle: axagent_core::db::DbHandle,
+    pub db_path: String,
+    pub master_key: [u8; 32],
+    pub app_dir: PathBuf,
+}
+
+/// 使用预先解析的 app_dir 初始化数据库。
+///
+/// Android：主线程已调用 `axagent_home()` + `create_dir_all()`，
+/// 子线程中 `dirs::data_dir()` 因缺少 JNI 上下文不可用。
+/// 此函数跳过路径解析，直接使用传入的目录。
+pub async fn init_database_with_dir(app_dir: PathBuf) -> Result<DatabaseInitResult, String> {
+    axagent_core::storage_paths::ensure_documents_dirs().unwrap_or_else(|e| {
+        tracing::warn!(
+            "Failed to create documents storage dirs (non-critical, will retry later): {}",
+            e
+        );
+    });
+
+    let db_path = format!("sqlite:{}/axagent.db", app_dir.display());
+
+    let key_path = app_dir.join("master.key");
+    let master_key = load_or_create_master_key(&key_path, &app_dir)?;
+
+    // 注册 sqlite-vec 扩展。在 Android 上默认跳过（见 vector_store.rs），
+    // 在桌面平台用 catch_unwind 防止 FFI 异常 panic。
+    let vec_registration = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        axagent_core::vector_store::register_sqlite_vec_extension();
+    }));
+    if let Err(e) = vec_registration {
+        let msg = if let Some(s) = e.downcast_ref::<String>() {
+            s.clone()
+        } else if let Some(s) = e.downcast_ref::<&str>() {
+            s.to_string()
+        } else {
+            "unknown panic payload".to_string()
+        };
+        tracing::error!(
+            "sqlite-vec extension registration panicked: {} — vector search will be unavailable",
+            msg
+        );
+    }
+    axagent_tools::global_state::set_db_path(&db_path);
+
+    // 直接使用当前 tokio runtime，不再创建嵌套 Runtime
+    let db_handle = axagent_core::db::create_pool(&db_path)
+        .await
+        .map_err(|e| format!("database initialization failed: {}", e))?;
+
+    // MCP 预设服务器播种（依赖 mcp_client，在 core 中）
+    if let Err(e) = axagent_core::repo::mcp_server::ensure_preset_servers(&db_handle.conn).await {
+        tracing::warn!("[DB] MCP 预设服务器迁移失败: {e}");
+    }
+
+    // 硬编码路径 → 模板变量迁移（已迁入 storage，直接调用）
+    // 注意：此函数已从 path_vars 移除，迁移逻辑由各模块自行处理
+    // axagent_core::path_vars::migrate_hardcoded_paths(&db_handle.conn).await;
+
+    // 注册 SeaORM 连接
+    axagent_tools::global_state::set_sea_db(std::sync::Arc::new(db_handle.conn.clone()));
+
+    Ok(DatabaseInitResult {
+        db_handle,
+        db_path,
+        master_key,
+        app_dir,
+    })
+}
+
+fn load_or_create_master_key(key_path: &Path, app_dir: &Path) -> Result<[u8; 32], String> {
+    if key_path.exists() {
+        let mut bytes =
+            std::fs::read(key_path).map_err(|e| format!("failed to read master key: {}", e))?;
+        if bytes.len() != 32 {
+            return Err(format!(
+                "master.key is corrupted: expected 32 bytes, got {}. Delete the file to regenerate.",
+                bytes.len()
+            ));
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&bytes);
+        // Security: securely zero the temporary buffer before dropping.
+        // Using a helper that inhibits compiler optimization of the clear.
+        secure_zero(&mut bytes);
+        // key is returned (copy), bytes is zeroed and dropped
+        Ok(key)
+    } else {
+        let db_file = app_dir.join("axagent.db");
+        if db_file.exists() {
+            return Err(format!(
+                "FATAL: axagent.db exists at '{}' but master.key is missing from '{}'.\n\
+                 Generating a new master key would render all encrypted database \
+                 contents permanently unrecoverable.\n\n\
+                 Options:\n\
+                 • Restore master.key from a backup and restart.\n\
+                 • Remove axagent.db (and axagent.db-shm / axagent.db-wal if present) \
+                   to start fresh — ALL DATA WILL BE LOST.",
+                db_file.display(),
+                key_path.display()
+            ));
+        }
+        let key = axagent_core::crypto::generate_master_key();
+        std::fs::write(key_path, key).map_err(|e| format!("failed to write master key: {}", e))?;
+        #[cfg(all(unix, not(mobile)))]
+        {
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(key_path, perms)
+                .map_err(|e| format!("failed to set master.key permissions: {}", e))?;
+        }
+        Ok(key)
+    }
+}
+
+/// Securely zero a byte buffer, inhibiting compiler optimization of the clear.
+/// Uses volatile writes to ensure the memory is actually overwritten before drop.
+#[inline(never)]
+fn secure_zero(buf: &mut [u8]) {
+    for byte in buf.iter_mut() {
+        // SAFETY: byte is a valid mutable reference obtained from buf.iter_mut();
+        // write_volatile is used to prevent compiler optimization from eliding the
+        // zeroing of sensitive key material; this is the standard pattern for secure
+        // memory clearing.
+        unsafe {
+            std::ptr::write_volatile(byte, 0);
+        }
+    }
+}

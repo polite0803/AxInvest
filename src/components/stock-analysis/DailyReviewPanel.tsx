@@ -1,8 +1,8 @@
 import { invoke } from "@/lib/invoke";
-import { parseAction, StockAction } from "@/types";
 import { useStockAnalysisStore } from "@/stores";
 import { useNavigate } from "react-router-dom";
-import { ArrowRightOutlined } from "@ant-design/icons";
+import { ArrowRightOutlined, HistoryOutlined } from "@ant-design/icons";
+import { RotateCcw } from "lucide-react";
 import { Button, Card, List, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,12 +22,7 @@ interface DecisionComparison {
 interface StockDaySummary {
   stockCode: string;
   stockName: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
   changePct: number;
-  volumeRatio: number | null;
   keyEvents: string[];
   alertTriggers: string[];
   lastDecision: DecisionComparison | null;
@@ -40,16 +35,14 @@ interface DailyReview {
   generatedAt: string;
 }
 
-/** 决策对比徽章 — 显示上次分析结论 + 当前状态 */
 function DecisionBadge({ decision }: { decision: DecisionComparison }) {
   const { t } = useTranslation();
-  const action = parseAction(decision.action);
   let statusText = "";
-  let statusColor = "default";
-  if (decision.stopLossHit) { statusText = "⚠ " + t("stockAnalysis.dailyReview.stopLossHit"); statusColor = "red"; }
-  else if (decision.targetHit) { statusText = "✓ " + t("stockAnalysis.dailyReview.targetHit"); statusColor = "green"; }
-  else if (decision.inTargetZone) { statusText = "🎯 " + t("stockAnalysis.dailyReview.inZone"); statusColor = "gold"; }
-  else { statusText = `${decision.daysSinceAnalysis}d`; statusColor = "default"; }
+  let statusColor: string = "default";
+  if (decision.stopLossHit) { statusText = t("stockAnalysis.dailyReview.stopLossHit"); statusColor = "red"; }
+  else if (decision.targetHit) { statusText = t("stockAnalysis.dailyReview.targetHit"); statusColor = "green"; }
+  else if (decision.inTargetZone) { statusText = t("stockAnalysis.dailyReview.inZone"); statusColor = "gold"; }
+  else { statusText = `${decision.daysSinceAnalysis}d`; }
 
   return (
     <Tooltip
@@ -57,20 +50,12 @@ function DecisionBadge({ decision }: { decision: DecisionComparison }) {
         <div className="text-[11px] space-y-0.5">
           <div>{t("stockAnalysis.dailyReview.lastAnalysis")}: {decision.analysisDate}</div>
           <div>{t("stockAnalysis.dailyReview.decisionAction")}: {decision.action}</div>
-          {decision.targetPrice && <div>🎯 {t("stockAnalysis.dailyReview.target")}: {decision.targetPrice.toFixed(2)}</div>}
-          {decision.stopLoss && <div>🛡 {t("stockAnalysis.dailyReview.stopLoss")}: {decision.stopLoss.toFixed(2)}</div>}
-          <div>{t("stockAnalysis.dailyReview.daysSince")}: {decision.daysSinceAnalysis}d</div>
+          {decision.targetPrice && <div>{t("stockAnalysis.dailyReview.target")}: {decision.targetPrice.toFixed(2)}</div>}
+          {decision.stopLoss && <div>{t("stockAnalysis.dailyReview.stopLoss")}: {decision.stopLoss.toFixed(2)}</div>}
         </div>
       }
     >
-      <Tag color={statusColor} className="m-0 text-[10px]" style={{ cursor: "pointer" }}>
-        {action === StockAction.BUY || action === StockAction.INCREASE
-          ? t("stockAnalysis.actionBuy")
-          : action === StockAction.SELL || action === StockAction.REDUCE
-          ? t("stockAnalysis.actionSell")
-          : t("stockAnalysis.actionHold")}{" "}
-        {statusText}
-      </Tag>
+      <Tag color={statusColor} className="m-0 text-[10px]">{decision.action} {statusText}</Tag>
     </Tooltip>
   );
 }
@@ -78,27 +63,10 @@ function DecisionBadge({ decision }: { decision: DecisionComparison }) {
 export function DailyReviewPanel() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
-  const [codes, setCodes] = useState<string[]>([]);
+
   const [review, setReview] = useState<DailyReview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // 跟随自选股变化
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list: any[] = await invoke("list_watchlist");
-        if (!cancelled) { setCodes(Array.isArray(list) ? list.map((w) => w.stockCode) : []); }
-      } catch {
-        if (!cancelled) { setCodes([]); }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [watchlistVersion]);
 
   const generate = useCallback(async () => {
     setLoading(true);
@@ -112,9 +80,11 @@ export function DailyReviewPanel() {
     setLoading(false);
   }, []);
 
-  const hasCodes = codes.length > 0;
+  useEffect(() => { generate(); }, [generate]);
+
+  const hasWatchlist = useStockAnalysisStore((s) => s.watchlistVersion > 0);
   const emptyKind: PanelEmptyKind = error ? "connectionFailed" : "noData";
-  const emptyDescription = !hasCodes
+  const emptyDescription = !hasWatchlist
     ? t("stockAnalysis.dailyReview.noWatchlist")
     : (error ?? t("stockAnalysis.dailyReview.empty"));
 
@@ -124,13 +94,7 @@ export function DailyReviewPanel() {
       title={t("stockAnalysis.dailyReview.title")}
       styles={{ body: { padding: "8px 10px" } }}
       extra={
-        <Button
-          size="small"
-          loading={loading}
-          onClick={generate}
-          type={review ? "default" : "primary"}
-          disabled={loading}
-        >
+        <Button size="small" loading={loading} onClick={generate} type={review ? "default" : "primary"} disabled={loading}>
           {review ? t("stockAnalysis.dailyReview.regenerate") : t("stockAnalysis.dailyReview.generate")}
         </Button>
       }
@@ -141,7 +105,6 @@ export function DailyReviewPanel() {
         ? <PanelEmpty kind={emptyKind} description={emptyDescription} />
         : (
           <div className="space-y-2">
-            {/* 市场状态 */}
             <div className="text-xs flex items-center gap-2">
               <span className="text-gray-500">{review.date}</span>
               <Tag color="default" className="m-0 text-[10px]">{review.marketStatus}</Tag>
@@ -156,12 +119,13 @@ export function DailyReviewPanel() {
                   size="small"
                   dataSource={review.watchlistSummary}
                   renderItem={(w) => (
-                    <List.Item
-                      style={{ padding: "3px 0", cursor: "pointer" }}
-                      onClick={() => navigate(`/stock-analysis?code=${w.stockCode}`)}
-                    >
+                    <List.Item style={{ padding: "3px 0" }}>
                       <div className="text-xs w-full flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <div
+                          className="flex items-center gap-1.5 min-w-0 flex-1"
+                          style={{ cursor: "pointer" }}
+                          onClick={() => navigate(`/stock-analysis?code=${w.stockCode}`)}
+                        >
                           <Tag className="m-0 text-[10px]">{w.stockCode}</Tag>
                           <span className="font-medium truncate">{w.stockName}</span>
                           <span style={{ color: w.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
@@ -169,7 +133,25 @@ export function DailyReviewPanel() {
                           </span>
                           {w.lastDecision && <DecisionBadge decision={w.lastDecision} />}
                         </div>
-                        <ArrowRightOutlined style={{ fontSize: 10, color: "var(--muted)" }} />
+                        <div className="flex gap-1 shrink-0">
+                          <Tooltip title={t("stockAnalysis.dailyReview.reflect")}>
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<RotateCcw size={11} />}
+                              onClick={() => navigate(`/stock-analysis?code=${w.stockCode}&tab=reflection`)}
+                            />
+                          </Tooltip>
+                          <Tooltip title={t("stockAnalysis.dailyReview.backtest")}>
+                            <Button
+                              size="small"
+                              type="text"
+                              icon={<HistoryOutlined style={{ fontSize: 11 }} />}
+                              onClick={() => navigate(`/backtest?code=${w.stockCode}`)}
+                            />
+                          </Tooltip>
+                          <ArrowRightOutlined style={{ fontSize: 10, color: "var(--muted)", alignSelf: "center" }} />
+                        </div>
                       </div>
                       {(w.keyEvents.length > 0 || w.alertTriggers.length > 0) && (
                         <div className="flex flex-wrap gap-1 mt-1">

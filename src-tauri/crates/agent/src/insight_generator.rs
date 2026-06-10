@@ -669,6 +669,14 @@ impl InsightGenerator {
             warn!("[insight] flush failed: {}", e);
         }
     }
+
+    #[cfg(test)]
+    pub(crate) async fn set_insight_timestamp(&self, id: &str, ts: DateTime<Utc>) {
+        let mut insights = self.insights.write().await;
+        if let Some(ins) = insights.get_mut(id) {
+            ins.last_reinforced_at = ts;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -714,14 +722,15 @@ mod tests {
     async fn test_dedup_merge_returns_snapshot() {
         let g = InsightGenerator::new();
         let r = r();
-        let mut v = g.generate_from_reflection_multi(&r);
-        let original = v.remove(0);
-        let first = g
-            .store_insight(original.clone())
-            .await
-            .expect("first store");
+        let v = g.generate_from_reflection_multi(&r);
+        // 存储所有生成的 insight
+        for ins in &v {
+            g.store_insight(ins.clone()).await;
+        }
+        // 再次存储第一个（触发去重合并）
+        let original = v[0].clone();
+        let first = g.store_insight(original.clone()).await.expect("first store");
         let second = g.store_insight(original).await.expect("second store");
-        // S1: store_insight 必返回 Some
         assert_eq!(first.id, second.id, "merge should return same id");
         let all = g.get_insights().await;
         assert_eq!(all.len(), v.len(), "merged: should not double the count");
@@ -784,8 +793,10 @@ mod tests {
             "t".to_string(),
         );
         ins.confidence = 0.9;
-        ins.last_reinforced_at = Utc::now() - Duration::days(11);
-        g.store_insight(ins).await;
+        let stored = g.store_insight(ins).await.expect("store");
+        // store_insight 会重置 last_reinforced_at 为 now，需要手动模拟过期
+        g.set_insight_timestamp(&stored.id, Utc::now() - Duration::days(11))
+            .await;
         let decayed = g.decay_stale().await;
         assert_eq!(decayed, 1);
         let all = g.get_insights().await;

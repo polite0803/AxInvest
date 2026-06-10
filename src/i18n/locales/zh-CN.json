@@ -33,15 +33,20 @@
     "stockAnalysis": "股票分析",
     "watchlist": "自选",
     "screener": "选股",
+    "recommend": "智能荐股",
     "trade": "交易",
     "backtest": "回测",
     "compare": "对比",
-    "replayWorkbench": "回放工作台"
+    "replayWorkbench": "回放工作台",
+    "review": "每日复盘"
   },
   "sidebar": {
     "sectionWork": "工作",
     "sectionTools": "工具",
     "sectionInvest": "投资",
+    "sectionInvestDiscover": "🔍 发现与分析",
+    "sectionInvestExecute": "📋 持仓与交易",
+    "sectionInvestReview": "📈 复盘与进化",
     "sectionInfrastructure": "基础设施",
     "sectionPlugins": "插件",
     "expand": "展开侧边栏",
@@ -7684,7 +7689,9 @@
       "daysSince": "已过",
       "stopLossHit": "已触发止损",
       "targetHit": "已达目标",
-      "inZone": "在目标区间"
+      "inZone": "在目标区间",
+      "reflect": "反思",
+      "backtest": "回测此决策"
     },
     "retry": "重试",
     "completed": "已完成",
@@ -7698,6 +7705,21 @@
       "debate": "多空辩论",
       "risk": "风险评估",
       "decision": "投资决策"
+    },
+    "dashboard": {
+      "title": "投资仪表盘",
+      "marketState": "大盘状态",
+      "bull": "牛市",
+      "bear": "熊市",
+      "sideways": "震荡",
+      "confidence": "置信度",
+      "highVol": "高波动",
+      "viewAll": "查看全部",
+      "recommendations": "今日推荐",
+      "analyzeStock": "分析个股",
+      "recordTrade": "录入交易",
+      "dailyReview": "每日复盘",
+      "recentAnalyses": "最近分析"
     },
     "debate": "多空辩论",
     "debateRound": "第{{round}}轮",
@@ -8231,6 +8253,8 @@
     "trade": {
       "pnlPercent": "盈亏比例",
       "quickRecord": "快速记录",
+      "record": "录入",
+      "fromDecision": "来自分析决策",
       "stopLoss": "止损",
       "totalPnl": "总盈亏",
       "totalTrades": "交易笔数",

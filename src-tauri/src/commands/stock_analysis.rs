@@ -777,6 +777,35 @@ pub async fn toggle_trading_enabled(
     .map_err(|e| e.to_string())
 }
 
+/// 获取最近分析记录（用于 Dashboard）
+#[tauri::command]
+pub async fn get_recent_analyses(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    let rows = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        .order_by_desc(stock_analyses::Column::CreatedAt)
+        .limit(limit.unwrap_or(5) as u64)
+        .all(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+    let result: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|r| {
+            serde_json::json!({
+                "stockCode": r.stock_code,
+                "stockName": r.stock_name,
+                "decisionAction": r.decision_action,
+                "analysisDate": r.analysis_date,
+                "status": r.status,
+            })
+        })
+        .collect();
+    Ok(result)
+}
+
 /// 校验交易（提交前预览）
 #[tauri::command]
 pub async fn validate_trade(

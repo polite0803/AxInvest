@@ -32,6 +32,7 @@ import { EventCalendarPanel } from "./EventCalendarPanel";
 import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
+import { InvestDashboard } from "./InvestDashboard";
 import { KLineChart } from "./KLineChart";
 import { NorthBoundPanel } from "./NorthBoundPanel";
 import { OptionPcrPanel } from "./OptionPcrPanel";
@@ -315,12 +316,7 @@ export function StockAnalysisPage() {
                       )}
 
                       {status === "idle" && (
-                        <div className="sa-empty">
-                          <div>
-                            <p className="sa-empty-title">{t("stockAnalysis.emptyHint")}</p>
-                            <p className="sa-empty-desc">{t("stockAnalysis.emptyHintDetail")}</p>
-                          </div>
-                        </div>
+                        <InvestDashboard />
                       )}
 
                       {status === "error" && (

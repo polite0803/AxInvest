@@ -33,15 +33,20 @@
     "stockAnalysis": "Stock Analysis",
     "watchlist": "Watchlist",
     "screener": "Screener",
+    "recommend": "Recommendations",
     "trade": "Trade",
     "backtest": "Backtest",
     "compare": "Compare",
-    "replayWorkbench": "Replay Workbench"
+    "replayWorkbench": "Replay Workbench",
+    "review": "Daily Review"
   },
   "sidebar": {
     "sectionWork": "Work",
     "sectionTools": "Tools",
     "sectionInvest": "Invest",
+    "sectionInvestDiscover": "Discover & Analyze",
+    "sectionInvestExecute": "Portfolio & Execute",
+    "sectionInvestReview": "Review & Evolve",
     "sectionInfrastructure": "Infrastructure",
     "sectionPlugins": "Plugins",
     "expand": "Expand sidebar",
@@ -7686,7 +7691,9 @@
       "daysSince": "Days since",
       "stopLossHit": "Stop loss triggered",
       "targetHit": "Target reached",
-      "inZone": "In target zone"
+      "inZone": "In target zone",
+      "reflect": "Reflect",
+      "backtest": "Backtest"
     },
     "retry": "Retry",
     "completed": "Completed",
@@ -7700,6 +7707,21 @@
       "debate": "Debate",
       "risk": "Risk Assessment",
       "decision": "Decision"
+    },
+    "dashboard": {
+      "title": "Investment Dashboard",
+      "marketState": "Market",
+      "bull": "Bull",
+      "bear": "Bear",
+      "sideways": "Sideways",
+      "confidence": "Confidence",
+      "highVol": "High Volatility",
+      "viewAll": "View All",
+      "recommendations": "Today's Picks",
+      "analyzeStock": "Analyze Stock",
+      "recordTrade": "Record Trade",
+      "dailyReview": "Daily Review",
+      "recentAnalyses": "Recent Analyses"
     },
     "debate": "Debate",
     "debateRound": "Round {{round}}",
@@ -8231,6 +8253,8 @@
     "trade": {
       "pnlPercent": "pnlPercent",
       "quickRecord": "quickRecord",
+      "record": "record",
+      "fromDecision": "fromDecision",
       "stopLoss": "stopLoss",
       "totalPnl": "totalPnl",
       "totalTrades": "totalTrades",

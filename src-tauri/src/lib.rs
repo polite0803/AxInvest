@@ -999,6 +999,9 @@ pub fn run() {
             commands::stock_analysis::get_evolution_drift_timeline,
             commands::stock_analysis::manual_recalc_strategy_weights,
             commands::stock_analysis::get_reco_strategy_weights,
+            // P2-6 RealtimeMonitor T+0 自动重跑
+            commands::stock_analysis::get_t0_config,
+            commands::stock_analysis::set_t0_config,
             // R2 组合监控
             commands::stock_analysis::get_portfolio_dashboard,
             commands::stock_analysis::refresh_portfolio_metrics,

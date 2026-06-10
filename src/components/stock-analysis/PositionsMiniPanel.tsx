@@ -74,7 +74,12 @@ export function PositionsMiniPanel() {
       width: 60,
       render: (v: number | null) =>
         v != null
-          ? <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>{v >= 0 ? "+" : ""}{v.toFixed(1)}%</span>
+          ? (
+            <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+              {v >= 0 ? "+" : ""}
+              {v.toFixed(1)}%
+            </span>
+          )
           : <span className="text-gray-400">—</span>,
     },
   ];
@@ -103,7 +108,8 @@ export function PositionsMiniPanel() {
           {t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
           {" | "}
           <span style={{ color: totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
-            {t("stockAnalysis.unrealizedPnl")}: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}
+            {t("stockAnalysis.unrealizedPnl")}: {totalPnl >= 0 ? "+" : ""}
+            {totalPnl.toFixed(0)}
           </span>
         </span>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load} />

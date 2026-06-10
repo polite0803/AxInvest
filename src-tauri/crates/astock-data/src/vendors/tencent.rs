@@ -180,6 +180,8 @@ fn parse_klines(raw: &str, _stock_code: &str) -> Result<Vec<KLine>, DataError> {
             volume: parse(5),
             amount: parse(6),
             turnover_rate: None,
+            // P1-4: vendor 默认不复权，adj_factor 留 None；调用方可在 aggregation 层按 adj 参数二次校正
+            adj_factor: None,
         });
     }
     Ok(result)
@@ -201,6 +203,7 @@ impl StockVendor for TencentVendor {
         stock_code: &str,
         period: &str,
         limit: u32,
+        _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let tc_code = to_tencent_code(stock_code);
         let period_code = match period {

@@ -29,6 +29,25 @@ export interface KLine {
   turnoverRate: number | null;
 }
 
+/** R3-B 财报披露事件 — 后端 `get_earnings_calendar` 返回结构 */
+export type EarningsEventType =
+  | "preliminary"
+  | "express"
+  | "formal"
+  | "shareholders_meeting"
+  | "other";
+
+export interface EarningsEvent {
+  stockCode: string;
+  stockName: string;
+  eventDate: string;
+  eventType: EarningsEventType | string;
+  period: string | null;
+  detail: string | null;
+  source: string | null;
+  createdAt: number;
+}
+
 export interface StockSearchResult {
   code: string;
   name: string;

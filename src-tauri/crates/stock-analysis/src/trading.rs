@@ -352,9 +352,10 @@ impl TradingEngine {
             fee: Set(None),
             realized_pnl: Set(realized_pnl),
             notes: Set(notes.map(|s| s.to_string())),
-            analysis_id: Set(analysis_id.map(|s| s.to_string())),
+            // analysis_id 当前未持久化（trades entity 暂未挂该字段，留作未来扩展）
             created_at: Set(now),
         };
+        let _ = analysis_id;
 
         trade
             .insert(self.db.as_ref())

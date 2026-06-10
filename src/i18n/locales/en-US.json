@@ -3769,7 +3769,9 @@
       "presetsImportFailed": "Import failed: {{error}}",
       "importPresetsTitle": "Import Preset Templates",
       "importPresets": "Import Presets"
-    },
+    ,
+  "moreActions": "More actions for {{name}}"
+},
     "previewInDevelopment": "Preview feature is in development",
     "publishInDevelopment": "Publish feature is in development",
     "aiAssistant": "AI Assistant",
@@ -4941,10 +4943,7 @@
     "contextMenu": {
       "label": "Node actions"
     },
-    "templateList": {
-      "moreActions": "More actions for {{name}}"
-    },
-    "nodeConfig": {
+        "nodeConfig": {
       "add_debater": "Add debater",
       "convergence_model_role": "Convergence model role",
       "convergence_prompt": "Convergence prompt",
@@ -4960,7 +4959,6 @@
       "close": "Close search",
       "placeholder": "Search nodes..."
     },
-    "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
     "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
     "canvasTitle": {
       "clickToRename": "Click to rename"
@@ -8112,6 +8110,7 @@
       "backward": "Backward",
       "tip": "Price adjustment for dividends and stock splits"
     },
+    "earningsOnChart": "Earnings",
     "calendar": {
       "filter": {
         "all": "All",
@@ -8417,6 +8416,17 @@
     },
     "chart.zoom": "Area Zoom",
     "chart.restore": "Restore",
+    "chart.drawOff": "Draw Off",
+    "chart.drawTrend": "Trend Line",
+    "chart.drawChannel": "Parallel Channel",
+    "chart.drawFib": "Fibonacci",
+    "chart.drawHorizontal": "Horizontal Line",
+    "chart.clearDraw": "Clear Drawings",
+    "chart.brushStats": "Range Stats",
+    "chart.brushHigh": "High",
+    "chart.brushLow": "Low",
+    "chart.brushRange": "Range %",
+    "chart.brushAvgVol": "Avg Volume",
     "stage.dataLoading": "Data Loading",
     "stage.analysis": "Analysis",
     "stage.debate": "Debate",
@@ -8446,6 +8456,14 @@
     "period.1y": "1Y",
     "period.weekly": "W",
     "period.monthly": "M",
+    "period.5m": "5m",
+    "period.15m": "15m",
+    "period.30m": "30m",
+    "period.60m": "60m",
+    "period.1d": "1D",
+    "period.1w": "1W",
+    "period.1M": "1M",
+    "period.zoomHint": "Scroll to zoom, auto-switches granularity",
     "progress.fetchingData": "Fetching stock data...",
     "progress.started": "Analysis started...",
     "progress.dataLoaded": "Data: {{kline}} K-lines, {{news}} news",

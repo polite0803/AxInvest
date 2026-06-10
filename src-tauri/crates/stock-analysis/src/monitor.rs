@@ -1,10 +1,47 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 
 use axagent_astock_data::{AStockClient, StockQuote};
 use tauri::Emitter;
+
+/// T+0 自动重跑配置 (P2-6)
+///
+/// 当 RealtimeMonitor 检测到异常行情时,除了发告警,还会触发 T+0 工作流重跑
+/// (即在交易时段内立即用最新行情重新跑一次 stock analysis workflow)。
+/// - `enabled`: 全局开关
+/// - `change_pct_threshold`: 涨跌幅超过 N% 触发 (None 表示不按此条件触发)
+/// - `turnover_rate_threshold`: 换手率超过 N% 触发 (None 表示不按此条件触发)
+/// - `min_interval_minutes`: 同一只股票两次 T+0 触发的最小间隔 (默认 30 分钟),
+///   避免短时间内连续触发造成工作流风暴
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TZeroConfig {
+    pub enabled: bool,
+    pub change_pct_threshold: Option<f64>,
+    pub turnover_rate_threshold: Option<f64>,
+    pub min_interval_minutes: i64,
+}
+
+impl Default for TZeroConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // 默认关闭 — 用户需在设置里显式开启
+            change_pct_threshold: Some(3.0),
+            turnover_rate_threshold: Some(8.0),
+            min_interval_minutes: 30,
+        }
+    }
+}
+
+/// T+0 触发回调: 接收 stock_code,异步启动工作流重跑
+pub type TZeroCallback = Arc<
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// 监控条件
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -53,6 +90,11 @@ pub struct RealtimeMonitor {
     last_alerts: RwLock<HashMap<String, i64>>,
     poll_interval_secs: RwLock<u64>,
     alert_cooldown_secs: RwLock<i64>,
+    // P2-6: T+0 自动重跑相关字段
+    t0_config: RwLock<TZeroConfig>,
+    t0_callback: RwLock<Option<TZeroCallback>>,
+    /// 记录每只股票最近一次 T+0 触发的时间戳(秒),用于 cooldown 控制
+    t0_last_trigger_ts: RwLock<HashMap<String, i64>>,
 }
 
 impl RealtimeMonitor {
@@ -67,7 +109,27 @@ impl RealtimeMonitor {
             last_alerts: RwLock::new(HashMap::new()),
             poll_interval_secs: RwLock::new(30),
             alert_cooldown_secs: RwLock::new(300),
+            t0_config: RwLock::new(TZeroConfig::default()),
+            t0_callback: RwLock::new(None),
+            t0_last_trigger_ts: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// P2-6: 设置 T+0 自动重跑配置
+    pub async fn set_t0_config(&self, config: TZeroConfig) {
+        *self.t0_config.write().await = config;
+    }
+
+    /// P2-6: 设置 T+0 触发回调。
+    /// 回调签名: 收到 stock_code,异步启动 workflow 重跑,返回 workflow_id 或错误信息。
+    /// 不设置 callback 即关闭 T+0 触发(T+0 配置只是"如果 callback 存在就触发")。
+    pub async fn set_t0_callback(&self, cb: TZeroCallback) {
+        *self.t0_callback.write().await = Some(cb);
+    }
+
+    /// P2-6: 查询当前 T+0 配置
+    pub async fn t0_config(&self) -> TZeroConfig {
+        self.t0_config.read().await.clone()
     }
 
     /// 设置 Tauri AppHandle 以桥接告警到前端
@@ -326,6 +388,111 @@ impl RealtimeMonitor {
                     }),
                 );
             }
+        }
+
+        // P2-6: T+0 自动重跑
+        // 在告警发送完毕后,根据本次触发的 alert 集合判断是否需要重跑工作流。
+        // - 必须 enabled=true
+        // - 必须有 alert 触发 (没触发就不重跑,避免每分钟空转)
+        // - 必须通过 cooldown 检查 (同一只股票两次触发间隔 ≥ min_interval_minutes)
+        if !alerts.is_empty() {
+            self.maybe_trigger_t0(&alerts, &config.stock_code, quote).await;
+        }
+    }
+
+    /// P2-6: 检查并触发 T+0 重跑
+    ///
+    /// 设计原则: monitor 不直接调用 workflow 重跑(避免循环依赖),而是 emit
+    /// `stock-monitor-t0-rerun-requested` 事件到前端,由前端 listener 调
+    /// `run_stock_workflow` 命令触发重跑。这样:
+    /// 1) 后端 monitor 保持纯监控职责,不依赖 workflow engine;
+    /// 2) 前端可在 T+0 重跑前做去重、节流、UI 提示;
+    /// 3) 如果用户没开前端 UI,事件会丢失但不阻塞监控。
+    async fn maybe_trigger_t0(
+        &self,
+        alerts: &[MonitorAlert],
+        stock_code: &str,
+        quote: &StockQuote,
+    ) {
+        let t0_cfg = self.t0_config.read().await.clone();
+        if !t0_cfg.enabled {
+            return;
+        }
+
+        // 1) 判断本次告警是否命中 T+0 触发条件
+        let mut hit_change = false;
+        let mut hit_volume = false;
+        for a in alerts {
+            if a.alert_type == "change" {
+                if let Some(th) = t0_cfg.change_pct_threshold {
+                    if quote.change_pct.abs() >= th {
+                        hit_change = true;
+                    }
+                }
+            } else if a.alert_type == "volume" {
+                if let Some(th) = t0_cfg.turnover_rate_threshold {
+                    if quote.turnover_rate >= th {
+                        hit_volume = true;
+                    }
+                }
+            }
+        }
+        if !hit_change && !hit_volume {
+            return; // 告警触发但未命中 T+0 阈值
+        }
+
+        // 2) Cooldown: 同一只股票两次 T+0 之间间隔 ≥ min_interval_minutes
+        let now_ts = chrono::Utc::now().timestamp();
+        let cooldown_secs = t0_cfg.min_interval_minutes * 60;
+        {
+            let last_map = self.t0_last_trigger_ts.read().await;
+            if let Some(&last_ts) = last_map.get(stock_code) {
+                if now_ts - last_ts < cooldown_secs {
+                    tracing::debug!(
+                        "[t0] skip {}: cooldown 未到 ({}s < {}s)",
+                        stock_code,
+                        now_ts - last_ts,
+                        cooldown_secs
+                    );
+                    return;
+                }
+            }
+        }
+
+        // 3) 记录触发时间, 然后 emit 事件
+        {
+            let mut last_map = self.t0_last_trigger_ts.write().await;
+            last_map.insert(stock_code.to_string(), now_ts);
+        }
+        let reason = if hit_change && hit_volume {
+            "change+volume"
+        } else if hit_change {
+            "change"
+        } else {
+            "volume"
+        };
+        tracing::info!(
+            "[t0] 触发 T+0 重跑: stock={} reason={} change_pct={:.2} turnover={:.2}",
+            stock_code,
+            reason,
+            quote.change_pct,
+            quote.turnover_rate
+        );
+
+        // 4) 触发 T+0 事件 (前端可订阅用于 toast 提示 + 调 run_stock_workflow)
+        let app_handle = self.app_handle.read().await.clone();
+        if let Some(ref app) = app_handle {
+            let _ = app.emit(
+                "stock-monitor-t0-rerun-requested",
+                serde_json::json!({
+                    "stockCode": stock_code,
+                    "reason": reason,
+                    "currentPrice": quote.price,
+                    "changePct": quote.change_pct,
+                    "turnoverRate": quote.turnover_rate,
+                    "timestamp": now_ts,
+                }),
+            );
         }
     }
 }

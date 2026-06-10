@@ -272,7 +272,7 @@ impl PersistedStore {
             }
         }
         let mut out: Vec<Reflection> = by_task.into_values().collect();
-        out.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        out.sort_by_key(|r| std::cmp::Reverse(r.timestamp));
         if out.len() > max {
             let drop_n = out.len() - max;
             out.drain(0..drop_n);

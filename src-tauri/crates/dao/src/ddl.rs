@@ -709,6 +709,94 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         db.execute_unprepared(sql).await?;
     }
 
+    // --- R1: 复盘→进化闭环（strategy_performance + strategy_weight_history） ---
+    for sql in &[
+        "CREATE TABLE IF NOT EXISTS strategy_performance (\
+            id TEXT NOT NULL PRIMARY KEY, strategy_id TEXT NOT NULL, period TEXT NOT NULL, \
+            stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
+            decision_at INTEGER NOT NULL, exit_at INTEGER NOT NULL, holding_days INTEGER NOT NULL, \
+            return_pct REAL NOT NULL, was_correct INTEGER NOT NULL, \
+            decision_confidence INTEGER NOT NULL, horizon_pnl_json TEXT, \
+            created_at INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS strategy_weight_history (\
+            id TEXT NOT NULL PRIMARY KEY, strategy_id TEXT NOT NULL, period TEXT NOT NULL, \
+            old_weight REAL NOT NULL, new_weight REAL NOT NULL, delta_pct REAL NOT NULL, \
+            trigger TEXT NOT NULL, source_reflection_id TEXT, sample_size INTEGER NOT NULL, \
+            win_rate REAL NOT NULL, rationale TEXT, applied_at INTEGER NOT NULL)",
+    ] {
+        db.execute_unprepared(sql).await?;
+    }
+
+    // --- R2: 组合监控（portfolio_metrics_daily + portfolio_correlation_snapshot） ---
+    for sql in &[
+        "CREATE TABLE IF NOT EXISTS portfolio_metrics_daily (\
+            id TEXT NOT NULL PRIMARY KEY, snapshot_date TEXT NOT NULL, \
+            total_market_value REAL NOT NULL, cash_pct REAL NOT NULL, \
+            total_pnl REAL NOT NULL, total_pnl_pct REAL NOT NULL, \
+            max_drawdown_pct REAL NOT NULL, \
+            beta REAL, sharpe_30d REAL, correlation_avg REAL, \
+            top_concentration_pct REAL NOT NULL, \
+            sector_exposure_json TEXT NOT NULL, stress_test_json TEXT, \
+            created_at INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS portfolio_correlation_snapshot (\
+            id TEXT NOT NULL PRIMARY KEY, snapshot_date TEXT NOT NULL, \
+            lookback_days INTEGER NOT NULL, \
+            code_a TEXT NOT NULL, code_b TEXT NOT NULL, \
+            correlation REAL NOT NULL, created_at INTEGER NOT NULL)",
+    ] {
+        db.execute_unprepared(sql).await?;
+    }
+
+    // --- R3: 数据层（financial_snapshots + earnings_events） ---
+    for sql in &[
+        "CREATE TABLE IF NOT EXISTS financial_snapshots (\
+            id TEXT NOT NULL PRIMARY KEY, stock_code TEXT NOT NULL, \
+            snapshot_date TEXT NOT NULL, \
+            pe_ttm REAL, pb REAL, ps_ttm REAL, pcf REAL, ev_ebitda REAL, \
+            roe REAL, gross_margin REAL, debt_ratio REAL, \
+            revenue_yoy REAL, profit_yoy REAL, \
+            source TEXT, created_at INTEGER NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS earnings_events (\
+            id TEXT NOT NULL PRIMARY KEY, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
+            event_date TEXT NOT NULL, event_type TEXT NOT NULL, \
+            period TEXT, detail TEXT, source TEXT, created_at INTEGER NOT NULL)",
+    ] {
+        db.execute_unprepared(sql).await?;
+    }
+
+    // --- schema_migrations 迁移追踪表（已应用迁移版本） ---
+    db.execute_unprepared(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (\
+            id TEXT NOT NULL PRIMARY KEY, description TEXT NOT NULL, \
+            applied_at INTEGER NOT NULL)",
+    )
+    .await?;
+    let migration_ts = chrono::Local::now().timestamp();
+    for (id, desc) in &[
+        (
+            "p0_init",
+            "P0 主框架初始化（所有基础表）",
+        ),
+        (
+            "r1_2026_06_10",
+            "R1 复盘→进化闭环（strategy_performance/strategy_weight_history）",
+        ),
+        (
+            "r2_2026_06_10",
+            "R2 组合监控（portfolio_metrics_daily/portfolio_correlation_snapshot）",
+        ),
+        (
+            "r3_2026_06_10",
+            "R3 数据层（financial_snapshots/earnings_events）",
+        ),
+    ] {
+        db.execute_unprepared(&format!(
+            "INSERT OR IGNORE INTO schema_migrations(id, description, applied_at) \
+             VALUES('{id}', '{desc}', {migration_ts})",
+        ))
+        .await?;
+    }
+
     // --- Time-travel mode: stock_analyses 扩展字段（幂等） ---
     for sql in &[
         "ALTER TABLE stock_analyses ADD COLUMN analysis_kind TEXT NOT NULL DEFAULT 'live'",
@@ -842,6 +930,17 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "CREATE INDEX IF NOT EXISTS idx_mdh_accessed ON market_data_history(last_accessed_at)",
         "CREATE INDEX IF NOT EXISTS idx_mdh_expires ON market_data_history(expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_replay_runs_created ON replay_runs(created_at)",
+        // R1 复盘→进化索引
+        "CREATE INDEX IF NOT EXISTS idx_strategy_perf_strategy ON strategy_performance(strategy_id, period, exit_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_perf_code ON strategy_performance(stock_code, exit_at)",
+        "CREATE INDEX IF NOT EXISTS idx_strategy_weight_hist_applied ON strategy_weight_history(strategy_id, period, applied_at)",
+        // R2 组合监控索引
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_metrics_date ON portfolio_metrics_daily(snapshot_date)",
+        "CREATE INDEX IF NOT EXISTS idx_portfolio_corr_date ON portfolio_correlation_snapshot(snapshot_date, lookback_days)",
+        // R3 数据层索引
+        "CREATE INDEX IF NOT EXISTS idx_financial_snapshots_code_date ON financial_snapshots(stock_code, snapshot_date)",
+        "CREATE INDEX IF NOT EXISTS idx_earnings_events_code_date ON earnings_events(stock_code, event_date)",
+        "CREATE INDEX IF NOT EXISTS idx_earnings_events_date ON earnings_events(event_date)",
     ] {
         db.execute_unprepared(sql).await?;
     }

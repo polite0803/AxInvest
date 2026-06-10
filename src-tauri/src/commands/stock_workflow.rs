@@ -96,6 +96,7 @@ async fn data_quality_precheck(
     };
 
     // P1-3 新增: 3. klines (取 60 日, 验证历史数据可拉到)
+    // AStockClient::get_klines 是 3 参 wrapper (内部默认 None 复权)
     let kline_check = match client.get_klines(stock_code, "daily", 60).await {
         Ok(klines) if klines.len() >= 30 => SourceCheck::Ok,
         Ok(klines) if !klines.is_empty() => {
@@ -526,6 +527,15 @@ async fn run_stock_workflow_inner(
                 if let serde_json::Value::String(ref key) = v.value {
                     if !key.is_empty() {
                         *state.astock_client.iwencai_key.write().await = key.clone();
+                    }
+                }
+            }
+            if v.name == "vendor_xueqiu_token" {
+                if let serde_json::Value::String(ref token) = v.value {
+                    if !token.is_empty() {
+                        if let Some(ref xq) = state.astock_client.xq_token {
+                            *xq.write().await = token.clone();
+                        }
                     }
                 }
             }

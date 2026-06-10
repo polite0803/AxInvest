@@ -124,7 +124,7 @@ impl InsightStore {
         let tmp = path.with_extension("jsonl.tmp");
         let mut buf = String::new();
         let mut v: Vec<&Insight> = insights.values().collect();
-        v.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        v.sort_by_key(|ins| ins.created_at);
         for ins in v {
             if let Ok(s) = serde_json::to_string(ins) {
                 buf.push_str(&s);
@@ -458,7 +458,7 @@ impl InsightGenerator {
     pub async fn get_insights(&self) -> Vec<Insight> {
         let insights = self.insights.read().await;
         let mut v: Vec<Insight> = insights.values().cloned().collect();
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.sort_by_key(|ins| std::cmp::Reverse(ins.created_at));
         v
     }
 
@@ -469,7 +469,7 @@ impl InsightGenerator {
             .filter(|i| i.category == category)
             .cloned()
             .collect();
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.sort_by_key(|ins| std::cmp::Reverse(ins.created_at));
         v
     }
 

@@ -101,6 +101,7 @@ impl StockVendor for BaiduStockVendor {
         stock_code: &str,
         period: &str,
         limit: u32,
+        _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let code = to_baidu_code(stock_code);
         let ktype = match period {
@@ -141,6 +142,8 @@ impl StockVendor for BaiduStockVendor {
                     volume,
                     amount,
                     turnover_rate,
+                    // P1-4: vendor 默认不复权
+                    adj_factor: None,
                 })
             })
             .collect())

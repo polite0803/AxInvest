@@ -171,13 +171,6 @@ const builtinNavItems: NavItem[] = [
     path: "/compare",
     isPlugin: false,
   },
-  {
-    key: "review",
-    icon: <RotateCcw size={18} color={NAV_ICON_COLORS.Router} />,
-    labelKey: "nav.review",
-    path: "/watchlist",
-    isPlugin: false,
-  },
 ];
 
 interface SidebarSection {
@@ -455,24 +448,20 @@ export function Sidebar() {
     sections.push({
       key: "invest-discover",
       labelKey: "sidebar.sectionInvestDiscover",
-      items: builtinNavItems.filter((n) =>
-        n.key === "stock-analysis" || n.key === "screener"
-      ),
+      items: builtinNavItems.filter((n) => n.key === "stock-analysis" || n.key === "screener"),
     });
 
     sections.push({
       key: "invest-execute",
       labelKey: "sidebar.sectionInvestExecute",
-      items: builtinNavItems.filter((n) =>
-        n.key === "trade"
-      ),
+      items: builtinNavItems.filter((n) => n.key === "trade"),
     });
 
     sections.push({
       key: "invest-review",
       labelKey: "sidebar.sectionInvestReview",
       items: builtinNavItems.filter((n) =>
-        n.key === "watchlist" || n.key === "review" || n.key === "backtest" || n.key === "compare" || n.key === "replay-workbench"
+        n.key === "watchlist" || n.key === "backtest" || n.key === "compare" || n.key === "replay-workbench"
       ),
     });
 

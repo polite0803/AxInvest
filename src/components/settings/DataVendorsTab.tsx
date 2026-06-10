@@ -2,7 +2,7 @@
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
 import { invoke } from "@/lib/invoke";
-import { Button, Card, message, Select, Space, Spin, Switch, Tag } from "antd";
+import { Button, Card, Input, message, Select, Space, Spin, Switch, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -134,6 +134,16 @@ const VENDORS: VendorDef[] = [
     requiresKey: false,
     helpText: "需本地安装通达信客户端，启动后 Mootdx 自动通过 127.0.0.1:7709 连接行情服务",
   },
+  {
+    key: "vendor_xueqiu",
+    enName: "xueqiu",
+    name: "雪球",
+    desc: "新闻/财务",
+    capabilities: ["news", "financials", "quote", "klines"],
+    requiresKey: true,
+    helpUrl: "https://xueqiu.com/",
+    helpText: "登录雪球后 F12 → Cookie 中取 xq_a_token",
+  },
 ];
 
 /** 工具 → Vendor 路由映射（固定 + 暴露） */
@@ -146,7 +156,7 @@ interface ToolRoute {
 
 /** 固定 ToolNode（DAG 确定性执行）*/
 const FIXED_TOOLS: ToolRoute[] = [
-  { tool: "get_stock_kline", label: "K线", kind: "fixed", vendors: ["eastmoney", "tencent", "mootdx"] },
+  { tool: "get_stock_kline", label: "K线", kind: "fixed", vendors: ["eastmoney", "tencent", "sina", "mootdx"] },
   { tool: "get_hot_stocks", label: "热门股", kind: "fixed", vendors: ["ths", "baidu_stock", "iwencai"] },
   { tool: "get_announcements", label: "公告", kind: "fixed", vendors: ["cninfo", "eastmoney"] },
   { tool: "get_consensus_eps", label: "一致预期", kind: "fixed", vendors: ["ths", "akshare", "iwencai"] },
@@ -157,8 +167,8 @@ const FIXED_TOOLS: ToolRoute[] = [
 /** LLM 暴露工具（Agent 自主调用，均走 VendorRouting 降级链）*/
 const EXPOSED_TOOLS: ToolRoute[] = [
   { tool: "get_stock_quote", label: "实时行情", kind: "exposed", vendors: ["tencent", "mootdx", "eastmoney"] },
-  { tool: "get_stock_news", label: "新闻", kind: "exposed", vendors: ["sina", "baidu_stock", "akshare"] },
-  { tool: "get_stock_financials", label: "财务", kind: "exposed", vendors: ["eastmoney", "baidu_stock", "akshare"] },
+  { tool: "get_stock_news", label: "新闻", kind: "exposed", vendors: ["xueqiu", "sina", "eastmoney", "baidu_stock", "akshare"] },
+  { tool: "get_stock_financials", label: "财务", kind: "exposed", vendors: ["eastmoney", "xueqiu", "baidu_stock", "akshare", "sina"] },
   { tool: "search_stock", label: "搜索", kind: "exposed", vendors: ["eastmoney", "iwencai", "baidu_stock"] },
   { tool: "get_research_reports", label: "研报", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
   { tool: "get_concept_blocks", label: "概念板块", kind: "exposed", vendors: ["ths", "baidu_stock", "iwencai"] },
@@ -170,6 +180,7 @@ const EXPOSED_TOOLS: ToolRoute[] = [
   { tool: "get_index_quotes", label: "大盘指数", kind: "exposed", vendors: ["eastmoney"] },
   { tool: "get_stock_peers", label: "同行对比", kind: "exposed", vendors: ["eastmoney"] },
   { tool: "get_stock_option_pcr", label: "期权PCR", kind: "exposed", vendors: ["eastmoney"] },
+  { tool: "get_stock_quote", label: "实时行情", kind: "exposed", vendors: ["tencent", "mootdx", "sina", "xueqiu", "eastmoney"] },
 ];
 
 const ALL_TOOLS = [...FIXED_TOOLS, ...EXPOSED_TOOLS];
@@ -217,6 +228,7 @@ export function DataVendorsTab() {
   const { t } = useTranslation();
   const [vendorValues, setVendorValues] = useState<Record<string, boolean>>({});
   const [iwencaiKey, setIwencaiKey] = useState("");
+  const [xueqiuToken, setXueqiuToken] = useState("");
   const [health, setHealth] = useState<Record<string, HealthStatus>>({});
   const [checkingAll, setCheckingAll] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -239,14 +251,17 @@ export function DataVendorsTab() {
       const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
       const vals: Record<string, boolean> = {};
       let key = "";
+      let xqToken = "";
       for (const v of vars) {
-        if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key") {
+        if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token") {
           vals[v.name] = !!v.value;
         }
         if (v.name === "vendor_iwencai_key") { key = typeof v.value === "string" ? v.value : ""; }
+        if (v.name === "vendor_xueqiu_token") { xqToken = typeof v.value === "string" ? v.value : ""; }
       }
       setVendorValues(vals);
       setIwencaiKey(key);
+      setXueqiuToken(xqToken);
       setLoaded(true);
     } catch {
       setLoaded(true);
@@ -281,6 +296,14 @@ export function DataVendorsTab() {
         value: iwencaiKey,
         is_secret: true,
       });
+      const xueqiuExisting = varMap.get("vendor_xueqiu_token");
+      varMap.set("vendor_xueqiu_token", {
+        ...(xueqiuExisting && typeof xueqiuExisting === "object" ? xueqiuExisting : {}),
+        name: "vendor_xueqiu_token",
+        var_type: "string",
+        value: xueqiuToken,
+        is_secret: true,
+      });
       const merged = Array.from(varMap.values());
       await invoke("update_workflow_template", {
         id: "stock-analysis",
@@ -308,7 +331,7 @@ export function DataVendorsTab() {
     } finally {
       setSaving(false);
     }
-  }, [vendorValues, iwencaiKey, t]);
+  }, [vendorValues, iwencaiKey, xueqiuToken, t]);
 
   const checkOne = useCallback(async (vendorName: string) => {
     setHealth((prev) => ({ ...prev, [vendorName]: "pending" }));
@@ -423,6 +446,15 @@ export function DataVendorsTab() {
                     placeholder={t("stockAnalysis.settings.vendors.apiKey")}
                     value={iwencaiKey ? [iwencaiKey] : []}
                     onChange={(vals) => setIwencaiKey(vals[0] ?? "")}
+                  />
+                )}
+                {v.key === "vendor_xueqiu" && (
+                  <Input.Password
+                    style={{ width: 180 }}
+                    size="small"
+                    placeholder={t("stockAnalysis.settings.vendors.apiKey")}
+                    value={xueqiuToken}
+                    onChange={(e) => setXueqiuToken(e.target.value)}
                   />
                 )}
                 <Button size="small" onClick={() => checkOne(v.enName)}>

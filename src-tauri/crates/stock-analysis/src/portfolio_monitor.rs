@@ -385,7 +385,8 @@ pub fn run_all_scenarios(
 }
 
 // ── 整合：组合 dashboard ──
-
+// 多参数是组合监控的统一输出需求（alpha + 风险 + 压力测试），不打包为结构体以保持调用方扁平。
+#[allow(clippy::too_many_arguments)]
 pub fn compute_dashboard(
     positions: &[PositionSummary],
     _limits: &PositionLimits,

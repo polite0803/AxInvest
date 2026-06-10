@@ -9,11 +9,14 @@ pub mod as_of_capability;
 pub mod calendar;
 pub mod daily_snapshot;
 pub mod disk_cache;
+pub mod gate; // 缺陷 F 修复: 并发门控
 mod error;
 pub mod indicators;
 pub mod mcp_tools;
-mod types;
-mod vendors;
+pub mod types;
+pub mod vendors;
+pub mod adjustment;
+pub mod valuation_band;
 
 use chrono::Local;
 use std::collections::HashMap;
@@ -22,8 +25,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::as_of_capability::AsOfCapability;
+use crate::gate::DomainGate;
 pub use error::DataError;
 pub use types::*;
+// R3: 估值带（暴露在 crate 根，方便 commands 端直接 `axagent_astock_data::ValuationBand`）
+pub use valuation_band::{FinancialSnapshotLike, MetricBand, ValuationBand};
 use vendors::akshare::AkshareVendor;
 use vendors::baidu_stock::BaiduStockVendor;
 use vendors::cninfo::CninfoVendor;
@@ -33,6 +39,7 @@ use vendors::mootdx::MootdxVendor;
 use vendors::sina::SinaVendor;
 use vendors::tencent::TencentVendor;
 use vendors::ths::ThsVendor;
+use vendors::xueqiu::XueqiuVendor;
 use vendors::StockVendor;
 
 type VendorRef = (String, Box<dyn StockVendor>);
@@ -91,10 +98,10 @@ impl VendorRouting {
 
     fn default_routing() -> Self {
         Self {
-            quote: vec!["tencent".into(), "mootdx".into(), "eastmoney".into()],
-            klines: vec!["eastmoney".into(), "tencent".into(), "mootdx".into()],
-            financials: vec!["eastmoney".into(), "baidu_stock".into(), "akshare".into()],
-            news: vec!["eastmoney".into(), "baidu_stock".into(), "akshare".into()],
+            quote: vec!["tencent".into(), "mootdx".into(), "sina".into(), "xueqiu".into(), "eastmoney".into()],
+            klines: vec!["eastmoney".into(), "tencent".into(), "sina".into(), "mootdx".into()],
+            financials: vec!["eastmoney".into(), "xueqiu".into(), "baidu_stock".into(), "akshare".into(), "sina".into()],
+            news: vec!["xueqiu".into(), "sina".into(), "eastmoney".into(), "baidu_stock".into(), "akshare".into()],
             money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
@@ -145,6 +152,7 @@ impl VendorRouting {
 pub struct AStockClient {
     vendors: Vec<VendorRef>,
     routing: VendorRouting,
+    gate: DomainGate,
     http: reqwest::Client,
     cache: RwLock<HashMap<String, (i64, String)>>,
     /// 缺陷 D 修复:可选 L2 磁盘缓存(spec §3.2)。
@@ -154,6 +162,8 @@ pub struct AStockClient {
     /// 需要先配置 l2,再通过 with_daily_snapshot_cache() 启用,默认关闭。
     daily_snapshot: Option<daily_snapshot::DailySnapshotCache>,
     pub iwencai_key: RwLock<String>,
+    /// 雪球 token 共享引用（前端设置页写入，vendor 自动读取）
+    pub xq_token: Option<Arc<RwLock<String>>>,
 }
 
 impl AStockClient {
@@ -172,11 +182,13 @@ impl AStockClient {
         let mut client = Self {
             vendors: Vec::new(),
             routing: VendorRouting::default_routing(),
+            gate: DomainGate::new(),
             http: http.clone(),
             cache: RwLock::new(HashMap::new()),
             l2: None,             // 默认不开启 L2,调用方通过 with_l2_cache 注入
             daily_snapshot: None, // P5:默认不开启,调用方通过 with_daily_snapshot_cache 注入
             iwencai_key: RwLock::new(String::new()),
+            xq_token: None,
         };
 
         client.register_vendor("tencent", Box::new(TencentVendor { http: http.clone() }));
@@ -194,6 +206,13 @@ impl AStockClient {
         );
         client.register_vendor("akshare", Box::new(AkshareVendor { http: http.clone() }));
         client.register_vendor("mootdx", Box::new(MootdxVendor::new()));
+        // 雪球数据源（始终注册，token 通过共享 Arc 运行时注入）
+        let xq_token = Arc::new(RwLock::new(String::new()));
+        client.xq_token = Some(xq_token.clone());
+        client.register_vendor("xueqiu", Box::new(XueqiuVendor {
+            http: http.clone(),
+            token: xq_token,
+        }));
 
         client
     }
@@ -296,8 +315,15 @@ impl AStockClient {
     /// K 线专用 cache key:在 cache_key_for 基础上追加 effective_cutoff(交易日 fallback 后),
     /// 解决缺陷 B —— 同一 as_of_date 下,周末 vs 周一/effective_cutoff 不同时缓存会污染。
     /// live 模式下 effective 与 as_of 一致,行为不变。
-    fn kline_cache_key(stock_code: &str, period: &str) -> String {
-        let base = Self::cache_key_for("klines", &format!("{stock_code}:{period}"));
+    fn kline_cache_key(stock_code: &str, period: &str, adj: Option<crate::types::AdjType>) -> String {
+        // P1-3: adj 维度 — None/Forward 共用 "fwd"(多数 vendor 默认前复权),
+        // Backward 独立 "bwd", AdjType::None 独立 "raw"。
+        let adj_tag = match adj {
+            None | Some(crate::types::AdjType::Forward) => "fwd",
+            Some(crate::types::AdjType::Backward) => "bwd",
+            Some(crate::types::AdjType::None) => "raw",
+        };
+        let base = Self::cache_key_for("klines", &format!("{stock_code}:{period}:adj={adj_tag}"));
         if let Some(ctx) = crate::as_of::current_as_of() {
             let effective = if crate::calendar::is_trading_day(&ctx.as_of_date) {
                 ctx.as_of_date
@@ -387,7 +413,6 @@ impl AStockClient {
             .collect()
     }
 
-    #[expect(dead_code)]
     /// 按当前 AsOfContext 截断 LockupSchedule：保留 unlock_date <= as_of_date 的项
     /// (as_of 之后才解禁的"未来"事件过滤掉)；live 模式原样返回。
     fn truncate_lockup_by_asof(items: Vec<LockupSchedule>) -> Vec<LockupSchedule> {
@@ -626,7 +651,7 @@ impl AStockClient {
         // 按 vendor 实际能力选择探测方法，避免用未实现的方法误判
         match vendor_name {
             "eastmoney" => {
-                vendor.get_klines("000001", "daily", 5).await?;
+                vendor.get_klines("000001", "daily", 5, None).await?;
             },
             "sina" => {
                 // sina news API (vip.stock.finance.sina.com.cn) 不稳定，改用 quote 探测
@@ -676,6 +701,7 @@ impl AStockClient {
         let mut last_err = None;
         for name in self.routing.vendors_for("quote", &self.routing.quote) {
             if let Some(vendor) = self.find_vendor(name) {
+                let _guard = self.gate.acquire(name).await;
                 match vendor.get_quote(stock_code).await {
                     Ok(result) => {
                         let json = serde_json::to_string(&result).unwrap_or_default();
@@ -701,7 +727,22 @@ impl AStockClient {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        let cache_key = Self::kline_cache_key(stock_code, period);
+        self.get_klines_with_adj(stock_code, period, limit, None).await
+    }
+
+    /// K 线查询，支持复权方式 (R3-A 接口, P1-4 vendor 接入后真正用上)
+    ///
+    /// 当前实现:`adj_type=None` 时等同于 `get_klines`;非 None 时按 P1-3 计划
+    /// 在 vendor 链路前/后挂上 `apply_adjustment`,目前是 stub,行为退化为
+    /// 不复权（保留原 vendor 形态）。等 P1-4 完成后再启用真正复权。
+    pub async fn get_klines_with_adj(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+        _adj_type: Option<crate::types::AdjType>,
+    ) -> Result<Vec<KLine>, DataError> {
+        let cache_key = Self::kline_cache_key(stock_code, period, _adj_type);
         let fetch_limit = limit.max(500);
 
         {
@@ -718,7 +759,8 @@ impl AStockClient {
         let mut last_err = None;
         for name in &self.routing.klines {
             if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_klines(stock_code, period, fetch_limit).await {
+                let _guard = self.gate.acquire(name).await;
+                match vendor.get_klines(stock_code, period, fetch_limit, _adj_type).await {
                     Ok(result) if !result.is_empty() => {
                         let result = Self::truncate_klines_by_asof(result);
                         if result.is_empty() {
@@ -744,6 +786,21 @@ impl AStockClient {
             vendor: "all".into(),
             message: "所有K线数据源均不可用".into(),
         }))
+    }
+
+    /// 财报披露日历 (R3-B 接口, 暂为 stub)
+    ///
+    /// 设计目标: 复用 `get_announcements` vendor 链路(cninfo 优先),按标题归类
+    /// 成 preliminary/express/formal/shareholders_meeting,过滤其它类。
+    ///
+    /// 当前实现: vendor 暂未实现按标题分类的 earnings 抽取,直接返回空数组;
+    /// 完整实现留在 P1-5 (K 线叠加财报日图标) 阶段一并补全。
+    pub async fn get_earnings_calendar(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<crate::types::EarningsEvent>, DataError> {
+        let _ = stock_code; // stub: vendor 端暂不提供分类接口
+        Ok(vec![])
     }
 
     pub async fn get_financials(
@@ -878,6 +935,7 @@ impl AStockClient {
             .vendors_for("money_flow", &self.routing.money_flow)
         {
             if let Some(vendor) = self.find_vendor(name) {
+                let _guard = self.gate.acquire(name).await;
                 match vendor.get_money_flow(stock_code).await {
                     Ok(Some(result)) => {
                         let cache_key = Self::cache_key_for("money_flow", stock_code);
@@ -886,7 +944,7 @@ impl AStockClient {
                         return Ok(Some(result));
                     },
                     Ok(None) => {
-                        tracing::warn!("[降级] {} 资金流向返回空，尝试下一源", name);
+                        tracing::debug!("[降级] {} 资金流向返回空，尝试下一源", name);
                     },
                     Err(e) => {
                         tracing::warn!("[降级] {} 资金流向失败: {}", name, e);
@@ -911,6 +969,7 @@ impl AStockClient {
         }
         for name in &self.routing.dragon_tiger {
             if let Some(vendor) = self.find_vendor(name) {
+                let _guard = self.gate.acquire(name).await;
                 if let Ok(result) = vendor.get_dragon_tiger(stock_code).await {
                     let result = Self::truncate_dragon_tiger_by_asof(result);
                     if result.is_empty() {
@@ -942,10 +1001,11 @@ impl AStockClient {
         for name in &self.routing.lockup {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_lockup_schedule(stock_code).await {
+                    let truncated = Self::truncate_lockup_by_asof(result);
                     let cache_key = Self::cache_key_for("lockup", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
+                    let json = serde_json::to_string(&truncated).unwrap_or_default();
                     self.cache_set(cache_key, json, 86400).await;
-                    return Ok(result);
+                    return Ok(truncated);
                 }
             }
         }
@@ -1394,13 +1454,13 @@ impl AStockClient {
                     }
                 }
             }
-            // 全部 vendor 都不支持 or 失败:走原 live 路径兜底(返回 today 数据)
-            // 显式标记降级,让 workflow 知道此结果是"now"而不是 "as_of_date"
+            // 全部 vendor 都不支持 or 失败: 返回空而非 live 数据（防止后见信息泄露）
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_market_dragon_tiger",
-                "as-of 模式下所有 vendor 都未提供 NativeDateParam 数据,fallback to live",
+                "as-of 模式下无可用 vendor",
             );
+            return Ok(vec![]);
         }
         for name in self
             .routing
@@ -1654,6 +1714,14 @@ impl AStockClient {
     }
 
     pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_index_quotes",
+                "as-of 模式不支持指数行情",
+            );
+            return Ok(vec![]);
+        }
         for name in &self.routing.index_quotes {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_index_quotes().await {
@@ -1685,11 +1753,12 @@ impl AStockClient {
                             }
                         },
                         AsOfCapability::Fallthrough => {
-                            if let Ok(result) = vendor.get_peers(stock_code).await {
-                                if !result.is_empty() {
-                                    return Ok(result);
-                                }
-                            }
+                            crate::as_of::record_degradation(
+                                name,
+                                "get_peers",
+                                "no historical semantic",
+                            );
+                            continue;
                         },
                         _ => {
                             crate::as_of::record_degradation(
@@ -1738,9 +1807,12 @@ impl AStockClient {
                             }
                         },
                         AsOfCapability::Fallthrough => {
-                            if let Ok(Some(r)) = vendor.get_option_pcr(stock_code).await {
-                                return Ok(Some(r));
-                            }
+                            crate::as_of::record_degradation(
+                                name,
+                                "get_option_pcr",
+                                "no historical semantic",
+                            );
+                            continue;
                         },
                         _ => {
                             crate::as_of::record_degradation(
@@ -2275,7 +2347,7 @@ mod asof_realtime_degrade_tests {
         let date = NaiveDate::from_ymd_opt(2025, 4, 25).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
         let key = AS_OF
-            .scope(Some(ctx), async { AStockClient::kline_cache_key("000001", "daily") })
+            .scope(Some(ctx), async { AStockClient::kline_cache_key("000001", "daily", None) })
             .await;
         assert!(key.contains("asof-20250425"));
         assert!(key.contains("eff=20250425"), "交易日 eff= 应等于 as_of: {key}");
@@ -2288,7 +2360,7 @@ mod asof_realtime_degrade_tests {
         let date = NaiveDate::from_ymd_opt(2025, 4, 26).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
         let key = AS_OF
-            .scope(Some(ctx), async { AStockClient::kline_cache_key("000001", "daily") })
+            .scope(Some(ctx), async { AStockClient::kline_cache_key("000001", "daily", None) })
             .await;
         assert!(key.contains("asof-20250426"));
         assert!(key.contains("eff=20250425"), "周末 eff= 应 fallback 到周五: {key}");

@@ -2189,11 +2189,11 @@ async fn seed_stock_analysis_workflow_template(
             a.config.output_mode = OutputMode::Json;
             a.config.model_role = Some("decision-maker".into());
             a.config.tools = vec![td_quote.clone(), td_kline.clone(), td_score.clone()];
-            a.config.system_prompt = format!(
+            a.config.system_prompt =
                 "数据质量评估为 D 或 F，上游分析数据不可靠。你需要在数据不足的情况下做出最保守的投资决策。\
-                 输出JSON格式（严格模式）：{{\"action\":\"持有/减持/卖出\",\"positionPct\":0-20,\"reasoning\":\"保守决策理由\"}}\
-                 只输出上述JSON对象，前后不要有任何其他文字",
-            );
+                 输出JSON格式（严格模式）：{\"action\":\"持有/减持/卖出\",\"positionPct\":0-20,\"reasoning\":\"保守决策理由\"}}\
+                 只输出上述JSON对象，前后不要有任何其他文字"
+                    .to_string();
             a.config.exposed_tools = vec![
                 "get_stock_quote".into(),
                 "get_stock_kline".into(),

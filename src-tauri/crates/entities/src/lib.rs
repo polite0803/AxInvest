@@ -101,4 +101,16 @@ pub mod trajectory_skill_executions;
 pub mod trajectory_skills;
 pub mod trajectory_steps;
 
+// R1: 复盘→进化闭环（策略表现 + 权重历史）
+pub mod strategy_performance;
+pub mod strategy_weight_history;
+
+// R2: 组合监控（每日指标 + 两两相关性快照）
+pub mod portfolio_metrics_daily;
+pub mod portfolio_correlation_snapshot;
+
+// R3: 数据层（估值带 + 财报日历）
+pub mod financial_snapshots;
+pub mod earnings_events;
+
 pub use sea_orm;

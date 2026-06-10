@@ -370,6 +370,8 @@ pub struct TimelinePoint {
 }
 
 /// 写入一行 strategy_performance（复盘 cron 触发时使用）
+// 参数较多(策略调用方: cron / replay runner / 离线评测 共用)，保持显式参数以避免引入过多构造包装。
+#[allow(clippy::too_many_arguments)]
 pub async fn record_performance(
     db: &DatabaseConnection,
     strategy_id: &str,

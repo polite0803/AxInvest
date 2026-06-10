@@ -88,7 +88,7 @@ pub fn classify_regime(klines: &[KLine]) -> MarketRegime {
     let (regime, confidence, desc) = if price_above_ma60 > 0.05 && price_above_ma20 > 0.02 && slope > 0.01
     {
         // 价格在 MA60 上方 5% + MA20 上方 2% + 向上斜率
-        let c = (price_above_ma60 * 2.0).min(0.95).max(0.5);
+        let c = (price_above_ma60 * 2.0).clamp(0.5, 0.95);
         let vol_note = if bollinger_pct > 0.20 { "（高波动预警）" } else { "" };
         (
             "bull".to_string(),
@@ -97,7 +97,7 @@ pub fn classify_regime(klines: &[KLine]) -> MarketRegime {
         )
     } else if price_above_ma60 < -0.03 && price_above_ma20 < -0.01 && slope < -0.005 {
         // 价格在 MA60 下方 3% + MA20 下方 + 向下斜率
-        let c = (price_above_ma60.abs() * 2.0).min(0.95).max(0.5);
+        let c = (price_above_ma60.abs() * 2.0).clamp(0.5, 0.95);
         (
             "bear".to_string(),
             c,

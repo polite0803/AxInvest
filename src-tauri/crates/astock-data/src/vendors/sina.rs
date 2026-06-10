@@ -65,12 +65,94 @@ impl StockVendor for SinaVendor {
         })
     }
 
-    async fn get_klines(&self, _: &str, _: &str, _: u32) -> Result<Vec<KLine>, DataError> {
-        Ok(vec![])
+    async fn get_klines(&self, stock_code: &str, period: &str, limit: u32, _adj: Option<AdjType>) -> Result<Vec<KLine>, DataError> {
+        let _ = period;
+        let market = if stock_code.starts_with('6') { "sh" } else { "sz" };
+        // 网易财经历史 K 线 API（新浪无直接 K 线接口，用 163 补）
+        let url = format!(
+            "https://quotes.money.163.com/service/chddata.html?code={market}{stock_code}&start=20200101&end=20500101&fields=TCLOSE;HIGH;LOW;TOPEN;LCLOSE;VOTURNOVER;VATURNOVER"
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://money.163.com/")
+            .send()
+            .await?;
+        let body = resp.text().await?;
+        let mut klines = Vec::new();
+        for line in body.lines().skip(1) {
+            let fields: Vec<&str> = line.split(',').collect();
+            if fields.len() < 7 {
+                continue;
+            }
+            let f = |i: usize| -> f64 { fields.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
+            // 163 格式: date,TCLOSE(收盘),HIGH(最高),LOW(最低),TOPEN(开盘),LCLOSE(昨收),VOTURNOVER(成交量),VATURNOVER(成交额)
+            klines.push(KLine {
+                date: fields[0].to_string(),
+                open: f(3),    // TOPEN
+                high: f(1),    // HIGH
+                low: f(2),     // LOW
+                close: f(4),   // TCLOSE
+                volume: f(5),  // VOTURNOVER
+                amount: f(6),  // VATURNOVER
+                turnover_rate: None,
+                adj_factor: None,
+            });
+        }
+        klines.sort_by(|a, b| a.date.cmp(&b.date));
+        if klines.len() > limit as usize {
+            let start = klines.len() - limit as usize;
+            klines = klines[start..].to_vec();
+        }
+        Ok(klines)
     }
 
-    async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
-        Ok(vec![])
+    async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
+        let market = if stock_code.starts_with('6') { "sh" } else { "sz" };
+        // 网易财经财务指标 API
+        let url = format!(
+            "https://quotes.money.163.com/service/zycwzb_{market}{stock_code}.html?type=report&start=2020&end=2026"
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://money.163.com/")
+            .send()
+            .await?;
+        let body = resp.text().await?;
+        let mut reports = Vec::new();
+        for line in body.lines().skip(2) {
+            let fields: Vec<&str> = line.split(',').collect();
+            if fields.len() < 12 {
+                continue;
+            }
+            let f = |i: usize| -> Option<f64> { fields.get(i).and_then(|s| s.trim().parse().ok()) };
+            let report_date = fields[0].trim().to_string();
+            if report_date.is_empty() || report_date.contains("报告期") {
+                continue;
+            }
+            reports.push(FinancialReport {
+                stock_code: stock_code.to_string(),
+                report_date,
+                revenue: f(1),
+                net_profit: f(2),
+                eps: f(3),
+                bps: f(4),
+                roe: f(5),
+                debt_ratio: f(6),
+                gross_margin: f(7),
+                net_margin: f(8),
+                revenue_yoy: f(9),
+                profit_yoy: f(10),
+                total_assets: f(11),
+                operating_cash_flow: None,
+                capital_expenditure: None,
+                free_cash_flow: None,
+                current_ratio: None,
+                quick_ratio: None,
+            });
+        }
+        Ok(reports)
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {

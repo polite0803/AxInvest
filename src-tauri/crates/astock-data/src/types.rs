@@ -91,6 +91,9 @@ pub struct KLine {
     pub volume: f64,
     pub amount: f64,
     pub turnover_rate: Option<f64>,
+    /// 累计复权因子 (R3-A); None 表示未应用复权
+    #[serde(default)]
+    pub adj_factor: Option<f64>,
 }
 
 /// 财务报告
@@ -532,6 +535,67 @@ pub struct MarketRawData {
     pub market_dragon_tiger: Vec<MarketDragonTiger>,
     pub north_bound_flow: Option<NorthBoundFlow>,
     pub index_quotes: Vec<IndexQuote>,
+}
+
+// ─── R3-A 复权 ───
+
+/// 复权方式 (R3-A)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AdjType {
+    /// 不复权
+    None,
+    /// 前复权（以最近一日为基准）
+    #[default]
+    Forward,
+    /// 后复权（以最早一日为基准）
+    Backward,
+}
+
+/// 单次除权除息事件 (R3-A)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentEvent {
+    /// 股票代码
+    pub stock_code: String,
+    /// 除权除息日 (YYYY-MM-DD)
+    pub ex_date: String,
+    /// 每股现金分红（元）
+    pub cash_dividend: f64,
+    /// 送转股比例（如 0.2 = 10送2）
+    pub bonus_share_ratio: f64,
+    /// 配股比例
+    pub rights_ratio: f64,
+    /// 配股价
+    pub rights_price: f64,
+}
+
+// ─── R3-B 财报日历 ───
+
+/// 财报披露事件 (R3-B)
+///
+/// `event_type` 取值:
+/// - "preliminary"        业绩预告
+/// - "express"           业绩快报
+/// - "formal"            正式财报
+/// - "shareholders_meeting" 股东大会
+/// - "other"             其它披露
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EarningsEvent {
+    pub stock_code: String,
+    pub stock_name: String,
+    /// YYYY-MM-DD
+    pub event_date: String,
+    /// "preliminary" | "express" | "formal" | "shareholders_meeting" | "other"
+    pub event_type: String,
+    /// 财报期间（"2025Q3" / "2025年报"）
+    pub period: Option<String>,
+    /// 摘要/标题
+    pub detail: Option<String>,
+    /// vendor 标识（"cninfo" / "ths"）
+    pub source: Option<String>,
+    pub created_at: i64,
 }
 
 #[cfg(test)]

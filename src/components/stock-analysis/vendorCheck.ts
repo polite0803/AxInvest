@@ -30,7 +30,7 @@ async function getEnabledVendors(): Promise<Set<string> | null> {
     const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
     const enabledSet = new Set<string>();
     for (const v of vars) {
-      if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.value) {
+      if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token" && v.value) {
         enabledSet.add(v.name.replace("vendor_", ""));
       }
     }

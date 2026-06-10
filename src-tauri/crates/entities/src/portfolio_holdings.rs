@@ -10,6 +10,7 @@ pub struct Model {
     pub stock_code: String,
     pub stock_name: String,
     pub shares: f64,
+    #[sea_orm(column_name = "cost_price")]
     pub avg_cost: f64,
     pub notes: Option<String>,
     pub created_at: i64,

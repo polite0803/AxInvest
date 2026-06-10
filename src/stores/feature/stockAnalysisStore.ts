@@ -7,6 +7,7 @@ import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
   AnalysisStatus,
   AnalysisSummary,
+  EarningsEvent,
   KLine,
   StockConsensus,
   StockDecision,
@@ -363,6 +364,29 @@ interface StockAnalysisState {
     proposedPrice: number,
   ) => Promise<PositionLimitsCheck | null>;
 
+  // R3-B: 财报披露事件 — K 线叠加图标用
+  earningsEvents: EarningsEvent[];
+  earningsLoading: boolean;
+  showEarningsOnChart: boolean;
+  setShowEarningsOnChart: (show: boolean) => void;
+  fetchEarningsEvents: (stockCode: string) => Promise<void>;
+
+  // P2-6: RealtimeMonitor T+0 自动重跑配置
+  t0Config: {
+    enabled: boolean;
+    changePctThreshold: number | null;
+    turnoverRateThreshold: number | null;
+    minIntervalMinutes: number;
+  };
+  t0Loading: boolean;
+  setT0Config: (cfg: Partial<{
+    enabled: boolean;
+    changePctThreshold: number | null;
+    turnoverRateThreshold: number | null;
+    minIntervalMinutes: number;
+  }>) => Promise<void>;
+  fetchT0Config: () => Promise<void>;
+
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
   _searchTimer: ReturnType<typeof setTimeout> | null;
@@ -416,6 +440,16 @@ const initialState = {
   portfolioCorrelations: [],
   portfolioRefreshing: false,
   portfolioLastError: null,
+  earningsEvents: [],
+  earningsLoading: false,
+  showEarningsOnChart: true,
+  t0Config: {
+    enabled: false,
+    changePctThreshold: 3.0,
+    turnoverRateThreshold: 8.0,
+    minIntervalMinutes: 30,
+  },
+  t0Loading: false,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -448,6 +482,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       const asOfDate = useTimeAnchorStore.getState().asOfDate;
       const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
       set({ quote, stockCode: code, stockName: quote.name });
+      // R3-B: 切换股票后拉取对应的财报披露事件，用于 K 线叠加图标
+      get().fetchEarningsEvents(code);
     } catch (e) {
       console.error("[StockAnalysis] Failed to get stock quote:", e);
     }
@@ -848,6 +884,67 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   setAsOfDate: (date) => set({ asOfDate: date }),
   setMode: (mode) => set({ mode }),
   setViolations: (violations) => set({ violations }),
+  setShowEarningsOnChart: (show) => set({ showEarningsOnChart: show }),
+
+  /**
+   * R3-B: 拉取财报披露事件列表,在 K 线图上叠加图标。
+   * 拉取失败时清空列表(避免显示陈旧数据),但不影响 K 线本身渲染。
+   */
+  fetchEarningsEvents: async (stockCode: string) => {
+    if (!stockCode) {
+      set({ earningsEvents: [] });
+      return;
+    }
+    // 切换股票:清旧数据再拉新数据,避免上一只股票的事件短暂闪烁在 UI 上
+    set({ earningsLoading: true });
+    try {
+      const events = await invoke<EarningsEvent[]>("get_earnings_calendar", { stockCode });
+      set({ earningsEvents: Array.isArray(events) ? events : [], earningsLoading: false });
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to fetch earnings events:", e);
+      set({ earningsEvents: [], earningsLoading: false });
+    }
+  },
+
+  /**
+   * P2-6: 拉取 T+0 自动重跑配置
+   */
+  fetchT0Config: async () => {
+    try {
+      const cfg = await invoke<{
+        enabled: boolean;
+        changePctThreshold: number | null;
+        turnoverRateThreshold: number | null;
+        minIntervalMinutes: number;
+      }>("get_t0_config");
+      set({
+        t0Config: {
+          enabled: !!cfg.enabled,
+          changePctThreshold: cfg.changePctThreshold,
+          turnoverRateThreshold: cfg.turnoverRateThreshold,
+          minIntervalMinutes: cfg.minIntervalMinutes,
+        },
+      });
+    } catch (e) {
+      console.warn("[StockAnalysis] Failed to fetch t0 config:", e);
+    }
+  },
+
+  /**
+   * P2-6: 更新 T+0 配置 (partial merge + 立即同步到后端)
+   */
+  setT0Config: async (patch) => {
+    const cur = get().t0Config;
+    const next = { ...cur, ...patch };
+    set({ t0Config: next, t0Loading: true });
+    try {
+      await invoke("set_t0_config", { config: next });
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to set t0 config:", e);
+    } finally {
+      set({ t0Loading: false });
+    }
+  },
 
   setupEventListener: async () => {
     const existing = get()._unlisten;
@@ -1105,11 +1202,37 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       });
     });
 
+    // P2-6: 监听 RealtimeMonitor T+0 自动重跑事件
+    // 后端 monitor 检测到异常行情后,emit `stock-monitor-t0-rerun-requested`,
+    // 我们在这里用最新行情重跑一次 stock-analysis workflow
+    const unlistenT0 = await listen<{
+      stockCode: string;
+      reason: string;
+      currentPrice: number;
+      changePct: number;
+      turnoverRate: number;
+      timestamp: number;
+    }>("stock-monitor-t0-rerun-requested", (event) => {
+      const { stockCode, reason } = event.payload;
+      // 防抖: 当前正在跑 workflow 就不重入
+      const cur = get();
+      if (cur.status === "running" || cur.status === "loading") {
+        console.warn(`[t0] skip ${stockCode}: workflow 已在运行中`);
+        return;
+      }
+      console.info(
+        `[t0] 收到 T+0 重跑请求: stock=${stockCode} reason=${reason}`,
+      );
+      // 直接调 store 内的 startAnalysis (它会拉 quote/kline 再触发 workflow)
+      get().startAnalysis(stockCode);
+    });
+
     set({
       _unlisten: () => {
         unlistenStep();
         unlistenComplete();
         unlistenError();
+        unlistenT0();
       },
     });
   },

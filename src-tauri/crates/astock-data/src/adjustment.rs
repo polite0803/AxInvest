@@ -237,8 +237,10 @@ mod tests {
         AdjustmentEvent {
             stock_code: "000001".into(),
             ex_date: ex_date.into(),
-            cash_dividend_per_share: _cash,
+            cash_dividend: _cash,
             bonus_share_ratio: bonus,
+            rights_ratio: 0.0,
+            rights_price: 0.0,
         }
     }
 

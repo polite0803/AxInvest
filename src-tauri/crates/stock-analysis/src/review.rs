@@ -187,9 +187,9 @@ async fn fetch_latest_analysis_decision(
         .unwrap_or(0);
 
     let price = *current_price;
-    let in_target_zone = target.map_or(false, |t| (price - t).abs() / t <= 0.05);
-    let stop_loss_hit = stop_loss.map_or(false, |s| price <= s);
-    let target_hit = target.map_or(false, |t| price >= t);
+    let in_target_zone = target.is_some_and(|t| (price - t).abs() / t <= 0.05);
+    let stop_loss_hit = stop_loss.is_some_and(|s| price <= s);
+    let target_hit = target.is_some_and(|t| price >= t);
 
     Some(DecisionComparison {
         analysis_date: row.analysis_date,

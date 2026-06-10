@@ -1,11 +1,11 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { useNavigate } from "react-router-dom";
 import { ArrowRightOutlined, HistoryOutlined } from "@ant-design/icons";
-import { RotateCcw } from "lucide-react";
 import { Button, Card, List, Spin, Tag, Tooltip } from "antd";
+import { RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 
 interface DecisionComparison {
@@ -39,10 +39,16 @@ function DecisionBadge({ decision }: { decision: DecisionComparison }) {
   const { t } = useTranslation();
   let statusText = "";
   let statusColor: string = "default";
-  if (decision.stopLossHit) { statusText = t("stockAnalysis.dailyReview.stopLossHit"); statusColor = "red"; }
-  else if (decision.targetHit) { statusText = t("stockAnalysis.dailyReview.targetHit"); statusColor = "green"; }
-  else if (decision.inTargetZone) { statusText = t("stockAnalysis.dailyReview.inZone"); statusColor = "gold"; }
-  else { statusText = `${decision.daysSinceAnalysis}d`; }
+  if (decision.stopLossHit) {
+    statusText = t("stockAnalysis.dailyReview.stopLossHit");
+    statusColor = "red";
+  } else if (decision.targetHit) {
+    statusText = t("stockAnalysis.dailyReview.targetHit");
+    statusColor = "green";
+  } else if (decision.inTargetZone) {
+    statusText = t("stockAnalysis.dailyReview.inZone");
+    statusColor = "gold";
+  } else { statusText = `${decision.daysSinceAnalysis}d`; }
 
   return (
     <Tooltip
@@ -50,7 +56,8 @@ function DecisionBadge({ decision }: { decision: DecisionComparison }) {
         <div className="text-[11px] space-y-0.5">
           <div>{t("stockAnalysis.dailyReview.lastAnalysis")}: {decision.analysisDate}</div>
           <div>{t("stockAnalysis.dailyReview.decisionAction")}: {decision.action}</div>
-          {decision.targetPrice && <div>{t("stockAnalysis.dailyReview.target")}: {decision.targetPrice.toFixed(2)}</div>}
+          {decision.targetPrice && <div>{t("stockAnalysis.dailyReview.target")}: {decision.targetPrice.toFixed(2)}
+          </div>}
           {decision.stopLoss && <div>{t("stockAnalysis.dailyReview.stopLoss")}: {decision.stopLoss.toFixed(2)}</div>}
         </div>
       }
@@ -80,7 +87,9 @@ export function DailyReviewPanel() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { generate(); }, [generate]);
+  useEffect(() => {
+    generate();
+  }, [generate]);
 
   const hasWatchlist = useStockAnalysisStore((s) => s.watchlistVersion > 0);
   const emptyKind: PanelEmptyKind = error ? "connectionFailed" : "noData";
@@ -94,7 +103,13 @@ export function DailyReviewPanel() {
       title={t("stockAnalysis.dailyReview.title")}
       styles={{ body: { padding: "8px 10px" } }}
       extra={
-        <Button size="small" loading={loading} onClick={generate} type={review ? "default" : "primary"} disabled={loading}>
+        <Button
+          size="small"
+          loading={loading}
+          onClick={generate}
+          type={review ? "default" : "primary"}
+          disabled={loading}
+        >
           {review ? t("stockAnalysis.dailyReview.regenerate") : t("stockAnalysis.dailyReview.generate")}
         </Button>
       }
@@ -129,7 +144,8 @@ export function DailyReviewPanel() {
                           <Tag className="m-0 text-[10px]">{w.stockCode}</Tag>
                           <span className="font-medium truncate">{w.stockName}</span>
                           <span style={{ color: w.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
-                            {w.changePct >= 0 ? "+" : ""}{w.changePct.toFixed(2)}%
+                            {w.changePct >= 0 ? "+" : ""}
+                            {w.changePct.toFixed(2)}%
                           </span>
                           {w.lastDecision && <DecisionBadge decision={w.lastDecision} />}
                         </div>
@@ -155,8 +171,12 @@ export function DailyReviewPanel() {
                       </div>
                       {(w.keyEvents.length > 0 || w.alertTriggers.length > 0) && (
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {w.keyEvents.map((e, i) => <Tag key={`ke-${i}`} color="orange" className="text-[10px] m-0">{e}</Tag>)}
-                          {w.alertTriggers.map((a, i) => <Tag key={`at-${i}`} color="red" className="text-[10px] m-0">{a}</Tag>)}
+                          {w.keyEvents.map((e, i) => (
+                            <Tag key={`ke-${i}`} color="orange" className="text-[10px] m-0">{e}</Tag>
+                          ))}
+                          {w.alertTriggers.map((a, i) => (
+                            <Tag key={`at-${i}`} color="red" className="text-[10px] m-0">{a}</Tag>
+                          ))}
                         </div>
                       )}
                     </List.Item>

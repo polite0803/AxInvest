@@ -4,22 +4,43 @@ use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::time::Duration;
+use tokio::time::sleep;
 
 pub struct EastMoneyVendor {
     pub http: reqwest::Client,
 }
 
 impl EastMoneyVendor {
+    /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     async fn em_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
-        self.http
-            .get(url)
-            .header("Referer", "https://quote.eastmoney.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .header("Accept", "application/json, text/plain, */*")
-            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-            .send()
-            .await
-            .map_err(DataError::from)
+        let max_retries = 3;
+        let mut delay = Duration::from_secs(1);
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            match self
+                .http
+                .get(url)
+                .header("Referer", "https://quote.eastmoney.com/")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .send()
+                .await
+            {
+                Ok(resp) => return Ok(resp),
+                Err(e) => {
+                    if attempt + 1 < max_retries {
+                        tracing::warn!("[retry] eastmoney 请求失败 (第{}次, {delay:?}后重试): {e}", attempt + 1);
+                        sleep(delay).await;
+                        delay *= 2;
+                    } else {
+                        last_err = Some(e);
+                    }
+                },
+            }
+        }
+        Err(DataError::from(last_err.unwrap()))
     }
 }
 
@@ -98,6 +119,7 @@ impl StockVendor for EastMoneyVendor {
         stock_code: &str,
         period: &str,
         limit: u32,
+        _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let period_code = match period {
             "5" | "Min5" => "5",
@@ -144,6 +166,8 @@ impl StockVendor for EastMoneyVendor {
                     volume: parse(parts[5]),
                     amount: parse(parts[6]),
                     turnover_rate: Some(parse(parts[10])),
+                    // P1-4: vendor 默认不复权
+                    adj_factor: None,
                 })
             })
             .collect::<Result<Vec<_>, DataError>>()?;
@@ -1323,6 +1347,7 @@ impl StockVendor for EastMoneyVendor {
         stock_code: &str,
         period: &str,
         limit: u32,
+        _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let period_code = match period {
             "5" | "Min5" => "5",
@@ -1373,6 +1398,8 @@ impl StockVendor for EastMoneyVendor {
                     } else {
                         None
                     },
+                    // P1-4: vendor 默认不复权
+                    adj_factor: None,
                 })
             })
             .collect::<Result<_, _>>()?;

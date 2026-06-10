@@ -17,9 +17,12 @@ pub struct RuleEngine;
 
 impl RuleEngine {
     /// 检查交易方案是否违反硬性规则
+    ///
     /// - `catalyst_level`: a-catalyst 输出的催化剂等级（None=中性）
     /// - `institutional_trace`: a-catalyst 输出的机构建仓痕迹（None=无）
+    ///
     /// 当 L2+ 催化剂 + 机构建仓 + "放量突破" 同时出现时，乖离率/RSI 改发 correction 而非 violation
+    #[allow(clippy::too_many_arguments)]
     pub fn check(
         indicators: &TechnicalIndicators,
         score: &ObjectiveScore,

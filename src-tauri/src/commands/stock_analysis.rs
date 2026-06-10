@@ -779,6 +779,7 @@ pub async fn toggle_trading_enabled(
 
 /// 获取最近分析记录（用于 Dashboard）
 #[tauri::command]
+#[allow(dead_code)] // 暂未在 frontend 调起，预留给 Dashboard "历史" 区块
 pub async fn get_recent_analyses(
     state: State<'_, AppState>,
     limit: Option<u32>,
@@ -1725,7 +1726,7 @@ pub async fn recommend_stocks(
         )
         .unwrap_or_default();
 
-        for (_style, picks) in &response.picks {
+        for picks in response.picks.values() {
             for pick in picks {
                 use sea_orm::ActiveModelTrait;
                 let am = reco_picks::ActiveModel {
@@ -2178,4 +2179,32 @@ pub async fn get_reco_strategy_weights(
         obj.insert(key, serde_json::json!(w));
     }
     Ok(serde_json::Value::Object(obj))
+}
+
+// ─── P2-6: RealtimeMonitor T+0 自动重跑配置 ───
+
+/// 查询 T+0 配置
+#[tauri::command]
+pub async fn get_t0_config(
+    state: State<'_, AppState>,
+) -> Result<axagent_stock_analysis::monitor::TZeroConfig, String> {
+    let monitor = state
+        .stock_monitor
+        .as_ref()
+        .ok_or_else(|| "RealtimeMonitor 未初始化".to_string())?;
+    Ok(monitor.t0_config().await)
+}
+
+/// 更新 T+0 配置
+#[tauri::command]
+pub async fn set_t0_config(
+    state: State<'_, AppState>,
+    config: axagent_stock_analysis::monitor::TZeroConfig,
+) -> Result<(), String> {
+    let monitor = state
+        .stock_monitor
+        .as_ref()
+        .ok_or_else(|| "RealtimeMonitor 未初始化".to_string())?;
+    monitor.set_t0_config(config).await;
+    Ok(())
 }

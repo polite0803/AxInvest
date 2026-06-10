@@ -64,13 +64,14 @@ export function PortfolioMonitorPanel() {
   const hasDashboard = dashboard !== null && typeof dashboard === "object" && !Array.isArray(dashboard);
 
   const sortedSectors = useMemo(() => {
-    if (!hasDashboard || !dashboard) { return []; }
+    if (!hasDashboard || !dashboard || !dashboard.sectorExposure) { return []; }
     return Object.entries(dashboard.sectorExposure)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8);
   }, [dashboard, hasDashboard]);
 
   const sortedCorrelations = useMemo(() => {
+    if (!correlations || !Array.isArray(correlations)) { return []; }
     const cells = [...correlations];
     cells.sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
     return cells.slice(0, 10);
@@ -79,13 +80,13 @@ export function PortfolioMonitorPanel() {
   if (!hasDashboard && !refreshing) {
     return (
       <div className="p-4">
-        <Empty description={t("portfolioMonitor.empty")} />
+        <Empty description={t("stockAnalysis.portfolioMonitor.empty")} />
         {lastError && (
           <Alert
             type="error"
             showIcon
             className="mt-2"
-            message={t("portfolioMonitor.loadError")}
+            message={t("stockAnalysis.portfolioMonitor.loadError")}
             description={lastError}
           />
         )}
@@ -95,7 +96,7 @@ export function PortfolioMonitorPanel() {
           onClick={() => refresh(asOfDate)}
           className="mt-3"
         >
-          {t("portfolioMonitor.refresh")}
+          {t("stockAnalysis.portfolioMonitor.refresh")}
         </Button>
       </div>
     );
@@ -115,8 +116,8 @@ export function PortfolioMonitorPanel() {
         <Alert
           type="info"
           showIcon
-          message={t("portfolioMonitor.historicalTitle", { date: dashboard.asOfDate ?? asOfDate })}
-          description={t("portfolioMonitor.historicalDesc")}
+          message={t("stockAnalysis.portfolioMonitor.historicalTitle", { date: dashboard.asOfDate ?? asOfDate })}
+          description={t("stockAnalysis.portfolioMonitor.historicalDesc")}
         />
       )}
 
@@ -125,7 +126,7 @@ export function PortfolioMonitorPanel() {
           type="warning"
           showIcon
           icon={<WarningOutlined />}
-          message={t("portfolioMonitor.warningTitle")}
+          message={t("stockAnalysis.portfolioMonitor.warningTitle")}
           description={dashboard.concentrationWarning}
         />
       )}
@@ -134,7 +135,7 @@ export function PortfolioMonitorPanel() {
       <Row gutter={[12, 12]}>
         <Col xs={12} sm={8} md={4}>
           <Statistic
-            title={t("portfolioMonitor.totalMv")}
+            title={t("stockAnalysis.portfolioMonitor.totalMv")}
             value={fmtMoney(dashboard.totalMarketValue)}
             prefix="¥"
             valueStyle={{ fontSize: 18 }}
@@ -142,7 +143,7 @@ export function PortfolioMonitorPanel() {
         </Col>
         <Col xs={12} sm={8} md={4}>
           <Statistic
-            title={t("portfolioMonitor.totalPnl")}
+            title={t("stockAnalysis.portfolioMonitor.totalPnl")}
             value={fmtMoney(dashboard.totalPnl)}
             valueStyle={{
               fontSize: 18,
@@ -153,7 +154,7 @@ export function PortfolioMonitorPanel() {
         </Col>
         <Col xs={12} sm={8} md={4}>
           <Statistic
-            title={t("portfolioMonitor.totalPnlPct")}
+            title={t("stockAnalysis.portfolioMonitor.totalPnlPct")}
             value={fmtPct(dashboard.totalPnlPct, false)}
             valueStyle={{
               fontSize: 18,
@@ -163,11 +164,11 @@ export function PortfolioMonitorPanel() {
         </Col>
         <Col xs={12} sm={8} md={4}>
           <Statistic
-            title={t("portfolioMonitor.topConcentration")}
+            title={t("stockAnalysis.portfolioMonitor.topConcentration")}
             value={fmtPct(dashboard.topConcentrationPct, false)}
             valueStyle={{ fontSize: 18 }}
             suffix={
-              <Tooltip title={t("portfolioMonitor.topConcentrationTip")}>
+              <Tooltip title={t("stockAnalysis.portfolioMonitor.topConcentrationTip")}>
                 <Tag color="red" className="ml-1">
                   {dashboard.positions.length}
                 </Tag>
@@ -176,18 +177,18 @@ export function PortfolioMonitorPanel() {
           />
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <Tooltip title={t("portfolioMonitor.betaTip")}>
+          <Tooltip title={t("stockAnalysis.portfolioMonitor.betaTip")}>
             <Statistic
-              title={t("portfolioMonitor.beta")}
+              title={t("stockAnalysis.portfolioMonitor.beta")}
               value={dashboard.beta?.toFixed(2) ?? "—"}
               valueStyle={{ fontSize: 18 }}
             />
           </Tooltip>
         </Col>
         <Col xs={12} sm={8} md={4}>
-          <Tooltip title={t("portfolioMonitor.diversificationTip")}>
+          <Tooltip title={t("stockAnalysis.portfolioMonitor.diversificationTip")}>
             <Statistic
-              title={t("portfolioMonitor.diversificationScore")}
+              title={t("stockAnalysis.portfolioMonitor.diversificationScore")}
               value={dashboard.diversificationScore}
               suffix="/ 100"
               valueStyle={{
@@ -203,20 +204,20 @@ export function PortfolioMonitorPanel() {
         <Col flex="auto">
           <Space>
             <Tag color={riskColor(dashboard.riskLevel)} icon={<SafetyOutlined />}>
-              {t("portfolioMonitor.riskLevel")}: {dashboard.riskLevel}
+              {t("stockAnalysis.portfolioMonitor.riskLevel")}: {dashboard.riskLevel}
             </Tag>
             {dashboard.correlationAvg !== undefined && (
               <Tag color="purple" icon={<ClusterOutlined />}>
-                {t("portfolioMonitor.correlationAvg")}: {dashboard.correlationAvg.toFixed(2)}
+                {t("stockAnalysis.portfolioMonitor.correlationAvg")}: {dashboard.correlationAvg.toFixed(2)}
               </Tag>
             )}
             {dashboard.sharpe30d !== undefined && (
               <Tag color="blue">
-                {t("portfolioMonitor.sharpe30d")}: {dashboard.sharpe30d.toFixed(2)}
+                {t("stockAnalysis.portfolioMonitor.sharpe30d")}: {dashboard.sharpe30d.toFixed(2)}
               </Tag>
             )}
             <span className="text-xs text-gray-500">
-              {t("portfolioMonitor.snapshotAt")}: {dashboard.snapshotAt
+              {t("stockAnalysis.portfolioMonitor.snapshotAt")}: {dashboard.snapshotAt
                 ? new Date(dashboard.snapshotAt).toLocaleString()
                 : "—"}
             </span>
@@ -229,7 +230,7 @@ export function PortfolioMonitorPanel() {
             loading={refreshing}
             type="primary"
           >
-            {t("portfolioMonitor.refresh")}
+            {t("stockAnalysis.portfolioMonitor.refresh")}
           </Button>
         </Col>
       </Row>
@@ -240,9 +241,9 @@ export function PortfolioMonitorPanel() {
           <div className="rounded border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
             <div className="mb-2 flex items-center gap-2">
               <ClusterOutlined />
-              <span className="font-semibold">{t("portfolioMonitor.sectorExposure")}</span>
+              <span className="font-semibold">{t("stockAnalysis.portfolioMonitor.sectorExposure")}</span>
             </div>
-            {sortedSectors.length === 0 ? <Empty description={t("portfolioMonitor.noSector")} /> : (
+            {sortedSectors.length === 0 ? <Empty description={t("stockAnalysis.portfolioMonitor.noSector")} /> : (
               sortedSectors.map(([sector, pct]) => (
                 <div key={sector} className="mb-2">
                   <div className="flex justify-between text-xs">
@@ -265,10 +266,10 @@ export function PortfolioMonitorPanel() {
           <div className="rounded border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
             <div className="mb-2 flex items-center gap-2">
               <AlertOutlined />
-              <span className="font-semibold">{t("portfolioMonitor.correlationHighlights")}</span>
+              <span className="font-semibold">{t("stockAnalysis.portfolioMonitor.correlationHighlights")}</span>
             </div>
             {sortedCorrelations.length === 0
-              ? <Empty description={t("portfolioMonitor.noCorrelation")} />
+              ? <Empty description={t("stockAnalysis.portfolioMonitor.noCorrelation")} />
               : (
                 <ul className="space-y-1 text-sm">
                   {sortedCorrelations.map((c: PortfolioCorrelationCell) => (
@@ -299,7 +300,7 @@ export function PortfolioMonitorPanel() {
       <div className="rounded border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
         <div className="mb-2 flex items-center gap-2">
           <ThunderboltOutlined />
-          <span className="font-semibold">{t("portfolioMonitor.stressTest")}</span>
+          <span className="font-semibold">{t("stockAnalysis.portfolioMonitor.stressTest")}</span>
         </div>
         <Row gutter={[12, 12]}>
           {[dashboard.stressTest.m10, dashboard.stressTest.m20, dashboard.stressTest.blackSwan]
@@ -317,7 +318,7 @@ export function PortfolioMonitorPanel() {
                       {fmtMoney(s.portfolioPnl)} 元
                     </div>
                     <div className="text-xs text-gray-500">
-                      {fmtPct(s.portfolioPnlPct, false)} · {t("portfolioMonitor.worstHit")}:{" "}
+                      {fmtPct(s.portfolioPnlPct, false)} · {t("stockAnalysis.portfolioMonitor.worstHit")}:{" "}
                       {s.topHit?.stockCode ?? "—"}
                       {s.topHit ? ` (${fmtPct(s.topHit.pnlPct, false)})` : ""}
                     </div>

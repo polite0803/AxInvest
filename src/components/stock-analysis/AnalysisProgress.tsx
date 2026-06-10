@@ -28,11 +28,9 @@ export function AnalysisProgress() {
   const progressPct = useStockAnalysisStore((s) => s.progressPct);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
 
-  if (status === "idle") { return null; }
-
-  const currentStep = status === "completed" ? 4 : currentStage;
-
+  // Hooks 必须在 early return 之前 — 保持顺序稳定
   const subProgress = useMemo(() => {
+    if (status === "idle") { return null; }
     const analystCount = Object.keys(analystReports).filter((k) =>
       k !== "investment-plan" && k !== "bull-researcher" && k !== "bear-researcher"
     ).length;
@@ -52,7 +50,11 @@ export function AnalysisProgress() {
       default:
         return null;
     }
-  }, [currentStage, analystReports, debateRounds, riskAssessments]);
+  }, [status, currentStage, analystReports, debateRounds, riskAssessments, t]);
+
+  if (status === "idle") { return null; }
+
+  const currentStep = status === "completed" ? 4 : currentStage;
 
   return (
     <div>

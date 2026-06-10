@@ -33,15 +33,15 @@ interface MarketRegimeInfo {
 
 /** 市场状态对应的颜色 */
 function regimeColor(regime: string): string {
-  if (regime === "bull") return "var(--sa-red)";
-  if (regime === "bear") return "var(--sa-green)";
+  if (regime === "bull") { return "var(--sa-red)"; }
+  if (regime === "bear") { return "var(--sa-green)"; }
   return "var(--color-text-secondary)";
 }
 
 /** 市场状态对应的标签 */
 function regimeLabel(regime: string, t: (key: string) => string): string {
-  if (regime === "bull") return t("stockAnalysis.dashboard.bull");
-  if (regime === "bear") return t("stockAnalysis.dashboard.bear");
+  if (regime === "bull") { return t("stockAnalysis.dashboard.bull"); }
+  if (regime === "bear") { return t("stockAnalysis.dashboard.bear"); }
   return t("stockAnalysis.dashboard.sideways");
 }
 
@@ -62,14 +62,16 @@ export function InvestDashboard() {
         invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
         loadMarketRegime(),
       ]);
-      if (Array.isArray(pos)) setPositions(pos);
-      if (Array.isArray(anl)) setRecentAnalyses(anl);
-      if (regime) setMarketRegime(regime);
+      if (Array.isArray(pos)) { setPositions(pos); }
+      if (Array.isArray(anl)) { setRecentAnalyses(anl); }
+      if (regime) { setMarketRegime(regime); }
     } catch { /* silent */ }
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const totalMv = positions.reduce((s, p) => s + (p.marketValue ?? 0), 0);
   const totalPnl = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0);
@@ -95,7 +97,9 @@ export function InvestDashboard() {
             <span style={{ color: "var(--color-text-secondary)" }}>
               ({t("stockAnalysis.dashboard.confidence")}: {(marketRegime.confidence * 100).toFixed(0)}%)
             </span>
-            <span className="text-gray-400">{marketRegime.volatility === "high" ? t("stockAnalysis.dashboard.highVol") : ""}</span>
+            <span className="text-gray-400">
+              {marketRegime.volatility === "high" ? t("stockAnalysis.dashboard.highVol") : ""}
+            </span>
           </div>
           <div className="text-xs mt-1" style={{ color: "var(--color-text-tertiary)" }}>
             {marketRegime.description}
@@ -116,9 +120,12 @@ export function InvestDashboard() {
           }
         >
           <div className="text-xs flex gap-3 mb-1">
-            <span>{t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b></span>
+            <span>
+              {t("stockAnalysis.totalMarketValue")}: <b>{(totalMv / 10000).toFixed(1)}{t("stockAnalysis.wanUnit")}</b>
+            </span>
             <span style={{ color: totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
-              {t("stockAnalysis.unrealizedPnl")}: {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(0)}
+              {t("stockAnalysis.unrealizedPnl")}: {totalPnl >= 0 ? "+" : ""}
+              {totalPnl.toFixed(0)}
             </span>
           </div>
           <Table
@@ -136,7 +143,12 @@ export function InvestDashboard() {
                 width: 56,
                 render: (v: number | null) =>
                   v != null
-                    ? <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>{v >= 0 ? "+" : ""}{v.toFixed(1)}%</span>
+                    ? (
+                      <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+                        {v >= 0 ? "+" : ""}
+                        {v.toFixed(1)}%
+                      </span>
+                    )
                     : <span className="text-gray-400">—</span>,
               },
             ]}
@@ -185,11 +197,20 @@ export function InvestDashboard() {
               {
                 dataIndex: "decisionAction",
                 width: 50,
-                render: (v: string | null) => v
-                  ? <Tag className="m-0 text-[10px]" color={v === "BUY" ? "red" : v === "SELL" ? "green" : "blue"}>{v}</Tag>
-                  : <span className="text-xs text-gray-400">—</span>,
+                render: (v: string | null) =>
+                  v
+                    ? (
+                      <Tag className="m-0 text-[10px]" color={v === "BUY" ? "red" : v === "SELL" ? "green" : "blue"}>
+                        {v}
+                      </Tag>
+                    )
+                    : <span className="text-xs text-gray-400">—</span>,
               },
-              { dataIndex: "analysisDate", width: 72, render: (v: string) => <span className="text-xs text-gray-400">{v}</span> },
+              {
+                dataIndex: "analysisDate",
+                width: 72,
+                render: (v: string) => <span className="text-xs text-gray-400">{v}</span>,
+              },
             ]}
             onRow={(record) => ({
               style: { cursor: "pointer" },
@@ -206,7 +227,7 @@ export function InvestDashboard() {
 async function loadMarketRegime(): Promise<MarketRegimeInfo | null> {
   try {
     const klines = await invoke<any[]>("get_market_klines", { code: "000300", period: "daily", limit: 60 });
-    if (!Array.isArray(klines) || klines.length < 20) return null;
+    if (!Array.isArray(klines) || klines.length < 20) { return null; }
     // 调用市场的 classify_regime — 简单在客户端用收盘价数组判断
     const closes = klines.map((k) => typeof k.close === "number" ? k.close : parseFloat(k.close ?? k[2] ?? 0));
     const ma20 = closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
@@ -217,15 +238,25 @@ async function loadMarketRegime(): Promise<MarketRegimeInfo | null> {
     const pctAbove60 = ma60 > 0 ? (last - ma60) / ma60 : 0;
     const slope = closes.length >= 10
       ? (closes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5
-         - closes.slice(-10, -5).reduce((a: number, b: number) => a + b, 0) / 5)
+        - closes.slice(-10, -5).reduce((a: number, b: number) => a + b, 0) / 5)
         / (closes.slice(-5).reduce((a: number, b: number) => a + b, 0) / 5)
       : 0;
 
     if (pctAbove60 > 0.05 && slope > 0.01) {
-      return { regime: "bull", confidence: Math.min(pctAbove60 * 2, 0.95), volatility: "normal", description: `站上60日均线${(pctAbove60 * 100).toFixed(1)}%` };
+      return {
+        regime: "bull",
+        confidence: Math.min(pctAbove60 * 2, 0.95),
+        volatility: "normal",
+        description: `站上60日均线${(pctAbove60 * 100).toFixed(1)}%`,
+      };
     }
     if (pctAbove60 < -0.03 && slope < -0.005) {
-      return { regime: "bear", confidence: Math.min(Math.abs(pctAbove60) * 2, 0.95), volatility: "normal", description: `跌破60日均线${(Math.abs(pctAbove60) * 100).toFixed(1)}%` };
+      return {
+        regime: "bear",
+        confidence: Math.min(Math.abs(pctAbove60) * 2, 0.95),
+        volatility: "normal",
+        description: `跌破60日均线${(Math.abs(pctAbove60) * 100).toFixed(1)}%`,
+      };
     }
     return { regime: "sideways", confidence: 0.5, volatility: "normal", description: "均线交叉/粘合，方向不明确" };
   } catch {

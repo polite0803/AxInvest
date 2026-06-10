@@ -627,6 +627,7 @@ impl StockVendor for MootdxVendor {
         stock_code: &str,
         period: &str,
         limit: u32,
+        _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
         let market = Self::market_code(stock_code) as u16;
         let category = Self::kline_category(period);
@@ -654,6 +655,8 @@ impl StockVendor for MootdxVendor {
                                     volume: b.vol,
                                     amount: b.amount,
                                     turnover_rate: None,
+                                    // P1-4: vendor 默认不复权
+                                    adj_factor: None,
                                 })
                                 .collect());
                         },

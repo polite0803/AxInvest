@@ -410,6 +410,7 @@ function TemplateSettings({
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
+  // Hooks 必须在 early return 之前 — 即使 currentTemplate 为 null, 也要保持 hook 顺序稳定
   const [schemaModal, setSchemaModal] = React.useState<{
     open: boolean;
     kind: "input" | "output";

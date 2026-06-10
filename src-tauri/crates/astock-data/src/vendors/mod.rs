@@ -16,6 +16,7 @@ pub trait StockVendor: Send + Sync {
         stock_code: &str,
         period: &str,
         limit: u32,
+        _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError>;
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError>;
@@ -179,8 +180,9 @@ pub trait StockVendor: Send + Sync {
         stock_code: &str,
         period: &str,
         limit: u32,
+        adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
-        self.get_klines(stock_code, period, limit).await
+        self.get_klines(stock_code, period, limit, adj).await
     }
 
     async fn get_financials_with_asof(
@@ -351,3 +353,4 @@ pub mod mootdx;
 pub mod sina;
 pub mod tencent;
 pub mod ths;
+pub mod xueqiu;

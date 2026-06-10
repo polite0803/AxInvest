@@ -66,33 +66,15 @@ export function DecisionBanner() {
 
   const actionLabel = (action: string) => t(getActionTKey(action));
 
-  // ── 空决策检查：全 0 / 无目标价 / 无理由 时不渲染 ──
-  if (!decision) { return null; }
-  // TypeScript 在此之后已将 decision 收窄为 StockDecision (non-null)
-  const emptyDecision = decision.confidence === 0
-    && decision.positionPct === 0
-    && decision.targetPrice == null
-    && decision.stopLoss == null
-    && (!decision.reasoning || decision.reasoning.trim() === "");
-  if (emptyDecision) { return null; }
-
-  const confidencePct = Math.round(decision.confidence ?? 0);
-  const meterColor = confidencePct >= 70
-    ? "var(--sa-green)"
-    : confidencePct >= 40
-    ? "var(--sa-amber)"
-    : "var(--sa-red)";
-
-  // 从报价和决策计算预期收益
-  const currentPrice = quote?.price ?? 0;
-  const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
-  const upside = targetPriceNum > 0 && currentPrice > 0
-    ? ((targetPriceNum - currentPrice) / currentPrice * 100)
-    : null;
-
-  // 导出报告
+  // Hooks 必须在 early return 之前 — 闭包内部自己处理 null decision
   const handleExport = useCallback(() => {
     if (!decision || !stockCode || !stockName) { return; }
+    const currentPrice = quote?.price ?? 0;
+    const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
+    const upside = targetPriceNum > 0 && currentPrice > 0
+      ? ((targetPriceNum - currentPrice) / currentPrice * 100)
+      : null;
+    const confidencePct = Math.round(decision.confidence ?? 0);
     const lines = [
       t("stockAnalysis.export.title"),
       t("stockAnalysis.export.stock", { name: stockName, code: stockCode }),
@@ -119,28 +101,22 @@ export function DecisionBanner() {
     a.click();
     URL.revokeObjectURL(url);
     message.success(t("stockAnalysis.exported"));
-  }, [
-    decision,
-    stockCode,
-    stockName,
-    currentPrice,
-    confidencePct,
-    upside,
-    analystReports,
-    debateRounds,
-    riskAssessments,
-    t,
-  ]);
+  }, [decision, stockCode, stockName, quote, analystReports, debateRounds, riskAssessments, t]);
 
-  // 问 AI：复制股票上下文到剪贴板，跳转到对话页
   const handleAskAI = useCallback(() => {
-    if (!stockCode || !stockName) { return; }
+    if (!decision || !stockCode || !stockName) { return; }
+    const currentPrice = quote?.price ?? 0;
+    const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
+    const upside = targetPriceNum > 0 && currentPrice > 0
+      ? ((targetPriceNum - currentPrice) / currentPrice * 100)
+      : null;
+    const confidencePct = Math.round(decision.confidence ?? 0);
     const context = [
-      t("stockAnalysis.askAi.prompt", { stockName, stockCode }),
+      t("stockAnalysis.askAi.prompt", { stockName, code: stockCode }),
       decision ? t("stockAnalysis.askAi.decision", { action: decision.action, confidence: confidencePct }) : "",
       t("stockAnalysis.export.price", { price: currentPrice.toFixed(2) }),
       upside != null ? t("stockAnalysis.export.upside", { pct: (upside >= 0 ? "+" : "") + upside.toFixed(1) }) : "",
-      `${t(getRiskTKey(decision?.riskLevel ?? ""))}`,
+      `${t(getRiskTKey(decision.riskLevel))}`,
     ].filter(Boolean).join("\n");
 
     navigator.clipboard.writeText(context).then(() => {
@@ -149,7 +125,31 @@ export function DecisionBanner() {
     }).catch(() => {
       navigate(`/chat?code=${stockCode}`);
     });
-  }, [stockCode, stockName, decision, currentPrice, confidencePct, upside, navigate, t]);
+  }, [decision, stockCode, stockName, quote, navigate, t]);
+
+  // ── 空决策检查：全 0 / 无目标价 / 无理由 时不渲染 ──
+  if (!decision) { return null; }
+  // TypeScript 在此之后已将 decision 收窄为 StockDecision (non-null)
+  const emptyDecision = decision.confidence === 0
+    && decision.positionPct === 0
+    && decision.targetPrice == null
+    && decision.stopLoss == null
+    && (!decision.reasoning || decision.reasoning.trim() === "");
+  if (emptyDecision) { return null; }
+
+  const confidencePct = Math.round(decision.confidence ?? 0);
+  const meterColor = confidencePct >= 70
+    ? "var(--sa-green)"
+    : confidencePct >= 40
+    ? "var(--sa-amber)"
+    : "var(--sa-red)";
+
+  // 从报价和决策计算预期收益
+  const currentPrice = quote?.price ?? 0;
+  const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
+  const upside = targetPriceNum > 0 && currentPrice > 0
+    ? ((targetPriceNum - currentPrice) / currentPrice * 100)
+    : null;
 
   return (
     <>
@@ -314,7 +314,7 @@ export function DecisionBanner() {
                 const qtyEl = document.getElementById("trade-qty-input") as HTMLInputElement;
                 const price = parseFloat(priceEl?.value ?? "0");
                 const qty = parseInt(qtyEl?.value ?? "100", 10);
-                if (price <= 0 || qty <= 0) return;
+                if (price <= 0 || qty <= 0) { return; }
                 const analysisId = useStockAnalysisStore.getState().analysisId;
                 try {
                   await invoke("record_trade", {
@@ -325,7 +325,9 @@ export function DecisionBanner() {
                     quantity: Math.round(qty / 100) * 100,
                     tradeDate: new Date().toISOString().slice(0, 10),
                     tradeTime: new Date().toISOString().slice(11, 16),
-                    notes: `${t("stockAnalysis.trade.fromDecision")} (${t("stockAnalysis.confidence")}: ${confidencePct}%)`,
+                    notes: `${t("stockAnalysis.trade.fromDecision")} (${
+                      t("stockAnalysis.confidence")
+                    }: ${confidencePct}%)`,
                     analysisId: analysisId ?? null,
                   });
                   message.success(t("trade.recorded"));

@@ -96,6 +96,8 @@ if (canRunFrontend) {
 
   step("TypeScript 类型检查", "npx tsc --noEmit");
 
+  step("ESLint 静态检查 (typescript-eslint + react-hooks)", "npx eslint .");
+
   step("i18n 键完整性检查", "node scripts/check-i18n-key-exists.mjs");
 
   step("AxInvest 完整性检查", "node scripts/verify-axinvest-integrity.mjs");

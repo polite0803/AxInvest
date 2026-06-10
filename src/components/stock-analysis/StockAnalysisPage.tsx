@@ -315,9 +315,7 @@ export function StockAnalysisPage() {
                         </div>
                       )}
 
-                      {status === "idle" && (
-                        <InvestDashboard />
-                      )}
+                      {status === "idle" && <InvestDashboard />}
 
                       {status === "error" && (
                         <div

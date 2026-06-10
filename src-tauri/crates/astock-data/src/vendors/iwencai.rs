@@ -91,7 +91,7 @@ impl StockVendor for IwencaiVendor {
         })
     }
 
-    async fn get_klines(&self, _: &str, _: &str, _: u32) -> Result<Vec<KLine>, DataError> {
+    async fn get_klines(&self, _: &str, _: &str, _: u32, _: Option<AdjType>) -> Result<Vec<KLine>, DataError> {
         Ok(vec![])
     }
 

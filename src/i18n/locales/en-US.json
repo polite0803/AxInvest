@@ -3525,7 +3525,10 @@
       "email": "Email",
       "debate": "Debate",
       "databaseQuery": "Database Query",
-      "switch": "Switch"
+      "switch": "Switch",
+      "groupFrame": "Group Frame",
+      "phaseSeparator": "Phase Separator",
+      "storage": "Storage"
     },
     "aiAssist": {
       "btn": {
@@ -3827,13 +3830,16 @@
     "saving": "Saving...",
     "save": "Save",
     "saveAsImage": "Save as Image",
+    "run": "Run",
+    "settings": "Settings",
     "exportEmpty": "No nodes to export",
     "leftPanel": {
       "nodesTab": "Nodes",
       "searchNodes": "Search nodes...",
       "legacySuffix": "(Legacy)",
       "templatesTab": "Templates",
-      "searchTemplates": "Search templates..."
+      "searchTemplates": "Search templates...",
+      "layout": "Layout"
     },
     "knowledgeSettings": {
       "title": "Knowledge"
@@ -3947,7 +3953,12 @@
       "diffNodeTypeChanged": "Node type changed",
       "diffNodeConfigChanged": "Node config changed",
       "diffEdgeAdded": "Edge added ({{type}})",
-      "diffEdgeRemoved": "Edge removed ({{type}})"
+      "diffEdgeRemoved": "Edge removed ({{type}})",
+      "latest": "Latest",
+      "rollback": "Rollback",
+      "rollbackConfirm": "Rollback to version {{version}}?",
+      "rollbackTo": "Rollback to {{v}}",
+      "rolledBack": "Rolled back to version {{version}}"
     },
     "versionHistoryLoadFailed": "Failed to load version history",
     "versionLoaded": "Version {{version}} loaded",
@@ -4266,7 +4277,39 @@
       "routingPromptPlaceholder": "Describe the routing decision logic",
       "showTools": "Show tools",
       "subject": "Subject",
-      "to": "To"
+      "to": "To",
+      "aggregAll": "All (array)",
+      "aggregConcat": "Concat (string)",
+      "aggregConcatHint": "Joins string values together",
+      "aggregCount": "Count",
+      "aggregLlmHint": "Use an LLM to summarize the branches",
+      "aggregLlmSummarize": "LLM Summarize",
+      "aggregMerge": "Merge (object)",
+      "aggregMergeHint": "Merge multiple objects into one",
+      "aggregStrategy": "Aggregation Strategy",
+      "aggregSum": "Sum (numeric)",
+      "aggregWeighted": "Weighted (numeric)",
+      "aggregWeightedHint": "Compute a weighted sum over inputs",
+      "branchTimeoutMs": "Timeout (ms)",
+      "defaultCase": "Default case (fallback)",
+      "defaultModel": "Use default model",
+      "degradeOnTimeout": "Degrade on timeout",
+      "expressionHint": "Expression is evaluated against the previous node's _value; result is a boolean",
+      "expressionPlaceholder": "_value > 100",
+      "llmRoutingModel": "Model (optional)",
+      "llmRoutingPrompt": "Routing Prompt",
+      "llmRoutingPromptPlaceholder": "Pick the best branch for the input: {{branches}}",
+      "matchModeContains": "Contains",
+      "matchModeExact": "Exact",
+      "matchModeExpression": "Expression",
+      "matchModeRegex": "Regex",
+      "summarizeModel": "Model (optional)",
+      "summarizePrompt": "Summarize prompt",
+      "summarizePromptPlaceholder": "Please summarize the following inputs: {{inputs}}",
+      "useLlmRouting": "LLM Smart Routing",
+      "waitForAll": "Wait for all inputs",
+      "weights": "Weights (comma-separated)",
+      "weightsPlaceholder": "e.g. 0.5, 0.3, 0.2"
     },
     "debug": {
       "totalDuration": "Total Duration",
@@ -4496,7 +4539,8 @@
       "expand": "Expand",
       "collapse": "Collapse",
       "waitAll": "Wait for all",
-      "waitAny": "Wait for any"
+      "waitAny": "Wait for any",
+      "decorative": "Decorative"
     },
     "debateNode": {
       "debaters": "debaters",
@@ -4520,7 +4564,12 @@
       "manual": "Manual trigger",
       "schedule": "Schedule trigger",
       "event": "Event trigger",
-      "title": "Trigger"
+      "title": "Trigger",
+      "configure": "Configure",
+      "configureHint": "Click to configure the trigger",
+      "statusActive": "Active",
+      "statusDisabled": "Disabled",
+      "statusUnconfigured": "Unconfigured"
     },
     "documentParserNode": {
       "notSet": "Not set",
@@ -4566,7 +4615,12 @@
     "node": {
       "tickMode": "Tick Mode",
       "breakpoint": "Breakpoint",
-      "retryEnabled": "Retry Enabled"
+      "retryEnabled": "Retry Enabled",
+      "clickToCollapsePorts": "Click to collapse ports",
+      "clickToExpandPorts": "Click to expand ports",
+      "inputs": "Inputs",
+      "outputs": "Outputs",
+      "type": "Type"
     },
     "code": {
       "rhaiDynamicTool": "🦀 Rhai (Dynamic Tool)",
@@ -4842,7 +4896,29 @@
       "topic_var": "Topic variable"
     },
     "searchNodes": "Search nodes",
-    "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}"
+    "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
+    "canvasTitle": {
+      "clickToRename": "Click to rename"
+    },
+    "containerNode": {
+      "branchTimeout": "Branch timeout",
+      "nodes": "nodes"
+    },
+    "decorativeContainerNoEdges": "Decorative containers cannot have edges",
+    "groupNode": {
+      "folded": "folded",
+      "untitled": "Group"
+    },
+    "legend": {
+      "title": "Node Colors"
+    },
+    "phaseSeparator": {
+      "defaultLabel": "Phase"
+    },
+    "swarmNode": {
+      "agents": "Agents",
+      "rounds": "rounds"
+    }
   },
   "atomicSkill": {
     "entryType": "Entry Type",
@@ -7491,6 +7567,7 @@
     "high": "High",
     "low": "Low",
     "close": "Close",
+    "changePct": "Change %",
     "volume": "Volume",
     "volumeUnit": "10k lots",
     "volumeChart": "Volume",

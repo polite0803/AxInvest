@@ -1,7 +1,7 @@
 use crate::AppState;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_core::entity::{
-    portfolio_holdings, price_alerts, stock_analyses, trades, watchlist_items,
+    portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades, watchlist_items,
 };
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
@@ -917,6 +917,84 @@ pub async fn optimize_scoring_weights(
         .await
 }
 
+/// 荐股策略历史回测（两组对比）
+///
+/// 1. 从 reco_picks 表读取最近一次荐股的真实推荐记录（synthetic=0）作为正向样本
+/// 2. 从同次荐股的候选池快照中，减去正向样本，得到负向样本（漏推荐的股票）
+/// 3. 两组分别跑策略信号历史回溯
+/// 4. 输出对比结果
+#[tauri::command]
+pub async fn backtest_reco_strategies(
+    state: State<'_, AppState>,
+) -> Result<axagent_stock_analysis::backtest_strategy::BacktestComparisonResponse, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    // 1. 找最近一次荐股记录的 generated_at
+    let latest = reco_picks::Entity::find()
+        .order_by_desc(reco_picks::Column::GeneratedAt)
+        .one(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let latest_run = match latest {
+        Some(r) => r,
+        None => return Err("暂无荐股记录。请先打开荐股面板获取推荐后再运行回测。".to_string()),
+    };
+    let run_ts = latest_run.generated_at;
+
+    // 2. 读取该次运行的所有推荐记录
+    let all_picks = reco_picks::Entity::find()
+        .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
+        .all(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if all_picks.is_empty() {
+        return Err("荐股记录为空，无法回测".to_string());
+    }
+
+    // 3. 解析候选池快照（从任一记录的 seed_pool_json 字段）
+    let seed_pool_json = all_picks
+        .first()
+        .and_then(|p| p.seed_pool_json.as_deref())
+        .unwrap_or("[]");
+
+    let seed_pool: Vec<Vec<String>> = serde_json::from_str(seed_pool_json).unwrap_or_default();
+
+    // 4. 分离正向/负向样本
+    // 正向 = synthetic=0 的 picks（被策略真实命中的推荐）
+    // 负向 = 候选池中 - 正向（但注意：候选池可能有重复，用 HashSet 去重）
+    let positive_set: std::collections::HashSet<String> = all_picks
+        .iter()
+        .filter(|p| p.synthetic == 0)
+        .map(|p| p.stock_code.clone())
+        .collect();
+
+    let positive_stocks: Vec<(String, String)> = all_picks
+        .iter()
+        .filter(|p| p.synthetic == 0)
+        .map(|p| (p.stock_code.clone(), p.stock_name.clone()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    // 负向：候选池中的股票 - 正向样本
+    let negative_stocks: Vec<(String, String)> = seed_pool
+        .into_iter()
+        .filter(|pair| pair.len() >= 2)
+        .filter(|pair| !positive_set.contains(&pair[0]))
+        .map(|pair| (pair[0].clone(), pair[1].clone()))
+        .collect();
+
+    // 5. 跑回测
+    axagent_stock_analysis::backtest_strategy::backtest_two_groups(
+        state.astock_client.clone(),
+        &positive_stocks,
+        &negative_stocks,
+    )
+    .await
+}
+
 // ── Portfolio Risk ──
 
 /// 获取组合风险指标
@@ -1290,13 +1368,53 @@ pub async fn recommend_stocks(
 
     // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
     let client: std::sync::Arc<_> = state.astock_client.clone();
-    if let Some(ctx) = as_of_ctx {
+    let response = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async { recommender::recommend_stocks(client, period, &vars).await })
             .await
     } else {
         recommender::recommend_stocks(client, period, &vars).await
+    }?;
+
+    // ── 持久化荐股结果（仅 live 模式） ──
+    if as_of_date.is_none() {
+        let generated_at = chrono::Local::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3f")
+            .to_string();
+        let created_at = generated_at.clone();
+
+        // 构建候选池快照（用于回测的负向样本）
+        use axagent_stock_analysis::recommender::pool::build_seed_pool;
+        let seed = build_seed_pool(&state.astock_client).await;
+        let seed_pool_json = serde_json::to_string(
+            &seed
+                .iter()
+                .map(|(c, n, _)| vec![c.as_str(), n.as_str()])
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default();
+
+        for (_style, picks) in &response.picks {
+            for pick in picks {
+                use sea_orm::ActiveModelTrait;
+                let am = reco_picks::ActiveModel {
+                    id: sea_orm::Set(uuid::Uuid::new_v4().to_string()),
+                    generated_at: sea_orm::Set(generated_at.clone()),
+                    period: sea_orm::Set(pick.period.as_str().to_string()),
+                    stock_code: sea_orm::Set(pick.stock_code.clone()),
+                    stock_name: sea_orm::Set(pick.stock_name.clone()),
+                    style: sea_orm::Set(pick.style.as_str().to_string()),
+                    confidence: sea_orm::Set(pick.confidence as i32),
+                    synthetic: sea_orm::Set(if pick.synthetic { 1 } else { 0 }),
+                    seed_pool_json: sea_orm::Set(Some(seed_pool_json.clone())),
+                    created_at: sea_orm::Set(created_at.clone()),
+                };
+                let _ = am.insert(state.harness.db()).await;
+            }
+        }
     }
+
+    Ok(response)
 }
 
 /// 失效荐股缓存（设置页保存 vendor 后由前端调用）

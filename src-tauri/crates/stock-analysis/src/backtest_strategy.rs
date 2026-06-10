@@ -90,60 +90,100 @@ fn closes(klines: &[KLine]) -> Vec<f64> {
 fn detect_trend_short(klines: &[KLine]) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
-    if klines.len() < 30 { return None; }
+    if klines.len() < 30 {
+        return None;
+    }
     let ma5 = indicators::sma(&cs, 5)?;
     let ma10 = indicators::sma(&cs, 10)?;
     let ma20 = indicators::sma(&cs, 20)?;
-    if !(ma5 > ma10 && ma10 > ma20) { return None; }
+    if !(ma5 > ma10 && ma10 > ma20) {
+        return None;
+    }
     let high = indicators::highest(klines, 20)?;
-    if last < high * 0.99 { return None; }
+    if last < high * 0.99 {
+        return None;
+    }
     let amt_ratio = klines.last()?.amount / indicators::avg_amount_20d(klines)?;
-    if amt_ratio < 0.8 { return None; }
+    if amt_ratio < 0.8 {
+        return None;
+    }
     Some(last)
 }
 
 fn detect_trend_mid(klines: &[KLine]) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
-    if klines.len() < 100 { return None; }
+    if klines.len() < 100 {
+        return None;
+    }
     let ma60 = indicators::sma(&cs, 60)?;
-    if ma60.is_nan() || last < ma60 * 0.995 { return None; }
-    if indicators::highest(klines, 60)? * 0.98 > last { return None; }
+    if ma60.is_nan() || last < ma60 * 0.995 {
+        return None;
+    }
+    if indicators::highest(klines, 60)? * 0.98 > last {
+        return None;
+    }
     if let Some((dif, dea, _)) = indicators::macd(klines, 12, 26, 9) {
-        if dif <= dea { return None; }
-    } else { return None; }
+        if dif <= dea {
+            return None;
+        }
+    } else {
+        return None;
+    }
     Some(last)
 }
 
 fn detect_trend_long(klines: &[KLine]) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
-    if cs.len() < 250 { return None; }
+    if cs.len() < 250 {
+        return None;
+    }
     let ma250 = indicators::sma(&cs, 250)?;
-    if ma250.is_nan() { return None; }
+    if ma250.is_nan() {
+        return None;
+    }
     let ma60 = indicators::sma(&cs, 60)?;
-    if ma60 < ma250 * 0.95 { return None; }
-    if last < ma60 * 0.95 { return None; }
+    if ma60 < ma250 * 0.95 {
+        return None;
+    }
+    if last < ma60 * 0.95 {
+        return None;
+    }
     Some(last)
 }
 
 fn detect_reversion_short(klines: &[KLine]) -> Option<f64> {
-    if klines.len() < 30 { return None; }
+    if klines.len() < 30 {
+        return None;
+    }
     let rsi_val = indicators::rsi(klines, 6)?;
-    if rsi_val >= 35.0 { return None; }
+    if rsi_val >= 35.0 {
+        return None;
+    }
     let avg_5 = indicators::avg_amount_n(klines, 5)?;
-    if avg_5 <= 0.0 { return None; }
+    if avg_5 <= 0.0 {
+        return None;
+    }
     let today_amt = klines.last()?.amount;
-    if today_amt > avg_5 * 1.2 { return None; }
+    if today_amt > avg_5 * 1.2 {
+        return None;
+    }
     Some(klines.last()?.close)
 }
 
 fn detect_reversion_mid(klines: &[KLine]) -> Option<f64> {
-    if klines.len() < 100 { return None; }
+    if klines.len() < 100 {
+        return None;
+    }
     let dd = indicators::drawdown_from_high(klines, 250)?;
-    if dd < 20.0 { return None; }
+    if dd < 20.0 {
+        return None;
+    }
     let rsi30 = indicators::rsi(klines, 30)?;
-    if rsi30 > 50.0 { return None; }
+    if rsi30 > 50.0 {
+        return None;
+    }
     Some(klines.last()?.close)
 }
 
@@ -159,11 +199,46 @@ struct StratDef {
 }
 
 const STRATS: &[StratDef] = &[
-    StratDef { id: "trend_short", style: "trend", period: "short", period_enum: Period::Short, warmup: 30, detect: detect_trend_short },
-    StratDef { id: "trend_mid",   style: "trend", period: "mid",   period_enum: Period::Mid,   warmup: 100, detect: detect_trend_mid },
-    StratDef { id: "trend_long",  style: "trend", period: "long",  period_enum: Period::Long,  warmup: 280, detect: detect_trend_long },
-    StratDef { id: "rev_short",   style: "reversion", period: "short", period_enum: Period::Short, warmup: 30, detect: detect_reversion_short },
-    StratDef { id: "rev_mid",     style: "reversion", period: "mid",   period_enum: Period::Mid,   warmup: 100, detect: detect_reversion_mid },
+    StratDef {
+        id: "trend_short",
+        style: "trend",
+        period: "short",
+        period_enum: Period::Short,
+        warmup: 30,
+        detect: detect_trend_short,
+    },
+    StratDef {
+        id: "trend_mid",
+        style: "trend",
+        period: "mid",
+        period_enum: Period::Mid,
+        warmup: 100,
+        detect: detect_trend_mid,
+    },
+    StratDef {
+        id: "trend_long",
+        style: "trend",
+        period: "long",
+        period_enum: Period::Long,
+        warmup: 280,
+        detect: detect_trend_long,
+    },
+    StratDef {
+        id: "rev_short",
+        style: "reversion",
+        period: "short",
+        period_enum: Period::Short,
+        warmup: 30,
+        detect: detect_reversion_short,
+    },
+    StratDef {
+        id: "rev_mid",
+        style: "reversion",
+        period: "mid",
+        period_enum: Period::Mid,
+        warmup: 100,
+        detect: detect_reversion_mid,
+    },
 ];
 
 pub const SKIPPED: &[&str] = &[
@@ -194,16 +269,28 @@ pub async fn backtest_two_groups(
     })
 }
 
-async fn run_group(client: Arc<AStockClient>, label: &str, stocks: &[(String, String)]) -> GroupBacktestResult {
+async fn run_group(
+    client: Arc<AStockClient>,
+    label: &str,
+    stocks: &[(String, String)],
+) -> GroupBacktestResult {
     let kline_limit = 500u32;
 
     // 加载所有 K 线
-    struct StockWithKlines { code: String, name: String, klines: Vec<KLine> }
+    struct StockWithKlines {
+        code: String,
+        name: String,
+        klines: Vec<KLine>,
+    }
     let mut loaded = Vec::new();
     for (code, name) in stocks {
         match client.get_klines(code, "daily", kline_limit).await {
-            Ok(k) if k.len() >= 60 => loaded.push(StockWithKlines { code: code.clone(), name: name.clone(), klines: k }),
-            _ => {}
+            Ok(k) if k.len() >= 60 => loaded.push(StockWithKlines {
+                code: code.clone(),
+                name: name.clone(),
+                klines: k,
+            }),
+            _ => {},
         }
     }
 
@@ -213,7 +300,15 @@ async fn run_group(client: Arc<AStockClient>, label: &str, stocks: &[(String, St
         let mut all_sigs = Vec::new();
         let holding = strat.period_enum.default_holding_days();
         for s in &loaded {
-            let sigs = scan_one(&s.klines, &s.code, &s.name, strat.id, strat.detect, holding, strat.warmup);
+            let sigs = scan_one(
+                &s.klines,
+                &s.code,
+                &s.name,
+                strat.id,
+                strat.detect,
+                holding,
+                strat.warmup,
+            );
             all_sigs.extend(sigs);
         }
         results.insert(strat.id.to_string(), all_sigs);
@@ -223,8 +318,11 @@ async fn run_group(client: Arc<AStockClient>, label: &str, stocks: &[(String, St
     let mut strategies = HashMap::new();
     for strat in STRATS {
         let sigs = results.get(strat.id).map_or(&[] as &[_], |v| v.as_slice());
-        if sigs.is_empty() { continue; }
-        strategies.insert(strat.id.to_string(), aggregate(strat.id, strat.style, strat.period, sigs));
+        if sigs.is_empty() {
+            continue;
+        }
+        strategies
+            .insert(strat.id.to_string(), aggregate(strat.id, strat.style, strat.period, sigs));
     }
 
     GroupBacktestResult {
@@ -237,8 +335,13 @@ async fn run_group(client: Arc<AStockClient>, label: &str, stocks: &[(String, St
 // ── 滑动窗口扫描 ──
 
 fn scan_one(
-    klines: &[KLine], code: &str, name: &str, sid: &str,
-    detect: fn(&[KLine]) -> Option<f64>, holding: u32, warmup: usize,
+    klines: &[KLine],
+    code: &str,
+    name: &str,
+    sid: &str,
+    detect: fn(&[KLine]) -> Option<f64>,
+    holding: u32,
+    warmup: usize,
 ) -> Vec<StrategySignalResult> {
     let max_idx = klines.len().saturating_sub(holding as usize + 1);
     let mut out = Vec::new();
@@ -250,14 +353,31 @@ fn scan_one(
             let mut peak = 0.0_f64;
             let mut max_dd = 0.0;
             for k in &klines[i..=exit_idx] {
-                if k.close > peak { peak = k.close; }
-                if peak > 0.0 { let dd = (peak - k.close) / peak; if dd > max_dd { max_dd = dd; } }
+                if k.close > peak {
+                    peak = k.close;
+                }
+                if peak > 0.0 {
+                    let dd = (peak - k.close) / peak;
+                    if dd > max_dd {
+                        max_dd = dd;
+                    }
+                }
             }
-            let ret = if entry > 0.0 { ((exit_price - entry) / entry) * 100.0 } else { 0.0 };
+            let ret = if entry > 0.0 {
+                ((exit_price - entry) / entry) * 100.0
+            } else {
+                0.0
+            };
             out.push(StrategySignalResult {
-                strategy_id: sid.into(), stock_code: code.into(), stock_name: name.into(),
-                signal_date: klines[i].date.clone(), entry_price: entry, exit_price,
-                holding_days: holding, return_pct: ret, was_profitable: ret > 0.0,
+                strategy_id: sid.into(),
+                stock_code: code.into(),
+                stock_name: name.into(),
+                signal_date: klines[i].date.clone(),
+                entry_price: entry,
+                exit_price,
+                holding_days: holding,
+                return_pct: ret,
+                was_profitable: ret > 0.0,
                 max_drawdown_pct: max_dd * 100.0,
             });
         }
@@ -274,34 +394,77 @@ fn aggregate(sid: &str, style: &str, period: &str, sigs: &[StrategySignalResult]
     let (wr, avg_ret, total_ret, avg_dd) = if total > 0 {
         let s_ret: f64 = sigs.iter().map(|s| s.return_pct).sum();
         let s_dd: f64 = sigs.iter().map(|s| s.max_drawdown_pct).sum();
-        (wins as f64 / total as f64 * 100.0, s_ret / total as f64, s_ret, s_dd / total as f64)
-    } else { (0.0, 0.0, 0.0, 0.0) };
+        (
+            wins as f64 / total as f64 * 100.0,
+            s_ret / total as f64,
+            s_ret,
+            s_dd / total as f64,
+        )
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
 
     let mut streak = 0u32;
     let mut max_streak = 0u32;
     for s in sigs {
-        if s.was_profitable { streak = 0; } else { streak += 1; if streak > max_streak { max_streak = streak; } }
+        if s.was_profitable {
+            streak = 0;
+        } else {
+            streak += 1;
+            if streak > max_streak {
+                max_streak = streak;
+            }
+        }
     }
 
     let sharpe = if total > 1 {
         let returns: Vec<f64> = sigs.iter().map(|s| s.return_pct / 100.0).collect();
         let avg_r = returns.iter().sum::<f64>() / returns.len() as f64;
-        let var = returns.iter().map(|r| (r - avg_r).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
-        if var > 0.0 { Some((avg_r - 0.025_f64 / 252.0_f64.sqrt()) / var.sqrt()) } else { None }
-    } else { None };
+        let var =
+            returns.iter().map(|r| (r - avg_r).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
+        if var > 0.0 {
+            Some((avg_r - 0.025_f64 / 252.0_f64.sqrt()) / var.sqrt())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     let pf = if total > 0 && losses > 0 {
-        let tw: f64 = sigs.iter().filter(|s| s.was_profitable).map(|s| s.return_pct.abs()).sum();
-        let tl: f64 = sigs.iter().filter(|s| !s.was_profitable).map(|s| s.return_pct.abs()).sum();
-        if tl > 0.0 && tw > 0.0 { Some(tw / tl) } else { None }
-    } else { None };
+        let tw: f64 = sigs
+            .iter()
+            .filter(|s| s.was_profitable)
+            .map(|s| s.return_pct.abs())
+            .sum();
+        let tl: f64 = sigs
+            .iter()
+            .filter(|s| !s.was_profitable)
+            .map(|s| s.return_pct.abs())
+            .sum();
+        if tl > 0.0 && tw > 0.0 {
+            Some(tw / tl)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     StrategyStats {
-        strategy_id: sid.into(), style: style.into(), period: period.into(),
-        total_signals: total, win_count: wins, loss_count: losses,
-        win_rate_pct: wr, avg_return_pct: avg_ret, total_return_pct: total_ret,
-        avg_max_drawdown_pct: avg_dd, max_consecutive_losses: max_streak,
-        sharpe_ratio: sharpe, profit_factor: pf,
+        strategy_id: sid.into(),
+        style: style.into(),
+        period: period.into(),
+        total_signals: total,
+        win_count: wins,
+        loss_count: losses,
+        win_rate_pct: wr,
+        avg_return_pct: avg_ret,
+        total_return_pct: total_ret,
+        avg_max_drawdown_pct: avg_dd,
+        max_consecutive_losses: max_streak,
+        sharpe_ratio: sharpe,
+        profit_factor: pf,
     }
 }
 
@@ -312,12 +475,23 @@ mod tests {
     use super::*;
 
     fn k(c: f64, d: &str, a: f64) -> KLine {
-        KLine { date: d.into(), open: c * 0.99, high: c * 1.02, low: c * 0.98, close: c, volume: 1_000_000.0, amount: a, turnover_rate: Some(1.0) }
+        KLine {
+            date: d.into(),
+            open: c * 0.99,
+            high: c * 1.02,
+            low: c * 0.98,
+            close: c,
+            volume: 1_000_000.0,
+            amount: a,
+            turnover_rate: Some(1.0),
+        }
     }
 
     #[test]
     fn no_signal_on_flat() {
-        let klines: Vec<KLine> = (0..50).map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0)).collect();
+        let klines: Vec<KLine> = (0..50)
+            .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
+            .collect();
         assert!(detect_trend_short(&klines).is_none());
         assert!(detect_reversion_short(&klines).is_none());
     }

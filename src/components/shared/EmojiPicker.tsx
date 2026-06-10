@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import "emoji-picker-element";
 
 declare module "react" {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
       "emoji-picker": React.DetailedHTMLProps<
@@ -43,8 +44,10 @@ export function EmojiPicker({
   const isDark = useResolvedDarkMode(themeMode);
 
   const onEmojiSelectRef = useRef(onEmojiSelect);
+  // eslint-disable-next-line react-hooks/refs
   onEmojiSelectRef.current = onEmojiSelect;
   const onCloseRef = useRef(onClose);
+  // eslint-disable-next-line react-hooks/refs
   onCloseRef.current = onClose;
 
   const handleClick = useCallback((e: Event) => {

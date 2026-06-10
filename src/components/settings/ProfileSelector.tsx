@@ -28,10 +28,13 @@ export function ProfileSelector() {
       setProfiles(list);
       const current = await invoke<ProfileInfo>("profile_active");
       setActive(current.profile.name);
-    } catch {}
+    } catch {
+      // ignore load errors
+    }
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
 

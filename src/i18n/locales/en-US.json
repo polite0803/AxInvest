@@ -4933,6 +4933,7 @@
       "expand": "Expand",
       "collapse": "Collapse"
     },
+    "back": "Back",
     "caseLabel": "Case {{n}}",
     "paramKey": "param_{{n}}",
     "subWorkflowLabel": "Sub Workflow",

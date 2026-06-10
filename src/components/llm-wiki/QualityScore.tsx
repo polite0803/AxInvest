@@ -38,6 +38,7 @@ export function QualityScore({
 
   useEffect(() => {
     loadQualityScore();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wikiId, pageId]);
 
   useEffect(() => {
@@ -46,9 +47,10 @@ export function QualityScore({
     }
     const interval = setInterval(loadQualityScore, refreshInterval);
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh, refreshInterval, wikiId, pageId]);
 
-  const loadQualityScore = async () => {
+  async function loadQualityScore() {
     setRefreshing(true);
     try {
       if (pageId) {

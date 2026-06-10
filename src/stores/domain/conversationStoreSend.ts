@@ -150,8 +150,8 @@ export function createSendMethods(
 
       // Hoisted variables used by both try and catch blocks
       let finalContent = content;
-      let kbIds: string[] = [];
-      let memIds: string[] = [];
+      let kbIds: string[];
+      let memIds: string[];
       let mcpIds: string[] = [];
       let thinkingBudget: number | undefined;
 
@@ -260,7 +260,7 @@ export function createSendMethods(
               // 搜索执行了但无结果 — 告知 LLM 未找到，避免幻觉
               searchResultTag = '<web-search status="empty" data-axagent="1">No results found</web-search>';
             }
-          } catch (e) {
+          } catch {
             // Search failed, continue without search results
             searchResultTag = '<web-search status="error" data-axagent="1">Search unavailable</web-search>';
           }
@@ -347,8 +347,7 @@ export function createSendMethods(
 
         // Determine whether this error is retryable (transient) vs permanent.
         // Only attempt fallback for network, rate limit, timeout, and provider errors.
-        const isRetryable = true
-          && !errMsg.includes("invalid_request_error") // bad request
+        const isRetryable = !errMsg.includes("invalid_request_error") // bad request
           && !errMsg.includes("authentication") // auth error
           && !errMsg.includes("insufficient_quota") // billing
           && !errMsg.includes("invalid_api_key") // auth
@@ -433,7 +432,7 @@ export function createSendMethods(
                 }));
                 fallbackSucceeded = true;
                 break;
-              } catch (_fallbackErr) {
+              } catch {
                 /* continue to next */
               }
             }
@@ -1185,7 +1184,7 @@ export function createSendMethods(
         // Safeguard: ensure listeners are always cleaned up, even if cleanup() itself throws
         try {
           cleanup();
-        } catch (_) {
+        } catch {
           /* ignore cleanup errors */
         }
         const errMsg = String(e);
@@ -1300,7 +1299,7 @@ export function createSendMethods(
       };
 
       // Placeholder assistant message (will be replaced by PlanCard rendering)
-      let currentMsgId = `temp-plan-${Date.now()}`;
+      const currentMsgId = `temp-plan-${Date.now()}`;
       const placeholderAssistant: Message = {
         id: currentMsgId,
         conversation_id: conversationId,

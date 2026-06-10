@@ -66,6 +66,7 @@ function PageLoader() {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function SafeLazyPage({ Page }: { Page: React.LazyExoticComponent<any> }) {
   const { t } = useTranslation();
   return (

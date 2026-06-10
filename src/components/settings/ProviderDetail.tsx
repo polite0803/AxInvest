@@ -812,6 +812,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
     } catch {
       message.error(t("error.saveFailed"));
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     editingModel,
     editCapabilities,
@@ -987,7 +988,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
       if (!batchSelected.has(m.model_id)) {
         return m;
       }
-      let updated = { ...m };
+      const updated = { ...m };
       if (batchModelTypeEnabled) {
         updated.model_type = batchModelType;
         updated.capabilities = sanitizeModelCapabilities(

@@ -41,6 +41,7 @@ export function ChatInspector({
   const [conversationCreatedFormatted, setConversationCreatedFormatted] = useState("");
   useEffect(() => {
     if (convCreatedAt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setConversationCreatedFormatted(
         new Date(convCreatedAt).toLocaleString(),
       );
@@ -240,7 +241,9 @@ export function ChatInspector({
       messages,
       convId,
       convProviderId,
-      convCreatedAt,
+      convModelId,
+      convMessageCount,
+      conversationCreatedFormatted,
       conversationArtifacts,
     ],
   );

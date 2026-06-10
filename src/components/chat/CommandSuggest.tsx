@@ -11,6 +11,11 @@ interface Suggestion {
   icon: React.ReactNode;
 }
 
+interface ToolDescriptor {
+  name: string;
+  description?: string;
+}
+
 // Slash commands
 const SLASH_COMMANDS: Suggestion[] = [
   {
@@ -76,6 +81,7 @@ export const CommandSuggest: React.FC<CommandSuggestProps> = ({
   const mcpTools = useMcpStore((s) => s.toolDescriptors);
 
   // Parse the current input to detect trigger
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!visible) {
       setSuggestions([]);
@@ -110,7 +116,6 @@ export const CommandSuggest: React.FC<CommandSuggestProps> = ({
         const afterTrigger = textBeforeCursor.slice(lastAt + 1);
         if (!afterTrigger.includes(" ")) {
           activeTrigger = "@";
-          triggerPos = lastAt;
           searchQuery = afterTrigger.toLowerCase();
         }
       }
@@ -137,12 +142,12 @@ export const CommandSuggest: React.FC<CommandSuggestProps> = ({
       const allTools = Object.values(mcpTools || {}).flat();
       const toolSuggestions: Suggestion[] = allTools
         .filter(
-          (tool: any) =>
+          (tool: ToolDescriptor) =>
             tool.name?.toLowerCase().includes(searchQuery)
             || tool.description?.toLowerCase().includes(searchQuery),
         )
         .slice(0, 10)
-        .map((tool: any) => ({
+        .map((tool: ToolDescriptor) => ({
           type: "tool" as const,
           label: tool.name,
           description: tool.description || i18n.t("commandSuggest.mcpTool"),
@@ -166,6 +171,7 @@ export const CommandSuggest: React.FC<CommandSuggestProps> = ({
 
     setSelectedIndex(0);
   }, [value, cursorPosition, visible, mcpTools]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -244,6 +250,7 @@ export const CommandSuggest: React.FC<CommandSuggestProps> = ({
 };
 
 // Export a hook to check if the suggest is handling a key event
+// eslint-disable-next-line react-refresh/only-export-components
 export const isCommandSuggestHandlingKey = (): boolean => {
   return false; // Will be managed by parent
 };

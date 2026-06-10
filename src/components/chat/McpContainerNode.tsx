@@ -1,10 +1,10 @@
 import { Collapse, Tag } from "antd";
 import { CheckCircle, Loader, XCircle } from "lucide-react";
-import type { NodeComponentProps } from "markstream-react";
+import type { NodeComponentProps, RenderContext, RenderNodeFn } from "markstream-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-function safeGetAttr(attrs: any, key: string): string | undefined {
+function safeGetAttr(attrs: unknown, key: string): string | undefined {
   if (!attrs) {
     return undefined;
   }
@@ -32,9 +32,10 @@ function safeGetAttr(attrs: any, key: string): string | undefined {
     return undefined;
   }
 
-  if (typeof attrs === "object") {
+  if (typeof attrs === "object" && attrs) {
+    const obj = attrs as Record<string, unknown>;
     for (const k of [key, `data-${key}`]) {
-      const v = attrs[k];
+      const v = obj[k];
       if (v == null) {
         continue;
       }
@@ -45,6 +46,7 @@ function safeGetAttr(attrs: any, key: string): string | undefined {
   return undefined;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractText(children: any[] | undefined): string {
   if (!children || children.length === 0) {
     return "";
@@ -77,11 +79,12 @@ function NodeChild({
   ctx,
   renderNode,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   child: any;
   indexKey: string | undefined;
   index: number;
-  ctx: any;
-  renderNode: (child: any, key: string, ctx: any) => React.ReactNode;
+  ctx: RenderContext;
+  renderNode: RenderNodeFn;
 }) {
   return renderNode(
     child,
@@ -100,17 +103,16 @@ function DefaultContainer({
   renderNode,
   indexKey,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   node: any;
-  ctx: any;
-  renderNode?:
-    | ((child: any, key: string, ctx: any) => React.ReactNode)
-    | undefined;
+  ctx: RenderContext;
+  renderNode?: RenderNodeFn | undefined;
   indexKey: string | undefined;
 }) {
   return (
     <div className={`vmr-container vmr-container-${node.name ?? "unknown"}`}>
       {Array.isArray(node.children) && ctx && renderNode
-        ? node.children.map((child: any, i: number) => (
+        ? node.children.map((child: any, i: number) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
           <NodeChild
             key={child.id
               ?? child.name
@@ -127,6 +129,7 @@ function DefaultContainer({
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function McpContainerNode(props: NodeComponentProps<any>) {
   const { node } = props;
 
@@ -135,7 +138,7 @@ export function McpContainerNode(props: NodeComponentProps<any>) {
     return (
       <DefaultContainer
         node={n}
-        ctx={ctx}
+        ctx={ctx!}
         renderNode={renderNode}
         indexKey={indexKey as string | undefined}
       />
@@ -155,6 +158,7 @@ const monoStyle: React.CSSProperties = {
   padding: "4px 0",
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function McpToolCard({ node }: { node: any }) {
   const { t } = useTranslation();
 
@@ -167,6 +171,7 @@ function McpToolCard({ node }: { node: any }) {
 
   useEffect(() => {
     if (isLoading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveKey(["1"]);
     } else {
       setActiveKey([]);

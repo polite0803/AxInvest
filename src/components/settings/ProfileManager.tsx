@@ -18,10 +18,13 @@ export function ProfileManager() {
     try {
       const list = await invoke<ProfileInfo[]>("profile_list");
       setProfiles(list);
-    } catch {}
+    } catch {
+      // ignore load errors
+    }
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, []);
 

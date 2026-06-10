@@ -1,5 +1,5 @@
-import { List } from "@/components/common/AntdList";
-import { Badge, Button, Empty, Popover, Space, Typography } from "antd";
+/* eslint-disable react-refresh/only-export-components */
+import { Badge, Button, Empty, List, Popover, Space, Typography } from "antd";
 import { AlertTriangle, Bell, Check, CheckCheck, Info, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,6 +29,7 @@ export function NotificationCenter({ trigger }: NotificationCenterProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visible, setVisible] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const stored = localStorage.getItem("axagent-notifications");
     if (stored) {
@@ -39,6 +40,7 @@ export function NotificationCenter({ trigger }: NotificationCenterProps) {
       }
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     localStorage.setItem(
@@ -92,7 +94,7 @@ export function NotificationCenter({ trigger }: NotificationCenterProps) {
   };
 
   const formatTime = (timestamp: number) => {
-    const now = Date.now();
+    const now = Date.now(); // eslint-disable-line react-hooks/purity
     const diff = now - timestamp;
 
     if (diff < 60000) {

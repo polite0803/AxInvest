@@ -7,7 +7,7 @@ import { logIpcError } from "@/lib/invoke";
 import { type PtySessionInfo, useTerminalStore } from "@/stores/feature/terminalStore";
 import { Badge, Button, Empty, Select } from "antd";
 import { AlertTriangle, CheckCircle, Maximize2, Minimize2, Plus, RefreshCw, Terminal, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface IntegratedTerminalProps {
@@ -15,7 +15,7 @@ interface IntegratedTerminalProps {
   defaultShell?: string;
   height?: number;
   onOutput?: (sessionId: string, data: string) => void;
-  onError?: (sessionId: string, errors: any[]) => void;
+  onError?: (sessionId: string, errors: unknown[]) => void;
 }
 
 export function IntegratedTerminal({
@@ -44,7 +44,9 @@ export function IntegratedTerminal({
   } = useTerminalStore();
 
   const terminalRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const xtermRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const terminalReadyRef = useRef(false);
@@ -57,12 +59,14 @@ export function IntegratedTerminal({
   void enhancementOptions;
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const activeOutput = activeSessionId
-    ? (outputBuffers[activeSessionId] ?? [])
-    : [];
-  const activeAnalysis = activeSessionId
-    ? analysis[activeSessionId]
-    : undefined;
+  const activeOutput = useMemo(
+    () => (activeSessionId ? (outputBuffers[activeSessionId] ?? []) : []),
+    [activeSessionId, outputBuffers],
+  );
+  const activeAnalysis = useMemo(
+    () => (activeSessionId ? analysis[activeSessionId] : undefined),
+    [activeSessionId, analysis],
+  );
 
   const initTerminal = useCallback(async () => {
     if (!terminalRef.current) {
@@ -132,6 +136,7 @@ export function IntegratedTerminal({
     } catch (e) {
       logIpcError("初始化 xterm")(e);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId, resizeSession, writeToSession]);
 
   useEffect(() => {
@@ -145,6 +150,7 @@ export function IntegratedTerminal({
         terminalReadyRef.current = false;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

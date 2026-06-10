@@ -263,8 +263,10 @@ export function InputArea() {
 
   const objectUrlsRef = useRef<string[]>([]);
   const attachmentObjectUrls = useMemo(() => {
+    // eslint-disable-next-line react-hooks/refs
     objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     const urls = attachedFiles.map((f) => URL.createObjectURL(f));
+    // eslint-disable-next-line react-hooks/refs
     objectUrlsRef.current = urls;
     return urls;
   }, [attachedFiles]);
@@ -307,6 +309,7 @@ export function InputArea() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const valueRef = useRef(value);
+  // eslint-disable-next-line react-hooks/refs
   valueRef.current = value;
   const [cursorPosition, setCursorPosition] = useState(0);
   const [showSuggest, setShowSuggest] = useState(false);
@@ -319,6 +322,7 @@ export function InputArea() {
   const ABSOLUTE_MAX_HEIGHT = 600;
   const [userMinHeight, setUserMinHeight] = useState(INITIAL_MIN_HEIGHT);
   const userMinHeightRef = useRef(userMinHeight);
+  // eslint-disable-next-line react-hooks/refs
   userMinHeightRef.current = userMinHeight;
   const dragStateRef = useRef<{ startY: number; startH: number } | null>(null);
   const hasUserResizedRef = useRef(false);
@@ -369,6 +373,7 @@ export function InputArea() {
       return totalActiveCount;
     }
     return activeMessages.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messagesLength, hasOlderMessages, totalActiveCount]);
 
   const conversations = useConversationStore((s) => s.conversations);
@@ -488,6 +493,7 @@ export function InputArea() {
   );
   // Use pendingModeRef when no conversation exists so the UI (mode badge, send routing)
   // correctly reflects the user's last mode dropdown choice.
+  // eslint-disable-next-line react-hooks/refs
   const currentMode = activeConversation?.mode || pendingModeRef.current || "chat";
 
   // Reset pending mode refs when a conversation becomes active
@@ -504,6 +510,7 @@ export function InputArea() {
       | "direct"
       | "plan"
       | undefined;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setWorkStrategy(strategy || "direct");
   }, [activeConversation?.work_strategy, activeConversation?.mode]);
 
@@ -567,6 +574,7 @@ export function InputArea() {
       && currentMode === "agent"
       && settings.default_workspace_dir
     ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAgentCwd(settings.default_workspace_dir);
     }
   }, [activeConversationId, currentMode, settings.default_workspace_dir]);
@@ -577,10 +585,11 @@ export function InputArea() {
       invoke("agent_get_session", {
         request: { conversationId: activeConversationId },
       })
-        .then((session: any) => {
-          if (session) {
-            setAgentPermissionMode(session.permission_mode || "default");
-            setAgentCwd(session.cwd || null);
+        .then((session: unknown) => {
+          const s = session as { permission_mode?: string; cwd?: string | null } | null;
+          if (s) {
+            setAgentPermissionMode(s.permission_mode || "default");
+            setAgentCwd(s.cwd || null);
           }
         })
         .catch(logIpcError("IPC: load agent session info"));
@@ -598,6 +607,7 @@ export function InputArea() {
         _draftCache.delete(prev);
       }
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setValue(
       activeConversationId ? _draftCache.get(activeConversationId) || "" : "",
     );
@@ -620,9 +630,11 @@ export function InputArea() {
       ? `axagent:companion-models:${activeConversationId}`
       : null,
   );
+  // eslint-disable-next-line react-hooks/refs
   companionStorageKeyRef.current = activeConversationId
     ? `axagent:companion-models:${activeConversationId}`
     : null;
+  // eslint-disable-next-line react-hooks/refs
   const companionStorageKey = companionStorageKeyRef.current
     ? `axagent:companion-models:${activeConversationId}`
     : null;
@@ -630,6 +642,7 @@ export function InputArea() {
   // Load companion models when conversation changes
   useEffect(() => {
     if (!companionStorageKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCompanionModels([]);
       return;
     }
@@ -649,6 +662,7 @@ export function InputArea() {
     }
     const text = pendingPromptText;
     useConversationStore.getState().setPendingPromptText(null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setValue(text);
   }, [pendingPromptText]);
 
@@ -698,7 +712,7 @@ export function InputArea() {
         setSearchProviderId(p.id);
       },
     }));
-  }, [searchProviders, searchEnabled, searchProviderId, token, t]);
+  }, [searchProviders, searchEnabled, searchProviderId, setSearchEnabled, setSearchProviderId, token, t]);
 
   // MCP popover content — mode selector + checkboxes with alias/description
   const mcpPopoverContent = useMemo(() => {
@@ -911,6 +925,8 @@ export function InputArea() {
     toggleMcpServer,
     mcpMode,
     setMcpMode,
+    navigate,
+    setSettingsSection,
     token,
     t,
   ]);
@@ -974,6 +990,7 @@ export function InputArea() {
         }
       })(),
       onClick: () => handleThinkingSelect(opt.key),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     })), [thinkingOptions]);
 
   const handleThinkingSelect = useCallback(
@@ -1021,6 +1038,7 @@ export function InputArea() {
       }
     }
     return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expertBuiltinRoles, agencyRoles, customRoles, t]);
 
   // Unified mode menu items (Ask / Plan / Action)
@@ -1076,7 +1094,8 @@ export function InputArea() {
       });
     }
     return items;
-  }, [t, unifiedMode, gatewayLinks, selectedGatewayId, token.colorPrimary]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t, unifiedMode, gatewayLinks, token.colorPrimary]);
 
   // Handle expert selection
   const handleExpertSelect = useCallback(
@@ -1156,7 +1175,8 @@ export function InputArea() {
       icon: <ShieldAlert size={14} style={{ color: token.colorError }} />,
       onClick: () => handlePermissionModeChange("full_access"),
     },
-  ], [t, agentPermissionMode, token.colorPrimary]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t, agentPermissionMode, token.colorPrimary, token.colorError]);
 
   const handlePermissionModeChange = useCallback(
     async (mode: string) => {
@@ -1196,7 +1216,7 @@ export function InputArea() {
         await applyChange();
       }
     },
-    [activeConversationId, t],
+    [activeConversationId, modal, t],
   );
 
   const permissionModeIcon = useMemo(() => {
@@ -1208,7 +1228,7 @@ export function InputArea() {
       default:
         return <Shield size={14} />;
     }
-  }, [agentPermissionMode]);
+  }, [agentPermissionMode, token.colorPrimary, token.colorError]);
 
   const permissionModeLabel = useMemo(() => {
     switch (agentPermissionMode) {
@@ -1525,6 +1545,7 @@ export function InputArea() {
 
   useEffect(() => {
     if (!activeConversationId || !activeConversation?.context_compression) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSummaryTokenCount(0);
       return;
     }
@@ -1572,6 +1593,7 @@ export function InputArea() {
     const isEstimate = hasOlderMessages && lastMarkerIdx === -1;
     const percent = Math.min(Math.round((usedTokens / maxTokens) * 100), 100);
     return { usedTokens, maxTokens, percent, isEstimate };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     messagesLength,
     currentModel?.max_tokens,
@@ -1812,6 +1834,8 @@ export function InputArea() {
       updateConversation,
       companionModels,
       companionStorageKey,
+      messageApi,
+      t,
     ],
   );
 
@@ -1823,6 +1847,7 @@ export function InputArea() {
         if (activeConversationId) {
           try {
             await updateConversation(activeConversationId, {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               work_strategy: "direct" as any,
             });
           } catch (e) {
@@ -1841,7 +1866,7 @@ export function InputArea() {
         }
       }
     },
-    [activeConversationId, activeConversation, handleWorkStrategyChange, updateConversation],
+    [activeConversationId, handleModeSwitch, handleWorkStrategyChange, updateConversation],
   );
 
   const handleSend = useCallback(async () => {
@@ -1979,11 +2004,10 @@ export function InputArea() {
     messageApi,
     navigate,
     t,
-    searchEnabled,
-    searchProviderId,
     currentMode,
     workStrategy,
     selectedGatewayId,
+    effectiveSearchProviderId,
   ]);
 
   const handleFillLastMessage = useCallback(() => {
@@ -2009,6 +2033,7 @@ export function InputArea() {
       const desired = Math.max(textarea.scrollHeight, userMinHeightRef.current);
       textarea.style.height = Math.min(desired, ABSOLUTE_MAX_HEIGHT) + "px";
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messagesLength, streaming]);
 
   const handleCancel = useCallback(() => {
@@ -2189,6 +2214,7 @@ export function InputArea() {
       unlistenRef.current?.();
       unlistenRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasVision, isTauri]);
 
   const handleKeyDown = useCallback(
@@ -2352,6 +2378,7 @@ export function InputArea() {
     };
     window.addEventListener("axagent:toggle-mode", onToggleMode);
     return () => window.removeEventListener("axagent:toggle-mode", onToggleMode);
+    // eslint-disable-next-line react-hooks/refs
   }, [currentMode, handleModeSwitch]);
 
   return (

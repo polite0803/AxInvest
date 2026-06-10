@@ -126,6 +126,7 @@ export function AppInitializer({ children }: AppInitializerProps) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     runInit();
   }, [runInit]);
 
@@ -192,7 +193,9 @@ async function enableD2AndPreload() {
   try {
     const { enableD2 } = await import("markstream-react");
     enableD2(() => import("@terrastruct/d2"));
-  } catch {}
+  } catch {
+    // D2 may not be available
+  }
   void preloadChatRenderers();
   preloadCommonPages();
 }

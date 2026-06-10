@@ -90,6 +90,10 @@ if (canRunFrontend) {
 
   step("dprint 格式化检查", "npx dprint check");
 
+  if (!quick) {
+    step("ESLint 检查", "npx eslint src --max-warnings=0");
+  }
+
   step("TypeScript 类型检查", "npx tsc --noEmit");
 
   step("i18n 键完整性检查", "node scripts/check-i18n-key-exists.mjs");

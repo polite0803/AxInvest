@@ -168,6 +168,7 @@ export function SchedulerSettings() {
 
   useEffect(() => {
     if (inTauri) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadCustomTasks();
       loadTemplates();
     }
@@ -381,12 +382,13 @@ export function SchedulerSettings() {
         });
       case "daily":
         return t("settings.scheduler.dailyDesc");
-      case "weekly":
+      case "weekly": {
         const dayNames = (config.weekdays || [])
           .filter((w): w is Weekday => !!w)
           .map((w) => t(`settings.scheduler.${w}`))
           .join(", ");
         return t("settings.scheduler.weeklyDesc", { days: dayNames || "-" });
+      }
       case "monthly":
         return t("settings.scheduler.monthlyDesc", {
           day: config.month_day || "-",
@@ -1268,7 +1270,7 @@ export function SchedulerSettings() {
                   <Form.List name="time_ranges">
                     {(fields, { add, remove }) => (
                       <>
-                        {fields.map(({ key, name, ...restField }, index) => (
+                        {fields.map(({ key, ...restField }, index) => (
                           <div
                             key={key}
                             style={{

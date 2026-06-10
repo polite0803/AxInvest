@@ -11,8 +11,12 @@ import {
   shouldStickToBottomOnLayoutChange,
 } from "./chatScroll";
 
+interface BubbleListElement extends HTMLElement {
+  scrollBoxNativeElement?: HTMLElement;
+}
+
 export interface UseChatViewScrollParams {
-  bubbleListRef: React.RefObject<any | null>;
+  bubbleListRef: React.RefObject<HTMLElement | null>;
   activeConversationId: string | null;
   bubbleListThemeKey: string;
   messageCount: number;
@@ -73,11 +77,11 @@ export function useChatViewScroll({
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior });
     }
-  }, []);
+  }, [bubbleListRef]);
 
   useLayoutEffect(() => {
     const el = bubbleListRef.current;
-    scrollBoxRef.current = (el?.scrollBoxNativeElement as HTMLElement) ?? el ?? null;
+    scrollBoxRef.current = ((el as BubbleListElement)?.scrollBoxNativeElement as HTMLElement) ?? el ?? null;
   });
 
   useEffect(() => {
@@ -121,7 +125,7 @@ export function useChatViewScroll({
   const minimapScrollTo = useCallback((messageId: string) => {
     let scrollBox = scrollBoxRef.current;
     if (!scrollBox) {
-      scrollBox = (bubbleListRef.current?.scrollBoxNativeElement as HTMLElement)
+      scrollBox = ((bubbleListRef.current as BubbleListElement)?.scrollBoxNativeElement as HTMLElement)
         ?? document.querySelector<HTMLElement>(".msg-list-scroll-box");
       if (scrollBox) {
         scrollBoxRef.current = scrollBox;
@@ -146,10 +150,11 @@ export function useChatViewScroll({
       el = parent;
     }
     el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+  }, [bubbleListRef]);
 
   useEffect(() => {
     pendingScrollConversationIdRef.current = activeConversationId ?? null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setShowScrollToBottom(false);
     setStickToBottom(true);
     scrollLayoutMetricsRef.current = { scrollHeight: 0, clientHeight: 0 };
@@ -170,7 +175,7 @@ export function useChatViewScroll({
   }, []);
 
   const handleLoadOlderMessages = useCallback(async () => {
-    const scrollContainer = bubbleListRef.current?.scrollBoxNativeElement as
+    const scrollContainer = (bubbleListRef.current as BubbleListElement)?.scrollBoxNativeElement as
       | HTMLDivElement
       | null
       | undefined;
@@ -190,7 +195,7 @@ export function useChatViewScroll({
         );
       });
     });
-  }, [loadOlderMessages]);
+  }, [loadOlderMessages, bubbleListRef]);
 
   const handleBubbleListScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
@@ -239,7 +244,7 @@ export function useChatViewScroll({
       }
       void handleLoadOlderMessages();
     },
-    [handleLoadOlderMessages, hasOlderMessages, loading, loadingOlder],
+    [handleLoadOlderMessages, hasOlderMessages, loading, loadingOlder, scrollToBottomImmediate],
   );
 
   const handleScrollToBottom = useCallback(() => {
@@ -315,6 +320,7 @@ export function useChatViewScroll({
     bubbleListThemeKey,
     messageCount,
     syncScrollToBottomVisibility,
+    scrollToBottomImmediate,
   ]);
 
   const prevStreamingRef = useRef(false);
@@ -334,7 +340,7 @@ export function useChatViewScroll({
         clearTimeout(streamingTimerRef.current);
       }
     };
-  }, [streaming]);
+  }, [streaming, scrollToBottomImmediate]);
 
   useEffect(() => {
     const rafId = window.requestAnimationFrame(() => {
@@ -346,7 +352,7 @@ export function useChatViewScroll({
       syncScrollToBottomVisibility();
     });
     return () => window.cancelAnimationFrame(rafId);
-  }, [allBubbleItems, stickToBottom, syncScrollToBottomVisibility]);
+  }, [allBubbleItems, stickToBottom, syncScrollToBottomVisibility, scrollToBottomImmediate]);
 
   useEffect(() => {
     if (!activeConversationId || allBubbleItems.length === 0) {
@@ -369,7 +375,7 @@ export function useChatViewScroll({
       window.cancelAnimationFrame(frame1);
       window.cancelAnimationFrame(frame2);
     };
-  }, [activeConversationId, allBubbleItems.length, lastBubbleKey]);
+  }, [activeConversationId, allBubbleItems.length, lastBubbleKey, scrollToBottomImmediate]);
 
   return {
     showScrollToBottom,

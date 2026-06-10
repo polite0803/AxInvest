@@ -344,6 +344,7 @@ const SchemaEditorModal: React.FC<{
   const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setText(initial);
       setError(null);
     }
@@ -409,15 +410,15 @@ function TemplateSettings({
   const { t } = useTranslation();
   const { token } = theme.useToken();
 
-  if (!currentTemplate) {
-    return null;
-  }
-
   const [schemaModal, setSchemaModal] = React.useState<{
     open: boolean;
     kind: "input" | "output";
     initial: string;
   }>({ open: false, kind: "input", initial: "" });
+
+  if (!currentTemplate) {
+    return null;
+  }
 
   const openSchemaModal = (kind: "input" | "output") => {
     const schema = kind === "input"
@@ -668,6 +669,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
     );
     const [localEdgeLabel, setLocalEdgeLabel] = React.useState("");
     React.useEffect(() => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocalEdgeLabel(selectedEdge?.label || "");
     }, [selectedEdge?.id, selectedEdge?.label]);
 

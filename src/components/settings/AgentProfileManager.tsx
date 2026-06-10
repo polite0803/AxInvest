@@ -43,7 +43,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
-const {} = Input;
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   general: <Bot size={14} />,
@@ -156,9 +155,11 @@ export function AgentProfileManager() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     loadRoles();
     loadExperts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {

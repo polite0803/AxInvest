@@ -75,12 +75,12 @@ interface NodeDiagnostic {
   isOrphan: boolean;
   isDeadEnd: boolean;
   toolMissing?: string;
-  modelEmpty?: boolean;
   promptEmpty?: boolean;
   issueCount: number;
 }
 
 /// 兼容编辑器层 + DAG 原始格式推断节点真实类型
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function resolveNodeType(n: any): string {
   // 1. 编辑器 ReactFlow 节点
   if (n.type && n.type !== "base") { return n.type; }
@@ -101,9 +101,10 @@ function resolveNodeType(n: any): string {
   return "unknown";
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function analyzeNodes(nodes: any[], edges: any[]): NodeDiagnostic[] {
-  const sources = new Set(edges.map((e: any) => e.source));
-  const targets = new Set(edges.map((e: any) => e.target));
+  const sources = new Set(edges.map((e) => e.source));
+  const targets = new Set(edges.map((e) => e.target));
 
   // 一次扫描计算工作流级终端计数，避免 O(n²)
   const summaries = nodes.map((n) => ({
@@ -126,7 +127,6 @@ function analyzeNodes(nodes: any[], edges: any[]): NodeDiagnostic[] {
     );
     let issueCount = 0;
     let toolMissing: string | undefined;
-    let modelEmpty: boolean | undefined;
     let promptEmpty: boolean | undefined;
 
     if (isOrphan && !isStart) { issueCount++; }
@@ -160,13 +160,13 @@ function analyzeNodes(nodes: any[], edges: any[]): NodeDiagnostic[] {
       isOrphan,
       isDeadEnd,
       toolMissing,
-      modelEmpty,
       promptEmpty,
       issueCount,
     };
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function analyzeEdges(edges: any[], nodeIds: Set<string>): { invalidSource: number; invalidTarget: number }[] {
   let invalidSource = 0;
   let invalidTarget = 0;
@@ -177,6 +177,7 @@ function analyzeEdges(edges: any[], nodeIds: Set<string>): { invalidSource: numb
   return [{ invalidSource, invalidTarget }];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function findCycles(edges: any[]): string[][] {
   const adj = new Map<string, string[]>();
   for (const e of edges) {
@@ -210,6 +211,7 @@ function findCycles(edges: any[]): string[][] {
   return cycles;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function findUnreachableNodes(nodes: any[], edges: any[]): string[] {
   const reachable = new Set<string>();
   const adj = new Map<string, string[]>();
@@ -304,6 +306,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
   const setDryRun = useWorkEngineStore((s) => s.setDryRun);
   const toggleBreakpoint = useWorkEngineStore((s) => s.toggleBreakpoint);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nodeIds = useMemo(() => new Set(nodes.map((n: any) => n.id)), [nodes]);
   const diagnostics = useMemo(() => analyzeNodes(nodes, edges), [nodes, edges]);
   const edgeAnalysis = useMemo(() => analyzeEdges(edges, nodeIds), [edges, nodeIds]);
@@ -329,10 +332,12 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
 
   const analyzeSubWorkflows = useCallback(async () => {
     setSubAnalyzing(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const subNodes = (nodes as any[]).filter((n: any) => {
       const t = n.type || n.data?.type || "";
       return t === "subWorkflow";
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: Record<string, any> = {};
     if (subNodes.length === 0) {
       setSubAnalyzing(false);
@@ -350,6 +355,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
         return;
       }
       pathSet.add(currentId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const subNode = subNodes.find((n: any) => {
         const sid = n.config?.sub_workflow_id || n.data?.config?.sub_workflow_id
           || n.data?.subWorkflowId || n.data?.sub_workflow_id;
@@ -365,6 +371,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
     }
 
     for (const sn of subNodes) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const s = sn as any;
       const subId = s.config?.sub_workflow_id || s.data?.config?.sub_workflow_id
         || s.data?.subWorkflowId || s.data?.sub_workflow_id;
@@ -377,11 +384,13 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
     }
 
     for (const sn of subNodes) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const s = sn as any;
       const subId = s.config?.sub_workflow_id || s.data?.config?.sub_workflow_id
         || s.data?.subWorkflowId || s.data?.sub_workflow_id;
       if (!subId) { continue; }
       try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const tmpl: any = await invoke("get_workflow_template", { id: subId });
         if (!tmpl?.nodes || !Array.isArray(tmpl.nodes)) { continue; }
         const subN = tmpl.nodes;
@@ -394,6 +403,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
         const subInputSchema = tmpl.input_schema || {};
         const mappingIssues: string[] = [];
         if (typeof inputMapping === "object" && Object.keys(inputMapping).length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const schemaProps = (subInputSchema as any)?.properties || {};
           for (const key of Object.keys(inputMapping)) {
             if (Object.keys(schemaProps).length > 0 && !schemaProps[key]) {
@@ -422,17 +432,20 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       }
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (result as any)._recursionErrors = recursionErrors;
     setSubDiags(result);
     setSubAnalyzing(false);
   }, [nodes, workflowId]);
 
   useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const subNodes = (nodes as any[]).filter((n: any) => {
       const t = n.type || n.data?.type || "";
       return t === "subWorkflow";
     });
     if (subNodes.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSubDiags({});
       return;
     }
@@ -521,6 +534,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       title: t("workflow.debug.colIssues"),
       key: "issues",
       width: 150,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       render: (_: any, r: NodeDiagnostic) => (
         <Space size={4} wrap>
           {r.isOrphan && <Tag color="warning">{t("workflow.debug.orphan")}</Tag>}
@@ -538,6 +552,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       title: t("workflow.debug.colNode"),
       key: "node",
       ellipsis: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       render: (_: any, r: NodeExecutionRecord) => (
         <Space size={4}>
           {r.status === "running" && <Badge status="processing" />}
@@ -578,6 +593,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       title: "",
       key: "actions",
       width: 40,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       render: (_: any, r: NodeExecutionRecord) => (
         <Tooltip title={t("workflow.debug.viewDetail")}>
           <Button
@@ -778,9 +794,11 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
 
         {Object.keys(subDiags).length > 0 && (
           <Panel header={`Sub-Workflows (${Object.keys(subDiags).length})${subAnalyzing ? " ..." : ""}`} key="subs">
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             {(subDiags as any)._recursionErrors?.length > 0 && (
               <Card size="small" type="inner" className="mb-2">
                 <Text type="danger" strong>Recursive References Detected</Text>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                 {(subDiags as any)._recursionErrors.map((path: string, i: number) => (
                   <Paragraph key={i} className="mt-1 mb-0" code type="danger">
                     {path}
@@ -1116,7 +1134,9 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
               ? (
                 <div className="flex flex-wrap gap-1">
                   {breakpoints.map((id) => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const node = nodes.find((n: any) => n.id === id);
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const name = node?.title || (node as any)?.data?.title || id;
                     return (
                       <Tag
@@ -1273,17 +1293,17 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
               {detailRecord.sub_workflow_id && (
                 <Descriptions.Item label="Sub-Workflow" span={2}>
                   <Space>
-                    <Tag color="blue">{detailRecord.sub_workflow_id}</Tag>
-                    {detailRecord.output && typeof detailRecord.output === "object"
-                      && (detailRecord.output as any)._child_execution_id && (
+                    <Tag color="blue">{String(detailRecord.sub_workflow_id ?? "")}</Tag>
+                    {!!detailRecord.output && typeof detailRecord.output === "object"
+                      && "_child_execution_id" in detailRecord.output && (
                       <Button
                         type="link"
                         size="small"
                         icon={<EyeOutlined />}
                         loading={subExecutionLoading}
                         onClick={async () => {
-                          const childId = (detailRecord.output as any)._child_execution_id;
-                          if (!childId) { return; }
+                          const childId = (detailRecord.output as Record<string, unknown>)._child_execution_id;
+                          if (!childId || typeof childId !== "string") { return; }
                           setSubExecutionLoading(true);
                           try {
                             const result = await invoke<ExecutionStatusResponse>(

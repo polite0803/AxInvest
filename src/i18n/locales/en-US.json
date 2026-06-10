@@ -3488,6 +3488,7 @@
     "learnFromMessages": "Learn from messages"
   },
   "workflow": {
+    "loopBackCycleDetected": "Loop-back edge would form a cycle, please adjust the target node",
     "categories": {
       "trigger": "Trigger",
       "execution": "Execution",
@@ -3526,9 +3527,12 @@
       "debate": "Debate",
       "databaseQuery": "Database Query",
       "switch": "Switch",
-      "groupFrame": "Group Frame",
+      "swarm": "Swarm",
+      "storage": "Storage",
+      "workflowRef": "Workflow Ref",
       "phaseSeparator": "Phase Separator",
-      "storage": "Storage"
+      "groupFrame": "Group",
+      "toolSetSelector": "Tool Set"
     },
     "aiAssist": {
       "btn": {
@@ -3653,6 +3657,7 @@
       "recommendationGenerated": "Recommendations generated",
       "recommendationFailed": "Recommendation failed",
       "copiedToClipboard": "Copied to clipboard",
+      "lockedByExpert": "System prompt is provided by the selected expert and cannot be modified",
       "tabGenerateWorkflow": "Generate Workflow",
       "describeWorkflow": "Describe your workflow",
       "generatePlaceholder": "Example: Create a code review workflow that explores the codebase structure...",
@@ -3837,6 +3842,7 @@
       "nodesTab": "Nodes",
       "searchNodes": "Search nodes...",
       "legacySuffix": "(Legacy)",
+      "layout": "Layout",
       "templatesTab": "Templates",
       "searchTemplates": "Search templates...",
       "layout": "Layout"
@@ -3912,7 +3918,10 @@
       "routingPrompt": "Routing Prompt",
       "routingPromptPlaceholder": "Describe how LLM should decide...",
       "routingModel": "Routing Model (optional)",
-      "routingModelPlaceholder": "Leave empty for system default"
+      "routingModelPlaceholder": "Leave empty for system default",
+      "deleteNode": "Delete this node",
+      "edgeTypeDebateRound": "Debate Round",
+      "edgeTypeGrouping": "Grouping"
     },
     "preset": "Preset",
     "custom": "Custom",
@@ -4542,6 +4551,33 @@
       "waitAny": "Wait for any",
       "decorative": "Decorative"
     },
+    "containerNode": {
+      "nodes": "nodes",
+      "branchTimeout": "Branch timeout configured"
+    },
+    "swarmNode": {
+      "agents": "Agents",
+      "rounds": "rounds"
+    },
+    "groupNode": {
+      "untitled": "Group",
+      "folded": "folded"
+    },
+    "phaseSeparator": {
+      "defaultLabel": "Phase"
+    },
+    "canvasTitle": {
+      "clickToRename": "Click to rename"
+    },
+    "node": {
+      "inputs": "Inputs",
+      "outputs": "Outputs",
+      "type": "Type",
+      "clickToExpandPorts": "Click to expand ports",
+      "clickToCollapsePorts": "Click to collapse ports",
+      "tickMode": "Tick mode",
+      "retryEnabled": "Retry enabled"
+    },
     "debateNode": {
       "debaters": "debaters",
       "rounds": "rounds",
@@ -4886,6 +4922,22 @@
     },
     "batchEditMode": "Batch edit mode",
     "noExecutionHistory": "No execution history",
+    "legend": {
+      "title": "Workflow Legend",
+      "toggleLabel": "{{action}} legend",
+      "expand": "Expand",
+      "collapse": "Collapse"
+    },
+    "caseLabel": "Case {{n}}",
+    "paramKey": "param_{{n}}",
+    "subWorkflowLabel": "Sub Workflow",
+    "nodesCount": "{{count}} nodes",
+    "contextMenu": {
+      "label": "Node actions"
+    },
+    "templateList": {
+      "moreActions": "More actions for {{name}}"
+    },
     "nodeConfig": {
       "add_debater": "Add debater",
       "convergence_model_role": "Convergence model role",
@@ -4896,6 +4948,13 @@
       "topic_var": "Topic variable"
     },
     "searchNodes": "Search nodes",
+    "search": {
+      "prev": "Previous match",
+      "next": "Next match",
+      "close": "Close search",
+      "placeholder": "Search nodes..."
+    },
+    "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
     "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
     "canvasTitle": {
       "clickToRename": "Click to rename"
@@ -4973,6 +5032,10 @@
     "statusPaused": "Paused",
     "statusPending": "Pending",
     "statusRunning": "Running",
+    "unsavedTitle": "Unsaved changes",
+    "unsavedContent": "You have unsaved changes. Are you sure you want to discard them?",
+    "discard": "Discard",
+    "keepEditing": "Continue editing",
     "nodes": "Nodes"
   },
   "rl": {

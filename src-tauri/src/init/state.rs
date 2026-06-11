@@ -11,6 +11,7 @@ use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::{CacheConfig, SemanticCache};
 use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
+use axagent_harness::workflow_types::ConstraintBlocks;
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
 use tokio_util::sync::CancellationToken;
@@ -384,37 +385,33 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             ));
             // Plan 模式：AgentExecutor 注入 engine 引用以创建/执行临时工作流
             rt.block_on(engine.inject_into_agent_executor(engine.clone()));
-            // 注册股票分析领域约束回调（A 股头部/尾部锚定 + as-of 时间锚定）
-            // spec §6.1: 回放模式下,头部必须先于 STOCK_HARD_CONSTRAINTS 注入
-            // `时间锚定 (截至 X 收盘)` 块,让 LLM 第一时间看到闭世界假设。
-            // as-of 上下文通过 `AS_OF.scope()` 跨 async 任务传递;本闭包在节点
-            // 执行时运行,正处 scope 内,可以直接 `current_as_of()` 读取。
-            rt.block_on(engine.set_domain_constraints(Arc::new(|role_name: &str| {
+            // 注册领域约束：股票角色走特定约束（as-of 时间锚定 + A 股规则），
+            // 其他角色走通用 DomainConstraints::by_role
+            rt.block_on(engine.set_domain_constraints(Arc::new(|role_name: &str| -> ConstraintBlocks {
                 let as_of_date: Option<String> =
                     axagent_astock_data::as_of::current_as_of().map(|c| c.as_string());
                 let is_stock = axagent_stock_analysis::prompts::is_stock_role(role_name);
-                if let Some(date) = as_of_date.as_deref() {
-                    // 回放模式: 时间锚定 + 股票角色约束
-                    let asof_block = axagent_stock_analysis::prompts::asof_system_prompt(date);
-                    if is_stock {
+                if is_stock {
+                    if let Some(date) = as_of_date.as_deref() {
+                        let asof_block = axagent_stock_analysis::prompts::asof_system_prompt(date);
                         let head = format!(
-                            "{asof_block}\n\n{}",
+                            "{asof_block}
+
+{}",
                             axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS
                         );
-                        axagent_runtime::work_engine::ConstraintBlocks::default()
+                        ConstraintBlocks::default()
                             .with_head(head)
                             .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
                     } else {
-                        axagent_runtime::work_engine::ConstraintBlocks::default()
-                            .with_head(asof_block)
+                        ConstraintBlocks::default()
+                            .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
+                            .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
                     }
-                } else if is_stock {
-                    // live 模式: 仅股票角色约束
-                    axagent_runtime::work_engine::ConstraintBlocks::default()
-                        .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
-                        .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
                 } else {
-                    axagent_runtime::work_engine::ConstraintBlocks::default()
+                    // 非股票角色：使用通用领域约束
+                    use axagent_rt_workflow::work_engine::domain_constraints;
+                    domain_constraints::DomainConstraints::by_role(role_name)
                 }
             })));
             engine

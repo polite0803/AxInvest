@@ -38,7 +38,7 @@ export function QualityScore({
 
   useEffect(() => {
     loadQualityScore();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wikiId, pageId]);
 
   useEffect(() => {
@@ -47,7 +47,7 @@ export function QualityScore({
     }
     const interval = setInterval(loadQualityScore, refreshInterval);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh, refreshInterval, wikiId, pageId]);
 
   async function loadQualityScore() {
@@ -81,7 +81,7 @@ export function QualityScore({
     }
     setLoading(false);
     setRefreshing(false);
-  };
+  }
 
   const calculateScore = (issues: LintIssue[]): number => {
     if (issues.length === 0) {

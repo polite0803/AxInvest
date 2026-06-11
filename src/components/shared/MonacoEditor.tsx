@@ -77,7 +77,7 @@ export function MonacoEditor({
       disposed = true;
       editor?.dispose();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

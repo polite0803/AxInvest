@@ -5,6 +5,18 @@ import { AIAssistButton, useNodeAIAssist } from "../../Hooks";
 import type { TriggerNode, TriggerType, WorkflowNode } from "../../types";
 import { BasePropertyPanel } from "./BasePropertyPanel";
 
+/** Union of all trigger config value shapes — TriggerConfig.config can be any of these. */
+interface TriggerConfigFields {
+  cron?: string;
+  timezone?: string;
+  enabled?: boolean;
+  path?: string;
+  method?: string;
+  auth_type?: string;
+  event_type?: string;
+  filter?: Record<string, string>;
+}
+
 interface TriggerPropertyPanelProps {
   node: WorkflowNode;
   onUpdate: (updates: Partial<WorkflowNode>) => void;
@@ -19,8 +31,8 @@ function TriggerConfig({
   triggerConfig,
   handleConfigChange,
 }: {
-  triggerConfig: { type: string; config: Record<string, unknown> };
-  handleConfigChange: (key: string, value: unknown) => void;
+  triggerConfig: { type: string; config: TriggerConfigFields };
+  handleConfigChange: (key: string, value: string | boolean) => void;
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
@@ -28,7 +40,7 @@ function TriggerConfig({
   const [messageApi, contextHolder] = message.useMessage();
 
   const handleAISuggestCron = async () => {
-    const current = (triggerConfig.config.cron as string) || "";
+    const current = triggerConfig.config.cron || "";
     const hint = current.trim() || t("workflow.aiAssist.trigger.cronHint");
     const result = await aiGenerate({
       systemPrompt:
@@ -57,7 +69,7 @@ function TriggerConfig({
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <Input
                 id="trigger-property-panel-input-113"
-                value={(triggerConfig.config.cron as string) || ""}
+                value={triggerConfig.config.cron || ""}
                 onChange={(e) => handleConfigChange("cron", e.target.value)}
                 placeholder="* * * * *"
                 size="small"
@@ -75,7 +87,7 @@ function TriggerConfig({
               {t("workflow.props.timezone")}
             </label>
             <Select
-              value={(triggerConfig.config.timezone as string) || "UTC"}
+              value={triggerConfig.config.timezone || "UTC"}
               onChange={(value) => handleConfigChange("timezone", value)}
               size="small"
               style={{ width: "100%" }}
@@ -103,7 +115,7 @@ function TriggerConfig({
             </label>
             <Switch
               size="small"
-              checked={(triggerConfig.config.enabled as boolean) ?? true}
+              checked={triggerConfig.config.enabled ?? true}
               onChange={(checked) => handleConfigChange("enabled", checked)}
             />
           </div>
@@ -119,7 +131,7 @@ function TriggerConfig({
             </label>
             <Input
               id="trigger-property-panel-input-114"
-              value={(triggerConfig.config.path as string) || ""}
+              value={triggerConfig.config.path || ""}
               onChange={(e) => handleConfigChange("path", e.target.value)}
               placeholder="/webhook/my-trigger"
               size="small"
@@ -130,7 +142,7 @@ function TriggerConfig({
               {t("workflow.props.httpMethod")}
             </label>
             <Select
-              value={(triggerConfig.config.method as string) || "GET"}
+              value={triggerConfig.config.method || "GET"}
               onChange={(value) => handleConfigChange("method", value)}
               size="small"
               style={{ width: "100%" }}
@@ -147,7 +159,7 @@ function TriggerConfig({
               {t("workflow.props.authType")}
             </label>
             <Select
-              value={(triggerConfig.config.auth_type as string) || "none"}
+              value={triggerConfig.config.auth_type || "none"}
               onChange={(value) => handleConfigChange("auth_type", value)}
               size="small"
               style={{ width: "100%" }}
@@ -171,7 +183,7 @@ function TriggerConfig({
             </label>
             <Input
               id="trigger-property-panel-input-115"
-              value={(triggerConfig.config.event_type as string) || ""}
+              value={triggerConfig.config.event_type || ""}
               onChange={(e) => handleConfigChange("event_type", e.target.value)}
               size="small"
             />
@@ -223,12 +235,12 @@ export const TriggerPropertyPanel: React.FC<TriggerPropertyPanelProps> = ({
     onUpdate({ config: newConfig });
   };
 
-  const handleConfigChange = (key: string, value: unknown) => {
+  const handleConfigChange = (key: string, value: string | boolean) => {
     onUpdate({
       config: {
         ...triggerConfig,
         config: {
-          ...(triggerConfig.config as Record<string, unknown>),
+          ...(triggerConfig.config as TriggerConfigFields),
           [key]: value,
         },
       },
@@ -274,7 +286,7 @@ export const TriggerPropertyPanel: React.FC<TriggerPropertyPanelProps> = ({
           {t("workflow.props.triggerConfig")}
         </label>
         <TriggerConfig
-          triggerConfig={triggerConfig}
+          triggerConfig={triggerConfig as { type: string; config: TriggerConfigFields }}
           handleConfigChange={handleConfigChange}
         />
       </div>

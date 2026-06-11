@@ -136,7 +136,9 @@ describe("stockAnalysisStore", () => {
     });
 
     it("handles workflow-completed event with AgentExecutor JSON results", async () => {
-      let completeHandler: (event: { payload: { workflowId: string; results: Record<string, { role: string; content: string }> } }) => void = () => {};
+      let completeHandler: (
+        event: { payload: { workflowId: string; results: Record<string, { role: string; content: string }> } },
+      ) => void = () => {};
       listenMock.mockImplementation((event: string, handler) => {
         if (event === "workflow-completed") { completeHandler = handler; }
         return Promise.resolve(unlistenMock);

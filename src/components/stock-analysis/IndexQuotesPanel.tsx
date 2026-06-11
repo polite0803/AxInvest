@@ -41,13 +41,13 @@ export function IndexQuotesPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<IndexQuote[]>("get_index_quotes");
     })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (Array.isArray(data) && data.length > 0) {
           setQuotes(data);
         } else {
@@ -62,9 +62,11 @@ export function IndexQuotesPanel() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const columns = [

@@ -251,7 +251,6 @@ export const SwitchPropertyPanel: React.FC<Props> = ({ node, onUpdate, onDelete 
               onClick={() => {
                 setCfg(
                   "cases",
-                   
                   config.cases.filter((_: any, j: number) => j !== i),
                 );
               }}

@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { QuantMetricsCard } from "@/components/quant/charts/QuantMetricsCard";
 import { useBacktestStore } from "@/stores/feature/quant";
-import type { MetricsCompareResponse, RunWithMetrics } from "@/types";
+import type { RunWithMetrics } from "@/types/quant";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -27,7 +27,7 @@ export function CompareTab() {
   }, [recentRuns, selectedIds.length]);
 
   const onCompare = async () => {
-    if (selectedIds.length < 2) return;
+    if (selectedIds.length < 2) { return; }
     try {
       await compareRuns(selectedIds);
     } catch {
@@ -41,8 +41,7 @@ export function CompareTab() {
     {
       title: t("quant.metrics.totalReturn"),
       key: "totalReturn",
-      render: (_: unknown, r: RunWithMetrics) =>
-        r.metrics ? `${(r.metrics.totalReturn * 100).toFixed(2)}%` : "—",
+      render: (_: unknown, r: RunWithMetrics) => r.metrics ? `${(r.metrics.totalReturn * 100).toFixed(2)}%` : "—",
     },
     {
       title: t("quant.metrics.sharpe"),
@@ -52,8 +51,7 @@ export function CompareTab() {
     {
       title: t("quant.metrics.maxDrawdownPct"),
       key: "maxDD",
-      render: (_: unknown, r: RunWithMetrics) =>
-        r.metrics ? `${(r.metrics.maxDrawdownPct * 100).toFixed(2)}%` : "—",
+      render: (_: unknown, r: RunWithMetrics) => r.metrics ? `${(r.metrics.maxDrawdownPct * 100).toFixed(2)}%` : "—",
     },
     {
       title: t("quant.metrics.winRate"),

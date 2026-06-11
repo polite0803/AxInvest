@@ -113,20 +113,28 @@ function computeDecisionLocal(params: PmInputParams): PmDecision {
   // 风险调整
   const riskAdjustment = (() => {
     switch (overallRisk) {
-      case "低": return 5;
-      case "高": return -5;
-      case "极高": return -10;
-      default: return 0;
+      case "低":
+        return 5;
+      case "高":
+        return -5;
+      case "极高":
+        return -10;
+      default:
+        return 0;
     }
   })();
 
   // 催化剂加成
   const catalystBonus = (() => {
     switch (catalystLevel) {
-      case "L3估值体系级": return 12;
-      case "L2业绩拐点级": return 6;
-      case "L1普通消息": return 2;
-      default: return 0;
+      case "L3估值体系级":
+        return 12;
+      case "L2业绩拐点级":
+        return 6;
+      case "L1普通消息":
+        return 2;
+      default:
+        return 0;
     }
   })();
 
@@ -143,10 +151,10 @@ function computeDecisionLocal(params: PmInputParams): PmDecision {
 
   // 最终动作
   const decision = (() => {
-    if (confidence >= 80 && positionPct >= 30) return "增持";
-    if (confidence >= 60) return "买入";
-    if (confidence >= 40) return "持有";
-    if (positionPct < 10) return "减持";
+    if (confidence >= 80 && positionPct >= 30) { return "增持"; }
+    if (confidence >= 60) { return "买入"; }
+    if (confidence >= 40) { return "持有"; }
+    if (positionPct < 10) { return "减持"; }
     return "持有";
   })();
 
@@ -160,7 +168,11 @@ function computeDecisionLocal(params: PmInputParams): PmDecision {
     riskLevel,
     stopLossPct: positionPct > 0 ? 8.0 : 0,
     takeProfitPct: positionPct > 0 ? 15.0 : 0,
-    reasoning: `确定性公式结果: totalScore=${totalScore.toFixed(0)}, dqi=${dqiScore.toFixed(0)}, risk=${overallRisk}, catalyst=${catalystLevel}, consensus=${consensusScore}, adjustment=${adjustment.toFixed(1)}, confidence=${Math.round(confidence)}, position=${Math.round(positionPct)}`,
+    reasoning: `确定性公式结果: totalScore=${totalScore.toFixed(0)}, dqi=${
+      dqiScore.toFixed(0)
+    }, risk=${overallRisk}, catalyst=${catalystLevel}, consensus=${consensusScore}, adjustment=${
+      adjustment.toFixed(1)
+    }, confidence=${Math.round(confidence)}, position=${Math.round(positionPct)}`,
   };
 }
 
@@ -179,12 +191,14 @@ function extractParamsFromSnapshot(snapshot: Record<string, any>): PmInputParams
   const pmParams = snapshot["params.portfolio-mgr"];
   const inputParams = pmParams?.input_params;
   if (inputParams) {
-    if (typeof inputParams.totalScore === "number") params.totalScore = inputParams.totalScore;
-    if (typeof inputParams.dqiScore === "number") params.dqiScore = inputParams.dqiScore;
-    if (typeof inputParams.overallRisk === "string") params.overallRisk = inputParams.overallRisk;
-    if (typeof inputParams.catalystLevel === "string") params.catalystLevel = inputParams.catalystLevel;
-    if (typeof inputParams.institutionalTrace === "string") params.institutionalTrace = inputParams.institutionalTrace;
-    if (typeof inputParams.consensusScore === "number") params.consensusScore = inputParams.consensusScore;
+    if (typeof inputParams.totalScore === "number") { params.totalScore = inputParams.totalScore; }
+    if (typeof inputParams.dqiScore === "number") { params.dqiScore = inputParams.dqiScore; }
+    if (typeof inputParams.overallRisk === "string") { params.overallRisk = inputParams.overallRisk; }
+    if (typeof inputParams.catalystLevel === "string") { params.catalystLevel = inputParams.catalystLevel; }
+    if (typeof inputParams.institutionalTrace === "string") {
+      params.institutionalTrace = inputParams.institutionalTrace;
+    }
+    if (typeof inputParams.consensusScore === "number") { params.consensusScore = inputParams.consensusScore; }
     return params; // input_params 有完整快照，直接返回
   }
 
@@ -205,8 +219,8 @@ function extractParamsFromSnapshot(snapshot: Record<string, any>): PmInputParams
   // 从 params.a-catalyst 读取催化剂参数
   const catParams = snapshot["params.a-catalyst"];
   if (catParams) {
-    if (catParams.catalyst_level) params.catalystLevel = catParams.catalyst_level;
-    if (catParams.institutional_trace) params.institutionalTrace = catParams.institutional_trace;
+    if (catParams.catalyst_level) { params.catalystLevel = catParams.catalyst_level; }
+    if (catParams.institutional_trace) { params.institutionalTrace = catParams.institutional_trace; }
   }
 
   // 尝试从决策 JSON 反推 totalScore
@@ -219,10 +233,14 @@ function extractParamsFromSnapshot(snapshot: Record<string, any>): PmInputParams
 }
 
 function tryParseDecisionJson(input: any): any {
-  if (!input) return null;
+  if (!input) { return null; }
   // 可能是字符串 JSON，也可能是对象
   if (typeof input === "string") {
-    try { return JSON.parse(input); } catch { return null; }
+    try {
+      return JSON.parse(input);
+    } catch {
+      return null;
+    }
   }
   return input;
 }
@@ -233,10 +251,10 @@ function tryParseDecisionJson(input: any): any {
 function originalDecisionSummary(snapshot: Record<string, any>): PmDecision | null {
   // portfolio-mgr 的 output
   const pmOutput = snapshot["portfolio-mgr"];
-  if (!pmOutput) return null;
+  if (!pmOutput) { return null; }
 
   const parsed = tryParseDecisionJson(pmOutput);
-  if (!parsed || !parsed.decision && !parsed.result) return null;
+  if (!parsed || !parsed.decision && !parsed.result) { return null; }
 
   // CodeNode 的 result 在 output.result 中
   const result = parsed.result || parsed;
@@ -286,21 +304,23 @@ export function WhatIfBacktest() {
         }
       })
       .catch((e) => {
-        if (!cancelled) console.error("Failed to load analyses:", e);
+        if (!cancelled) { console.error("Failed to load analyses:", e); }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 选择分析 → 加载 blackboard snapshot
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId) { return; }
     let cancelled = false;
     invoke<AnalysisRecord>("get_stock_analysis", { analysisId: selectedId })
       .then((record) => {
-        if (cancelled || !record) return;
+        if (cancelled || !record) { return; }
         // 解析 blackboard_snapshot
         let snap: Record<string, any> = {};
         try {
@@ -317,9 +337,11 @@ export function WhatIfBacktest() {
         setOriginalDecision(orig);
       })
       .catch((e) => {
-        if (!cancelled) console.error("Failed to load analysis:", e);
+        if (!cancelled) { console.error("Failed to load analysis:", e); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId]);
 
   // 每次 params 变化时重新计算（优先后端，fallback TS）
@@ -327,14 +349,16 @@ export function WhatIfBacktest() {
     let cancelled = false;
     (async () => {
       const backendResult = await computeDecisionBackend(params);
-      if (cancelled) return;
+      if (cancelled) { return; }
       if (backendResult) {
         setResult(backendResult);
       } else {
         setResult(computeDecisionLocal(params));
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [params]);
 
   // 选择框的 options
@@ -353,14 +377,14 @@ export function WhatIfBacktest() {
 
   // 判断 params 是否有变化
   const hasChanges = useMemo(() => {
-    if (!snapshot) return false;
+    if (!snapshot) { return false; }
     const original = extractParamsFromSnapshot(snapshot);
     return JSON.stringify(original) !== JSON.stringify(params);
   }, [params, snapshot]);
 
   // 差异比较
   const diffFields = useMemo(() => {
-    if (!originalDecision || !result) return [];
+    if (!originalDecision || !result) { return []; }
     const fields: { label: string; before: string; after: string; changed: boolean }[] = [];
     const add = (label: string, before: any, after: any) => {
       const bs = String(before ?? "—");
@@ -393,8 +417,7 @@ export function WhatIfBacktest() {
           options={selectOptions}
           showSearch
           filterOption={(input, option) =>
-            (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false
-          }
+            (option?.label as string)?.toLowerCase().includes(input.toLowerCase()) ?? false}
         />
       </div>
 
@@ -411,13 +434,15 @@ export function WhatIfBacktest() {
               <ParamSlider
                 label="totalScore（基础评分）"
                 value={params.totalScore}
-                min={0} max={100}
+                min={0}
+                max={100}
                 onChange={(v) => setParams((p) => ({ ...p, totalScore: v }))}
               />
               <ParamSlider
                 label="dqiScore（数据质量）"
                 value={params.dqiScore}
-                min={0} max={100}
+                min={0}
+                max={100}
                 onChange={(v) => setParams((p) => ({ ...p, dqiScore: v }))}
               />
               <ParamSelect
@@ -456,7 +481,8 @@ export function WhatIfBacktest() {
               <ParamSlider
                 label="consensusScore（辩论收敛）"
                 value={params.consensusScore}
-                min={0} max={100}
+                min={0}
+                max={100}
                 onChange={(v) => setParams((p) => ({ ...p, consensusScore: v }))}
               />
               <div className="flex justify-end gap-1">
@@ -477,25 +503,76 @@ export function WhatIfBacktest() {
               extra: toolReplayLoading ? <span className="text-xs text-blue-400">计算中...</span> : undefined,
               children: (
                 <div className="space-y-2">
-                  <div className="text-[10px] text-gray-500">修改这些参数会通过后端重新计算工具链（scoring + valuation + risk），进而影响 totalScore 和最终决策。</div>
+                  <div className="text-[10px] text-gray-500">
+                    修改这些参数会通过后端重新计算工具链（scoring + valuation + risk），进而影响 totalScore 和最终决策。
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <ConfigParamSlider label="scoring_trend" value={configOverrides.scoring_trend} onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_trend: v }))} />
-                    <ConfigParamSlider label="scoring_deviation" value={configOverrides.scoring_deviation} onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_deviation: v }))} />
-                    <ConfigParamSlider label="scoring_macd" value={configOverrides.scoring_macd} onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_macd: v }))} />
-                    <ConfigParamSlider label="scoring_volume" value={configOverrides.scoring_volume} onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_volume: v }))} />
-                    <ConfigParamSlider label="scoring_rsi" value={configOverrides.scoring_rsi} onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_rsi: v }))} />
-                    <ConfigParamSlider label="scoring_support" value={configOverrides.scoring_support} onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_support: v }))} />
+                    <ConfigParamSlider
+                      label="scoring_trend"
+                      value={configOverrides.scoring_trend}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_trend: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="scoring_deviation"
+                      value={configOverrides.scoring_deviation}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_deviation: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="scoring_macd"
+                      value={configOverrides.scoring_macd}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_macd: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="scoring_volume"
+                      value={configOverrides.scoring_volume}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_volume: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="scoring_rsi"
+                      value={configOverrides.scoring_rsi}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_rsi: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="scoring_support"
+                      value={configOverrides.scoring_support}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_support: v }))}
+                    />
                   </div>
                   <div className="text-[10px] text-gray-500 mt-1">估值参数</div>
                   <div className="grid grid-cols-2 gap-2">
-                    <ConfigParamSlider label="value_dcf_growth_rate" value={configOverrides.value_dcf_growth_rate} onChange={(v) => setConfigOverrides((p) => ({ ...p, value_dcf_growth_rate: v }))} />
-                    <ConfigParamSlider label="value_dcf_discount_rate" value={configOverrides.value_dcf_discount_rate} onChange={(v) => setConfigOverrides((p) => ({ ...p, value_dcf_discount_rate: v }))} />
-                    <ConfigParamSlider label="value_safety_margin" value={configOverrides.value_safety_margin} onChange={(v) => setConfigOverrides((p) => ({ ...p, value_safety_margin: v }))} />
+                    <ConfigParamSlider
+                      label="value_dcf_growth_rate"
+                      value={configOverrides.value_dcf_growth_rate}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, value_dcf_growth_rate: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="value_dcf_discount_rate"
+                      value={configOverrides.value_dcf_discount_rate}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, value_dcf_discount_rate: v }))}
+                    />
+                    <ConfigParamSlider
+                      label="value_safety_margin"
+                      value={configOverrides.value_safety_margin}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, value_safety_margin: v }))}
+                    />
                   </div>
                   <div className="text-[10px] text-gray-500 mt-1">风控参数</div>
                   <div className="grid grid-cols-2 gap-2">
-                    <ConfigParamSlider label="kelly_fraction" value={configOverrides.kelly_fraction} onChange={(v) => setConfigOverrides((p) => ({ ...p, kelly_fraction: v }))} min={0} max={1} step={0.05} />
-                    <ConfigParamSlider label="risk_max_drawdown_limit" value={configOverrides.risk_max_drawdown_limit} onChange={(v) => setConfigOverrides((p) => ({ ...p, risk_max_drawdown_limit: v }))} min={5} max={50} />
+                    <ConfigParamSlider
+                      label="kelly_fraction"
+                      value={configOverrides.kelly_fraction}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, kelly_fraction: v }))}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                    />
+                    <ConfigParamSlider
+                      label="risk_max_drawdown_limit"
+                      value={configOverrides.risk_max_drawdown_limit}
+                      onChange={(v) => setConfigOverrides((p) => ({ ...p, risk_max_drawdown_limit: v }))}
+                      min={5}
+                      max={50}
+                    />
                   </div>
                   <div className="flex justify-end">
                     <Button
@@ -505,8 +582,10 @@ export function WhatIfBacktest() {
                       onClick={async () => {
                         setToolReplayLoading(true);
                         try {
-                          const _stockCode = selectedId ? records.find((r) => r.id === selectedId)?.stockCode : "";
-                          if (!_stockCode) return;
+                          const _stockCode = selectedId
+                            ? records.find((r) => r.id === selectedId)?.stockCode
+                            : "";
+                          if (!_stockCode) { return; }
                           await invoke("replay_tool_chain", {
                             params: { stockCode: _stockCode, configOverrides },
                           });
@@ -534,9 +613,12 @@ export function WhatIfBacktest() {
             {originalDecision && result && (
               <div className="space-y-1">
                 {diffFields.map((f) => (
-                  <div key={f.label} className={`flex items-center justify-between px-2 py-1 rounded text-xs ${
-                    f.changed ? "bg-blue-900/20" : ""
-                  }`}>
+                  <div
+                    key={f.label}
+                    className={`flex items-center justify-between px-2 py-1 rounded text-xs ${
+                      f.changed ? "bg-blue-900/20" : ""
+                    }`}
+                  >
                     <span className="text-gray-400 w-24">{f.label}</span>
                     <div className="flex items-center gap-1 flex-1 justify-end">
                       <span className={f.changed ? "text-gray-500 line-through" : "text-gray-300"}>
@@ -577,7 +659,11 @@ export function WhatIfBacktest() {
 
 /** 数值滑块参数控件 */
 function ParamSlider({
-  label, value, min, max, onChange,
+  label,
+  value,
+  min,
+  max,
+  onChange,
 }: {
   label: string;
   value: number;
@@ -610,7 +696,10 @@ function ParamSlider({
 
 /** 枚举选择参数控件 */
 function ParamSelect({
-  label, value, options, onChange,
+  label,
+  value,
+  options,
+  onChange,
 }: {
   label: string;
   value: string;
@@ -633,7 +722,12 @@ function ParamSelect({
 
 /** 配置参数覆盖滑块（L2 工具链回测） */
 function ConfigParamSlider({
-  label, value, onChange, min = 0, max = 100, step,
+  label,
+  value,
+  onChange,
+  min = 0,
+  max = 100,
+  step,
 }: {
   label: string;
   value?: number;
@@ -647,7 +741,8 @@ function ConfigParamSlider({
       <span className="text-[10px] text-gray-500 w-20 truncate" title={label}>{label}</span>
       <Slider
         className="flex-1 !mb-0"
-        min={min} max={max}
+        min={min}
+        max={max}
         step={step ?? 1}
         value={value ?? 50}
         onChange={onChange}
@@ -655,7 +750,8 @@ function ConfigParamSlider({
       <InputNumber
         className="!w-14 !text-[11px]"
         size="small"
-        min={min} max={max}
+        min={min}
+        max={max}
         step={step ?? 1}
         value={value ?? 50}
         onChange={(v) => onChange(v ?? min)}

@@ -58,13 +58,13 @@ export function ConceptBlocksPanel({ stockCode }: { stockCode: string }) {
       return;
     }
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<ConceptBlocks | null>("get_stock_concept_blocks", { stockCode });
     })
       .then((result) => {
-        if (cancelled || !result) return;
+        if (cancelled || !result) { return; }
         // 没有行业/概念/地区数据，按"无数据"处理
         if (!result || (result.industry === "未知" && result.concepts.length === 0 && result.regions.length === 0)) {
           setData(null);
@@ -80,9 +80,11 @@ export function ConceptBlocksPanel({ stockCode }: { stockCode: string }) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [stockCode]);
 
   const renderBlock = (items: BlockItem[], color: string) => (

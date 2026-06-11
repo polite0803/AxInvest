@@ -44,9 +44,9 @@ export function IntegratedTerminal({
   } = useTerminalStore();
 
   const terminalRef = useRef<HTMLDivElement>(null);
-   
+
   const xtermRef = useRef<any>(null);
-   
+
   const fitAddonRef = useRef<any>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const terminalReadyRef = useRef(false);

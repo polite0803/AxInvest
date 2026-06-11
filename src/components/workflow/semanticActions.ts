@@ -25,7 +25,6 @@ export function clearSemanticAction(
   const nodeActions = { ...(prev[nodeId] ?? {}) };
   delete nodeActions[skillId];
   if (Object.keys(nodeActions).length === 0) {
-     
     const { [nodeId]: _removed, ...rest } = prev;
     return rest;
   }

@@ -40,7 +40,7 @@ pub struct StockDaySummary {
 #[serde(rename_all = "camelCase")]
 pub struct DecisionComparison {
     pub analysis_date: String,
-    pub action: String,                   // BUY / HOLD / SELL
+    pub action: String, // BUY / HOLD / SELL
     pub target_price: Option<f64>,
     pub stop_loss: Option<f64>,
     pub days_since_analysis: u32,
@@ -161,7 +161,11 @@ async fn fetch_latest_analysis_decision(
         .ok()
         .flatten()?;
 
-    let action = row.decision_action.as_deref().unwrap_or("uncertain").to_string();
+    let action = row
+        .decision_action
+        .as_deref()
+        .unwrap_or("uncertain")
+        .to_string();
     let target = row.decision_json.as_ref().and_then(|raw| {
         serde_json::from_str::<serde_json::Value>(raw)
             .ok()

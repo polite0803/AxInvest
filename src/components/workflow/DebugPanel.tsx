@@ -80,7 +80,7 @@ interface NodeDiagnostic {
 }
 
 /// 兼容编辑器层 + DAG 原始格式推断节点真实类型
- 
+
 function resolveNodeType(n: any): string {
   // 1. 编辑器 ReactFlow 节点
   if (n.type && n.type !== "base") { return n.type; }
@@ -101,7 +101,6 @@ function resolveNodeType(n: any): string {
   return "unknown";
 }
 
- 
 function analyzeNodes(nodes: any[], edges: any[]): NodeDiagnostic[] {
   const sources = new Set(edges.map((e) => e.source));
   const targets = new Set(edges.map((e) => e.target));
@@ -166,7 +165,6 @@ function analyzeNodes(nodes: any[], edges: any[]): NodeDiagnostic[] {
   });
 }
 
- 
 function analyzeEdges(edges: any[], nodeIds: Set<string>): { invalidSource: number; invalidTarget: number }[] {
   let invalidSource = 0;
   let invalidTarget = 0;
@@ -177,7 +175,6 @@ function analyzeEdges(edges: any[], nodeIds: Set<string>): { invalidSource: numb
   return [{ invalidSource, invalidTarget }];
 }
 
- 
 function findCycles(edges: any[]): string[][] {
   const adj = new Map<string, string[]>();
   for (const e of edges) {
@@ -211,7 +208,6 @@ function findCycles(edges: any[]): string[][] {
   return cycles;
 }
 
- 
 function findUnreachableNodes(nodes: any[], edges: any[]): string[] {
   const reachable = new Set<string>();
   const adj = new Map<string, string[]>();
@@ -306,7 +302,6 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
   const setDryRun = useWorkEngineStore((s) => s.setDryRun);
   const toggleBreakpoint = useWorkEngineStore((s) => s.toggleBreakpoint);
 
-   
   const nodeIds = useMemo(() => new Set(nodes.map((n: any) => n.id)), [nodes]);
   const diagnostics = useMemo(() => analyzeNodes(nodes, edges), [nodes, edges]);
   const edgeAnalysis = useMemo(() => analyzeEdges(edges, nodeIds), [edges, nodeIds]);
@@ -332,12 +327,12 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
 
   const analyzeSubWorkflows = useCallback(async () => {
     setSubAnalyzing(true);
-     
+
     const subNodes = (nodes as any[]).filter((n: any) => {
       const t = n.type || n.data?.type || "";
       return t === "subWorkflow";
     });
-     
+
     const result: Record<string, any> = {};
     if (subNodes.length === 0) {
       setSubAnalyzing(false);
@@ -355,7 +350,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
         return;
       }
       pathSet.add(currentId);
-       
+
       const subNode = subNodes.find((n: any) => {
         const sid = n.config?.sub_workflow_id || n.data?.config?.sub_workflow_id
           || n.data?.subWorkflowId || n.data?.sub_workflow_id;
@@ -371,7 +366,6 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
     }
 
     for (const sn of subNodes) {
-       
       const s = sn as any;
       const subId = s.config?.sub_workflow_id || s.data?.config?.sub_workflow_id
         || s.data?.subWorkflowId || s.data?.sub_workflow_id;
@@ -384,13 +378,11 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
     }
 
     for (const sn of subNodes) {
-       
       const s = sn as any;
       const subId = s.config?.sub_workflow_id || s.data?.config?.sub_workflow_id
         || s.data?.subWorkflowId || s.data?.sub_workflow_id;
       if (!subId) { continue; }
       try {
-         
         const tmpl: any = await invoke("get_workflow_template", { id: subId });
         if (!tmpl?.nodes || !Array.isArray(tmpl.nodes)) { continue; }
         const subN = tmpl.nodes;
@@ -403,7 +395,6 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
         const subInputSchema = tmpl.input_schema || {};
         const mappingIssues: string[] = [];
         if (typeof inputMapping === "object" && Object.keys(inputMapping).length > 0) {
-           
           const schemaProps = (subInputSchema as any)?.properties || {};
           for (const key of Object.keys(inputMapping)) {
             if (Object.keys(schemaProps).length > 0 && !schemaProps[key]) {
@@ -432,14 +423,12 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       }
     }
 
-     
     (result as any)._recursionErrors = recursionErrors;
     setSubDiags(result);
     setSubAnalyzing(false);
   }, [nodes, workflowId]);
 
   useEffect(() => {
-     
     const subNodes = (nodes as any[]).filter((n: any) => {
       const t = n.type || n.data?.type || "";
       return t === "subWorkflow";
@@ -535,7 +524,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       title: t("workflow.debug.colIssues"),
       key: "issues",
       width: 150,
-       
+
       render: (_: any, r: NodeDiagnostic) => (
         <Space size={4} wrap>
           {r.isOrphan && <Tag color="warning">{t("workflow.debug.orphan")}</Tag>}
@@ -553,7 +542,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       title: t("workflow.debug.colNode"),
       key: "node",
       ellipsis: true,
-       
+
       render: (_: any, r: NodeExecutionRecord) => (
         <Space size={4}>
           {r.status === "running" && <Badge status="processing" />}
@@ -594,7 +583,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
       title: "",
       key: "actions",
       width: 40,
-       
+
       render: (_: any, r: NodeExecutionRecord) => (
         <Tooltip title={t("workflow.debug.viewDetail")}>
           <Button
@@ -795,11 +784,11 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
 
         {Object.keys(subDiags).length > 0 && (
           <Panel header={`Sub-Workflows (${Object.keys(subDiags).length})${subAnalyzing ? " ..." : ""}`} key="subs">
-            { }
+            {}
             {(subDiags as any)._recursionErrors?.length > 0 && (
               <Card size="small" type="inner" className="mb-2">
                 <Text type="danger" strong>Recursive References Detected</Text>
-                { }
+                {}
                 {(subDiags as any)._recursionErrors.map((path: string, i: number) => (
                   <Paragraph key={i} className="mt-1 mb-0" code type="danger">
                     {path}
@@ -1135,9 +1124,8 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
               ? (
                 <div className="flex flex-wrap gap-1">
                   {breakpoints.map((id) => {
-                     
                     const node = nodes.find((n: any) => n.id === id);
-                     
+
                     const name = node?.title || (node as any)?.data?.title || id;
                     return (
                       <Tag

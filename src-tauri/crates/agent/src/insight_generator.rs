@@ -729,7 +729,10 @@ mod tests {
         }
         // 再次存储第一个（触发去重合并）
         let original = v[0].clone();
-        let first = g.store_insight(original.clone()).await.expect("first store");
+        let first = g
+            .store_insight(original.clone())
+            .await
+            .expect("first store");
         let second = g.store_insight(original).await.expect("second store");
         assert_eq!(first.id, second.id, "merge should return same id");
         let all = g.get_insights().await;

@@ -13,8 +13,8 @@ interface QuantMetricsCardProps {
 }
 
 function colorForValue(v: number, positiveIsGood: boolean | undefined): string | undefined {
-  if (v === 0) return undefined;
-  if (positiveIsGood === undefined) return undefined;
+  if (v === 0) { return undefined; }
+  if (positiveIsGood === undefined) { return undefined; }
   const isPositive = v > 0;
   const good = (positiveIsGood && isPositive) || (!positiveIsGood && !isPositive);
   return good ? "#389e0d" : "#cf1322";

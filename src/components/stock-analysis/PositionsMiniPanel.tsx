@@ -38,7 +38,9 @@ export function PositionsMiniPanel() {
 
   useEffect(() => {
     invoke<PositionSummary[]>("get_trade_positions")
-      .then((p) => { if (Array.isArray(p)) setPositions(p); })
+      .then((p) => {
+        if (Array.isArray(p)) { setPositions(p); }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

@@ -187,12 +187,16 @@ impl WalkForward {
             let test_end = add_days(first_date, test_end_offset.saturating_sub(1));
             let train_bars: Vec<Bar> = klines
                 .iter()
-                .filter(|b| b.date.as_str() >= train_start.as_str() && b.date.as_str() <= train_end.as_str())
+                .filter(|b| {
+                    b.date.as_str() >= train_start.as_str() && b.date.as_str() <= train_end.as_str()
+                })
                 .cloned()
                 .collect();
             let test_bars: Vec<Bar> = klines
                 .iter()
-                .filter(|b| b.date.as_str() >= test_start.as_str() && b.date.as_str() <= test_end.as_str())
+                .filter(|b| {
+                    b.date.as_str() >= test_start.as_str() && b.date.as_str() <= test_end.as_str()
+                })
                 .cloned()
                 .collect();
             if train_bars.len() >= self.config.min_train_bars
@@ -241,12 +245,18 @@ impl WalkForward {
         for (i, fold) in split.folds.iter().enumerate() {
             let train_bars: Vec<Bar> = klines
                 .iter()
-                .filter(|b| b.date.as_str() >= fold.train_start.as_str() && b.date.as_str() <= fold.train_end.as_str())
+                .filter(|b| {
+                    b.date.as_str() >= fold.train_start.as_str()
+                        && b.date.as_str() <= fold.train_end.as_str()
+                })
                 .cloned()
                 .collect();
             let test_bars: Vec<Bar> = klines
                 .iter()
-                .filter(|b| b.date.as_str() >= fold.test_start.as_str() && b.date.as_str() <= fold.test_end.as_str())
+                .filter(|b| {
+                    b.date.as_str() >= fold.test_start.as_str()
+                        && b.date.as_str() <= fold.test_end.as_str()
+                })
                 .cloned()
                 .collect();
             // 每个 fold 用独立的 strategy 实例（避免状态污染）
@@ -254,8 +264,10 @@ impl WalkForward {
             let mut test_strategy = strategy_factory(i);
             let train_result = engine.run(train_strategy.as_mut(), train_bars).await?;
             let test_result = engine.run(test_strategy.as_mut(), test_bars).await?;
-            let train_metrics = MetricsReport::from_backtest_result(&train_result, self.config.risk_free_annual);
-            let test_metrics = MetricsReport::from_backtest_result(&test_result, self.config.risk_free_annual);
+            let train_metrics =
+                MetricsReport::from_backtest_result(&train_result, self.config.risk_free_annual);
+            let test_metrics =
+                MetricsReport::from_backtest_result(&test_result, self.config.risk_free_annual);
             let degradation = if train_metrics.sharpe.abs() > 1e-6 {
                 test_metrics.sharpe / train_metrics.sharpe
             } else {
@@ -300,10 +312,7 @@ impl WalkForward {
             0.0
         } else {
             let mean = degradations.iter().sum::<f64>() / degradations.len() as f64;
-            let var = degradations
-                .iter()
-                .map(|d| (d - mean).powi(2))
-                .sum::<f64>()
+            let var = degradations.iter().map(|d| (d - mean).powi(2)).sum::<f64>()
                 / degradations.len() as f64;
             (1.0 - var.sqrt().min(1.0)).max(0.0)
         };

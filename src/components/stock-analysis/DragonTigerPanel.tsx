@@ -84,14 +84,14 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return checkVendorEnabled("dragontiger", { silent: true });
     })
       .then((check) => {
-        if (cancelled || !check) return;
+        if (cancelled || !check) { return; }
         if (check.status === "disabled") {
           setEntries([]);
           setEmptyKind("vendorDisabled");
@@ -106,7 +106,7 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
         return invoke<any[]>("get_market_dragon_tiger");
       })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (!Array.isArray(data)) { throw new Error("bad data"); }
         const list: DragonTigerEntry[] = data.slice(0, 30).map((e: any) => ({
           code: e.stockCode ?? e.stock_code ?? "",
@@ -129,9 +129,11 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const analyze = async (code: string) => {

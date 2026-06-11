@@ -56,13 +56,13 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
       return;
     }
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<OptionPCR | null>("get_stock_option_pcr", { stockCode });
     })
       .then((result) => {
-        if (cancelled || !result) return;
+        if (cancelled || !result) { return; }
         if (result && (result.callVolume > 0 || result.putVolume > 0)) {
           setPcr(result);
         } else {
@@ -77,9 +77,11 @@ export function OptionPcrPanel({ stockCode }: { stockCode: string }) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [stockCode]);
 
   // PCR > 1 表示看空力量更强（红色）；PCR < 1 表示看多（绿色）

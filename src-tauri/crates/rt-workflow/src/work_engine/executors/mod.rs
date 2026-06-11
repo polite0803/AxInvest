@@ -81,4 +81,6 @@ pub(crate) mod llm_resolve;
 pub(crate) use llm_resolve::resolve_provider_and_adapter;
 
 pub(crate) mod var_filter;
-pub(crate) use var_filter::{collect_data_vars, extract_json_params, is_data_var, resolve_var_path};
+pub(crate) use var_filter::{
+    collect_data_vars, extract_json_params, is_data_var, resolve_var_path,
+};

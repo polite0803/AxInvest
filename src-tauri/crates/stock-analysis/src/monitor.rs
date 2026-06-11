@@ -38,9 +38,7 @@ impl Default for TZeroConfig {
 
 /// T+0 触发回调: 接收 stock_code,异步启动工作流重跑
 pub type TZeroCallback = Arc<
-    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + Sync,
 >;
 
 /// 监控条件
@@ -396,7 +394,8 @@ impl RealtimeMonitor {
         // - 必须有 alert 触发 (没触发就不重跑,避免每分钟空转)
         // - 必须通过 cooldown 检查 (同一只股票两次触发间隔 ≥ min_interval_minutes)
         if !alerts.is_empty() {
-            self.maybe_trigger_t0(&alerts, &config.stock_code, quote).await;
+            self.maybe_trigger_t0(&alerts, &config.stock_code, quote)
+                .await;
         }
     }
 

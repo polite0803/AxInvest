@@ -1,7 +1,7 @@
 // StrategyForm — 策略参数编辑表单
 // 内置策略用字段,RhIA 策略不需
 
-import { Form, InputNumber, Input, Select } from "antd";
+import { Form, Input, InputNumber } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 

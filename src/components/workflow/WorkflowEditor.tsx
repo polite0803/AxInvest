@@ -445,7 +445,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         const isContainer = typeMeta?.isContainer === true
           || (rtType === "subWorkflow" && useWorkflowEditorStore.getState().expandedSubWorkflows[node.id] != null);
         // 子图节点计数（优先从 config.subGraph.nodes 获取，否则回退到引用的子节点 ID 计数）
-         
+
         const subGraphNodes = (node as any).config?.subGraph?.nodes;
         let subGraphChildCount = Array.isArray(subGraphNodes) ? subGraphNodes.length : 0;
         if (subGraphChildCount === 0) {
@@ -588,7 +588,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               : {}),
           },
         };
-         
       });
       // 将 ParallelNode 的 branches[].steps 和 MergeNode（auto-inputs）中的子节点挂载为容器子节点
       // parentId 权威来源是 store.parentRefs（持久化），其次才回退到本次回填期望值。
@@ -596,7 +595,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       // 折叠态：收集所有"应隐藏"的子节点 ID（含 branches.steps + merge auto_inputs）
       const hiddenChildIds = new Set<string>();
       for (const node of nodes) {
-         
         if (node.type === "parallel" && (node as any).config?.branches) {
           const branches = (node as any).config.branches;
           for (const branch of branches) {
@@ -734,7 +732,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             }
           }
         }
-         
       }
 
       // 把回填期望值持久化到 store：扫描结束后调 setParentRef，让 autosave 能保存到后端。
@@ -751,7 +748,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       for (const containerNode of nodes) {
         const typeMeta = NODE_TYPE_MAP[containerNode.type];
         if (!typeMeta?.isContainer) { continue; }
-         
+
         const subGraph = (containerNode as any).config?.subGraph as
           | { nodes?: WorkflowNode[]; edges?: WorkflowEdge[] }
           | undefined;
@@ -804,7 +801,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         // ── 注入子图内部边（subGraph.edges）──
         // 这些边仅在容器展开时可见，连接子图内部的节点。
         // 实际注入在 flowEdges 声明之后的 subGraphEdgeInjection 阶段完成。
-         
       }
 
       // ── 注入展开的子工作流内部节点 ──
@@ -818,7 +814,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           // 新约定：subNode.position 已是相对父节点的偏移，直接透传。
           flowNodes.push({
             id: subNode.id,
-             
+
             type: (subNode as any).type || "agent",
             position: { x: subNode.position.x, y: subNode.position.y },
             parentId: swNodeId,
@@ -852,7 +848,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       const childPortMap = new Map<string, string>();
       for (const node of nodes) {
         if (node.type !== "parallel") { continue; }
-         
+
         const cfg = (node as any).config as { branches?: Array<{ steps: string[] }> } | undefined;
         if (!cfg?.branches) { continue; }
         for (let bi = 0; bi < cfg.branches.length; bi++) {
@@ -919,7 +915,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       for (const containerNode of nodes) {
         const typeMeta = NODE_TYPE_MAP[containerNode.type];
         if (!typeMeta?.isContainer) { continue; }
-         
+
         const subGraph = (containerNode as any).config?.subGraph as
           | { nodes?: WorkflowNode[]; edges?: WorkflowEdge[] }
           | undefined;
@@ -941,7 +937,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             data: { edgeType: subEdge.edge_type },
           });
         }
-         
       }
 
       setREdges(flowEdges);
@@ -1001,7 +996,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       // 禁止连接到装饰容器或从装饰容器出发
       const srcNode = nodes.find((n) => n.id === params.source);
       const tgtNode = nodes.find((n) => n.id === params.target);
-       
+
       if ((srcNode?.config as any)?.kind === "decorative") {
         message.warning(t("workflow.decorativeContainerNoEdges"));
         return;
@@ -1010,7 +1005,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         message.warning(t("workflow.decorativeContainerNoEdges"));
         return;
       }
-       
+
       // 禁止重复边（通过 ref 读取避免 onConnect 依赖 edges 频繁重建）
       const exists = edgesRef.current.some(
         (e) =>
@@ -1343,7 +1338,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         return;
       }
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-       
+
       nodes.forEach((node: any) => {
         const nodeType = (node.data?.type as string) || node.type || "";
         const fallback = NODE_TYPE_MAP[nodeType]?.isContainer
@@ -1639,7 +1634,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   }, []);
 
   const handleNodesChange = useCallback(
-     
     (changes: any) => {
       // ReactFlow 内部 handleParentExpand 尝试直接修改 node.position，
       // 若 position 对象已被冻结则引发只读属性崩溃。
@@ -1688,7 +1682,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         }
       });
     },
-     
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [onNodesChange, currentTemplate, updateNode, deleteNode],
   );
@@ -1751,7 +1744,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   );
 
   const handleEdgesChange = useCallback(
-     
     (changes: any) => {
       onEdgesChange(changes);
 
@@ -1761,7 +1753,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         }
       });
     },
-     
     [onEdgesChange, deleteEdge],
   );
 
@@ -1781,7 +1772,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 
   const handleAutoLayout = useCallback(async () => {
     // 过滤分组边：不参与自动布局
-     
+
     const layoutEdges = reactFlowEdges.filter(
       (e) => (e.data as any)?.edgeType !== "grouping",
     );
@@ -1791,7 +1782,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       layoutEdges,
       parentRefs,
     );
-     
+
     // 保留 edges 不变
     setRNodes(layoutedNodes);
 
@@ -1811,7 +1802,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         const subId = subNode.data?.subWorkflowId || subNode.data?.sub_workflow_id;
         if (!subId) { continue; }
         try {
-           
           const tmpl: any = await invoke("get_workflow_template", { id: subId });
           if (!tmpl?.nodes || !Array.isArray(tmpl.nodes)) { continue; }
           const subNodes = tmpl.nodes;
@@ -1841,7 +1831,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             }
             return { ...n, position: laid.position };
           });
-           
+
           const input = {
             name: tmpl.name || "",
             icon: tmpl.icon || "",
@@ -2232,7 +2222,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               onClose={() => setAiPanelVisible(false)}
               selectedNodeId={selectedNodeId}
               selectedNodePrompt={selectedNodeId
-                 
                 ? (nodes.find(n => n.id === selectedNodeId) as any)?.config?.system_prompt ?? null
                 : null}
               onApplyPromptToNode={applyOptimizedPromptToNode}
@@ -2755,7 +2744,7 @@ function createWorkflowNode(
       console.warn(`[createWorkflowNode] Unknown node type "${type}", falling back to agent`);
       return {
         ...baseNode,
-         
+
         type: type as any,
         config: {},
       };

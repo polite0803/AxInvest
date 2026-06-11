@@ -41,8 +41,8 @@ export function FundPanel() {
         invoke<FundTransfer[]>("list_fund_transfers", { limit: 100 }),
         invoke<FundSummary>("get_fund_summary"),
       ]);
-      if (Array.isArray(t)) setTransfers(t);
-      if (s) setSummary(s);
+      if (Array.isArray(t)) { setTransfers(t); }
+      if (s) { setSummary(s); }
     } catch {
       // silent
     } finally {
@@ -50,7 +50,9 @@ export function FundPanel() {
     }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleRecord = async () => {
     if (form.amount <= 0) { return message.warning("金额必须 > 0"); }
@@ -72,13 +74,10 @@ export function FundPanel() {
   };
 
   const columns = [
-    { title: "类型", dataIndex: "transferType", width: 56,
-      render: (v: string) => v === "deposit" ? "入金" : "出金" },
-    { title: "金额", dataIndex: "amount", width: 72,
-      render: (v: number) => v.toFixed(0) },
+    { title: "类型", dataIndex: "transferType", width: 56, render: (v: string) => v === "deposit" ? "入金" : "出金" },
+    { title: "金额", dataIndex: "amount", width: 72, render: (v: number) => v.toFixed(0) },
     { title: "日期", dataIndex: "transferDate", width: 80 },
-    { title: "手续费", dataIndex: "fee", width: 56,
-      render: (v: number | null) => v ? v.toFixed(0) : "-" },
+    { title: "手续费", dataIndex: "fee", width: 56, render: (v: number | null) => v ? v.toFixed(0) : "-" },
     { title: "备注", dataIndex: "notes", render: (v: string | null) => v || "-" },
   ];
 
@@ -106,8 +105,11 @@ export function FundPanel() {
             总出金<div style={{ fontWeight: "bold" }}>{summary.totalWithdrawals.toFixed(0)}</div>
           </div>
           <div className="p-1 rounded" style={{ background: "var(--surface)" }}>
-            净入金<div style={{ color: summary.netInflow >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
-              {summary.netInflow >= 0 ? "+" : ""}{summary.netInflow.toFixed(0)}
+            净入金<div
+              style={{ color: summary.netInflow >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}
+            >
+              {summary.netInflow >= 0 ? "+" : ""}
+              {summary.netInflow.toFixed(0)}
             </div>
           </div>
         </div>

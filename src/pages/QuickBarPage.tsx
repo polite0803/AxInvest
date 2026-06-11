@@ -543,7 +543,6 @@ function CommandMode({
         )}
         <Input
           id="quick-bar-page-input-131"
-           
           ref={inputRef as any}
           placeholder={showCommands
             ? t("quickbar.selectCommand")

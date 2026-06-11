@@ -108,12 +108,7 @@ impl MetricsReport {
 
     /// 从 BacktestResult 构建
     pub fn from_backtest_result(result: &BacktestResult, risk_free_annual: f64) -> Self {
-        Self::from_equity_curve(
-            &result.equity_curve,
-            &result.trades,
-            risk_free_annual,
-            252.0,
-        )
+        Self::from_equity_curve(&result.equity_curve, &result.trades, risk_free_annual, 252.0)
     }
 }
 
@@ -177,11 +172,7 @@ fn annual_volatility(curve: &[EquityPoint], days_per_year: f64) -> f64 {
         return 0.0;
     }
     let mean = rets.iter().sum::<f64>() / rets.len() as f64;
-    let var = rets
-        .iter()
-        .map(|r| (r - mean).powi(2))
-        .sum::<f64>()
-        / rets.len() as f64;
+    let var = rets.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / rets.len() as f64;
     var.sqrt() * days_per_year.sqrt()
 }
 
@@ -191,11 +182,7 @@ fn sharpe_ratio(curve: &[EquityPoint], risk_free_annual: f64, days_per_year: f64
         return 0.0;
     }
     let mean = rets.iter().sum::<f64>() / rets.len() as f64;
-    let var = rets
-        .iter()
-        .map(|r| (r - mean).powi(2))
-        .sum::<f64>()
-        / rets.len() as f64;
+    let var = rets.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / rets.len() as f64;
     let std = var.sqrt();
     if std < 1e-10 {
         return 0.0;

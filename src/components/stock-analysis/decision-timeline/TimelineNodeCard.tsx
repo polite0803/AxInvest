@@ -1,7 +1,7 @@
 import { Tooltip } from "@/components/layout/Tooltip";
 import { useRightPanel } from "@/hooks/useRightPanel";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import type { EvidenceRef, TimelineNode } from "@/types";
+import type { EvidenceRef, TimelineNode } from "@/types/stock-analysis";
 import { ChevronDown, ChevronRight, Send } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

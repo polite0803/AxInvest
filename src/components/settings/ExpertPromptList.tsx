@@ -28,12 +28,12 @@ export function ExpertPromptList() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return invoke<ExpertRow[]>("list_agency_experts");
     })
       .then((rows) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         const filtered = Array.isArray(rows)
           ? rows.filter((r) =>
             r.source_dir === "stock-analysis" || r.category === "finance" || r.id.startsWith("agency-stock-analysis-")
@@ -42,12 +42,14 @@ export function ExpertPromptList() {
         setExperts(filtered);
       })
       .catch(() => {
-        if (!cancelled) setExperts([]);
+        if (!cancelled) { setExperts([]); }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const expand = (expert: ExpertRow) => {

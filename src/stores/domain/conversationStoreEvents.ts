@@ -8,7 +8,6 @@ import {
   _isMultiModelActive,
   _listenerGen,
   _multiModelDoneResolve,
-   
   _multiModelFirstMessageId,
   _multiModelTotalRemaining,
   _streamBuffer,

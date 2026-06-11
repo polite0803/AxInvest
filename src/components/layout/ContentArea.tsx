@@ -67,7 +67,6 @@ function PageLoader() {
   );
 }
 
- 
 function SafeLazyPage({ Page }: { Page: React.LazyExoticComponent<any> }) {
   const { t } = useTranslation();
   return (

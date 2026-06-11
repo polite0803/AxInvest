@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
-import { Card, Spin, Tooltip, Tag, Empty, Segmented } from "antd";
+import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,14 +9,14 @@ const PERIOD_KEYS = ["short", "mid", "long"] as const;
 
 /** 色标辅助 */
 function rateColor(rate: number): string {
-  if (rate >= 55) return "var(--sa-red)";
-  if (rate >= 45) return "var(--sa-warning, #faad14)";
+  if (rate >= 55) { return "var(--sa-red)"; }
+  if (rate >= 45) { return "var(--sa-warning, #faad14)"; }
   return "var(--sa-green)";
 }
 
 function rateBg(rate: number): string {
-  if (rate >= 55) return "rgba(226, 75, 74, 0.10)";
-  if (rate >= 45) return "rgba(250, 173, 20, 0.10)";
+  if (rate >= 55) { return "rgba(226, 75, 74, 0.10)"; }
+  if (rate >= 45) { return "rgba(250, 173, 20, 0.10)"; }
   return "rgba(82, 196, 26, 0.10)";
 }
 
@@ -59,11 +59,11 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
 
   // 按 (style, period) 重组
   const matrix = useMemo(() => {
-    if (!data) return null;
+    if (!data) { return null; }
     const map: Record<string, Record<string, StrategyStats>> = {};
     const grp = group === "positive" ? data.positive : data.negative;
     for (const [, s] of Object.entries(grp.strategies)) {
-      if (!map[s.style]) map[s.style] = {};
+      if (!map[s.style]) { map[s.style] = {}; }
       map[s.style][s.period] = s;
     }
     return map;
@@ -91,7 +91,9 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
   }
 
   return (
-    <Card size="small" title={t("stockAnalysis.backtest.matrixTitle") ?? "策略回测矩阵"}
+    <Card
+      size="small"
+      title={t("stockAnalysis.backtest.matrixTitle") ?? "策略回测矩阵"}
       extra={
         <Segmented
           size="small"
@@ -171,12 +173,18 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                     <Tooltip
                       title={
                         <div style={{ fontSize: 11, lineHeight: 1.8 }}>
-                          <div>{`${t("stockAnalysis.backtest.colWinRate") ?? "胜率"}: ${s.winRatePct.toFixed(1)}%`}</div>
-                          <div>{`${t("stockAnalysis.backtest.colAvgReturn") ?? "平均收益"}: ${s.avgReturnPct.toFixed(2)}%`}</div>
+                          <div>
+                            {`${t("stockAnalysis.backtest.colWinRate") ?? "胜率"}: ${s.winRatePct.toFixed(1)}%`}
+                          </div>
+                          <div>
+                            {`${t("stockAnalysis.backtest.colAvgReturn") ?? "平均收益"}: ${s.avgReturnPct.toFixed(2)}%`}
+                          </div>
                           <div>{`Sharpe: ${s.sharpeRatio != null ? s.sharpeRatio.toFixed(2) : "—"}`}</div>
                           <div>{`Profit Factor: ${s.profitFactor != null ? s.profitFactor.toFixed(2) : "—"}`}</div>
                           <div>{`${t("stockAnalysis.backtest.colSignalCount") ?? "信号数"}: ${s.totalSignals}`}</div>
-                          <div>{`${t("stockAnalysis.backtest.colMaxLossStreak") ?? "最大连亏"}: ${s.maxConsecutiveLosses}`}</div>
+                          <div>
+                            {`${t("stockAnalysis.backtest.colMaxLossStreak") ?? "最大连亏"}: ${s.maxConsecutiveLosses}`}
+                          </div>
                         </div>
                       }
                     >

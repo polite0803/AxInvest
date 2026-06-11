@@ -45,7 +45,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use rhai::{Array, Engine, Map, Scope, AST};
+use rhai::{AST, Array, Engine, Map, Scope};
 use serde_json::Value;
 
 use crate::ctx::StrategyCtx;
@@ -130,7 +130,10 @@ impl Strategy for RhaiStrategy {
     fn set_param(&mut self, key: &str, value: Value) -> Result<(), QuantError> {
         self.params.insert(key.to_string(), value.clone());
         // 重新调用 init(params) 让用户脚本感知新参数
-        let engine = self.engine.lock().map_err(|e| QuantError::Script(format!("engine lock: {}", e)))?;
+        let engine = self
+            .engine
+            .lock()
+            .map_err(|e| QuantError::Script(format!("engine lock: {}", e)))?;
         let ast = self.ast.clone();
         let params_map = json_value_to_rhai(&value);
         // 调用 init(params) - 用户脚本可选实现
@@ -156,9 +159,7 @@ impl Strategy for RhaiStrategy {
             let mut scope = Scope::new();
             engine.call_fn(&mut scope, &ast, "on_bar", (bar_map, ctx_map))
         };
-        let arr = result.map_err(|e| {
-            QuantError::Script(format!("on_bar 执行失败: {}", e))
-        })?;
+        let arr = result.map_err(|e| QuantError::Script(format!("on_bar 执行失败: {}", e)))?;
         rhai_array_to_signals(arr)
     }
 
@@ -256,10 +257,7 @@ fn ctx_to_rhai(ctx: &StrategyCtx, bar: &Bar) -> Map {
         .map(|p| p.quantity as i64)
         .unwrap_or(0);
     m.insert("position_qty".into(), pos_qty.into());
-    let pos_cost = ctx
-        .position(&bar.code)
-        .map(|p| p.cost_basis)
-        .unwrap_or(0.0);
+    let pos_cost = ctx.position(&bar.code).map(|p| p.cost_basis).unwrap_or(0.0);
     m.insert("position_cost".into(), pos_cost.into());
     m
 }
@@ -282,12 +280,7 @@ fn rhai_array_to_signals(arr: Array) -> Result<Vec<Signal>, QuantError> {
             "buy" => SignalAction::Buy,
             "sell" => SignalAction::Sell,
             "hold" => SignalAction::Hold,
-            other => {
-                return Err(QuantError::Script(format!(
-                    "signal action 非法: {}",
-                    other
-                )))
-            }
+            other => return Err(QuantError::Script(format!("signal action 非法: {}", other))),
         };
         let strength = m
             .get("strength")
@@ -333,20 +326,20 @@ fn json_value_to_rhai(v: &Value) -> rhai::Dynamic {
             } else {
                 rhai::Dynamic::UNIT
             }
-        }
+        },
         Value::String(s) => s.clone().into(),
         Value::Array(arr) => {
             let rhai_arr: Array = arr.iter().map(json_value_to_rhai).collect();
             // 这里会动 array，按值返回
             rhai::Dynamic::from_array(rhai_arr)
-        }
+        },
         Value::Object(obj) => {
             let mut m = Map::new();
             for (k, v) in obj {
                 m.insert(k.clone().into(), json_value_to_rhai(v));
             }
             m.into()
-        }
+        },
     }
 }
 

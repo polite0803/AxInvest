@@ -125,8 +125,8 @@ pub fn extract_json_params(text: &str) -> Option<Value> {
                         }
                         break;
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
@@ -201,18 +201,12 @@ mod tests {
                 "content": "分析文本...",
             }),
         );
-        assert_eq!(
-            resolve_var_path("a-market-analyst.params.bull_score", &vars),
-            Some(json!(40))
-        );
+        assert_eq!(resolve_var_path("a-market-analyst.params.bull_score", &vars), Some(json!(40)));
         assert_eq!(
             resolve_var_path("a-market-analyst.params", &vars),
             Some(json!({"bull_score": 40, "bear_score": 50, "confidence": 70}))
         );
-        assert_eq!(
-            resolve_var_path("a-market-analyst.content", &vars),
-            Some(json!("分析文本..."))
-        );
+        assert_eq!(resolve_var_path("a-market-analyst.content", &vars), Some(json!("分析文本...")));
     }
 
     #[test]

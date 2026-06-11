@@ -33,9 +33,8 @@ interface RightPanelState {
   researchSources: ResearchSourceItem[];
   setResearchSources: (sources: ResearchSourceItem[]) => void;
 
-   
   report: any | null;
-   
+
   setReport: (report: any | null) => void;
 }
 

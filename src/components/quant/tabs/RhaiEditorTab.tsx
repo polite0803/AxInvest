@@ -1,13 +1,13 @@
 // RhaiEditorTab — Rhai 脚本编辑 + 注册
 
-import { Alert, Button, Card, Form, Input, Space, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Form, Input, message, Space, Tag, Typography } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useStrategyStore } from "@/stores/feature/quant";
 import { DEFAULT_RHAI_TEMPLATE } from "@/types";
 
-const { Title, Text, Paragraph } = Typography;
+const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
 export function RhaiEditorTab() {

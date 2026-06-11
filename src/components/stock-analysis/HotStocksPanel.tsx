@@ -69,14 +69,14 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return checkVendorEnabled("screener", { silent: true });
     })
       .then((check) => {
-        if (cancelled || !check) return;
+        if (cancelled || !check) { return; }
         if (check.status === "disabled") {
           setStocks([]);
           setEmptyKind("vendorDisabled");
@@ -91,7 +91,7 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
         return invoke<HotStock[]>("get_hot_stocks");
       })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (Array.isArray(data) && data.length > 0) {
           setStocks(data);
         } else {
@@ -106,9 +106,11 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const analyze = async (code: string) => {

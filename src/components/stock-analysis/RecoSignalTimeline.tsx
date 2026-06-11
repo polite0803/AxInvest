@@ -41,7 +41,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
 
   // 按股票代码筛选
   const filtered = useMemo(() => {
-    if (!filterCode) return signals;
+    if (!filterCode) { return signals; }
     const q = filterCode.toUpperCase();
     return signals.filter(
       (s) => s.stockCode.toUpperCase().includes(q) || s.stockName.toUpperCase().includes(q),
@@ -53,7 +53,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
     const seen = new Set<string>();
     return signals
       .filter((s) => {
-        if (seen.has(s.stockCode)) return false;
+        if (seen.has(s.stockCode)) { return false; }
         seen.add(s.stockCode);
         return true;
       })
@@ -62,7 +62,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
 
   // 聚合统计
   const stats = useMemo(() => {
-    if (filtered.length === 0) return null;
+    if (filtered.length === 0) { return null; }
     const wins = filtered.filter((s) => s.wasProfitable).length;
     const total = filtered.length;
     const avgRet = filtered.reduce((a, s) => a + s.returnPct, 0) / total;
@@ -156,9 +156,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
           <span className="text-sm font-medium">
             {t("stockAnalysis.backtest.signalHistory") ?? "信号时间线"}
           </span>
-          {strategyId && (
-            <Tag className="m-0 text-[10px]">{strategyId}</Tag>
-          )}
+          {strategyId && <Tag className="m-0 text-[10px]">{strategyId}</Tag>}
         </div>
       }
       extra={
@@ -179,67 +177,75 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
       }
       styles={{ body: { padding: "8px 10px" } }}
     >
-      {!strategyId ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t("stockAnalysis.backtest.signalSelectHint") ?? "请在策略矩阵中点击一个策略查看信号明细"}
-        />
-      ) : loading ? (
-        <Spin size="small" style={{ display: "block", margin: "24px auto" }} />
-      ) : error ? (
-        <div className="text-xs text-red-500 text-center py-4">{error}</div>
-      ) : filtered.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t("stockAnalysis.backtest.signalEmpty") ?? "该策略暂无历史信号"}
-        />
-      ) : (
-        <>
-          {/* 聚合摘要 */}
-          {stats && (
-            <div className="flex items-center gap-3 mb-3 text-xs">
-              <span>
-                {t("stockAnalysis.backtest.total") ?? "总计"}: <strong>{stats.total}</strong>
-              </span>
-              <span>
-                {t("stockAnalysis.backtest.colWinRate") ?? "胜率"}:{" "}
-                <strong style={{ color: stats.winRate >= 55 ? "var(--sa-red)" : "var(--sa-green)" }}>
-                  {stats.winRate.toFixed(1)}%
-                </strong>
-              </span>
-              <span>
-                {t("stockAnalysis.backtest.colAvgReturn") ?? "平均收益"}:{" "}
-                <strong style={{ color: stats.avgRet >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
-                  {stats.avgRet >= 0 ? "+" : ""}{stats.avgRet.toFixed(2)}%
-                </strong>
-              </span>
-              <Tooltip title={t("stockAnalysis.backtest.winsAndLosses") ?? `胜 ${stats.wins} / 负 ${stats.total - stats.wins}`}>
-                <span>
-                  <Tag color="green" className="m-0 text-[10px]">W {stats.wins}</Tag>
-                  <Tag color="red" className="m-0 text-[10px]">L {stats.total - stats.wins}</Tag>
-                </span>
-              </Tooltip>
-            </div>
-          )}
-
-          {/* 信号表格 */}
-          <Table
-            dataSource={filtered}
-            columns={columns}
-            rowKey={(r) => `${r.stockCode}-${r.signalDate}-${r.entryPrice}`}
-            pagination={{
-              size: "small",
-              pageSize: 20,
-              showSizeChanger: true,
-              pageSizeOptions: ["10", "20", "50"],
-            }}
-            size="small"
-            bordered={false}
-            scroll={{ x: 640 }}
-            className="signal-history-table"
+      {!strategyId
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("stockAnalysis.backtest.signalSelectHint") ?? "请在策略矩阵中点击一个策略查看信号明细"}
           />
-        </>
-      )}
+        )
+        : loading
+        ? <Spin size="small" style={{ display: "block", margin: "24px auto" }} />
+        : error
+        ? <div className="text-xs text-red-500 text-center py-4">{error}</div>
+        : filtered.length === 0
+        ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("stockAnalysis.backtest.signalEmpty") ?? "该策略暂无历史信号"}
+          />
+        )
+        : (
+          <>
+            {/* 聚合摘要 */}
+            {stats && (
+              <div className="flex items-center gap-3 mb-3 text-xs">
+                <span>
+                  {t("stockAnalysis.backtest.total") ?? "总计"}: <strong>{stats.total}</strong>
+                </span>
+                <span>
+                  {t("stockAnalysis.backtest.colWinRate") ?? "胜率"}:{" "}
+                  <strong style={{ color: stats.winRate >= 55 ? "var(--sa-red)" : "var(--sa-green)" }}>
+                    {stats.winRate.toFixed(1)}%
+                  </strong>
+                </span>
+                <span>
+                  {t("stockAnalysis.backtest.colAvgReturn") ?? "平均收益"}:{" "}
+                  <strong style={{ color: stats.avgRet >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+                    {stats.avgRet >= 0 ? "+" : ""}
+                    {stats.avgRet.toFixed(2)}%
+                  </strong>
+                </span>
+                <Tooltip
+                  title={t("stockAnalysis.backtest.winsAndLosses")
+                    ?? `胜 ${stats.wins} / 负 ${stats.total - stats.wins}`}
+                >
+                  <span>
+                    <Tag color="green" className="m-0 text-[10px]">W {stats.wins}</Tag>
+                    <Tag color="red" className="m-0 text-[10px]">L {stats.total - stats.wins}</Tag>
+                  </span>
+                </Tooltip>
+              </div>
+            )}
+
+            {/* 信号表格 */}
+            <Table
+              dataSource={filtered}
+              columns={columns}
+              rowKey={(r) => `${r.stockCode}-${r.signalDate}-${r.entryPrice}`}
+              pagination={{
+                size: "small",
+                pageSize: 20,
+                showSizeChanger: true,
+                pageSizeOptions: ["10", "20", "50"],
+              }}
+              size="small"
+              bordered={false}
+              scroll={{ x: 640 }}
+              className="signal-history-table"
+            />
+          </>
+        )}
     </Card>
   );
 }

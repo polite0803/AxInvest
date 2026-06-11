@@ -49,13 +49,13 @@ export function ClsFlashPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<any[]>("get_cls_flash");
     })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (Array.isArray(data) && data.length > 0) {
           // 兼容后端字段名变化：驼峰/下划线都接受
           const normalized: ClsFlashItem[] = data.slice(0, 20).map((d: any) => ({
@@ -78,9 +78,11 @@ export function ClsFlashPanel() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

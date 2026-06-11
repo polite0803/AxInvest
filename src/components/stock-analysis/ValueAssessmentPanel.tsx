@@ -308,7 +308,7 @@ export function ValueAssessmentPanel() {
     const code = (rawData?.stockCode as string | undefined) ?? (rawData?.code as string | undefined) ?? "";
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       if (!code) {
         setValuationBand(null);
         return;

@@ -46,7 +46,6 @@ function safeGetAttr(attrs: unknown, key: string): string | undefined {
   return undefined;
 }
 
- 
 function extractText(children: any[] | undefined): string {
   if (!children || children.length === 0) {
     return "";
@@ -79,7 +78,6 @@ function NodeChild({
   ctx,
   renderNode,
 }: {
-   
   child: any;
   indexKey: string | undefined;
   index: number;
@@ -103,7 +101,6 @@ function DefaultContainer({
   renderNode,
   indexKey,
 }: {
-   
   node: any;
   ctx: RenderContext;
   renderNode?: RenderNodeFn | undefined;
@@ -112,7 +109,7 @@ function DefaultContainer({
   return (
     <div className={`vmr-container vmr-container-${node.name ?? "unknown"}`}>
       {Array.isArray(node.children) && ctx && renderNode
-        ? node.children.map((child: any, i: number) => (  
+        ? node.children.map((child: any, i: number) => (
           <NodeChild
             key={child.id
               ?? child.name
@@ -129,7 +126,6 @@ function DefaultContainer({
   );
 }
 
- 
 export function McpContainerNode(props: NodeComponentProps<any>) {
   const { node } = props;
 
@@ -158,7 +154,6 @@ const monoStyle: React.CSSProperties = {
   padding: "4px 0",
 };
 
- 
 function McpToolCard({ node }: { node: any }) {
   const { t } = useTranslation();
 

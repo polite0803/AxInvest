@@ -79,25 +79,27 @@ export function ScheduledAnalysisTab() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return invoke<CronJobRow[]>("list_stock_crons");
     })
       .then((list) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (Array.isArray(list)) { setJobs(list); }
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
     invoke<CronJobRow[]>("list_watchlist_scan_crons")
       .then((list) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (Array.isArray(list)) { setWlScanJobs(list); }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const create = async (values: any) => {

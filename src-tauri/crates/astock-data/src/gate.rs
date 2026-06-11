@@ -10,15 +10,15 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// 支持的供应商及其并发上限
 const CAPACITIES: &[(&str, usize)] = &[
-    ("eastmoney",    3),  // 东方财富：最核心，但限流最严
-    ("tencent",      5),  // 腾讯财经：稳定，可宽松
-    ("baidu_stock",  3),  // 百度股市通：有隐性限流
-    ("ths",          4),  // 同花顺：适中
-    ("akshare",      4),  // AKShare
-    ("mootdx",       3),  // 通达信TCP：连接数不宜过多
-    ("sina",         5),  // 新浪财经
-    ("iwencai",      3),  // 问财：需 API Key
-    ("cninfo",       3),  // 巨潮资讯
+    ("eastmoney", 3),   // 东方财富：最核心，但限流最严
+    ("tencent", 5),     // 腾讯财经：稳定，可宽松
+    ("baidu_stock", 3), // 百度股市通：有隐性限流
+    ("ths", 4),         // 同花顺：适中
+    ("akshare", 4),     // AKShare
+    ("mootdx", 3),      // 通达信TCP：连接数不宜过多
+    ("sina", 5),        // 新浪财经
+    ("iwencai", 3),     // 问财：需 API Key
+    ("cninfo", 3),      // 巨潮资讯
 ];
 
 /// Per-Vendor 并发门控
@@ -34,7 +34,9 @@ pub struct DomainGuard {
 
 impl DomainGuard {
     fn new(permit: OwnedSemaphorePermit) -> Self {
-        Self { _permit: Some(permit) }
+        Self {
+            _permit: Some(permit),
+        }
     }
 }
 

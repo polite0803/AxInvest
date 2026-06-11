@@ -4,19 +4,19 @@
     clippy::let_and_return,
     clippy::if_same_then_else
 )]
+pub mod adjustment;
 pub mod as_of;
 pub mod as_of_capability;
 pub mod calendar;
 pub mod daily_snapshot;
 pub mod disk_cache;
-pub mod gate; // 缺陷 F 修复: 并发门控
 mod error;
+pub mod gate; // 缺陷 F 修复: 并发门控
 pub mod indicators;
 pub mod mcp_tools;
 pub mod types;
-pub mod vendors;
-pub mod adjustment;
 pub mod valuation_band;
+pub mod vendors;
 
 use chrono::Local;
 use std::collections::HashMap;
@@ -98,10 +98,33 @@ impl VendorRouting {
 
     fn default_routing() -> Self {
         Self {
-            quote: vec!["tencent".into(), "mootdx".into(), "sina".into(), "xueqiu".into(), "eastmoney".into()],
-            klines: vec!["eastmoney".into(), "tencent".into(), "sina".into(), "mootdx".into()],
-            financials: vec!["eastmoney".into(), "xueqiu".into(), "baidu_stock".into(), "akshare".into(), "sina".into()],
-            news: vec!["xueqiu".into(), "sina".into(), "eastmoney".into(), "baidu_stock".into(), "akshare".into()],
+            quote: vec![
+                "tencent".into(),
+                "mootdx".into(),
+                "sina".into(),
+                "xueqiu".into(),
+                "eastmoney".into(),
+            ],
+            klines: vec![
+                "eastmoney".into(),
+                "tencent".into(),
+                "sina".into(),
+                "mootdx".into(),
+            ],
+            financials: vec![
+                "eastmoney".into(),
+                "xueqiu".into(),
+                "baidu_stock".into(),
+                "akshare".into(),
+                "sina".into(),
+            ],
+            news: vec![
+                "xueqiu".into(),
+                "sina".into(),
+                "eastmoney".into(),
+                "baidu_stock".into(),
+                "akshare".into(),
+            ],
             money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
@@ -209,10 +232,13 @@ impl AStockClient {
         // 雪球数据源（始终注册，token 通过共享 Arc 运行时注入）
         let xq_token = Arc::new(RwLock::new(String::new()));
         client.xq_token = Some(xq_token.clone());
-        client.register_vendor("xueqiu", Box::new(XueqiuVendor {
-            http: http.clone(),
-            token: xq_token,
-        }));
+        client.register_vendor(
+            "xueqiu",
+            Box::new(XueqiuVendor {
+                http: http.clone(),
+                token: xq_token,
+            }),
+        );
 
         client
     }
@@ -315,7 +341,11 @@ impl AStockClient {
     /// K 线专用 cache key:在 cache_key_for 基础上追加 effective_cutoff(交易日 fallback 后),
     /// 解决缺陷 B —— 同一 as_of_date 下,周末 vs 周一/effective_cutoff 不同时缓存会污染。
     /// live 模式下 effective 与 as_of 一致,行为不变。
-    fn kline_cache_key(stock_code: &str, period: &str, adj: Option<crate::types::AdjType>) -> String {
+    fn kline_cache_key(
+        stock_code: &str,
+        period: &str,
+        adj: Option<crate::types::AdjType>,
+    ) -> String {
         // P1-3: adj 维度 — None/Forward 共用 "fwd"(多数 vendor 默认前复权),
         // Backward 独立 "bwd", AdjType::None 独立 "raw"。
         let adj_tag = match adj {
@@ -727,7 +757,8 @@ impl AStockClient {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        self.get_klines_with_adj(stock_code, period, limit, None).await
+        self.get_klines_with_adj(stock_code, period, limit, None)
+            .await
     }
 
     /// K 线查询，支持复权方式 (R3-A 接口, P1-4 vendor 接入后真正用上)
@@ -760,7 +791,10 @@ impl AStockClient {
         for name in &self.routing.klines {
             if let Some(vendor) = self.find_vendor(name) {
                 let _guard = self.gate.acquire(name).await;
-                match vendor.get_klines(stock_code, period, fetch_limit, _adj_type).await {
+                match vendor
+                    .get_klines(stock_code, period, fetch_limit, _adj_type)
+                    .await
+                {
                     Ok(result) if !result.is_empty() => {
                         let result = Self::truncate_klines_by_asof(result);
                         if result.is_empty() {

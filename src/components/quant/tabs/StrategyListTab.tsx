@@ -1,13 +1,11 @@
 // StrategyListTab — 策略元数据列表
 
-import { Empty, Space, Table, Tag, Typography } from "antd";
+import { Empty, Space, Table, Tag } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useStrategyStore } from "@/stores/feature/quant";
 import type { StrategyMeta } from "@/types";
-
-const { Text } = Typography;
 
 export function StrategyListTab() {
   const { t } = useTranslation();

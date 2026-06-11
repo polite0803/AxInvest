@@ -69,14 +69,14 @@ export function NorthBoundPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return checkVendorEnabled("north", { silent: true });
     })
       .then((check) => {
-        if (cancelled || !check) return;
+        if (cancelled || !check) { return; }
         if (check.status === "disabled") {
           setFlow(null);
           setEmptyKind("vendorDisabled");
@@ -91,7 +91,7 @@ export function NorthBoundPanel() {
         return invoke<any>("get_north_bound_flow");
       })
       .then((f) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (!f) {
           setFlow(null);
           setEmptyKind("noData");
@@ -117,9 +117,11 @@ export function NorthBoundPanel() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const total = flow?.totalFlow ?? 0;

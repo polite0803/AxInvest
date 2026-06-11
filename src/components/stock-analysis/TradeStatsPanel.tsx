@@ -59,13 +59,15 @@ export function TradeStatsPanel() {
     }
   }, []);
 
-  useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
 
-  if (!stats || stats.totalBuys === 0) return null;
+  if (!stats || stats.totalBuys === 0) { return null; }
 
   const profitFactorColor = (pf: number) => {
-    if (pf >= 2) return "var(--sa-red)";
-    if (pf >= 1) return "#fa8c16";
+    if (pf >= 2) { return "var(--sa-red)"; }
+    if (pf >= 1) { return "#fa8c16"; }
     return "var(--sa-green)";
   };
 
@@ -85,13 +87,16 @@ export function TradeStatsPanel() {
         <div className="text-xs p-1 rounded" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>总盈亏</span>
           <div style={{ color: stats.totalRealizedPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
-            {stats.totalRealizedPnl >= 0 ? "+" : ""}{stats.totalRealizedPnl.toFixed(0)}
+            {stats.totalRealizedPnl >= 0 ? "+" : ""}
+            {stats.totalRealizedPnl.toFixed(0)}
           </div>
         </div>
         <div className="text-xs p-1 rounded" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>胜率</span>
           <div style={{ fontWeight: "bold" }}>
-            {stats.winRate.toFixed(1)}%<span className="text-xs" style={{ color: "var(--muted)" }}> ({stats.winCount}/{stats.totalSells})</span>
+            {stats.winRate.toFixed(1)}%<span className="text-xs" style={{ color: "var(--muted)" }}>
+              ({stats.winCount}/{stats.totalSells})
+            </span>
           </div>
         </div>
         <div className="text-xs p-1 rounded" style={{ background: "var(--surface)" }}>
@@ -108,7 +113,7 @@ export function TradeStatsPanel() {
 
       {/* 税费 */}
       <div className="text-xs mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>
-        <span style={{ color: "var(--muted)" }}>税费估算 </span>
+        <span style={{ color: "var(--muted)" }}>税费估算</span>
         <span style={{ color: "var(--sa-green)" }}>印花税 ¥{stats.totalStampTax.toFixed(0)}</span>
         <span className="mx-1" style={{ color: "var(--muted)" }}>|</span>
         <span style={{ color: "var(--muted)" }}>佣金 ¥{stats.totalFeesEst.toFixed(0)}</span>
@@ -126,7 +131,8 @@ export function TradeStatsPanel() {
                 <div>{h.label}</div>
                 <b>{h.count} 笔</b>
                 <div style={{ color: h.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontSize: 9 }}>
-                  {h.totalPnl >= 0 ? "+" : ""}{h.totalPnl.toFixed(0)}
+                  {h.totalPnl >= 0 ? "+" : ""}
+                  {h.totalPnl.toFixed(0)}
                 </div>
               </div>
             ))}
@@ -140,11 +146,16 @@ export function TradeStatsPanel() {
           <div className="text-xs mb-1" style={{ color: "var(--muted)" }}>按策略</div>
           <div className="flex gap-1 flex-wrap">
             {stats.strategyBreakdown.map(s => (
-              <div key={s.strategy} className="text-xs p-1 rounded" style={{ background: "var(--surface)", minWidth: 80 }}>
+              <div
+                key={s.strategy}
+                className="text-xs p-1 rounded"
+                style={{ background: "var(--surface)", minWidth: 80 }}
+              >
                 <Tag style={{ fontSize: 9, lineHeight: "14px", margin: 0 }}>{s.strategy}</Tag>
                 <div>{s.tradeCount} 笔</div>
                 <div style={{ color: s.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontSize: 9 }}>
-                  {s.totalPnl >= 0 ? "+" : ""}{s.totalPnl.toFixed(0)} ({s.winRate.toFixed(0)}%)
+                  {s.totalPnl >= 0 ? "+" : ""}
+                  {s.totalPnl.toFixed(0)} ({s.winRate.toFixed(0)}%)
                 </div>
               </div>
             ))}
@@ -158,13 +169,19 @@ export function TradeStatsPanel() {
           <div className="text-xs mb-1" style={{ color: "var(--muted)" }}>月度盈亏</div>
           <div className="flex gap-1 flex-wrap">
             {stats.monthlyPnl.slice(-12).map(m => (
-              <div key={m.yearMonth} className="text-xs p-1 rounded" style={{
-                background: m.realizedPnl >= 0 ? "rgba(255,77,79,0.08)" : "rgba(82,196,26,0.08)",
-                minWidth: 56, textAlign: "center",
-              }}>
+              <div
+                key={m.yearMonth}
+                className="text-xs p-1 rounded"
+                style={{
+                  background: m.realizedPnl >= 0 ? "rgba(255,77,79,0.08)" : "rgba(82,196,26,0.08)",
+                  minWidth: 56,
+                  textAlign: "center",
+                }}
+              >
                 <div style={{ fontSize: 9, color: "var(--muted)" }}>{m.yearMonth.slice(5)}</div>
                 <div style={{ color: m.realizedPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
-                  {m.realizedPnl >= 0 ? "+" : ""}{m.realizedPnl.toFixed(0)}
+                  {m.realizedPnl >= 0 ? "+" : ""}
+                  {m.realizedPnl.toFixed(0)}
                 </div>
                 <div style={{ fontSize: 8, color: "var(--muted)" }}>{m.winCount}/{m.tradeCount}</div>
               </div>

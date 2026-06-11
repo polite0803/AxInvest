@@ -1847,7 +1847,6 @@ export function InputArea() {
         if (activeConversationId) {
           try {
             await updateConversation(activeConversationId, {
-               
               work_strategy: "direct" as any,
             });
           } catch (e) {

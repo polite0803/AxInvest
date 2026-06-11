@@ -26,21 +26,23 @@ export function RolePromptList() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return invoke<RoleRow[]>("list_agent_roles", { source: "stock-analysis" });
     })
       .then((rows) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         setRoles(Array.isArray(rows) ? rows : []);
       })
       .catch(() => {
-        if (!cancelled) setRoles([]);
+        if (!cancelled) { setRoles([]); }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const expand = (role: RoleRow) => {

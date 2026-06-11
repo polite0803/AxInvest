@@ -1,5 +1,5 @@
 import { useSettingsStore } from "@/stores";
-import { ANALYST_NAMES } from "@/types";
+import { ANALYST_NAMES } from "@/types/stock-analysis";
 import { getSignalColor } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";

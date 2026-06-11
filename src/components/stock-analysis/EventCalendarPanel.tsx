@@ -139,13 +139,13 @@ export function EventCalendarPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return (async () => {
         const check = await checkVendorEnabled("events", { silent: true });
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (check.status === "disabled") {
           setEvents([]);
           setEmptyKind("vendorDisabled");
@@ -161,96 +161,146 @@ export function EventCalendarPanel() {
         }
 
         const items: EventItem[] = [];
-      // 优先：当前正在分析的股票
-      if (stockCode) {
-        await (async () => {
-          try {
-            const lu: any[] = await invoke("get_lockup_schedule", { stockCode: stockCode });
-            if (Array.isArray(lu)) {
-              for (const l of lu.slice(0, 5)) {
-                const date = l.unlockDate ?? l.unlock_date ?? "";
-                if (!date) { continue; }
-                items.push({ type: "lockup", code: stockCode, name: stockName ?? stockCode, date, detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${t("stockAnalysis.settings.panels.lockup")}` });
-              }
-            }
-          } catch { /* 单只失败不影响其他 */ }
-          try {
-            const dv: any[] = await invoke("get_dividend_records", { stockCode: stockCode });
-            if (Array.isArray(dv)) {
-              for (const d of dv.slice(0, 3)) {
-                const ex = d.exDate ?? d.ex_date ?? "";
-                if (!ex) { continue; }
-                items.push({ type: "dividend", code: stockCode, name: stockName ?? stockCode, date: ex, detail: `${(Number(d.dividendPerShare ?? d.dividend_per_share ?? 0)).toFixed(2)}${t("stockAnalysis.settings.panels.perShare")}` });
-              }
-            }
-          } catch { /* */ }
-          try {
-            const evs: any[] = await invoke("get_earnings_calendar", { stockCode: stockCode });
-            if (Array.isArray(evs)) {
-              for (const e of evs.slice(0, 6)) {
-                const ed = e.eventDate ?? e.event_date ?? "";
-                if (!ed) { continue; }
-                items.push({ type: "earnings", code: stockCode, name: e.stockName ?? e.stock_name ?? stockName ?? stockCode, date: ed, detail: e.detail ?? "", earningsType: e.eventType ?? e.event_type ?? "other", period: e.period ?? undefined });
-              }
-            }
-          } catch { /* */ }
-        })();
-      }
-      // 补充：自选股列表
-      try {
-        const wl: any[] = await invoke("list_watchlist");
-        if (Array.isArray(wl)) {
-          for (const w of wl.slice(0, 8)) {
-            if (cancelled) return;
-            if (stockCode && w.stockCode === stockCode) { continue; }
-            const code = w.stockCode;
-            const name = w.stockName ?? w.stockCode;
+        // 优先：当前正在分析的股票
+        if (stockCode) {
+          await (async () => {
             try {
-              const lu: any[] = await invoke("get_lockup_schedule", { stockCode: code });
+              const lu: any[] = await invoke("get_lockup_schedule", { stockCode: stockCode });
               if (Array.isArray(lu)) {
                 for (const l of lu.slice(0, 5)) {
                   const date = l.unlockDate ?? l.unlock_date ?? "";
                   if (!date) { continue; }
-                  items.push({ type: "lockup", code, name, date, detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${t("stockAnalysis.settings.panels.lockup")}` });
+                  items.push({
+                    type: "lockup",
+                    code: stockCode,
+                    name: stockName ?? stockCode,
+                    date,
+                    detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${
+                      t("stockAnalysis.settings.panels.lockup")
+                    }`,
+                  });
                 }
               }
             } catch { /* 单只失败不影响其他 */ }
             try {
-              const dv: any[] = await invoke("get_dividend_records", { stockCode: code });
+              const dv: any[] = await invoke("get_dividend_records", { stockCode: stockCode });
               if (Array.isArray(dv)) {
                 for (const d of dv.slice(0, 3)) {
                   const ex = d.exDate ?? d.ex_date ?? "";
                   if (!ex) { continue; }
-                  items.push({ type: "dividend", code, name, date: ex, detail: `${(Number(d.dividendPerShare ?? d.dividend_per_share ?? 0)).toFixed(2)}${t("stockAnalysis.settings.panels.perShare")}` });
+                  items.push({
+                    type: "dividend",
+                    code: stockCode,
+                    name: stockName ?? stockCode,
+                    date: ex,
+                    detail: `${(Number(d.dividendPerShare ?? d.dividend_per_share ?? 0)).toFixed(2)}${
+                      t("stockAnalysis.settings.panels.perShare")
+                    }`,
+                  });
                 }
               }
             } catch { /* */ }
             try {
-              const evs: any[] = await invoke("get_earnings_calendar", { stockCode: code });
+              const evs: any[] = await invoke("get_earnings_calendar", { stockCode: stockCode });
               if (Array.isArray(evs)) {
                 for (const e of evs.slice(0, 6)) {
                   const ed = e.eventDate ?? e.event_date ?? "";
                   if (!ed) { continue; }
-                  items.push({ type: "earnings", code, name: e.stockName ?? e.stock_name ?? name, date: ed, detail: e.detail ?? "", earningsType: e.eventType ?? e.event_type ?? "other", period: e.period ?? undefined });
+                  items.push({
+                    type: "earnings",
+                    code: stockCode,
+                    name: e.stockName ?? e.stock_name ?? stockName ?? stockCode,
+                    date: ed,
+                    detail: e.detail ?? "",
+                    earningsType: e.eventType ?? e.event_type ?? "other",
+                    period: e.period ?? undefined,
+                  });
                 }
               }
             } catch { /* */ }
-          }
+          })();
         }
-      } catch { /* 无自选或后端不可用时跳过 */ }
+        // 补充：自选股列表
+        try {
+          const wl: any[] = await invoke("list_watchlist");
+          if (Array.isArray(wl)) {
+            for (const w of wl.slice(0, 8)) {
+              if (cancelled) { return; }
+              if (stockCode && w.stockCode === stockCode) { continue; }
+              const code = w.stockCode;
+              const name = w.stockName ?? w.stockCode;
+              try {
+                const lu: any[] = await invoke("get_lockup_schedule", { stockCode: code });
+                if (Array.isArray(lu)) {
+                  for (const l of lu.slice(0, 5)) {
+                    const date = l.unlockDate ?? l.unlock_date ?? "";
+                    if (!date) { continue; }
+                    items.push({
+                      type: "lockup",
+                      code,
+                      name,
+                      date,
+                      detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${
+                        t("stockAnalysis.settings.panels.lockup")
+                      }`,
+                    });
+                  }
+                }
+              } catch { /* 单只失败不影响其他 */ }
+              try {
+                const dv: any[] = await invoke("get_dividend_records", { stockCode: code });
+                if (Array.isArray(dv)) {
+                  for (const d of dv.slice(0, 3)) {
+                    const ex = d.exDate ?? d.ex_date ?? "";
+                    if (!ex) { continue; }
+                    items.push({
+                      type: "dividend",
+                      code,
+                      name,
+                      date: ex,
+                      detail: `${(Number(d.dividendPerShare ?? d.dividend_per_share ?? 0)).toFixed(2)}${
+                        t("stockAnalysis.settings.panels.perShare")
+                      }`,
+                    });
+                  }
+                }
+              } catch { /* */ }
+              try {
+                const evs: any[] = await invoke("get_earnings_calendar", { stockCode: code });
+                if (Array.isArray(evs)) {
+                  for (const e of evs.slice(0, 6)) {
+                    const ed = e.eventDate ?? e.event_date ?? "";
+                    if (!ed) { continue; }
+                    items.push({
+                      type: "earnings",
+                      code,
+                      name: e.stockName ?? e.stock_name ?? name,
+                      date: ed,
+                      detail: e.detail ?? "",
+                      earningsType: e.eventType ?? e.event_type ?? "other",
+                      period: e.period ?? undefined,
+                    });
+                  }
+                }
+              } catch { /* */ }
+            }
+          }
+        } catch { /* 无自选或后端不可用时跳过 */ }
 
-      if (cancelled) return;
-      items.sort((a, b) => a.date.localeCompare(b.date));
-      setEvents(items.slice(0, 30));
-      if (items.length === 0) { setEmptyKind("noData"); }
-      setLoading(false);
-    })();
+        if (cancelled) { return; }
+        items.sort((a, b) => a.date.localeCompare(b.date));
+        setEvents(items.slice(0, 30));
+        if (items.length === 0) { setEmptyKind("noData"); }
+        setLoading(false);
+      })();
     })
-    .catch(() => {})
-    .finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [stockCode, stockName, t]);
 
   const analyze = async (code: string) => {

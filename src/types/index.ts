@@ -1100,8 +1100,26 @@ export * from "./nudge";
 export * from "./permission";
 export * from "./platform";
 export * from "./proactive";
+export type { BacktestResult } from "./quant";
 export * from "./search";
-export * from "./stock-analysis";
+export type {
+  BacktestComparisonResponse,
+  BacktestStats,
+  GroupBacktestResult,
+  StrategySignalResult,
+  StrategyStats,
+} from "./stock-analysis";
+export type { BacktestResult as StockBacktestResult } from "./stock-analysis";
+export {
+  classifySentiment,
+  getActionColor,
+  getActionTKey,
+  getRiskColor,
+  getRiskTKey,
+  getSignalColor,
+  parseAction,
+  StockAction,
+} from "./stock-analysis";
 export * from "./style";
 export * from "./tracer";
 export * from "./wiki";

@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import type { TimelineNode } from "@/types";
+import type { TimelineNode } from "@/types/stock-analysis";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";

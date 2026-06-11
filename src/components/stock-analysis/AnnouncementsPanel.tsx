@@ -54,13 +54,13 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
       return;
     }
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<Announcement[]>("get_stock_announcements", { stockCode });
     })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (Array.isArray(data) && data.length > 0) {
           setItems(data);
         } else {
@@ -75,9 +75,11 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [stockCode]);
 
   const columns = [

@@ -65,9 +65,19 @@ impl StockVendor for SinaVendor {
         })
     }
 
-    async fn get_klines(&self, stock_code: &str, period: &str, limit: u32, _adj: Option<AdjType>) -> Result<Vec<KLine>, DataError> {
+    async fn get_klines(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+        _adj: Option<AdjType>,
+    ) -> Result<Vec<KLine>, DataError> {
         let _ = period;
-        let market = if stock_code.starts_with('6') { "sh" } else { "sz" };
+        let market = if stock_code.starts_with('6') {
+            "sh"
+        } else {
+            "sz"
+        };
         // 网易财经历史 K 线 API（新浪无直接 K 线接口，用 163 补）
         let url = format!(
             "https://quotes.money.163.com/service/chddata.html?code={market}{stock_code}&start=20200101&end=20500101&fields=TCLOSE;HIGH;LOW;TOPEN;LCLOSE;VOTURNOVER;VATURNOVER"
@@ -89,12 +99,12 @@ impl StockVendor for SinaVendor {
             // 163 格式: date,TCLOSE(收盘),HIGH(最高),LOW(最低),TOPEN(开盘),LCLOSE(昨收),VOTURNOVER(成交量),VATURNOVER(成交额)
             klines.push(KLine {
                 date: fields[0].to_string(),
-                open: f(3),    // TOPEN
-                high: f(1),    // HIGH
-                low: f(2),     // LOW
-                close: f(4),   // TCLOSE
-                volume: f(5),  // VOTURNOVER
-                amount: f(6),  // VATURNOVER
+                open: f(3),   // TOPEN
+                high: f(1),   // HIGH
+                low: f(2),    // LOW
+                close: f(4),  // TCLOSE
+                volume: f(5), // VOTURNOVER
+                amount: f(6), // VATURNOVER
                 turnover_rate: None,
                 adj_factor: None,
             });
@@ -108,7 +118,11 @@ impl StockVendor for SinaVendor {
     }
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
-        let market = if stock_code.starts_with('6') { "sh" } else { "sz" };
+        let market = if stock_code.starts_with('6') {
+            "sh"
+        } else {
+            "sz"
+        };
         // 网易财经财务指标 API
         let url = format!(
             "https://quotes.money.163.com/service/zycwzb_{market}{stock_code}.html?type=report&start=2020&end=2026"

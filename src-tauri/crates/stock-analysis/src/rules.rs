@@ -40,11 +40,20 @@ impl RuleEngine {
         let is_buy = matches!(proposed_action, "买入" | "增持");
 
         // catalyst_override 路径：L2+ 催化剂 + 机构建仓 + 放量突破 → 容忍追高
-        let catalyst_override = matches!(catalyst_level, Some("L2业绩拐点级") | Some("L3估值体系级"))
-            && matches!(institutional_trace, Some("有建仓痕迹") | Some("疑似建仓"))
-            && indicators.volume_signal == "放量突破";
-        let effective_rsi_limit = if catalyst_override { 95.0 } else { config.rsi_overbought };
-        let effective_bias_limit = if catalyst_override { 12.0 } else { config.bias_limit };
+        let catalyst_override =
+            matches!(catalyst_level, Some("L2业绩拐点级") | Some("L3估值体系级"))
+                && matches!(institutional_trace, Some("有建仓痕迹") | Some("疑似建仓"))
+                && indicators.volume_signal == "放量突破";
+        let effective_rsi_limit = if catalyst_override {
+            95.0
+        } else {
+            config.rsi_overbought
+        };
+        let effective_bias_limit = if catalyst_override {
+            12.0
+        } else {
+            config.bias_limit
+        };
 
         if is_buy && indicators.rsi6 > effective_rsi_limit {
             violations.push(format!(
@@ -60,8 +69,13 @@ impl RuleEngine {
                 corrections.push(format!(
                     "乖离MA5={:.1}%>{:.0}%，但出现放量突破+L{}+机构建仓三重共振，\
                      容忍追高；建议减仓至 50%，止损设于 MA10={:.2}。",
-                    indicators.bias_ma5, effective_bias_limit,
-                    if catalyst_level == Some("L3估值体系级") { "3" } else { "2" },
+                    indicators.bias_ma5,
+                    effective_bias_limit,
+                    if catalyst_level == Some("L3估值体系级") {
+                        "3"
+                    } else {
+                        "2"
+                    },
                     indicators.ma10
                 ));
             } else {

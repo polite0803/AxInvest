@@ -449,9 +449,7 @@ const STRATS: &[StratDef] = &[
     },
 ];
 
-pub const SKIPPED: &[&str] = &[
-    "watchlist_*: 兜底策略无信号逻辑，不计入回测",
-];
+pub const SKIPPED: &[&str] = &["watchlist_*: 兜底策略无信号逻辑，不计入回测"];
 
 // ── 策略查找与单策略信号历史 ──
 
@@ -468,8 +466,7 @@ pub async fn run_signal_history(
     sid: &str,
     stock_codes: Option<&[(String, String)]>,
 ) -> Result<Vec<StrategySignalResult>, String> {
-    let strat = get_strategy_def(sid)
-        .ok_or_else(|| format!("未知策略: {}", sid))?;
+    let strat = get_strategy_def(sid).ok_or_else(|| format!("未知策略: {}", sid))?;
     let kline_limit = 500u32;
     let holding = strat.period_enum.default_holding_days();
 

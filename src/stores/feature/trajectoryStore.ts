@@ -76,7 +76,6 @@ export const useTrajectoryStore = create<TrajectoryStore>((set, get) => ({
 
   clearConversation: (conversationId: string) => {
     set((s) => {
-       
       const { [conversationId]: _, ...rest } = s.trajectoriesByConversation;
       return { trajectoriesByConversation: rest };
     });

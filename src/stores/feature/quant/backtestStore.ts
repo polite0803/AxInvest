@@ -97,12 +97,12 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
       // 缓存 result（解 result_json）
       const result: BacktestResult | null = response.run.resultJson
         ? (() => {
-            try {
-              return JSON.parse(response.run.resultJson) as BacktestResult;
-            } catch {
-              return null;
-            }
-          })()
+          try {
+            return JSON.parse(response.run.resultJson) as BacktestResult;
+          } catch {
+            return null;
+          }
+        })()
         : null;
       // 记录 recent
       const recent = [response.run, ...get().recentRuns].slice(0, 20);

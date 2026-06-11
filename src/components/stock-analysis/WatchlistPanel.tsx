@@ -106,7 +106,7 @@ export function WatchlistPanel() {
     let cancelled = false;
     invoke<WatchlistItem[]>("list_watchlist")
       .then((list) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (Array.isArray(list)) {
           const parsed = list.map((w: any) => {
             let group = DEFAULT_GROUP;
@@ -121,11 +121,13 @@ export function WatchlistPanel() {
           setItems(parsed);
         }
       })
-      .catch(() => { /* 后端未运行 */ })
+      .catch(() => {/* 后端未运行 */})
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [watchlistVersion]);
 
   // 当前分组下的自选股

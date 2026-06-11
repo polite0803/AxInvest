@@ -41,8 +41,8 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
 
   loadStrategies: async (force = false) => {
     const state = get();
-    if (state.isLoading) return;
-    if (!force && state.strategies.length > 0) return;
+    if (state.isLoading) { return; }
+    if (!force && state.strategies.length > 0) { return; }
     set({ isLoading: true, error: null });
     try {
       const result = await invoke<StrategyMeta[]>("quant_strategies_list");

@@ -46,19 +46,21 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return invoke<any[]>("list_stock_analyses", { limit: 30 });
     })
       .then((list) => {
-        if (cancelled || !list) return;
+        if (cancelled || !list) { return; }
         if (Array.isArray(list)) { setRecords(list); }
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -66,11 +68,13 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
     let cancelled = false;
     invoke<{ blackboardSnapshot: string | null }>("get_stock_analysis", { analysisId })
       .then((r) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (r.blackboardSnapshot) { setSnapshot(JSON.parse(r.blackboardSnapshot)); }
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [analysisId]);
 
   const runBacktest = async (record: AnalysisRecord) => {

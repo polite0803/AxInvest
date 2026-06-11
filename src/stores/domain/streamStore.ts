@@ -864,7 +864,7 @@ export function stopConversationStream(
   if (!(conversationId in activeStreams)) {
     return { activeStreams };
   }
-   
+
   const { [conversationId]: _removed, ...rest } = activeStreams;
   return {
     activeStreams: rest,
@@ -1023,7 +1023,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       thinkingActiveMessageIds,
     } = get();
     const { [activeConvId]: _msgId, ...restStreams } = activeStreams;
-     
+
     const { [activeConvId]: _ts, ...restTimestamps } = streamingStartTimestamps;
     // Only remove thinking indicators for the cancelled conversation's messages,
     // leaving other conversations' thinking state intact.

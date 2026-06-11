@@ -22,7 +22,7 @@
 //! 后续可考虑将 astock-data 指标函数提升为 pub 复用。
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::ctx::StrategyCtx;
 use crate::error::QuantError;
@@ -106,7 +106,10 @@ pub struct MaCrossStrategy {
 
 impl MaCrossStrategy {
     pub fn new(short_period: usize, long_period: usize) -> Self {
-        Self { short_period, long_period }
+        Self {
+            short_period,
+            long_period,
+        }
     }
 }
 
@@ -118,7 +121,9 @@ impl Default for MaCrossStrategy {
 
 #[async_trait]
 impl Strategy for MaCrossStrategy {
-    fn name(&self) -> &str { "ma_cross" }
+    fn name(&self) -> &str {
+        "ma_cross"
+    }
     fn description(&self) -> &str {
         "双均线交叉：MA short 上穿 MA long 买入；下穿卖出"
     }
@@ -135,13 +140,13 @@ impl Strategy for MaCrossStrategy {
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "long_period" => {
                 self.long_period = value
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             _ => return Err(QuantError::Param(key.to_string())),
         }
         Ok(())
@@ -216,7 +221,9 @@ impl Default for MacdStrategy {
 
 #[async_trait]
 impl Strategy for MacdStrategy {
-    fn name(&self) -> &str { "macd" }
+    fn name(&self) -> &str {
+        "macd"
+    }
     fn description(&self) -> &str {
         "MACD 金叉死叉：DIF 上穿 DEA 买入；DIF 下穿 DEA 卖出"
     }
@@ -234,19 +241,19 @@ impl Strategy for MacdStrategy {
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "slow" => {
                 self.slow = value
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "signal" => {
                 self.signal = value
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             _ => return Err(QuantError::Param(key.to_string())),
         }
         Ok(())
@@ -314,7 +321,11 @@ pub struct RsiStrategy {
 
 impl RsiStrategy {
     pub fn new(period: usize, overbought: f64, oversold: f64) -> Self {
-        Self { period, overbought, oversold }
+        Self {
+            period,
+            overbought,
+            oversold,
+        }
     }
 }
 
@@ -326,7 +337,9 @@ impl Default for RsiStrategy {
 
 #[async_trait]
 impl Strategy for RsiStrategy {
-    fn name(&self) -> &str { "rsi" }
+    fn name(&self) -> &str {
+        "rsi"
+    }
     fn description(&self) -> &str {
         "RSI 超买超卖反转：RSI 下穿 oversold 买入；RSI 上穿 overbought 卖出"
     }
@@ -344,17 +357,17 @@ impl Strategy for RsiStrategy {
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "overbought" => {
                 self.overbought = value
                     .as_f64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
-            }
+            },
             "oversold" => {
                 self.oversold = value
                     .as_f64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
-            }
+            },
             _ => return Err(QuantError::Param(key.to_string())),
         }
         Ok(())
@@ -378,10 +391,7 @@ impl Strategy for RsiStrategy {
                 code: bar.code.clone(),
                 action: SignalAction::Buy,
                 strength: 0.6,
-                reason: format!(
-                    "RSI({}) 跌破 {} (现 {:.2})",
-                    self.period, self.oversold, cur_rsi
-                ),
+                reason: format!("RSI({}) 跌破 {} (现 {:.2})", self.period, self.oversold, cur_rsi),
                 target_weight: None,
                 close_reason: None,
             }]);
@@ -424,7 +434,9 @@ impl Default for BollStrategy {
 
 #[async_trait]
 impl Strategy for BollStrategy {
-    fn name(&self) -> &str { "boll" }
+    fn name(&self) -> &str {
+        "boll"
+    }
     fn description(&self) -> &str {
         "布林带均值回归：触及下轨买入；触及上轨卖出"
     }
@@ -441,12 +453,12 @@ impl Strategy for BollStrategy {
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "stddev" => {
                 self.stddev = value
                     .as_f64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
-            }
+            },
             _ => return Err(QuantError::Param(key.to_string())),
         }
         Ok(())
@@ -503,7 +515,12 @@ pub struct TurtleStrategy {
 }
 
 impl TurtleStrategy {
-    pub fn new(entry_period: usize, exit_period: usize, atr_period: usize, atr_multiplier: f64) -> Self {
+    pub fn new(
+        entry_period: usize,
+        exit_period: usize,
+        atr_period: usize,
+        atr_multiplier: f64,
+    ) -> Self {
         Self {
             entry_period,
             exit_period,
@@ -522,7 +539,9 @@ impl Default for TurtleStrategy {
 
 #[async_trait]
 impl Strategy for TurtleStrategy {
-    fn name(&self) -> &str { "turtle" }
+    fn name(&self) -> &str {
+        "turtle"
+    }
     fn description(&self) -> &str {
         "海龟交易法：N 日最高价突破买入；M 日最低价跌破卖出；ATR 倍数止损"
     }
@@ -541,24 +560,24 @@ impl Strategy for TurtleStrategy {
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "exit_period" => {
                 self.exit_period = value
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "atr_period" => {
                 self.atr_period = value
                     .as_u64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
                     as usize
-            }
+            },
             "atr_multiplier" => {
                 self.atr_multiplier = value
                     .as_f64()
                     .ok_or_else(|| QuantError::Param(key.to_string()))?
-            }
+            },
             _ => return Err(QuantError::Param(key.to_string())),
         }
         Ok(())

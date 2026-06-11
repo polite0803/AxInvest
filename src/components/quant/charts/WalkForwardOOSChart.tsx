@@ -13,7 +13,7 @@
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 
-import type { EquityPoint, WalkForwardFold, WalkForwardWindowResult } from "@/types";
+import type { EquityPoint, WalkForwardFold, WalkForwardWindowResult } from "@/types/quant";
 
 interface WalkForwardOOSChartProps {
   /** Rust 端 WalkForwardReport.aggregatedOosEquity（拼接所有 OOS 段） */

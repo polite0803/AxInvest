@@ -814,10 +814,7 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
     .await?;
     let migration_ts = chrono::Local::now().timestamp();
     for (id, desc) in &[
-        (
-            "p0_init",
-            "P0 主框架初始化（所有基础表）",
-        ),
+        ("p0_init", "P0 主框架初始化（所有基础表）"),
         (
             "r1_2026_06_10",
             "R1 复盘→进化闭环（strategy_performance/strategy_weight_history）",
@@ -826,10 +823,7 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             "r2_2026_06_10",
             "R2 组合监控（portfolio_metrics_daily/portfolio_correlation_snapshot）",
         ),
-        (
-            "r3_2026_06_10",
-            "R3 数据层（financial_snapshots/earnings_events）",
-        ),
+        ("r3_2026_06_10", "R3 数据层（financial_snapshots/earnings_events）"),
         (
             "m1_2026_06_11",
             "M1 量化交易+量化回测（quant_strategies/runs/signals/paper_trades）",

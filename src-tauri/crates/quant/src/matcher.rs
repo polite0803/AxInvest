@@ -96,7 +96,11 @@ impl Matcher {
             return self.reject(order, bar, "数量为 0");
         }
         if self.config.lot_size > 0 && order.quantity % self.config.lot_size != 0 {
-            return self.reject(order, bar, &format!("非整手（必须为 {} 的倍数）", self.config.lot_size));
+            return self.reject(
+                order,
+                bar,
+                &format!("非整手（必须为 {} 的倍数）", self.config.lot_size),
+            );
         }
 
         // 2. 涨跌停校验
@@ -121,10 +125,7 @@ impl Matcher {
             if order.quantity > pos.quantity {
                 let qty = order.quantity;
                 let held = pos.quantity;
-                return self.reject(order, bar, &format!(
-                    "卖出数量 {} 超过持仓 {}",
-                    qty, held
-                ));
+                return self.reject(order, bar, &format!("卖出数量 {} 超过持仓 {}", qty, held));
             }
         }
 
@@ -143,7 +144,7 @@ impl Matcher {
                     }
                     price.max(bar.low)
                 }
-            }
+            },
         };
 
         // 5. 滑点
@@ -157,7 +158,8 @@ impl Matcher {
         let fill_amount = fill_price * order.quantity as f64;
 
         // 6. 手续费 + 印花税
-        let commission = (fill_amount * self.config.commission_rate).max(self.config.commission_min);
+        let commission =
+            (fill_amount * self.config.commission_rate).max(self.config.commission_min);
         let stamp_tax = if matches!(order.side, Side::Short) {
             fill_amount * self.config.stamp_tax_rate
         } else {
@@ -168,10 +170,11 @@ impl Matcher {
         if matches!(order.side, Side::Long) {
             let cash_required = fill_amount + commission + stamp_tax;
             if cash_required > cash + 1e-6 {
-                return self.reject(order, bar, &format!(
-                    "资金不足：需要 {:.2}，可用 {:.2}",
-                    cash_required, cash
-                ));
+                return self.reject(
+                    order,
+                    bar,
+                    &format!("资金不足：需要 {:.2}，可用 {:.2}", cash_required, cash),
+                );
             }
         }
 

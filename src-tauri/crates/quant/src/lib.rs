@@ -45,7 +45,7 @@ mod strategy;
 mod types;
 mod walkforward;
 
-pub use builtin::{BollStrategy, MacdStrategy, MaCrossStrategy, RsiStrategy, TurtleStrategy};
+pub use builtin::{BollStrategy, MaCrossStrategy, MacdStrategy, RsiStrategy, TurtleStrategy};
 pub use ctx::{EquityPoint, Position, StrategyCtx, Trade};
 pub use engine::{BacktestConfig, BacktestEngine, BacktestResult};
 pub use error::QuantError;
@@ -53,16 +53,16 @@ pub use matcher::{Matcher, MatcherConfig};
 pub use metrics::MetricsReport;
 pub use script::RhaiStrategy;
 pub use strategy::Strategy;
-pub use types::{
-    Bar, CloseReason, Fill, Order, OrderType, Side, Signal, SignalAction,
-};
+pub use types::{Bar, CloseReason, Fill, Order, OrderType, Side, Signal, SignalAction};
 pub use walkforward::{
     WalkForward, WalkForwardConfig, WalkForwardFold, WalkForwardReport, WalkForwardSplit,
     WalkForwardWindowResult,
 };
 
 pub mod prelude {
-    pub use crate::builtin::{BollStrategy, MacdStrategy, MaCrossStrategy, RsiStrategy, TurtleStrategy};
+    pub use crate::builtin::{
+        BollStrategy, MaCrossStrategy, MacdStrategy, RsiStrategy, TurtleStrategy,
+    };
     pub use crate::ctx::{EquityPoint, Position, StrategyCtx, Trade};
     pub use crate::engine::{BacktestConfig, BacktestEngine, BacktestResult};
     pub use crate::error::QuantError;
@@ -70,9 +70,7 @@ pub mod prelude {
     pub use crate::metrics::MetricsReport;
     pub use crate::script::RhaiStrategy;
     pub use crate::strategy::Strategy;
-    pub use crate::types::{
-        Bar, CloseReason, Fill, Order, OrderType, Side, Signal, SignalAction,
-    };
+    pub use crate::types::{Bar, CloseReason, Fill, Order, OrderType, Side, Signal, SignalAction};
     pub use crate::walkforward::{
         WalkForward, WalkForwardConfig, WalkForwardFold, WalkForwardReport, WalkForwardSplit,
         WalkForwardWindowResult,

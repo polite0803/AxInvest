@@ -106,17 +106,17 @@ pub mod strategy_performance;
 pub mod strategy_weight_history;
 
 // R2: 组合监控（每日指标 + 两两相关性快照）
-pub mod portfolio_metrics_daily;
 pub mod portfolio_correlation_snapshot;
+pub mod portfolio_metrics_daily;
 
 // R3: 数据层（估值带 + 财报日历）
-pub mod financial_snapshots;
 pub mod earnings_events;
+pub mod financial_snapshots;
 
 // Quant: 量化交易 + 量化回测（4 张核心表）
-pub mod quant_strategies;
+pub mod quant_paper_trades;
 pub mod quant_runs;
 pub mod quant_signals;
-pub mod quant_paper_trades;
+pub mod quant_strategies;
 
 pub use sea_orm;

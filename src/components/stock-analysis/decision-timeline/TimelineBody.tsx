@@ -1,5 +1,5 @@
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import type { TimelineNode, TimelinePhase } from "@/types";
+import type { TimelineNode, TimelinePhase } from "@/types/stock-analysis";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DecisionBanner } from "../DecisionBanner";

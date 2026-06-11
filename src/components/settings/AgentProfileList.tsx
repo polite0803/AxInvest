@@ -212,7 +212,7 @@ export function AgentProfileList() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return Promise.all([
         invoke<{ nodes: unknown[] }>("get_workflow_template", { id: "stock-analysis" }),
@@ -222,7 +222,7 @@ export function AgentProfileList() {
       ]);
     })
       .then((result) => {
-        if (!result || cancelled) return;
+        if (!result || cancelled) { return; }
         const [template, tools, expertsRaw, rolesRaw] = result;
         setAllTools(Array.isArray(tools) ? tools : []);
         const em: Record<string, { name: string; prompt: string }> = {};
@@ -262,7 +262,7 @@ export function AgentProfileList() {
             .filter(Boolean) as AgentNodeRow[];
           if (parsed.length > 0) {
             setRows(parsed);
-            if (!cancelled) setLoading(false);
+            if (!cancelled) { setLoading(false); }
             return;
           }
         }
@@ -302,9 +302,11 @@ export function AgentProfileList() {
         console.error("加载模板节点失败", err);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSavePrompt = useCallback(async () => {

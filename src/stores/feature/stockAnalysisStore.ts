@@ -15,8 +15,14 @@ import type {
   StockSearchResult,
   TimelineNode,
   TimelinePhase,
-} from "@/types";
-import { computeStockConsensus, parseAction, parseRiskLevel, StockAction, StockRiskLevel } from "@/types";
+} from "@/types/stock-analysis";
+import {
+  computeStockConsensus,
+  parseAction,
+  parseRiskLevel,
+  StockAction,
+  StockRiskLevel,
+} from "@/types/stock-analysis";
 import { create } from "zustand";
 
 // ── 工作流结果解析 ──

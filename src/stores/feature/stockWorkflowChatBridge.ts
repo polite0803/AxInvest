@@ -4,7 +4,7 @@ import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { useConversationStore } from "@/stores/domain/conversationStore";
 import type { Message } from "@/types";
-import { parseRiskLevel, StockRiskLevel } from "@/types";
+import { parseRiskLevel, StockRiskLevel } from "@/types/stock-analysis";
 import i18next from "i18next";
 
 const activeBridges = new Map<string, UnlistenFn[]>();

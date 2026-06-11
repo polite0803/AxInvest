@@ -89,14 +89,14 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return checkVendorEnabled("limitup", { silent: true });
     })
       .then((check) => {
-        if (cancelled || !check) return;
+        if (cancelled || !check) { return; }
         if (check.status === "disabled") {
           setStocks([]);
           setEmptyKind("vendorDisabled");
@@ -111,28 +111,32 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
         return invoke<any[]>("get_hot_stocks");
       })
       .then((hot) => {
-        if (cancelled || !hot) return;
+        if (cancelled || !hot) { return; }
         if (!Array.isArray(hot)) { throw new Error("bad data"); }
         const candidates = hot.filter((h) => (h.changePct ?? 0) >= 9.5);
-        return Promise.all(candidates.slice(0, 30).map(async (h: any) => {
-          try {
-            const q = await invoke<any>("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code });
-            const price = q?.price ?? 0;
-            const limitUp = q?.limitUp ?? q?.limit_up ?? 0;
-            return {
-              code: h.stockCode ?? h.stock_code,
-              name: h.stockName ?? h.stock_name ?? "",
-              price,
-              changePct: h.changePct ?? 0,
-              turnoverRate: q?.turnoverRate ?? q?.turnover_rate ?? 0,
-              isSealed: limitUp > 0 && Math.abs(price - limitUp) < 0.01,
-              boardCount: Math.max(1, Math.round((h.changePct ?? 0) / 10)),
-            } as LimitUpStock;
-          } catch { return null; }
-        }));
+        return Promise.all(
+          candidates.slice(0, 30).map(async (h: any) => {
+            try {
+              const q = await invoke<any>("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code });
+              const price = q?.price ?? 0;
+              const limitUp = q?.limitUp ?? q?.limit_up ?? 0;
+              return {
+                code: h.stockCode ?? h.stock_code,
+                name: h.stockName ?? h.stock_name ?? "",
+                price,
+                changePct: h.changePct ?? 0,
+                turnoverRate: q?.turnoverRate ?? q?.turnover_rate ?? 0,
+                isSealed: limitUp > 0 && Math.abs(price - limitUp) < 0.01,
+                boardCount: Math.max(1, Math.round((h.changePct ?? 0) / 10)),
+              } as LimitUpStock;
+            } catch {
+              return null;
+            }
+          }),
+        );
       })
       .then((results) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         const filtered = (results ?? []).filter(Boolean) as LimitUpStock[];
         filtered.sort((a, b) => b.changePct - a.changePct);
         setStocks(filtered);
@@ -145,9 +149,11 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const analyze = async (code: string) => {

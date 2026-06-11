@@ -45,11 +45,8 @@ pub trait Strategy: Send + Sync {
     /// - bar: 当前 K 线（已含涨跌停信息）
     /// - ctx: 策略上下文（可读持仓/权益/历史 K 线/指标，**不要**直接修改 cash/positions）
     /// - 返回 0..N 个 Signal；Engine 收集本 bar 全部 Signal 后转 Order
-    async fn on_bar(
-        &mut self,
-        bar: &Bar,
-        ctx: &mut StrategyCtx,
-    ) -> Result<Vec<Signal>, QuantError>;
+    async fn on_bar(&mut self, bar: &Bar, ctx: &mut StrategyCtx)
+    -> Result<Vec<Signal>, QuantError>;
 
     /// 回测/实盘启动时调用一次（用于初始化指标历史等）
     async fn on_init(&mut self, _ctx: &mut StrategyCtx) -> Result<(), QuantError> {

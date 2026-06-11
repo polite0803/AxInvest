@@ -1,11 +1,5 @@
 {
   "version": "1",
-  "generated": "2026-06-11",
-  "total_entries": 167,
-  "total_files": 133,,
-"generated": "2026-06-08",
-  "total_entries": 359,
-  "total_files": 359,
   "entries": [
     {
       "file": "amplitude",
@@ -1755,8 +1749,7 @@
     {
       "file": "src/components/settings/SettingsPanel.tsx",
       "lines": "443",
-      "reason": "logIpcError 内部日志，非 UI",,
-"file": "tool.moneyFlow",
+      "reason": "logIpcError 内部日志，非 UI",
       "lines": "m,o,n,e,y,F,l,w",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -1776,8 +1769,7 @@
     {
       "file": "src/components/terminal/IntegratedTerminal.tsx",
       "lines": "137,203,228",
-      "reason": "logIpcError 内部日志，非 UI",,
-"file": "tool.optionData",
+      "reason": "logIpcError 内部日志，非 UI",
       "lines": "o,p,t,i,n,D,a",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -1959,8 +1951,7 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/TriggerPropertyPanel.tsx",
       "lines": "35,36,47,48",
-      "reason": "AI cron 表达式生成 prompts，非 UI 字符串",,
-"file": "workflow.analyst.market-analyst",
+      "reason": "AI cron 表达式生成 prompts，非 UI 字符串",
       "lines": "T,e,c,h,n,i,a,l,A,y,s,t",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -2034,8 +2025,7 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/AgentPropertyPanel.tsx",
       "lines": "287,288,289,290,291,313,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329",
-      "reason": "LLM system/user prompt 字符串",,
-"file": "workflow.confidence",
+      "reason": "LLM system/user prompt 字符串",
       "lines": "C,o,n,f,i,d,e,c",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -2061,9 +2051,8 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/DatabaseQueryPropertyPanel.tsx",
       "lines": "28,29,72",
-      "reason": "LLM prompt + placeholder",,
-"file": "workflow.failedStepsWithCount",
-      "lines": "F,a,i,l,e,d,S,t,p,s,(,{,c,o,u,n,},)",
+      "reason": "LLM prompt + placeholder",
+      "lines": "F,a,i,l,e,d,S,t,p,s,(,{,c,o,u,n},)",
       "reason": "硬编码中文字符串",
       "phase": 3
     },
@@ -2082,8 +2071,7 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/EmailPropertyPanel.tsx",
       "lines": "36,37,57,58,80",
-      "reason": "LLM prompt + placeholder",,
-"file": "workflow.notification",
+      "reason": "LLM prompt + placeholder",
       "lines": "A,n,a,l,y,s,i,C,o,m,p,e,t,N,f,c",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -2103,8 +2091,7 @@
     {
       "file": "src/components/workflow/Panels/PropertyPanels/SwitchPropertyPanel.tsx",
       "lines": "28,29,60,117,128",
-      "reason": "LLM prompt + placeholder",,
-"file": "workflow.riskAggregation",
+      "reason": "LLM prompt + placeholder",
       "lines": "R,i,s,k,A,g,r,e,a,t,o,n",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -2148,8 +2135,7 @@
     {
       "file": "src/stores/__tests__/workflowEditorStore.test.ts",
       "lines": "544,550",
-      "reason": "测试 mock 数据标签",,
-"file": "workflow.startFailed",
+      "reason": "测试 mock 数据标签",
       "lines": "s,t,a,r,F,i,l,e,d",
       "reason": "硬编码中文字符串",
       "phase": 3
@@ -2168,7 +2154,7 @@
     },
     {
       "file": "workflowStarting",
-      "lines": "⏳,S,t,a,r,i,n,g,{,s,o,c,k,C,d,e,},l,y,w,f,.",
+      "lines": "⏳,S,t,a,r,i,n,g,{,s,o,c,k,C,d,e},l,y,w,f,.",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

@@ -63,7 +63,10 @@ pub fn classify_regime(klines: &[KLine]) -> MarketRegime {
     // 最近 N 日斜率（用线性回归简化：最后5日 vs 之前5日）
     let slope = if closes.len() >= 10 {
         let recent_5: f64 = closes[closes.len() - 5..].iter().sum::<f64>() / 5.0;
-        let prev_5: f64 = closes[closes.len() - 10..closes.len() - 5].iter().sum::<f64>() / 5.0;
+        let prev_5: f64 = closes[closes.len() - 10..closes.len() - 5]
+            .iter()
+            .sum::<f64>()
+            / 5.0;
         (recent_5 - prev_5) / prev_5
     } else {
         0.0
@@ -78,22 +81,38 @@ pub fn classify_regime(klines: &[KLine]) -> MarketRegime {
             / 20.0;
         let std_dev = variance.sqrt();
         let bbp = if ma20 > 0.0 { std_dev / ma20 } else { 0.0 };
-        let vs = if bbp > 0.20 { "high" } else if bbp < 0.10 { "low" } else { "normal" };
+        let vs = if bbp > 0.20 {
+            "high"
+        } else if bbp < 0.10 {
+            "low"
+        } else {
+            "normal"
+        };
         (bbp, vs.to_string())
     } else {
         (0.0, "normal".to_string())
     };
 
     // 决策逻辑
-    let (regime, confidence, desc) = if price_above_ma60 > 0.05 && price_above_ma20 > 0.02 && slope > 0.01
+    let (regime, confidence, desc) = if price_above_ma60 > 0.05
+        && price_above_ma20 > 0.02
+        && slope > 0.01
     {
         // 价格在 MA60 上方 5% + MA20 上方 2% + 向上斜率
         let c = (price_above_ma60 * 2.0).clamp(0.5, 0.95);
-        let vol_note = if bollinger_pct > 0.20 { "（高波动预警）" } else { "" };
+        let vol_note = if bollinger_pct > 0.20 {
+            "（高波动预警）"
+        } else {
+            ""
+        };
         (
             "bull".to_string(),
             c,
-            format!("沪深300站上60日均线{:.1}%，短期均线多头排列{}", price_above_ma60 * 100.0, vol_note),
+            format!(
+                "沪深300站上60日均线{:.1}%，短期均线多头排列{}",
+                price_above_ma60 * 100.0,
+                vol_note
+            ),
         )
     } else if price_above_ma60 < -0.03 && price_above_ma20 < -0.01 && slope < -0.005 {
         // 价格在 MA60 下方 3% + MA20 下方 + 向下斜率
@@ -193,8 +212,8 @@ mod tests {
         // 高波动：大幅震荡，振幅 > 20%
         let mut closes = Vec::new();
         for i in 0..60 {
-            let cycle = (i as f64 * 0.5).sin();  // -1 ~ +1
-            closes.push(3500.0 + cycle * 1200.0);  // ±1200, ~34% 振幅
+            let cycle = (i as f64 * 0.5).sin(); // -1 ~ +1
+            closes.push(3500.0 + cycle * 1200.0); // ±1200, ~34% 振幅
         }
         let r = classify_regime(&make_klines(&closes));
         assert_eq!(r.volatility, "high", "大幅震荡应识别为高波动, got={}", r.volatility);

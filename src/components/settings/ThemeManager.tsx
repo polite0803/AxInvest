@@ -143,7 +143,7 @@ colors:
   const yamlToTheme = (yaml: string): Theme | null => {
     try {
       const lines = yaml.split("\n");
-       
+
       const result: Record<string, any> = { metadata: {}, colors: {} };
 
       for (const line of lines) {

@@ -11,7 +11,7 @@ export function ExperimentTrail() {
   const experiments = useStockAnalysisStore((s) => s.experiments);
   const decision = useStockAnalysisStore((s) => s.decision);
 
-  if (experiments.length === 0) return null;
+  if (experiments.length === 0) { return null; }
 
   const steps = [
     {
@@ -24,7 +24,9 @@ export function ExperimentTrail() {
     },
     ...experiments.map((e, i) => ({
       label: `Experiment #${e.step}`,
-      sub: `${e.decisionAfter.action ?? "—"} / ${e.decisionAfter.confidence ?? "—"}% / ${e.decisionAfter.positionPct ?? "—"}%`,
+      sub: `${e.decisionAfter.action ?? "—"} / ${e.decisionAfter.confidence ?? "—"}% / ${
+        e.decisionAfter.positionPct ?? "—"
+      }%`,
       active: i === experiments.length - 1,
       color: "var(--color-background-info)",
       detail: Object.entries(e.params)
@@ -48,26 +50,45 @@ export function ExperimentTrail() {
         {steps.map((step, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 0, flex: 1 }}>
             {/* Circle */}
-            <div style={{
-              width: 24, height: 24, borderRadius: "50%",
-              background: step.active ? step.color : "var(--color-border-tertiary)",
-              color: step.active ? "white" : "var(--color-text-tertiary)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 10, fontWeight: 500, flexShrink: 0,
-            }}>
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: "50%",
+                background: step.active ? step.color : "var(--color-border-tertiary)",
+                color: step.active ? "white" : "var(--color-text-tertiary)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 10,
+                fontWeight: 500,
+                flexShrink: 0,
+              }}
+            >
               {i + 1}
             </div>
             {/* Connector */}
             {i < steps.length - 1 && (
-              <div style={{
-                flex: 1, height: 1.5,
-                borderTop: ("dashed" in step && step.dashed) ? "1.5px dashed var(--color-border-tertiary)" : `1.5px solid ${step.color}`,
-                margin: "0 4px",
-              }} />
+              <div
+                style={{
+                  flex: 1,
+                  height: 1.5,
+                  borderTop: ("dashed" in step && step.dashed)
+                    ? "1.5px dashed var(--color-border-tertiary)"
+                    : `1.5px solid ${step.color}`,
+                  margin: "0 4px",
+                }}
+              />
             )}
             {/* Label */}
             <div style={{ marginLeft: 4, flex: 1 }}>
-              <div style={{ fontWeight: 500, fontSize: 11, color: step.active ? "var(--color-text-info)" : "var(--color-text-primary)" }}>
+              <div
+                style={{
+                  fontWeight: 500,
+                  fontSize: 11,
+                  color: step.active ? "var(--color-text-info)" : "var(--color-text-primary)",
+                }}
+              >
                 {step.label}
               </div>
               <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>

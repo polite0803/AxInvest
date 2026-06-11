@@ -264,7 +264,7 @@ export function DataVendorsTab() {
     let cancelled = false;
     invoke<any>("get_workflow_template", { id: "stock-analysis" })
       .then((tmpl) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
         const vals: Record<string, boolean> = {};
         let key = "";
@@ -282,9 +282,11 @@ export function DataVendorsTab() {
         setLoaded(true);
       })
       .catch(() => {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled) { setLoaded(true); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSave = useCallback(async () => {

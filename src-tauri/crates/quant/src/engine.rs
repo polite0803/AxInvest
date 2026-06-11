@@ -250,7 +250,11 @@ fn signal_to_order(sig: &Signal, bar: &Bar) -> Order {
     };
     // 占位：M1 阶段每 signal 默认 100 股（最小一手）
     // M2 阶段接入 portfolio sizing（按目标权重 / 凯利公式 / 风险预算）
-    let quantity = if matches!(sig.action, SignalAction::Hold) { 0 } else { 100 };
+    let quantity = if matches!(sig.action, SignalAction::Hold) {
+        0
+    } else {
+        100
+    };
     Order {
         code: bar.code.clone(),
         side,
@@ -291,8 +295,7 @@ fn apply_fill(ctx: &mut StrategyCtx, fill: &Fill) {
                 });
             let new_qty = pos.quantity + order.quantity;
             pos.cost_basis = if new_qty > 0 {
-                (pos.cost_basis * pos.quantity as f64
-                    + fill.fill_price * order.quantity as f64)
+                (pos.cost_basis * pos.quantity as f64 + fill.fill_price * order.quantity as f64)
                     / new_qty as f64
             } else {
                 0.0
@@ -301,7 +304,7 @@ fn apply_fill(ctx: &mut StrategyCtx, fill: &Fill) {
             pos.last_price = fill.fill_price;
             pos.market_value = fill.fill_price * new_qty as f64;
             pos.unrealized_pnl = 0.0;
-        }
+        },
         Side::Short => {
             let proceeds = fill.fill_amount - fill.commission - fill.stamp_tax;
             ctx.cash += proceeds;
@@ -321,8 +324,8 @@ fn apply_fill(ctx: &mut StrategyCtx, fill: &Fill) {
                 pos.unrealized_pnl = 0.0;
                 ctx.realized_pnl += realized;
             }
-        }
-        Side::Flat => {}
+        },
+        Side::Flat => {},
     }
     let realized_for_trade = if matches!(order.side, Side::Short) {
         if let Some(pos) = ctx.positions.get(&order.code) {
@@ -348,10 +351,7 @@ fn apply_fill(ctx: &mut StrategyCtx, fill: &Fill) {
     });
 }
 
-fn compute_basic(
-    ctx: &StrategyCtx,
-    initial_cash: f64,
-) -> (f64, f64, f64, f64, f64) {
+fn compute_basic(ctx: &StrategyCtx, initial_cash: f64) -> (f64, f64, f64, f64, f64) {
     let final_equity = ctx.total_equity();
     let total_return = if initial_cash > 0.0 {
         (final_equity - initial_cash) / initial_cash

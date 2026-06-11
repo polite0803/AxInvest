@@ -60,7 +60,8 @@ impl StockVendor for XueqiuVendor {
             });
         }
         let symbol = to_xq_symbol(stock_code);
-        let url = format!("https://stock.xueqiu.com/v5/stock/quote.json?symbol={symbol}&extend=detail");
+        let url =
+            format!("https://stock.xueqiu.com/v5/stock/quote.json?symbol={symbol}&extend=detail");
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;
         let item = &json["data"]["quote"];
@@ -92,7 +93,13 @@ impl StockVendor for XueqiuVendor {
         })
     }
 
-    async fn get_klines(&self, stock_code: &str, period: &str, limit: u32, _adj: Option<AdjType>) -> Result<Vec<KLine>, DataError> {
+    async fn get_klines(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+        _adj: Option<AdjType>,
+    ) -> Result<Vec<KLine>, DataError> {
         if !self.enabled().await {
             return Ok(vec![]);
         }
@@ -116,15 +123,15 @@ impl StockVendor for XueqiuVendor {
         );
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;
-        let items = json["data"]["item"].as_array().ok_or_else(|| {
-            DataError::ParseError("xueqiu klines: missing item array".into())
-        })?;
+        let items = json["data"]["item"]
+            .as_array()
+            .ok_or_else(|| DataError::ParseError("xueqiu klines: missing item array".into()))?;
         let mut klines: Vec<KLine> = items
             .iter()
             .map(|v| {
-                let arr = v.as_array().ok_or_else(|| {
-                    DataError::ParseError("xueqiu kline: not an array".into())
-                })?;
+                let arr = v
+                    .as_array()
+                    .ok_or_else(|| DataError::ParseError("xueqiu kline: not an array".into()))?;
                 // 雪球日K格式: [timestamp, open, high, low, close, volume, amount, ...]
                 if arr.len() < 7 {
                     return Err(DataError::ParseError(format!(
@@ -164,9 +171,9 @@ impl StockVendor for XueqiuVendor {
         );
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;
-        let list = json["data"]["list"].as_array().ok_or_else(|| {
-            DataError::ParseError("xueqiu financials: missing list array".into())
-        })?;
+        let list = json["data"]["list"]
+            .as_array()
+            .ok_or_else(|| DataError::ParseError("xueqiu financials: missing list array".into()))?;
         Ok(list
             .iter()
             .map(|item| {
@@ -200,7 +207,17 @@ impl StockVendor for XueqiuVendor {
         if !self.enabled().await {
             return Ok(vec![]);
         }
-        let symbol_id = format!("{}{}", if stock_code.starts_with('6') { "SH" } else if stock_code.starts_with('8') || stock_code.starts_with('4') { "BJ" } else { "SZ" }, stock_code);
+        let symbol_id = format!(
+            "{}{}",
+            if stock_code.starts_with('6') {
+                "SH"
+            } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
+                "BJ"
+            } else {
+                "SZ"
+            },
+            stock_code
+        );
         let count = limit.min(50);
         // 雪球股票时间线接口：个股动态（新闻+讨论）
         let url = format!(
@@ -208,9 +225,9 @@ impl StockVendor for XueqiuVendor {
         );
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;
-        let items = json["list"].as_array().ok_or_else(|| {
-            DataError::ParseError("xueqiu news: missing list array".into())
-        })?;
+        let items = json["list"]
+            .as_array()
+            .ok_or_else(|| DataError::ParseError("xueqiu news: missing list array".into()))?;
         Ok(items
             .iter()
             .map(|item| {
@@ -263,12 +280,13 @@ impl StockVendor for XueqiuVendor {
         if !self.enabled().await {
             return Ok(vec![]);
         }
-        let url = format!("https://xueqiu.com/query/v1/search/web/search.json?q={keyword}&count=10");
+        let url =
+            format!("https://xueqiu.com/query/v1/search/web/search.json?q={keyword}&count=10");
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;
-        let items = json["data"]["stocks"].as_array().ok_or_else(|| {
-            DataError::ParseError("xueqiu search: missing stocks array".into())
-        })?;
+        let items = json["data"]["stocks"]
+            .as_array()
+            .ok_or_else(|| DataError::ParseError("xueqiu search: missing stocks array".into()))?;
         Ok(items
             .iter()
             .map(|item| StockSearchResult {

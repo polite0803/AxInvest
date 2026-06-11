@@ -259,7 +259,6 @@ export function useVirtualScroll(
   terminal: XTerm | null,
   _bufferSize: number = 5000,
 ) {
-   
   const [visibleRange, _setVisibleRange] = useState({ start: 0, end: 0 });
 
   const scrollToBottom = useCallback(() => {

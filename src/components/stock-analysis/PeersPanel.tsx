@@ -57,13 +57,13 @@ export function PeersPanel() {
       return;
     }
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<PeerComparison[]>("get_stock_peers", { stockCode });
     })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (Array.isArray(data) && data.length > 0) {
           setPeers(data);
         } else {
@@ -78,9 +78,11 @@ export function PeersPanel() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [stockCode]);
 
   const columns = [

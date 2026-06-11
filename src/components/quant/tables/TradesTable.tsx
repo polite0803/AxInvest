@@ -30,7 +30,9 @@ export function TradesTable({ trades }: TradesTableProps) {
     let totalFee = 0;
     let totalPnl = 0;
     for (const tr of trades) {
-      if (tr.side === "long") { longCount++; } else if (tr.side === "flat") { flatCount++; } else { shortCount++; }
+      if (tr.side === "long") { longCount++; }
+      else if (tr.side === "flat") { flatCount++; }
+      else { shortCount++; }
       totalAmount += tr.amount;
       totalFee += tr.commission + tr.stampTax + tr.slippage;
       totalPnl += tr.realizedPnl;
@@ -105,8 +107,7 @@ export function TradesTable({ trades }: TradesTableProps) {
       key: "fee",
       align: "right",
       width: 110,
-      render: (_: unknown, tr) =>
-        (tr.commission + tr.stampTax + tr.slippage).toFixed(2),
+      render: (_: unknown, tr) => (tr.commission + tr.stampTax + tr.slippage).toFixed(2),
     },
     {
       title: t("quant.trades.realizedPnl"),
@@ -130,7 +131,11 @@ export function TradesTable({ trades }: TradesTableProps) {
   ];
 
   if (trades.length === 0) {
-    return <Card><span style={{ color: "#999" }}>{t("quant.trades.empty")}</span></Card>;
+    return (
+      <Card>
+        <span style={{ color: "#999" }}>{t("quant.trades.empty")}</span>
+      </Card>
+    );
   }
 
   return (

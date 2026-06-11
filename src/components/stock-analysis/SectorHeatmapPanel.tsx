@@ -71,14 +71,14 @@ export function SectorHeatmapPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return checkVendorEnabled("sectors", { silent: true });
     })
       .then((check) => {
-        if (cancelled || !check) return;
+        if (cancelled || !check) { return; }
         if (check.status === "disabled") {
           setSectors([]);
           setEmptyKind("vendorDisabled");
@@ -93,7 +93,7 @@ export function SectorHeatmapPanel() {
         return invoke<any[]>("get_industry_ranking");
       })
       .then((list) => {
-        if (cancelled || !list) return;
+        if (cancelled || !list) { return; }
         if (!Array.isArray(list)) { throw new Error("bad data"); }
         const next: SectorEntry[] = list.slice(0, 25).map((e: any) => ({
           name: e.industryName ?? e.industry_name ?? "",
@@ -114,9 +114,11 @@ export function SectorHeatmapPanel() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const analyze = async (code: string) => {

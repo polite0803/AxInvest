@@ -106,7 +106,6 @@ function poolItemToEvent(item: AgentPoolItem): TimelineEvent {
 
 // ── Status colors and icons ──────────────────────────────────────────────
 
- 
 function getStatusConfig(token: Record<string, any>) {
   return {
     pending: { color: token.colorTextQuaternary, icon: <Clock size={12} /> },

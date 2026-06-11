@@ -31,10 +31,14 @@ interface TradeReviewSummary {
 
 function gradeColor(g: string): string {
   switch (g) {
-    case "优秀": return "green";
-    case "良好": return "blue";
-    case "及格": return "gold";
-    default: return "red";
+    case "优秀":
+      return "green";
+    case "良好":
+      return "blue";
+    case "及格":
+      return "gold";
+    default:
+      return "red";
   }
 }
 
@@ -54,9 +58,11 @@ export function TradeReviewPanel() {
     }
   }, []);
 
-  useEffect(() => { loadReview(); }, [loadReview]);
+  useEffect(() => {
+    loadReview();
+  }, [loadReview]);
 
-  if (!review || review.totalClosed === 0) return null;
+  if (!review || review.totalClosed === 0) { return null; }
 
   const columns = [
     { title: "代码", dataIndex: "stockCode", width: 56 },
@@ -65,12 +71,21 @@ export function TradeReviewPanel() {
     { title: "持有", dataIndex: "holdingDays", width: 36, render: (v: number) => `${v}d` },
     { title: "入场价", dataIndex: "entryPrice", width: 56, render: (v: number) => v.toFixed(2) },
     { title: "出场价", dataIndex: "exitPrice", width: 56, render: (v: number) => v.toFixed(2) },
-    { title: "盈亏", dataIndex: "pnlPct", width: 50,
-      render: (v: number) => <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
-        {v >= 0 ? "+" : ""}{v.toFixed(1)}%
-      </span>,
+    {
+      title: "盈亏",
+      dataIndex: "pnlPct",
+      width: 50,
+      render: (v: number) => (
+        <span style={{ color: v >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
+          {v >= 0 ? "+" : ""}
+          {v.toFixed(1)}%
+        </span>
+      ),
     },
-    { title: "评级", dataIndex: "grade", width: 48,
+    {
+      title: "评级",
+      dataIndex: "grade",
+      width: 48,
       render: (v: string) => <Tag color={gradeColor(v)} style={{ fontSize: 10 }}>{v}</Tag>,
     },
   ];
@@ -96,25 +111,36 @@ export function TradeReviewPanel() {
         </div>
         <div className="p-1 rounded" style={{ background: "var(--surface)" }}>
           总盈亏<div style={{ color: review.totalPnl >= 0 ? "var(--sa-red)" : "var(--sa-green)", fontWeight: "bold" }}>
-            {review.totalPnl >= 0 ? "+" : ""}{review.totalPnl.toFixed(0)}
+            {review.totalPnl >= 0 ? "+" : ""}
+            {review.totalPnl.toFixed(0)}
           </div>
         </div>
         <div className="p-1 rounded" style={{ background: "var(--surface)" }}>
-          综合评级<div><Tag color={gradeColor(review.avgGrade)}>{review.avgGrade}</Tag></div>
+          综合评级<div>
+            <Tag color={gradeColor(review.avgGrade)}>{review.avgGrade}</Tag>
+          </div>
         </div>
       </div>
 
       {/* 改进建议 */}
       <div className="text-xs mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>
         {review.suggestions.map((s, i) => (
-          <div key={i} style={{ color: s.includes("优秀") || s.includes("良好") ? "var(--sa-red)" : "var(--sa-green)" }}>
+          <div
+            key={i}
+            style={{ color: s.includes("优秀") || s.includes("良好") ? "var(--sa-red)" : "var(--sa-green)" }}
+          >
             • {s}
           </div>
         ))}
       </div>
 
-      <Table size="small" dataSource={review.items.slice(0, 20)} rowKey={(r) => `${r.stockCode}-${r.exitDate}`}
-        pagination={false} columns={columns} />
+      <Table
+        size="small"
+        dataSource={review.items.slice(0, 20)}
+        rowKey={(r) => `${r.stockCode}-${r.exitDate}`}
+        pagination={false}
+        columns={columns}
+      />
     </Card>
   );
 }

@@ -471,7 +471,7 @@ function ReflectionSettingsModal({
     let cancelled = false;
     // L7: 先用缓存填充，再后台刷新
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       if (__reflectionConfigCache && Date.now() - __reflectionConfigCache.at < CONFIG_CACHE_TTL_MS) {
         setCfg(__reflectionConfigCache.value);
         setDirty(false);
@@ -479,7 +479,7 @@ function ReflectionSettingsModal({
       return invoke<ReflectionConfig>("get_reflection_config");
     })
       .then((remote) => {
-        if (cancelled || !remote) return;
+        if (cancelled || !remote) { return; }
         setCfg(remote);
         setDirty(false);
         __reflectionConfigCache = { value: remote, at: Date.now() };
@@ -930,7 +930,7 @@ export function ReflectionPanel({
       started_at_ms: record.startedAtMs ?? null,
     })
       .then((result) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         setReflection(result);
         onReflectionComplete?.(result);
 
@@ -941,13 +941,13 @@ export function ReflectionPanel({
         });
       })
       .catch((e) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         setError(String(e));
         // 失败时允许重试
         reflectedRunRef.current = null;
       })
       .finally(() => {
-        if (!cancelled) setIsRefecting(false);
+        if (!cancelled) { setIsRefecting(false); }
       });
     return () => {
       cancelled = true;

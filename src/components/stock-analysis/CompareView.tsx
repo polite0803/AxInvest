@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import type { StockQuote } from "@/types";
+import type { StockQuote } from "@/types/stock-analysis";
 import { SwapOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Input, Spin, Tag } from "antd";
 import * as echarts from "echarts";

@@ -1,6 +1,6 @@
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { KLine } from "@/types";
+import type { KLine } from "@/types/stock-analysis";
 import * as echarts from "echarts";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -423,7 +423,7 @@ export function KLineChart() {
 
   const chartHeight = Math.max(300, Math.min(520, window.innerHeight * 0.38));
   const curTierInfo = useMemo(() => {
-    if (klineData.length === 0) return null;
+    if (klineData.length === 0) { return null; }
     return findTier(klineData.length);
   }, [klineData]);
 

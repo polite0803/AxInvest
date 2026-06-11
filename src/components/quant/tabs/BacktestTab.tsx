@@ -1,8 +1,22 @@
 // BacktestTab — 回测配置 + 触发运行 + 结果展示
 
-import { Alert, Button, Card, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Space, Spin, Switch, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  DatePicker,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
 import dayjs from "dayjs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DrawdownChart } from "@/components/quant/charts/DrawdownChart";
@@ -11,7 +25,6 @@ import { QuantMetricsCard } from "@/components/quant/charts/QuantMetricsCard";
 import { StrategyForm } from "@/components/quant/tabs/StrategyForm";
 import { useBacktestStore, useStrategyStore } from "@/stores/feature/quant";
 import type { BacktestRunRequest, StrategyMeta } from "@/types";
-import { BUILTIN_STRATEGY_IDS } from "@/types";
 
 const { Title, Text } = Typography;
 
@@ -38,7 +51,7 @@ export function BacktestTab() {
   useEffect(() => {
     if (!selectedStrategy && draft.strategyId) {
       const m = strategies.find((s) => s.id === draft.strategyId);
-      if (m) setSelectedStrategy(m);
+      if (m) { setSelectedStrategy(m); }
     }
   }, [strategies, draft.strategyId, selectedStrategy]);
 
@@ -51,7 +64,7 @@ export function BacktestTab() {
   };
 
   const onRun = async () => {
-    if (!selectedStrategy) return;
+    if (!selectedStrategy) { return; }
     const req: BacktestRunRequest = {
       strategyId: selectedStrategy.id,
       strategyType: selectedStrategy.strategyType,
@@ -200,7 +213,11 @@ export function BacktestTab() {
               positiveIsGood={false}
             />
             <QuantMetricsCard title={t("quant.metrics.winRate")} value={currentRun.metrics.winRate * 100} suffix="%" />
-            <QuantMetricsCard title={t("quant.metrics.totalTrades")} value={currentRun.metrics.totalTrades} precision={0} />
+            <QuantMetricsCard
+              title={t("quant.metrics.totalTrades")}
+              value={currentRun.metrics.totalTrades}
+              precision={0}
+            />
           </div>
 
           <div style={{ marginTop: 16 }}>

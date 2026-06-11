@@ -63,11 +63,7 @@ impl Bar {
     }
 
     /// 从 KLine + StockQuote 构造（带涨跌停上下限，撮合器依赖此信息）
-    pub fn from_kline_with_quote(
-        code: impl Into<String>,
-        k: &KLine,
-        q: &StockQuote,
-    ) -> Self {
+    pub fn from_kline_with_quote(code: impl Into<String>, k: &KLine, q: &StockQuote) -> Self {
         Self {
             code: code.into(),
             date: k.date.clone(),
@@ -91,7 +87,7 @@ impl Bar {
         match self.limit_up {
             Some(lu) if lu > 0.0 => {
                 (self.close - lu).abs() < 0.0001 * lu.max(1.0) || self.close >= lu
-            }
+            },
             _ => false,
         }
     }
@@ -101,7 +97,7 @@ impl Bar {
         match self.limit_down {
             Some(ld) if ld > 0.0 => {
                 (self.close - ld).abs() < 0.0001 * ld.max(1.0) || self.close <= ld
-            }
+            },
             _ => false,
         }
     }

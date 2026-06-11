@@ -85,14 +85,14 @@ export function IndustryRankingPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       setEmptyVendors(undefined);
       return checkVendorEnabled("sectors", { silent: true });
     })
       .then((check) => {
-        if (cancelled || !check) return;
+        if (cancelled || !check) { return; }
         if (check.status === "disabled") {
           setRows([]);
           setEmptyKind("vendorDisabled");
@@ -107,7 +107,7 @@ export function IndustryRankingPanel() {
         return invoke<any[]>("get_industry_ranking");
       })
       .then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data) { return; }
         if (!Array.isArray(data)) { throw new Error("bad data"); }
         const list: IndustryRow[] = data.slice(0, 20).map((e: any, i: number) => ({
           rank: i + 1,
@@ -135,9 +135,11 @@ export function IndustryRankingPanel() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const analyze = async (code: string) => {

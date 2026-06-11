@@ -22,7 +22,10 @@ impl EastMoneyVendor {
                 .http
                 .get(url)
                 .header("Referer", "https://quote.eastmoney.com/")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                )
                 .header("Accept", "application/json, text/plain, */*")
                 .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                 .send()
@@ -31,7 +34,10 @@ impl EastMoneyVendor {
                 Ok(resp) => return Ok(resp),
                 Err(e) => {
                     if attempt + 1 < max_retries {
-                        tracing::warn!("[retry] eastmoney 请求失败 (第{}次, {delay:?}后重试): {e}", attempt + 1);
+                        tracing::warn!(
+                            "[retry] eastmoney 请求失败 (第{}次, {delay:?}后重试): {e}",
+                            attempt + 1
+                        );
                         sleep(delay).await;
                         delay *= 2;
                     } else {

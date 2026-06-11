@@ -23,7 +23,7 @@ export function EquityCurveChart({
   const instRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!chartRef.current) { return; }
     instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
     return () => {
       instRef.current?.dispose();
@@ -32,11 +32,11 @@ export function EquityCurveChart({
   }, []);
 
   useEffect(() => {
-    if (!instRef.current || curve.length === 0) return;
+    if (!instRef.current || curve.length === 0) { return; }
 
     const dates = curve.map((p) => p.date);
     const equities = curve.map((p) => parseFloat(p.equity.toFixed(2)));
-    const drawdowns = curve.map((p) => parseFloat((p.drawdownPct * 100).toFixed(2)));
+    // const drawdowns = curve.map((p) => parseFloat((p.drawdownPct * 100).toFixed(2)));
 
     const series: any[] = [
       {

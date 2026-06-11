@@ -72,21 +72,23 @@ export function ScheduledRecommendationTab() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return invoke<RecoCronRow[]>("list_recommendation_crons");
     })
       .then((list) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (Array.isArray(list)) { setJobs(list); }
       })
       .catch((e) => {
         console.warn("[ScheduledRecommendation] load failed:", e);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loadTasks = async () => {

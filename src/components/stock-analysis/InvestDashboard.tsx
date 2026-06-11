@@ -75,9 +75,9 @@ export function InvestDashboard() {
       invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
       loadMarketRegime().catch(() => null),
     ]).then(([pos, anl, regime]) => {
-      if (Array.isArray(pos)) setPositions(pos);
-      if (Array.isArray(anl)) setRecentAnalyses(anl);
-      if (regime) setMarketRegime(regime);
+      if (Array.isArray(pos)) { setPositions(pos); }
+      if (Array.isArray(anl)) { setRecentAnalyses(anl); }
+      if (regime) { setMarketRegime(regime); }
     }).finally(() => setLoading(false));
   }, []);
 

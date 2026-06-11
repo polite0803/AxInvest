@@ -89,8 +89,13 @@ export function DailyReviewPanel() {
 
   useEffect(() => {
     invoke<DailyReview>("generate_daily_review")
-      .then((r) => { setReview(r); setError(null); })
-      .catch((e: any) => { setError(e?.message ?? String(e)); })
+      .then((r) => {
+        setReview(r);
+        setError(null);
+      })
+      .catch((e: any) => {
+        setError(e?.message ?? String(e));
+      })
       .finally(() => setLoading(false));
   }, [setReview, setError, setLoading]);
 

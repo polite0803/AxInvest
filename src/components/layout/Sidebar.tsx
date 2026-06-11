@@ -468,7 +468,8 @@ export function Sidebar() {
       key: "invest-review",
       labelKey: "sidebar.sectionInvestReview",
       items: builtinNavItems.filter((n) =>
-        n.key === "watchlist" || n.key === "backtest" || n.key === "compare" || n.key === "quant" || n.key === "replay-workbench"
+        n.key === "watchlist" || n.key === "backtest" || n.key === "compare" || n.key === "quant"
+        || n.key === "replay-workbench"
       ),
     });
 

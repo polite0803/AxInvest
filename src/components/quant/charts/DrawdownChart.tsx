@@ -15,7 +15,7 @@ export function DrawdownChart({ curve, height = 220 }: DrawdownChartProps) {
   const instRef = useRef<echarts.ECharts | null>(null);
 
   useEffect(() => {
-    if (!chartRef.current) return;
+    if (!chartRef.current) { return; }
     instRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
     return () => {
       instRef.current?.dispose();
@@ -24,13 +24,13 @@ export function DrawdownChart({ curve, height = 220 }: DrawdownChartProps) {
   }, []);
 
   useEffect(() => {
-    if (!instRef.current || curve.length === 0) return;
+    if (!instRef.current || curve.length === 0) { return; }
     const dates = curve.map((p) => p.date);
     const data = curve.map((p) => parseFloat((p.drawdownPct * 100).toFixed(2)));
 
     instRef.current.setOption(
       {
-        tooltip: { trigger: "axis", valueFormatter: (v) => `${v}%` },
+        tooltip: { trigger: "axis", valueFormatter: (v: number) => `${v.toFixed(2)}%` },
         grid: { left: 50, right: 30, top: 16, bottom: 40 },
         xAxis: { type: "category", data: dates, axisLabel: { hideOverlap: true } },
         yAxis: {

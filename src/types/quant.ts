@@ -135,6 +135,8 @@ export interface MetricsReport {
 // ── Walk-Forward 报告 ──
 
 export interface WalkForwardFold {
+  trainBarsCount: number;
+  testBarsCount: number;
   foldIndex: number;
   trainStart: string;
   trainEnd: string;
@@ -145,6 +147,15 @@ export interface WalkForwardFold {
   bestParams: Record<string, unknown> | null;
   degradationRatio: number;
   isOverfitFold: boolean;
+}
+
+export interface WalkForwardWindowResult {
+  fold: WalkForwardFold;
+  overfitFlag: boolean;
+  trainMetrics: { sharpe: number };
+  testMetrics: { sharpe: number };
+  degradationRatio: number;
+  totalReturnPct: number;
 }
 
 export interface WalkForwardReport {

@@ -3,9 +3,9 @@ import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBad
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { LatestAnalysisSummary, StockConsensus } from "@/types";
+import type { LatestAnalysisSummary, StockConsensus } from "@/types/stock-analysis";
+import { parseAction } from "@/types/stock-analysis";
 import type { BacktestComparisonResponse } from "@/types/stock-analysis";
-import { parseAction } from "@/types";
 import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -99,7 +99,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   // P0-1: 荐股面板关联历史分析数据
   const [latestAnalyses, setLatestAnalyses] = useState<Record<string, LatestAnalysisSummary | null>>({});
   // P0-2: 策略回测统计（每个风格的 win rate + Sharpe）
-  const [strategyStats, setStrategyStats] = useState<Record<string, { winRate: number; sharpe: number | null; signalCount: number }> | null>(null);
+  const [strategyStats, setStrategyStats] = useState<
+    Record<string, { winRate: number; sharpe: number | null; signalCount: number }> | null
+  >(null);
   const [strategyStatsLoading, setStrategyStatsLoading] = useState(false);
 
   const reqTokenRef = useRef(0);
@@ -143,33 +145,33 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
       return invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
     }).then((r) => {
-        if (cancelled) return;
-        if (!r || !r.picks || Object.keys(r.picks).length === 0) {
-          setData(r ?? null);
-          if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
-            setEmptyKind("vendorDisabled");
-          } else {
-            setEmptyKind("noData");
-          }
-          return;
+      if (cancelled) { return; }
+      if (!r || !r.picks || Object.keys(r.picks).length === 0) {
+        setData(r ?? null);
+        if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
+          setEmptyKind("vendorDisabled");
+        } else {
+          setEmptyKind("noData");
         }
-        setData(r);
-        const d = new Date(r.generatedAt);
-        setGeneratedAtText(
-          d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        );
-        return r;
-      })
+        return;
+      }
+      setData(r);
+      const d = new Date(r.generatedAt);
+      setGeneratedAtText(
+        d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+      return r;
+    })
       .then((r) => {
-        if (cancelled || !r) return;
+        if (cancelled || !r) { return; }
         const allCodes = new Set<string>();
         for (const arr of Object.values(r.picks ?? {})) {
           if (!arr) { continue; }
@@ -184,7 +186,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         );
       })
       .then((result) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (result) { setLatestAnalyses(result); }
       })
       .catch((e: any) => {
@@ -195,10 +197,11 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
-     
+    return () => {
+      cancelled = true;
+    };
   }, [period, asOfDate, i18n.language]);
 
   // P0-2: 加载策略回测统计
@@ -210,16 +213,20 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
       for (const [, s] of Object.entries(result.positive.strategies)) {
         const style = s.style;
-        if (!byStyle[style]) byStyle[style] = { winRates: [], sharpes: [], signals: 0 };
+        if (!byStyle[style]) { byStyle[style] = { winRates: [], sharpes: [], signals: 0 }; }
         byStyle[style].winRates.push(s.winRatePct);
-        if (s.sharpeRatio != null) byStyle[style].sharpes.push(s.sharpeRatio);
+        if (s.sharpeRatio != null) { byStyle[style].sharpes.push(s.sharpeRatio); }
         byStyle[style].signals += s.totalSignals;
       }
       const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
       for (const [style, v] of Object.entries(byStyle)) {
         const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
         const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
-        agg[style] = { winRate: Math.round(avgWr * 10) / 10, sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null, signalCount: v.signals };
+        agg[style] = {
+          winRate: Math.round(avgWr * 10) / 10,
+          sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null,
+          signalCount: v.signals,
+        };
       }
       setStrategyStats(agg);
     } catch {
@@ -440,14 +447,22 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                         <>
                           <Tag
                             className="m-0 text-[10px] leading-4"
-                            color={strategyStats[style].winRate >= 55 ? "green" : strategyStats[style].winRate >= 45 ? "orange" : "red"}
+                            color={strategyStats[style].winRate >= 55
+                              ? "green"
+                              : strategyStats[style].winRate >= 45
+                              ? "orange"
+                              : "red"}
                           >
                             {`${strategyStats[style].winRate}%`}
                           </Tag>
                           {strategyStats[style].sharpe != null && (
                             <Tag
                               className="m-0 text-[10px] leading-4"
-                              color={strategyStats[style].sharpe! >= 1 ? "green" : strategyStats[style].sharpe! >= 0.5 ? "orange" : "red"}
+                              color={strategyStats[style].sharpe! >= 1
+                                ? "green"
+                                : strategyStats[style].sharpe! >= 0.5
+                                ? "orange"
+                                : "red"}
                             >
                               {`S ${strategyStats[style].sharpe!.toFixed(1)}`}
                             </Tag>

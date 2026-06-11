@@ -11,7 +11,7 @@
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
 
-import type { WalkForwardWindowResult } from "@/types";
+import type { WalkForwardWindowResult } from "@/types/quant";
 
 interface WalkForwardFoldBarChartProps {
   windows: WalkForwardWindowResult[];
@@ -34,7 +34,7 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
   useEffect(() => {
     if (!instRef.current || windows.length === 0) { return; }
 
-    const foldLabels = windows.map((w) => `F${w.fold.foldIdx}`);
+    const foldLabels = windows.map((w) => `F${w.fold.foldIndex}`);
     const trainSharpe = windows.map((w) => parseFloat(w.trainMetrics.sharpe.toFixed(3)));
     const testSharpe = windows.map((w) => parseFloat(w.testMetrics.sharpe.toFixed(3)));
     // test_bar 颜色：过拟合 fold 红色，否则绿色
@@ -51,7 +51,7 @@ export function WalkForwardFoldBarChart({ windows, height = 280 }: WalkForwardFo
             const w = windows[arr[0].dataIndex];
             const f = w.fold;
             return [
-              `<b>Fold ${f.foldIdx}</b> ${w.overfitFlag ? "<span style='color:#cf1322'>(过拟合)</span>" : ""}`,
+              `<b>Fold ${f.foldIndex}</b> ${w.overfitFlag ? "<span style='color:#cf1322'>(过拟合)</span>" : ""}`,
               `IS: ${f.trainStart} → ${f.trainEnd} (${f.trainBarsCount} 根)`,
               `OOS: ${f.testStart} → ${f.testEnd} (${f.testBarsCount} 根)`,
               `Train Sharpe: ${w.trainMetrics.sharpe.toFixed(3)}`,

@@ -51,7 +51,7 @@ export function ExecutionReplayPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setFetchError(false);
       return invoke<ExecutionSummary[]>("list_workflow_executions", {
@@ -59,16 +59,18 @@ export function ExecutionReplayPanel() {
       });
     })
       .then((list) => {
-        if (cancelled || !list) return;
+        if (cancelled || !list) { return; }
         setExecutions(list ?? []);
       })
       .catch(() => {
-        if (!cancelled) setFetchError(true);
+        if (!cancelled) { setFetchError(true); }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loadStatus = useCallback(async (executionId: string) => {

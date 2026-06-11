@@ -5,17 +5,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
-import {
-  ArrowLeftRight,
-  Coins,
-  LineChart,
-  RotateCcw,
-  Settings,
-  Shield,
-  Sparkles,
-  Users,
-  X,
-} from "lucide-react";
+import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, Sparkles, Users, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -443,9 +433,14 @@ export function StockAnalysisPage() {
                     <div
                       onClick={() => navigate("/trade")}
                       style={{
-                        marginTop: 8, padding: "8px 0", textAlign: "center", fontSize: 12,
-                        border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6,
-                        cursor: "pointer", color: "var(--color-text-secondary)",
+                        marginTop: 8,
+                        padding: "8px 0",
+                        textAlign: "center",
+                        fontSize: 12,
+                        border: "0.5px solid var(--color-border-tertiary)",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        color: "var(--color-text-secondary)",
                       }}
                     >
                       Execute trade &rarr;
@@ -538,26 +533,34 @@ function AnalystConsensusBar() {
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const reports = Object.values(analystReports).filter(Boolean) as string[];
   const total = reports.length;
-  if (total === 0) return null;
+  if (total === 0) { return null; }
 
   // Simple heuristic: count bullish/bearish keywords in each report text
-  let bull = 0; let bear = 0; let neutral = 0;
+  let bull = 0;
+  let bear = 0;
+  let neutral = 0;
   for (const text of reports) {
     const lower = text.toLowerCase();
     const b = (lower.match(/看多|bullish|买入|positive|利好/g) || []).length;
     const be = (lower.match(/看空|bearish|卖出|negative|利空/g) || []).length;
-    if (b > be * 1.5) bull++;
-    else if (be > b * 1.5) bear++;
-    else neutral++;
+    if (b > be * 1.5) { bull++; }
+    else if (be > b * 1.5) { bear++; }
+    else { neutral++; }
   }
 
   return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 12,
-      padding: "6px 12px", marginTop: 8,
-      border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6,
-      fontSize: 12,
-    }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "6px 12px",
+        marginTop: 8,
+        border: "0.5px solid var(--color-border-tertiary)",
+        borderRadius: 6,
+        fontSize: 12,
+      }}
+    >
       <span style={{ fontWeight: 500, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
         Analyst consensus
       </span>

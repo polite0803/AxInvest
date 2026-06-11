@@ -73,7 +73,7 @@ export function TradePanel() {
     if (!enabled) { return; }
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       return Promise.all([
         invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 100 }),
@@ -81,16 +81,18 @@ export function TradePanel() {
       ]);
     })
       .then((result) => {
-        if (!result || cancelled) return;
+        if (!result || cancelled) { return; }
         const [t, p] = result;
         if (Array.isArray(t)) { setTrades(t); }
         if (Array.isArray(p)) { setPositions(p); }
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [enabled]);
 
   // 同步分析页代码

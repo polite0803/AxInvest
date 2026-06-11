@@ -211,7 +211,6 @@ function inferStep(v: Variable): number {
   return 1;
 }
 
- 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface Props {}
 
@@ -290,7 +289,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
     let cancelled = false;
     invoke<WorkflowTemplateResponse | null>("get_workflow_template", { id: TEMPLATE_ID })
       .then(async (rsp) => {
-        if (cancelled) return;
+        if (cancelled) { return; }
         if (rsp && (!rsp.variables || rsp.variables.length === 0)) {
           // Initial load: if template has no variables, init with defaults and save back
           const defaults = getDefaultVariables();
@@ -323,9 +322,15 @@ export function StockAnalysisConfigPanel(_props: Props) {
           setValues(map);
         }
       })
-      .catch(() => { if (!cancelled) message.error(t("stockAnalysis.settings.loadFailed")); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .catch(() => {
+        if (!cancelled) { message.error(t("stockAnalysis.settings.loadFailed")); }
+      })
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [t]);
 
   // tool → parameter groups

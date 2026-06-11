@@ -232,7 +232,6 @@ function ChatViewInner({
   );
   const workflowMatchSuggestion = useAgentStore((s) => s.workflowMatchSuggestion);
 
-   
   const bubbleListRef = useRef<any>(null);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
 

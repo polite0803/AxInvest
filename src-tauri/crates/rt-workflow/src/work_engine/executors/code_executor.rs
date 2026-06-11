@@ -54,16 +54,27 @@ fn execute_rhai_directly(
         input_params_snapshot.insert(target_key.clone(), snapshot_value);
         // 将 Value 转换为 Rhai 动态类型；解析失败时推入 ()（单元值/空）
         match &value {
-            Some(Value::Null) | None => { let _ = scope.push_constant(target_key.as_str(), ()); },
-            Some(Value::Bool(b)) => { let _ = scope.push_constant(target_key.as_str(), *b); },
+            Some(Value::Null) | None => {
+                let _ = scope.push_constant(target_key.as_str(), ());
+            },
+            Some(Value::Bool(b)) => {
+                let _ = scope.push_constant(target_key.as_str(), *b);
+            },
             Some(Value::Number(n)) => {
-                let val = if let Some(f) = n.as_f64() { f }
-                          else if let Some(i) = n.as_i64() { i as f64 }
-                          else if let Some(u) = n.as_u64() { u as f64 }
-                          else { 0.0_f64 };
+                let val = if let Some(f) = n.as_f64() {
+                    f
+                } else if let Some(i) = n.as_i64() {
+                    i as f64
+                } else if let Some(u) = n.as_u64() {
+                    u as f64
+                } else {
+                    0.0_f64
+                };
                 let _ = scope.push_constant(target_key.as_str(), val);
             },
-            Some(Value::String(s)) => { let _ = scope.push_constant(target_key.as_str(), s.clone()); },
+            Some(Value::String(s)) => {
+                let _ = scope.push_constant(target_key.as_str(), s.clone());
+            },
             Some(Value::Array(arr)) => {
                 let rhai_arr: rhai::Array = arr.iter().map(|v| json_value_to_dynamic(v)).collect();
                 let dyn_arr: rhai::Dynamic = rhai_arr.into();
@@ -72,10 +83,7 @@ fn execute_rhai_directly(
             Some(Value::Object(obj)) => {
                 let mut map = rhai::Map::new();
                 for (k, v) in obj {
-                    map.insert(
-                        k.clone().into(),
-                        json_value_to_dynamic(v),
-                    );
+                    map.insert(k.clone().into(), json_value_to_dynamic(v));
                 }
                 scope.push_dynamic(target_key.as_str(), map.into());
             },
@@ -84,17 +92,11 @@ fn execute_rhai_directly(
 
     // 执行脚本，期望返回一个 map
     let result: rhai::Dynamic = engine.eval_with_scope(&mut scope, code).map_err(|e| {
-        NodeError::exec_failed(
-            error_code::VALIDATION_FAILED,
-            format!("Rhai execution failed: {e}"),
-        )
+        NodeError::exec_failed(error_code::VALIDATION_FAILED, format!("Rhai execution failed: {e}"))
     })?;
 
     // 将 Rhai 结果转换回 JSON
-    Ok((
-        dynamic_to_json_value(&result),
-        Value::Object(input_params_snapshot),
-    ))
+    Ok((dynamic_to_json_value(&result), Value::Object(input_params_snapshot)))
 }
 
 /// 将 serde_json::Value 转换为 Rhai Dynamic
@@ -119,10 +121,7 @@ fn json_value_to_dynamic(v: &Value) -> rhai::Dynamic {
         Value::Object(obj) => {
             let mut map = rhai::Map::new();
             for (k, v) in obj {
-                map.insert(
-                    k.clone().into(),
-                    json_value_to_dynamic(v),
-                );
+                map.insert(k.clone().into(), json_value_to_dynamic(v));
             }
             rhai::Dynamic::from(map)
         },
@@ -158,7 +157,11 @@ fn dynamic_to_json_value(v: &rhai::Dynamic) -> Value {
     // Array
     if v.is_array() {
         if let Some(arr) = v.clone().try_cast::<rhai::Array>() {
-            return Value::Array(arr.into_iter().map(|item| dynamic_to_json_value(&item)).collect());
+            return Value::Array(
+                arr.into_iter()
+                    .map(|item| dynamic_to_json_value(&item))
+                    .collect(),
+            );
         }
     }
     // Map

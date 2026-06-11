@@ -42,7 +42,7 @@ export function BacktestPanel() {
   useEffect(() => {
     let cancelled = false;
     Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (cancelled) { return; }
       setLoading(true);
       setFetchError(false);
       return invoke<BacktestStats>("backtest_all_history", {
@@ -51,16 +51,18 @@ export function BacktestPanel() {
       });
     })
       .then((result) => {
-        if (cancelled || !result) return;
+        if (cancelled || !result) { return; }
         setStats(result);
       })
       .catch(() => {
-        if (!cancelled) setFetchError(true);
+        if (!cancelled) { setFetchError(true); }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setLoading(false); }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [holdingDays, scope]);
 
   const runStrategyBacktest = useCallback(async () => {

@@ -88,7 +88,6 @@ export function BenchmarkRunner() {
               key: "tasks",
               label: t("benchmark.tasks"),
               children: (
-                 
                 <TaskList tasks={(currentReport as any).tasks ?? []} results={(currentReport as any).results ?? []} />
               ),
             },

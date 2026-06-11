@@ -208,7 +208,6 @@ interface WorkflowEditorState {
     nodes: WorkflowNode[],
     workflowName: string,
     description?: string,
-     
   ) => Promise<any>;
 
   generateWorkflowFromPrompt: (

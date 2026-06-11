@@ -437,7 +437,6 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
                     axagent_rt_workflow::work_engine::domain_constraints::DomainConstraints::by_role(role_name)
                 }
             })));
-            })));
             engine
         },
         skill_decomposer: Arc::new(tokio::sync::RwLock::new(

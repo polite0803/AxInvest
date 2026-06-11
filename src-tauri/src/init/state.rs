@@ -11,7 +11,6 @@ use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::{CacheConfig, SemanticCache};
 use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
-use axagent_harness::workflow_types::ConstraintBlocks;
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
 use tokio_util::sync::CancellationToken;
@@ -387,7 +386,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             rt.block_on(engine.inject_into_agent_executor(engine.clone()));
             // 注册领域约束：股票角色走特定约束（as-of 时间锚定 + A 股规则），
             // 其他角色走通用 DomainConstraints::by_role
-            rt.block_on(engine.set_domain_constraints(Arc::new(|role_name: &str| -> ConstraintBlocks {
+            rt.block_on(engine.set_domain_constraints(Arc::new(|role_name: &str| {
                 let as_of_date: Option<String> =
                     axagent_astock_data::as_of::current_as_of().map(|c| c.as_string());
                 let is_stock = axagent_stock_analysis::prompts::is_stock_role(role_name);
@@ -410,9 +409,9 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
                     }
                 } else {
                     // 非股票角色：使用通用领域约束
-                    use axagent_rt_workflow::work_engine::domain_constraints;
-                    domain_constraints::DomainConstraints::by_role(role_name)
+                    axagent_rt_workflow::work_engine::domain_constraints::DomainConstraints::by_role(role_name)
                 }
+            })));
             })));
             engine
         },

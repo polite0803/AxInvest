@@ -37,8 +37,11 @@ export function PositionsMiniPanel() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    invoke<PositionSummary[]>("get_trade_positions")
+      .then((p) => { if (Array.isArray(p)) setPositions(p); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   const totalMv = useMemo(
     () => positions.reduce((s, p) => s + (p.marketValue ?? 0), 0),

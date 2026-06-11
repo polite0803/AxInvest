@@ -18,6 +18,7 @@ use std::collections::HashMap;
 ///   - `raw.combined`            原始数据聚合
 ///   - `degraded`                时间锚定降级报告（spec §4.1）
 ///   - `_meta`                   元数据：mode / as_of_date / source / built_at
+///   - `params.<nodeId>`         结构化参数（Agent 节点的 .params + CodeNode 的 .result）
 ///   - 其余节点（debate/risk/research-mgr/portfolio-mgr 等）按 nodeId 存
 ///
 /// `degradation` 由调用方在 workflow 完成时通过 `as_of::take_asof_degradation_report()`
@@ -49,6 +50,23 @@ pub fn build_blackboard_snapshot(
             _ => node_id.clone(),
         };
         bb.insert(key, Value::String(text));
+
+        // ── 结构化参数专用存储（结构化参数方案 Phase 4）──
+        // 保存每个节点的 .params（Agent 节点）或 .result（CodeNode），
+        // 供 What-If 回测 UI 读取原始参数值并允许用户修改后重算。
+        // 注意：extract_node_text 会丢失 JSON 结构，因此需要单独保存。
+        if let Some(obj) = raw_output.as_object() {
+            // Agent 节点：.params 在顶层
+            if let Some(params) = obj.get("params") {
+                if !params.is_null() {
+                    bb.insert(format!("params.{node_id}"), params.clone());
+                }
+            }
+            // CodeNode 直接执行：.result 在顶层
+            if let Some(result) = obj.get("result") {
+                bb.insert(format!("params.{node_id}"), result.clone());
+            }
+        }
     }
     bb.insert("_meta".into(), build_meta(as_of_ctx));
     // 降级报告: spec §4.1 统一降级协议

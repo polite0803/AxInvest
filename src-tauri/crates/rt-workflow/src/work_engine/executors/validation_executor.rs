@@ -116,11 +116,5 @@ impl NodeExecutorTrait for ValidationExecutor {
 
 /// 从 ExecutionState 变量中解析点分隔路径（如 "result.text" → variables["result"]["text"]）。
 fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
-    let parts: Vec<&str> = path.split('.').collect();
-    let root = context.variables.get(parts[0])?.clone();
-    let mut current = root;
-    for part in &parts[1..] {
-        current = current.get(part)?.clone();
-    }
-    Some(current)
+    super::resolve_var_path(path, &context.variables)
 }

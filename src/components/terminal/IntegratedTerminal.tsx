@@ -44,9 +44,9 @@ export function IntegratedTerminal({
   } = useTerminalStore();
 
   const terminalRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const xtermRef = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const fitAddonRef = useRef<any>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const terminalReadyRef = useRef(false);

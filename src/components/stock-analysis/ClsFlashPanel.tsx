@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Spin, Tag, Timeline } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -20,7 +20,7 @@ export function ClsFlashPanel() {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
     setEmptyKind(null);
     try {
@@ -44,11 +44,44 @@ export function ClsFlashPanel() {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      return invoke<any[]>("get_cls_flash");
+    })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data) && data.length > 0) {
+          // 兼容后端字段名变化：驼峰/下划线都接受
+          const normalized: ClsFlashItem[] = data.slice(0, 20).map((d: any) => ({
+            title: d.title ?? "",
+            content: d.content ?? d.summary ?? "",
+            publishTime: d.publishTime ?? d.publish_time ?? d.time ?? "",
+            source: d.source ?? d.source_name ?? null,
+            url: d.url ?? d.link ?? null,
+          }));
+          setItems(normalized);
+        } else {
+          setItems([]);
+          setEmptyKind("noData");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setItems([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <Card

@@ -15,6 +15,7 @@ export { useConversationStore } from "./domain/conversationStore";
 export { useMultiModelStore } from "./domain/multiModelStore";
 export { usePreferenceStore } from "./domain/preferenceStore";
 export { useStreamStore } from "./domain/streamStore";
+export { useBacktestStore, useStrategyStore } from "./feature/quant";
 export { useAgentProfileStore } from "./feature/agentProfileStore";
 export { setupAgentEventListeners, useAgentStore } from "./feature/agentStore";
 export { useAppConfigStore } from "./feature/appConfigStore";

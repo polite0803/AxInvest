@@ -71,7 +71,7 @@ export function CompactRiskSummary({ data }: CompactRiskSummaryProps) {
       label: getLabel(type),
       score: computeRiskScore(text),
     })).sort((a, b) => b.score - a.score);
-  }, [assessments]);
+  }, [assessments, getLabel]);
 
   if (entries.length === 0) {
     return (

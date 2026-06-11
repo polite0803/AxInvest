@@ -24,7 +24,7 @@ export function PanelCollapseButton({ content, onCopied }: PanelCollapseButtonPr
         try {
           await navigator.clipboard.writeText(content);
           onCopied?.();
-        } catch (e) {
+        } catch (_e) {
           // 复制失败 → 降级为 select+execCommand
           const ta = document.createElement("textarea");
           ta.value = content;

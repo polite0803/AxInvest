@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Spin, Table } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 
@@ -20,7 +20,7 @@ export function IndexQuotesPanel() {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
     setEmptyKind(null);
     try {
@@ -36,11 +36,36 @@ export function IndexQuotesPanel() {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      return invoke<IndexQuote[]>("get_index_quotes");
+    })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data) && data.length > 0) {
+          setQuotes(data);
+        } else {
+          setQuotes([]);
+          setEmptyKind("noData");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setQuotes([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const columns = [
     { title: t("stockAnalysis.alert.name"), dataIndex: "name", key: "name", width: 100 },

@@ -62,6 +62,7 @@ pub mod prompt_templates;
 pub mod provider_balance;
 pub mod providers;
 pub mod pty;
+pub mod quant;
 #[cfg(not(mobile))]
 pub mod quickbar;
 pub mod reflection;

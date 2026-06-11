@@ -222,7 +222,7 @@ function findCyclicSCCs(nodes: NodeLike[], edges: EdgeLike[]): string[][] {
 
 /** 提取节点标题：优先 data.title（ReactFlow），回退到 WorkflowNode.title */
 function titleOf(n: NodeLike): string {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   if (typeof (n as any).title === "string") { return (n as any).title; }
   if (typeof n.data?.title === "string") { return n.data.title; }
   return "";
@@ -289,7 +289,7 @@ export function validate_workflow(
 ): ValidationResult {
   // 过滤分组/装饰边——不参与结构校验
   const realEdges = edges.filter(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (e) => e.edge_type !== "grouping" && (e as any).data?.edgeType !== "grouping",
   );
   const issues: ValidateIssue[] = [];
@@ -342,9 +342,9 @@ export function validate_workflow(
 
     // decorative 容器跳过入度/出度检查（仅供视觉分组，调度引擎忽略）
     if (
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (n as any).kind === "decorative" || (n as any).data?.kind === "decorative"
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       || (n as any).config?.kind === "decorative"
     ) { continue; }
 
@@ -551,7 +551,7 @@ export function validate_workflow(
 
 /** 从节点中提取 config 字段值（兼容 WorkflowNode 和 ReactFlow Node） */
 function extractConfig(n: NodeLike, key: string): string | undefined {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const cfg = (n as any).config;
   if (cfg && typeof cfg[key] === "string") { return cfg[key]; }
   if (n.data && typeof n.data[key] === "string") { return n.data[key] as string; }

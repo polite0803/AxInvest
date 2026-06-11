@@ -933,7 +933,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
                 const items: { value: string; label: string }[] = [];
                 // Template tool_defs（Rhai 脚本工具）
                 if (templateToolDefs && templateToolDefs.length > 0) {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                   
                   items.push({ value: "", label: t("workflow.code.templateRhaiTools"), disabled: true } as any);
                   templateToolDefs.forEach((td) => {
                     if (!names.has(td.tool_name)) {
@@ -943,7 +943,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
                   });
                 }
                 // 全局工具
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 items.push({ value: "", label: t("workflow.code.globalTools"), disabled: true } as any);
                 (config.tools || []).forEach((td) => {
                   const name = typeof td === "string" ? td : td.name;

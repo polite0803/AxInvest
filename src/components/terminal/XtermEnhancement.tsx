@@ -259,7 +259,7 @@ export function useVirtualScroll(
   terminal: XTerm | null,
   _bufferSize: number = 5000,
 ) {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [visibleRange, _setVisibleRange] = useState({ start: 0, end: 0 });
 
   const scrollToBottom = useCallback(() => {

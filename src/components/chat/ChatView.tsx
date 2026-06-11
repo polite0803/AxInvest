@@ -232,7 +232,7 @@ function ChatViewInner({
   );
   const workflowMatchSuggestion = useAgentStore((s) => s.workflowMatchSuggestion);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const bubbleListRef = useRef<any>(null);
   const messageAreaRef = useRef<HTMLDivElement | null>(null);
 

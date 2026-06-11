@@ -21,14 +21,7 @@ impl Default for SwitchExecutor {
 /// 解析点号分隔路径，从 ExecutionState.variables 提取目标值。
 /// 空路径直接返回 None；segments 中间值非对象也返回 None。
 fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
-    if path.is_empty() {
-        return None;
-    }
-    let mut current = context.variables.get(path)?.clone();
-    for segment in path.split('.').skip(1) {
-        current = current.get(segment)?.clone();
-    }
-    Some(current)
+    super::resolve_var_path(path, &context.variables)
 }
 
 /// 将 serde_json::Value 转为 Rhai 兼容的字面量表达式。

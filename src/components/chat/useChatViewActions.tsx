@@ -22,7 +22,7 @@ export interface UseChatViewActionsParams {
   activeConversationId: string | null;
   activeConversation: import("@/types").Conversation | undefined;
   messages: Message[];
-  bubbleListRef: React.RefObject<any | null>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  bubbleListRef: React.RefObject<any | null>;  
   messageAreaRef: React.RefObject<HTMLDivElement | null>;
   loadOlderMessages: () => Promise<void>;
 }

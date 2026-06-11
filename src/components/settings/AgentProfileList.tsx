@@ -210,8 +210,102 @@ export function AgentProfileList() {
   }, []);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      return Promise.all([
+        invoke<{ nodes: unknown[] }>("get_workflow_template", { id: "stock-analysis" }),
+        invoke<string[]>("list_stock_tools"),
+        invoke<{ id: string; name: string; system_prompt: string }[]>("list_agency_experts"),
+        invoke<{ id: string; name: string; system_prompt: string }[]>("list_agent_roles", { source: "stock-analysis" }),
+      ]);
+    })
+      .then((result) => {
+        if (!result || cancelled) return;
+        const [template, tools, expertsRaw, rolesRaw] = result;
+        setAllTools(Array.isArray(tools) ? tools : []);
+        const em: Record<string, { name: string; prompt: string }> = {};
+        for (const e of (Array.isArray(expertsRaw) ? expertsRaw : [])) {
+          em[e.id] = { name: e.name, prompt: e.system_prompt };
+        }
+        setExpertMap(em);
+        const rm: Record<string, { name: string; prompt: string }> = {};
+        for (const r of (Array.isArray(rolesRaw) ? rolesRaw : [])) {
+          rm[r.id] = { name: r.name, prompt: r.system_prompt };
+        }
+        setRoleMap(rm);
+
+        if (template?.nodes) {
+          const nodes = Array.isArray(template.nodes) ? template.nodes : [];
+          const parsed = nodes
+            .map((n: any) => {
+              const pid: string = n?.config?.agent_profile_id ?? "";
+              if (!pid.startsWith("stock-")) { return null; }
+              const exposed: string[] = n.config.exposed_tools ?? [];
+              const nodeId: string = n.base?.id ?? n.id ?? "";
+              return {
+                id: nodeId,
+                profileId: pid,
+                expertId: `agency-${pid}`,
+                expertName: PROFILE_NAMES[pid] ?? pid,
+                roleId: PROFILE_ROLE_IDS[pid] ?? "",
+                roleName: PROFILE_ROLES[pid] ?? "-",
+                tools: exposed,
+                fixedTools: FIXED_TOOL_MAP[nodeId] ?? FIXED_ALGO_TOOLS[nodeId] ?? [],
+                systemPrompt: n.config.system_prompt ?? "",
+                temperature: n.config.temperature ?? 0.3,
+                maxTokens: n.config.max_tokens ?? 4096,
+                maxToolRounds: n.config.max_tool_rounds ?? 2,
+              } as AgentNodeRow;
+            })
+            .filter(Boolean) as AgentNodeRow[];
+          if (parsed.length > 0) {
+            setRows(parsed);
+            if (!cancelled) setLoading(false);
+            return;
+          }
+        }
+        // 无模板数据时用静态映射回退（预览/离线模式）
+        const profileToNode: Record<string, string> = {
+          "stock-market-analyst": "a-market-analyst",
+          "stock-sentiment-analyst": "a-sentiment",
+          "stock-news-analyst": "a-news",
+          "stock-fundamentals-analyst": "a-fundamentals",
+          "stock-policy-analyst": "a-policy",
+          "stock-hot-money-tracker": "a-hot-money",
+          "stock-lockup-watcher": "a-lockup",
+          "stock-research-analyst": "a-research",
+          "stock-sector-analyst": "a-sector",
+          "stock-research-manager": "research-mgr",
+        };
+        const fallbackRows: AgentNodeRow[] = Object.keys(PROFILE_NAMES).map((pid) => {
+          const nid = profileToNode[pid] ?? pid.replace("stock-", "");
+          return {
+            id: nid,
+            profileId: pid,
+            expertId: `agency-${pid}`,
+            expertName: PROFILE_NAMES[pid],
+            roleId: PROFILE_ROLE_IDS[pid] ?? "",
+            roleName: PROFILE_ROLES[pid] ?? "-",
+            tools: [],
+            fixedTools: FIXED_TOOL_MAP[nid] ?? FIXED_ALGO_TOOLS[nid] ?? [],
+            systemPrompt: "",
+            temperature: 0.3,
+            maxTokens: 4096,
+            maxToolRounds: 2,
+          };
+        });
+        setRows(fallbackRows);
+      })
+      .catch((err) => {
+        console.error("加载模板节点失败", err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSavePrompt = useCallback(async () => {
     if (!editPrompt) { return; }

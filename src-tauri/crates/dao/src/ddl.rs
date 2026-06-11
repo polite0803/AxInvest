@@ -705,6 +705,47 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
             style TEXT NOT NULL, confidence INTEGER NOT NULL DEFAULT 0, \
             synthetic INTEGER NOT NULL DEFAULT 0, \
             seed_pool_json TEXT, created_at TEXT NOT NULL)",
+        // ========================================================================
+        // SECTION L: AxInvest — Quant (量化交易 + 量化回测)
+        // ========================================================================
+        // 4 张核心表：策略元数据 / 回测运行 / 信号历史 / 纸面成交
+        // 设计原则：result_json 直接存 BacktestResult 全量序列化
+        // （避免后续新增指标时还要加表字段）
+        "CREATE TABLE IF NOT EXISTS quant_strategies (\
+            id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL DEFAULT '1.0.0', \
+            strategy_type TEXT NOT NULL DEFAULT 'builtin', description TEXT, \
+            script_source TEXT, params_json TEXT, \
+            walk_forward_enabled INTEGER NOT NULL DEFAULT 1, \
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, \
+            UNIQUE(name, version))",
+        "CREATE TABLE IF NOT EXISTS quant_runs (\
+            id TEXT NOT NULL PRIMARY KEY, strategy_id TEXT NOT NULL, name TEXT, \
+            start_date TEXT NOT NULL, end_date TEXT NOT NULL, \
+            initial_cash REAL NOT NULL DEFAULT 1000000.0, \
+            config_json TEXT NOT NULL DEFAULT '{}', \
+            status TEXT NOT NULL DEFAULT 'pending', \
+            result_json TEXT, \
+            walk_forward_enabled INTEGER NOT NULL DEFAULT 0, \
+            walk_forward_folds INTEGER, \
+            walk_forward_overfit_warning INTEGER, \
+            walk_forward_stability_score REAL, \
+            started_at INTEGER NOT NULL, finished_at INTEGER, \
+            error_message TEXT, \
+            FOREIGN KEY (strategy_id) REFERENCES quant_strategies(id) ON DELETE CASCADE)",
+        "CREATE TABLE IF NOT EXISTS quant_signals (\
+            id TEXT NOT NULL PRIMARY KEY, run_id TEXT NOT NULL, \
+            code TEXT NOT NULL, action TEXT NOT NULL, strength REAL NOT NULL DEFAULT 0.5, \
+            reason TEXT, close_reason TEXT, \
+            timestamp TEXT NOT NULL, created_at INTEGER NOT NULL, \
+            FOREIGN KEY (run_id) REFERENCES quant_runs(id) ON DELETE CASCADE)",
+        "CREATE TABLE IF NOT EXISTS quant_paper_trades (\
+            id TEXT NOT NULL PRIMARY KEY, run_id TEXT NOT NULL, \
+            code TEXT NOT NULL, side TEXT NOT NULL, \
+            quantity INTEGER NOT NULL, price REAL NOT NULL, amount REAL NOT NULL, \
+            commission REAL NOT NULL DEFAULT 0, stamp_tax REAL NOT NULL DEFAULT 0, \
+            slippage REAL NOT NULL DEFAULT 0, \
+            timestamp TEXT NOT NULL, reason TEXT, realized_pnl REAL NOT NULL DEFAULT 0, \
+            FOREIGN KEY (run_id) REFERENCES quant_runs(id) ON DELETE CASCADE)",
     ] {
         db.execute_unprepared(sql).await?;
     }
@@ -788,6 +829,10 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         (
             "r3_2026_06_10",
             "R3 数据层（financial_snapshots/earnings_events）",
+        ),
+        (
+            "m1_2026_06_11",
+            "M1 量化交易+量化回测（quant_strategies/runs/signals/paper_trades）",
         ),
     ] {
         db.execute_unprepared(&format!(
@@ -941,6 +986,15 @@ pub async fn run_initialization(db: &impl ConnectionTrait) -> Result<(), DbErr> 
         "CREATE INDEX IF NOT EXISTS idx_financial_snapshots_code_date ON financial_snapshots(stock_code, snapshot_date)",
         "CREATE INDEX IF NOT EXISTS idx_earnings_events_code_date ON earnings_events(stock_code, event_date)",
         "CREATE INDEX IF NOT EXISTS idx_earnings_events_date ON earnings_events(event_date)",
+        // Quant 索引
+        "CREATE INDEX IF NOT EXISTS idx_quant_strategies_name ON quant_strategies(name)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_strategies_type ON quant_strategies(strategy_type)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_runs_strategy ON quant_runs(strategy_id, started_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_runs_status ON quant_runs(status, started_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_signals_run ON quant_signals(run_id, timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_signals_code_action ON quant_signals(code, action, timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_paper_trades_run ON quant_paper_trades(run_id, timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_quant_paper_trades_code ON quant_paper_trades(code, timestamp)",
     ] {
         db.execute_unprepared(sql).await?;
     }

@@ -548,6 +548,21 @@ export interface BacktestComparisonResponse {
   skipped: string[];
 }
 
+// ── RecoSignalTimeline ──
+
+export interface StrategySignalResult {
+  strategyId: string;
+  stockCode: string;
+  stockName: string;
+  signalDate: string;
+  entryPrice: number;
+  exitPrice: number;
+  holdingDays: number;
+  returnPct: number;
+  wasProfitable: boolean;
+  maxDrawdownPct: number;
+}
+
 // ── Decision Timeline（Phase 8）──
 
 // ── 荐股面板历史分析关联（P0-1）──

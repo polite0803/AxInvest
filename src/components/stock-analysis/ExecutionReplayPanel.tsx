@@ -34,7 +34,7 @@ export function ExecutionReplayPanel() {
   const [status, setStatus] = useState<ExecutionStatusResponse | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
     setFetchError(false);
     try {
@@ -46,11 +46,30 @@ export function ExecutionReplayPanel() {
       setFetchError(true);
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setFetchError(false);
+      return invoke<ExecutionSummary[]>("list_workflow_executions", {
+        workflowId: "stock-analysis",
+      });
+    })
+      .then((list) => {
+        if (cancelled || !list) return;
+        setExecutions(list ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const loadStatus = useCallback(async (executionId: string) => {
     setLoadingStatus(true);

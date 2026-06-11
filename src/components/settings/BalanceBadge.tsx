@@ -12,7 +12,7 @@ interface BalanceData {
 
 export const BalanceBadge: React.FC = () => {
   const { t } = useTranslation();
-  const fetchBalance = useProviderStore((s) => (s as any).fetchBalance); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const fetchBalance = useProviderStore((s) => (s as any).fetchBalance);  
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [loading, setLoading] = useState(false);
 

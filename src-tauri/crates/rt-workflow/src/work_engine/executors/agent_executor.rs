@@ -441,8 +441,9 @@ impl NodeExecutorTrait for AgentExecutor {
             let mut pairs: Vec<(&String, &String)> = an.config.input_mapping.iter().collect();
             pairs.sort_by(|a, b| a.0.cmp(b.0));
             for (target_key, source_key) in &pairs {
-                if let Some(value) = context.variables.get(source_key.as_str()) {
-                    let formatted = match value {
+                // 使用 resolve_var_path 支持点号路径（如 a-market-analyst.params.bull_score）
+                if let Some(value) = super::resolve_var_path(source_key, &context.variables) {
+                    let formatted = match &value {
                         Value::String(s) => s.clone(),
                         other => other.to_string(),
                     };
@@ -770,14 +771,29 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
+        // ── 4i. 结构化参数提取（结构化参数方案 Phase 1）──
+        // 从 LLM 回复文本中提取 JSON params，嵌入 output 的 "params" 键。
+        // 下游节点可通过 input_mapping: {"key": "node_id.params.field"}
+        // 或 resolve_var_path("node_id.params") 直接消费结构化参数，
+        // 无需 LLM 重新理解文本。
+        let extracted_params = super::extract_json_params(&final_content);
+
+        // ── 4j. 自然语言 params fallback（非 JSON 输出 → 生成默认占位符）
+        // 当 LLM 未输出结构化 JSON 时（如纯文本回复、RAG 查询），params 设为 null；
+        // 前端和下游可通过 `params == null` 判断是否可进行确定性计算。
+        let params = extracted_params.unwrap_or(Value::Null);
+
+        let output_json = serde_json::json!({
+            "role": role_desc, "model": model_for_output,
+            "content": final_content, "thinking": final_thinking,
+            "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
+            "tool_calls_made": tool_calls_made,
+            "node_id": node.base_id(),
+            "params": params,
+        });
+
         Ok(NodeOutput {
-            output: serde_json::json!({
-                "role": role_desc, "model": model_for_output,
-                "content": final_content, "thinking": final_thinking,
-                "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
-                "tool_calls_made": tool_calls_made,
-                "node_id": node.base_id(),
-            }),
+            output: output_json,
             output_var: Some(an.config.output_var.clone()),
         })
     }

@@ -31,7 +31,7 @@ function NodeBadge({ name }: { name: string }) {
 }
 
 /** 证据 chip:点击 → useRightPanel.navigateTo */
-function EvidenceChip({ ref: ev }: { ref: EvidenceRef }) {
+function EvidenceChip({ evidence: ev }: { evidence: EvidenceRef }) {
   const { navigateTo } = useRightPanel();
   return (
     <button
@@ -240,7 +240,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
 
           {node.evidenceRefs.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {node.evidenceRefs.map((ev, i) => <EvidenceChip key={i} ref={ev} />)}
+              {node.evidenceRefs.map((ev, i) => <EvidenceChip key={i} evidence={ev} />)}
             </div>
           )}
 

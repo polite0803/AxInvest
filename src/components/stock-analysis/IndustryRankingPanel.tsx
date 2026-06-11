@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -36,7 +36,7 @@ export function IndustryRankingPanel() {
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async (silent = false) => {
+  const load = async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
@@ -80,11 +80,65 @@ export function IndustryRankingPanel() {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load(true);
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      setEmptyVendors(undefined);
+      return checkVendorEnabled("sectors", { silent: true });
+    })
+      .then((check) => {
+        if (cancelled || !check) return;
+        if (check.status === "disabled") {
+          setRows([]);
+          setEmptyKind("vendorDisabled");
+          setEmptyVendors(check.vendors);
+          return;
+        }
+        if (check.status === "backend_offline") {
+          setRows([]);
+          setEmptyKind("backendOffline");
+          return;
+        }
+        return invoke<any[]>("get_industry_ranking");
+      })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (!Array.isArray(data)) { throw new Error("bad data"); }
+        const list: IndustryRow[] = data.slice(0, 20).map((e: any, i: number) => ({
+          rank: i + 1,
+          industryName: e.industryName ?? e.industry_name ?? "",
+          industryCode: e.industryCode ?? e.industry_code ?? "",
+          changePct: Number(e.changePct ?? e.change_pct ?? 0),
+          mainInflow: e.mainInflow != null
+            ? Number(e.mainInflow)
+            : (e.main_inflow != null ? Number(e.main_inflow) : null),
+          leaderCode: e.leaderCode ?? e.leader_code ?? "",
+          leaderName: e.leaderName ?? e.leader_name ?? "",
+          leaderChangePct: Number(e.leaderChangePct ?? e.leader_change_pct ?? 0),
+        }));
+        list.sort((a, b) => b.changePct - a.changePct);
+        list.forEach((r, i) => {
+          r.rank = i + 1;
+        });
+        setRows(list);
+        if (list.length === 0) { setEmptyKind("noData"); }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRows([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const analyze = async (code: string) => {
     if (!code) { return; }

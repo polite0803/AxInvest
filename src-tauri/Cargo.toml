@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/cache", "crates/core", "crates/crypto", "crates/dao", "crates/disk-cache", "crates/document-parser", "crates/entities", "crates/harness", "crates/kit", "crates/mcp", "crates/providers", "crates/gateway", "crates/migration", "crates/agent", "crates/runtime-core", "crates/runtime", "crates/search", "crates/storage", "crates/trajectory", "crates/telemetry", "crates/plugins", "crates/tools", "crates/prompt-guard", "crates/rt-workflow", "crates/rt-messaging", "crates/rt-webhook", "crates/rt-dashboard", "crates/rt-theme", "crates/npm", "crates/astock-data", "crates/stock-analysis", "schema-gen"]
+members = [".", "crates/cache", "crates/core", "crates/crypto", "crates/dao", "crates/disk-cache", "crates/document-parser", "crates/entities", "crates/harness", "crates/kit", "crates/mcp", "crates/providers", "crates/gateway", "crates/migration", "crates/agent", "crates/runtime-core", "crates/runtime", "crates/search", "crates/storage", "crates/trajectory", "crates/telemetry", "crates/plugins", "crates/tools", "crates/prompt-guard", "crates/quant", "crates/rt-workflow", "crates/rt-messaging", "crates/rt-webhook", "crates/rt-dashboard", "crates/rt-theme", "crates/npm", "crates/astock-data", "crates/stock-analysis", "schema-gen"]
 resolver = "2"
 
 [workspace.package]
@@ -87,9 +87,11 @@ axagent-trajectory = { path = "crates/trajectory" }
 axagent-telemetry = { path = "crates/telemetry" }
 axagent-tools = { path = "crates/tools" }
 axagent-plugins = { path = "crates/plugins" }
+rhai = { version = "1", features = ["sync"] }
 axagent-astock-data = { path = "crates/astock-data" }
 axagent-stock-analysis = { path = "crates/stock-analysis" }
 axagent-prompt-guard = { path = "crates/prompt-guard" }
+axagent-quant = { path = "crates/quant" }
 tokio = { workspace = true }
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { workspace = true }

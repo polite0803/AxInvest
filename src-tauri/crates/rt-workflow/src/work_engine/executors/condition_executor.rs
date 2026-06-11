@@ -414,21 +414,6 @@ fn evaluate_llm_heuristic(
     false
 }
 
-/// 从 ExecutionState 变量中解析点分隔路径。
 fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
-    // 修复：空路径直接返回 None，不再走 parts[0] 触发 panic
-    if path.is_empty() {
-        return None;
-    }
-    let parts: Vec<&str> = path.split('.').collect();
-    // 尝试按节点输出路径解析：root 为节点 ID，后续为嵌套字段
-    if let Some(root) = context.variables.get(parts[0]) {
-        let mut current = root.clone();
-        for part in &parts[1..] {
-            current = current.get(part)?.clone();
-        }
-        return Some(current);
-    }
-    // fallback：root 不是节点 ID，将整个 path 作为模板变量名直查
-    context.variables.get(path).cloned()
+    super::resolve_var_path(path, &context.variables)
 }

@@ -176,21 +176,7 @@ impl NodeExecutorTrait for ToolExecutor {
 }
 
 fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
-    // 修复：空路径直接返回 None，避免 parts[0] 在空字符串上访问触发 panic
-    if path.is_empty() {
-        return None;
-    }
-    let parts: Vec<&str> = path.split('.').collect();
-    // 尝试按节点输出路径解析：root 为节点 ID，后续为嵌套字段
-    if let Some(root) = context.variables.get(parts[0]) {
-        let mut current = root.clone();
-        for part in &parts[1..] {
-            current = current.get(part)?.clone();
-        }
-        return Some(current);
-    }
-    // fallback：root 不是节点 ID，将整个 path 作为模板变量名直查
-    context.variables.get(path).cloned()
+    super::resolve_var_path(path, &context.variables)
 }
 
 /// 从 ExecutionState 中收集所有模板变量（非节点输出），用于注入工具函数的 _template_vars。

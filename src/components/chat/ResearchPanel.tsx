@@ -297,7 +297,7 @@ export function ResearchPanel({ className }: ResearchPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [topic]);
+  }, [topic, syncCitations, t]);
 
   const pauseResearch = useCallback(() => {
     setIsPaused(true);

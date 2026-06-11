@@ -70,8 +70,16 @@ export function InvestDashboard() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    Promise.all([
+      invoke<PositionSummary[]>("get_trade_positions").catch(() => []),
+      invoke<RecentAnalysis[]>("get_recent_analyses", { limit: 5 }).catch(() => []),
+      loadMarketRegime().catch(() => null),
+    ]).then(([pos, anl, regime]) => {
+      if (Array.isArray(pos)) setPositions(pos);
+      if (Array.isArray(anl)) setRecentAnalyses(anl);
+      if (regime) setMarketRegime(regime);
+    }).finally(() => setLoading(false));
+  }, []);
 
   const totalMv = positions.reduce((s, p) => s + (p.marketValue ?? 0), 0);
   const totalPnl = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0);

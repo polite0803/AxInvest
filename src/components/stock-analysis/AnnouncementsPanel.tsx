@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Spin, Table, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -21,7 +21,7 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     if (!stockCode) {
       setItems([]);
       setEmptyKind("noStock");
@@ -42,11 +42,43 @@ export function AnnouncementsPanel({ stockCode }: { stockCode: string }) {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, [stockCode]);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    if (!stockCode) {
+      Promise.resolve().then(() => {
+        setItems([]);
+        setEmptyKind("noStock");
+      });
+      return;
+    }
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      return invoke<Announcement[]>("get_stock_announcements", { stockCode });
+    })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data) && data.length > 0) {
+          setItems(data);
+        } else {
+          setItems([]);
+          setEmptyKind("noData");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setItems([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [stockCode]);
 
   const columns = [
     {

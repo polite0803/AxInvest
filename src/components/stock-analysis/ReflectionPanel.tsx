@@ -57,7 +57,18 @@ export function ReflectionPanel() {
   };
 
   useEffect(() => {
-    load();
+    let cancelled = false;
+    Promise.all([
+      invoke<ReflectionRow[]>("list_reflections", {}),
+      invoke<CronJobResponse[]>("list_validate_decisions_crons", {}),
+    ])
+      .then(([r, c]) => {
+        if (cancelled) return;
+        if (Array.isArray(r)) { setReflections(r); }
+        if (Array.isArray(c)) { setCronJobs(c); }
+      })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
   }, []);
 
   const activeCron = cronJobs.find((j) => j.status === "Active") || cronJobs[0];

@@ -624,13 +624,15 @@ export function useChatViewMessages({
 
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
   const [summaryModalText, setSummaryModalText] = useState("");
-  const contentRendererMessageIdsRef = useRef<Set<string>>(new Set());
+  const [contentRendererMessageIds, setContentRendererMessageIds] = useState<Set<string>>(new Set());
+  const contentRendererMessageIdsRef = useRef(contentRendererMessageIds);
 
   useEffect(() => {
     if (!streaming || !streamingMessageId) {
       return;
     }
-    contentRendererMessageIdsRef.current.add(streamingMessageId);
+    contentRendererMessageIdsRef.current = new Set(contentRendererMessageIdsRef.current).add(streamingMessageId);
+    setContentRendererMessageIds(contentRendererMessageIdsRef.current);
   }, [streaming, streamingMessageId]);
 
   const activeMessages = useMemo(
@@ -727,20 +729,12 @@ export function useChatViewMessages({
     return next;
   }, [activeMessages]);
 
-  const bubbleItemCacheRef = useRef<
-    Map<string, { signature: string; item: BubbleItemType }>
-  >(new Map());
   /** 内联解析 workflow-* 消息内容（避免额外 import 路径） */
   function parseWorkflowCardInline(content: string) {
     return parseWorkflowCard(content);
   }
 
   const bubbleItems: BubbleItemType[] = useMemo(() => {
-    const cache = bubbleItemCacheRef.current;
-    const nextCache = new Map<
-      string,
-      { signature: string; item: BubbleItemType }
-    >();
     const nextItems: BubbleItemType[] = [];
 
     for (const msg of activeMessages) {
@@ -749,19 +743,12 @@ export function useChatViewMessages({
       }
 
       if (msg.role === "system" && msg.content === "<!-- context-clear -->") {
-        const signature = "context-clear";
-        // eslint-disable-next-line react-hooks/refs
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : {
-            key: msg.id,
-            role: "context-clear",
-            content: msg.id,
-            variant: "borderless" as const,
-          };
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
+        nextItems.push({
+          key: msg.id,
+          role: "context-clear",
+          content: msg.id,
+          variant: "borderless" as const,
+        });
         continue;
       }
 
@@ -769,54 +756,29 @@ export function useChatViewMessages({
         msg.role === "system"
         && msg.content === "<!-- context-compressed -->"
       ) {
-        const signature = "context-compressed";
-        // eslint-disable-next-line react-hooks/refs
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : {
-            key: msg.id,
-            role: "context-compressed",
-            content: msg.id,
-            variant: "borderless" as const,
-          };
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
+        nextItems.push({
+          key: msg.id,
+          role: "context-compressed",
+          content: msg.id,
+          variant: "borderless" as const,
+        });
         continue;
       }
 
       if (msg.role === "system" && msg.content.startsWith("<!-- workflow-")) {
         const data = parseWorkflowCardInline(msg.content);
-        // signature 必须包含内容变化因子，否则缓存会阻止卡片实时更新
-        // completed/total 字段随每个 workflow-step-done 事件变化
-        const progressKey = data?.completed != null
-          ? `${data.completed}/${data.total ?? "?"}/${data.status ?? ""}`
-          : `${msg.content.length}`;
-        const signature = `workflow:${data?.type ?? "unknown"}:${msg.id}:${progressKey}`;
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : {
-            key: msg.id,
-            role: "workflow-card",
-            content: data ?? msg.content,
-            variant: "borderless" as const,
-          } as BubbleItemType;
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
+        nextItems.push({
+          key: msg.id,
+          role: "workflow-card",
+          content: data ?? msg.content,
+          variant: "borderless" as const,
+        } as BubbleItemType);
         continue;
       }
 
       if (msg.role === "user") {
         const { userContent } = userSearchContentById.get(msg.id) ?? parseSearchContent(msg.content);
-        const signature = `user:${userContent}`;
-        // eslint-disable-next-line react-hooks/refs
-        const cached = cache.get(msg.id);
-        const item = cached?.signature === signature
-          ? cached.item
-          : { key: msg.id, role: "user", content: userContent };
-        nextCache.set(msg.id, { signature, item });
-        nextItems.push(item);
+        nextItems.push({ key: msg.id, role: "user", content: userContent });
         continue;
       }
 
@@ -855,21 +817,9 @@ export function useChatViewMessages({
       const stableKey = msg.parent_message_id
         ? `ai:${msg.parent_message_id}`
         : msg.id;
-      if (nextCache.has(stableKey)) {
-        continue;
-      }
-      const signature = `ai:${msg.id}:${aiContent}`;
-      // eslint-disable-next-line react-hooks/refs
-      const cached = cache.get(stableKey);
-      const item = cached?.signature === signature
-        ? cached.item
-        : { key: stableKey, role: "ai", content: aiContent };
-      nextCache.set(stableKey, { signature, item });
-      nextItems.push(item);
+      nextItems.push({ key: stableKey, role: "ai", content: aiContent });
     }
 
-    // eslint-disable-next-line react-hooks/refs
-    bubbleItemCacheRef.current = nextCache;
     return nextItems;
   }, [activeMessages, thinkingActiveMessageIds, userSearchContentById]);
 
@@ -965,11 +915,7 @@ export function useChatViewMessages({
 
   const hiddenEarlierCount = 0;
 
-  const aiContentNodesCacheRef = useRef<
-    Map<string, { content: string; nodes: ChatMarkdownNode[] }>
-  >(new Map());
   const aiContentNodesById = useMemo(() => {
-    const cache = aiContentNodesCacheRef.current;
     const next = new Map<string, ChatMarkdownNode[]>();
     for (const item of bubbleItems) {
       if (item.role !== "ai" || typeof item.content !== "string") {
@@ -982,39 +928,14 @@ export function useChatViewMessages({
       }
       const shouldRenderFromContent = shouldRenderAssistantMarkdownFromContent(
         streaming && msg?.id === streamingMessageId,
-        // eslint-disable-next-line react-hooks/refs
-        Boolean(msg?.id && contentRendererMessageIdsRef.current.has(msg.id)),
+        Boolean(msg?.id && contentRendererMessageIds.has(msg.id)),
       );
       if (shouldRenderFromContent) {
         continue;
       }
       const messageId = String(item.key);
-      // eslint-disable-next-line react-hooks/refs
-      const cached = cache.get(messageId);
-      if (cached && cached.content === item.content) {
-        next.set(messageId, cached.nodes);
-        continue;
-      }
       const nodes = parseChatMarkdown(item.content);
-      // eslint-disable-next-line react-hooks/refs
-      if (cache.size >= 100) {
-        // eslint-disable-next-line react-hooks/refs
-        const firstKey = cache.keys().next().value;
-        if (firstKey !== undefined) {
-          // eslint-disable-next-line react-hooks/refs
-          cache.delete(firstKey);
-        }
-      }
-      // eslint-disable-next-line react-hooks/refs
-      cache.set(messageId, { content: item.content, nodes });
       next.set(messageId, nodes);
-    }
-    // eslint-disable-next-line react-hooks/refs
-    for (const messageId of Array.from(cache.keys())) {
-      if (!next.has(messageId)) {
-        // eslint-disable-next-line react-hooks/refs
-        cache.delete(messageId);
-      }
     }
     return next;
   }, [
@@ -1023,6 +944,7 @@ export function useChatViewMessages({
     messageById,
     streaming,
     streamingMessageId,
+    contentRendererMessageIds,
   ]);
 
   const formatTime = useCallback((ts: number) => {
@@ -1344,7 +1266,6 @@ export function useChatViewMessages({
   );
 
   const aiRole = useCallback(
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     (bubbleData: BubbleItemType) => {
       const msg = assistantByParentId.get(String(bubbleData.key))
         ?? (() => {

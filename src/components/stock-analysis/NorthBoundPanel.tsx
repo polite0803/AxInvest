@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Spin, Statistic } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -21,7 +21,7 @@ export function NorthBoundPanel() {
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async (silent = false) => {
+  const load = async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
@@ -64,11 +64,63 @@ export function NorthBoundPanel() {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load(true);
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      setEmptyVendors(undefined);
+      return checkVendorEnabled("north", { silent: true });
+    })
+      .then((check) => {
+        if (cancelled || !check) return;
+        if (check.status === "disabled") {
+          setFlow(null);
+          setEmptyKind("vendorDisabled");
+          setEmptyVendors(check.vendors);
+          return;
+        }
+        if (check.status === "backend_offline") {
+          setFlow(null);
+          setEmptyKind("backendOffline");
+          return;
+        }
+        return invoke<any>("get_north_bound_flow");
+      })
+      .then((f) => {
+        if (cancelled) return;
+        if (!f) {
+          setFlow(null);
+          setEmptyKind("noData");
+          return;
+        }
+        const next: NbFlow = {
+          date: f.date ?? "",
+          shFlow: Number(f.shFlow ?? f.sh_flow ?? 0),
+          szFlow: Number(f.szFlow ?? f.sz_flow ?? 0),
+          totalFlow: Number(f.totalFlow ?? f.total_flow ?? 0),
+        };
+        if (next.totalFlow === 0 && next.shFlow === 0 && next.szFlow === 0) {
+          setFlow(null);
+          setEmptyKind("noData");
+        } else {
+          setFlow(next);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFlow(null);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const total = flow?.totalFlow ?? 0;
   const dir = total >= 0 ? t("stockAnalysis.settings.panels.inflow") : t("stockAnalysis.settings.panels.outflow");

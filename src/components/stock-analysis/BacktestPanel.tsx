@@ -24,7 +24,7 @@ export function BacktestPanel() {
   const [strategyLoading, setStrategyLoading] = useState(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
     setFetchError(false);
     try {
@@ -37,11 +37,31 @@ export function BacktestPanel() {
       setFetchError(true);
     }
     setLoading(false);
-  }, [holdingDays, scope]);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setFetchError(false);
+      return invoke<BacktestStats>("backtest_all_history", {
+        holdingDays,
+        scope,
+      });
+    })
+      .then((result) => {
+        if (cancelled || !result) return;
+        setStats(result);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [holdingDays, scope]);
 
   const runStrategyBacktest = useCallback(async () => {
     setStrategyLoading(true);
@@ -54,7 +74,7 @@ export function BacktestPanel() {
       setStrategyError(typeof e === "string" ? e : e?.message ?? t("stockAnalysis.backtest.strategyFailed"));
     }
     setStrategyLoading(false);
-  }, []);
+  }, [t]);
 
   const accuracyColor = stats ? stats.accuracyPct >= 60 ? "var(--sa-red)" : "var(--sa-green)" : undefined;
   const returnColor = stats && stats.avgReturnPct >= 0 ? "var(--sa-red)" : "var(--sa-green)";

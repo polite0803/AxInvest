@@ -53,7 +53,7 @@ export function TradePanel() {
     notes: "",
   });
 
-  const loadData = useCallback(async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
       const [t, p] = await Promise.all([
@@ -67,19 +67,41 @@ export function TradePanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
-    if (enabled) { loadData(); }
-  }, [enabled, loadData]);
+    if (!enabled) { return; }
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      return Promise.all([
+        invoke<TradeRecord[]>("list_trades", { stockCode: null, limit: 100 }),
+        invoke<PositionSummary[]>("get_trade_positions"),
+      ]);
+    })
+      .then((result) => {
+        if (!result || cancelled) return;
+        const [t, p] = result;
+        if (Array.isArray(t)) { setTrades(t); }
+        if (Array.isArray(p)) { setPositions(p); }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [enabled]);
 
   // 同步分析页代码
   useEffect(() => {
     if (storeStockCode && !form.stockCode) {
       const dir = storeDecision?.action === StockAction.SELL ? "sell" : "buy";
-      setForm((f) => ({ ...f, stockCode: storeStockCode, stockName: storeStockName, direction: dir }));
+      Promise.resolve().then(() => {
+        setForm((f) => ({ ...f, stockCode: storeStockCode, stockName: storeStockName, direction: dir }));
+      });
     }
-  }, [storeStockCode, storeStockName, storeDecision]);
+  }, [storeStockCode, storeStockName, storeDecision, form.stockCode]);
 
   // 一键从分析结论录入
   const quickRecord = useCallback(() => {
@@ -95,7 +117,7 @@ export function TradePanel() {
       quantity: positionPct ? Math.round((positionPct / 100) * 1000) : 100,
       notes: stopLoss ? t("stockAnalysis.trade.stopLoss", { price: stopLoss }) : "",
     }));
-  }, [storeDecision, storeStockCode, storeStockName]);
+  }, [storeDecision, storeStockCode, storeStockName, t]);
 
   const handleRecord = async () => {
     if (!form.stockCode || form.price <= 0) { return message.warning(t("trade.fillRequired")); }

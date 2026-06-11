@@ -38,7 +38,8 @@
     "backtest": "回测",
     "compare": "对比",
     "replayWorkbench": "回放工作台",
-    "review": "每日复盘"
+    "review": "每日复盘",
+    "quant": "量化"
   },
   "sidebar": {
     "sectionWork": "工作",
@@ -4587,10 +4588,9 @@
       "presetsImported": "已导入 {{count}} 个预设模板",
       "presetsImportFailed": "导入失败: {{error}}",
       "importPresetsTitle": "导入预设模板",
-      "importPresets": "导入预设"
-    ,
-  "moreActions": "「{{name}}」的更多操作"
-},
+      "importPresets": "导入预设",
+      "moreActions": "「{{name}}」的更多操作"
+    },
     "undo": "撤销",
     "redo": "重做",
     "autoLayout": "一键布局",
@@ -5292,7 +5292,7 @@
     "contextMenu": {
       "label": "节点操作"
     },
-        "nodeConfig": {
+    "nodeConfig": {
       "add_debater": "添加辩手",
       "convergence_model_role": "收敛模型角色",
       "convergence_prompt": "收敛提示词",
@@ -8219,7 +8219,26 @@
       "colTotalReturn": "累计收益",
       "colMaxDrawdown": "最大回撤",
       "colMaxLossStreak": "连亏",
-      "colProfitFactor": "盈亏比"
+      "colProfitFactor": "盈亏比",
+      "matrixTitle": "策略回测矩阵",
+      "groupPositive": "推荐组",
+      "groupNegative": "候选组",
+      "colStyle": "风格",
+      "strategyEmpty": "暂无回测数据，请先生成推荐",
+      "tabAnalysis": "分析回测",
+      "tabStrategy": "策略回测",
+      "signalHistory": "信号时间线",
+      "signalEmpty": "该策略暂无历史信号",
+      "signalSelectHint": "请在策略矩阵中点击一个策略查看信号明细",
+      "winsAndLosses": "Win/Loss 分布",
+      "filterStock": "筛选股票",
+      "colEntry": "入场",
+      "colExit": "出场",
+      "colReturn": "收益",
+      "colHolding": "持有期",
+      "colDate": "日期",
+      "colCode": "代码",
+      "colName": "名称"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -8732,7 +8751,13 @@
       "trend_mid": "趋势·中",
       "trend_long": "趋势·长",
       "rev_short": "超跌·短",
-      "rev_mid": "超跌·中"
+      "rev_mid": "超跌·中",
+      "value_short": "价值·短",
+      "value_mid": "价值·中",
+      "value_long": "价值·长",
+      "capital_short": "资金·短",
+      "capital_mid": "资金·中",
+      "capital_long": "资金·长"
     }
   },
   "trade": {
@@ -8880,6 +8905,97 @@
       "label": "已降级 · 部分数据无历史",
       "labelWithCount": "已降级 · {{n}} 项",
       "tooltip": "回放模式下资金流向/融资融券/北向持仓等数据无历史语义,已被跳过。详见推荐面板的降级提示。"
+    }
+  },
+  "quant": {
+    "title": "量化实验台",
+    "subtitle": "策略开发 + 历史回测 + Walk-Forward 验证 + 多策略对比",
+    "tabs": {
+      "backtest": "回测运行",
+      "strategies": "策略管理",
+      "rhai": "Rhai 编辑器",
+      "compare": "指标对比"
+    },
+    "backtest": {
+      "title": "回测配置",
+      "selectStrategy": "选择策略",
+      "code": "股票代码",
+      "codePlaceholder": "如 600519",
+      "startDate": "起始日期",
+      "endDate": "截止日期",
+      "initialCash": "初始资金",
+      "walkForward": "Walk-Forward 验证（反过拟合硬规则）",
+      "walkForwardForceOff": "强制关闭 Walk-Forward（不推荐）",
+      "run": "运行回测",
+      "running": "回测中…",
+      "result": "回测结果",
+      "noResult": "尚未运行回测",
+      "errorRunning": "回测失败",
+      "signals": "信号",
+      "trades": "纸面成交",
+      "walkForwardTitle": "Walk-Forward 验证",
+      "stabilityScore": "稳定性分数",
+      "overfitWarning": "过拟合告警（{{count}} 个窗口）"
+    },
+    "strategy": {
+      "list": "策略列表",
+      "name": "策略名",
+      "version": "版本",
+      "type": "类型",
+      "builtin": "内置",
+      "rhai": "Rhai 脚本",
+      "description": "描述",
+      "params": "参数",
+      "lastUpdated": "更新时间",
+      "actions": "操作",
+      "delete": "删除",
+      "edit": "编辑",
+      "new": "新建策略"
+    },
+    "rhai": {
+      "title": "Rhai 脚本策略",
+      "hint": "Rhai 脚本在沙箱中执行,禁止文件系统/网络/系统调用。可用 helper: sma / ema / rsi。",
+      "name": "策略名",
+      "version": "版本",
+      "source": "脚本源码",
+      "save": "保存并验证",
+      "saved": "已保存并验证通过",
+      "compileError": "编译失败",
+      "duplicate": "已存在同名同版本策略,启用 upsert 以覆盖"
+    },
+    "metrics": {
+      "title": "绩效指标",
+      "totalReturn": "总收益",
+      "annualizedReturn": "年化收益",
+      "annualizedVolatility": "年化波动",
+      "sharpe": "夏普",
+      "sortino": "索提诺",
+      "maxDrawdown": "最大回撤",
+      "maxDrawdownPct": "最大回撤 %",
+      "maxDrawdownDurationDays": "回撤持续天数",
+      "winRate": "胜率",
+      "profitFactor": "盈亏比",
+      "avgWin": "平均盈利",
+      "avgLoss": "平均亏损",
+      "payoffRatio": "盈亏倍数",
+      "totalTrades": "成交次数",
+      "winningTrades": "盈利次数",
+      "losingTrades": "亏损次数",
+      "avgHoldingDays": "平均持仓天数",
+      "bestBy": "最佳：{{metric}} → {{runId}}"
+    },
+    "compare": {
+      "title": "多策略对比",
+      "selectRuns": "选择 run 列表",
+      "compare": "对比",
+      "comparing": "对比中…",
+      "bestBy": "最佳指标"
+    },
+    "common": {
+      "loading": "加载中…",
+      "empty": "无数据",
+      "error": "出错：{{msg}}",
+      "retry": "重试"
     }
   }
 }

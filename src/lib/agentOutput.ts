@@ -100,7 +100,7 @@ export function tryBeautifyJson(text: string): string {
  * - 合并多余空行
  */
 export function extractContent(value: unknown): string {
-  let text = "";
+  let text: string;
   if (typeof value === "string") {
     text = value;
   } else if (value && typeof value === "object") {

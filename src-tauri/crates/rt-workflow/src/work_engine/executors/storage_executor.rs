@@ -22,14 +22,7 @@ impl Default for StorageExecutor {
 
 /// 从 ExecutionState.variables 按 path 提取值
 fn resolve_var_path(path: &str, ctx: &ExecutionState) -> Option<serde_json::Value> {
-    if path.is_empty() {
-        return None;
-    }
-    let mut current = ctx.variables.get(path)?.clone();
-    for segment in path.split('.').skip(1) {
-        current = current.get(segment)?.clone();
-    }
-    Some(current)
+    super::resolve_var_path(path, &ctx.variables)
 }
 
 #[async_trait]

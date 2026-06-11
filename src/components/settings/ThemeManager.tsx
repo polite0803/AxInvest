@@ -143,7 +143,7 @@ colors:
   const yamlToTheme = (yaml: string): Theme | null => {
     try {
       const lines = yaml.split("\n");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const result: Record<string, any> = { metadata: {}, colors: {} };
 
       for (const line of lines) {

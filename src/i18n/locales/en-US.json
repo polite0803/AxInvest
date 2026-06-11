@@ -38,7 +38,8 @@
     "backtest": "Backtest",
     "compare": "Compare",
     "replayWorkbench": "Replay Workbench",
-    "review": "Daily Review"
+    "review": "Daily Review",
+    "quant": "Quant"
   },
   "sidebar": {
     "sectionWork": "Work",
@@ -3768,10 +3769,9 @@
       "presetsImported": "{{count}} preset templates imported",
       "presetsImportFailed": "Import failed: {{error}}",
       "importPresetsTitle": "Import Preset Templates",
-      "importPresets": "Import Presets"
-    ,
-  "moreActions": "More actions for {{name}}"
-},
+      "importPresets": "Import Presets",
+      "moreActions": "More actions for {{name}}"
+    },
     "previewInDevelopment": "Preview feature is in development",
     "publishInDevelopment": "Publish feature is in development",
     "aiAssistant": "AI Assistant",
@@ -4943,7 +4943,7 @@
     "contextMenu": {
       "label": "Node actions"
     },
-        "nodeConfig": {
+    "nodeConfig": {
       "add_debater": "Add debater",
       "convergence_model_role": "Convergence model role",
       "convergence_prompt": "Convergence prompt",
@@ -8218,7 +8218,26 @@
       "colTotalReturn": "Total Return",
       "colMaxDrawdown": "Max Drawdown",
       "colMaxLossStreak": "Max Losses",
-      "colProfitFactor": "Profit Factor"
+      "colProfitFactor": "Profit Factor",
+      "matrixTitle": "Strategy Backtest Matrix",
+      "groupPositive": "Recommended",
+      "groupNegative": "Not Recommended",
+      "colStyle": "Style",
+      "strategyEmpty": "No backtest data. Generate recommendations first.",
+      "tabAnalysis": "Analysis Backtest",
+      "tabStrategy": "Strategy Backtest",
+      "signalHistory": "Signal History",
+      "signalEmpty": "No signals for this strategy",
+      "signalSelectHint": "Click a cell in the strategy matrix to view signal details",
+      "winsAndLosses": "Win/Loss distribution",
+      "filterStock": "Filter stock",
+      "colEntry": "Entry",
+      "colExit": "Exit",
+      "colReturn": "Return",
+      "colHolding": "Holding",
+      "colDate": "Date",
+      "colCode": "Code",
+      "colName": "Name"
     },
     "export": {
       "analystReports": "analystReports",
@@ -8618,7 +8637,13 @@
       "trend_mid": "Trend · Mid",
       "trend_long": "Trend · Long",
       "rev_short": "Reversal · Short",
-      "rev_mid": "Reversal · Mid"
+      "rev_mid": "Reversal · Mid",
+      "value_short": "Value · Short",
+      "value_mid": "Value · Mid",
+      "value_long": "Value · Long",
+      "capital_short": "Capital · Short",
+      "capital_mid": "Capital · Mid",
+      "capital_long": "Capital · Long"
     }
   },
   "trade": {
@@ -8871,6 +8896,97 @@
       "label": "Degraded · Some data has no history",
       "labelWithCount": "Degraded · {{n}} items",
       "tooltip": "In replay mode, money flow / margin / north-bound holding etc. have no historical semantics and were skipped."
+    }
+  },
+  "quant": {
+    "title": "Quant Lab",
+    "subtitle": "Strategy development · Backtest · Walk-Forward · Strategy comparison",
+    "tabs": {
+      "backtest": "Backtest",
+      "strategies": "Strategies",
+      "rhai": "Rhai Editor",
+      "compare": "Compare"
+    },
+    "backtest": {
+      "title": "Backtest Configuration",
+      "selectStrategy": "Select strategy",
+      "code": "Stock code",
+      "codePlaceholder": "e.g. 600519",
+      "startDate": "Start date",
+      "endDate": "End date",
+      "initialCash": "Initial cash",
+      "walkForward": "Walk-Forward validation (anti-overfit hard rule)",
+      "walkForwardForceOff": "Force off Walk-Forward (not recommended)",
+      "run": "Run backtest",
+      "running": "Running…",
+      "result": "Backtest result",
+      "noResult": "No backtest yet",
+      "errorRunning": "Backtest failed",
+      "signals": "Signals",
+      "trades": "Paper trades",
+      "walkForwardTitle": "Walk-Forward validation",
+      "stabilityScore": "Stability score",
+      "overfitWarning": "Overfit warning ({{count}} windows)"
+    },
+    "strategy": {
+      "list": "Strategy list",
+      "name": "Name",
+      "version": "Version",
+      "type": "Type",
+      "builtin": "Builtin",
+      "rhai": "Rhai script",
+      "description": "Description",
+      "params": "Params",
+      "lastUpdated": "Updated",
+      "actions": "Actions",
+      "delete": "Delete",
+      "edit": "Edit",
+      "new": "New strategy"
+    },
+    "rhai": {
+      "title": "Rhai script strategy",
+      "hint": "Rhai scripts run in sandbox: no fs / no net / no sys calls. Helpers: sma / ema / rsi.",
+      "name": "Name",
+      "version": "Version",
+      "source": "Source",
+      "save": "Save & validate",
+      "saved": "Saved & validated",
+      "compileError": "Compile failed",
+      "duplicate": "Duplicate name+version. Enable upsert to overwrite."
+    },
+    "metrics": {
+      "title": "Performance metrics",
+      "totalReturn": "Total return",
+      "annualizedReturn": "Annualized return",
+      "annualizedVolatility": "Annualized vol",
+      "sharpe": "Sharpe",
+      "sortino": "Sortino",
+      "maxDrawdown": "Max drawdown",
+      "maxDrawdownPct": "Max drawdown %",
+      "maxDrawdownDurationDays": "Max DD days",
+      "winRate": "Win rate",
+      "profitFactor": "Profit factor",
+      "avgWin": "Avg win",
+      "avgLoss": "Avg loss",
+      "payoffRatio": "Payoff ratio",
+      "totalTrades": "Total trades",
+      "winningTrades": "Winning",
+      "losingTrades": "Losing",
+      "avgHoldingDays": "Avg holding days",
+      "bestBy": "Best: {{metric}} → {{runId}}"
+    },
+    "compare": {
+      "title": "Strategy comparison",
+      "selectRuns": "Select run ids",
+      "compare": "Compare",
+      "comparing": "Comparing…",
+      "bestBy": "Best by"
+    },
+    "common": {
+      "loading": "Loading…",
+      "empty": "No data",
+      "error": "Error: {{msg}}",
+      "retry": "Retry"
     }
   }
 }

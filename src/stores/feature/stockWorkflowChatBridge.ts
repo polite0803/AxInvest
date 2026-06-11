@@ -316,7 +316,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     if (nodeId.startsWith("t-")) {
       if (!dataSourcesMap.has(nodeId)) {
         let toolName = "";
-        let label = TOOL_NODE_TO_LABEL[nodeId] ?? nodeId.slice(2);
+        const label = TOOL_NODE_TO_LABEL[nodeId] ?? nodeId.slice(2);
 
         if (output != null && typeof output === "object") {
           const out = output as Record<string, unknown>;

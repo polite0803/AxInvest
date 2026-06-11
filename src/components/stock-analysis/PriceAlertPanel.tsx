@@ -35,21 +35,38 @@ export function PriceAlertPanel() {
   };
 
   useEffect(() => {
-    loadAlerts();
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      return invoke<PriceAlert[]>("list_price_alerts");
+    })
+      .then((list) => {
+        if (cancelled || !list) return;
+        if (Array.isArray(list)) {
+          setAlerts(list.filter((a) => !a.isTriggered));
+          setHistory(list.filter((a) => a.isTriggered));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
-    (async () => {
-      try {
-        unlisten = await listen<PriceAlert>("price-alert-triggered", () => {
-          message.info(t("stockAnalysis.alert.triggered"));
-          loadAlerts();
-        });
-      } catch { /* 可选 */ }
-    })();
+    let cancelled = false;
+    listen<PriceAlert>("price-alert-triggered", () => {
+      if (cancelled) return;
+      message.info(t("stockAnalysis.alert.triggered"));
+      loadAlerts();
+    })
+      .then((fn) => {
+        if (cancelled) { fn(); return; }
+        unlisten = fn;
+      })
+      .catch(() => { /* 可选 */ });
     return () => {
       if (unlisten) { unlisten(); }
+      cancelled = true;
     };
   }, [t]);
 

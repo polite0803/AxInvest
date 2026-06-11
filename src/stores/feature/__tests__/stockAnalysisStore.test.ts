@@ -392,9 +392,9 @@ describe("stockAnalysisStore - feature coverage", () => {
   // 4. workflow-error 事件处理（错误路径）
   // ────────────────────────────────────────────────────────────
   describe("workflow-error 事件处理 - 错误路径", () => {
-    const setupErrorHandler = async (): Promise<Function> => {
-      let errorHandler: Function = () => {};
-      listenMock.mockImplementation((event: string, handler: Function) => {
+    const setupErrorHandler = async (): Promise<(event: { payload: { workflowId: string; error: string; errorCode?: string } }) => void> => {
+      let errorHandler: (event: { payload: { workflowId: string; error: string; errorCode?: string } }) => void = () => {};
+      listenMock.mockImplementation((event: string, handler) => {
         if (event === "workflow-error") { errorHandler = handler; }
         return Promise.resolve(unlistenMock);
       });
@@ -446,9 +446,9 @@ describe("stockAnalysisStore - feature coverage", () => {
   // 5. 阶段副作用（通过 workflow-step-done 事件间接验证 inferStage）
   // ────────────────────────────────────────────────────────────
   describe("setupEventListener - workflow-step-done 阶段副作用", () => {
-    const setupStepHandler = async (): Promise<Function> => {
-      let stepHandler: Function = () => {};
-      listenMock.mockImplementation((event: string, handler: Function) => {
+    const setupStepHandler = async (): Promise<(event: { payload: { workflowId: string; nodeId: string; status: string; totalNodes: number; completedNodes: number } }) => void> => {
+      let stepHandler: (event: { payload: { workflowId: string; nodeId: string; status: string; totalNodes: number; completedNodes: number } }) => void = () => {};
+      listenMock.mockImplementation((event: string, handler) => {
         if (event === "workflow-step-done") { stepHandler = handler; }
         return Promise.resolve(unlistenMock);
       });
@@ -514,9 +514,9 @@ describe("stockAnalysisStore - feature coverage", () => {
   //    修复 Bug #2: value-investor / rule-check / data-quality / raw-data
   // ────────────────────────────────────────────────────────────
   describe("workflow-completed 事件 - parseWorkflowResults 扩展节点 (修复 Bug #2)", () => {
-    const setupCompleteHandler = async (): Promise<Function> => {
-      let handler: Function = () => {};
-      listenMock.mockImplementation((event: string, h: Function) => {
+    const setupCompleteHandler = async (): Promise<(event: { payload: { workflowId: string; results: Record<string, { content: string }> } }) => void> => {
+      let handler: (event: { payload: { workflowId: string; results: Record<string, { content: string }> } }) => void = () => {};
+      listenMock.mockImplementation((event: string, h) => {
         if (event === "workflow-completed") { handler = h; }
         return Promise.resolve(unlistenMock);
       });

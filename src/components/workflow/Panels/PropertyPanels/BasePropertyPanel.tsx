@@ -200,7 +200,7 @@ export const BasePropertyPanel: React.FC<BasePropertyPanelProps> = ({
                 circuit_breaker: enabled
                   ? { failure_threshold: 3, reset_timeout_ms: 60000 }
                   : undefined,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
               } as any)}
           />
         </div>
@@ -218,7 +218,7 @@ export const BasePropertyPanel: React.FC<BasePropertyPanelProps> = ({
                       ...(node as WorkflowNodeWithExtras).circuit_breaker,
                       failure_threshold: v ?? 3,
                     },
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                     
                   } as any)}
                 min={1}
                 max={20}
@@ -238,7 +238,7 @@ export const BasePropertyPanel: React.FC<BasePropertyPanelProps> = ({
                       ...(node as WorkflowNodeWithExtras).circuit_breaker,
                       reset_timeout_ms: v ?? 60000,
                     },
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                     
                   } as any)}
                 min={5000}
                 max={600000}
@@ -288,7 +288,7 @@ export const BasePropertyPanel: React.FC<BasePropertyPanelProps> = ({
           size="small"
           checked={(node as WorkflowNodeWithExtras)._breakpoint ?? false}
           onChange={(checked) =>
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             
             onUpdate({ _breakpoint: checked || undefined } as any)}
         />
       </div>

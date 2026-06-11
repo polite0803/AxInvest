@@ -968,6 +968,8 @@ pub fn run() {
             commands::stock_workflow::run_stock_workflow,
             commands::stock_workflow::cancel_stock_workflow,
             commands::stock_analysis::cancel_stock_analysis,
+            commands::stock_analysis::compute_what_if,
+            commands::stock_analysis::replay_tool_chain,
             commands::stock_analysis::list_stock_analyses,
             commands::stock_analysis::get_stock_analysis,
             // Watchlist / Portfolio / Trading
@@ -1032,6 +1034,7 @@ pub fn run() {
             commands::stock_analysis::generate_daily_review,
             commands::stock_analysis::optimize_scoring_weights,
             commands::stock_analysis::backtest_reco_strategies,
+            commands::stock_analysis::get_reco_signal_history,
             commands::stock_analysis::get_value_assessment,
             commands::stock_analysis::compute_value_metrics,
             commands::stock_analysis::get_portfolio_risk,
@@ -1071,6 +1074,11 @@ pub fn run() {
             commands::migration::migration_execute,
             commands::migration::migration_list_backups,
             commands::migration::migration_rollback,
+            // Quant commands (M1)
+            commands::quant::quant_strategies_list,
+            commands::quant::quant_backtest_run,
+            commands::quant::quant_metrics_compare,
+            commands::quant::quant_strategy_register_rhai,
         ])
         .setup(|app| {
             android_utils::mark_startup_phase("setup_start");

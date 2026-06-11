@@ -167,8 +167,18 @@ const FIXED_TOOLS: ToolRoute[] = [
 /** LLM 暴露工具（Agent 自主调用，均走 VendorRouting 降级链）*/
 const EXPOSED_TOOLS: ToolRoute[] = [
   { tool: "get_stock_quote", label: "实时行情", kind: "exposed", vendors: ["tencent", "mootdx", "eastmoney"] },
-  { tool: "get_stock_news", label: "新闻", kind: "exposed", vendors: ["xueqiu", "sina", "eastmoney", "baidu_stock", "akshare"] },
-  { tool: "get_stock_financials", label: "财务", kind: "exposed", vendors: ["eastmoney", "xueqiu", "baidu_stock", "akshare", "sina"] },
+  {
+    tool: "get_stock_news",
+    label: "新闻",
+    kind: "exposed",
+    vendors: ["xueqiu", "sina", "eastmoney", "baidu_stock", "akshare"],
+  },
+  {
+    tool: "get_stock_financials",
+    label: "财务",
+    kind: "exposed",
+    vendors: ["eastmoney", "xueqiu", "baidu_stock", "akshare", "sina"],
+  },
   { tool: "search_stock", label: "搜索", kind: "exposed", vendors: ["eastmoney", "iwencai", "baidu_stock"] },
   { tool: "get_research_reports", label: "研报", kind: "exposed", vendors: ["eastmoney", "baidu_stock"] },
   { tool: "get_concept_blocks", label: "概念板块", kind: "exposed", vendors: ["ths", "baidu_stock", "iwencai"] },
@@ -180,7 +190,12 @@ const EXPOSED_TOOLS: ToolRoute[] = [
   { tool: "get_index_quotes", label: "大盘指数", kind: "exposed", vendors: ["eastmoney"] },
   { tool: "get_stock_peers", label: "同行对比", kind: "exposed", vendors: ["eastmoney"] },
   { tool: "get_stock_option_pcr", label: "期权PCR", kind: "exposed", vendors: ["eastmoney"] },
-  { tool: "get_stock_quote", label: "实时行情", kind: "exposed", vendors: ["tencent", "mootdx", "sina", "xueqiu", "eastmoney"] },
+  {
+    tool: "get_stock_quote",
+    label: "实时行情",
+    kind: "exposed",
+    vendors: ["tencent", "mootdx", "sina", "xueqiu", "eastmoney"],
+  },
 ];
 
 const ALL_TOOLS = [...FIXED_TOOLS, ...EXPOSED_TOOLS];
@@ -245,32 +260,32 @@ export function DataVendorsTab() {
     return map;
   }, []);
 
-  const load = useCallback(async () => {
-    try {
-      const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
-      const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
-      const vals: Record<string, boolean> = {};
-      let key = "";
-      let xqToken = "";
-      for (const v of vars) {
-        if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token") {
-          vals[v.name] = !!v.value;
-        }
-        if (v.name === "vendor_iwencai_key") { key = typeof v.value === "string" ? v.value : ""; }
-        if (v.name === "vendor_xueqiu_token") { xqToken = typeof v.value === "string" ? v.value : ""; }
-      }
-      setVendorValues(vals);
-      setIwencaiKey(key);
-      setXueqiuToken(xqToken);
-      setLoaded(true);
-    } catch {
-      setLoaded(true);
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    invoke<any>("get_workflow_template", { id: "stock-analysis" })
+      .then((tmpl) => {
+        if (cancelled) return;
+        const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
+        const vals: Record<string, boolean> = {};
+        let key = "";
+        let xqToken = "";
+        for (const v of vars) {
+          if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token") {
+            vals[v.name] = !!v.value;
+          }
+          if (v.name === "vendor_iwencai_key") { key = typeof v.value === "string" ? v.value : ""; }
+          if (v.name === "vendor_xueqiu_token") { xqToken = typeof v.value === "string" ? v.value : ""; }
+        }
+        setVendorValues(vals);
+        setIwencaiKey(key);
+        setXueqiuToken(xqToken);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSave = useCallback(async () => {
     setSaving(true);

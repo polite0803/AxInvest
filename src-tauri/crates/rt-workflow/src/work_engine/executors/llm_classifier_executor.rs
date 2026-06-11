@@ -311,18 +311,7 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
 ///    然后沿 `parts[1..]` 逐层下钻嵌套字段
 /// 3. fallback：root 不是节点 ID 时，将整个 `path` 作为模板变量名直查
 fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
-    if path.is_empty() {
-        return None;
-    }
-    let parts: Vec<&str> = path.split('.').collect();
-    if let Some(root) = context.variables.get(parts[0]) {
-        let mut current = root.clone();
-        for part in &parts[1..] {
-            current = current.get(part)?.clone();
-        }
-        return Some(current);
-    }
-    context.variables.get(path).cloned()
+    super::resolve_var_path(path, &context.variables)
 }
 
 /// 将 `serde_json::Value` 序列化为 LLM 友好的可读文本。

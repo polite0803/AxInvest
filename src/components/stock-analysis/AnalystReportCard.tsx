@@ -412,7 +412,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
       const isJsonLike = text.trim().startsWith("{") || text.trim().startsWith("[");
       if (!isJsonLike && text.length > 30) {
         // 去掉常见噪音前缀
-        let cleaned = text
+        const cleaned = text
           .replace(/由于上游工具调用返回了.*?的错误[，。]/g, "")
           .replace(/根据系统指令.*?[，。]/g, "")
           .replace(/我的职责是.*?[，。]/g, "")

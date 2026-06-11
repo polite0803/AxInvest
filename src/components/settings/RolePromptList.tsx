@@ -23,20 +23,24 @@ export function RolePromptList() {
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const rows = await invoke<RoleRow[]>("list_agent_roles", { source: "stock-analysis" });
-      setRoles(Array.isArray(rows) ? rows : []);
-    } catch {
-      setRoles([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    load();
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      return invoke<RoleRow[]>("list_agent_roles", { source: "stock-analysis" });
+    })
+      .then((rows) => {
+        if (cancelled) return;
+        setRoles(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setRoles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   const expand = (role: RoleRow) => {

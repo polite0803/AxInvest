@@ -29,7 +29,7 @@ const registry = new Map<string, DualView<any>>();
 
 export function registerDualView<T>(view: DualView<T>): void {
   if (registry.has(view.id)) {
-    // eslint-disable-next-line no-console
+     
     console.warn(`[dualView] duplicate registration: ${view.id}`);
   }
   registry.set(view.id, view);

@@ -44,6 +44,13 @@ export function ScheduledAnalysisTab() {
     } catch { /* backend not running */ }
   };
 
+  const loadTasks = async () => {
+    try {
+      const list = await invoke<CronJobRow[]>("list_stock_crons");
+      if (Array.isArray(list)) { setJobs(list); }
+    } catch { /* backend not running */ }
+  };
+
   const toggleWlScan = async (job: CronJobRow | null, enable: boolean) => {
     try {
       if (enable && !job) {
@@ -69,18 +76,28 @@ export function ScheduledAnalysisTab() {
     } catch { /* silent */ }
   };
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const list = await invoke<CronJobRow[]>("list_stock_crons");
-      if (Array.isArray(list)) { setJobs(list); }
-    } catch { /* backend not running */ }
-    setLoading(false);
-  };
-
   useEffect(() => {
-    load();
-    loadWlScan();
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      return invoke<CronJobRow[]>("list_stock_crons");
+    })
+      .then((list) => {
+        if (cancelled) return;
+        if (Array.isArray(list)) { setJobs(list); }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    invoke<CronJobRow[]>("list_watchlist_scan_crons")
+      .then((list) => {
+        if (cancelled) return;
+        if (Array.isArray(list)) { setWlScanJobs(list); }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const create = async (values: any) => {
@@ -92,7 +109,7 @@ export function ScheduledAnalysisTab() {
       });
       form.resetFields();
       setAdding(false);
-      load();
+      loadTasks();
       message.success(t("stockAnalysis.scheduledAnalysis.taskCreated"));
     } catch {
       message.error(t("stockAnalysis.scheduledAnalysis.createFailed"));
@@ -102,14 +119,14 @@ export function ScheduledAnalysisTab() {
   const toggle = async (id: string, active: boolean) => {
     try {
       await invoke("toggle_stock_cron", { id, enabled: active });
-      load();
+      loadTasks();
     } catch { /* silent */ }
   };
 
   const remove = async (id: string) => {
     try {
       await invoke("delete_stock_cron", { id });
-      load();
+      loadTasks();
     } catch { /* silent */ }
   };
 

@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Table, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -33,7 +33,7 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async (silent = false) => {
+  const load = async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
@@ -64,11 +64,52 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load(true);
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      setEmptyVendors(undefined);
+      return checkVendorEnabled("screener", { silent: true });
+    })
+      .then((check) => {
+        if (cancelled || !check) return;
+        if (check.status === "disabled") {
+          setStocks([]);
+          setEmptyKind("vendorDisabled");
+          setEmptyVendors(check.vendors);
+          return;
+        }
+        if (check.status === "backend_offline") {
+          setStocks([]);
+          setEmptyKind("backendOffline");
+          return;
+        }
+        return invoke<HotStock[]>("get_hot_stocks");
+      })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data) && data.length > 0) {
+          setStocks(data);
+        } else {
+          setStocks([]);
+          setEmptyKind("noData");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStocks([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const analyze = async (code: string) => {
     await getStockQuote(code);

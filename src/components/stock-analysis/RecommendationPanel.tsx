@@ -4,6 +4,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { LatestAnalysisSummary, StockConsensus } from "@/types";
+import type { BacktestComparisonResponse } from "@/types/stock-analysis";
 import { parseAction } from "@/types";
 import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -97,30 +98,64 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [generatedAtText, setGeneratedAtText] = useState<string>("");
   // P0-1: 荐股面板关联历史分析数据
   const [latestAnalyses, setLatestAnalyses] = useState<Record<string, LatestAnalysisSummary | null>>({});
+  // P0-2: 策略回测统计（每个风格的 win rate + Sharpe）
+  const [strategyStats, setStrategyStats] = useState<Record<string, { winRate: number; sharpe: number | null; signalCount: number }> | null>(null);
+  const [strategyStatsLoading, setStrategyStatsLoading] = useState(false);
 
-  // P1-2: monotonically increasing request token — discard stale results.
   const reqTokenRef = useRef(0);
 
-  const load = useCallback(
-    async () => {
-      const myToken = ++reqTokenRef.current;
+  const load = async () => {
+    const myToken = ++reqTokenRef.current;
+    setLoading(true);
+    setEmptyKind(null);
+    try {
+      const r = await invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
+      if (myToken !== reqTokenRef.current) { return; }
+      if (!r || !r.picks || Object.keys(r.picks).length === 0) {
+        setData(r ?? null);
+        if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
+          setEmptyKind("vendorDisabled");
+        } else {
+          setEmptyKind("noData");
+        }
+        setLoading(false);
+        return;
+      }
+      setData(r);
+      const d = new Date(r.generatedAt);
+      setGeneratedAtText(
+        d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+
+      fetchLatestAnalyses(r);
+    } catch (e: any) {
+      console.error("[RecommendationPanel] load failed:", e);
+      if (myToken !== reqTokenRef.current) { return; }
+      setData(null);
+      setEmptyKind("connectionFailed");
+    }
+    if (myToken === reqTokenRef.current) { setLoading(false); }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
       setLoading(true);
       setEmptyKind(null);
-      try {
-        // 后端会基于 FALLBACK_STOCKS 兜底 seed pool，并在响应里返回 disabledStyles；
-        // 这里不再做硬性 vendor 门控（否则会卡死整个面板）。
-        const r = await invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
-        if (myToken !== reqTokenRef.current) { return; // stale
-         }
+      return invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
+    }).then((r) => {
+        if (cancelled) return;
         if (!r || !r.picks || Object.keys(r.picks).length === 0) {
           setData(r ?? null);
-          // 区分"全风格 disabled" vs "有 enabled 但没出 picks"
           if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
             setEmptyKind("vendorDisabled");
           } else {
             setEmptyKind("noData");
           }
-          setLoading(false);
           return;
         }
         setData(r);
@@ -131,25 +166,72 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
             minute: "2-digit",
           }),
         );
-
-        // P0-1: 批量加载历史分析结论
-        fetchLatestAnalyses(r);
-      } catch (e: any) {
-        // P3-2: don't swallow the error
-        // eslint-disable-next-line no-console
+        return r;
+      })
+      .then((r) => {
+        if (cancelled || !r) return;
+        const allCodes = new Set<string>();
+        for (const arr of Object.values(r.picks ?? {})) {
+          if (!arr) { continue; }
+          for (const p of arr) {
+            if (!p.synthetic) { allCodes.add(p.stockCode); }
+          }
+        }
+        if (allCodes.size === 0) { return; }
+        return invoke<Record<string, LatestAnalysisSummary | null>>(
+          "get_latest_analyses_for_stocks",
+          { stockCodes: Array.from(allCodes), asOfDate },
+        );
+      })
+      .then((result) => {
+        if (cancelled) return;
+        if (result) { setLatestAnalyses(result); }
+      })
+      .catch((e: any) => {
         console.error("[RecommendationPanel] load failed:", e);
-        if (myToken !== reqTokenRef.current) { return; }
-        setData(null);
-        setEmptyKind("connectionFailed");
-      }
-      if (myToken === reqTokenRef.current) { setLoading(false); }
-    },
-    [period, asOfDate, i18n.language],
-  );
+        if (!cancelled) {
+          setData(null);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+     
+  }, [period, asOfDate, i18n.language]);
 
+  // P0-2: 加载策略回测统计
+  const loadStrategyStats = useCallback(async () => {
+    setStrategyStatsLoading(true);
+    try {
+      const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
+      // 按 style 聚合所有 period 的统计
+      const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
+      for (const [, s] of Object.entries(result.positive.strategies)) {
+        const style = s.style;
+        if (!byStyle[style]) byStyle[style] = { winRates: [], sharpes: [], signals: 0 };
+        byStyle[style].winRates.push(s.winRatePct);
+        if (s.sharpeRatio != null) byStyle[style].sharpes.push(s.sharpeRatio);
+        byStyle[style].signals += s.totalSignals;
+      }
+      const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
+      for (const [style, v] of Object.entries(byStyle)) {
+        const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
+        const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
+        agg[style] = { winRate: Math.round(avgWr * 10) / 10, sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null, signalCount: v.signals };
+      }
+      setStrategyStats(agg);
+    } catch {
+      // 静默忽略：荐股记录为空或策略回测不可用时 badge 不显示
+    }
+    setStrategyStatsLoading(false);
+  }, []);
+
+  // P0-2: 加载策略回测统计（仅加载一次）
   useEffect(() => {
-    load();
-  }, [load]);
+    loadStrategyStats();
+  }, [loadStrategyStats]);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);
@@ -353,6 +435,25 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                       <Tag color={STYLE_COLOR[style]} className="m-0 text-xs">
                         {t(`stockAnalysis.recommendation.style${capitalize(style)}`)}
                       </Tag>
+                      {/* P0-2: 策略回测徽章 */}
+                      {!strategyStatsLoading && strategyStats?.[style] && (
+                        <>
+                          <Tag
+                            className="m-0 text-[10px] leading-4"
+                            color={strategyStats[style].winRate >= 55 ? "green" : strategyStats[style].winRate >= 45 ? "orange" : "red"}
+                          >
+                            {`${strategyStats[style].winRate}%`}
+                          </Tag>
+                          {strategyStats[style].sharpe != null && (
+                            <Tag
+                              className="m-0 text-[10px] leading-4"
+                              color={strategyStats[style].sharpe! >= 1 ? "green" : strategyStats[style].sharpe! >= 0.5 ? "orange" : "red"}
+                            >
+                              {`S ${strategyStats[style].sharpe!.toFixed(1)}`}
+                            </Tag>
+                          )}
+                        </>
+                      )}
                       {/* B15: 降级风格在 label 处加 ⛔ 徽标(橙色),区别于 disabled 的灰 */}
                       {isDegraded && (
                         <Tag color="orange" className="m-0 text-[10px]">

@@ -122,6 +122,9 @@ function useDerivedExecutionRecord(conversationId?: string) {
   const pool = useExecutionStore((s) => conversationId ? s.agentPool[conversationId] ?? [] : []);
   const agentStatus = useExecutionStore((s) => conversationId ? s.agentStatus[conversationId] : undefined);
 
+  // L1: 捕获挂载时的 now，避免 render 中调用 Date.now()（react-hooks/purity）
+  const [now] = useState(() => Date.now());
+
   return useMemo(() => {
     if (!conversationId) {
       return null;
@@ -156,10 +159,10 @@ function useDerivedExecutionRecord(conversationId?: string) {
       }
     }
     if (!Number.isFinite(earliest)) {
-      earliest = Date.now();
+      earliest = now;
     }
     if (latestEnd === 0) {
-      latestEnd = Date.now();
+      latestEnd = now;
     }
     const durationMs = Math.max(0, latestEnd - earliest);
     // M2: success 仅当 phase=completed 且**没有非空错误**。空字符串 agentStatus 视为 OK。
@@ -179,7 +182,7 @@ function useDerivedExecutionRecord(conversationId?: string) {
       durationMs,
       startedAtMs: earliest,
     };
-  }, [conversationId, phase, pool, agentStatus]);
+  }, [conversationId, phase, pool, agentStatus, now]);
 }
 
 function QualityScore({
@@ -467,24 +470,25 @@ function ReflectionSettingsModal({
     }
     let cancelled = false;
     // L7: 先用缓存填充，再后台刷新
-    if (__reflectionConfigCache && Date.now() - __reflectionConfigCache.at < CONFIG_CACHE_TTL_MS) {
-      setCfg(__reflectionConfigCache.value);
-      setDirty(false);
-    }
-    void (async () => {
-      try {
-        const remote = await invoke<ReflectionConfig>("get_reflection_config");
-        if (!cancelled) {
-          setCfg(remote);
-          setDirty(false);
-          __reflectionConfigCache = { value: remote, at: Date.now() };
-        }
-      } catch {
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      if (__reflectionConfigCache && Date.now() - __reflectionConfigCache.at < CONFIG_CACHE_TTL_MS) {
+        setCfg(__reflectionConfigCache.value);
+        setDirty(false);
+      }
+      return invoke<ReflectionConfig>("get_reflection_config");
+    })
+      .then((remote) => {
+        if (cancelled || !remote) return;
+        setCfg(remote);
+        setDirty(false);
+        __reflectionConfigCache = { value: remote, at: Date.now() };
+      })
+      .catch(() => {
         if (!cancelled && !__reflectionConfigCache) {
           setCfg(REFLECTION_CONFIG_DEFAULT);
         }
-      }
-    })();
+      });
     return () => {
       cancelled = true;
     };
@@ -895,10 +899,60 @@ export function ReflectionPanel({
     if (!autoEnabled) {
       return;
     }
-    if (record && taskId) {
-      void performReflection();
+    if (!record || !taskId) {
+      return;
     }
-  }, [autoEnabled, performReflection, record, taskId]);
+    const runKey = `${taskId}#${record.startedAtMs ?? record.durationMs}#${runVersion}`;
+    if (reflectedRunRef.current === runKey) {
+      return;
+    }
+    reflectedRunRef.current = runKey;
+
+    let cancelled = false;
+    setIsRefecting(true);
+    setReflection(null);
+    setError(null);
+
+    invoke<ReflectionData>("reflect_on_task", {
+      // 同时传 camelCase 和 snake_case，兼容 tauri v1/v2 命令参数解析
+      taskId,
+      task_id: taskId,
+      taskDescription,
+      task_description: taskDescription,
+      success: record.success,
+      error: record.error ?? null,
+      toolsUsed: record.toolsUsed,
+      tools_used: record.toolsUsed,
+      iterations: record.iterations,
+      durationMs: record.durationMs,
+      duration_ms: record.durationMs,
+      startedAtMs: record.startedAtMs ?? null,
+      started_at_ms: record.startedAtMs ?? null,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setReflection(result);
+        onReflectionComplete?.(result);
+
+        return invoke<Insight[]>("get_reflection_insights", { category: null }).then((fetchedInsights) => {
+          if (!cancelled) {
+            setInsights(fetchedInsights.slice(-10));
+          }
+        });
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e));
+        // 失败时允许重试
+        reflectedRunRef.current = null;
+      })
+      .finally(() => {
+        if (!cancelled) setIsRefecting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [autoEnabled, record, taskId, taskDescription, onReflectionComplete, runVersion]);
 
   const handleStartReflection = () => {
     reflectedRunRef.current = null;

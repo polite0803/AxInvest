@@ -88,6 +88,10 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "catalyst-analyst",
         include_str!("../../agency_experts/stock-analysis/catalyst-analyst.md"),
     ),
+    (
+        "debate-convergence",
+        include_str!("../../agency_experts/stock-analysis/debate-convergence.md"),
+    ),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -114,6 +118,7 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("data-quality-inspector", "stock-analyst"),
     ("rule-checker", "risk-evaluator"),
     ("catalyst-analyst", "stock-analyst"),
+    ("debate-convergence", "debater"),
 ];
 
 struct StockRoleDef {
@@ -380,10 +385,10 @@ async fn seed_stock_analysis_workflow_template(
         DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode,
         LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
         OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
-        RetryPolicy, StorageNode, StorageNodeConfig, SubGraph, SwitchCase, SwitchNode,
-        SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
-        TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable,
-        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        RetryPolicy, StorageNode, StorageNodeConfig, SwitchCase, SwitchNode, SwitchNodeConfig,
+        ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
+        ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
+        WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -443,7 +448,9 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    const TEMPLATE_VERSION: i32 = 22;
+    // v23: 修复子节点双重定义问题——subGraph 注入后从顶层 nodes 数组剔除子节点，
+    //   避免导出 JSON 中子节点同时存在于 subGraph 和顶层 nodes（导致编辑器渲染悬空连线）。
+    const TEMPLATE_VERSION: i32 = 23;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -1083,9 +1090,8 @@ async fn seed_stock_analysis_workflow_template(
             id: "trigger".into(),
             title: "开始分析".into(),
             description: Some("输入股票代码启动分析".into()),
-            // F-1 修复: 3×3 网格总宽 1200 (col_x 40..1000 + 节点宽 200),
-            // 居中后 trigger x = 580 - 100 = 580。y=0 保持画布最顶部。
-            position: Position { x: 580.0, y: 0.0 },
+            // F-1 修复: 3×3 网格最右列 x=1240+200=1440, 居中 trigger x=520
+            position: Position { x: 520.0, y: 0.0 },
             retry: RetryConfig::default(),
             timeout: None,
             enabled: true,
@@ -1102,54 +1108,18 @@ async fn seed_stock_analysis_workflow_template(
     let analysts = [
         (
             "a-market-analyst",
-            "基于行情数据对该股票进行技术面分析，覆盖K线形态、均线、MACD/RSI指标、支撑阻力位，输出结构化分析报告",
+            "技术面分析：K线形态、MACD/RSI、支撑阻力位",
             "market-analyst",
         ),
-        (
-            "a-sentiment",
-            "分析该股票的市场情绪，包括资金流向、散户/机构态度、社交媒体热度，给出情绪面评分",
-            "sentiment-analyst",
-        ),
-        (
-            "a-news",
-            "梳理该股票近期重大新闻和公告，评估每条消息对股价的影响方向和力度",
-            "news-analyst",
-        ),
-        (
-            "a-fundamentals",
-            "基于PE/PB/ROE/营收增长率等财务指标对该股票进行基本面估值分析",
-            "fundamentals-analyst",
-        ),
-        (
-            "a-policy",
-            "分析当前宏观政策和行业政策对该股票的潜在影响，包括货币政策、产业政策、监管动态",
-            "policy-analyst",
-        ),
-        (
-            "a-hot-money",
-            "追踪该股票的游资动向、龙虎榜数据、主力资金进出情况",
-            "hot-money-tracker",
-        ),
-        (
-            "a-lockup",
-            "排查该股票近期解禁计划、大股东减持公告、股权质押风险",
-            "lockup-watcher",
-        ),
-        (
-            "a-research",
-            "汇总该股票的最新券商研报观点，提取目标价、评级变化和核心逻辑",
-            "research-analyst",
-        ),
-        (
-            "a-sector",
-            "分析该股票所属行业的景气度、板块轮动趋势、同业竞争格局",
-            "sector-analyst",
-        ),
-        (
-            "a-catalyst",
-            "评估近期新闻/公告是否构成催化剂、判断叙事完整度、识别机构建仓痕迹",
-            "catalyst-analyst",
-        ),
+        ("a-sentiment", "市场情绪分析：资金流向、散户/机构态度", "sentiment-analyst"),
+        ("a-news", "新闻公告影响评估", "news-analyst"),
+        ("a-fundamentals", "基本面估值分析：PE/PB/ROE等", "fundamentals-analyst"),
+        ("a-policy", "宏观政策与行业政策影响分析", "policy-analyst"),
+        ("a-hot-money", "游资动向与主力资金追踪", "hot-money-tracker"),
+        ("a-lockup", "解禁减持与质押风险排查", "lockup-watcher"),
+        ("a-research", "券商研报观点汇总", "research-analyst"),
+        ("a-sector", "行业景气度与轮动分析", "sector-analyst"),
+        ("a-catalyst", "催化剂与叙事完整度评估", "catalyst-analyst"),
     ];
     let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
 
@@ -1324,7 +1294,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(600),
             aggregation: Some(MergeStrategy::All),
             auto_input_from_parent: false, // 不自动从父节点接收输入
-            sub_graph: None,               // 稍后从子节点 parent_id 注入
+            sub_graph: None,               // v23: 保持 None，编辑器通过 parent_id + 步骤引用渲染
         },
     }));
 
@@ -1405,7 +1375,7 @@ async fn seed_stock_analysis_workflow_template(
             convergence_model_role: Some("decision-maker".into()),
             topic_var: "trigger.output".into(),
             output_var: "debate-result".into(),
-            sub_graph: None, // 稍后从子节点 parent_id 注入
+            sub_graph: None, // v23: 保持 None，编辑器通过 parent_id + 步骤引用渲染
         },
     }));
 
@@ -1550,6 +1520,37 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-bull-r{round_num}-bear-r{round_num}"), &bull_id, &bear_id));
     }
 
+    // ── debate-convergence（辩论收敛分析）──
+    // 读取全部 6 轮辩手输出，输出 consensus_score 供 portfolio-mgr 公式使用。
+    // 入边从 bear-r{debate_max_rounds} 出发，确保等真辩论结束后再启动收敛。
+    // 出边到 value-investor 和 portfolio-mgr，确保收敛结果在决策前可用。
+    {
+        let last_debate_node = format!("bear-r{debate_max_rounds}");
+        let mut dc = agent(
+            "debate-convergence",
+            "辩论结果收敛：consensus_score 聚合",
+            "debate-convergence",
+            None,
+            500.0,
+            1420.0,
+        );
+        if let WorkflowNode::Agent(ref mut a) = dc {
+            a.config.context_sources = vec![
+                "bull-r1".into(),
+                "bull-r2".into(),
+                "bull-r3".into(),
+                "bear-r1".into(),
+                "bear-r2".into(),
+                "bear-r3".into(),
+            ];
+            a.config.model_role = Some("debater".into());
+            a.config.max_tool_rounds = Some(1);
+            a.config.output_mode = OutputMode::Json;
+        }
+        nodes.push(dc);
+        edges.push(edge("e-bear-r3-debate-convergence", &last_debate_node, "debate-convergence"));
+    }
+
     // ── value-investor（巴菲特框架）：在辩论之后、与风险评估并行运行 ──
     // 入边从 bear-r{debate_max_rounds} 出发，确保等真辩论收敛后再启动
     // （debate-bull-bear 是 DebateNode 容器，立即 Completed，返回的是配置而非辩论结果）
@@ -1647,7 +1648,7 @@ async fn seed_stock_analysis_workflow_template(
             aggregation: Some(MergeStrategy::All),
             auto_input_from_parent: false,
             timeout: Some(600),
-            sub_graph: None, // 稍后从子节点 parent_id 注入
+            sub_graph: None, // v23: 保持 None，编辑器通过 parent_id + 步骤引用渲染
         },
     }));
     edges.push(edge(
@@ -1920,7 +1921,7 @@ async fn seed_stock_analysis_workflow_template(
     //       或 orphan,可考虑给节点加 kind="context_sink" 标记让校验跳过。
     {
         let dq_id = "data-quality";
-        let dq_title = "评估本次分析的 9 个分析师报告的覆盖度、字数、占位检测与一致性，输出 A/B/C/D/F 质量等级与数据缺口清单";
+        let dq_title = "数据质量评估：覆盖度、字数、占位检测，输出 A/B/C/D/F 等级";
         let dq_y = 3300.0;
         let mut dq = agent(dq_id, dq_title, "data-quality-inspector", None, 840.0, dq_y);
         if let WorkflowNode::Agent(ref mut a) = dq {
@@ -1941,6 +1942,35 @@ async fn seed_stock_analysis_workflow_template(
                 "t-valuation".into(),
                 "t-risk".into(),
             ];
+            // ── 结构化参数注入（结构化参数方案 Phase 2）──
+            // 注入各分析师的 confidence 结构化值，使 DQI 可直接判断
+            // "信心低迷（confidence < 30）" 条件，无需从文本中重新提取。
+            a.config.input_mapping = [
+                ("mk_confidence", "a-market-analyst.params.confidence"),
+                ("sent_confidence", "a-sentiment.params.confidence"),
+                ("news_confidence", "a-news.params.confidence"),
+                ("fund_confidence", "a-fundamentals.params.confidence"),
+                ("pol_confidence", "a-policy.params.confidence"),
+                ("hm_confidence", "a-hot-money.params.confidence"),
+                ("lk_confidence", "a-lockup.params.confidence"),
+                ("res_confidence", "a-research.params.confidence"),
+                ("sec_confidence", "a-sector.params.confidence"),
+                ("cat_confidence", "a-catalyst.params.confidence"),
+                // 注入各分析师的 if_data_gaps 布尔值，无需扫描全文检查缺失项
+                ("mk_data_gaps", "a-market-analyst.params.if_data_gaps"),
+                ("sent_data_gaps", "a-sentiment.params.if_data_gaps"),
+                ("news_data_gaps", "a-news.params.if_data_gaps"),
+                ("fund_data_gaps", "a-fundamentals.params.if_data_gaps"),
+                ("pol_data_gaps", "a-policy.params.if_data_gaps"),
+                ("hm_data_gaps", "a-hot-money.params.if_data_gaps"),
+                ("lk_data_gaps", "a-lockup.params.if_data_gaps"),
+                ("res_data_gaps", "a-research.params.if_data_gaps"),
+                ("sec_data_gaps", "a-sector.params.if_data_gaps"),
+                ("cat_data_gaps", "a-catalyst.params.if_data_gaps"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
             a.config.model_role = Some("stock-analyst".into());
             let tool_names = PROFILE_TOOLS
                 .iter()
@@ -1962,7 +1992,7 @@ async fn seed_stock_analysis_workflow_template(
     // research-mgr → trader → portfolio-mgr
     let mut rm = agent(
         "research-mgr",
-        "综合三种风险偏好的评估结果，给出该股票的总体风险评级（低/中/高）及主要风险点清单",
+        "综合风险评估：总体风险评级与主要风险点清单",
         "research-manager",
         None,
         240.0,
@@ -1977,6 +2007,18 @@ async fn seed_stock_analysis_workflow_template(
             "risk-aggregated".into(),
             "risk-level".into(),
         ];
+        // ── 结构化参数注入（结构化参数方案 Phase 2）──
+        // 注入风险聚合的结构化评分，使 research-mgr 可在 system_prompt 中
+        // 直接使用 risk_level 等值，无需从文本中重新提取。
+        a.config.input_mapping = [
+            ("overall_risk", "risk-level.params.overall_risk"),
+            ("agg_risk_pos", "risk-aggregated.params.aggressive_pct"),
+            ("cons_risk_pos", "risk-aggregated.params.conservative_pct"),
+            ("neut_risk_pos", "risk-aggregated.params.neutral_pct"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
         a.config.model_role = Some("decision-maker".into());
         a.config.tools = vec![
             td_score.clone(),
@@ -2013,7 +2055,7 @@ async fn seed_stock_analysis_workflow_template(
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
     let mut trader = agent(
         "trader",
-        "基于风险总评和辩论结论，制定该股票的具体A股交易方案：入场价、目标价、止损价、仓位比例、分批建仓计划。必须遵守T+1和涨跌停规则。\n如果数据不足，基于当前股价和通用风控原则给出保守方案，不要留空字段。",
+        "制定A股交易方案：入场价、目标价、止损价、仓位比例。遵守T+1和涨跌停规则",
         "trader",
         None,
         240.0,
@@ -2041,68 +2083,66 @@ async fn seed_stock_analysis_workflow_template(
     nodes.push(trader);
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
 
-    // portfolio-mgr: 最终决策 — 全量工具验证
-    let mut pm = agent(
-        "portfolio-mgr",
-        "作为最终决策者，综合所有分析结果，给出该股票的最终投资决策。\n输出JSON格式（严格模式）：\n{\n  \"action\": \"买入/增持/持有/减持/卖出\",\n  \"positionPct\": 仓位百分比(整数0-100),\n  \"targetPrice\": 目标价(浮点数),\n  \"stopLoss\": 止损价(浮点数),\n  \"reasoning\": \"决策理由(300字以内)\",\n  \"riskLevel\": \"低/中/高\",\n  \"confidence\": 置信度(0-100)\n}\n要求：\n1. 只输出上述JSON对象，前后不要有任何其他文字\n2. 键名和字符串值必须用双引号\n3. riskLevel只允许三个值：\"低\"、\"中\"、\"高\"\n4. action只允许五个值：\"买入\"、\"增持\"、\"持有\"、\"减持\"、\"卖出\"\n5. 如果上游分析数据不足，基于已有信息给出最合理的保守决策（通常是\"持有\"+低仓位），reasoning中说明数据限制，不要返回空字段。",
-        "portfolio-manager",
-        None,
-        240.0,
-        4200.0,
-    );
-    if let WorkflowNode::Agent(ref mut a) = pm {
-        a.config.context_sources = vec![
-            "trader".into(),
-            "research-mgr".into(),
-            "debate-bull-bear".into(),
-            // 注入数据质量与原始数据，让最终决策在已知数据完整度
-            // (data-quality) 与可核验的原始指标 (raw-data) 之上做出。
-            // 调度：data-quality/raw-data 都在 v-validate 之后/同步 t-risk
-            // 完成，远早于 portfolio-mgr 启动，可安全作为 context。
-            "data-quality".into(),
-            "raw-data".into(),
-        ];
-        a.config.model_role = Some("decision-maker".into());
-        a.config.tools = vec![
-            td_quote.clone(),
-            td_kline.clone(),
-            td_fin.clone(),
-            td_score.clone(),
-            td_val.clone(),
-            td_risk.clone(),
-            td_maxdd.clone(),
-            td_sharpe.clone(),
-            td_var.clone(),
-            td_pe_pct.clone(),
-            td_peg.clone(),
-            td_ma_cross.clone(),
-            td_breakout.clone(),
-            td_kelly.clone(),
-            td_rp.clone(),
-            td_beta.clone(),
-            td_earnings.clone(),
-            td_pledge.clone(),
-            td_corr.clone(),
-            td_mc.clone(),
-            td_ind.clone(),
-            td_lup.clone(),
-        ];
-        a.config.system_prompt =
-            format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
-        a.config.max_tool_rounds = Some(3);
-    }
+    // portfolio-mgr: 最终决策 — 确定性计算（CodeNode + Rhai）
+    // ── 结构化参数方案 Phase 3 ──
+    // 原为 Agent 节点（LLM 执行公式），现改为 CodeNode（Rhai 确定性执行）。
+    //
+    // 公式逻辑（与 portfolio-manager prompt 保持一致）：
+    //   confidence = clamp(totalScore + adjustment, 0, 100)
+    //   adjustment = 共识调整 + 数据质量调整 + 风险调整 + 催化剂加成 + 机构加成
+    let pm_code = include_str!("portfolio-mgr.rhai").to_string();
+    let pm = WorkflowNode::Code(CodeNode {
+        base: WorkflowNodeBase {
+            id: "portfolio-mgr".into(),
+            title: "投资组合经理（确定性决策）".into(),
+            description: Some("基于结构化参数，用确定性公式计算最终决策".into()),
+            position: Position {
+                x: 240.0,
+                y: 4200.0,
+            },
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: CodeNodeConfig {
+            language: "rhai".into(),
+            code: pm_code,
+            output_var: "portfolio-mgr".into(),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping: [
+                ("totalScore", "t-scoring.result.totalScore"),
+                ("dqi_score", "data-quality.params.score"),
+                ("overall_risk", "risk-level.params.overall_risk"),
+                ("catalyst_level", "a-catalyst.params.catalyst_level"),
+                ("institutional_trace", "a-catalyst.params.institutional_trace"),
+                ("consensusScore", "debate-convergence.params.consensus_score"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        },
+    });
     nodes.push(pm);
     edges.push(edge("e-trader-portfolio-mgr", "trader", "portfolio-mgr"));
     edges.push(edge("e-research-mgr-portfolio-mgr", "research-mgr", "portfolio-mgr"));
+    // debate-convergence → portfolio-mgr: 显式边确保 consensus_score 在公式执行前就绪
+    edges.push(edge(
+        "e-debate-convergence-portfolio-mgr",
+        "debate-convergence",
+        "portfolio-mgr",
+    ));
 
     // ── P3 (real-nodes): rule-check 规则检查 Agent ──
     // 在 portfolio-mgr 完成后启动，对照硬性规则阈值（RSI/乖离率/止损/放量下跌/空头排列）
     // 检查交易方案是否违规，输出 violations / corrections / force_signals
     {
         let rc_id = "rule-check";
-        let rc_title = "对照硬性规则阈值（RSI 超买/乖离率追高/缺失止损/放量下跌/空头排列）检查最终交易方案是否违规，输出违规清单与修正建议";
+        let rc_title = "硬性规则检查：RSI超买/乖离率追高/缺失止损/放量下跌/空头排列";
         let rc_y = 4200.0;
-        let mut rc = agent(rc_id, rc_title, "rule-checker", None, 840.0, rc_y);
+        let mut rc = agent(rc_id, rc_title, "rule-checker", None, 700.0, rc_y);
         if let WorkflowNode::Agent(ref mut a) = rc {
             a.config.context_sources = vec![
                 "portfolio-mgr".into(),
@@ -2141,7 +2181,7 @@ async fn seed_stock_analysis_workflow_template(
             title: "数据质量门禁".into(),
             description: Some("检查数据质量等级，A/B/C 级以上继续，D/F 走保守降级路径".into()),
             position: Position {
-                x: 840.0,
+                x: 700.0,
                 y: 4500.0,
             },
             retry: RetryConfig::default(),
@@ -2168,7 +2208,7 @@ async fn seed_stock_analysis_workflow_template(
     // ── Agent: 降级处理路径（数据质量不足时生成保守决策）──
     {
         let fq_id = "quality-fallback";
-        let fq_title = "数据质量不足，基于已有信息生成保守交易决策（持仓不变 / 减仓观望）";
+        let fq_title = "数据不足→保守决策：持仓不变/减仓观望";
         let fq_y = 4500.0;
         let mut fq = agent(
             fq_id,
@@ -3656,55 +3696,11 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     let error_config_val = serde_json::to_string(&error_config)
         .map_err(|e| format!("序列化 ErrorConfig 失败: {e}"))?;
 
-    // ── 注入容器节点子图（subGraph），确保编辑器正确渲染为可展开/折叠容器 ──
-    // 子图仅在编辑器中用于嵌套渲染，运行时仍使用同一份 flat nodes/edges 列表。
-    let container_nodes: &[&str] = &["p-analysts", "debate-bull-bear", "p-risk-assess"];
-    for &cid in container_nodes {
-        let child_ids: Vec<String> = nodes
-            .iter()
-            .filter(|n| n.base().parent_id.as_deref() == Some(cid))
-            .map(|n| n.base_id().to_string())
-            .collect();
-        if child_ids.is_empty() {
-            continue;
-        }
-        let child_node_ids: std::collections::HashSet<&str> =
-            child_ids.iter().map(|s| s.as_str()).collect();
-        let sub_edges: Vec<WorkflowEdge> = edges
-            .iter()
-            .filter(|e| {
-                child_node_ids.contains(e.source.as_str())
-                    && child_node_ids.contains(e.target.as_str())
-            })
-            .cloned()
-            .collect();
-        let sub_nodes: Vec<WorkflowNode> = nodes
-            .iter()
-            .filter(|n| child_node_ids.contains(n.base_id()))
-            .cloned()
-            .collect();
-        let sub_graph = SubGraph {
-            nodes: sub_nodes,
-            edges: sub_edges,
-        };
-        // 注入到容器节点 config 中
-        for n in nodes.iter_mut() {
-            if n.base_id() != cid {
-                continue;
-            }
-            match n {
-                WorkflowNode::Parallel(p) => {
-                    p.config.sub_graph = Some(sub_graph);
-                },
-                WorkflowNode::Debate(d) => {
-                    d.config.sub_graph = Some(sub_graph);
-                },
-                _ => {},
-            }
-            break;
-        }
-    }
-
+    // ── 注：不再向容器注入 subGraph ──
+    // v23 修复: 子节点已通过 parent_id 关联到容器，编辑器通过步骤引用
+    //   为其设置 parentId + extent: "parent"，无需 subGraph 也可正常渲染。
+    //   避免 JSON 中子节点被双重定义（悬空连线/孤立节点）。
+    //   容器初始化时 sub_graph 已为 None，无需设置。
     // 写入 DB
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
     // DEBUG: 验证前几个 Tool 节点的 type 字段
@@ -4067,14 +4063,27 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     use axagent_harness::workflow_types::{TriggerConfig, TriggerType};
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    // 查重
-    if workflow_template::Entity::find_by_id("stock-reflection")
+    // v23 修复: 增加版本检查，当 stock-analysis 更新时重新克隆
+    const REFLECTION_MIN_VERSION: i32 = 23;
+
+    // 查重 + 版本检查（stock-analysis 更新后需要重新克隆 reflection）
+    let existing = workflow_template::Entity::find_by_id("stock-reflection")
         .one(db)
         .await
-        .map_err(|e| format!("查重失败: {e}"))?
-        .is_some()
-    {
-        return Ok(());
+        .map_err(|e| format!("查重失败: {e}"))?;
+
+    if let Some(existing) = &existing {
+        if existing.version >= REFLECTION_MIN_VERSION {
+            return Ok(());
+        }
+        tracing::info!(
+            "[stock_analysis_setup] 反思复盘模板版本落后 (v{} < v{REFLECTION_MIN_VERSION})，删除后重建",
+            existing.version
+        );
+        workflow_template::Entity::delete_by_id("stock-reflection")
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除旧反思模板失败: {e}"))?;
     }
 
     // 读取原模板

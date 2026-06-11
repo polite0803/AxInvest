@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -28,7 +28,7 @@ export function SectorHeatmapPanel() {
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async (silent = false) => {
+  const load = async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
@@ -66,11 +66,58 @@ export function SectorHeatmapPanel() {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load(true);
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      setEmptyVendors(undefined);
+      return checkVendorEnabled("sectors", { silent: true });
+    })
+      .then((check) => {
+        if (cancelled || !check) return;
+        if (check.status === "disabled") {
+          setSectors([]);
+          setEmptyKind("vendorDisabled");
+          setEmptyVendors(check.vendors);
+          return;
+        }
+        if (check.status === "backend_offline") {
+          setSectors([]);
+          setEmptyKind("backendOffline");
+          return;
+        }
+        return invoke<any[]>("get_industry_ranking");
+      })
+      .then((list) => {
+        if (cancelled || !list) return;
+        if (!Array.isArray(list)) { throw new Error("bad data"); }
+        const next: SectorEntry[] = list.slice(0, 25).map((e: any) => ({
+          name: e.industryName ?? e.industry_name ?? "",
+          changePct: Number(e.changePct ?? e.change_pct ?? 0),
+          turnover: Number(e.turnover ?? 0),
+          leaderCode: e.leaderCode ?? e.leader_code,
+          leaderName: e.leaderName ?? e.leader_name,
+          leaderChange: e.leaderChangePct ?? e.leader_change_pct,
+        }));
+        next.sort((a, b) => b.changePct - a.changePct);
+        setSectors(next);
+        if (next.length === 0) { setEmptyKind("noData"); }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSectors([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const analyze = async (code: string) => {
     await getStockQuote(code);

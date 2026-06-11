@@ -249,13 +249,13 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
     const edges: ContextGraphEdge[] = [];
 
     // 预构建查找映射，避免在循环中调用 find
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const kbMap = new Map(knowledgeBases.map((k: any) => [k.id, k]));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const nsMap = new Map(memoryNamespaces.map((n: any) => [n.id, n]));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const srvMap = new Map(mcpServers.map((s: any) => [s.id, s]));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     const skillMap = new Map(installedSkills.map((s: any) => [s.id, s]));
 
     // Conversation node (center)
@@ -490,13 +490,13 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
               {(() => {
                 const pills: { label: string; color: string }[] = [];
                 // 预构建查找映射，避免在循环中调用 find
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 const kbMap = new Map(knowledgeBases.map((k: any) => [k.id, k]));
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 const nsMap = new Map(memoryNamespaces.map((n: any) => [n.id, n]));
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 const srvMap = new Map(mcpServers.map((s: any) => [s.id, s]));
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 const skillMap = new Map(installedSkills.map((s: any) => [s.id, s]));
                 if (modelName) {
                   pills.push({

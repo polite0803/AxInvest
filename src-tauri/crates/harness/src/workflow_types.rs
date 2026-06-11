@@ -654,6 +654,16 @@ pub struct CodeNodeConfig {
     /// Rhai 脚本注册为工具名（language="rhai" 时生效，为空则用 code_<node_id>）
     #[serde(default)]
     pub tool_name: Option<String>,
+    /// 输入变量映射（与 AgentNodeConfig.input_mapping 相同语义）。
+    /// key=注入的变量名，value=variables 中的 key 或点号路径。
+    /// 用于 directly_executed Rhai 脚本读取上游 .params 值。
+    #[serde(default)]
+    pub input_mapping: std::collections::HashMap<String, String>,
+    /// 是否直接执行脚本（而非注册为工具）。
+    /// true: 在 DAG 中直接执行 Rhai 代码，消费 input_mapping 的值，产生输出。
+    /// false（默认）: 注册为工具，由 Agent/LLM 调用（向后兼容）。
+    #[serde(default)]
+    pub execute_directly: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

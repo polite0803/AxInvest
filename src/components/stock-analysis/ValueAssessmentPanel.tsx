@@ -306,23 +306,26 @@ export function ValueAssessmentPanel() {
 
   useEffect(() => {
     const code = (rawData?.stockCode as string | undefined) ?? (rawData?.code as string | undefined) ?? "";
-    if (!code) {
-      setValuationBand(null);
-      return;
-    }
     let cancelled = false;
-    setValuationBandLoading(true);
-    invoke<ValuationBandData>("compute_valuation_band", { stockCode: code, years: 5 })
-      .then((d) => {
-        if (!cancelled) { setValuationBand(d); }
-      })
-      .catch((err) => {
-        console.warn("[ValueAssessmentPanel] compute_valuation_band failed:", err);
-        if (!cancelled) { setValuationBand(null); }
-      })
-      .finally(() => {
-        if (!cancelled) { setValuationBandLoading(false); }
-      });
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      if (!code) {
+        setValuationBand(null);
+        return;
+      }
+      setValuationBandLoading(true);
+      invoke<ValuationBandData>("compute_valuation_band", { stockCode: code, years: 5 })
+        .then((d) => {
+          if (!cancelled) { setValuationBand(d); }
+        })
+        .catch((err) => {
+          console.warn("[ValueAssessmentPanel] compute_valuation_band failed:", err);
+          if (!cancelled) { setValuationBand(null); }
+        })
+        .finally(() => {
+          if (!cancelled) { setValuationBandLoading(false); }
+        });
+    });
     return () => {
       cancelled = true;
     };
@@ -345,28 +348,30 @@ export function ValueAssessmentPanel() {
   const readableText = hasValue ? extractReadableText(valueReport) : "";
 
   // 暴露调试数据到 window，方便 Console 检查
-  if (typeof window !== "undefined" && hasValue) {
-    (window as any).__DEBUG_VALUE__ = {
-      raw: valueReport.slice(0, 2000),
-      parsed,
-      parsedType: parsed ? typeof parsed : null,
-      readablePreview: readableText.slice(0, 500),
-      rawValueType: typeof rawValue,
-    };
-    console.log("[ValueAssessmentPanel] DEBUG 数据已暴露到 window.__DEBUG_VALUE__");
-    console.log("[ValueAssessmentPanel] parsed:", parsed);
-    console.log("[ValueAssessmentPanel] rawValue type:", typeof rawValue);
-    console.log("[ValueAssessmentPanel] rawValue preview:", String(rawValue).slice(0, 500));
-    if (parsed) {
-      console.log("[ValueAssessmentPanel] buffett_verdict type:", typeof parsed.buffett_verdict);
-      console.log("[ValueAssessmentPanel] buffett_verdict preview:", String(parsed.buffett_verdict).slice(0, 200));
-      console.log("[ValueAssessmentPanel] all keys:", Object.keys(parsed));
-    } else {
-      console.log("[ValueAssessmentPanel] parsed = null，将使用可读文本渲染");
-      console.log("[ValueAssessmentPanel] readableText preview:", readableText.slice(0, 500));
-      console.log("[ValueAssessmentPanel] looksLikeJson(readableText):", looksLikeJson(readableText));
+  useEffect(() => {
+    if (typeof window !== "undefined" && hasValue && process.env.NODE_ENV === "development") {
+      (window as any).__DEBUG_VALUE__ = {
+        raw: valueReport.slice(0, 2000),
+        parsed,
+        parsedType: parsed ? typeof parsed : null,
+        readablePreview: readableText.slice(0, 500),
+        rawValueType: typeof rawValue,
+      };
+      console.log("[ValueAssessmentPanel] DEBUG 数据已暴露到 window.__DEBUG_VALUE__");
+      console.log("[ValueAssessmentPanel] parsed:", parsed);
+      console.log("[ValueAssessmentPanel] rawValue type:", typeof rawValue);
+      console.log("[ValueAssessmentPanel] rawValue preview:", String(rawValue).slice(0, 500));
+      if (parsed) {
+        console.log("[ValueAssessmentPanel] buffett_verdict type:", typeof parsed.buffett_verdict);
+        console.log("[ValueAssessmentPanel] buffett_verdict preview:", String(parsed.buffett_verdict).slice(0, 200));
+        console.log("[ValueAssessmentPanel] all keys:", Object.keys(parsed));
+      } else {
+        console.log("[ValueAssessmentPanel] parsed = null，将使用可读文本渲染");
+        console.log("[ValueAssessmentPanel] readableText preview:", readableText.slice(0, 500));
+        console.log("[ValueAssessmentPanel] looksLikeJson(readableText):", looksLikeJson(readableText));
+      }
     }
-  }
+  }, [valueReport, parsed, readableText, rawValue, hasValue]);
 
   if (!hasAny) {
     return (

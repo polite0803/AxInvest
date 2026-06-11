@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -40,7 +40,7 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async (silent = false) => {
+  const load = async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
@@ -79,11 +79,60 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load(true);
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      setEmptyVendors(undefined);
+      return checkVendorEnabled("dragontiger", { silent: true });
+    })
+      .then((check) => {
+        if (cancelled || !check) return;
+        if (check.status === "disabled") {
+          setEntries([]);
+          setEmptyKind("vendorDisabled");
+          setEmptyVendors(check.vendors);
+          return;
+        }
+        if (check.status === "backend_offline") {
+          setEntries([]);
+          setEmptyKind("backendOffline");
+          return;
+        }
+        return invoke<any[]>("get_market_dragon_tiger");
+      })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (!Array.isArray(data)) { throw new Error("bad data"); }
+        const list: DragonTigerEntry[] = data.slice(0, 30).map((e: any) => ({
+          code: e.stockCode ?? e.stock_code ?? "",
+          name: e.stockName ?? e.stock_name ?? "",
+          date: e.date ?? "",
+          netBuy: Number(e.netBuy ?? e.net_buy ?? 0),
+          buyAmount: Number(e.buyAmount ?? e.buy_amount ?? 0),
+          sellAmount: Number(e.sellAmount ?? e.sell_amount ?? 0),
+          reason: e.reason,
+        }));
+        // 按净买额降序
+        list.sort((a, b) => b.netBuy - a.netBuy);
+        setEntries(list);
+        if (list.length === 0) { setEmptyKind("noData"); }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEntries([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const analyze = async (code: string) => {
     await getStockQuote(code);

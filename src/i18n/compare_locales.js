@@ -1,3 +1,4 @@
+/* global console */
 import fs from "fs";
 
 // 读取英文基准文件

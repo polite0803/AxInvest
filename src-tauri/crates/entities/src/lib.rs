@@ -113,4 +113,10 @@ pub mod portfolio_correlation_snapshot;
 pub mod financial_snapshots;
 pub mod earnings_events;
 
+// Quant: 量化交易 + 量化回测（4 张核心表）
+pub mod quant_strategies;
+pub mod quant_runs;
+pub mod quant_signals;
+pub mod quant_paper_trades;
+
 pub use sea_orm;

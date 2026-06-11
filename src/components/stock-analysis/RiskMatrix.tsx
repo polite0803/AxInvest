@@ -436,7 +436,7 @@ export function RiskMatrix() {
       chart.dispose();
       expandedInstanceRef.current = null;
     };
-  }, [expanded, riskAssessments, t]);
+  }, [expanded, riskAssessments, t, isDark]);
 
   if (Object.keys(riskAssessments).length === 0) { return null; }
 

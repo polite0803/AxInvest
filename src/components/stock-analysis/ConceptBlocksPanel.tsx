@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Spin, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -24,7 +24,7 @@ export function ConceptBlocksPanel({ stockCode }: { stockCode: string }) {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     if (!stockCode) {
       setData(null);
       setEmptyKind("noStock");
@@ -46,11 +46,44 @@ export function ConceptBlocksPanel({ stockCode }: { stockCode: string }) {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, [stockCode]);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    if (!stockCode) {
+      Promise.resolve().then(() => {
+        setData(null);
+        setEmptyKind("noStock");
+      });
+      return;
+    }
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      return invoke<ConceptBlocks | null>("get_stock_concept_blocks", { stockCode });
+    })
+      .then((result) => {
+        if (cancelled || !result) return;
+        // 没有行业/概念/地区数据，按"无数据"处理
+        if (!result || (result.industry === "未知" && result.concepts.length === 0 && result.regions.length === 0)) {
+          setData(null);
+          setEmptyKind("noData");
+        } else {
+          setData(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setData(null);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [stockCode]);
 
   const renderBlock = (items: BlockItem[], color: string) => (
     <div className="flex flex-wrap gap-1 mt-1">

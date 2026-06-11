@@ -276,6 +276,10 @@ export interface CodeNodeConfig {
   output_var: string;
   /** Rhai 脚本注册为工具名（language="rhai" 时生效） */
   tool_name?: string;
+  /** 输入变量映射（与 AgentNodeConfig.input_mapping 相同语义） */
+  input_mapping?: Record<string, string>;
+  /** 是否直接执行脚本（而非注册为工具） */
+  execute_directly?: boolean;
 }
 
 export interface CodeNode extends WorkflowNodeBase {

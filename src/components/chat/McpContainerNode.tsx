@@ -46,7 +46,7 @@ function safeGetAttr(attrs: unknown, key: string): string | undefined {
   return undefined;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function extractText(children: any[] | undefined): string {
   if (!children || children.length === 0) {
     return "";
@@ -79,7 +79,7 @@ function NodeChild({
   ctx,
   renderNode,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   child: any;
   indexKey: string | undefined;
   index: number;
@@ -103,7 +103,7 @@ function DefaultContainer({
   renderNode,
   indexKey,
 }: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   node: any;
   ctx: RenderContext;
   renderNode?: RenderNodeFn | undefined;
@@ -112,7 +112,7 @@ function DefaultContainer({
   return (
     <div className={`vmr-container vmr-container-${node.name ?? "unknown"}`}>
       {Array.isArray(node.children) && ctx && renderNode
-        ? node.children.map((child: any, i: number) => ( // eslint-disable-line @typescript-eslint/no-explicit-any
+        ? node.children.map((child: any, i: number) => (  
           <NodeChild
             key={child.id
               ?? child.name
@@ -129,7 +129,7 @@ function DefaultContainer({
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export function McpContainerNode(props: NodeComponentProps<any>) {
   const { node } = props;
 
@@ -158,7 +158,7 @@ const monoStyle: React.CSSProperties = {
   padding: "4px 0",
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function McpToolCard({ node }: { node: any }) {
   const { t } = useTranslation();
 

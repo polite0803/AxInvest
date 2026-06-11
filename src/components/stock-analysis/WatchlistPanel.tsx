@@ -103,8 +103,30 @@ export function WatchlistPanel() {
   }, []);
 
   useEffect(() => {
-    loadWatchlist();
-  }, [watchlistVersion, loadWatchlist]);
+    let cancelled = false;
+    invoke<WatchlistItem[]>("list_watchlist")
+      .then((list) => {
+        if (cancelled) return;
+        if (Array.isArray(list)) {
+          const parsed = list.map((w: any) => {
+            let group = DEFAULT_GROUP;
+            try {
+              if (w.notes) {
+                const n = JSON.parse(w.notes);
+                if (n.group) { group = n.group; }
+              }
+            } catch { /* ignore */ }
+            return { ...w, group };
+          });
+          setItems(parsed);
+        }
+      })
+      .catch(() => { /* 后端未运行 */ })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [watchlistVersion]);
 
   // 当前分组下的自选股
   const groupItems = useMemo(
@@ -133,10 +155,27 @@ export function WatchlistPanel() {
   }, [groupItems]);
 
   useEffect(() => {
-    refreshQuotes();
-    const timer = setInterval(refreshQuotes, 15000);
+    const refresh = async () => {
+      if (groupItems.length === 0) { return; }
+      const snap: Record<string, QuoteSnapshot> = {};
+      for (const item of groupItems) {
+        try {
+          const q = await invoke<any>("get_stock_quote", { stockCode: item.stockCode });
+          snap[item.stockCode] = {
+            price: q?.price ?? 0,
+            changePct: q?.changePct ?? 0,
+            pe: q?.pe,
+            timestamp: q?.timestamp ?? "",
+          };
+        } catch { /* skip */ }
+      }
+      setQuotes(snap);
+      setRefreshing(false);
+    };
+    refresh();
+    const timer = setInterval(refresh, 15000);
     return () => clearInterval(timer);
-  }, [refreshQuotes]);
+  }, [groupItems]);
 
   // 排序
   const sorted = useMemo(() => {

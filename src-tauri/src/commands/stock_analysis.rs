@@ -18,6 +18,257 @@ use axagent_stock_analysis::recommender::{self, RecoResponse};
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
+use serde::{Deserialize, Serialize};
+
+// ── What-If 回测命令（结构化参数方案 Phase 5/6）──
+// 前端 What-If 面板调用此命令，后端执行 Rhai 引擎确保公式与 DAG 中完全一致。
+
+/// What-If 回测请求参数
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhatIfRequest {
+    pub total_score: f64,
+    pub dqi_score: f64,
+    pub overall_risk: String,
+    pub catalyst_level: String,
+    pub institutional_trace: String,
+    pub consensus_score: f64,
+}
+
+/// What-If 回测结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhatIfResult {
+    pub decision: String,
+    pub position_pct: f64,
+    pub confidence: f64,
+    pub risk_level: String,
+    pub stop_loss_pct: f64,
+    pub take_profit_pct: f64,
+    pub reasoning: String,
+}
+
+/// 执行 portfolio-mgr 确定性公式（Rhai 引擎）。
+/// 与 `stock_analysis_setup.rs` 中的 Rhai 脚本逻辑完全一致。
+#[tauri::command]
+pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
+    use rhai::{Engine, Scope};
+
+    let engine = Engine::new();
+    let mut scope = Scope::new();
+
+    // 注入参数
+    scope.push_constant("totalScore", params.total_score);
+    scope.push_constant("dqi_score", params.dqi_score);
+    scope.push_constant("overall_risk", params.overall_risk.clone());
+    scope.push_constant("catalyst_level", params.catalyst_level.clone());
+    scope.push_constant("institutional_trace", params.institutional_trace.clone());
+    scope.push_constant("consensusScore", params.consensus_score);
+
+    // portfolio-mgr 确定性公式（与 stock_analysis_setup.rs 中的 Rhai 脚本一致）
+    let code = r#"
+        let consensus_adj = (consensusScore - 50.0) / 100.0 * 10.0;
+        let dqi_adj = (dqi_score - 50.0) / 100.0 * 5.0;
+        let risk_adj = switch overall_risk {
+            "低" => 5.0, "高" => -5.0, "极高" => -10.0, _ => 0.0
+        };
+        let cat_bonus = switch catalyst_level {
+            "L3估值体系级" => 12.0, "L2业绩拐点级" => 6.0, "L1普通消息" => 2.0, _ => 0.0
+        };
+        let inst_bonus = if institutional_trace == "有建仓痕迹" || institutional_trace == "疑似建仓" { 5.0 } else { 0.0 };
+        let adjustment = consensus_adj + dqi_adj + risk_adj + cat_bonus + inst_bonus;
+        let confidence = clamp(totalScore + adjustment, 0.0, 100.0);
+        let base_pos = if risk_adj >= 0.0 { confidence * 0.8 } else { confidence * 0.5 };
+        let position_pct = clamp(base_pos, 0.0, 100.0);
+        let decision = if confidence >= 80.0 && position_pct >= 30.0 { "增持" }
+            else if confidence >= 60.0 { "买入" }
+            else if confidence >= 40.0 { "持有" }
+            else if position_pct < 10.0 { "减持" }
+            else { "持有" };
+        let stop_loss = if position_pct > 0.0 { 8.0 } else { 0.0 };
+        let take_profit = if position_pct > 0.0 { 15.0 } else { 0.0 };
+        let reasoning = `确定性公式结果: totalScore=${totalScore}, dqi=${dqi_score}, risk=${overall_risk}, catalyst=${catalyst_level}, consensus=${consensusScore}, adjustment=${adjustment}, confidence=${confidence}, position=${position_pct}`;
+        #{
+            "decision": decision,
+            "position_pct": position_pct,
+            "confidence": confidence,
+            "risk_level": overall_risk,
+            "stop_loss_pct": stop_loss,
+            "take_profit_pct": take_profit,
+            "reasoning": reasoning
+        }
+    "#;
+
+    let result: rhai::Dynamic = engine.eval_with_scope(&mut scope, code).map_err(|e| format!("Rhai execution failed: {e}"))?;
+
+    // 转换结果为 WhatIfResult
+    let result_map = result.clone().try_cast::<rhai::Map>().ok_or("Result is not a map")?;
+    let get_str = |key: &str| -> String {
+        result_map.get(&key.into()).and_then(|v| v.clone().try_cast::<String>().ok()).unwrap_or_default()
+    };
+    let get_f64 = |key: &str| -> f64 {
+        result_map.get(&key.into()).and_then(|v| v.as_float()).unwrap_or(0.0)
+    };
+
+    Ok(WhatIfResult {
+        decision: get_str("decision"),
+        position_pct: get_f64("position_pct"),
+        confidence: get_f64("confidence"),
+        risk_level: get_str("risk_level"),
+        stop_loss_pct: get_f64("stop_loss_pct"),
+        take_profit_pct: get_f64("take_profit_pct"),
+        reasoning: get_str("reasoning"),
+    })
+}
+
+// ── 工具链回放命令（L2 配置参数覆盖回测）──
+// 允许用户修改评分权重/估值参数/风控参数后，重算工具链并得到新决策。
+
+/// 工具链回放请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayToolChainRequest {
+    pub stock_code: String,
+    /// 用户要覆盖的配置参数（key=参数名, value=新值）
+    pub config_overrides: std::collections::HashMap<String, serde_json::Value>,
+}
+
+/// 工具链回放结果
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayToolChainResult {
+    pub total_score: f64,
+    pub score_details: serde_json::Value,
+    pub valuation_result: serde_json::Value,
+    pub risk_result: serde_json::Value,
+    pub decision: WhatIfResult,
+}
+
+/// 重新运行工具链（t-scoring / t-valuation / t-risk）带上覆盖的配置参数。
+/// 工具本身是纯 Rust 函数（确定性），修改配置参数后会产生不同输出。
+#[tauri::command]
+pub async fn replay_tool_chain(
+    state: State<'_, AppState>,
+    params: ReplayToolChainRequest,
+) -> Result<ReplayToolChainResult, String> {
+    use axagent_astock_data::{client::AStockClient, indicators};
+    use std::sync::Arc;
+
+    let code = &params.stock_code;
+    let client = Arc::new(AStockClient::new());
+
+    // ── 获取实时数据 ──
+    let (klines, quote) = tokio::join!(
+        client.get_klines(code, "daily", 120),
+        client.get_quote(code),
+    );
+    let klines = klines.map_err(|e| format!("Failed to get klines: {e}"))?;
+    let quote = quote.map_err(|e| format!("Failed to get quote: {e}"))?;
+
+    // ── 从 _template_vars 读取参数（用覆盖值替换默认值） ──
+    let tv = |key: &str, default: f64| -> f64 {
+        params.config_overrides
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(default)
+    };
+    let tv_str = |key: &str, default: &str| -> String {
+        params.config_overrides
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or(default)
+            .to_string()
+    };
+
+    // ── 1. compute_scoring（技术综合评分）──
+    let ind = indicators::compute_indicators(code, &klines);
+
+    let w_trend = tv("scoring_trend", 30.0);
+    let w_deviation = tv("scoring_deviation", 20.0);
+    let w_macd = tv("scoring_macd", 15.0);
+    let w_volume = tv("scoring_volume", 15.0);
+    let w_rsi = tv("scoring_rsi", 10.0);
+    let w_support = tv("scoring_support", 10.0);
+    let catalyst_score = tv("catalyst_analyst_score", 50.0);
+
+    let trend_score = match ind.ma_alignment.as_str() {
+        "多头排列" => 90.0, "弱多头" => 70.0, "缠绕/交叉" => 50.0, "空头排列" => 30.0, _ => 50.0,
+    };
+    let bias_avg = (ind.bias_ma5.abs() + ind.bias_ma20.abs()) / 2.0;
+    let deviation_score = if bias_avg < 2.0 { 80.0 } else if bias_avg < 5.0 { 60.0 }
+        else if bias_avg < 10.0 { 40.0 } else { 20.0 };
+    let macd_score = match ind.macd_signal.as_str() {
+        "金叉" => 90.0, "多头运行" => 70.0, "死叉" => 30.0, "空头运行" => 20.0, _ => 50.0,
+    };
+    let volume_score = match ind.volume_signal.as_str() {
+        "放量突破" => 95.0, "放量上涨" => 90.0, "缩量回调" => 60.0,
+        "正常" => 50.0, "缩量上涨" => 40.0, "放量下跌" => 20.0, _ => 50.0,
+    };
+    let rsi_score = if ind.rsi6 > 80.0 { 25.0 } else if ind.rsi6 > 70.0 { 45.0 }
+        else if ind.rsi6 > 50.0 { 75.0 } else if ind.rsi6 > 30.0 { 55.0 } else { 80.0 };
+    let support_score = if !ind.support_levels.is_empty() && !ind.resistance_levels.is_empty() {
+        let d_s = (quote.price - ind.support_levels[0]).abs();
+        let d_r = (ind.resistance_levels[0] - quote.price).abs();
+        let t = d_s + d_r;
+        if t > 0.0 { (d_s / t) * 100.0 } else { 50.0 }
+    } else { 50.0 };
+    let base = trend_score * w_trend / 100.0 + deviation_score * w_deviation / 100.0
+        + macd_score * w_macd / 100.0 + volume_score * w_volume / 100.0
+        + rsi_score * w_rsi / 100.0 + support_score * w_support / 100.0;
+    let total_score = (base * 0.7 + catalyst_score * 0.3).round().min(100.0).max(0.0);
+
+    let score_details = serde_json::json!({
+        "trendScore": trend_score, "deviationScore": deviation_score,
+        "macdScore": macd_score, "volumeScore": volume_score,
+        "rsiScore": rsi_score, "supportScore": support_score,
+        "catalystScore": catalyst_score, "totalScore": total_score,
+        "weights": { "trend": w_trend, "deviation": w_deviation, "macd": w_macd,
+            "volume": w_volume, "rsi": w_rsi, "support": w_support },
+    });
+
+    // ── 2. compute_valuation（简化版：基于 F-Score 和 PE 的基本估值判断）──
+    let fscore = tv("fscore_buy_threshold", 7.0) as i64;
+    let pe_pct = quote.pe_ttm.as_ref()
+        .and_then(|pe| client.get_pe_percentile(code, *pe).await.ok())
+        .flatten()
+        .unwrap_or(50.0);
+    let valuation_result = serde_json::json!({
+        "pePercentile": pe_pct, "fscoreThreshold": fscore,
+        "valuation": if pe_pct < 30.0 { "undervalued" } else if pe_pct > 70.0 { "overvalued" } else { "fair" },
+    });
+
+    // ── 3. compute_portfolio_risk（简化版）──
+    let max_dd = tv("risk_max_drawdown_limit", 20.0);
+    let hhi_limit = tv("risk_hhi_concentrated", 0.25);
+    let kelly_f = tv("kelly_fraction", 0.5);
+    let overall_risk = if max_dd > 25.0 { "高" } else if max_dd > 15.0 { "中" } else { "低" };
+    let risk_result = serde_json::json!({
+        "overallRisk": overall_risk, "maxDrawdownLimit": max_dd,
+        "hhiLimit": hhi_limit, "kellyFraction": kelly_f,
+    });
+
+    // ── 4. portfolio-mgr 公式 ──
+    let what_if = WhatIfRequest {
+        total_score,
+        dqi_score: 50.0,
+        overall_risk: overall_risk.to_string(),
+        catalyst_level: tv_str("catalyst_level", "无催化剂"),
+        institutional_trace: tv_str("institutional_trace", "无异常"),
+        consensus_score: 50.0,
+    };
+    let decision = compute_what_if(what_if)?;
+
+    drop(client);
+    drop(state);
+
+    Ok(ReplayToolChainResult {
+        total_score,
+        score_details,
+        valuation_result,
+        risk_result,
+        decision,
+    })
+}
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -1056,6 +1307,64 @@ async fn backtest_reco_strategies_inner(
         state.astock_client.clone(),
         &positive_stocks,
         &negative_stocks,
+    )
+    .await
+}
+
+// ── RecoSignalTimeline ──
+
+/// 获取指定策略的历史信号明细
+#[tauri::command]
+pub async fn get_reco_signal_history(
+    state: State<'_, AppState>,
+    strategy_id: String,
+) -> Result<Vec<axagent_stock_analysis::backtest_strategy::StrategySignalResult>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    // 1. 找最近一次荐股记录
+    let latest = reco_picks::Entity::find()
+        .order_by_desc(reco_picks::Column::GeneratedAt)
+        .one(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let latest_run = match latest {
+        Some(r) => r,
+        None => return Err("暂无荐股记录。请先打开荐股面板获取推荐。".to_string()),
+    };
+    let run_ts = latest_run.generated_at;
+
+    // 2. 读取该次运行的所有推荐记录
+    let all_picks = reco_picks::Entity::find()
+        .filter(reco_picks::Column::GeneratedAt.eq(&run_ts))
+        .all(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 3. 构建股票列表（从推荐记录 + 候选池去重）
+    let seed_pool_json = all_picks
+        .first()
+        .and_then(|p| p.seed_pool_json.as_deref())
+        .unwrap_or("[]");
+    let seed_pool: Vec<Vec<String>> = serde_json::from_str(seed_pool_json).unwrap_or_default();
+
+    use std::collections::BTreeSet;
+    let mut all_stocks: BTreeSet<(String, String)> = BTreeSet::new();
+    for p in &all_picks {
+        all_stocks.insert((p.stock_code.clone(), p.stock_name.clone()));
+    }
+    for pair in &seed_pool {
+        if pair.len() >= 2 {
+            all_stocks.insert((pair[0].clone(), pair[1].clone()));
+        }
+    }
+    let stock_list: Vec<(String, String)> = all_stocks.into_iter().collect();
+
+    // 4. 调用信号历史
+    axagent_stock_analysis::backtest_strategy::run_signal_history(
+        state.astock_client.clone(),
+        &strategy_id,
+        Some(&stock_list),
     )
     .await
 }

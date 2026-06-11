@@ -450,12 +450,12 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
   );
 
   // ── Local model management ────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const [modelList, setModelList] = useState<any[]>([]);
   const [downloading, setDownloading] = useState<string | null>(null);
 
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     invoke<any[]>("list_local_models")
       .then(setModelList)
       .catch(logIpcError("list_local_models"));
@@ -465,7 +465,7 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
     setDownloading(filename);
     try {
       await invoke("download_model", { filename });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const updated = await invoke<any[]>("list_local_models");
       setModelList(updated);
       messageApi.success(t("settings.rag.modelDownloaded"));
@@ -479,7 +479,7 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
   const handleDeleteModel = async (filename: string) => {
     try {
       await invoke("delete_model", { filename });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const updated = await invoke<any[]>("list_local_models");
       setModelList(updated);
     } catch (e) {
@@ -1497,7 +1497,7 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
                 locale={{
                   emptyText: <Empty description={t("settings.rag.modelNotDownloaded")} />,
                 }}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                 
                 renderItem={(model: any) => (
                   <List.Item
                     actions={[

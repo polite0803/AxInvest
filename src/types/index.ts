@@ -708,7 +708,8 @@ export type BuiltinPageKey =
   | "screener"
   | "trade"
   | "backtest"
-  | "compare";
+  | "compare"
+  | "quant";
 export type PageKey = BuiltinPageKey | string;
 export type SettingsSection =
   | "providers"
@@ -1147,6 +1148,9 @@ export type ToolBinding = {
   approvalMode: "inherit" | "ask" | "allow_safe";
 };
 
+// Quant 量化交易 + 量化回测（见文件末尾 re-export）
+// （避免在中部插入破坏布局；统一在文件末尾汇总）
+
 export type KnowledgeBinding = {
   knowledgeBaseIds: string[];
   autoAttach: boolean;
@@ -1384,6 +1388,17 @@ export interface PlanModifyStepRequest {
   description?: string;
   approved?: boolean;
 }
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  content: string;
+  variablesSchema?: string;
+}
+
+// Quant 量化交易 + 量化回测（M1）
+export * from "./quant";
 
 export interface PromptTemplate {
   id: string;

@@ -63,6 +63,82 @@ pub fn collect_data_vars(variables: &HashMap<String, Value>) -> Vec<(&String, &V
     out
 }
 
+/// 从 `ExecutionState.variables` 中解析点分隔路径。
+///
+/// `path` 支持两种模式：
+/// 1. `a-market-analyst.params.bull_score` → 点号路径，逐层导航 JSON 嵌套
+/// 2. `stock_code` → 无点号，直接按 key 查找（完全兼容旧行为）
+///
+/// 实现逻辑与 tool_executor/condition_executor 中的同名函数保持一致。
+pub fn resolve_var_path(path: &str, variables: &HashMap<String, Value>) -> Option<Value> {
+    if path.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = path.split('.').collect();
+    // 尝试按节点输出路径解析：root 为节点 ID，后续为嵌套字段
+    if let Some(root) = variables.get(parts[0]) {
+        let mut current = root.clone();
+        for part in &parts[1..] {
+            current = current.get(part)?.clone();
+        }
+        return Some(current);
+    }
+    // fallback：root 不是变量名，将整个 path 作为变量名直查
+    variables.get(path).cloned()
+}
+
+/// 从 LLM 回复文本中提取 JSON 结构化参数。
+///
+/// 提取策略（按优先级）：
+/// 1. 查找 ```json ... ``` 代码块中的内容
+/// 2. 查找顶层 `{...}` 结构并尝试解析
+/// 3. 直接尝试解析整个文本
+///
+/// 如果 LLM 输出为纯文本（无 JSON 结构），返回 `None`。
+pub fn extract_json_params(text: &str) -> Option<Value> {
+    // 策略 1：查找 ```json ... ``` 代码块
+    for marker in &["```json\n", "```json\r\n", "```\n", "```\r\n"] {
+        if let Some(after_marker) = text.split(marker).nth(1) {
+            if let Some(json_text) = after_marker.split("```").next() {
+                let trimmed = json_text.trim();
+                if !trimmed.is_empty() {
+                    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+    }
+
+    // 策略 2：查找顶层 { ... } 结构，追踪花括号深度
+    if let Some(start) = text.find('{') {
+        let mut depth = 0u32;
+        for (i, ch) in text[start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        let candidate = &text[start..start + i + 1];
+                        if let Ok(v) = serde_json::from_str::<Value>(candidate) {
+                            return Some(v);
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // 策略 3：直接解析整个文本
+    if let Ok(v) = serde_json::from_str::<Value>(text.trim()) {
+        return Some(v);
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +178,93 @@ mod tests {
         assert!(!is_data_var("risk_hhi_concentrated"));
         assert!(!is_data_var("__workflow_model__"));
         assert!(!is_data_var("execution_id"));
+    }
+
+    #[test]
+    fn resolve_var_path_flat_key() {
+        let mut vars = HashMap::new();
+        vars.insert("stock_code".into(), json!("600036"));
+        assert_eq!(resolve_var_path("stock_code", &vars), Some(json!("600036")));
+    }
+
+    #[test]
+    fn resolve_var_path_dot_path() {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "a-market-analyst".into(),
+            json!({
+                "params": {
+                    "bull_score": 40,
+                    "bear_score": 50,
+                    "confidence": 70,
+                },
+                "content": "分析文本...",
+            }),
+        );
+        assert_eq!(
+            resolve_var_path("a-market-analyst.params.bull_score", &vars),
+            Some(json!(40))
+        );
+        assert_eq!(
+            resolve_var_path("a-market-analyst.params", &vars),
+            Some(json!({"bull_score": 40, "bear_score": 50, "confidence": 70}))
+        );
+        assert_eq!(
+            resolve_var_path("a-market-analyst.content", &vars),
+            Some(json!("分析文本..."))
+        );
+    }
+
+    #[test]
+    fn resolve_var_path_missing_key() {
+        let vars = HashMap::new();
+        assert_eq!(resolve_var_path("nonexistent", &vars), None);
+    }
+
+    #[test]
+    fn resolve_var_path_empty() {
+        let vars = HashMap::new();
+        assert_eq!(resolve_var_path("", &vars), None);
+    }
+
+    #[test]
+    fn extract_json_params_from_code_block() {
+        let text = r##"这是分析文本。
+
+```json
+{
+  "trend_state": "震荡",
+  "bull_score": 40,
+  "bear_score": 50,
+  "confidence": 70
+}
+```
+
+以上是我的分析。"##;
+        let result = extract_json_params(text).unwrap();
+        assert_eq!(result["bull_score"], json!(40));
+        assert_eq!(result["trend_state"], json!("震荡"));
+    }
+
+    #[test]
+    fn extract_json_params_from_top_level() {
+        let text = r##"分析结果：{"action":"buy","positionPct":30,"confidence":75}"##;
+        let result = extract_json_params(text).unwrap();
+        assert_eq!(result["action"], json!("buy"));
+        assert_eq!(result["positionPct"], json!(30));
+    }
+
+    #[test]
+    fn extract_json_params_no_json() {
+        let text = "这是一个纯文本回复，没有任何 JSON 结构。";
+        assert_eq!(extract_json_params(text), None);
+    }
+
+    #[test]
+    fn extract_json_params_from_plain_json() {
+        let text = r##"{"sentiment":"bullish","confidence":0.8}"##;
+        let result = extract_json_params(text).unwrap();
+        assert_eq!(result["sentiment"], json!("bullish"));
+        assert_eq!(result["confidence"], json!(0.8));
     }
 }

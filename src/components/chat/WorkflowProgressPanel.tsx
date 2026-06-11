@@ -619,28 +619,31 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
 
   // --- Re-read storage when conversationId changes ---
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWorkflowId(getWorkflowIdFromStorage(conversationId));
-  }, [conversationId]);
+    const wid = getWorkflowIdFromStorage(conversationId);
+    if (wid !== workflowId) {
+      Promise.resolve().then(() => {
+        setWorkflowId(wid);
+      });
+    }
+  }, [conversationId, workflowId]);
 
   // --- Reset internal state on workflowId change ---
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setWorkflow(null);
-    setLoading(false);
-    setError(null);
-    setExpandedSteps(new Set());
-    setShowDag(true);
-    setDagCollapsed(false);
+    Promise.resolve().then(() => {
+      setWorkflow(null);
+      setLoading(false);
+      setError(null);
+      setExpandedSteps(new Set());
+      setShowDag(true);
+      setDagCollapsed(false);
+    });
   }, [workflowId]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Poll workflow status with race-condition protection & terminal stop ---
   const workflowRef = useRef(workflow);
   // eslint-disable-next-line react-hooks/refs
   workflowRef.current = workflow;
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
@@ -648,7 +651,9 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
     }
 
     if (!workflowId) {
-      setWorkflow(null);
+      Promise.resolve().then(() => {
+        setWorkflow(null);
+      });
       return;
     }
 
@@ -659,10 +664,6 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
         return;
       }
       const requestId = ++fetchIdRef.current;
-
-      if (requestId === 1) {
-        setLoading(true);
-      }
 
       try {
         const data = await invoke<WorkflowData>("workflow_get_status", {
@@ -704,13 +705,15 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
           message.warning(msg);
         }
         logIpcError("WorkflowProgressPanel.fetchStatus")(e);
-      } finally {
-        if (fetchIdRef.current === requestId) {
-          setLoading(false);
-        }
       }
     };
 
+    // Set loading asynchronously to avoid synchronous setState in effect
+    Promise.resolve().then(() => {
+      if (!stoppedByTerminal) {
+        setLoading(true);
+      }
+    });
     poll();
     pollTimerRef.current = setInterval(poll, POLL_INTERVAL_MS);
 
@@ -722,7 +725,6 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
       }
     };
   }, [workflowId]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Step toggle ---
   const toggleStep = useCallback((stepId: string) => {

@@ -10,7 +10,9 @@
 //! ## 覆盖
 //! - **Trend** (short/mid/long): 纯 K 线依赖 ✅
 //! - **Reversion** (short/mid): 纯 K 线依赖 ✅
-//! - Value / Capital / Watchlist: 需实时数据或非信号逻辑 ❌
+//! - **Value** (short/mid/long): K 线代理（低波幅+均线附近+温和量能） ✅
+//! - **Capital** (short/mid/long): K 线代理（放量上涨+量价配合） ✅
+//! - Watchlist: 兜底策略无信号逻辑，不计入回测 ⏭️
 
 use crate::recommender::indicators;
 use crate::recommender::types::Period;
@@ -187,9 +189,165 @@ fn detect_reversion_mid(klines: &[KLine]) -> Option<f64> {
     Some(klines.last()?.close)
 }
 
+// ── Value 策略 K 线代理 ──
+//
+// 实际 Value 策略依赖 PE/PB/TTM 基本面数据，历史回测不可得。
+// 此处用 K 线形态近似：低波幅 + 价格在均线附近 + 无异常放量，
+// 反映"低估值股票"在 K 线上的典型特征（稳定、非投机）。
+
+fn detect_value_short(klines: &[KLine]) -> Option<f64> {
+    if klines.len() < 30 {
+        return None;
+    }
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    let ma20 = indicators::sma(&cs, 20)?;
+    // 价格在 MA20 附近（偏离 < 2%），不在上涨趋势中
+    if last > ma20 * 1.02 || last < ma20 * 0.90 {
+        return None;
+    }
+    // 低波幅：20 日振幅 < 15%
+    let high20 = indicators::highest(klines, 20)?;
+    let low20 = indicators::lowest(klines, 20)?;
+    if (high20 - low20) / low20 > 0.15 {
+        return None;
+    }
+    // 成交温和（非投机放量）
+    let avg_amt = indicators::avg_amount_n(klines, 20)?;
+    let today_amt = klines.last()?.amount;
+    if today_amt > avg_amt * 2.0 {
+        return None;
+    }
+    Some(last)
+}
+
+fn detect_value_mid(klines: &[KLine]) -> Option<f64> {
+    if klines.len() < 100 {
+        return None;
+    }
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    let ma60 = indicators::sma(&cs, 60)?;
+    // 价格在 MA60 附近（偏离 -20% ~ +5%），排除深跌垃圾股和暴涨热门股
+    if last > ma60 * 1.05 || last < ma60 * 0.80 {
+        return None;
+    }
+    // 60 日波幅 < 30%
+    let high60 = indicators::highest(klines, 60)?;
+    let low60 = indicators::lowest(klines, 60)?;
+    if (high60 - low60) / low60 > 0.30 {
+        return None;
+    }
+    Some(last)
+}
+
+fn detect_value_long(klines: &[KLine]) -> Option<f64> {
+    if klines.len() < 250 {
+        return None;
+    }
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    let ma120 = indicators::sma(&cs, 120)?;
+    if ma120.is_nan() {
+        return None;
+    }
+    // 价格在 MA120 附近（-30% ~ +10%），允许更大基本面偏离
+    if last > ma120 * 1.10 || last < ma120 * 0.70 {
+        return None;
+    }
+    // 长期低波幅：120 日波幅 < 40%
+    let high120 = indicators::highest(klines, 120)?;
+    let low120 = indicators::lowest(klines, 120)?;
+    if (high120 - low120) / low120 > 0.40 {
+        return None;
+    }
+    Some(last)
+}
+
+// ── Capital 策略 K 线代理 ──
+//
+// 实际 Capital 策略依赖北向持仓/主力净流入/龙虎榜资金流数据。
+// 此处用量价配合近似：放量上涨 + 成交额放大反映资金介入。
+
+fn detect_capital_short(klines: &[KLine]) -> Option<f64> {
+    if klines.len() < 30 {
+        return None;
+    }
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    // 放量：当日成交额 > 20 日均值 1.5 倍
+    let avg_amt = indicators::avg_amount_n(klines, 20)?;
+    let today_amt = klines.last()?.amount;
+    if today_amt < avg_amt * 1.5 {
+        return None;
+    }
+    // 上涨：当日收盘价 > 前日收盘价 * 1.01（至少 1% 涨幅确认）
+    let prev = cs[cs.len() - 2];
+    if last < prev * 1.01 {
+        return None;
+    }
+    // 不极度追高：涨幅 < 10%
+    if last > prev * 1.10 {
+        return None;
+    }
+    Some(last)
+}
+
+fn detect_capital_mid(klines: &[KLine]) -> Option<f64> {
+    if klines.len() < 100 {
+        return None;
+    }
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    // 中期放量：20 日均成交额 > 60 日均值
+    let avg_amt_20 = indicators::avg_amount_n(klines, 20)?;
+    let avg_amt_60 = indicators::avg_amount_n(klines, 60)?;
+    if avg_amt_60 <= 0.0 || avg_amt_20 < avg_amt_60 * 1.2 {
+        return None;
+    }
+    // 趋势向上：MA20 > MA60（资金驱动的中期上涨）
+    let ma20 = indicators::sma(&cs, 20)?;
+    let ma60 = indicators::sma(&cs, 60)?;
+    if last < ma20 || ma20 < ma60 * 0.95 {
+        return None;
+    }
+    // RSI 非超买 (< 70)
+    let rsi30 = indicators::rsi(klines, 30)?;
+    if rsi30 > 70.0 {
+        return None;
+    }
+    Some(last)
+}
+
+fn detect_capital_long(klines: &[KLine]) -> Option<f64> {
+    if klines.len() < 250 {
+        return None;
+    }
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    // 长期放量：60 日均成交额 > 120 日均值
+    let avg_amt_60 = indicators::avg_amount_n(klines, 60)?;
+    let avg_amt_120 = indicators::avg_amount_n(klines, 120)?;
+    if avg_amt_120 <= 0.0 || avg_amt_60 < avg_amt_120 * 1.1 {
+        return None;
+    }
+    // 持续上升趋势
+    let ma120 = indicators::sma(&cs, 120)?;
+    let ma60 = indicators::sma(&cs, 60)?;
+    if ma120.is_nan() || ma60 < ma120 {
+        return None;
+    }
+    // RSI 非过热 (< 65)
+    let rsi60 = indicators::rsi(klines, 60)?;
+    if rsi60 > 65.0 {
+        return None;
+    }
+    Some(last)
+}
+
 // ── 策略注册表 ──
 
-struct StratDef {
+pub(crate) struct StratDef {
     id: &'static str,
     style: &'static str,
     period: &'static str,
@@ -239,13 +397,99 @@ const STRATS: &[StratDef] = &[
         warmup: 100,
         detect: detect_reversion_mid,
     },
+    // ── Value（K 线代理） ──
+    StratDef {
+        id: "value_short",
+        style: "value",
+        period: "short",
+        period_enum: Period::Short,
+        warmup: 30,
+        detect: detect_value_short,
+    },
+    StratDef {
+        id: "value_mid",
+        style: "value",
+        period: "mid",
+        period_enum: Period::Mid,
+        warmup: 100,
+        detect: detect_value_mid,
+    },
+    StratDef {
+        id: "value_long",
+        style: "value",
+        period: "long",
+        period_enum: Period::Long,
+        warmup: 250,
+        detect: detect_value_long,
+    },
+    // ── Capital（K 线代理） ──
+    StratDef {
+        id: "capital_short",
+        style: "capital",
+        period: "short",
+        period_enum: Period::Short,
+        warmup: 30,
+        detect: detect_capital_short,
+    },
+    StratDef {
+        id: "capital_mid",
+        style: "capital",
+        period: "mid",
+        period_enum: Period::Mid,
+        warmup: 100,
+        detect: detect_capital_mid,
+    },
+    StratDef {
+        id: "capital_long",
+        style: "capital",
+        period: "long",
+        period_enum: Period::Long,
+        warmup: 250,
+        detect: detect_capital_long,
+    },
 ];
 
 pub const SKIPPED: &[&str] = &[
-    "value_*: 需历史 PE/PB 数据",
-    "capital_*: 需历史资金流/北向/龙虎数据",
-    "watchlist_*: 兜底策略无信号逻辑",
+    "watchlist_*: 兜底策略无信号逻辑，不计入回测",
 ];
+
+// ── 策略查找与单策略信号历史 ──
+
+/// 按 strategy_id 查找策略定义（用于 RecoSignalTimeline）
+pub(crate) fn get_strategy_def(sid: &str) -> Option<&'static StratDef> {
+    STRATS.iter().find(|s| s.id == sid)
+}
+
+/// 对指定策略跑所有股票的单笔信号历史（不聚合，返回每条信号明细）
+///
+/// `stock_codes` 可选过滤：传入非空列表时只分析这些股票；None 时从 reco_picks 种子池读。
+pub async fn run_signal_history(
+    client: Arc<AStockClient>,
+    sid: &str,
+    stock_codes: Option<&[(String, String)]>,
+) -> Result<Vec<StrategySignalResult>, String> {
+    let strat = get_strategy_def(sid)
+        .ok_or_else(|| format!("未知策略: {}", sid))?;
+    let kline_limit = 500u32;
+    let holding = strat.period_enum.default_holding_days();
+
+    let stocks = match stock_codes {
+        Some(list) => list.to_vec(),
+        None => return Ok(vec![]), // 调用方应自行提供股票列表
+    };
+
+    let mut results = Vec::new();
+    for (code, name) in &stocks {
+        let klines = match client.get_klines(code, "daily", kline_limit).await {
+            Ok(k) if k.len() >= strat.warmup => k,
+            _ => continue,
+        };
+        let sigs = scan_one(&klines, code, name, sid, strat.detect, holding, strat.warmup);
+        results.extend(sigs);
+    }
+    results.sort_by(|a, b| b.signal_date.cmp(&a.signal_date));
+    Ok(results)
+}
 
 // ── 主入口 ──
 
@@ -489,12 +733,47 @@ mod tests {
     }
 
     #[test]
-    fn no_signal_on_flat() {
+    fn momentum_strategies_no_signal_on_flat() {
         let klines: Vec<KLine> = (0..50)
             .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
             .collect();
         assert!(detect_trend_short(&klines).is_none());
         assert!(detect_reversion_short(&klines).is_none());
+        // 资金策略需要放量，平盘不放量也为 None
+        assert!(detect_capital_short(&klines).is_none());
+    }
+
+    #[test]
+    fn value_strategy_signals_on_flat() {
+        let klines: Vec<KLine> = (0..50)
+            .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
+            .collect();
+        // 平盘 = 低波幅+均线附近 = 价值股典型 K 线特征
+        assert!(detect_value_short(&klines).is_some());
+    }
+
+    #[test]
+    fn capital_needs_volume_spike() {
+        // 第 1 部分：平盘无放量 → None
+        let flat: Vec<KLine> = (0..50)
+            .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
+            .collect();
+        assert!(detect_capital_short(&flat).is_none());
+
+        // 第 2 部分：最后一日放量 + 上涨 → 有信号
+        let mut spike = flat.clone();
+        spike.push(KLine {
+            date: "d100".into(),
+            open: 10.1,
+            high: 10.4,
+            low: 10.0,
+            close: 10.3,
+            volume: 3_000_000.0,
+            amount: 31_000_000.0,
+            turnover_rate: Some(3.0),
+            adj_factor: None,
+        });
+        assert!(detect_capital_short(&spike).is_some());
     }
 
     #[test]

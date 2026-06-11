@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Table } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -24,7 +24,7 @@ export function PeersPanel() {
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     if (!stockCode) {
       setPeers([]);
       setEmptyKind("noStock");
@@ -45,11 +45,43 @@ export function PeersPanel() {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, [stockCode]);
+  };
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let cancelled = false;
+    if (!stockCode) {
+      Promise.resolve().then(() => {
+        setPeers([]);
+        setEmptyKind("noStock");
+      });
+      return;
+    }
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      return invoke<PeerComparison[]>("get_stock_peers", { stockCode });
+    })
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (Array.isArray(data) && data.length > 0) {
+          setPeers(data);
+        } else {
+          setPeers([]);
+          setEmptyKind("noData");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPeers([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [stockCode]);
 
   const columns = [
     { title: t("stockAnalysis.alert.code"), dataIndex: "stockCode", key: "code", width: 70 },

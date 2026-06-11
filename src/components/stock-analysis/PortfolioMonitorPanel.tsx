@@ -7,7 +7,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import { Alert, Button, Col, Empty, Progress, Row, Skeleton, Space, Statistic, Tag, Tooltip } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { type PortfolioCorrelationCell, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
@@ -49,15 +49,15 @@ export function PortfolioMonitorPanel() {
   const fetchDashboard = useStockAnalysisStore((s) => s.fetchPortfolioDashboard);
   const fetchCorrelations = useStockAnalysisStore((s) => s.fetchPortfolioCorrelations);
   const refresh = useStockAnalysisStore((s) => s.refreshPortfolioMetrics);
-  const [autoLoaded, setAutoLoaded] = useState(false);
+  const autoLoadedRef = useRef(false);
 
   useEffect(() => {
-    if (!autoLoaded) {
-      setAutoLoaded(true);
+    if (!autoLoadedRef.current) {
+      autoLoadedRef.current = true;
       void fetchDashboard(asOfDate);
       void fetchCorrelations(asOfDate);
     }
-  }, [autoLoaded, asOfDate, fetchDashboard, fetchCorrelations]);
+  }, [asOfDate, fetchDashboard, fetchCorrelations]);
 
   const isReplay = mode === "replay" && !!asOfDate;
 

@@ -21,7 +21,10 @@ export function useGlobalShortcutManager() {
   // 用 ref 保存最新 settings，避免 effect 依赖整个 settings 对象
   // 每次任意设置字段变更都触发全部快捷键重注册
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     const diagnostics: GlobalShortcutDiagnostic[] = [];

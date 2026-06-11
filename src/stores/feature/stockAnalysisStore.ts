@@ -319,6 +319,13 @@ interface StockAnalysisState {
   asOfDate: string | null;
   mode: "live" | "replay" | "backtest_sweep";
   violations: Array<{ nodeId: string; snippet: string; ruleHit: string }>;
+
+  // Phase 10: Experiment mode (What-If integrated)
+  decisionMode: "view" | "experiment" | "execute";
+  setDecisionMode: (mode: "view" | "experiment" | "execute") => void;
+  experiments: ExperimentRecord[];
+  pushExperiment: (record: ExperimentRecord) => void;
+  clearExperiments: () => void;
   setAsOfDate: (date: string | null) => void;
   setMode: (mode: "live" | "replay" | "backtest_sweep") => void;
   setViolations: (
@@ -379,17 +386,30 @@ interface StockAnalysisState {
     minIntervalMinutes: number;
   };
   t0Loading: boolean;
-  setT0Config: (cfg: Partial<{
-    enabled: boolean;
-    changePctThreshold: number | null;
-    turnoverRateThreshold: number | null;
-    minIntervalMinutes: number;
-  }>) => Promise<void>;
+  setT0Config: (
+    cfg: Partial<{
+      enabled: boolean;
+      changePctThreshold: number | null;
+      turnoverRateThreshold: number | null;
+      minIntervalMinutes: number;
+    }>,
+  ) => Promise<void>;
   fetchT0Config: () => Promise<void>;
 
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
   _searchTimer: ReturnType<typeof setTimeout> | null;
+}
+
+export interface ExperimentRecord {
+  id: string;
+  step: number;
+  params: Record<string, number | string>;
+  configOverrides: Record<string, number>;
+  decisionBefore: Partial<StockDecision>;
+  decisionAfter: Partial<StockDecision>;
+  accepted: boolean;
+  createdAt: number;
 }
 
 const initialState = {
@@ -450,6 +470,8 @@ const initialState = {
     minIntervalMinutes: 30,
   },
   t0Loading: false,
+  decisionMode: "view" as "view" | "experiment" | "execute",
+  experiments: [],
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -885,6 +907,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   setMode: (mode) => set({ mode }),
   setViolations: (violations) => set({ violations }),
   setShowEarningsOnChart: (show) => set({ showEarningsOnChart: show }),
+
+  // Phase 10: Experiment mode actions
+  setDecisionMode: (mode) => set({ decisionMode: mode }),
+  pushExperiment: (record) => set((s) => ({ experiments: [...s.experiments, record] })),
+  clearExperiments: () => set({ experiments: [] }),
 
   /**
    * R3-B: 拉取财报披露事件列表,在 K 线图上叠加图标。

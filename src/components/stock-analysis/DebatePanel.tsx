@@ -123,11 +123,11 @@ function extractReadableDebateText(text: string): string {
     return values.join("\n\n");
   }
   // 2. 清理工具调用标签和多余空白
-  let cleaned = text
+  const cleaned = text
     .replace(/```json\s*[\s\S]*?\s*```/g, "")
     .replace(/\{\s*["']?[a-zA-Z_]+["']?\s*:/g, "")
     .replace(/["']?[a-zA-Z_]+["']?\s*:\s*["']?/g, "")
-    .replace(/[{}\[\]",]/g, " ")
+    .replace(/[{}[\]",]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned.length > 20 ? cleaned : text;

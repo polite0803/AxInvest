@@ -51,6 +51,7 @@ const LazyScreenerPage = lazy(() => import("@/pages/ScreenerPage").then((m) => (
 const LazyTradePage = lazy(() => import("@/pages/TradePage").then((m) => ({ default: m.TradePage })));
 const LazyBacktestPage = lazy(() => import("@/pages/BacktestPage").then((m) => ({ default: m.BacktestPage })));
 const LazyComparePage = lazy(() => import("@/pages/ComparePage").then((m) => ({ default: m.ComparePage })));
+const LazyQuantLabPage = lazy(() => import("@/pages/QuantLabPage").then((m) => ({ default: m.QuantLabPage })));
 const LazyReplayWorkbenchPage = lazy(() =>
   import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
 );
@@ -66,7 +67,7 @@ function PageLoader() {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 function SafeLazyPage({ Page }: { Page: React.LazyExoticComponent<any> }) {
   const { t } = useTranslation();
   return (
@@ -254,6 +255,10 @@ export const ContentArea = memo(function ContentArea() {
           <Route
             path="/replay-workbench"
             element={<SafeLazyPage Page={LazyReplayWorkbenchPage} />}
+          />
+          <Route
+            path="/quant"
+            element={<SafeLazyPage Page={LazyQuantLabPage} />}
           />
           <Route
             path="/devtools/trace-explorer"

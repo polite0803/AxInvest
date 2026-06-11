@@ -13,7 +13,6 @@ import {
   Settings,
   Shield,
   Sparkles,
-  TrendingUp,
   Users,
   X,
 } from "lucide-react";
@@ -27,6 +26,8 @@ import { ClsFlashPanel } from "./ClsFlashPanel";
 import { ConceptBlocksPanel } from "./ConceptBlocksPanel";
 import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
+import { ExperimentSidebar } from "./ExperimentSidebar";
+import { ExperimentTrail } from "./ExperimentTrail";
 import "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
@@ -189,12 +190,7 @@ export function StockAnalysisPage() {
       children: <ValueAssessmentPanel />,
     },
     { key: "risk", label: t("stockAnalysis.tab.risk"), icon: <Shield size={14} />, children: <RiskMatrix /> },
-    {
-      key: "decision",
-      label: t("stockAnalysis.tab.decision"),
-      icon: <TrendingUp size={14} />,
-      children: <DecisionBanner />,
-    },
+    // Decision tab removed — now rendered as full-width hero at top
     {
       key: "reflection",
       label: t("stockAnalysis.tab.reflection"),
@@ -292,6 +288,17 @@ export function StockAnalysisPage() {
             <StockSearchBar />
 
             <div className="sa-body-inner">
+              {/* Decision hero (full width, at top) */}
+              {status === "completed" && (
+                <div style={{ margin: "0 16px 12px 16px" }}>
+                  <DecisionBanner />
+                  {/* Analyst consensus summary */}
+                  <AnalystConsensusBar />
+                  {/* Experiment trail */}
+                  <ExperimentTrail />
+                </div>
+              )}
+
               <div className="sa-main">
                 {settingsOpen && !isMobile
                   ? (
@@ -429,20 +436,39 @@ export function StockAnalysisPage() {
               </div>
 
               <div className="sa-sidebar">
-                <Collapse
-                  size="small"
-                  ghost
-                  defaultActiveKey={["screener"]}
-                  items={sheetPanels.map((p) => ({
-                    key: p.key,
-                    label: <span className="text-xs font-medium">{p.label}</span>,
-                    children: <div className="sa-panel-body">{p.element}</div>,
-                  }))}
-                />
+                {status === "completed" && (
+                  <>
+                    <ExperimentSidebar />
+                    {/* Execute shortcut */}
+                    <div
+                      onClick={() => navigate("/trade")}
+                      style={{
+                        marginTop: 8, padding: "8px 0", textAlign: "center", fontSize: 12,
+                        border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6,
+                        cursor: "pointer", color: "var(--color-text-secondary)",
+                      }}
+                    >
+                      Execute trade &rarr;
+                    </div>
+                  </>
+                )}
+                {status !== "completed" && (
+                  <Collapse
+                    size="small"
+                    ghost
+                    defaultActiveKey={["screener"]}
+                    items={sheetPanels.map((p) => ({
+                      key: p.key,
+                      label: <span className="text-xs font-medium">{p.label}</span>,
+                      children: <div className="sa-panel-body">{p.element}</div>,
+                    }))}
+                  />
+                )}
               </div>
             </div>
           </div>
 
+          {/* Experiment trail (Phase 10) */}
           {/* 底部滑出面板  ? 平板/移动 ? */}
           <div className={`sa-bottom-sheet${sheetOpen ? " open" : ""}`}>
             <div className="sa-sheet-handle" onClick={() => setSheetOpen(!sheetOpen)}>
@@ -504,5 +530,52 @@ export function StockAnalysisPage() {
         )}
       </StockAnalysisPageContext.Provider>
     </PageErrorBoundary>
+  );
+}
+
+/** 分析师共识条 — 在 Decision Hero 下方显示 10 位分析师的 bull/bear/neutral 投票分布 */
+function AnalystConsensusBar() {
+  const analystReports = useStockAnalysisStore((s) => s.analystReports);
+  const reports = Object.values(analystReports).filter(Boolean) as string[];
+  const total = reports.length;
+  if (total === 0) return null;
+
+  // Simple heuristic: count bullish/bearish keywords in each report text
+  let bull = 0; let bear = 0; let neutral = 0;
+  for (const text of reports) {
+    const lower = text.toLowerCase();
+    const b = (lower.match(/看多|bullish|买入|positive|利好/g) || []).length;
+    const be = (lower.match(/看空|bearish|卖出|negative|利空/g) || []).length;
+    if (b > be * 1.5) bull++;
+    else if (be > b * 1.5) bear++;
+    else neutral++;
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "6px 12px", marginTop: 8,
+      border: "0.5px solid var(--color-border-tertiary)", borderRadius: 6,
+      fontSize: 12,
+    }}>
+      <span style={{ fontWeight: 500, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
+        Analyst consensus
+      </span>
+      {bull > 0 && (
+        <span style={{ color: "var(--sa-red)" }}>
+          {bull} bullish
+        </span>
+      )}
+      {bear > 0 && (
+        <span style={{ color: "var(--sa-green)" }}>
+          {bear} bearish
+        </span>
+      )}
+      {neutral > 0 && (
+        <span style={{ color: "var(--color-text-tertiary)" }}>
+          {neutral} neutral
+        </span>
+      )}
+    </div>
   );
 }

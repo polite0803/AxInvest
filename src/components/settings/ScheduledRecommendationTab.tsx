@@ -69,21 +69,32 @@ export function ScheduledRecommendationTab() {
   const [adding, setAdding] = useState(false);
   const [form] = Form.useForm();
 
-  const load = async () => {
-    setLoading(true);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      return invoke<RecoCronRow[]>("list_recommendation_crons");
+    })
+      .then((list) => {
+        if (cancelled) return;
+        if (Array.isArray(list)) { setJobs(list); }
+      })
+      .catch((e) => {
+        console.warn("[ScheduledRecommendation] load failed:", e);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const loadTasks = async () => {
     try {
       const list = await invoke<RecoCronRow[]>("list_recommendation_crons");
       if (Array.isArray(list)) { setJobs(list); }
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn("[ScheduledRecommendation] load failed:", e);
-    }
-    setLoading(false);
+    } catch { /* 静默 */ }
   };
-
-  useEffect(() => {
-    load();
-  }, []);
 
   const create = async (values: any) => {
     try {
@@ -96,7 +107,7 @@ export function ScheduledRecommendationTab() {
       });
       form.resetFields();
       setAdding(false);
-      load();
+      loadTasks();
       message.success("定时荐股任务已创建");
     } catch (e: any) {
       message.error(`创建失败: ${e?.message ?? e}`);
@@ -106,14 +117,14 @@ export function ScheduledRecommendationTab() {
   const toggle = async (id: string, active: boolean) => {
     try {
       await invoke("toggle_recommendation_cron", { id, enabled: active });
-      load();
+      loadTasks();
     } catch { /* 静默 */ }
   };
 
   const remove = async (id: string) => {
     try {
       await invoke("delete_recommendation_cron", { id });
-      load();
+      loadTasks();
     } catch { /* 静默 */ }
   };
 

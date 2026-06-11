@@ -29,18 +29,18 @@ export function NotificationCenter({ trigger }: NotificationCenterProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [visible, setVisible] = useState(false);
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const stored = localStorage.getItem("axagent-notifications");
     if (stored) {
-      try {
-        setNotifications(JSON.parse(stored));
-      } catch {
-        setNotifications([]);
-      }
+      Promise.resolve().then(() => {
+        try {
+          setNotifications(JSON.parse(stored));
+        } catch {
+          setNotifications([]);
+        }
+      });
     }
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     localStorage.setItem(

@@ -37,7 +37,7 @@ interface DailyReview {
 
 function DecisionBadge({ decision }: { decision: DecisionComparison }) {
   const { t } = useTranslation();
-  let statusText = "";
+  let statusText: string;
   let statusColor: string = "default";
   if (decision.stopLossHit) {
     statusText = t("stockAnalysis.dailyReview.stopLossHit");
@@ -88,8 +88,11 @@ export function DailyReviewPanel() {
   }, []);
 
   useEffect(() => {
-    generate();
-  }, [generate]);
+    invoke<DailyReview>("generate_daily_review")
+      .then((r) => { setReview(r); setError(null); })
+      .catch((e: any) => { setError(e?.message ?? String(e)); })
+      .finally(() => setLoading(false));
+  }, [setReview, setError, setLoading]);
 
   const hasWatchlist = useStockAnalysisStore((s) => s.watchlistVersion > 0);
   const emptyKind: PanelEmptyKind = error ? "connectionFailed" : "noData";

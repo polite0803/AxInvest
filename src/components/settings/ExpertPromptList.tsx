@@ -25,25 +25,29 @@ export function ExpertPromptList() {
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const rows = await invoke<ExpertRow[]>("list_agency_experts");
-      const filtered = Array.isArray(rows)
-        ? rows.filter((r) =>
-          r.source_dir === "stock-analysis" || r.category === "finance" || r.id.startsWith("agency-stock-analysis-")
-        )
-        : [];
-      setExperts(filtered);
-    } catch {
-      setExperts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    load();
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      return invoke<ExpertRow[]>("list_agency_experts");
+    })
+      .then((rows) => {
+        if (cancelled) return;
+        const filtered = Array.isArray(rows)
+          ? rows.filter((r) =>
+            r.source_dir === "stock-analysis" || r.category === "finance" || r.id.startsWith("agency-stock-analysis-")
+          )
+          : [];
+        setExperts(filtered);
+      })
+      .catch(() => {
+        if (!cancelled) setExperts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   const expand = (expert: ExpertRow) => {

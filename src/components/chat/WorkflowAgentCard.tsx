@@ -5,6 +5,8 @@ import { TrendingUp } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
+/* eslint-disable react-refresh/only-export-components */
+
 /** 从任意 Agent JSON 输出中提取一段可读摘要 */
 function extractAgentBrief(report: string, maxLen = 180): string {
   const cleaned = cleanToolCallTags(report).trim();
@@ -18,7 +20,7 @@ function extractAgentBrief(report: string, maxLen = 180): string {
       parsed = JSON.parse(trimmed);
     } else {
       // 匹配 ```json ... ```
-      let m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (m) { parsed = JSON.parse(m[1]); }
     }
   } catch {

@@ -36,7 +36,7 @@ export function useSlashCompleter(
   const [isActive, setIsActive] = useState(false);
   const [currentInput, setCurrentInput] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [_cursorPosition, _setCursorPosition] = useState(0);
   const inputBufferRef = useRef("");
   const cursorPosRef = useRef(0);
@@ -210,7 +210,7 @@ export function SlashCompleterWidget({
 }: SlashCompleterWidgetProps) {
   const {
     isActive,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     currentInput: _currentInput,
     filteredCommands,
     selectedIndex,

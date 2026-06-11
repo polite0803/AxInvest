@@ -1847,7 +1847,7 @@ export function InputArea() {
         if (activeConversationId) {
           try {
             await updateConversation(activeConversationId, {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               work_strategy: "direct" as any,
             });
           } catch (e) {

@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -34,7 +34,7 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = useCallback(async (silent = false) => {
+  const load = async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
@@ -84,11 +84,71 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
       setEmptyKind("connectionFailed");
     }
     setLoading(false);
-  }, []);
+  };
 
   useEffect(() => {
-    load(true); // 首次静默：避免每个面板都 toast 一次
-  }, [load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setEmptyKind(null);
+      setEmptyVendors(undefined);
+      return checkVendorEnabled("limitup", { silent: true });
+    })
+      .then((check) => {
+        if (cancelled || !check) return;
+        if (check.status === "disabled") {
+          setStocks([]);
+          setEmptyKind("vendorDisabled");
+          setEmptyVendors(check.vendors);
+          return;
+        }
+        if (check.status === "backend_offline") {
+          setStocks([]);
+          setEmptyKind("backendOffline");
+          return;
+        }
+        return invoke<any[]>("get_hot_stocks");
+      })
+      .then((hot) => {
+        if (cancelled || !hot) return;
+        if (!Array.isArray(hot)) { throw new Error("bad data"); }
+        const candidates = hot.filter((h) => (h.changePct ?? 0) >= 9.5);
+        return Promise.all(candidates.slice(0, 30).map(async (h: any) => {
+          try {
+            const q = await invoke<any>("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code });
+            const price = q?.price ?? 0;
+            const limitUp = q?.limitUp ?? q?.limit_up ?? 0;
+            return {
+              code: h.stockCode ?? h.stock_code,
+              name: h.stockName ?? h.stock_name ?? "",
+              price,
+              changePct: h.changePct ?? 0,
+              turnoverRate: q?.turnoverRate ?? q?.turnover_rate ?? 0,
+              isSealed: limitUp > 0 && Math.abs(price - limitUp) < 0.01,
+              boardCount: Math.max(1, Math.round((h.changePct ?? 0) / 10)),
+            } as LimitUpStock;
+          } catch { return null; }
+        }));
+      })
+      .then((results) => {
+        if (cancelled) return;
+        const filtered = (results ?? []).filter(Boolean) as LimitUpStock[];
+        filtered.sort((a, b) => b.changePct - a.changePct);
+        setStocks(filtered);
+        if (filtered.length === 0) { setEmptyKind("noData"); }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStocks([]);
+          setEmptyKind("connectionFailed");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const analyze = async (code: string) => {
     await getStockQuote(code);

@@ -149,6 +149,7 @@ export const ContentArea = memo(function ContentArea() {
     "/backtest",
     "/compare",
     "/replay-workbench",
+    "/quant",
   ]);
   const isStockPage = stockInvestmentPaths.has(location.pathname);
 

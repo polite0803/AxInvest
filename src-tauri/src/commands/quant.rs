@@ -237,7 +237,7 @@ pub async fn quant_backtest_run(
     let matcher_cfg = request
         .matcher_config
         .clone()
-        .unwrap_or_else(MatcherConfig::default);
+        .unwrap_or_default();
 
     let bt_config = BacktestConfig {
         initial_cash: request.initial_cash,

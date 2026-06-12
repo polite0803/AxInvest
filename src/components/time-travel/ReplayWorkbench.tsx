@@ -51,7 +51,7 @@ export function ReplayWorkbench() {
   };
 
   return (
-    <div style={{ padding: "24px 16px", maxWidth: 920, margin: "0 auto" }}>
+    <div style={{ padding: "24px 16px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <History size={20} />
         <Title level={3} style={{ margin: 0 }}>

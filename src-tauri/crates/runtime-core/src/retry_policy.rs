@@ -178,6 +178,12 @@ impl RetryPolicy {
     }
 }
 
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::default_llm()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,12 +289,5 @@ mod tests {
         let result: Result<String, String> = policy.handle_fallback("model overloaded");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("gpt-4"));
-    }
-}
-
-/// 为 RetryPolicy 提供 Default 实现（与 default_llm() 相同）
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self::default_llm()
     }
 }

@@ -206,12 +206,12 @@ export function PortfolioMonitorPanel() {
             <Tag color={riskColor(dashboard.riskLevel)} icon={<SafetyOutlined />}>
               {t("stockAnalysis.portfolioMonitor.riskLevel")}: {dashboard.riskLevel}
             </Tag>
-            {dashboard.correlationAvg !== undefined && (
+            {dashboard.correlationAvg != null && (
               <Tag color="purple" icon={<ClusterOutlined />}>
                 {t("stockAnalysis.portfolioMonitor.correlationAvg")}: {dashboard.correlationAvg.toFixed(2)}
               </Tag>
             )}
-            {dashboard.sharpe30d !== undefined && (
+            {dashboard.sharpe30d != null && (
               <Tag color="blue">
                 {t("stockAnalysis.portfolioMonitor.sharpe30d")}: {dashboard.sharpe30d.toFixed(2)}
               </Tag>

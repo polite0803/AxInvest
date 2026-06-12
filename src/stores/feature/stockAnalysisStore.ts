@@ -506,8 +506,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   getStockQuote: async (code: string) => {
     try {
-      // 时间旅行：从 timeAnchorStore 读 as_of_date，透传给后端
-      const asOfDate = useTimeAnchorStore.getState().asOfDate;
+      // 时间旅行：从 timeAnchorStore 读 as_of_date，透传给后端（仅 replay/backtest_sweep 模式）
+      const asOfDate = (() => {
+        const state = useTimeAnchorStore.getState();
+        return state.mode === "replay" || state.mode === "backtest_sweep" ? state.asOfDate : null;
+      })();
       const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
       set({ quote, stockCode: code, stockName: quote.name });
       // R3-B: 切换股票后拉取对应的财报披露事件，用于 K 线叠加图标
@@ -524,8 +527,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     adj?: "auto" | "none" | "forward" | "backward",
   ) => {
     try {
-      // 时间旅行：K 线按 as_of_date 截断
-      const asOfDate = useTimeAnchorStore.getState().asOfDate;
+      // 时间旅行：K 线按 as_of_date 截断（仅 replay/backtest_sweep 模式）
+      const asOfDate = (() => {
+        const state = useTimeAnchorStore.getState();
+        return state.mode === "replay" || state.mode === "backtest_sweep" ? state.asOfDate : null;
+      })();
       const klineData = await invoke<KLine[]>("get_stock_kline", {
         stockCode: code,
         period,
@@ -605,8 +611,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
       const dryRun = await get().getDryRun();
       // 时间旅行模式：从 useTimeAnchorStore 读 as_of_date，透传给后端
-      const asOfDate = useTimeAnchorStore.getState().asOfDate;
+      // 只在 replay / backtest_sweep 模式传日期，live 模式传 null 以避免 persist 残留
       const anchorMode = useTimeAnchorStore.getState().mode;
+      const rawAsOfDate = useTimeAnchorStore.getState().asOfDate;
+      const asOfDate = anchorMode === "replay" || anchorMode === "backtest_sweep" ? rawAsOfDate : null;
       set({
         asOfDate,
         mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",

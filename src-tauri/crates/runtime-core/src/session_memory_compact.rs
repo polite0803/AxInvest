@@ -486,7 +486,7 @@ mod tests {
         // More messages
         for i in 0..5 {
             session
-                .push_message(ConversationMessage::user_text(&format!("msg {}", i)))
+                .push_message(ConversationMessage::user_text(format!("msg {}", i)))
                 .unwrap();
         }
 

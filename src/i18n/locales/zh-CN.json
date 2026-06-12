@@ -46,7 +46,10 @@
     "sectionPlugins": "插件",
     "expand": "展开侧边栏",
     "collapse": "收起侧边栏",
-    "sectionInvest": "投资"
+    "sectionInvest": "投资",
+    "sectionInvestDiscover": "发现",
+    "sectionInvestExecute": "执行",
+    "sectionInvestReview": "复盘"
   },
   "chat": {
     "newConversation": "新建对话",
@@ -2783,7 +2786,11 @@
     "hide": "隐藏",
     "key": "键",
     "value": "值",
-    "searchPlaceholder": "搜索..."
+    "searchPlaceholder": "搜索...",
+    "exportMarkdown": "导出 Markdown",
+    "saveFailed": "保存失败",
+    "saved": "已保存",
+    "unknownError": "未知错误"
   },
   "image": {
     "loadError": "图片加载失败",
@@ -7054,7 +7061,50 @@
     "errorRecoveryScore": "错误恢复",
     "goalCompletionScore": "目标完成度",
     "reflectError": "反思失败",
-    "retry": "重试"
+    "retry": "重试",
+    "useful": "有用",
+    "notUseful": "不有用",
+    "deleteInsight": "删除洞察",
+    "autoTrigger": "自动触发",
+    "delete": {
+      "confirm": "确定删除此洞察？",
+      "success": "洞察已删除",
+      "failed": "删除洞察失败"
+    },
+    "feedback": {
+      "thanksUseful": "感谢反馈！已标记为有用",
+      "thanksNotUseful": "感谢反馈！已标记为不有用",
+      "notFound": "未找到该洞察",
+      "failed": "反馈提交失败"
+    },
+    "settings": {
+      "title": "反思设置",
+      "subtitle": "配置自动反思与洞察管理",
+      "core": "核心设置",
+      "enabled": "启用自动反思",
+      "enabledHint": "任务执行后自动触发反思流程",
+      "qualitySection": "质量阈值",
+      "qualityThreshold": "最低质量阈值",
+      "qualityThresholdHint": "低于此阈值的洞察将被过滤",
+      "storageSection": "存储设置",
+      "maxHistory": "最大历史记录",
+      "maxHistoryHint": "保留最近 N 条反思历史",
+      "maxInsights": "最大洞察数",
+      "maxInsightsHint": "保留最多 N 条洞察记录",
+      "insightSection": "洞察设置",
+      "storeInsights": "持久化洞察",
+      "storeInsightsHint": "洞察将保存到本地并跨会话可用",
+      "decayDays": "衰减天数",
+      "decayDaysHint": "洞察在 N 天后自动降低权重",
+      "errorSection": "错误分析",
+      "useErrorClassifier": "启用错误分类器",
+      "useErrorClassifierHint": "自动分类错误模式以便分析",
+      "save": "保存",
+      "saved": "保存成功",
+      "saveFailed": "保存失败",
+      "cancel": "取消",
+      "reset": "重置"
+    }
   },
   "subAgentCard": {
     "viewConversation": "查看子会话",
@@ -7180,7 +7230,8 @@
     "devops": "运维",
     "design": "设计",
     "writing": "写作",
-    "business": "商业"
+    "business": "商业",
+    "finance": "金融"
   },
   "planStore": {
     "rejectFailed": "拒绝计划失败: {{error}}",
@@ -8658,7 +8709,9 @@
     },
     "replayBadge": {
       "label": "回放 · {{date}}",
-      "tooltip": "此视图中的所有资料、提示词与结论都以 {{date}} 为錨点。不可用于实盘交易。"
+      "replay": "回放 {{date}}",
+      "sweep": "批次扫描",
+      "tooltip": "此视图中的所有资料、提示词与结论都以 {{date}} 为锚点。不可用于实盘交易。"
     },
     "replayWatermark": {
       "label": "截至 {{date}}"

@@ -2024,11 +2024,10 @@ mod tests {
 
     #[cfg(windows)]
     fn shell_snippet(script: &str) -> String {
-        let script = script
+        script
             .replace("printf '", "echo ")
             .replace('\'', "")
-            .replace(";", "&");
-        script
+            .replace(";", "&")
     }
 
     #[cfg(not(windows))]

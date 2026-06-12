@@ -238,8 +238,7 @@ impl StockVendor for XueqiuVendor {
                     .replace("</p>", " ")
                     .replace("<br />", " ")
                     .replace("<br>", " ")
-                    .replace('\n', " ")
-                    .replace('\r', " ");
+                    .replace(['\n', '\r'], " ");
                 let trimmed = plain.split_whitespace().collect::<Vec<_>>().join(" ");
                 let summary = trimmed.chars().take(200).collect::<String>();
                 let created_at = item["created_at"].as_i64().unwrap_or(0);

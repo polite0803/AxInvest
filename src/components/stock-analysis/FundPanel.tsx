@@ -60,7 +60,9 @@ export function FundPanel() {
         invoke<FundSummary>("get_fund_summary"),
       ]);
     })
-      .then(([t, s]) => {
+      .then((r) => {
+        if (!r) { return; }
+        const [t, s] = r;
         if (cancelled) { return; }
         if (Array.isArray(t)) { setTransfers(t); }
         if (s) { setSummary(s); }

@@ -38,7 +38,9 @@ export function EventCalendarPanel() {
 
   const fetchOneStock = async (code: string, name: string, items: EventItem[]) => {
     try {
-      const lu: Record<string, unknown>[] = await invoke("get_lockup_schedule", { stockCode: code }) as Record<
+      const lu: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_lockup_schedule", {
+        stockCode: code,
+      }) as Record<
         string,
         unknown
       >[];
@@ -59,7 +61,9 @@ export function EventCalendarPanel() {
       }
     } catch { /* 单只失败不影响其他 */ }
     try {
-      const dv: Record<string, unknown>[] = await invoke("get_dividend_records", { stockCode: code }) as Record<
+      const dv: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_dividend_records", {
+        stockCode: code,
+      }) as Record<
         string,
         unknown
       >[];
@@ -81,7 +85,9 @@ export function EventCalendarPanel() {
     } catch { /* */ }
     // R3-B 接入:财报披露事件
     try {
-      const evs: Record<string, unknown>[] = await invoke("get_earnings_calendar", { stockCode: code }) as Record<
+      const evs: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_earnings_calendar", {
+        stockCode: code,
+      }) as Record<
         string,
         unknown
       >[];
@@ -177,14 +183,15 @@ export function EventCalendarPanel() {
               const lu = await invoke<unknown[]>("get_lockup_schedule", { stockCode: stockCode });
               if (Array.isArray(lu)) {
                 for (const l of lu.slice(0, 5)) {
-                  const date = (l.unlockDate ?? l.unlock_date ?? "") as string;
+                  const item = l as Record<string, unknown>;
+                  const date = (item.unlockDate ?? item.unlock_date ?? "") as string;
                   if (!date) { continue; }
                   items.push({
                     type: "lockup",
                     code: stockCode,
                     name: stockName ?? stockCode,
                     date,
-                    detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${
+                    detail: `${(Number(item.unlockRatio ?? item.unlock_ratio ?? 0)).toFixed(1)}% ${
                       t("stockAnalysis.settings.panels.lockup")
                     }`,
                   });
@@ -195,14 +202,15 @@ export function EventCalendarPanel() {
               const dv = await invoke<unknown[]>("get_dividend_records", { stockCode: stockCode });
               if (Array.isArray(dv)) {
                 for (const d of dv.slice(0, 3)) {
-                  const ex = (d.exDate ?? d.ex_date ?? "") as string;
+                  const item = d as Record<string, unknown>;
+                  const ex = (item.exDate ?? item.ex_date ?? "") as string;
                   if (!ex) { continue; }
                   items.push({
                     type: "dividend",
                     code: stockCode,
                     name: stockName ?? stockCode,
                     date: ex,
-                    detail: `${(Number(d.dividendPerShare ?? d.dividend_per_share ?? 0)).toFixed(2)}${
+                    detail: `${(Number(item.dividendPerShare ?? item.dividend_per_share ?? 0)).toFixed(2)}${
                       t("stockAnalysis.settings.panels.perShare")
                     }`,
                   });
@@ -213,16 +221,17 @@ export function EventCalendarPanel() {
               const evs = await invoke<unknown[]>("get_earnings_calendar", { stockCode: stockCode });
               if (Array.isArray(evs)) {
                 for (const e of evs.slice(0, 6)) {
-                  const ed = (e.eventDate ?? e.event_date ?? "") as string;
+                  const item = e as Record<string, unknown>;
+                  const ed = (item.eventDate ?? item.event_date ?? "") as string;
                   if (!ed) { continue; }
                   items.push({
                     type: "earnings",
                     code: stockCode,
-                    name: e.stockName ?? e.stock_name ?? stockName ?? stockCode,
+                    name: (item.stockName ?? item.stock_name ?? stockName ?? stockCode) as string,
                     date: ed,
-                    detail: (e.detail ?? "") as string,
-                    earningsType: e.eventType ?? e.event_type ?? "other",
-                    period: e.period as string | undefined,
+                    detail: (item.detail ?? "") as string,
+                    earningsType: (item.eventType ?? item.event_type ?? "other") as EventItem["earningsType"],
+                    period: item.period as string | undefined,
                   });
                 }
               }
@@ -239,7 +248,7 @@ export function EventCalendarPanel() {
               const code = w.stockCode as string;
               const name = (w.stockName ?? w.stockCode) as string;
               try {
-                const lu: Record<string, unknown>[] = await invoke("get_lockup_schedule", {
+                const lu: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_lockup_schedule", {
                   stockCode: code,
                 }) as Record<string, unknown>[];
                 if (Array.isArray(lu)) {
@@ -259,7 +268,7 @@ export function EventCalendarPanel() {
                 }
               } catch { /* 单只失败不影响其他 */ }
               try {
-                const dv: Record<string, unknown>[] = await invoke("get_dividend_records", {
+                const dv: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>("get_dividend_records", {
                   stockCode: code,
                 }) as Record<string, unknown>[];
                 if (Array.isArray(dv)) {
@@ -279,9 +288,12 @@ export function EventCalendarPanel() {
                 }
               } catch { /* */ }
               try {
-                const evs: Record<string, unknown>[] = await invoke("get_earnings_calendar", {
-                  stockCode: code,
-                }) as Record<string, unknown>[];
+                const evs: Record<string, unknown>[] = await invoke<Record<string, unknown>[]>(
+                  "get_earnings_calendar",
+                  {
+                    stockCode: code,
+                  },
+                ) as Record<string, unknown>[];
                 if (Array.isArray(evs)) {
                   for (const e of evs.slice(0, 6)) {
                     const ed = (e.eventDate ?? e.event_date ?? "") as string;
@@ -292,7 +304,7 @@ export function EventCalendarPanel() {
                       name: (e.stockName ?? e.stock_name ?? name) as string,
                       date: ed,
                       detail: (e.detail ?? "") as string,
-                      earningsType: e.eventType ?? e.event_type ?? "other",
+                      earningsType: (e.eventType ?? e.event_type ?? "other") as EventItem["earningsType"],
                       period: e.period as string | undefined,
                     });
                   }

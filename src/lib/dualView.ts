@@ -31,7 +31,7 @@ export function registerDualView<T>(view: DualView<T>): void {
   if (registry.has(view.id)) {
     console.warn(`[dualView] duplicate registration: ${view.id}`);
   }
-  registry.set(view.id, view);
+  registry.set(view.id, view as DualView<unknown>);
 }
 
 export function getDualView(id: string): DualView | undefined {

@@ -211,20 +211,20 @@ function extractParamsFromSnapshot(snapshot: Record<string, unknown>): PmInputPa
   }
 
   // 从 params.data-quality 读取 dqi_score
-  const dqParams = snapshot["params.data-quality"];
+  const dqParams = snapshot["params.data-quality"] as Record<string, unknown> | undefined;
   if (dqParams && typeof dqParams.score === "number") {
     params.dqiScore = dqParams.score;
   }
 
   // 从 params.a-catalyst 读取催化剂参数
-  const catParams = snapshot["params.a-catalyst"];
+  const catParams = snapshot["params.a-catalyst"] as Record<string, unknown> | undefined;
   if (catParams) {
-    if (catParams.catalyst_level) { params.catalystLevel = catParams.catalyst_level; }
-    if (catParams.institutional_trace) { params.institutionalTrace = catParams.institutional_trace; }
+    if (catParams.catalyst_level) { params.catalystLevel = String(catParams.catalyst_level); }
+    if (catParams.institutional_trace) { params.institutionalTrace = String(catParams.institutional_trace); }
   }
 
   // 尝试从决策 JSON 反推 totalScore
-  const decoded = tryParseDecisionJson(snapshot["portfolio-mgr"]);
+  const decoded = tryParseDecisionJson(snapshot["portfolio-mgr"]) as Record<string, unknown> | undefined;
   if (decoded && typeof decoded.confidence === "number") {
     // 保留用户已有的决策值作为参考，但 params 优先
   }
@@ -253,22 +253,22 @@ function originalDecisionSummary(snapshot: Record<string, unknown>): PmDecision 
   const pmOutput = snapshot["portfolio-mgr"];
   if (!pmOutput) { return null; }
 
-  const parsed = tryParseDecisionJson(pmOutput);
+  const parsed = tryParseDecisionJson(pmOutput) as Record<string, unknown> | undefined;
   if (!parsed || !parsed.decision && !parsed.result) { return null; }
 
   // CodeNode 的 result 在 output.result 中
-  const result = parsed.result || parsed;
+  const result = (parsed.result ?? parsed) as Record<string, unknown>;
 
   // 从 decision_json 解析
   if (typeof result.decision === "string") {
     return {
       decision: result.decision,
-      positionPct: result.positionPct ?? result.position_pct ?? 0,
-      confidence: result.confidence ?? 0,
-      riskLevel: result.riskLevel ?? result.risk_level ?? "中",
-      stopLossPct: result.stopLossPct ?? result.stop_loss_pct ?? 0,
-      takeProfitPct: result.takeProfitPct ?? result.take_profit_pct ?? 0,
-      reasoning: result.reasoning ?? "",
+      positionPct: (result.positionPct ?? result.position_pct ?? 0) as number,
+      confidence: (result.confidence ?? 0) as number,
+      riskLevel: (result.riskLevel ?? result.risk_level ?? "中") as string,
+      stopLossPct: (result.stopLossPct ?? result.stop_loss_pct ?? 0) as number,
+      takeProfitPct: (result.takeProfitPct ?? result.take_profit_pct ?? 0) as number,
+      reasoning: (result.reasoning ?? "") as string,
     };
   }
 

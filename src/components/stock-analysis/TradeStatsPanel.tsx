@@ -61,7 +61,7 @@ export function TradeStatsPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<TradeStats | null>("get_trade_stats")
+    invoke<TradeStatsSummary | null>("get_trade_stats")
       .then((data) => {
         if (!cancelled) { setStats(data); }
       })

@@ -109,9 +109,10 @@ export function KLineChart() {
   // 绑定在 setOption 之后，监听 dataZoom 事件
   const setupZoomHandler = useCallback((chart: echarts.ECharts, datesLength: number) => {
     chart.off("dataZoom");
-    chart.on("dataZoom", (params: { start?: number; end?: number; batch?: unknown }) => {
+    chart.on("dataZoom", (params: unknown) => {
+      const p = params as { start?: number; end?: number; batch?: unknown };
       if (zoomingRef.current) { return; }
-      const batch = Array.isArray(params) ? params : [params];
+      const batch = Array.isArray(p) ? p : [p];
       const b = batch[0];
       if (!b || b.batch != null) { return; // skip slider sub-batch
        }

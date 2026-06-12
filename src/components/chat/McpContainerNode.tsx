@@ -97,7 +97,7 @@ function NodeChild({
   renderNode: RenderNodeFn;
 }) {
   return renderNode(
-    child,
+    child as Parameters<RenderNodeFn>[0],
     `${String(indexKey ?? "vmr-container")}-${index}`,
     ctx,
   );

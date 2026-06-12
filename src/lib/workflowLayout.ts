@@ -225,7 +225,7 @@ function findCyclicSCCs(nodes: NodeLike[], edges: EdgeLike[]): string[][] {
 /** 提取节点标题：优先 data.title（ReactFlow），回退到 WorkflowNode.title */
 function titleOf(n: NodeLike): string {
   if (typeof (n as NodeLike & { title?: string }).title === "string") {
-    return (n as NodeLike & { title?: string }).title;
+    return (n as NodeLike & { title?: string }).title ?? "";
   }
   if (typeof n.data?.title === "string") { return n.data.title; }
   return "";

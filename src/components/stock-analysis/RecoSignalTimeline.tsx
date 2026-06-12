@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import type { StrategySignalResult } from "@/types/stock-analysis";
 import { Card, Empty, Select, Spin, Table, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface RecoSignalTimelineProps {
@@ -15,21 +15,6 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
   const [error, setError] = useState<string | null>(null);
   const [filterCode, setFilterCode] = useState<string>("");
 
-  const _load = useCallback(async (sid: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<StrategySignalResult[]>("get_reco_signal_history", {
-        strategyId: sid,
-      });
-      setSignals(result ?? []);
-    } catch (e: unknown) {
-      setError(typeof e === "string" ? e : e instanceof Error ? e.message : "加载失败");
-      setSignals([]);
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
     if (!strategyId) {
       Promise.resolve().then(() => {
@@ -42,10 +27,10 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<RecoSignal[]>("get_reco_signals", { strategyId });
+      return invoke<StrategySignalResult[]>("get_reco_signals", { strategyId });
     })
       .then((data) => {
-        if (!cancelled) { setSignals(data); }
+        if (!cancelled) { setSignals(data ?? []); }
       })
       .catch((e) => {
         if (!cancelled) { setError(String(e)); }

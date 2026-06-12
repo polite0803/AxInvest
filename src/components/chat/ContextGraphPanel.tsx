@@ -258,7 +258,7 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
 
     const srvMap = new Map(mcpServers.map((s) => [s.id, s]));
 
-    const skillMap = new Map(installedSkills.map((s) => [s.id, s]));
+    const skillMap = new Map(installedSkills.map((s) => [s.name, s]));
 
     // Conversation node (center)
     const convName = conversationTitle
@@ -499,7 +499,7 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
 
                 const srvMap = new Map(mcpServers.map((s) => [s.id, s]));
 
-                const skillMap = new Map(installedSkills.map((s) => [s.id, s]));
+                const skillMap = new Map(installedSkills.map((s) => [s.name, s]));
                 if (modelName) {
                   pills.push({
                     label: modelName.slice(0, 12),

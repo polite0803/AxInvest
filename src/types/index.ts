@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // === Provider System ===
+import type { Citation } from "./citation";
 import type { RAGPipelineConfig } from "./knowledge";
 
 export type ProviderType =
@@ -1083,6 +1084,15 @@ export interface SkillSettingsCapability {
     entry: string;
     props?: Record<string, unknown>;
   };
+}
+
+// ── Research ──
+export interface ResearchReport {
+  id: string;
+  topic: string;
+  content: string;
+  citations: Citation[];
+  summary: string;
 }
 
 // Phase-2 type modules

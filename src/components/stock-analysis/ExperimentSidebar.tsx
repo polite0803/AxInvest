@@ -8,7 +8,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { type ExperimentRecord, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import { parseRiskLevel } from "@/types/stock-analysis";
+import { parseAction, parseRiskLevel } from "@/types/stock-analysis";
 import { Button, InputNumber, Select, Slider } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -141,7 +141,7 @@ export function ExperimentSidebar() {
         }
         : {},
       decisionAfter: {
-        action: result.decision as string,
+        action: parseAction(result.decision),
         confidence: result.confidence,
         positionPct: result.positionPct,
         riskLevel: parseRiskLevel(result.riskLevel),

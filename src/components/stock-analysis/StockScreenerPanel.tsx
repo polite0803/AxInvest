@@ -164,9 +164,10 @@ export function StockScreenerPanel() {
       const cur = prev[key];
       const enabled = !cur?.enabled;
       const fd = FACTOR_DEFS.find((f) => f.key === key);
-      const value = enabled
-        ? (cur?.value ?? ("default" in fd! ? (fd as unknown as { default?: unknown }).default : undefined))
+      const rawValue = enabled
+        ? (cur?.value ?? ("default" in fd! ? (fd as unknown as { default?: number }).default : undefined))
         : cur?.value;
+      const value = typeof rawValue === "number" ? rawValue : undefined;
       const next = { ...prev, [key]: { ...cur, enabled, value } };
       setSelectedCount(Object.values(next).filter((f) => f.enabled).length);
       return next;

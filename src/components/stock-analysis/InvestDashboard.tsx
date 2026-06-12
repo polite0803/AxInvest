@@ -241,7 +241,12 @@ async function loadMarketRegime(): Promise<MarketRegimeInfo | null> {
     });
     if (!Array.isArray(klines) || klines.length < 20) { return null; }
     // 调用市场的 classify_regime — 简单在客户端用收盘价数组判断
-    const closes = klines.map((k) => typeof k.close === "number" ? k.close : parseFloat(k.close ?? k[2] ?? 0));
+    const closes = klines.map((k) => {
+      const v = k.close;
+      if (typeof v === "number") { return v; }
+      if (v != null) { return parseFloat(String(v)); }
+      return 0;
+    });
     const ma20 = closes.slice(-20).reduce((a: number, b: number) => a + b, 0) / 20;
     const ma60 = closes.length >= 60
       ? closes.slice(-60).reduce((a: number, b: number) => a + b, 0) / 60

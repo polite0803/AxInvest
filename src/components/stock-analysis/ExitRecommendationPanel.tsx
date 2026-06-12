@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Card, Space, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 // ── 类型定义 ──
 
@@ -101,20 +101,6 @@ export function ExitRecommendationPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    invoke<ExitRecommendation[]>("get_exit_recommendations")
-      .then((data) => {
-        if (!cancelled) { setRecommendations(data); }
-      })
-      .catch((e) => {
-        if (!cancelled) { console.error("[ExitRecommendationPanel]", e); }
-      });
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   if (!summary || summary.totalPositions === 0) {

@@ -25,7 +25,7 @@ type RoleType = Record<
   }
 >;
 
-interface BubbleListRef {
+export interface BubbleListRef {
   scrollBoxNativeElement?: HTMLElement | null;
 }
 
@@ -559,7 +559,7 @@ export interface ChatViewMessagesProps {
   streaming: boolean;
   compressing: boolean;
   bubbleStyle: string;
-  bubbleListRef: React.RefObject<BubbleListRef | null>;
+  bubbleListRef: React.RefObject<HTMLDivElement | null>;
   handleEditMessage: (
     messageId: string,
     content: string,

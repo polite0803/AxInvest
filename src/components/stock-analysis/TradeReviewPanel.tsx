@@ -60,7 +60,7 @@ export function TradeReviewPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<TradeReview | null>("get_trade_review")
+    invoke<TradeReviewSummary | null>("get_trade_review")
       .then((data) => {
         if (!cancelled) { setReview(data); }
       })

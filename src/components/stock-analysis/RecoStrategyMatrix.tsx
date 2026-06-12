@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
 import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const STYLE_KEYS = ["trend", "value", "capital", "reversion"] as const;
@@ -31,22 +31,9 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
   const { t } = useTranslation();
   const [internalData, setInternalData] = useState<BacktestComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, _setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [group, setGroup] = useState<"positive" | "negative">("positive");
-
-  // 加载数据
-  const _load = useCallback(async (_targetGroup: "positive" | "negative") => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
-      setInternalData(result);
-    } catch (e: unknown) {
-      setError(typeof e === "string" ? e : e instanceof Error ? e.message : t("stockAnalysis.backtest.strategyFailed"));
-    }
-    setLoading(false);
-  }, [t]);
 
   useEffect(() => {
     if (externalData) { return; }
@@ -54,10 +41,10 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<RecoStrategy[]>("get_reco_strategies", { group });
+      return invoke<BacktestComparisonResponse>("get_reco_strategies", { group });
     })
       .then((data) => {
-        if (!cancelled) { setStrategies(data); }
+        if (!cancelled) { setInternalData(data ?? null); }
       })
       .catch((e) => {
         if (!cancelled) { console.error("[RecoStrategyMatrix]", e); }

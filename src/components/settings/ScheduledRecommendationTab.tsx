@@ -65,6 +65,7 @@ const ALL_PERIODS: { value: PeriodKey; label: string }[] = [
 export function ScheduledRecommendationTab() {
   const [jobs, setJobs] = useState<RecoCronRow[]>([]);
   const [adding, setAdding] = useState(false);
+  const [, setLoading] = useState(true);
   const [form] = Form.useForm();
 
   useEffect(() => {

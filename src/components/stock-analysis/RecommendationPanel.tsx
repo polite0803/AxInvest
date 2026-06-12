@@ -7,7 +7,7 @@ import type { LatestAnalysisSummary, StockConsensus } from "@/types/stock-analys
 import { parseAction } from "@/types/stock-analysis";
 import type { BacktestComparisonResponse } from "@/types/stock-analysis";
 import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -204,52 +204,45 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     };
   }, [period, asOfDate, i18n.language]);
 
-  // P0-2: 加载策略回测统计
-  const _loadStrategyStats = useCallback(async () => {
-    setStrategyStatsLoading(true);
-    try {
-      const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
-      // 按 style 聚合所有 period 的统计
-      const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
-      for (const [, s] of Object.entries(result.positive.strategies)) {
-        const style = s.style;
-        if (!byStyle[style]) { byStyle[style] = { winRates: [], sharpes: [], signals: 0 }; }
-        byStyle[style].winRates.push(s.winRatePct);
-        if (s.sharpeRatio != null) { byStyle[style].sharpes.push(s.sharpeRatio); }
-        byStyle[style].signals += s.totalSignals;
-      }
-      const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
-      for (const [style, v] of Object.entries(byStyle)) {
-        const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
-        const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
-        agg[style] = {
-          winRate: Math.round(avgWr * 10) / 10,
-          sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null,
-          signalCount: v.signals,
-        };
-      }
-      setStrategyStats(agg);
-    } catch {
-      // 静默忽略：荐股记录为空或策略回测不可用时 badge 不显示
-    }
-    setStrategyStatsLoading(false);
-  }, []);
-
   // P0-2: 加载策略回测统计（仅加载一次）
   useEffect(() => {
     let cancelled = false;
-    invoke<StrategyStat[]>("get_strategy_stats", { asOfDate })
-      .then((data) => {
-        if (!cancelled) { setStrategyStats(data); }
+    Promise.resolve().then(() => {
+      if (cancelled) { return; }
+      setStrategyStatsLoading(true);
+      return invoke<BacktestComparisonResponse>("backtest_reco_strategies");
+    })
+      .then((result) => {
+        if (cancelled || !result) { return; }
+        // 按 style 聚合所有 period 的统计
+        const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
+        for (const [, s] of Object.entries(result.positive.strategies)) {
+          const style = s.style;
+          if (!byStyle[style]) { byStyle[style] = { winRates: [], sharpes: [], signals: 0 }; }
+          byStyle[style].winRates.push(s.winRatePct);
+          if (s.sharpeRatio != null) { byStyle[style].sharpes.push(s.sharpeRatio); }
+          byStyle[style].signals += s.totalSignals;
+        }
+        const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
+        for (const [style, v] of Object.entries(byStyle)) {
+          const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
+          const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
+          agg[style] = {
+            winRate: Math.round(avgWr * 10) / 10,
+            sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null,
+            signalCount: v.signals,
+          };
+        }
+        setStrategyStats(agg);
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) { setStatsLoading(false); }
+        if (!cancelled) { setStrategyStatsLoading(false); }
       });
     return () => {
       cancelled = true;
     };
-  }, [asOfDate]);
+  }, []);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);

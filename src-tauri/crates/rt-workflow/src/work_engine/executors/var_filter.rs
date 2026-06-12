@@ -98,14 +98,14 @@ pub fn resolve_var_path(path: &str, variables: &HashMap<String, Value>) -> Optio
 pub fn extract_json_params(text: &str) -> Option<Value> {
     // 策略 1：查找 ```json ... ``` 代码块
     for marker in &["```json\n", "```json\r\n", "```\n", "```\r\n"] {
-        if let Some(after_marker) = text.split(marker).nth(1) {
-            if let Some(json_text) = after_marker.split("```").next() {
-                let trimmed = json_text.trim();
-                if !trimmed.is_empty() {
-                    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-                        return Some(v);
-                    }
-                }
+        if let Some(after_marker) = text.split(marker).nth(1)
+            && let Some(json_text) = after_marker.split("```").next()
+        {
+            let trimmed = json_text.trim();
+            if !trimmed.is_empty()
+                && let Ok(v) = serde_json::from_str::<Value>(trimmed)
+            {
+                return Some(v);
             }
         }
     }

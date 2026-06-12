@@ -78,7 +78,7 @@ fn execute_rhai_directly(
                 let _ = scope.push_constant(target_key.as_str(), s.clone());
             },
             Some(Value::Array(arr)) => {
-                let rhai_arr: rhai::Array = arr.iter().map(|v| json_value_to_dynamic(v)).collect();
+                let rhai_arr: rhai::Array = arr.iter().map(json_value_to_dynamic).collect();
                 let dyn_arr: rhai::Dynamic = rhai_arr.into();
                 scope.push_dynamic(target_key.as_str(), dyn_arr);
             },
@@ -139,42 +139,34 @@ fn dynamic_to_json_value(v: &rhai::Dynamic) -> Value {
         return Value::Bool(v.as_bool().unwrap_or(false));
     }
     if v.is_string() {
-        if let Ok(s) = v.clone().as_string() {
-            return Value::String(s.to_string());
+        if let Ok(s) = v.clone().into_string() {
+            return Value::String(s);
         }
     }
-    if v.is_int() {
-        if let Ok(i) = v.as_int() {
-            return Value::Number(serde_json::Number::from(i));
-        }
+    if let Ok(i) = v.as_int() {
+        return Value::Number(serde_json::Number::from(i));
     }
-    if v.is_float() {
-        if let Ok(f) = v.as_float() {
-            if let Some(n) = serde_json::Number::from_f64(f) {
-                return Value::Number(n);
-            }
-            return Value::Number(serde_json::Number::from(0));
+    if let Ok(f) = v.as_float() {
+        if let Some(n) = serde_json::Number::from_f64(f) {
+            return Value::Number(n);
         }
+        return Value::Number(serde_json::Number::from(0));
     }
     // Array
-    if v.is_array() {
-        if let Some(arr) = v.clone().try_cast::<rhai::Array>() {
-            return Value::Array(
-                arr.into_iter()
-                    .map(|item| dynamic_to_json_value(&item))
-                    .collect(),
-            );
-        }
+    if let Some(arr) = v.clone().try_cast::<rhai::Array>() {
+        return Value::Array(
+            arr.into_iter()
+                .map(|item| dynamic_to_json_value(&item))
+                .collect(),
+        );
     }
     // Map
-    if v.is_map() {
-        if let Some(map) = v.clone().try_cast::<rhai::Map>() {
-            let mut obj = serde_json::Map::new();
-            for (k, val) in &map {
-                obj.insert(format!("{k}"), dynamic_to_json_value(val));
-            }
-            return Value::Object(obj);
+    if let Some(map) = v.clone().try_cast::<rhai::Map>() {
+        let mut obj = serde_json::Map::new();
+        for (k, val) in &map {
+            obj.insert(format!("{k}"), dynamic_to_json_value(val));
         }
+        return Value::Object(obj);
     }
     Value::String(format!("{v}"))
 }

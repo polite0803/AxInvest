@@ -61,7 +61,7 @@ try {
 "
 
 is_allowed() {
-  grep -qxF "${1}:${2}" "$TEMP_DIR/ignored.txt" 2>/dev/null
+  grep -qxF "${1}:${2}" "$TEMP_DIR/ignored.txt" 2>/dev/null || grep -qxF "${1}:*" "$TEMP_DIR/ignored.txt" 2>/dev/null
 }
 
 VIOLATIONS=0

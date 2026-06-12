@@ -124,15 +124,15 @@ impl BacktestEngine {
         let mut bars: Vec<Bar> = klines
             .into_iter()
             .filter(|b| {
-                if let Some(s) = &self.config.start_date {
-                    if b.date.as_str() < s.as_str() {
-                        return false;
-                    }
+                if let Some(s) = &self.config.start_date
+                    && b.date.as_str() < s.as_str()
+                {
+                    return false;
                 }
-                if let Some(e) = &self.config.end_date {
-                    if b.date.as_str() > e.as_str() {
-                        return false;
-                    }
+                if let Some(e) = &self.config.end_date
+                    && b.date.as_str() > e.as_str()
+                {
+                    return false;
                 }
                 if !self.config.codes.is_empty() && !self.config.codes.contains(&b.code) {
                     return false;

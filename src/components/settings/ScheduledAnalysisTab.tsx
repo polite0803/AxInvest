@@ -49,7 +49,7 @@ export function ScheduledAnalysisTab() {
       const list = await invoke<CronJobRow[]>("list_stock_crons");
       if (Array.isArray(list)) { setJobs(list); }
     } catch { /* backend not running */ }
-}, []);
+  }, []);
 
   const toggleWlScan = async (job: CronJobRow | null, enable: boolean) => {
     try {

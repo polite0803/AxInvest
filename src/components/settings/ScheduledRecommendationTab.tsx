@@ -94,7 +94,7 @@ export function ScheduledRecommendationTab() {
       const list = await invoke<RecoCronRow[]>("list_recommendation_crons");
       if (Array.isArray(list)) { setJobs(list); }
     } catch { /* 静默 */ }
-}, []);
+  }, []);
 
   const create = async (values: Record<string, unknown>) => {
     try {

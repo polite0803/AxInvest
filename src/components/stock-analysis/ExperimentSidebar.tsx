@@ -141,7 +141,7 @@ export function ExperimentSidebar() {
         }
         : {},
       decisionAfter: {
-        action: result.decision as any,
+        action: result.decision as string,
         confidence: result.confidence,
         positionPct: result.positionPct,
         riskLevel: parseRiskLevel(result.riskLevel),
@@ -157,11 +157,11 @@ export function ExperimentSidebar() {
     if (!stockCode || Object.keys(configOverrides).length === 0) { return; }
     setToolReplayLoading(true);
     try {
-      const res = await invoke<any>("replay_tool_chain", {
+      const res = await invoke("replay_tool_chain", {
         params: { stockCode, configOverrides },
       });
-      if (res?.totalScore != null) {
-        setParams((p) => ({ ...p, totalScore: res.totalScore }));
+      if ((res as Record<string, unknown>)?.totalScore != null) {
+        setParams((p) => ({ ...p, totalScore: (res as Record<string, unknown>).totalScore as number }));
       }
     } catch (e) {
       console.error("Tool chain replay failed:", e);

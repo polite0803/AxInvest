@@ -38,10 +38,13 @@ export function EventCalendarPanel() {
 
   const fetchOneStock = async (code: string, name: string, items: EventItem[]) => {
     try {
-      const lu: any[] = await invoke("get_lockup_schedule", { stockCode: code });
+      const lu: Record<string, unknown>[] = await invoke("get_lockup_schedule", { stockCode: code }) as Record<
+        string,
+        unknown
+      >[];
       if (Array.isArray(lu)) {
         for (const l of lu.slice(0, 5)) {
-          const date = l.unlockDate ?? l.unlock_date ?? "";
+          const date = (l.unlockDate ?? l.unlock_date ?? "") as string;
           if (!date) { continue; }
           items.push({
             type: "lockup",
@@ -56,10 +59,13 @@ export function EventCalendarPanel() {
       }
     } catch { /* 单只失败不影响其他 */ }
     try {
-      const dv: any[] = await invoke("get_dividend_records", { stockCode: code });
+      const dv: Record<string, unknown>[] = await invoke("get_dividend_records", { stockCode: code }) as Record<
+        string,
+        unknown
+      >[];
       if (Array.isArray(dv)) {
         for (const d of dv.slice(0, 3)) {
-          const ex = d.exDate ?? d.ex_date ?? "";
+          const ex = (d.exDate ?? d.ex_date ?? "") as string;
           if (!ex) { continue; }
           items.push({
             type: "dividend",
@@ -75,20 +81,23 @@ export function EventCalendarPanel() {
     } catch { /* */ }
     // R3-B 接入:财报披露事件
     try {
-      const evs: any[] = await invoke("get_earnings_calendar", { stockCode: code });
+      const evs: Record<string, unknown>[] = await invoke("get_earnings_calendar", { stockCode: code }) as Record<
+        string,
+        unknown
+      >[];
       if (Array.isArray(evs)) {
         for (const e of evs.slice(0, 6)) {
-          const ed = e.eventDate ?? e.event_date ?? "";
+          const ed = (e.eventDate ?? e.event_date ?? "") as string;
           if (!ed) { continue; }
-          const evType = e.eventType ?? e.event_type ?? "other";
+          const evType = (e.eventType ?? e.event_type ?? "other") as string;
           items.push({
             type: "earnings",
             code,
-            name: e.stockName ?? e.stock_name ?? name,
+            name: (e.stockName ?? e.stock_name ?? name) as string,
             date: ed,
-            detail: e.detail ?? "",
-            earningsType: evType,
-            period: e.period ?? undefined,
+            detail: (e.detail ?? "") as string,
+            earningsType: evType as "formal" | "preliminary" | "express" | "shareholders_meeting" | "other" | undefined,
+            period: e.period as string | undefined,
           });
         }
       }
@@ -121,11 +130,11 @@ export function EventCalendarPanel() {
     }
     // 补充：自选股列表
     try {
-      const wl: any[] = await invoke("list_watchlist");
+      const wl: Record<string, unknown>[] = await invoke("list_watchlist") as Record<string, unknown>[];
       if (Array.isArray(wl)) {
         for (const w of wl.slice(0, 8)) {
-          if (stockCode && w.stockCode === stockCode) { continue; }
-          await fetchOneStock(w.stockCode, w.stockName ?? w.stockCode, items);
+          if (stockCode && (w.stockCode as string) === stockCode) { continue; }
+          await fetchOneStock(w.stockCode as string, (w.stockName ?? w.stockCode) as string, items);
         }
       }
     } catch { /* 无自选或后端不可用时跳过 */ }
@@ -165,10 +174,10 @@ export function EventCalendarPanel() {
         if (stockCode) {
           await (async () => {
             try {
-              const lu: any[] = await invoke("get_lockup_schedule", { stockCode: stockCode });
+              const lu = await invoke<unknown[]>("get_lockup_schedule", { stockCode: stockCode });
               if (Array.isArray(lu)) {
                 for (const l of lu.slice(0, 5)) {
-                  const date = l.unlockDate ?? l.unlock_date ?? "";
+                  const date = (l.unlockDate ?? l.unlock_date ?? "") as string;
                   if (!date) { continue; }
                   items.push({
                     type: "lockup",
@@ -183,10 +192,10 @@ export function EventCalendarPanel() {
               }
             } catch { /* 单只失败不影响其他 */ }
             try {
-              const dv: any[] = await invoke("get_dividend_records", { stockCode: stockCode });
+              const dv = await invoke<unknown[]>("get_dividend_records", { stockCode: stockCode });
               if (Array.isArray(dv)) {
                 for (const d of dv.slice(0, 3)) {
-                  const ex = d.exDate ?? d.ex_date ?? "";
+                  const ex = (d.exDate ?? d.ex_date ?? "") as string;
                   if (!ex) { continue; }
                   items.push({
                     type: "dividend",
@@ -201,19 +210,19 @@ export function EventCalendarPanel() {
               }
             } catch { /* */ }
             try {
-              const evs: any[] = await invoke("get_earnings_calendar", { stockCode: stockCode });
+              const evs = await invoke<unknown[]>("get_earnings_calendar", { stockCode: stockCode });
               if (Array.isArray(evs)) {
                 for (const e of evs.slice(0, 6)) {
-                  const ed = e.eventDate ?? e.event_date ?? "";
+                  const ed = (e.eventDate ?? e.event_date ?? "") as string;
                   if (!ed) { continue; }
                   items.push({
                     type: "earnings",
                     code: stockCode,
                     name: e.stockName ?? e.stock_name ?? stockName ?? stockCode,
                     date: ed,
-                    detail: e.detail ?? "",
+                    detail: (e.detail ?? "") as string,
                     earningsType: e.eventType ?? e.event_type ?? "other",
-                    period: e.period ?? undefined,
+                    period: e.period as string | undefined,
                   });
                 }
               }
@@ -222,18 +231,20 @@ export function EventCalendarPanel() {
         }
         // 补充：自选股列表
         try {
-          const wl: any[] = await invoke("list_watchlist");
+          const wl: Record<string, unknown>[] = await invoke("list_watchlist") as Record<string, unknown>[];
           if (Array.isArray(wl)) {
             for (const w of wl.slice(0, 8)) {
               if (cancelled) { return; }
-              if (stockCode && w.stockCode === stockCode) { continue; }
-              const code = w.stockCode;
-              const name = w.stockName ?? w.stockCode;
+              if (stockCode && (w.stockCode as string) === stockCode) { continue; }
+              const code = w.stockCode as string;
+              const name = (w.stockName ?? w.stockCode) as string;
               try {
-                const lu: any[] = await invoke("get_lockup_schedule", { stockCode: code });
+                const lu: Record<string, unknown>[] = await invoke("get_lockup_schedule", {
+                  stockCode: code,
+                }) as Record<string, unknown>[];
                 if (Array.isArray(lu)) {
                   for (const l of lu.slice(0, 5)) {
-                    const date = l.unlockDate ?? l.unlock_date ?? "";
+                    const date = (l.unlockDate ?? l.unlock_date ?? "") as string;
                     if (!date) { continue; }
                     items.push({
                       type: "lockup",
@@ -248,10 +259,12 @@ export function EventCalendarPanel() {
                 }
               } catch { /* 单只失败不影响其他 */ }
               try {
-                const dv: any[] = await invoke("get_dividend_records", { stockCode: code });
+                const dv: Record<string, unknown>[] = await invoke("get_dividend_records", {
+                  stockCode: code,
+                }) as Record<string, unknown>[];
                 if (Array.isArray(dv)) {
                   for (const d of dv.slice(0, 3)) {
-                    const ex = d.exDate ?? d.ex_date ?? "";
+                    const ex = (d.exDate ?? d.ex_date ?? "") as string;
                     if (!ex) { continue; }
                     items.push({
                       type: "dividend",
@@ -266,19 +279,21 @@ export function EventCalendarPanel() {
                 }
               } catch { /* */ }
               try {
-                const evs: any[] = await invoke("get_earnings_calendar", { stockCode: code });
+                const evs: Record<string, unknown>[] = await invoke("get_earnings_calendar", {
+                  stockCode: code,
+                }) as Record<string, unknown>[];
                 if (Array.isArray(evs)) {
                   for (const e of evs.slice(0, 6)) {
-                    const ed = e.eventDate ?? e.event_date ?? "";
+                    const ed = (e.eventDate ?? e.event_date ?? "") as string;
                     if (!ed) { continue; }
                     items.push({
                       type: "earnings",
                       code,
-                      name: e.stockName ?? e.stock_name ?? name,
+                      name: (e.stockName ?? e.stock_name ?? name) as string,
                       date: ed,
-                      detail: e.detail ?? "",
+                      detail: (e.detail ?? "") as string,
                       earningsType: e.eventType ?? e.event_type ?? "other",
-                      period: e.period ?? undefined,
+                      period: e.period as string | undefined,
                     });
                   }
                 }

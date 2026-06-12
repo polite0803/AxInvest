@@ -58,6 +58,7 @@ class TabErrorBoundary extends Component<
   }
 }
 
+import type { ResearchReport } from "@/types";
 import { AgentExecutionPanel } from "./AgentExecutionPanel";
 import { AgentHierarchyTree } from "./AgentHierarchyTree";
 import { ArtifactPanel } from "./ArtifactPanel";
@@ -262,7 +263,7 @@ export function RightPanelContainer({
         shouldRender: !!panelReport,
         render: () => (
           <ReportViewer
-            report={panelReport}
+            report={panelReport as ResearchReport | null}
             onReset={() => panelSetReport(null)}
           />
         ),

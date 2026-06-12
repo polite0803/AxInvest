@@ -60,8 +60,19 @@ export function TradeStatsPanel() {
   }, []);
 
   useEffect(() => {
-    loadStats();
-  }, [loadStats]);
+    let cancelled = false;
+    invoke<TradeStats | null>("get_trade_stats")
+      .then((data) => {
+        if (!cancelled) { setStats(data); }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!stats || stats.totalBuys === 0) { return null; }
 

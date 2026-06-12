@@ -14,7 +14,9 @@ interface BalanceData {
 
 export const BalanceBadge: React.FC = () => {
   const { t } = useTranslation();
-  const fetchBalance = useProviderStore((s) => (s as any).fetchBalance);
+  const fetchBalance = useProviderStore((s) =>
+    (s as unknown as { fetchBalance: () => Promise<BalanceData> }).fetchBalance
+  );
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [loading, setLoading] = useState(false);
 

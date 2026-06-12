@@ -51,8 +51,28 @@ export function FundPanel() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) { return; }
+      setLoading(true);
+      return Promise.all([
+        invoke<FundTransfer[]>("list_fund_transfers", { limit: 100 }),
+        invoke<FundSummary>("get_fund_summary"),
+      ]);
+    })
+      .then(([t, s]) => {
+        if (cancelled) { return; }
+        if (Array.isArray(t)) { setTransfers(t); }
+        if (s) { setSummary(s); }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleRecord = async () => {
     if (form.amount <= 0) { return message.warning("金额必须 > 0"); }

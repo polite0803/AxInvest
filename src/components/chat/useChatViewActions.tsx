@@ -24,7 +24,7 @@ export interface UseChatViewActionsParams {
   activeConversationId: string | null;
   activeConversation: import("@/types").Conversation | undefined;
   messages: Message[];
-  bubbleListRef: React.RefObject<any | null>;
+  bubbleListRef: React.RefObject<HTMLDivElement | null>;
   messageAreaRef: React.RefObject<HTMLDivElement | null>;
   loadOlderMessages: () => Promise<void>;
 }
@@ -168,10 +168,11 @@ export function useChatViewActions({
   }, [activeConversation, isTitleGenerating, regenerateTitle]);
 
   const handleLoadOlderMessages = useCallback(async () => {
-    const scrollContainer = bubbleListRef.current?.scrollBoxNativeElement as
-      | HTMLDivElement
-      | null
-      | undefined;
+    const scrollContainer = (bubbleListRef.current as unknown as { scrollBoxNativeElement?: HTMLDivElement })
+      ?.scrollBoxNativeElement as
+        | HTMLDivElement
+        | null
+        | undefined;
     const previousScrollHeight = scrollContainer?.scrollHeight ?? 0;
     const previousScrollTop = scrollContainer?.scrollTop ?? 0;
     await loadOlderMessages();

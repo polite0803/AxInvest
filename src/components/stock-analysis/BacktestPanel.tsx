@@ -72,8 +72,10 @@ export function BacktestPanel() {
     try {
       const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
       setStrategyResult(result);
-    } catch (e: any) {
-      setStrategyError(typeof e === "string" ? e : e?.message ?? t("stockAnalysis.backtest.strategyFailed"));
+    } catch (e: unknown) {
+      setStrategyError(
+        typeof e === "string" ? e : e instanceof Error ? e.message : t("stockAnalysis.backtest.strategyFailed"),
+      );
     }
     setStrategyLoading(false);
   }, [t]);

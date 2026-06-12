@@ -35,7 +35,7 @@ function tryExtractClaims(text: string, isBull: boolean): ParsedClaim | null {
   // 提取 ```json 块
   const m = text.match(/```(?:json)?\s*([\s\S]+?)```/);
   const candidate = m ? m[1].trim() : text.trim();
-  let parsed: any = null;
+  let parsed: Record<string, unknown> | null = null;
   try {
     parsed = JSON.parse(candidate);
   } catch { /* not json */ }

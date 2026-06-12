@@ -252,13 +252,13 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
 
     // 预构建查找映射，避免在循环中调用 find
 
-    const kbMap = new Map(knowledgeBases.map((k: any) => [k.id, k]));
+    const kbMap = new Map(knowledgeBases.map((k) => [k.id, k]));
 
-    const nsMap = new Map(memoryNamespaces.map((n: any) => [n.id, n]));
+    const nsMap = new Map(memoryNamespaces.map((n) => [n.id, n]));
 
-    const srvMap = new Map(mcpServers.map((s: any) => [s.id, s]));
+    const srvMap = new Map(mcpServers.map((s) => [s.id, s]));
 
-    const skillMap = new Map(installedSkills.map((s: any) => [s.id, s]));
+    const skillMap = new Map(installedSkills.map((s) => [s.id, s]));
 
     // Conversation node (center)
     const convName = conversationTitle
@@ -493,13 +493,13 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
                 const pills: { label: string; color: string }[] = [];
                 // 预构建查找映射，避免在循环中调用 find
 
-                const kbMap = new Map(knowledgeBases.map((k: any) => [k.id, k]));
+                const kbMap = new Map(knowledgeBases.map((k) => [k.id, k]));
 
-                const nsMap = new Map(memoryNamespaces.map((n: any) => [n.id, n]));
+                const nsMap = new Map(memoryNamespaces.map((n) => [n.id, n]));
 
-                const srvMap = new Map(mcpServers.map((s: any) => [s.id, s]));
+                const srvMap = new Map(mcpServers.map((s) => [s.id, s]));
 
-                const skillMap = new Map(installedSkills.map((s: any) => [s.id, s]));
+                const skillMap = new Map(installedSkills.map((s) => [s.id, s]));
                 if (modelName) {
                   pills.push({
                     label: modelName.slice(0, 12),

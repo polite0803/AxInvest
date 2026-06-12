@@ -224,7 +224,9 @@ function findCyclicSCCs(nodes: NodeLike[], edges: EdgeLike[]): string[][] {
 
 /** 提取节点标题：优先 data.title（ReactFlow），回退到 WorkflowNode.title */
 function titleOf(n: NodeLike): string {
-  if (typeof (n as any).title === "string") { return (n as any).title; }
+  if (typeof (n as NodeLike & { title?: string }).title === "string") {
+    return (n as NodeLike & { title?: string }).title;
+  }
   if (typeof n.data?.title === "string") { return n.data.title; }
   return "";
 }
@@ -290,7 +292,8 @@ export function validate_workflow(
 ): ValidationResult {
   // 过滤分组/装饰边——不参与结构校验
   const realEdges = edges.filter(
-    (e) => e.edge_type !== "grouping" && (e as any).data?.edgeType !== "grouping",
+    (e) =>
+      e.edge_type !== "grouping" && (e as EdgeLike & { data?: { edgeType?: string } }).data?.edgeType !== "grouping",
   );
   const issues: ValidateIssue[] = [];
   const indegree = buildIndegree(realEdges);
@@ -342,8 +345,9 @@ export function validate_workflow(
 
     // decorative 容器跳过入度/出度检查（仅供视觉分组，调度引擎忽略）
     if (
-      (n as any).kind === "decorative" || (n as any).data?.kind === "decorative"
-      || (n as any).config?.kind === "decorative"
+      (n as NodeLike & { kind?: string }).kind === "decorative"
+      || (n as NodeLike & { data?: { kind?: string } }).data?.kind === "decorative"
+      || (n as NodeLike & { config?: { kind?: string } }).config?.kind === "decorative"
     ) { continue; }
 
     const hasChildren = nodes.some((x) => x.parentId === n.id);
@@ -549,7 +553,7 @@ export function validate_workflow(
 
 /** 从节点中提取 config 字段值（兼容 WorkflowNode 和 ReactFlow Node） */
 function extractConfig(n: NodeLike, key: string): string | undefined {
-  const cfg = (n as any).config;
+  const cfg = (n as NodeLike & { config?: Record<string, unknown> }).config;
   if (cfg && typeof cfg[key] === "string") { return cfg[key]; }
   if (n.data && typeof n.data[key] === "string") { return n.data[key] as string; }
   if (n.data?.config && typeof (n.data.config as Record<string, unknown>)[key] === "string") {

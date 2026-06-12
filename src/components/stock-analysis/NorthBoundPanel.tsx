@@ -40,14 +40,14 @@ export function NorthBoundPanel() {
         setLoading(false);
         return;
       }
-      const f: any = await invoke("get_north_bound_flow");
+      const f = await invoke("get_north_bound_flow") as Record<string, unknown>;
       if (!f) {
         setFlow(null);
         setEmptyKind("noData");
         return;
       }
       const next: NbFlow = {
-        date: f.date ?? "",
+        date: (f.date ?? "") as string,
         shFlow: Number(f.shFlow ?? f.sh_flow ?? 0),
         szFlow: Number(f.szFlow ?? f.sz_flow ?? 0),
         totalFlow: Number(f.totalFlow ?? f.total_flow ?? 0),
@@ -88,7 +88,7 @@ export function NorthBoundPanel() {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke<any>("get_north_bound_flow");
+        return invoke<Record<string, unknown>>("get_north_bound_flow");
       })
       .then((f) => {
         if (cancelled) { return; }
@@ -98,7 +98,7 @@ export function NorthBoundPanel() {
           return;
         }
         const next: NbFlow = {
-          date: f.date ?? "",
+          date: (f.date ?? "") as string,
           shFlow: Number(f.shFlow ?? f.sh_flow ?? 0),
           szFlow: Number(f.szFlow ?? f.sz_flow ?? 0),
           totalFlow: Number(f.totalFlow ?? f.total_flow ?? 0),

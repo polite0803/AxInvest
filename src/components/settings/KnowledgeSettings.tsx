@@ -453,11 +453,11 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
 
   // ── Local model management ────────────────────────────────
 
-  const [modelList, setModelList] = useState<any[]>([]);
+  const [modelList, setModelList] = useState<Record<string, unknown>[]>([]);
   const [downloading, setDownloading] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<any[]>("list_local_models")
+    invoke<Record<string, unknown>[]>("list_local_models")
       .then(setModelList)
       .catch(logIpcError("list_local_models"));
   }, []);
@@ -467,7 +467,7 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
     try {
       await invoke("download_model", { filename });
 
-      const updated = await invoke<any[]>("list_local_models");
+      const updated = await invoke<Record<string, unknown>[]>("list_local_models");
       setModelList(updated);
       messageApi.success(t("settings.rag.modelDownloaded"));
     } catch (e) {
@@ -481,7 +481,7 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
     try {
       await invoke("delete_model", { filename });
 
-      const updated = await invoke<any[]>("list_local_models");
+      const updated = await invoke<Record<string, unknown>[]>("list_local_models");
       setModelList(updated);
     } catch (e) {
       messageApi.error(String(e));
@@ -1498,15 +1498,15 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
                 locale={{
                   emptyText: <Empty description={t("settings.rag.modelNotDownloaded")} />,
                 }}
-                renderItem={(model: any) => (
+                renderItem={(model: Record<string, unknown>) => (
                   <List.Item
                     actions={[
-                      model.is_downloaded
+                      model.is_downloaded as boolean
                         ? (
                           <Popconfirm
                             key="delete"
                             title={t("settings.rag.modelDelete")}
-                            onConfirm={() => handleDeleteModel(model.name)}
+                            onConfirm={() => handleDeleteModel(model.name as string)}
                             okText={t("common.yes")}
                             cancelText={t("common.no")}
                           >
@@ -1520,11 +1520,11 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
                             key="download"
                             size="small"
                             type="primary"
-                            loading={downloading === model.name}
+                            loading={downloading === (model.name as string)}
                             icon={<DownloadOutlined />}
-                            onClick={() => handleDownloadModel(model.name)}
+                            onClick={() => handleDownloadModel(model.name as string)}
                           >
-                            {downloading === model.name
+                            {downloading === (model.name as string)
                               ? t("settings.rag.modelDownloading")
                               : t("settings.rag.modelDownload")}
                           </Button>
@@ -1532,7 +1532,7 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
                     ]}
                   >
                     <List.Item.Meta
-                      avatar={model.is_downloaded
+                      avatar={model.is_downloaded as boolean
                         ? (
                           <CheckCircleOutlined
                             style={{
@@ -1549,16 +1549,16 @@ function KnowledgeBaseDetail({ base }: { base: KnowledgeBase }) {
                             }}
                           />
                         )}
-                      title={model.name}
+                      title={model.name as string}
                       description={
                         <Space size={4}>
                           <Tag>
-                            {model.model_type === "Reranker"
+                            {model.model_type as string === "Reranker"
                               ? t("settings.rag.rerankerModel")
                               : t("settings.rag.judgeModel")}
                           </Tag>
                           <Typography.Text type="secondary">
-                            {formatBytes(model.size_bytes)}
+                            {formatBytes(model.size_bytes as number)}
                           </Typography.Text>
                         </Space>
                       }

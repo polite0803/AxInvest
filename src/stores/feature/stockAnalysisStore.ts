@@ -546,9 +546,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       return dryRunCache.value;
     }
     try {
-      const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
-      const vars: any[] = tmpl?.variables ?? [];
-      const v = vars.find((x: any) => x.name === "analysis_dry_run");
+      const tmpl: Record<string, unknown> = await invoke("get_workflow_template", { id: "stock-analysis" });
+      const vars: Record<string, unknown>[] = tmpl?.variables ?? [];
+      const v = vars.find((x: Record<string, unknown>) => x.name === "analysis_dry_run");
       const value = !!v?.value;
       dryRunCache = { value, ts: now };
       return value;

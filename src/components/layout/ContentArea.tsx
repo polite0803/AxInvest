@@ -69,7 +69,7 @@ function PageLoader() {
   );
 }
 
-function SafeLazyPage({ Page }: { Page: React.LazyExoticComponent<any> }) {
+function SafeLazyPage({ Page }: { Page: React.LazyExoticComponent<React.ComponentType> }) {
   const { t } = useTranslation();
   return (
     <PageErrorBoundary title={t("error.page")}>

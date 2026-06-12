@@ -47,16 +47,19 @@ export function SectorHeatmapPanel() {
         setLoading(false);
         return;
       }
-      const list: any[] = await invoke("get_industry_ranking");
+      const list = await invoke("get_industry_ranking") as Record<string, unknown>[];
       if (!Array.isArray(list)) { throw new Error("bad data"); }
-      const next: SectorEntry[] = list.slice(0, 25).map((e: any) => ({
-        name: e.industryName ?? e.industry_name ?? "",
-        changePct: Number(e.changePct ?? e.change_pct ?? 0),
-        turnover: Number(e.turnover ?? 0),
-        leaderCode: e.leaderCode ?? e.leader_code,
-        leaderName: e.leaderName ?? e.leader_name,
-        leaderChange: e.leaderChangePct ?? e.leader_change_pct,
-      }));
+      const next: SectorEntry[] = list.slice(0, 25).map((e) => {
+        const r = e as Record<string, unknown>;
+        return {
+          name: (r.industryName ?? r.industry_name ?? "") as string,
+          changePct: Number(r.changePct ?? r.change_pct ?? 0),
+          turnover: Number(r.turnover ?? 0),
+          leaderCode: (r.leaderCode ?? r.leader_code) as string | undefined,
+          leaderName: (r.leaderName ?? r.leader_name) as string | undefined,
+          leaderChange: (r.leaderChangePct ?? r.leader_change_pct) as number | undefined,
+        };
+      });
       // 涨幅降序
       next.sort((a, b) => b.changePct - a.changePct);
       setSectors(next);
@@ -90,19 +93,22 @@ export function SectorHeatmapPanel() {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke<any[]>("get_industry_ranking");
+        return invoke("get_industry_ranking") as Promise<Record<string, unknown>[]>;
       })
       .then((list) => {
         if (cancelled || !list) { return; }
         if (!Array.isArray(list)) { throw new Error("bad data"); }
-        const next: SectorEntry[] = list.slice(0, 25).map((e: any) => ({
-          name: e.industryName ?? e.industry_name ?? "",
-          changePct: Number(e.changePct ?? e.change_pct ?? 0),
-          turnover: Number(e.turnover ?? 0),
-          leaderCode: e.leaderCode ?? e.leader_code,
-          leaderName: e.leaderName ?? e.leader_name,
-          leaderChange: e.leaderChangePct ?? e.leader_change_pct,
-        }));
+        const next: SectorEntry[] = list.slice(0, 25).map((e) => {
+          const r = e as Record<string, unknown>;
+          return {
+            name: (r.industryName ?? r.industry_name ?? "") as string,
+            changePct: Number(r.changePct ?? r.change_pct ?? 0),
+            turnover: Number(r.turnover ?? 0),
+            leaderCode: (r.leaderCode ?? r.leader_code) as string | undefined,
+            leaderName: (r.leaderName ?? r.leader_name) as string | undefined,
+            leaderChange: (r.leaderChangePct ?? r.leader_change_pct) as number | undefined,
+          };
+        });
         next.sort((a, b) => b.changePct - a.changePct);
         setSectors(next);
         if (next.length === 0) { setEmptyKind("noData"); }

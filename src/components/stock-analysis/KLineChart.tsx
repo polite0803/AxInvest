@@ -109,7 +109,7 @@ export function KLineChart() {
   // 绑定在 setOption 之后，监听 dataZoom 事件
   const setupZoomHandler = useCallback((chart: echarts.ECharts, datesLength: number) => {
     chart.off("dataZoom");
-    chart.on("dataZoom", (params: any) => {
+    chart.on("dataZoom", (params: { start?: number; end?: number; batch?: unknown }) => {
       if (zoomingRef.current) { return; }
       const batch = Array.isArray(params) ? params : [params];
       const b = batch[0];
@@ -357,7 +357,7 @@ export function KLineChart() {
               symbolSize: 22,
               symbolOffset: [0, -8],
               data: earningsPoints,
-              label: { show: true, formatter: (p: any) => p.value ?? "", fontSize: 9, color: "#fff" },
+              label: { show: true, formatter: (p: { value?: string }) => p.value ?? "", fontSize: 9, color: "#fff" },
               z: 5,
             }
             : undefined,
@@ -371,7 +371,7 @@ export function KLineChart() {
             yAxisIndex: 0,
             smooth: true,
             showSymbol: false,
-            lineStyle: { width: 1.5, color: MA_ORANGE } as any,
+            lineStyle: { width: 1.5, color: MA_ORANGE } as const,
             z: 1,
           }]
           : []),
@@ -384,7 +384,7 @@ export function KLineChart() {
             yAxisIndex: 0,
             smooth: true,
             showSymbol: false,
-            lineStyle: { width: 1.5, color: MA_BLUE } as any,
+            lineStyle: { width: 1.5, color: MA_BLUE } as const,
             z: 1,
           }]
           : []),
@@ -397,7 +397,7 @@ export function KLineChart() {
             yAxisIndex: 0,
             smooth: true,
             showSymbol: false,
-            lineStyle: { width: 1.5, color: MA_PURPLE } as any,
+            lineStyle: { width: 1.5, color: MA_PURPLE } as const,
             z: 1,
           }]
           : []),
@@ -408,7 +408,7 @@ export function KLineChart() {
           xAxisIndex: 1,
           yAxisIndex: 1,
           itemStyle: {
-            color: (p: any) => {
+            color: (p: { dataIndex: number }) => {
               const k = ohlc[p.dataIndex];
               return k && k[1] >= k[0] ? SA_RED : SA_GREEN;
             },

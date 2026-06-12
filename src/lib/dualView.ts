@@ -25,7 +25,7 @@ export interface DualView<T = unknown> {
   noDualView?: boolean;
 }
 
-const registry = new Map<string, DualView<any>>();
+const registry = new Map<string, DualView<unknown>>();
 
 export function registerDualView<T>(view: DualView<T>): void {
   if (registry.has(view.id)) {

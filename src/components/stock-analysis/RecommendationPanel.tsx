@@ -133,7 +133,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       );
 
       fetchLatestAnalyses(r);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[RecommendationPanel] load failed:", e);
       if (myToken !== reqTokenRef.current) { return; }
       setData(null);
@@ -189,7 +189,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         if (cancelled) { return; }
         if (result) { setLatestAnalyses(result); }
       })
-      .catch((e: any) => {
+      .catch((e: unknown) => {
         console.error("[RecommendationPanel] load failed:", e);
         if (!cancelled) {
           setData(null);
@@ -237,8 +237,19 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   // P0-2: 加载策略回测统计（仅加载一次）
   useEffect(() => {
-    loadStrategyStats();
-  }, [loadStrategyStats]);
+    let cancelled = false;
+    invoke<StrategyStat[]>("get_strategy_stats", { asOfDate })
+      .then((data) => {
+        if (!cancelled) { setStrategyStats(data); }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) { setStatsLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asOfDate]);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);

@@ -234,7 +234,11 @@ export function InvestDashboard() {
 /** 拉取 CSI300 近 60 日 K 线 → 判断市场状态 */
 async function loadMarketRegime(): Promise<MarketRegimeInfo | null> {
   try {
-    const klines = await invoke<any[]>("get_market_klines", { code: "000300", period: "daily", limit: 60 });
+    const klines = await invoke<Record<string, unknown>[]>("get_market_klines", {
+      code: "000300",
+      period: "daily",
+      limit: 60,
+    });
     if (!Array.isArray(klines) || klines.length < 20) { return null; }
     // 调用市场的 classify_regime — 简单在客户端用收盘价数组判断
     const closes = klines.map((k) => typeof k.close === "number" ? k.close : parseFloat(k.close ?? k[2] ?? 0));

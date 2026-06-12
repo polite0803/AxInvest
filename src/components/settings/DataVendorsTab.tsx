@@ -262,10 +262,10 @@ export function DataVendorsTab() {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<any>("get_workflow_template", { id: "stock-analysis" })
+    invoke<Record<string, unknown>>("get_workflow_template", { id: "stock-analysis" })
       .then((tmpl) => {
         if (cancelled) { return; }
-        const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
+        const vars: { name: string; value: unknown }[] = (tmpl?.variables as { name: string; value: unknown }[]) ?? [];
         const vals: Record<string, boolean> = {};
         let key = "";
         let xqToken = "";
@@ -293,10 +293,10 @@ export function DataVendorsTab() {
     setSaving(true);
     try {
       // 先加载全量模板，只更新 vendor_ 变量值，保留 var_type/is_secret 等字段
-      const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
-      const allVars: any[] = tmpl?.variables ?? [];
-      const varMap = new Map<string, any>();
-      for (const v of allVars) { varMap.set(v.name, v); }
+      const tmpl = await invoke("get_workflow_template", { id: "stock-analysis" }) as Record<string, unknown>;
+      const allVars = (tmpl?.variables as Record<string, unknown>[]) ?? [];
+      const varMap = new Map<string, Record<string, unknown>>();
+      for (const v of allVars) { varMap.set(v.name as string, v); }
       for (const [k, v] of Object.entries(vendorValues)) {
         const existing = varMap.get(k);
         if (existing && typeof existing === "object" && "name" in existing) {

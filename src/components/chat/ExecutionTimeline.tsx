@@ -9,6 +9,7 @@ const _EMPTY: never[] = [];
 import { SyncOutlined } from "@ant-design/icons";
 import { Progress, Tag, theme, Timeline, Typography } from "antd";
 import type { TimelineItemProps } from "antd";
+import type { GlobalToken } from "antd/es/theme/interface";
 import {
   AlertTriangle,
   Bot,
@@ -108,7 +109,7 @@ function poolItemToEvent(item: AgentPoolItem): TimelineEvent {
 
 // ── Status colors and icons ──────────────────────────────────────────────
 
-function getStatusConfig(token: Record<string, any>) {
+function getStatusConfig(token: GlobalToken) {
   return {
     pending: { color: token.colorTextQuaternary, icon: <Clock size={12} /> },
     running: {

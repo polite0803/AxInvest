@@ -104,8 +104,18 @@ export function ExitRecommendationPanel() {
   }, []);
 
   useEffect(() => {
-    loadRecommendations();
-  }, [loadRecommendations]);
+    let cancelled = false;
+    invoke<ExitRecommendation[]>("get_exit_recommendations")
+      .then((data) => {
+        if (!cancelled) { setRecommendations(data); }
+      })
+      .catch((e) => {
+        if (!cancelled) { console.error("[ExitRecommendationPanel]", e); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!summary || summary.totalPositions === 0) {
     return null;

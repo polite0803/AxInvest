@@ -98,7 +98,7 @@ export function ScheduledRecommendationTab() {
     } catch { /* 静默 */ }
   };
 
-  const create = async (values: any) => {
+  const create = async (values: Record<string, unknown>) => {
     try {
       await invoke("create_recommendation_cron", {
         name: values.name,
@@ -111,8 +111,8 @@ export function ScheduledRecommendationTab() {
       setAdding(false);
       loadTasks();
       message.success("定时荐股任务已创建");
-    } catch (e: any) {
-      message.error(`创建失败: ${e?.message ?? e}`);
+    } catch (e: unknown) {
+      message.error(`创建失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 

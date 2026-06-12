@@ -176,7 +176,7 @@ export function ExecutionReplayPanel() {
                             <div className="flex flex-col gap-0.5" style={{ fontSize: 11 }}>
                               <div className="flex items-center gap-1">
                                 <Badge
-                                  color={STATUS_COLOR[r.status] as any}
+                                  color={STATUS_COLOR[r.status] as string}
                                   className="shrink-0"
                                 />
                                 <span className="font-medium truncate">{r.node_name ?? r.node_id}</span>

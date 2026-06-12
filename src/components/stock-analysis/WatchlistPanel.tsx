@@ -86,7 +86,7 @@ export function WatchlistPanel() {
       const list = await invoke<WatchlistItem[]>("list_watchlist");
       if (Array.isArray(list)) {
         // 从 notes JSON 恢复 group 信息
-        const parsed = list.map((w: any) => {
+        const parsed = list.map((w: WatchlistItem & { group?: string }) => {
           let group = DEFAULT_GROUP;
           try {
             if (w.notes) {
@@ -108,7 +108,7 @@ export function WatchlistPanel() {
       .then((list) => {
         if (cancelled) { return; }
         if (Array.isArray(list)) {
-          const parsed = list.map((w: any) => {
+          const parsed = list.map((w: WatchlistItem & { group?: string }) => {
             let group = DEFAULT_GROUP;
             try {
               if (w.notes) {
@@ -143,12 +143,12 @@ export function WatchlistPanel() {
     const snap: Record<string, QuoteSnapshot> = {};
     for (const item of groupItems) {
       try {
-        const q = await invoke<any>("get_stock_quote", { stockCode: item.stockCode });
+        const q = await invoke("get_stock_quote", { stockCode: item.stockCode }) as Record<string, unknown>;
         snap[item.stockCode] = {
-          price: q?.price ?? 0,
-          changePct: q?.changePct ?? 0,
-          pe: q?.pe,
-          timestamp: q?.timestamp ?? "",
+          price: (q?.price as number) ?? 0,
+          changePct: (q?.changePct as number) ?? 0,
+          pe: q?.pe as number | undefined,
+          timestamp: (q?.timestamp ?? "") as string,
         };
       } catch { /* skip */ }
     }
@@ -162,12 +162,12 @@ export function WatchlistPanel() {
       const snap: Record<string, QuoteSnapshot> = {};
       for (const item of groupItems) {
         try {
-          const q = await invoke<any>("get_stock_quote", { stockCode: item.stockCode });
+          const q = await invoke("get_stock_quote", { stockCode: item.stockCode }) as Record<string, unknown>;
           snap[item.stockCode] = {
-            price: q?.price ?? 0,
-            changePct: q?.changePct ?? 0,
-            pe: q?.pe,
-            timestamp: q?.timestamp ?? "",
+            price: (q?.price as number) ?? 0,
+            changePct: (q?.changePct as number) ?? 0,
+            pe: q?.pe as number | undefined,
+            timestamp: (q?.timestamp ?? "") as string,
           };
         } catch { /* skip */ }
       }

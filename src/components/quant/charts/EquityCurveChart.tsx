@@ -38,7 +38,7 @@ export function EquityCurveChart({
     const equities = curve.map((p) => parseFloat(p.equity.toFixed(2)));
     // const drawdowns = curve.map((p) => parseFloat((p.drawdownPct * 100).toFixed(2)));
 
-    const series: any[] = [
+    const series: echarts.SeriesOption[] = [
       {
         name: "权益",
         type: "line",

@@ -42,17 +42,33 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     try {
       const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
       setInternalData(result);
-    } catch (e: any) {
-      setError(typeof e === "string" ? e : e?.message ?? t("stockAnalysis.backtest.strategyFailed"));
+    } catch (e: unknown) {
+      setError(typeof e === "string" ? e : e instanceof Error ? e.message : t("stockAnalysis.backtest.strategyFailed"));
     }
     setLoading(false);
   }, [t]);
 
   useEffect(() => {
-    if (!externalData) {
-      load(group);
-    }
-  }, [externalData, group, load]);
+    if (externalData) { return; }
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) { return; }
+      setLoading(true);
+      return invoke<RecoStrategy[]>("get_reco_strategies", { group });
+    })
+      .then((data) => {
+        if (!cancelled) { setStrategies(data); }
+      })
+      .catch((e) => {
+        if (!cancelled) { console.error("[RecoStrategyMatrix]", e); }
+      })
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [group, externalData]);
 
   // 数据源
   const data = externalData ?? internalData;

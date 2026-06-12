@@ -1849,7 +1849,7 @@ export function InputArea() {
         if (activeConversationId) {
           try {
             await updateConversation(activeConversationId, {
-              work_strategy: "direct" as any,
+              work_strategy: "direct",
             });
           } catch (e) {
             logIpcError("UnifiedMode: switch to ask")(e);

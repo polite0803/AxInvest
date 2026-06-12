@@ -48,7 +48,17 @@ function safeGetAttr(attrs: unknown, key: string): string | undefined {
   return undefined;
 }
 
-function extractText(children: any[] | undefined): string {
+interface VNodeLike {
+  id?: string;
+  name?: string;
+  content?: string | Record<string, unknown>;
+  children?: VNodeLike[];
+  attrs?: Record<string, unknown>;
+  loading?: boolean;
+  [key: string]: unknown;
+}
+
+function extractText(children: VNodeLike[] | undefined): string {
   if (!children || children.length === 0) {
     return "";
   }
@@ -80,7 +90,7 @@ function NodeChild({
   ctx,
   renderNode,
 }: {
-  child: any;
+  child: VNodeLike;
   indexKey: string | undefined;
   index: number;
   ctx: RenderContext;
@@ -103,7 +113,7 @@ function DefaultContainer({
   renderNode,
   indexKey,
 }: {
-  node: any;
+  node: VNodeLike;
   ctx: RenderContext;
   renderNode?: RenderNodeFn | undefined;
   indexKey: string | undefined;
@@ -111,7 +121,7 @@ function DefaultContainer({
   return (
     <div className={`vmr-container vmr-container-${node.name ?? "unknown"}`}>
       {Array.isArray(node.children) && ctx && renderNode
-        ? node.children.map((child: any, i: number) => (
+        ? node.children.map((child: VNodeLike, i: number) => (
           <NodeChild
             key={child.id
               ?? child.name
@@ -128,7 +138,7 @@ function DefaultContainer({
   );
 }
 
-export function McpContainerNode(props: NodeComponentProps<any>) {
+export function McpContainerNode(props: NodeComponentProps<Record<string, unknown>>) {
   const { node } = props;
 
   if (node.name !== "mcp") {
@@ -156,7 +166,7 @@ const monoStyle: React.CSSProperties = {
   padding: "4px 0",
 };
 
-function McpToolCard({ node }: { node: any }) {
+function McpToolCard({ node }: { node: VNodeLike }) {
   const { t } = useTranslation();
 
   const serverName = safeGetAttr(node.attrs, "name") ?? "MCP";

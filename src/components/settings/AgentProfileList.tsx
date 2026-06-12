@@ -145,11 +145,14 @@ export function AgentProfileList() {
       if (template?.nodes) {
         const nodes = Array.isArray(template.nodes) ? template.nodes : [];
         const parsed = nodes
-          .map((n: any) => {
-            const pid: string = n?.config?.agent_profile_id ?? "";
+          .map((n) => {
+            const node = n as Record<string, unknown>;
+            const config = node?.config as Record<string, unknown> | undefined;
+            const base = node?.base as Record<string, unknown> | undefined;
+            const pid: string = (config?.agent_profile_id as string) ?? "";
             if (!pid.startsWith("stock-")) { return null; }
-            const exposed: string[] = n.config.exposed_tools ?? [];
-            const nodeId: string = n.base?.id ?? n.id ?? "";
+            const exposed: string[] = (config?.exposed_tools as string[]) ?? [];
+            const nodeId: string = (base?.id as string) ?? (node?.id as string) ?? "";
             return {
               id: nodeId,
               profileId: pid,
@@ -159,10 +162,10 @@ export function AgentProfileList() {
               roleName: PROFILE_ROLES[pid] ?? "-",
               tools: exposed,
               fixedTools: FIXED_TOOL_MAP[nodeId] ?? FIXED_ALGO_TOOLS[nodeId] ?? [],
-              systemPrompt: n.config.system_prompt ?? "",
-              temperature: n.config.temperature ?? 0.3,
-              maxTokens: n.config.max_tokens ?? 4096,
-              maxToolRounds: n.config.max_tool_rounds ?? 2,
+              systemPrompt: config?.system_prompt as string ?? "",
+              temperature: config?.temperature as number ?? 0.3,
+              maxTokens: config?.max_tokens as number ?? 4096,
+              maxToolRounds: config?.max_tool_rounds as number ?? 2,
             } as AgentNodeRow;
           })
           .filter(Boolean) as AgentNodeRow[];
@@ -239,11 +242,14 @@ export function AgentProfileList() {
         if (template?.nodes) {
           const nodes = Array.isArray(template.nodes) ? template.nodes : [];
           const parsed = nodes
-            .map((n: any) => {
-              const pid: string = n?.config?.agent_profile_id ?? "";
+            .map((rawN) => {
+              const n = rawN as Record<string, unknown>;
+              const config = n?.config as Record<string, unknown> | undefined;
+              const base = n?.base as Record<string, unknown> | undefined;
+              const pid: string = (config?.agent_profile_id as string) ?? "";
               if (!pid.startsWith("stock-")) { return null; }
-              const exposed: string[] = n.config.exposed_tools ?? [];
-              const nodeId: string = n.base?.id ?? n.id ?? "";
+              const exposed: string[] = (config?.exposed_tools as string[]) ?? [];
+              const nodeId: string = (base?.id as string) ?? (n?.id as string) ?? "";
               return {
                 id: nodeId,
                 profileId: pid,
@@ -253,10 +259,10 @@ export function AgentProfileList() {
                 roleName: PROFILE_ROLES[pid] ?? "-",
                 tools: exposed,
                 fixedTools: FIXED_TOOL_MAP[nodeId] ?? FIXED_ALGO_TOOLS[nodeId] ?? [],
-                systemPrompt: n.config.system_prompt ?? "",
-                temperature: n.config.temperature ?? 0.3,
-                maxTokens: n.config.max_tokens ?? 4096,
-                maxToolRounds: n.config.max_tool_rounds ?? 2,
+                systemPrompt: config?.system_prompt as string ?? "",
+                temperature: config?.temperature as number ?? 0.3,
+                maxTokens: config?.max_tokens as number ?? 4096,
+                maxToolRounds: config?.max_tool_rounds as number ?? 2,
               } as AgentNodeRow;
             })
             .filter(Boolean) as AgentNodeRow[];

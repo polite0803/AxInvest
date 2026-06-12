@@ -116,7 +116,7 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ isRunning: false, error: msg });
-      throw new Error(msg);
+      throw new Error(msg, { cause: e });
     }
   },
 
@@ -156,7 +156,7 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ isComparing: false, error: msg });
-      throw new Error(msg);
+      throw new Error(msg, { cause: e });
     }
   },
 

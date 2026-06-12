@@ -26,8 +26,8 @@ async function getEnabledVendors(): Promise<Set<string> | null> {
     return enabledCache.set;
   }
   try {
-    const tmpl: any = await invoke("get_workflow_template", { id: "stock-analysis" });
-    const vars: { name: string; value: any }[] = tmpl?.variables ?? [];
+    const tmpl = await invoke("get_workflow_template", { id: "stock-analysis" }) as Record<string, unknown>;
+    const vars: { name: string; value: unknown }[] = (tmpl?.variables as { name: string; value: unknown }[]) ?? [];
     const enabledSet = new Set<string>();
     for (const v of vars) {
       if (

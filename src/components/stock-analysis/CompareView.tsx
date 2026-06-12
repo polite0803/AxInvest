@@ -56,8 +56,8 @@ export function CompareView() {
       const [q1, q2, f1, f2] = await Promise.all([
         invoke<StockQuote>("get_stock_quote", { stockCode: code1 }),
         invoke<StockQuote>("get_stock_quote", { stockCode: code2 }),
-        invoke<any[]>("get_stock_financials", { stockCode: code1 }).then(parseFin),
-        invoke<any[]>("get_stock_financials", { stockCode: code2 }).then(parseFin),
+        invoke<Record<string, unknown>[]>("get_stock_financials", { stockCode: code1 }).then(parseFin),
+        invoke<Record<string, unknown>[]>("get_stock_financials", { stockCode: code2 }).then(parseFin),
       ]);
       setQuote1(q1);
       setQuote2(q2);
@@ -70,7 +70,7 @@ export function CompareView() {
     }
   };
 
-  const parseFin = (list: any[]): FinancialMetrics => {
+  const parseFin = (list: Record<string, unknown>[]): FinancialMetrics => {
     const last = list?.[list.length - 1];
     if (!last) {
       return { pe: null, pb: null, roe: null, revenueYoy: null, profitYoy: null, grossMargin: null, debtRatio: null };
@@ -78,11 +78,11 @@ export function CompareView() {
     return {
       pe: null,
       pb: null,
-      roe: last.roe ?? null,
-      revenueYoy: last.revenueYoy ?? last.revenue_yoy ?? null,
-      profitYoy: last.profitYoy ?? last.profit_yoy ?? null,
-      grossMargin: last.grossMargin ?? last.gross_margin ?? null,
-      debtRatio: last.debtRatio ?? last.debt_ratio ?? null,
+      roe: (last.roe ?? last.revenue_yoy) as number ?? null,
+      revenueYoy: (last.revenueYoy ?? last.revenue_yoy) as number ?? null,
+      profitYoy: (last.profitYoy ?? last.profit_yoy) as number ?? null,
+      grossMargin: (last.grossMargin ?? last.gross_margin) as number ?? null,
+      debtRatio: (last.debtRatio ?? last.debt_ratio) as number ?? null,
     };
   };
 

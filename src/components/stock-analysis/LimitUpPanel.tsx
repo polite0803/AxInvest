@@ -53,26 +53,29 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
         setLoading(false);
         return;
       }
-      const hot: any[] = await invoke("get_hot_stocks");
+      const hot = await invoke("get_hot_stocks") as Record<string, unknown>[];
       if (!Array.isArray(hot)) { throw new Error("bad data"); }
       // 主排序：changePct 倒序；过滤：涨幅 >= 9.5% 的强势股
       // 数据源返回的 changePct 单位是 %（例如 9.8 / 10.0）
-      const candidates = hot.filter((h) => (h.changePct ?? 0) >= 9.5);
+      const candidates = hot.filter((h) => ((h as Record<string, unknown>).changePct as number) ?? 0 >= 9.5);
       const results: LimitUpStock[] = [];
       for (const h of candidates.slice(0, 30)) {
         try {
-          const q = await invoke<any>("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code });
-          const price = q?.price ?? 0;
-          const limitUp = q?.limitUp ?? q?.limit_up ?? 0;
+          const q = await invoke("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code }) as Record<
+            string,
+            unknown
+          >;
+          const price = (q?.price as number) ?? 0;
+          const limitUp = (q?.limitUp ?? q?.limit_up) as number ?? 0;
           results.push({
-            code: h.stockCode ?? h.stock_code,
-            name: h.stockName ?? h.stock_name ?? "",
+            code: String(h.stockCode ?? h.stock_code),
+            name: String(h.stockName ?? h.stock_name ?? ""),
             price,
-            changePct: h.changePct ?? 0,
-            turnoverRate: q?.turnoverRate ?? q?.turnover_rate ?? 0,
+            changePct: Number(h.changePct ?? 0),
+            turnoverRate: Number(q?.turnoverRate ?? q?.turnover_rate ?? 0),
             isSealed: limitUp > 0 && Math.abs(price - limitUp) < 0.01,
             // 连板数估算：涨停板 9.5-19% 为 1 连板，19-29% 为 2 连板，以此类推
-            boardCount: Math.max(1, Math.round((h.changePct ?? 0) / 10)),
+            boardCount: Math.max(1, Math.round(Number(h.changePct ?? 0) / 10)),
           });
         } catch { /* 跳过单只 */ }
       }
@@ -108,26 +111,29 @@ export function LimitUpPanel({ bordered = true }: LimitUpPanelProps = {}) {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke<any[]>("get_hot_stocks");
+        return invoke<Record<string, unknown>[]>("get_hot_stocks");
       })
       .then((hot) => {
         if (cancelled || !hot) { return; }
         if (!Array.isArray(hot)) { throw new Error("bad data"); }
-        const candidates = hot.filter((h) => (h.changePct ?? 0) >= 9.5);
+        const candidates = hot.filter((h) => ((h as Record<string, unknown>).changePct as number) ?? 0 >= 9.5);
         return Promise.all(
-          candidates.slice(0, 30).map(async (h: any) => {
+          candidates.slice(0, 30).map(async (h: Record<string, unknown>) => {
             try {
-              const q = await invoke<any>("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code });
-              const price = q?.price ?? 0;
-              const limitUp = q?.limitUp ?? q?.limit_up ?? 0;
+              const q = await invoke("get_stock_quote", { stockCode: h.stockCode ?? h.stock_code }) as Record<
+                string,
+                unknown
+              >;
+              const price = Number(q?.price ?? 0);
+              const limitUp = Number(q?.limitUp ?? q?.limit_up ?? 0);
               return {
-                code: h.stockCode ?? h.stock_code,
-                name: h.stockName ?? h.stock_name ?? "",
+                code: String(h.stockCode ?? h.stock_code),
+                name: String(h.stockName ?? h.stock_name ?? ""),
                 price,
-                changePct: h.changePct ?? 0,
-                turnoverRate: q?.turnoverRate ?? q?.turnover_rate ?? 0,
+                changePct: Number(h.changePct ?? 0),
+                turnoverRate: Number(q?.turnoverRate ?? q?.turnover_rate ?? 0),
                 isSealed: limitUp > 0 && Math.abs(price - limitUp) < 0.01,
-                boardCount: Math.max(1, Math.round((h.changePct ?? 0) / 10)),
+                boardCount: Math.max(1, Math.round(((h.changePct as number) ?? 0) / 10)),
               } as LimitUpStock;
             } catch {
               return null;

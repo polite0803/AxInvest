@@ -24,10 +24,10 @@ export function ClsFlashPanel() {
     setLoading(true);
     setEmptyKind(null);
     try {
-      const data = await invoke<any[]>("get_cls_flash");
+      const data = await invoke<Record<string, string | null | undefined>[]>("get_cls_flash");
       if (Array.isArray(data) && data.length > 0) {
         // 兼容后端字段名变化：驼峰/下划线都接受
-        const normalized: ClsFlashItem[] = data.slice(0, 20).map((d: any) => ({
+        const normalized: ClsFlashItem[] = data.slice(0, 20).map((d) => ({
           title: d.title ?? "",
           content: d.content ?? d.summary ?? "",
           publishTime: d.publishTime ?? d.publish_time ?? d.time ?? "",
@@ -52,13 +52,13 @@ export function ClsFlashPanel() {
       if (cancelled) { return; }
       setLoading(true);
       setEmptyKind(null);
-      return invoke<any[]>("get_cls_flash");
+      return invoke<Record<string, string | null | undefined>[]>("get_cls_flash");
     })
       .then((data) => {
         if (cancelled || !data) { return; }
         if (Array.isArray(data) && data.length > 0) {
           // 兼容后端字段名变化：驼峰/下划线都接受
-          const normalized: ClsFlashItem[] = data.slice(0, 20).map((d: any) => ({
+          const normalized: ClsFlashItem[] = data.slice(0, 20).map((d) => ({
             title: d.title ?? "",
             content: d.content ?? d.summary ?? "",
             publishTime: d.publishTime ?? d.publish_time ?? d.time ?? "",

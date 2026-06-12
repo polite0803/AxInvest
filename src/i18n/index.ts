@@ -36,7 +36,7 @@ i18n.use(initReactI18next).init({
 
 // Expose i18n on window for debugging (dev only)
 if (typeof window !== "undefined") {
-  (window as any).i18n = i18n;
+  Object.assign(window, { i18n });
 }
 
 export default i18n;

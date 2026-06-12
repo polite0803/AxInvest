@@ -586,15 +586,15 @@ export function StockAnalysisConfigPanel(_props: Props) {
   const handleOptimize = async () => {
     setSaving(true);
     try {
-      const weights = await invoke<any>("optimize_scoring_weights");
+      const weights = await invoke<Record<string, unknown>>("optimize_scoring_weights");
       if (weights) {
         const map: Record<string, number> = {
-          scoring_trend: weights.trendWeight,
-          scoring_deviation: weights.deviationWeight,
-          scoring_macd: weights.macdWeight,
-          scoring_volume: weights.volumeWeight,
-          scoring_rsi: weights.rsiWeight,
-          scoring_support: weights.supportWeight,
+          scoring_trend: weights.trendWeight as number,
+          scoring_deviation: weights.deviationWeight as number,
+          scoring_macd: weights.macdWeight as number,
+          scoring_volume: weights.volumeWeight as number,
+          scoring_rsi: weights.rsiWeight as number,
+          scoring_support: weights.supportWeight as number,
         };
         setValues((prev) => ({ ...prev, ...map }));
         message.success(t("stockAnalysis.settings.optimize.success"));

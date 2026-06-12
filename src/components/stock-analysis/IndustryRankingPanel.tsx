@@ -55,20 +55,23 @@ export function IndustryRankingPanel() {
         setLoading(false);
         return;
       }
-      const data = await invoke<any[]>("get_industry_ranking");
+      const data = await invoke("get_industry_ranking") as Record<string, unknown>[];
       if (!Array.isArray(data)) { throw new Error("bad data"); }
-      const list: IndustryRow[] = data.slice(0, 20).map((e: any, i: number) => ({
-        rank: i + 1,
-        industryName: e.industryName ?? e.industry_name ?? "",
-        industryCode: e.industryCode ?? e.industry_code ?? "",
-        changePct: Number(e.changePct ?? e.change_pct ?? 0),
-        mainInflow: e.mainInflow != null
-          ? Number(e.mainInflow)
-          : (e.main_inflow != null ? Number(e.main_inflow) : null),
-        leaderCode: e.leaderCode ?? e.leader_code ?? "",
-        leaderName: e.leaderName ?? e.leader_name ?? "",
-        leaderChangePct: Number(e.leaderChangePct ?? e.leader_change_pct ?? 0),
-      }));
+      const list: IndustryRow[] = data.slice(0, 20).map((e, i) => {
+        const r = e as Record<string, unknown>;
+        return {
+          rank: i + 1,
+          industryName: (r.industryName ?? r.industry_name ?? "") as string,
+          industryCode: (r.industryCode ?? r.industry_code ?? "") as string,
+          changePct: Number(r.changePct ?? r.change_pct ?? 0),
+          mainInflow: r.mainInflow != null
+            ? Number(r.mainInflow)
+            : (r.main_inflow != null ? Number(r.main_inflow) : null),
+          leaderCode: (r.leaderCode ?? r.leader_code ?? "") as string,
+          leaderName: (r.leaderName ?? r.leader_name ?? "") as string,
+          leaderChangePct: Number(r.leaderChangePct ?? r.leader_change_pct ?? 0),
+        };
+      }).map((item, i) => ({ ...item, rank: i + 1 }));
       list.sort((a, b) => b.changePct - a.changePct);
       list.forEach((r, i) => {
         r.rank = i + 1;
@@ -104,23 +107,26 @@ export function IndustryRankingPanel() {
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke<any[]>("get_industry_ranking");
+        return invoke("get_industry_ranking") as Promise<Record<string, unknown>[]>;
       })
       .then((data) => {
         if (cancelled || !data) { return; }
         if (!Array.isArray(data)) { throw new Error("bad data"); }
-        const list: IndustryRow[] = data.slice(0, 20).map((e: any, i: number) => ({
-          rank: i + 1,
-          industryName: e.industryName ?? e.industry_name ?? "",
-          industryCode: e.industryCode ?? e.industry_code ?? "",
-          changePct: Number(e.changePct ?? e.change_pct ?? 0),
-          mainInflow: e.mainInflow != null
-            ? Number(e.mainInflow)
-            : (e.main_inflow != null ? Number(e.main_inflow) : null),
-          leaderCode: e.leaderCode ?? e.leader_code ?? "",
-          leaderName: e.leaderName ?? e.leader_name ?? "",
-          leaderChangePct: Number(e.leaderChangePct ?? e.leader_change_pct ?? 0),
-        }));
+        const list: IndustryRow[] = data.slice(0, 20).map((e, i: number) => {
+          const r = e as Record<string, unknown>;
+          return {
+            rank: i + 1,
+            industryName: (r.industryName ?? r.industry_name ?? "") as string,
+            industryCode: (r.industryCode ?? r.industry_code ?? "") as string,
+            changePct: Number(r.changePct ?? r.change_pct ?? 0),
+            mainInflow: r.mainInflow != null
+              ? Number(r.mainInflow)
+              : (r.main_inflow != null ? Number(r.main_inflow) : null),
+            leaderCode: (r.leaderCode ?? r.leader_code ?? "") as string,
+            leaderName: (r.leaderName ?? r.leader_name ?? "") as string,
+            leaderChangePct: Number(r.leaderChangePct ?? r.leader_change_pct ?? 0),
+          };
+        });
         list.sort((a, b) => b.changePct - a.changePct);
         list.forEach((r, i) => {
           r.rank = i + 1;

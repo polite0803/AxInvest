@@ -59,8 +59,19 @@ export function TradeReviewPanel() {
   }, []);
 
   useEffect(() => {
-    loadReview();
-  }, [loadReview]);
+    let cancelled = false;
+    invoke<TradeReview | null>("get_trade_review")
+      .then((data) => {
+        if (!cancelled) { setReview(data); }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!review || review.totalClosed === 0) { return null; }
 

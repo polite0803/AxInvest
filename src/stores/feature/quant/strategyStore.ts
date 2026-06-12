@@ -83,7 +83,7 @@ export const useStrategyStore = create<StrategyState>((set, get) => ({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       set({ isRegistering: false, error: msg });
-      throw new Error(msg);
+      throw new Error(msg, { cause: e });
     }
   },
 

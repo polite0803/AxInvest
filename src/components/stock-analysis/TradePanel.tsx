@@ -108,15 +108,16 @@ export function TradePanel() {
   // 一键从分析结论录入
   const quickRecord = useCallback(() => {
     if (!storeDecision) { return; }
-    const { action, positionPct, targetPrice, stopLoss } = storeDecision as any;
-    if (!action || action === StockAction.HOLD || action === StockAction.REDUCE) { return; }
+    const decisionData = storeDecision as unknown as Record<string, unknown>;
+    const { action, positionPct, targetPrice, stopLoss } = decisionData;
+    if (!action || (action as string) === StockAction.HOLD || (action as string) === StockAction.REDUCE) { return; }
     setForm((f) => ({
       ...f,
       stockCode: storeStockCode,
       stockName: storeStockName,
       direction: action === StockAction.SELL ? "sell" : "buy",
-      price: targetPrice || 0,
-      quantity: positionPct ? Math.round((positionPct / 100) * 1000) : 100,
+      price: (targetPrice as number) || 0,
+      quantity: (positionPct as number) ? Math.round(((positionPct as number) / 100) * 1000) : 100,
       notes: stopLoss ? t("stockAnalysis.trade.stopLoss", { price: stopLoss }) : "",
     }));
   }, [storeDecision, storeStockCode, storeStockName, t]);
@@ -324,9 +325,9 @@ export function TradePanel() {
         <div className="text-xs p-1 rounded mb-2" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
           <Tag
-            color={getActionColor((storeDecision as any).action)}
+            color={getActionColor((storeDecision as unknown as Record<string, unknown>).action as string)}
           >
-            {(storeDecision as any).action}
+            {(storeDecision as unknown as Record<string, unknown>).action as string}
           </Tag>
           <Button size="small" type="link" className="text-xs px-1" onClick={quickRecord}>
             {t("stockAnalysis.trade.quickRecord")}

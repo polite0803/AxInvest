@@ -35,9 +35,9 @@ interface RightPanelState {
   researchSources: ResearchSourceItem[];
   setResearchSources: (sources: ResearchSourceItem[]) => void;
 
-  report: any | null;
+  report: unknown | null;
 
-  setReport: (report: any | null) => void;
+  setReport: (report: unknown | null) => void;
 }
 
 export const useRightPanelStore = create<RightPanelState>((set) => ({

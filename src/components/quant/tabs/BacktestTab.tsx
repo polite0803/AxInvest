@@ -51,7 +51,7 @@ export function BacktestTab() {
   useEffect(() => {
     if (!selectedStrategy && draft.strategyId) {
       const m = strategies.find((s) => s.id === draft.strategyId);
-      if (m) { setSelectedStrategy(m); }
+      if (m) { Promise.resolve().then(() => setSelectedStrategy(m)); }
     }
   }, [strategies, draft.strategyId, selectedStrategy]);
 

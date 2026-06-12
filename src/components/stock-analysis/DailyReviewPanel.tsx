@@ -81,8 +81,8 @@ export function DailyReviewPanel() {
     try {
       const r = await invoke<DailyReview>("generate_daily_review");
       setReview(r);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     }
     setLoading(false);
   }, []);
@@ -93,8 +93,8 @@ export function DailyReviewPanel() {
         setReview(r);
         setError(null);
       })
-      .catch((e: any) => {
-        setError(e?.message ?? String(e));
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => setLoading(false));
   }, [setReview, setError, setLoading]);

@@ -75,7 +75,7 @@ export function PriceAlertPanel() {
     };
   }, [t]);
 
-  const addAlert = async (values: any) => {
+  const addAlert = async (values: Record<string, unknown>) => {
     try {
       await invoke("create_price_alert", {
         stockCode: values.stockCode,

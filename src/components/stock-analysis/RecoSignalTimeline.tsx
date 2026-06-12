@@ -23,21 +23,40 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
         strategyId: sid,
       });
       setSignals(result ?? []);
-    } catch (e: any) {
-      setError(typeof e === "string" ? e : e?.message ?? "加载失败");
+    } catch (e: unknown) {
+      setError(typeof e === "string" ? e : e instanceof Error ? e.message : "加载失败");
       setSignals([]);
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    if (strategyId) {
-      load(strategyId);
-    } else {
-      setSignals([]);
-      setError(null);
+    if (!strategyId) {
+      Promise.resolve().then(() => {
+        setSignals([]);
+        setError(null);
+      });
+      return;
     }
-  }, [strategyId, load]);
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) { return; }
+      setLoading(true);
+      return invoke<RecoSignal[]>("get_reco_signals", { strategyId });
+    })
+      .then((data) => {
+        if (!cancelled) { setSignals(data); }
+      })
+      .catch((e) => {
+        if (!cancelled) { setError(String(e)); }
+      })
+      .finally(() => {
+        if (!cancelled) { setLoading(false); }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [strategyId]);
 
   // 按股票代码筛选
   const filtered = useMemo(() => {

@@ -350,13 +350,15 @@ export function ValueAssessmentPanel() {
   // 暴露调试数据到 window，方便 Console 检查
   useEffect(() => {
     if (typeof window !== "undefined" && hasValue && process.env.NODE_ENV === "development") {
-      (window as any).__DEBUG_VALUE__ = {
-        raw: valueReport.slice(0, 2000),
-        parsed,
-        parsedType: parsed ? typeof parsed : null,
-        readablePreview: readableText.slice(0, 500),
-        rawValueType: typeof rawValue,
-      };
+      Object.assign(window, {
+        __DEBUG_VALUE__: {
+          raw: valueReport.slice(0, 2000),
+          parsed,
+          parsedType: parsed ? typeof parsed : null,
+          readablePreview: readableText.slice(0, 500),
+          rawValueType: typeof rawValue,
+        },
+      });
       console.log("[ValueAssessmentPanel] DEBUG 数据已暴露到 window.__DEBUG_VALUE__");
       console.log("[ValueAssessmentPanel] parsed:", parsed);
       console.log("[ValueAssessmentPanel] rawValue type:", typeof rawValue);

@@ -22,7 +22,9 @@ export function CompareTab() {
 
   useEffect(() => {
     if (recentRuns.length >= 2 && selectedIds.length === 0) {
-      setSelectedIds(recentRuns.slice(0, Math.min(3, recentRuns.length)).map((r) => r.id));
+      Promise.resolve().then(() =>
+        setSelectedIds(recentRuns.slice(0, Math.min(3, recentRuns.length)).map((r) => r.id))
+      );
     }
   }, [recentRuns, selectedIds.length]);
 

@@ -102,7 +102,7 @@ export function ScheduledAnalysisTab() {
     };
   }, []);
 
-  const create = async (values: any) => {
+  const create = async (values: Record<string, unknown>) => {
     try {
       await invoke("create_stock_cron", {
         stockCode: values.stockCode,

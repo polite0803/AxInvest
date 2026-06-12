@@ -59,16 +59,18 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
         setLoading(false);
         return;
       }
-      const data = await invoke<any[]>("get_market_dragon_tiger");
+      const data = await invoke("get_market_dragon_tiger") as Record<string, unknown>[];
       if (!Array.isArray(data)) { throw new Error("bad data"); }
-      const list: DragonTigerEntry[] = data.slice(0, 30).map((e: any) => ({
-        code: e.stockCode ?? e.stock_code ?? "",
-        name: e.stockName ?? e.stock_name ?? "",
-        date: e.date ?? "",
-        netBuy: Number(e.netBuy ?? e.net_buy ?? 0),
-        buyAmount: Number(e.buyAmount ?? e.buy_amount ?? 0),
-        sellAmount: Number(e.sellAmount ?? e.sell_amount ?? 0),
-        reason: e.reason,
+      const list: DragonTigerEntry[] = data.slice(0, 30).map((e) => ({
+        code: String((e as Record<string, unknown>).stockCode ?? (e as Record<string, unknown>).stock_code ?? ""),
+        name: String((e as Record<string, unknown>).stockName ?? (e as Record<string, unknown>).stock_name ?? ""),
+        date: String((e as Record<string, unknown>).date ?? ""),
+        netBuy: Number((e as Record<string, unknown>).netBuy ?? (e as Record<string, unknown>).net_buy ?? 0),
+        buyAmount: Number((e as Record<string, unknown>).buyAmount ?? (e as Record<string, unknown>).buy_amount ?? 0),
+        sellAmount: Number(
+          (e as Record<string, unknown>).sellAmount ?? (e as Record<string, unknown>).sell_amount ?? 0,
+        ),
+        reason: (e as Record<string, unknown>).reason as string | undefined,
       }));
       // 按净买额降序
       list.sort((a, b) => b.netBuy - a.netBuy);
@@ -103,20 +105,23 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
           setEmptyKind("backendOffline");
           return;
         }
-        return invoke<any[]>("get_market_dragon_tiger");
+        return invoke("get_market_dragon_tiger") as Promise<Record<string, unknown>[]>;
       })
       .then((data) => {
         if (cancelled || !data) { return; }
         if (!Array.isArray(data)) { throw new Error("bad data"); }
-        const list: DragonTigerEntry[] = data.slice(0, 30).map((e: any) => ({
-          code: e.stockCode ?? e.stock_code ?? "",
-          name: e.stockName ?? e.stock_name ?? "",
-          date: e.date ?? "",
-          netBuy: Number(e.netBuy ?? e.net_buy ?? 0),
-          buyAmount: Number(e.buyAmount ?? e.buy_amount ?? 0),
-          sellAmount: Number(e.sellAmount ?? e.sell_amount ?? 0),
-          reason: e.reason,
-        }));
+        const list: DragonTigerEntry[] = data.slice(0, 30).map((e) => {
+          const r = e as Record<string, unknown>;
+          return {
+            code: String(r.stockCode ?? r.stock_code ?? ""),
+            name: String(r.stockName ?? r.stock_name ?? ""),
+            date: String(r.date ?? ""),
+            netBuy: Number(r.netBuy ?? r.net_buy ?? 0),
+            buyAmount: Number(r.buyAmount ?? r.buy_amount ?? 0),
+            sellAmount: Number(r.sellAmount ?? r.sell_amount ?? 0),
+            reason: r.reason as string | undefined,
+          };
+        });
         // 按净买额降序
         list.sort((a, b) => b.netBuy - a.netBuy);
         setEntries(list);

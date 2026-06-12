@@ -48,7 +48,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<any[]>("list_stock_analyses", { limit: 30 });
+      return invoke("list_stock_analyses", { limit: 30 }) as Promise<AnalysisRecord[]>;
     })
       .then((list) => {
         if (cancelled || !list) { return; }
@@ -248,7 +248,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
               size="small"
               dataSource={filtered}
               renderItem={(r) => {
-                let decision: any = null;
+                let decision: Record<string, unknown> | null = null;
                 try {
                   if (r.decisionJson) { decision = JSON.parse(r.decisionJson); }
                 } catch { /* */ }
@@ -260,10 +260,10 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                       decision && (
                         <Tag
                           key="act"
-                          color={getActionColor(decision.action)}
+                          color={getActionColor(decision.action as string)}
                           className="text-xs m-0"
                         >
-                          {decision.action}
+                          {decision.action as string}
                         </Tag>
                       ),
                       <Button

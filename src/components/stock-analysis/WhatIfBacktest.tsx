@@ -74,7 +74,7 @@ function clamp(value: number, min: number, max: number): number {
 
 async function computeDecisionBackend(params: PmInputParams): Promise<PmDecision | null> {
   try {
-    const result = await invoke<any>("compute_what_if", {
+    const result = await invoke("compute_what_if", {
       params: {
         totalScore: params.totalScore,
         dqiScore: params.dqiScore,
@@ -83,16 +83,16 @@ async function computeDecisionBackend(params: PmInputParams): Promise<PmDecision
         institutionalTrace: params.institutionalTrace,
         consensusScore: params.consensusScore,
       },
-    });
+    }) as Record<string, unknown>;
     if (result) {
       return {
-        decision: result.decision,
-        positionPct: Math.round(result.positionPct),
-        confidence: Math.round(result.confidence),
-        riskLevel: result.riskLevel,
-        stopLossPct: result.stopLossPct,
-        takeProfitPct: result.takeProfitPct,
-        reasoning: result.reasoning,
+        decision: result.decision as string,
+        positionPct: Math.round(result.positionPct as number),
+        confidence: Math.round(result.confidence as number),
+        riskLevel: result.riskLevel as string,
+        stopLossPct: result.stopLossPct as number,
+        takeProfitPct: result.takeProfitPct as number,
+        reasoning: result.reasoning as string,
       };
     }
   } catch (e) {
@@ -183,13 +183,13 @@ function computeDecisionLocal(params: PmInputParams): PmDecision {
  * Phase 5: 优先从 `params.portfolio-mgr.input_params` 读取（CodeNode 直接保存的
  * 原始 input_mapping 解析值快照），fallback 到从各上游节点 params 重建。
  */
-function extractParamsFromSnapshot(snapshot: Record<string, any>): PmInputParams {
+function extractParamsFromSnapshot(snapshot: Record<string, unknown>): PmInputParams {
   const params: PmInputParams = { ...DEFAULT_PARAMS };
 
   // Phase 5: 优先从 params.portfolio-mgr.input_params 读取
   // 这是 code_executor.rs 直接保存的 input_mapping 解析值快照
-  const pmParams = snapshot["params.portfolio-mgr"];
-  const inputParams = pmParams?.input_params;
+  const pmParams = snapshot["params.portfolio-mgr"] as Record<string, unknown> | undefined;
+  const inputParams = pmParams?.input_params as Record<string, unknown> | undefined;
   if (inputParams) {
     if (typeof inputParams.totalScore === "number") { params.totalScore = inputParams.totalScore; }
     if (typeof inputParams.dqiScore === "number") { params.dqiScore = inputParams.dqiScore; }
@@ -232,7 +232,7 @@ function extractParamsFromSnapshot(snapshot: Record<string, any>): PmInputParams
   return params;
 }
 
-function tryParseDecisionJson(input: any): any {
+function tryParseDecisionJson(input: unknown): unknown {
   if (!input) { return null; }
   // 可能是字符串 JSON，也可能是对象
   if (typeof input === "string") {
@@ -248,7 +248,7 @@ function tryParseDecisionJson(input: any): any {
 // ── UI 组件 ──
 
 /** 原始决策摘要 */
-function originalDecisionSummary(snapshot: Record<string, any>): PmDecision | null {
+function originalDecisionSummary(snapshot: Record<string, unknown>): PmDecision | null {
   // portfolio-mgr 的 output
   const pmOutput = snapshot["portfolio-mgr"];
   if (!pmOutput) { return null; }
@@ -282,7 +282,7 @@ export function WhatIfBacktest() {
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<Record<string, any> | null>(null);
+  const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
   const [originalDecision, setOriginalDecision] = useState<PmDecision | null>(null);
   const [params, setParams] = useState<PmInputParams>(DEFAULT_PARAMS);
   const [result, setResult] = useState<PmDecision | null>(null);
@@ -292,8 +292,11 @@ export function WhatIfBacktest() {
   // 加载历史分析列表
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    invoke<AnalysisRecord[]>("list_stock_analyses", { limit: 50, offset: 0 })
+    Promise.resolve().then(() => {
+      if (cancelled) { return; }
+      setLoading(true);
+      return invoke<AnalysisRecord[]>("list_stock_analyses", { limit: 50, offset: 0 });
+    })
       .then((list) => {
         if (!cancelled) {
           setRecords(list ?? []);
@@ -322,7 +325,7 @@ export function WhatIfBacktest() {
       .then((record) => {
         if (cancelled || !record) { return; }
         // 解析 blackboard_snapshot
-        let snap: Record<string, any> = {};
+        let snap: Record<string, unknown> = {};
         try {
           snap = JSON.parse(record.blackboardSnapshot ?? "{}");
         } catch { /* empty */ }
@@ -386,7 +389,7 @@ export function WhatIfBacktest() {
   const diffFields = useMemo(() => {
     if (!originalDecision || !result) { return []; }
     const fields: { label: string; before: string; after: string; changed: boolean }[] = [];
-    const add = (label: string, before: any, after: any) => {
+    const add = (label: string, before: unknown, after: unknown) => {
       const bs = String(before ?? "—");
       const as = String(after ?? "—");
       fields.push({ label, before: bs, after: as, changed: bs !== as });

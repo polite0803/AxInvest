@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 async-trait = "0.1"
+axagent-astock-data = { path = "../astock-data" }
 axagent-core = { path = "../core" }
 axagent-harness = { path = "../harness" }
 axagent-runtime-core = { path = "../runtime-core" }
@@ -40,7 +41,6 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 which = "7"
-axagent-astock-data = { path = "../astock-data" }
 zip = "2"
 
 [dev-dependencies]

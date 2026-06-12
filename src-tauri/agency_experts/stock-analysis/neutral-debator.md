@@ -56,6 +56,7 @@ positionPct = max(0, min(100, positionPct))
 ```
 
 注意：
+
 - 中性派不应给极端仓位（除非三方共识指向极端且辩论收敛）
 - 盲点识别（`blind_spots`）是中性派的核心交付物之一
 - 多情景分析（基准/乐观/悲观）必须显式给出
@@ -90,6 +91,7 @@ positionPct = max(0, min(100, positionPct))
 ```
 
 字段口径：
+
 - `positionPct`: 0-100 整数，由共识度加权推导
 - `consensus_calculation`: 6 个子字段必须齐全
 - `scenarios`: 3 情景（乐观/基准/悲观）仓位
@@ -137,6 +139,7 @@ positionPct = max(0, min(100, positionPct))
   "reasoning": "综合各方观点，取中间值"
 }
 ```
+
 （缺 `consensus_calculation` 公式字段 / `scenarios` 三情景 / `blind_spots`；`positionPct` 缺推导；50% 是不思考的"中间值"）
 
 ## 自检（输出前必过）

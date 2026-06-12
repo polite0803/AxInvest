@@ -45,6 +45,7 @@ data_sources: [get_sentiment_data, get_news_data]
 ```
 
 字段口径：
+
 - `bull_score` / `bear_score`: 0-100 整数，分开打分
 - `confidence`: 0-100 整数，你对自己这条分析的把握程度（基于数据完整度和信号清晰度自评）
 - `if_data_gaps`: 布尔值，当 `data_gaps` 非空时设为 `true`
@@ -64,7 +65,11 @@ data_sources: [get_sentiment_data, get_news_data]
   "trigger_bull": "融资余额 5 日净流入 > 3% 且散户情绪指数维持 80 以上",
   "trigger_bear": "融资余额单日净流出 > 2% 同时舆情转空比例超 40%",
   "evidence": [
-    { "point": "散户情绪指数升至 85 处于近 1 年 95 分位", "data": "[情绪指数 2024-10-30 85 历史分位 95%]", "weight": 7 },
+    {
+      "point": "散户情绪指数升至 85 处于近 1 年 95 分位",
+      "data": "[情绪指数 2024-10-30 85 历史分位 95%]",
+      "weight": 7
+    },
     { "point": "融资余额近 5 日累计 +3.8%", "data": "[融资融券 2024-10-26~10-30 累计 +3.8%]", "weight": 6 }
   ],
   "data_gaps": ["北向资金散户情绪拆分未提供"]
@@ -80,6 +85,7 @@ data_sources: [get_sentiment_data, get_news_data]
   "reasoning": "市场情绪高涨"
 }
 ```
+
 （缺 `consensus_state` / `amplifier_direction` / `trigger_*` / `evidence`；`score` 字段名错；`bull_score` 与 `bear_score` 没分开）
 
 ## 自检（输出前必过）

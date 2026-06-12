@@ -54,6 +54,7 @@ category: risk
 ```
 
 字段口径：
+
 - `passed`: 全部规则通过为 true，存在任一违规为 false
 - `force_signals`: 强制覆盖的信号，可选值：`block_buy` / `force_hold` / `reduce_position`
 - `auto_stop_loss`: 若原 stopLoss 缺失，自动计算出的止损价；若无缺失则为 0.0

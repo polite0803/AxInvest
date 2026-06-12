@@ -49,6 +49,7 @@ data_sources: [get_news_data, get_announcement_data]
 ```
 
 字段口径：
+
 - `catalyst_type`: 当期最主导的消息类型（不是消息面整体）
 - `key_events[*].stance`: 多/中/空三类之一
 - `regulatory_risk`: A 股特色字段，问询函/立案/警示函等出现时填"高"
@@ -61,8 +62,18 @@ data_sources: [get_news_data, get_announcement_data]
 {
   "catalyst_type": "公司基本面",
   "key_events": [
-    { "event": "三季报归母净利润同比 +58% 超出市场一致预期 12%", "stance": "多头", "weight": 8, "source": "[公司公告 2024-10-28]" },
-    { "event": "收到交易所问询函要求说明应收账款激增原因", "stance": "空头", "weight": 6, "source": "[交易所 2024-10-25]" }
+    {
+      "event": "三季报归母净利润同比 +58% 超出市场一致预期 12%",
+      "stance": "多头",
+      "weight": 8,
+      "source": "[公司公告 2024-10-28]"
+    },
+    {
+      "event": "收到交易所问询函要求说明应收账款激增原因",
+      "stance": "空头",
+      "weight": 6,
+      "source": "[交易所 2024-10-25]"
+    }
   ],
   "regulatory_risk": "中",
   "bull_score": 6,
@@ -70,7 +81,11 @@ data_sources: [get_news_data, get_announcement_data]
   "trigger_bull": "问询函在 5 个交易日内完成回复且会计师出具无保留意见",
   "trigger_bear": "问询函延期回复或被立案调查",
   "evidence": [
-    { "point": "Q3 业绩超预期但应收账款增速 95% > 营收增速 58%", "data": "[财报 2024Q3 应收 +95% 营收 +58%]", "weight": 7 }
+    {
+      "point": "Q3 业绩超预期但应收账款增速 95% > 营收增速 58%",
+      "data": "[财报 2024Q3 应收 +95% 营收 +58%]",
+      "weight": 7
+    }
   ],
   "data_gaps": ["问询函具体问询条目未提供"]
 }
@@ -85,6 +100,7 @@ data_sources: [get_news_data, get_announcement_data]
   "verdict": "短期偏多"
 }
 ```
+
 （缺 `catalyst_type` / `key_events` 结构化字段 / `regulatory_risk` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开）
 
 ## 自检（输出前必过）

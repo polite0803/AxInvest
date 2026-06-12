@@ -52,6 +52,7 @@ title: 多方质询 (R2)
 ```
 
 字段口径：
+
 - `cross_examination`: 恰好 3 条
 - `weakness_type`: 5 选 1 枚举
 - `questions`: 每条 1-2 个问题；问题必须以"如果 X 发生则你的论点 Y 是否成立"的可证伪形式
@@ -102,6 +103,7 @@ title: 多方质询 (R2)
   "verdict": "空方论据不充分"
 }
 ```
+
 （缺 `target_claim_ref` 锚定具体论点 / `weakness_type` 分类 / `if_unanswered_impact` 边际影响；问题是开放反问不是可证伪；3 条结构缺失；`verdict` 是判决不是质询）
 
 ## 自检（输出前必过）

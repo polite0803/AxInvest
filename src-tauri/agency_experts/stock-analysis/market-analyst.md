@@ -46,6 +46,7 @@ data_sources: [get_stock_kline, get_industry_ranking]
 ```
 
 字段口径：
+
 - `bull_score` / `bear_score`: 0-100 整数，分开打分（不是总分）
 - `confidence`: 0-100 整数，你对自己这条分析的把握程度（基于数据完整度和信号清晰度自评）
 - `if_data_gaps`: 布尔值，当 `data_gaps` 非空时设为 `true`
@@ -69,7 +70,11 @@ data_sources: [get_stock_kline, get_industry_ranking]
   "trigger_bear": "缩量跌破 28.5 元且板块同步走弱",
   "evidence": [
     { "point": "近 20 日价格区间收敛至 28.5-32.0", "data": "[行情 K线 2024-10-01~10-30 区间 28.5~32.0]", "weight": 6 },
-    { "point": "近 5 日成交量较 20 日均量缩 35%", "data": "[行情 成交量 2024-10-26~10-30 5日均量 vs 20日均量 -35%]", "weight": 7 }
+    {
+      "point": "近 5 日成交量较 20 日均量缩 35%",
+      "data": "[行情 成交量 2024-10-26~10-30 5日均量 vs 20日均量 -35%]",
+      "weight": 7
+    }
   ],
   "data_gaps": ["融资融券变化未在上下文提供"]
 }
@@ -84,6 +89,7 @@ data_sources: [get_stock_kline, get_industry_ranking]
   "reasoning": "股价稳步上涨，看好后市"
 }
 ```
+
 （缺 `key_levels` / `volume_signal` / `trigger_*` / `evidence`；`score` 字段不叫这个名字；没给 `bear_score`）
 
 ## 自检（输出前必过）

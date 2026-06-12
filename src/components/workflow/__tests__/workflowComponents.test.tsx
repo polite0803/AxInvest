@@ -183,7 +183,7 @@ vi.mock("@/stores", () => ({
   useWorkflowEditorStore: storeMockRef,
 }));
 
-vi.mock("reactflow", () => ({
+vi.mock("@xyflow/react", () => ({
   useReactFlow: () => ({
     getNodes: () => [],
     getEdges: () => [],

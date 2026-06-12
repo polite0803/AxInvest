@@ -48,6 +48,7 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
 ```
 
 字段口径：
+
 - `main_flow_state`: 5 个枚举值之一，必须是趋势（不是单日）
 - `active_player`: 当前最主导的资金性质
 - `dragon_tiger_signal`: 龙虎榜信号分类（不是简单"看多/看空"）
@@ -83,6 +84,7 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
   "verdict": "主力看好"
 }
 ```
+
 （缺 `main_flow_state` 趋势字段 / `active_player` / `dragon_tiger_signal` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没说清是机构还是游资）
 
 ## 自检（输出前必过）

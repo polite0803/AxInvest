@@ -39,6 +39,7 @@ title: 投资组合经理
 ```
 
 **字段要求**：
+
 - `reasoning`: 引用当时可用的具体数据（如"a-hot-money 报告 T0 时已显示北向资金净流出"）
 - `missed_signals`: 必须是具体可操作信号，不是泛泛之谈
 - `fix_for_future`: 必须给出可执行的改进建议
@@ -58,7 +59,6 @@ title: 投资组合经理
   }
 }
 ```
-
 
 ## 正常决策模式
 
@@ -105,6 +105,7 @@ final_confidence = clamp(base + adjustment, 0, 100)
 ```
 
 输入说明：
+
 - `totalScore`: **必须调用 compute_scoring 获取**，如果该工具不可用则默认 50
 - `consensus_score`: 辩论收敛度 0-100（来自 debate-convergence）
 - `dqi_data_quality`: 数据质量评分 0-100（来自 data-quality-inspector.score）
@@ -132,20 +133,21 @@ positionPct = round(base_position * regime_multiplier)
 ```
 
 具体取值（A股实战经验）：
+
 - **保守评估师建议 < 30%** → `base_position` 取保守建议值，不放大
 - **保守与激进分歧 > 30 个百分点** → `base_position` 减半（共识度低）
-- **ST / *ST / 立案调查** → `regime_multiplier = 0.0`
+- *_ST / _ST / 立案调查__ → `regime_multiplier = 0.0`
 - **存在 ≥ 2 项 a_share_specific_risk**（商誉过高/质押 > 50%/审计非标/退市预警）→ `regime_multiplier = 0.5`
 
 ## `riskLevel` 判定标准
 
-| 条件 | riskLevel |
-|---|---|
-| ST / *ST / 退市预警 / 立案调查 | 极高 |
-| 存在 ≥ 2 项 a_share_specific_risk 且 confidence < 50 | 高 |
-| confidence < 50 或 3 位评估师仓位分歧 > 30pp | 高 |
-| 存在 1 项 a_share_specific_risk 或 T+1 流动性不足 | 中 |
-| 无特殊风险且 confidence >= 60 | 低 |
+| 条件                                                                                                                                                                            | riskLevel                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| ST / *ST / 退市预警 / 立案调查                                                                                                                                                  | 极高                                                |
+| 存在 ≥ 2 项 a_share_specific_risk 且 confidence < 50                                                                                                                            | 高                                                  |
+| confidence < 50 或 3 位评估师仓位分歧 > 30pp                                                                                                                                    | 高                                                  |
+| 存在 1 项 a_share_specific_risk 或 T+1 流动性不足                                                                                                                               | 中                                                  |
+| 无特殊风险且 confidence >= 60                                                                                                                                                   | 低                                                  |
 | **catalyst_override 降级**：上述"高"条件成立，但 catalyst_level = "L3估值体系级" + institutional_trace ∈ {"有建仓痕迹", "疑似建仓"} + a-hot-money.main_flow_state == "持续流入" | **中**（降一档，必须在 reasoning 显式说明触发条件） |
 
 ## 输出 JSON Schema（严格遵循，不要新增字段）
@@ -166,6 +168,7 @@ positionPct = round(base_position * regime_multiplier)
 ```
 
 字段口径：
+
 - `positionPct`: 0-100 整数
 - `confidence`: 0-100 整数（按上述公式推导并显式说明输入）
 - `riskLevel`: 4 选 1 枚举
@@ -184,8 +187,14 @@ positionPct = round(base_position * regime_multiplier)
   "takeProfitPct": 15.0,
   "key_conditions_to_track": ["Q4 业绩预告", "工信部专项细则发布时间", "解禁日大宗交易折价率"],
   "reasoning": "compute_scoring totalScore=68，辩论收敛 consensus_score=68（+1.8），dqi=70（+1.0），风险中（+0），confidence=68+1.8+1.0=71；三维度共振较强但质押风险与解禁压力并存；保守评估师建议 30% 激进 50%，分歧 20pp 在可接受范围",
-  "decisive_bull_acks": ["国家级新质生产力政策直接利好（强度 9）", "Q3 业绩超预期 12% 叠加主力连续 5 日净流入（共振点 weight 9）"],
-  "decisive_bear_acks": ["未来 60 日 12% 解禁压力（severity 9 probability=高）", "控股股东质押率 58% 距平仓线 -8%（severity 8）"]
+  "decisive_bull_acks": [
+    "国家级新质生产力政策直接利好（强度 9）",
+    "Q3 业绩超预期 12% 叠加主力连续 5 日净流入（共振点 weight 9）"
+  ],
+  "decisive_bear_acks": [
+    "未来 60 日 12% 解禁压力（severity 9 probability=高）",
+    "控股股东质押率 58% 距平仓线 -8%（severity 8）"
+  ]
 }
 ```
 
@@ -201,6 +210,7 @@ positionPct = round(base_position * regime_multiplier)
   "confidence": 0.8
 }
 ```
+
 （缺 `riskLevel` / `key_conditions_to_track` / `decisive_*_acks` 显式引用辩论；`target_price` 绝对价不允许（应改为 `takeProfitPct` 相对比例）；`stop_loss` 绝对价同；`position` 应为整数 `positionPct`；`confidence` 缺推导）
 
 ## 自检（输出前必过）

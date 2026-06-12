@@ -105,7 +105,13 @@ const LazyStockAnalysisSettings = lazy(() =>
 );
 // 工作流设置 — 上游使用 WorkflowEditor 作为设置页入口
 const LazyWorkflowEditor = lazy(() => import("@/components/workflow").then((m) => ({ default: m.WorkflowEditor })));
-const LazyReactFlowProvider = lazy(() => import("reactflow").then((m) => ({ default: m.ReactFlowProvider })));
+const LazyReactFlowProvider = lazy(() =>
+  import("@xyflow/react").then((m) => ({
+    default:
+      (({ children }: { children: React.ReactNode }) => <m.ReactFlowProvider>{children}
+      </m.ReactFlowProvider>) as React.ComponentType<{ children?: React.ReactNode }>,
+  }))
+);
 
 function SectionFallback() {
   return (

@@ -50,6 +50,7 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
 ```
 
 字段口径：
+
 - `moat_score_ref` / `f_score_ref`: 0-100 / 0-9，整数，直接引用系统预计算
 - `safety_margin_pct`: 0-100 浮点（如 28.5 表示 28.5%），可负数（无安全边际）
 - `a_share_specific_risk`: 数组，可空 `[]`，每项是枚举值
@@ -71,7 +72,11 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
   "trigger_bull": "Q4 应收账款周转天数回到行业均值 + 商誉减值测试通过",
   "trigger_bear": "商誉减值计提 > 净利润 30% 或年报被审计非标",
   "evidence": [
-    { "point": "近 3 年 ROE 稳定 15-18% 毛利率 38%", "data": "[财报 2022~2024 ROE均值 16.2% 毛利率均值 38%]", "weight": 7 },
+    {
+      "point": "近 3 年 ROE 稳定 15-18% 毛利率 38%",
+      "data": "[财报 2022~2024 ROE均值 16.2% 毛利率均值 38%]",
+      "weight": 7
+    },
     { "point": "当前 PE 22 处于近 5 年 30 分位", "data": "[估值 2024-10-30 PE_TTM 22 历史分位 30%]", "weight": 6 }
   ],
   "data_gaps": ["Q4 业绩预告未发布"]
@@ -88,6 +93,7 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
   "score": 8
 }
 ```
+
 （缺 `quality_signal` / `moat_score_ref` / `f_score_ref` / `safety_margin_pct` / `a_share_specific_risk` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；直接给"买入"结论越权）
 
 ## 自检（输出前必过）

@@ -606,7 +606,9 @@ async fn run_stock_workflow_inner(
         .await
         .ok()
         .and_then(|klines| {
-            if klines.is_empty() { return None; }
+            if klines.is_empty() {
+                return None;
+            }
             let r = axagent_stock_analysis::market_regime::classify_regime(&klines);
             Some(serde_json::json!({
                 "regime": r.regime,
@@ -1088,8 +1090,8 @@ async fn fetch_similar_cases(stock_code: &str, db: &sea_orm::DatabaseConnection)
 }
 /// 从 stock_reflections 表查询该股最近的结构化反思教训（错因/被忽视信号/改进建议），返回格式化文本。
 async fn fetch_stock_lessons(stock_code: &str, db: &sea_orm::DatabaseConnection) -> Option<String> {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
     use chrono::Utc;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
     let three_months_ago = Utc::now() - chrono::Duration::days(90);
     let all = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::StockCode.eq(stock_code))
@@ -1099,7 +1101,9 @@ async fn fetch_stock_lessons(stock_code: &str, db: &sea_orm::DatabaseConnection)
         .await
         .unwrap_or_default();
     let lessons: Vec<_> = all.into_iter().take(3).collect();
-    if lessons.is_empty() { return None; }
+    if lessons.is_empty() {
+        return None;
+    }
     let mut lines: Vec<String> = Vec::new();
     for (i, l) in lessons.iter().enumerate() {
         lines.push(format!("#{} 反思于 {}", i + 1, l.hindsight_date));

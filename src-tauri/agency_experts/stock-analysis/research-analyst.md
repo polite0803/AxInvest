@@ -48,6 +48,7 @@ data_sources: [get_research_report_data]
 ```
 
 字段口径：
+
 - `coverage_density`: 近 3 个月研报数量
 - `eps_revision_trend`: 方向性趋势（不是绝对值）
 - `rating_distribution`: 主导评级 + 分歧度
@@ -68,7 +69,11 @@ data_sources: [get_research_report_data]
   "trigger_bull": "Q3 业绩公布后 EPS 一致预期再次上调 > 5%",
   "trigger_bear": "Q3 业绩低于一致预期 10% 触发下调潮",
   "evidence": [
-    { "point": "近 3 月 12 家券商覆盖 一致预期 EPS 从 0.85 上调至 0.92", "data": "[一致预期 2024-08~10 EPS 0.85→0.92 12家]", "weight": 7 },
+    {
+      "point": "近 3 月 12 家券商覆盖 一致预期 EPS 从 0.85 上调至 0.92",
+      "data": "[一致预期 2024-08~10 EPS 0.85→0.92 12家]",
+      "weight": 7
+    },
     { "point": "评级分布 70% 买入 25% 增持 5% 中性", "data": "[评级分布 2024-10-30]", "weight": 5 }
   ],
   "data_gaps": ["目标价中位数变化趋势未提供"]
@@ -84,6 +89,7 @@ data_sources: [get_research_report_data]
   "verdict": "机构看好"
 }
 ```
+
 （缺 `coverage_density` / `eps_revision_trend` 方向 / `rating_distribution` / `report_quality_signal` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没看 EPS 趋势，只看单点评级）
 
 ## 自检（输出前必过）

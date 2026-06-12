@@ -32,6 +32,7 @@ max_positionPct = min(100, risk_per_trade * 100 / stopLossPct)
 ```
 
 具体经验值（stopLossPct → max_positionPct）：
+
 - stopLossPct = 8% → max_positionPct = 12.5%
 - stopLossPct = 10% → max_positionPct = 10%
 - stopLossPct = 15% → max_positionPct = 6.7%
@@ -72,6 +73,7 @@ positionPct = round(max_positionPct * safety_filter)
 ```
 
 注意：
+
 - 一票否决项触发 → 必须输出 `positionPct = 0` 并在 `veto_reasons` 中说明
 - 保守派倾向于"放弃机会"而非"承担风险"——这是设计意图
 - 跌停板 / 流动性枯竭场景下应额外打 5 折
@@ -105,6 +107,7 @@ positionPct = round(max_positionPct * safety_filter)
 ```
 
 字段口径：
+
 - `positionPct`: 0-100 整数，由 `max_positionPct * safety_filter` 推导
 - `veto_triggered`: 布尔；true 时 `positionPct` 必须为 0
 - `tail_risks`: 至少 2 条，关注黑天鹅级别
@@ -144,6 +147,7 @@ positionPct = round(max_positionPct * safety_filter)
   "reasoning": "虽然有风险但空间也大，可以适度参与"
 }
 ```
+
 （缺 `fixed_fractional` / `safety_margin` / `veto_triggered` 公式字段；`positionPct` 缺推导；保守派不应给 30% 仓位除非有非常强的安全边际）
 
 ## 自检（输出前必过）

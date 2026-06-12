@@ -99,15 +99,26 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
         }
     "#;
 
-    let result: rhai::Dynamic = engine.eval_with_scope(&mut scope, code).map_err(|e| format!("Rhai execution failed: {e}"))?;
+    let result: rhai::Dynamic = engine
+        .eval_with_scope(&mut scope, code)
+        .map_err(|e| format!("Rhai execution failed: {e}"))?;
 
     // 转换结果为 WhatIfResult
-    let result_map = result.clone().try_cast::<rhai::Map>().ok_or("Result is not a map")?;
+    let result_map = result
+        .clone()
+        .try_cast::<rhai::Map>()
+        .ok_or("Result is not a map")?;
     let get_str = |key: &str| -> String {
-        result_map.get(&key.into()).and_then(|v| v.clone().try_cast::<String>().ok()).unwrap_or_default()
+        result_map
+            .get(&key.into())
+            .and_then(|v| v.clone().try_cast::<String>().ok())
+            .unwrap_or_default()
     };
     let get_f64 = |key: &str| -> f64 {
-        result_map.get(&key.into()).and_then(|v| v.as_float()).unwrap_or(0.0)
+        result_map
+            .get(&key.into())
+            .and_then(|v| v.as_float())
+            .unwrap_or(0.0)
     };
 
     Ok(WhatIfResult {
@@ -158,22 +169,22 @@ pub async fn replay_tool_chain(
     let client = Arc::new(AStockClient::new());
 
     // ── 获取实时数据 ──
-    let (klines, quote) = tokio::join!(
-        client.get_klines(code, "daily", 120),
-        client.get_quote(code),
-    );
+    let (klines, quote) =
+        tokio::join!(client.get_klines(code, "daily", 120), client.get_quote(code),);
     let klines = klines.map_err(|e| format!("Failed to get klines: {e}"))?;
     let quote = quote.map_err(|e| format!("Failed to get quote: {e}"))?;
 
     // ── 从 _template_vars 读取参数（用覆盖值替换默认值） ──
     let tv = |key: &str, default: f64| -> f64 {
-        params.config_overrides
+        params
+            .config_overrides
             .get(key)
             .and_then(|v| v.as_f64())
             .unwrap_or(default)
     };
     let tv_str = |key: &str, default: &str| -> String {
-        params.config_overrides
+        params
+            .config_overrides
             .get(key)
             .and_then(|v| v.as_str())
             .unwrap_or(default)
@@ -192,30 +203,67 @@ pub async fn replay_tool_chain(
     let catalyst_score = tv("catalyst_analyst_score", 50.0);
 
     let trend_score = match ind.ma_alignment.as_str() {
-        "多头排列" => 90.0, "弱多头" => 70.0, "缠绕/交叉" => 50.0, "空头排列" => 30.0, _ => 50.0,
+        "多头排列" => 90.0,
+        "弱多头" => 70.0,
+        "缠绕/交叉" => 50.0,
+        "空头排列" => 30.0,
+        _ => 50.0,
     };
     let bias_avg = (ind.bias_ma5.abs() + ind.bias_ma20.abs()) / 2.0;
-    let deviation_score = if bias_avg < 2.0 { 80.0 } else if bias_avg < 5.0 { 60.0 }
-        else if bias_avg < 10.0 { 40.0 } else { 20.0 };
+    let deviation_score = if bias_avg < 2.0 {
+        80.0
+    } else if bias_avg < 5.0 {
+        60.0
+    } else if bias_avg < 10.0 {
+        40.0
+    } else {
+        20.0
+    };
     let macd_score = match ind.macd_signal.as_str() {
-        "金叉" => 90.0, "多头运行" => 70.0, "死叉" => 30.0, "空头运行" => 20.0, _ => 50.0,
+        "金叉" => 90.0,
+        "多头运行" => 70.0,
+        "死叉" => 30.0,
+        "空头运行" => 20.0,
+        _ => 50.0,
     };
     let volume_score = match ind.volume_signal.as_str() {
-        "放量突破" => 95.0, "放量上涨" => 90.0, "缩量回调" => 60.0,
-        "正常" => 50.0, "缩量上涨" => 40.0, "放量下跌" => 20.0, _ => 50.0,
+        "放量突破" => 95.0,
+        "放量上涨" => 90.0,
+        "缩量回调" => 60.0,
+        "正常" => 50.0,
+        "缩量上涨" => 40.0,
+        "放量下跌" => 20.0,
+        _ => 50.0,
     };
-    let rsi_score = if ind.rsi6 > 80.0 { 25.0 } else if ind.rsi6 > 70.0 { 45.0 }
-        else if ind.rsi6 > 50.0 { 75.0 } else if ind.rsi6 > 30.0 { 55.0 } else { 80.0 };
+    let rsi_score = if ind.rsi6 > 80.0 {
+        25.0
+    } else if ind.rsi6 > 70.0 {
+        45.0
+    } else if ind.rsi6 > 50.0 {
+        75.0
+    } else if ind.rsi6 > 30.0 {
+        55.0
+    } else {
+        80.0
+    };
     let support_score = if !ind.support_levels.is_empty() && !ind.resistance_levels.is_empty() {
         let d_s = (quote.price - ind.support_levels[0]).abs();
         let d_r = (ind.resistance_levels[0] - quote.price).abs();
         let t = d_s + d_r;
         if t > 0.0 { (d_s / t) * 100.0 } else { 50.0 }
-    } else { 50.0 };
-    let base = trend_score * w_trend / 100.0 + deviation_score * w_deviation / 100.0
-        + macd_score * w_macd / 100.0 + volume_score * w_volume / 100.0
-        + rsi_score * w_rsi / 100.0 + support_score * w_support / 100.0;
-    let total_score = (base * 0.7 + catalyst_score * 0.3).round().min(100.0).max(0.0);
+    } else {
+        50.0
+    };
+    let base = trend_score * w_trend / 100.0
+        + deviation_score * w_deviation / 100.0
+        + macd_score * w_macd / 100.0
+        + volume_score * w_volume / 100.0
+        + rsi_score * w_rsi / 100.0
+        + support_score * w_support / 100.0;
+    let total_score = (base * 0.7 + catalyst_score * 0.3)
+        .round()
+        .min(100.0)
+        .max(0.0);
 
     let score_details = serde_json::json!({
         "trendScore": trend_score, "deviationScore": deviation_score,
@@ -228,7 +276,9 @@ pub async fn replay_tool_chain(
 
     // ── 2. compute_valuation（简化版：基于 F-Score 和 PE 的基本估值判断）──
     let fscore = tv("fscore_buy_threshold", 7.0) as i64;
-    let pe_pct = quote.pe_ttm.as_ref()
+    let pe_pct = quote
+        .pe_ttm
+        .as_ref()
         .and_then(|pe| client.get_pe_percentile(code, *pe).await.ok())
         .flatten()
         .unwrap_or(50.0);
@@ -241,7 +291,13 @@ pub async fn replay_tool_chain(
     let max_dd = tv("risk_max_drawdown_limit", 20.0);
     let hhi_limit = tv("risk_hhi_concentrated", 0.25);
     let kelly_f = tv("kelly_fraction", 0.5);
-    let overall_risk = if max_dd > 25.0 { "高" } else if max_dd > 15.0 { "中" } else { "低" };
+    let overall_risk = if max_dd > 25.0 {
+        "高"
+    } else if max_dd > 15.0 {
+        "中"
+    } else {
+        "低"
+    };
     let risk_result = serde_json::json!({
         "overallRisk": overall_risk, "maxDrawdownLimit": max_dd,
         "hhiLimit": hhi_limit, "kellyFraction": kelly_f,
@@ -1208,7 +1264,13 @@ pub async fn generate_daily_review(state: State<'_, AppState>) -> Result<DailyRe
         }
     }
 
-    PostCloseReview::generate(&state.astock_client, &watchlist, &triggered_alerts, state.harness.db()).await
+    PostCloseReview::generate(
+        &state.astock_client,
+        &watchlist,
+        &triggered_alerts,
+        state.harness.db(),
+    )
+    .await
 }
 
 // ── Scoring Weights Optimization ──

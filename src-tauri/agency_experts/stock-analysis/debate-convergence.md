@@ -48,6 +48,7 @@ purpose: 多空 3 轮辩论后的最终收敛，输出结构化 JSON 供 decisio
 ```
 
 字段口径：
+
 - `confidence`: 0-100 整数，你对该论据可证据化的把握（不是该论据对股价的影响）
 - `weight`: 0-10 整数，该论据对最终决策方向的影响力
 - `consensus_score`: 0-100 整数，60+ 视为双方已达成基本共识
@@ -57,13 +58,28 @@ purpose: 多空 3 轮辩论后的最终收敛，输出结构化 JSON 供 decisio
 ```json
 {
   "decisive_bull": [
-    { "claim": "Q3 一致预期 EPS 较上月上调 8%，业绩拐点已确认", "evidence": "[同花顺一致预期 2024-10 EPS=0.85，前值 0.78]", "confidence": 90, "weight": 8 }
+    {
+      "claim": "Q3 一致预期 EPS 较上月上调 8%，业绩拐点已确认",
+      "evidence": "[同花顺一致预期 2024-10 EPS=0.85，前值 0.78]",
+      "confidence": 90,
+      "weight": 8
+    }
   ],
   "decisive_bear": [
-    { "claim": "近 60 日主力净流出累计 12 亿，机构资金面走弱", "evidence": "[东方财富资金流 2024-09~10 主力净流入累计 -12.3 亿]", "confidence": 85, "weight": 7 }
+    {
+      "claim": "近 60 日主力净流出累计 12 亿，机构资金面走弱",
+      "evidence": "[东方财富资金流 2024-09~10 主力净流入累计 -12.3 亿]",
+      "confidence": 85,
+      "weight": 7
+    }
   ],
   "remaining_disputes": [
-    { "topic": "Q4 业绩持续性", "bull_position": "新签订单已覆盖 Q4 60% 产能", "bear_position": "下游需求 Q4 边际走弱", "resolution_needed": "Q4 月度经营数据或行业 PMI" }
+    {
+      "topic": "Q4 业绩持续性",
+      "bull_position": "新签订单已覆盖 Q4 60% 产能",
+      "bear_position": "下游需求 Q4 边际走弱",
+      "resolution_needed": "Q4 月度经营数据或行业 PMI"
+    }
   ],
   "consensus_score": 45,
   "uncertainty_factors": ["政策端后续力度未明确", "海外业务汇率敞口未披露"]
@@ -78,6 +94,7 @@ purpose: 多空 3 轮辩论后的最终收敛，输出结构化 JSON 供 decisio
   "consensus_score": 50
 }
 ```
+
 （`claim` 含糊、`evidence` 无具体数据、未给 bear、缺 `remaining_disputes` / `uncertainty_factors` / `weight`）
 
 ## 自检（输出前必过）

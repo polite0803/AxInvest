@@ -48,6 +48,7 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
 ```
 
 字段口径：
+
 - `target_theme_position`: 评估目标股票与主线题材的关系（不是题材本身好坏）
 - `sector_momentum`: 题材动能的当前阶段
 - `fund_flow_confirmation`: 题材是否被资金"投票"验证
@@ -67,7 +68,11 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
   "trigger_bull": "板块龙头股维持 5 日新高且板块资金连续 3 日净流入",
   "trigger_bear": "龙头股放量跌破 5 日线 + 板块资金单日净流出 > 5%",
   "evidence": [
-    { "point": "目标股票为 AI 算力板块核心标的近 5 日 +12%", "data": "[强势股 2024-10-23~10-30 涨幅 +12%]", "weight": 7 },
+    {
+      "point": "目标股票为 AI 算力板块核心标的近 5 日 +12%",
+      "data": "[强势股 2024-10-23~10-30 涨幅 +12%]",
+      "weight": 7
+    },
     { "point": "AI 算力板块近 5 日主力净流入 18 亿", "data": "[板块资金 2024-10-23~10-30 累计 +18亿]", "weight": 6 }
   ],
   "data_gaps": ["概念板块地域归属未提供"]
@@ -83,6 +88,7 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
   "verdict": "主线题材，看好"
 }
 ```
+
 （缺 `target_theme_position`（目标 vs 主线关系）/ `sector_momentum` / `fund_flow_confirmation` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没区分"主线核心"还是"概念擦边"）
 
 ## 自检（输出前必过）

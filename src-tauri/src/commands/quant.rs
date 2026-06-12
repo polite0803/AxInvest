@@ -18,7 +18,7 @@ use crate::AppState;
 use axagent_core::entity::{quant_paper_trades, quant_runs, quant_signals, quant_strategies};
 use axagent_quant::prelude::{
     BacktestConfig, BacktestEngine, BacktestResult, Bar, BollingerStrategy as BollStrategyAlias,
-    MacdStrategy, MaCrossStrategy, MatcherConfig, MetricsReport, RhaiStrategy, RsiStrategy,
+    MaCrossStrategy, MacdStrategy, MatcherConfig, MetricsReport, RhaiStrategy, RsiStrategy,
     Strategy, StrategyCtx, TurtleStrategy, WalkForward, WalkForwardConfig,
 };
 
@@ -43,7 +43,13 @@ pub struct StrategyListItem {
 fn builtin_strategy_items() -> Vec<StrategyListItem> {
     let now = Utc::now().timestamp();
     vec![
-        builtin_item("builtin.ma_cross", "MA Cross", "5/20 均线交叉", MaCrossStrategy::default(), now),
+        builtin_item(
+            "builtin.ma_cross",
+            "MA Cross",
+            "5/20 均线交叉",
+            MaCrossStrategy::default(),
+            now,
+        ),
         builtin_item("builtin.macd", "MACD", "MACD 金叉死叉", MacdStrategy::default(), now),
         builtin_item("builtin.rsi", "RSI", "RSI 超买超卖", RsiStrategy::default(), now),
         builtin_item("builtin.boll", "Bollinger", "布林带突破", BollStrategyAlias::default(), now),
@@ -51,13 +57,7 @@ fn builtin_strategy_items() -> Vec<StrategyListItem> {
     ]
 }
 
-fn builtin_item(
-    id: &str,
-    name: &str,
-    desc: &str,
-    s: impl Strategy,
-    now: i64,
-) -> StrategyListItem {
+fn builtin_item(id: &str, name: &str, desc: &str, s: impl Strategy, now: i64) -> StrategyListItem {
     StrategyListItem {
         id: id.to_string(),
         name: name.to_string(),
@@ -205,19 +205,12 @@ pub async fn quant_backtest_run(
     // ── 2. 拉 K 线（取 ~2 年前复权日 K） ──
     let klines_with_quotes = state
         .astock_client
-        .get_klines_with_adj(
-            &request.code,
-            axagent_astock_data::AdjType::Forward,
-            "daily",
-        )
+        .get_klines_with_adj(&request.code, axagent_astock_data::AdjType::Forward, "daily")
         .await
         .map_err(|e| format!("get_klines failed for {}: {e}", request.code))?;
 
     if klines_with_quotes.is_empty() {
-        return Err(format!(
-            "股票 {} 无 K 线数据",
-            request.code
-        ));
+        return Err(format!("股票 {} 无 K 线数据", request.code));
     }
 
     // 合并 KLine + StockQuote → Bar
@@ -227,15 +220,14 @@ pub async fn quant_backtest_run(
             Some(q) => Bar::from_kline_with_quote(&request.code, k, q),
             None => Bar::from_kline(&request.code, k),
         })
-        .filter(|b| b.date.as_str() >= request.start_date.as_str()
-            && b.date.as_str() <= request.end_date.as_str())
+        .filter(|b| {
+            b.date.as_str() >= request.start_date.as_str()
+                && b.date.as_str() <= request.end_date.as_str()
+        })
         .collect();
 
     if bars.is_empty() {
-        return Err(format!(
-            "区间 {}-{} 无数据",
-            request.start_date, request.end_date
-        ));
+        return Err(format!("区间 {}-{} 无数据", request.start_date, request.end_date));
     }
 
     // ── 3. 写 quant_runs (pending → running) ──
@@ -251,8 +243,8 @@ pub async fn quant_backtest_run(
         end_date: Some(request.end_date.clone()),
     };
 
-    let config_json = serde_json::to_string(&bt_config)
-        .map_err(|e| format!("serialize BacktestConfig: {e}"))?;
+    let config_json =
+        serde_json::to_string(&bt_config).map_err(|e| format!("serialize BacktestConfig: {e}"))?;
 
     let run_active = quant_runs::ActiveModel {
         id: Set(run_id.clone()),
@@ -316,7 +308,7 @@ pub async fn quant_backtest_run(
                         // rhai fold：编译源（这里拿不到原始脚本，需要先读 DB）
                         // 为安全起见，使用 default 工厂（M1 简化：rhai 不走 WF grid）
                         Box::new(MaCrossStrategy::default())
-                    }
+                    },
                     _ => Box::new(MaCrossStrategy::default()),
                 };
                 for (k, v) in &params {
@@ -342,7 +334,10 @@ pub async fn quant_backtest_run(
             action: Set(format!("{:?}", sig.action).to_lowercase()),
             strength: Set(sig.strength),
             reason: Set(Some(sig.reason.clone())),
-            close_reason: Set(sig.close_reason.as_ref().map(|c| format!("{c:?}").to_lowercase())),
+            close_reason: Set(sig
+                .close_reason
+                .as_ref()
+                .map(|c| format!("{c:?}").to_lowercase())),
             timestamp: Set(sig.timestamp.clone()),
             created_at: Set(Utc::now().timestamp()),
         })
@@ -391,8 +386,8 @@ pub async fn quant_backtest_run(
     // ── 8. 算指标 + 更新 run (completed) ──
     let metrics = MetricsReport::from_backtest_result(&result, 0.025);
 
-    let result_json = serde_json::to_string(&result)
-        .map_err(|e| format!("serialize BacktestResult: {e}"))?;
+    let result_json =
+        serde_json::to_string(&result).map_err(|e| format!("serialize BacktestResult: {e}"))?;
 
     let now_ts = Utc::now().timestamp();
     let mut run_update: quant_runs::ActiveModel = quant_runs::Entity::find_by_id(&run_id)
@@ -466,7 +461,7 @@ async fn build_strategy(
                 }
             }
             Ok(Box::new(s))
-        }
+        },
         other => Err(format!("未知 strategy_type: {other}")),
     }
 }
@@ -513,10 +508,7 @@ pub async fn quant_metrics_compare(
         .all(state.harness.db())
         .await
         .map_err(|e| format!("query strategies: {e}"))?;
-    let name_map: HashMap<String, String> = strats
-        .into_iter()
-        .map(|s| (s.id, s.name))
-        .collect();
+    let name_map: HashMap<String, String> = strats.into_iter().map(|s| (s.id, s.name)).collect();
 
     let mut results: Vec<RunWithMetrics> = Vec::new();
     for run in &runs {
@@ -549,7 +541,10 @@ pub async fn quant_metrics_compare(
             if best_sharpe.map(|(v, _)| m.sharpe > v).unwrap_or(true) {
                 best_sharpe = Some((m.sharpe, id));
             }
-            if best_return.map(|(v, _)| m.annualized_return > v).unwrap_or(true) {
+            if best_return
+                .map(|(v, _)| m.annualized_return > v)
+                .unwrap_or(true)
+            {
                 best_return = Some((m.annualized_return, id));
             }
             // max_drawdown_pct 越小越好
@@ -639,8 +634,8 @@ pub async fn quant_strategy_register_rhai(
         .await
         .map_err(|e| format!("query existing: {e}"))?;
 
-    let params_json = serde_json::to_string(&request.params)
-        .map_err(|e| format!("serialize params: {e}"))?;
+    let params_json =
+        serde_json::to_string(&request.params).map_err(|e| format!("serialize params: {e}"))?;
 
     let row = if let Some(prev) = existing {
         if !request.upsert {

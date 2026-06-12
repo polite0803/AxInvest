@@ -62,6 +62,7 @@ data_sources: [get_news_data, get_announcement_data, get_sector_data]
 ```
 
 字段口径：
+
 - `catalyst_level`: L3/L2/L1/无 四级，用于决定下游是否将其视为关键变量
 - `narrative_completeness`: 叙事5要素完整度（市场空间/解决方案/落地案例/增长路径/竞争壁垒）
 - `institutional_trace`: 基于量价数据的机构资金行为推断

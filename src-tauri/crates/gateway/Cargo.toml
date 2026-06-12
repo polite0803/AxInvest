@@ -10,9 +10,9 @@ axagent-core = { path = "../core" }
 axagent-dao = { path = "../dao" }
 axagent-entities = { path = "../entities" }
 axagent-harness = { path = "../harness" }
-chrono = { workspace = true }
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
+chrono = { workspace = true }
 futures = "0.3"
 governor = "0.8"
 http = "1"

@@ -43,6 +43,7 @@ positionPct = max(0, min(100, kelly_pct * scale * 100))
 ```
 
 注意：
+
 - Kelly 为负 → 输出 0（建议"持有/观望"），不要硬塞正仓位
 - 涨停板接力窗口期（连续 3 板以上）可上调到 100 上限封顶
 - A 股 T+1 限制 → 激进建议仓位的执行必须明确"分批建仓节奏"
@@ -73,6 +74,7 @@ positionPct = max(0, min(100, kelly_pct * scale * 100))
 ```
 
 字段口径：
+
 - `positionPct`: 0-100 整数，由 Kelly 公式推导
 - `kelly_inputs`: 公式透明可审计
 - `asymmetric_opportunities`: 至少 2 条，盈亏比 > 2:1 的机会
@@ -112,6 +114,7 @@ positionPct = max(0, min(100, kelly_pct * scale * 100))
   "reasoning": "政策利好 + 资金流入 + 业绩超预期，应该重仓"
 }
 ```
+
 （缺 `kelly_inputs` 公式透明字段 / `asymmetric_opportunities` 结构化 / `key_assumptions` / `key_break_conditions`；`positionPct` 缺推导过程；`reasoning` 不是字段名）
 
 ## 自检（输出前必过）

@@ -48,6 +48,7 @@ data_sources: [get_lockup_data, get_shareholder_data]
 ```
 
 字段口径：
+
 - `unlock_pressure`: 综合规模 + 概率 + 减持新规，不是单纯看解禁市值
 - `shareholder_behavior`: 当前最显著的行为类型
 - `pledge_risk`: 质押比例 > 50% 通常为"高"
@@ -67,8 +68,16 @@ data_sources: [get_lockup_data, get_shareholder_data]
   "trigger_bull": "大股东在解禁前发布增持公告且质押率降至 30% 以下",
   "trigger_bear": "解禁后 30 日内大宗交易折价 > 8% 且股东人数单季 +15%",
   "evidence": [
-    { "point": "未来 60 日解禁占总股本 12% 解禁股东为原始 PE 机构", "data": "[解禁清单 2024-12-15 12% PE机构]", "weight": 8 },
-    { "point": "控股股东质押率 58% 平仓线距当前价 -8%", "data": "[质押公告 2024-09 质押率 58% 平仓线距当前价 -8%]", "weight": 7 }
+    {
+      "point": "未来 60 日解禁占总股本 12% 解禁股东为原始 PE 机构",
+      "data": "[解禁清单 2024-12-15 12% PE机构]",
+      "weight": 8
+    },
+    {
+      "point": "控股股东质押率 58% 平仓线距当前价 -8%",
+      "data": "[质押公告 2024-09 质押率 58% 平仓线距当前价 -8%]",
+      "weight": 7
+    }
   ],
   "data_gaps": ["股东人数近 1 年变化趋势未提供"]
 }
@@ -83,6 +92,7 @@ data_sources: [get_lockup_data, get_shareholder_data]
   "verdict": "短期承压"
 }
 ```
+
 （缺 `unlock_pressure` 量化 / `shareholder_behavior` / `pledge_risk` / `concentration_trend` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没说清是主动减持还是被动质押）
 
 ## 自检（输出前必过）

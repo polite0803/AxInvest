@@ -48,6 +48,7 @@ data_sources: [get_policy_data, get_news_data]
 ```
 
 字段口径：
+
 - `policy_tier`: 选最主导的一条（不是消息面整体）
 - `duration_type`: 区分主题炒作 vs 长期趋势
 - `transmission_path`: 明确"政策→行业→个股"链路
@@ -83,6 +84,7 @@ data_sources: [get_policy_data, get_news_data]
   "verdict": "政策利好"
 }
 ```
+
 （缺 `policy_tier` / `duration_type` / `transmission_path` / `beneficiary_type` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没说清楚是主题还是趋势）
 
 ## 自检（输出前必过）

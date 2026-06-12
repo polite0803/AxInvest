@@ -95,7 +95,7 @@ impl Matcher {
         if order.quantity == 0 {
             return self.reject(order, bar, "数量为 0");
         }
-        if self.config.lot_size > 0 && order.quantity % self.config.lot_size != 0 {
+        if self.config.lot_size > 0 && !order.quantity.is_multiple_of(self.config.lot_size) {
             return self.reject(
                 order,
                 bar,

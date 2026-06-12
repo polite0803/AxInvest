@@ -158,7 +158,7 @@ impl Strategy for MaCrossStrategy {
         ctx: &mut StrategyCtx,
     ) -> Result<Vec<Signal>, QuantError> {
         let history = match ctx.bar_history.get(&bar.code) {
-            Some(h) if h.len() >= self.long_period + 1 => h,
+            Some(h) if h.len() > self.long_period => h,
             _ => return Ok(vec![]),
         };
         let cs = closes(history);
@@ -265,7 +265,7 @@ impl Strategy for MacdStrategy {
         ctx: &mut StrategyCtx,
     ) -> Result<Vec<Signal>, QuantError> {
         let history = match ctx.bar_history.get(&bar.code) {
-            Some(h) if h.len() >= self.slow + self.signal + 1 => h,
+            Some(h) if h.len() > self.slow + self.signal => h,
             _ => return Ok(vec![]),
         };
         let cs = closes(history);
@@ -470,7 +470,7 @@ impl Strategy for BollStrategy {
         ctx: &mut StrategyCtx,
     ) -> Result<Vec<Signal>, QuantError> {
         let history = match ctx.bar_history.get(&bar.code) {
-            Some(h) if h.len() >= self.period + 1 => h,
+            Some(h) if h.len() > self.period => h,
             _ => return Ok(vec![]),
         };
         let cs = closes(history);
@@ -589,7 +589,7 @@ impl Strategy for TurtleStrategy {
         ctx: &mut StrategyCtx,
     ) -> Result<Vec<Signal>, QuantError> {
         let history = match ctx.bar_history.get(&bar.code) {
-            Some(h) if h.len() >= self.entry_period + 1 => h,
+            Some(h) if h.len() > self.entry_period => h,
             _ => return Ok(vec![]),
         };
         // 不含当前 bar 的前 N 日最高

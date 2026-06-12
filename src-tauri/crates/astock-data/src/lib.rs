@@ -2159,6 +2159,7 @@ mod asof_truncate_tests {
             volume: 0.0,
             amount: 0.0,
             turnover_rate: None,
+            adj_factor: None,
         }
     }
 
@@ -2313,6 +2314,7 @@ mod asof_realtime_degrade_tests {
             volume: 1000.0,
             amount: 10000.0,
             turnover_rate: Some(0.01),
+            adj_factor: None,
         }
     }
 
@@ -2370,7 +2372,7 @@ mod asof_realtime_degrade_tests {
     #[test]
     fn kline_cache_key_live_no_effective_suffix() {
         // live 模式:不带 eff= 后缀
-        let key = AStockClient::kline_cache_key("000001", "daily");
+        let key = AStockClient::kline_cache_key("000001", "daily", None);
         assert!(!key.contains("eff="), "live 模式不应有 eff= 后缀: {key}");
     }
 

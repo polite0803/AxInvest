@@ -92,7 +92,7 @@ export function BacktestTab() {
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
       <Card title={t("quant.backtest.title")} size="small">
         <Form layout="vertical" size="small">
-          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(2, 1fr)" }}>
             <Form.Item label={t("quant.backtest.selectStrategy")}>
               <select
                 style={{ width: "100%", height: 32, padding: "0 8px" }}
@@ -188,7 +188,7 @@ export function BacktestTab() {
               {currentRun.run.status}
             </Tag>
           </Title>
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
             <QuantMetricsCard
               title={t("quant.metrics.totalReturn")}
               value={currentRun.metrics.totalReturn * 100}

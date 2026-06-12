@@ -696,6 +696,7 @@ mod tests {
             volume: 10000.0,
             amount: 105000.0,
             turnover_rate: Some(0.5),
+            adj_factor: None,
         };
         let json = serde_json::to_string(&kline).unwrap();
         assert!(json.contains("2025-01-15"));

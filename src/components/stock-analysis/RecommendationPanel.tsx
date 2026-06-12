@@ -205,7 +205,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   }, [period, asOfDate, i18n.language]);
 
   // P0-2: 加载策略回测统计
-  const loadStrategyStats = useCallback(async () => {
+  const _loadStrategyStats = useCallback(async () => {
     setStrategyStatsLoading(true);
     try {
       const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");

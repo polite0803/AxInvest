@@ -315,7 +315,7 @@ export function WhatIfBacktest() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedId]);
 
   // 选择分析 → 加载 blackboard snapshot
   useEffect(() => {

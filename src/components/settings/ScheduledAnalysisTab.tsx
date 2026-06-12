@@ -2,7 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button, Card, Empty, Form, Input, message, Popconfirm, Select, Spin, Switch, Table, Tag } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface CronJobRow {
@@ -44,12 +44,12 @@ export function ScheduledAnalysisTab() {
     } catch { /* backend not running */ }
   };
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     try {
       const list = await invoke<CronJobRow[]>("list_stock_crons");
       if (Array.isArray(list)) { setJobs(list); }
     } catch { /* backend not running */ }
-  };
+}, []);
 
   const toggleWlScan = async (job: CronJobRow | null, enable: boolean) => {
     try {
@@ -118,19 +118,19 @@ export function ScheduledAnalysisTab() {
     }
   };
 
-  const toggle = async (id: string, active: boolean) => {
+  const toggle = useCallback(async (id: string, active: boolean) => {
     try {
       await invoke("toggle_stock_cron", { id, enabled: active });
       loadTasks();
     } catch { /* silent */ }
-  };
+  }, [loadTasks]);
 
-  const remove = async (id: string) => {
+  const remove = useCallback(async (id: string) => {
     try {
       await invoke("delete_stock_cron", { id });
       loadTasks();
     } catch { /* silent */ }
-  };
+  }, [loadTasks]);
 
   const columns = useMemo(() => [
     {
@@ -179,7 +179,7 @@ export function ScheduledAnalysisTab() {
         </Popconfirm>
       ),
     },
-  ], [t]);
+  ], [remove, toggle, t]);
 
   if (loading) { return <Spin size="small" />; }
 

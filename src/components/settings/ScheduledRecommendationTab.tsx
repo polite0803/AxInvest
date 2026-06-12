@@ -12,14 +12,13 @@ import {
   Select,
   Slider,
   Space,
-  Spin,
   Switch,
   Table,
   Tag,
   Tooltip,
 } from "antd";
 import { Clock, Zap } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type PeriodKey = "short" | "mid" | "long";
 
@@ -65,7 +64,6 @@ const ALL_PERIODS: { value: PeriodKey; label: string }[] = [
 
 export function ScheduledRecommendationTab() {
   const [jobs, setJobs] = useState<RecoCronRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [form] = Form.useForm();
 
@@ -91,12 +89,12 @@ export function ScheduledRecommendationTab() {
     };
   }, []);
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     try {
       const list = await invoke<RecoCronRow[]>("list_recommendation_crons");
       if (Array.isArray(list)) { setJobs(list); }
     } catch { /* 静默 */ }
-  };
+}, []);
 
   const create = async (values: Record<string, unknown>) => {
     try {
@@ -116,19 +114,19 @@ export function ScheduledRecommendationTab() {
     }
   };
 
-  const toggle = async (id: string, active: boolean) => {
+  const toggle = useCallback(async (id: string, active: boolean) => {
     try {
       await invoke("toggle_recommendation_cron", { id, enabled: active });
       loadTasks();
     } catch { /* 静默 */ }
-  };
+  }, [loadTasks]);
 
-  const remove = async (id: string) => {
+  const remove = useCallback(async (id: string) => {
     try {
       await invoke("delete_recommendation_cron", { id });
       loadTasks();
     } catch { /* 静默 */ }
-  };
+  }, [loadTasks]);
 
   const columns = useMemo(
     () => [
@@ -191,10 +189,8 @@ export function ScheduledRecommendationTab() {
         ),
       },
     ],
-    [],
+    [remove, toggle],
   );
-
-  if (loading) { return <Spin size="small" />; }
 
   return (
     <div className="flex flex-col gap-3">

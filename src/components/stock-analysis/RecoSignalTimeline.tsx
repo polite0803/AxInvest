@@ -15,7 +15,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
   const [error, setError] = useState<string | null>(null);
   const [filterCode, setFilterCode] = useState<string>("");
 
-  const load = useCallback(async (sid: string) => {
+  const _load = useCallback(async (sid: string) => {
     setLoading(true);
     setError(null);
     try {

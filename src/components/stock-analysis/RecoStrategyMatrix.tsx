@@ -36,7 +36,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
   const [group, setGroup] = useState<"positive" | "negative">("positive");
 
   // 加载数据
-  const load = useCallback(async (_targetGroup: "positive" | "negative") => {
+  const _load = useCallback(async (_targetGroup: "positive" | "negative") => {
     setLoading(true);
     setError(null);
     try {

@@ -189,7 +189,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   }, [data.phase, t]);
 
   const analystLabel = useMemo(() => {
-    if (!data.analystName) { return t("stockAnalysis.workflow.analyst"); }
+    if (!data.analystName) { return t("stockAnalysis.workflow.analystFallback"); }
     return t(`stockAnalysis.workflow.analyst.${data.analystName}`, data.analystName);
   }, [data.analystName, t]);
 

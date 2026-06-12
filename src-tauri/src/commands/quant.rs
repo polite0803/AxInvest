@@ -234,10 +234,7 @@ pub async fn quant_backtest_run(
     }
 
     // ── 3. 写 quant_runs (pending → running) ──
-    let matcher_cfg = request
-        .matcher_config
-        .clone()
-        .unwrap_or_default();
+    let matcher_cfg = request.matcher_config.clone().unwrap_or_default();
 
     let bt_config = BacktestConfig {
         initial_cash: request.initial_cash,

@@ -2576,7 +2576,8 @@
     "provider": {
       "deepseekBalance": "DeepSeek 余额",
       "noValidKey": "无有效密钥"
-    }
+    },
+    "stockAnalysis": "股票分析"
   },
   "backup": {
     "title": "备份中心",
@@ -7429,6 +7430,8 @@
     "steerInput": "引导",
     "showExtras": "更多面板",
     "hideExtras": "收起",
+    "collapse": "折叠面板",
+    "expand": "展开面板",
     "close": "关闭"
   },
   "knowledgeSettings": {
@@ -7943,7 +7946,8 @@
         "t-quality": "质量門控",
         "research-mgr": "研究经理综合",
         "trader": "交易方案制定",
-        "portfolio-mgr": "最終决策生成"
+        "portfolio-mgr": "最終决策生成",
+        "rule-check": "规则检查"
       },
       "failedStepsWithCount": "失敗步驟（{{count}} 步）",
       "fetchFailed": "数据獲取失敗",
@@ -7969,7 +7973,8 @@
       "startFailed": "启动失败",
       "vValidate": "验证数据",
       "aggRisk": "激進风险评估",
-      "notifyResult": "通知结果"
+      "notifyResult": "通知结果",
+      "analystFallback": "分析师"
     },
     "risk": {
       "high": "高",
@@ -8613,6 +8618,13 @@
     "loading": "加载中...",
     "noHoldings": "暂无持仓",
     "period": {
+      "5m": "5分钟",
+      "15m": "15分钟",
+      "30m": "30分钟",
+      "60m": "60分钟",
+      "1d": "日线",
+      "1w": "周线",
+      "1M": "月线",
       "zoomHint": "框选缩放"
     }
   },

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { Tooltip } from "@/components/layout/Tooltip";
 import { ModeSwitch } from "@/components/time-travel/ModeSwitch";
 import { useHelpStore } from "@/stores/feature/helpStore";

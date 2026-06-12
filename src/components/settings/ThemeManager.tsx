@@ -1,6 +1,7 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { Theme, ThemeColors, useThemeStore } from "@/stores/feature/themeStore";
-import { Button, Card, Form, Input, message, Modal, Popconfirm, Space, Typography } from "antd";
+import { Button, Card, Form, Input, List, message, Modal, Popconfirm, Space, Typography } from "antd";
 import { Check, Copy, Delete, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -143,7 +144,7 @@ colors:
   const yamlToTheme = (yaml: string): Theme | null => {
     try {
       const lines = yaml.split("\n");
-
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result: Record<string, any> = { metadata: {}, colors: {} };
 
       for (const line of lines) {

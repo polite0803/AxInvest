@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import type { NodeProps } from "@xyflow/react";
 import { Tag } from "antd";
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
-import type { NodeProps } from "reactflow";
 import type { MergeStrategy } from "../types/workflow.types";
 import type { ContainerNodeData } from "./ContainerNode";
 import { ContainerNode } from "./ContainerNode";
@@ -15,10 +17,8 @@ interface ParallelNodeData extends ContainerNodeData {
   autoInputFromParent?: boolean;
 }
 
-const ParallelNodeComponent: React.FC<NodeProps<ParallelNodeData>> = ({
-  data,
-  selected,
-}) => {
+const ParallelNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as ParallelNodeData;
   const { t } = useTranslation();
   const isDecorative = data.kind === "decorative";
   const branches = data.branches || 2;

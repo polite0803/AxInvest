@@ -1,6 +1,7 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useRecommendationStore } from "@/stores/devtools/recommendationStore";
-import { Alert, Button, Card, Divider, Input, Progress, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Divider, Input, List, Progress, Space, Spin, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -54,7 +55,7 @@ export function ToolRecommendationPanel() {
   return (
     <div style={{ padding: "24px" }}>
       <Card title={t("recommendation.title")}>
-        <Space orientation="vertical" style={{ width: "100%" }} size="large">
+        <Space direction="vertical" style={{ width: "100%" }} size="large">
           <div>
             <Title level={5}>{t("recommendation.taskDescription")}</Title>
             <TextArea

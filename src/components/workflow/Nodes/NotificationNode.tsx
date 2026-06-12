@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { theme } from "antd";
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { Handle, type NodeProps, Position } from "reactflow";
 
 const NODE_COLOR = "#fa8c16";
 
@@ -14,7 +16,8 @@ interface NotificationNodeData {
   enabled: boolean;
 }
 
-const NotificationNodeComponent: React.FC<NodeProps<NotificationNodeData>> = ({ data, selected }) => {
+const NotificationNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as NotificationNodeData;
   const { t } = useTranslation();
   const { token } = theme.useToken();
   return (

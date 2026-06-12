@@ -1,4 +1,6 @@
-use axagent_harness::workflow_types::WorkflowNode;
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use axagent_core::workflow_types::WorkflowNode;
 
 use super::dispatcher::NodeDispatcher;
 use super::execution_state::ExecutionState;

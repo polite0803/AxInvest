@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! 工具错误类型 — 从 axagent-runtime-core 提取的契约接口
 //!
 //! `ToolError` 和 `ToolErrorKind` 是工具系统的核心错误类型，
@@ -97,6 +99,15 @@ impl ToolError {
             message: message.into(),
             kind: ToolErrorKind::ExecutionFailed,
             error_code: format!("tool.{tool_name}.executionFailed"),
+        }
+    }
+
+    #[must_use]
+    pub fn timeout_for(tool_name: &str, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: ToolErrorKind::Timeout,
+            error_code: format!("tool.{tool_name}.timeout"),
         }
     }
 }

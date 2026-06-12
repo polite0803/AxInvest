@@ -1,7 +1,8 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { usePromptTemplateStore } from "@/stores";
 import type { PromptTemplate } from "@/types";
-import { Input, Modal, Spin, Tag } from "antd";
+import { Input, List, Modal, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

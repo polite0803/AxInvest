@@ -1,6 +1,7 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useArtifactStore, useConversationStore } from "@/stores";
-import { Descriptions, Empty, Tabs, Tag, theme, Typography } from "antd";
+import { Descriptions, Empty, List, Tabs, Tag, theme, Typography } from "antd";
 import { FileText, Info, Paperclip, Search, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

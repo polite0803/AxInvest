@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! LSP (Language Server Protocol) client registry for tool dispatch.
 
 use std::collections::HashMap;
@@ -8,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use super::lsp_process::{LspProcess, LspProcessManager, LspServerConfig};
+use crate::util::lock_or_recover;
 
 /// Supported LSP actions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,7 +199,7 @@ impl LspRegistry {
     }
 
     pub fn get(&self, language: &str) -> Option<LspServerState> {
-        let inner = self.inner.lock().expect("lsp registry lock poisoned");
+        let inner = lock_or_recover(self.inner.lock(), "lsp_client");
         inner.servers.get(language).cloned()
     }
 
@@ -226,7 +229,7 @@ impl LspRegistry {
 
     /// List all registered servers.
     pub fn list_servers(&self) -> Vec<LspServerState> {
-        let inner = self.inner.lock().expect("lsp registry lock poisoned");
+        let inner = lock_or_recover(self.inner.lock(), "lsp_client");
         inner.servers.values().cloned().collect()
     }
 
@@ -247,7 +250,7 @@ impl LspRegistry {
 
     /// Get diagnostics for a specific file path.
     pub fn get_diagnostics(&self, path: &str) -> Vec<LspDiagnostic> {
-        let inner = self.inner.lock().expect("lsp registry lock poisoned");
+        let inner = lock_or_recover(self.inner.lock(), "lsp_client");
         inner
             .servers
             .values()
@@ -278,7 +281,7 @@ impl LspRegistry {
 
     #[must_use]
     pub fn len(&self) -> usize {
-        let inner = self.inner.lock().expect("lsp registry lock poisoned");
+        let inner = lock_or_recover(self.inner.lock(), "lsp_client");
         inner.servers.len()
     }
 
@@ -311,7 +314,7 @@ impl LspRegistry {
                 }));
             }
             // All diagnostics across all servers
-            let inner = self.inner.lock().expect("lsp registry lock poisoned");
+            let inner = lock_or_recover(self.inner.lock(), "lsp_client");
             let all_diags: Vec<_> = inner
                 .servers
                 .values()

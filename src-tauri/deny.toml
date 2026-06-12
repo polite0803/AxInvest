@@ -24,7 +24,6 @@ allow = [
     "BSL-1.0",
     "NCSA",
     "CDLA-Permissive-2.0",
-    "MIT-0",
 ]
 
 [[licenses.clarify]]

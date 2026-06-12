@@ -1,7 +1,8 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { invoke } from "@/lib/invoke";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, message, Modal, Select, Spin, Tag, theme, Tooltip } from "antd";
+import { Button, List, message, Modal, Select, Spin, Tag, theme, Tooltip } from "antd";
 import { History, RotateCcw } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

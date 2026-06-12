@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import i18n from "@/i18n";
 import { isTauri, logIpcError } from "@/lib/invoke";
 import { executeShortcutAction } from "@/lib/shortcutActions";
@@ -10,21 +12,13 @@ import {
 } from "@/lib/shortcuts";
 import { useSettingsStore } from "@/stores";
 import type { GlobalShortcutDiagnostic, GlobalShortcutStatus } from "@/stores";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 export function useGlobalShortcutManager() {
   const settings = useSettingsStore((s) => s.settings);
   const setGlobalShortcutStatus = useSettingsStore(
     (s) => s.setGlobalShortcutStatus,
   );
-
-  // 用 ref 保存最新 settings，避免 effect 依赖整个 settings 对象
-  // 每次任意设置字段变更都触发全部快捷键重注册
-  const settingsRef = useRef(settings);
-
-  useEffect(() => {
-    settingsRef.current = settings;
-  }, [settings]);
 
   useEffect(() => {
     const diagnostics: GlobalShortcutDiagnostic[] = [];
@@ -39,7 +33,7 @@ export function useGlobalShortcutManager() {
       if (diagnostics.length > 40) {
         diagnostics.splice(0, diagnostics.length - 40);
       }
-      if (!settingsRef.current.shortcut_registration_logs_enabled) {
+      if (!settings.shortcut_registration_logs_enabled) {
         return;
       }
       const consolePayload = {
@@ -61,7 +55,7 @@ export function useGlobalShortcutManager() {
     ) => {
       setGlobalShortcutStatus({
         ...status,
-        diagnostics: settingsRef.current.shortcut_registration_logs_enabled
+        diagnostics: settings.shortcut_registration_logs_enabled
           ? [...diagnostics]
           : [],
       });
@@ -137,7 +131,7 @@ export function useGlobalShortcutManager() {
             isGlobalShortcutAction(action)
               ? [
                 (async () => {
-                  const binding = getShortcutBinding(settingsRef.current, action);
+                  const binding = getShortcutBinding(settings, action);
                   const accelerator = toTauriAccelerator(binding);
                   pushDiagnostic({
                     phase: "register",
@@ -204,11 +198,11 @@ export function useGlobalShortcutManager() {
                     if (reason.indexOf("HotKey already registered") !== -1) {
                       reason = i18n.t("shortcuts.conflictError");
                     } else if (reason.indexOf("Invalid shortcut") !== -1) {
-                      reason = i18n.t("shortcuts.invalidFormat");
+                      reason = i18n.t("shortcuts.invalidShortcut");
                     } else if (
                       reason.indexOf(" accelerators are not supported") !== -1
                     ) {
-                      reason = i18n.t("shortcuts.unsupportedCombo");
+                      reason = i18n.t("shortcuts.shortcutNotSupported");
                     }
                     failed.push({ shortcut: accelerator, reason });
                     pushDiagnostic({
@@ -282,7 +276,5 @@ export function useGlobalShortcutManager() {
           });
       }
     };
-    // 只依赖 global_shortcuts_enabled 开关，其他 settings 字段通过 settingsRef 读取
-    // 避免每次任意设置变更（主题、语言等）都触发全部快捷键的重注销+重注册
-  }, [settings.global_shortcuts_enabled, setGlobalShortcutStatus]);
+  }, [settings, setGlobalShortcutStatus]);
 }

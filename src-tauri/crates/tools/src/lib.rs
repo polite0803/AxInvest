@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! AxAgent Tool System - 统一工具接口与执行引擎
 //!
 //! 提供 Tool trait、ToolRegistry、编排器、流式执行器等核心组件。
@@ -22,6 +24,7 @@ pub mod sandbox;
 pub mod stats;
 pub mod streaming;
 pub mod tools;
+pub mod utils;
 
 pub use global_state::{get_db_path, get_sea_db, set_db_path, set_sea_db};
 pub use plugin_sdk::{

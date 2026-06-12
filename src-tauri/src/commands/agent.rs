@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::agent as agent_err;
@@ -16,6 +18,7 @@ use axagent_harness::{ProviderAdapter, ProviderRequestContext, resolve_base_url_
 use axagent_tools::context_keys;
 use axagent_tools::registry::{McpServerConfig, UnifiedToolRegistry};
 use base64::Engine;
+use dashmap::DashMap;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -210,7 +213,7 @@ use tauri::{AppHandle, Emitter, State};
 struct AsyncRunningAgentGuard {
     conversation_id: String,
     running_agents: Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>,
-    cancel_tokens: Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>>,
+    cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
     paused_set: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
@@ -224,16 +227,14 @@ impl Drop for AsyncRunningAgentGuard {
             tokio::spawn(async move {
                 let mut agents = running_agents.write().await;
                 agents.remove(&conversation_id);
-                let mut tokens = cancel_tokens.lock().await;
-                tokens.remove(&conversation_id);
+                cancel_tokens.remove(&conversation_id);
                 let mut paused = paused_set.lock().await;
                 paused.remove(&conversation_id);
             });
         } else {
             let mut agents = running_agents.blocking_write();
             agents.remove(&conversation_id);
-            let mut tokens = cancel_tokens.blocking_lock();
-            tokens.remove(&conversation_id);
+            cancel_tokens.remove(&conversation_id);
             let mut paused = paused_set.blocking_lock();
             paused.remove(&conversation_id);
         }
@@ -1729,10 +1730,9 @@ pub async fn agent_query(
 
     // Create and register a cancel token for this agent run
     let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
-        let mut tokens = app_state.agent_cancel_tokens.lock().await;
-        tokens.insert(conversation_id.clone(), cancel_token.clone());
-    }
+    app_state
+        .agent_cancel_tokens
+        .insert(conversation_id.clone(), cancel_token.clone());
 
     // Drain steer queue and inject instructions into the prompt
     let augmented_input = {
@@ -1791,10 +1791,7 @@ pub async fn agent_query(
     info!("[agent_query] run_turn_with_tools completed");
 
     // Clean up cancel token
-    {
-        let mut tokens = app_state.agent_cancel_tokens.lock().await;
-        tokens.remove(&conversation_id);
-    }
+    app_state.agent_cancel_tokens.remove(&conversation_id);
 
     // Eagerly and synchronously remove from running_agents to close the
     // race window where a second agent_query could slip in before the
@@ -3341,7 +3338,7 @@ pub async fn agent_cancel(
     // completes, which avoids a race where the agent loop hasn't checked
     // the flag yet but the token (and its Arc) is already gone.
     {
-        let tokens = app_state.agent_cancel_tokens.lock().await;
+        let tokens = &app_state.agent_cancel_tokens;
         if let Some(token) = tokens.get(&request.conversation_id) {
             token.store(true, std::sync::atomic::Ordering::Release);
             info!("[agent_cancel] Set cancel token for conversationId={}", request.conversation_id);

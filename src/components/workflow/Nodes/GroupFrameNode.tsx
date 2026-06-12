@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import type { NodeProps } from "@xyflow/react";
 import { theme } from "antd";
 import React, { memo, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { NodeProps } from "reactflow";
 
 interface GroupFrameData {
   id: string;
@@ -19,10 +21,8 @@ interface GroupFrameData {
  * 用于对子图进行视觉分组，有标题栏、可折叠、可调整边框颜色。
  * 本身不包含执行逻辑，仅在编辑器中渲染为框。支持嵌套。
  */
-const GroupFrameNodeComponent: React.FC<NodeProps<GroupFrameData>> = ({
-  data,
-  selected,
-}) => {
+const GroupFrameNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as GroupFrameData;
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [collapsed, setCollapsed] = useState(data.collapsed || false);

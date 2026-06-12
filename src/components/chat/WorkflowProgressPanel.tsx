@@ -1,4 +1,17 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { invoke, logIpcError } from "@/lib/invoke";
+import {
+  Background,
+  type Edge,
+  Handle,
+  type Node,
+  type NodeProps,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+} from "@xyflow/react";
 import { Button, message, Spin, theme } from "antd";
 import type { GlobalToken } from "antd/es/theme/interface";
 import {
@@ -15,17 +28,7 @@ import {
 } from "lucide-react";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactFlow, {
-  Background,
-  type Edge,
-  Handle,
-  type Node,
-  type NodeProps,
-  Position,
-  ReactFlowProvider,
-  useReactFlow,
-} from "reactflow";
-import "reactflow/dist/style.css";
+import "@xyflow/react/dist/style.css";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -222,7 +225,7 @@ function isDone(status: StepLike["status"]): boolean {
 // DAG Layout
 // ---------------------------------------------------------------------------
 
-interface WorkflowDagNodeData {
+interface WorkflowDagNodeData extends Record<string, unknown> {
   stepId: string;
   goal: string;
   agentRole: string;
@@ -230,7 +233,7 @@ interface WorkflowDagNodeData {
 }
 
 function computeDagLayout(steps: StepLike[], token: GlobalToken): {
-  nodes: Node<WorkflowDagNodeData>[];
+  nodes: Node[];
   edges: Edge[];
 } {
   if (steps.length === 0) {
@@ -269,7 +272,7 @@ function computeDagLayout(steps: StepLike[], token: GlobalToken): {
   }
 
   const sortedLayers = [...layerGroups.keys()].toSorted((a, b) => a - b);
-  const nodes: Node<WorkflowDagNodeData>[] = [];
+  const nodes: Node[] = [];
 
   for (const layer of sortedLayers) {
     const group = layerGroups.get(layer)!;
@@ -319,20 +322,17 @@ function computeDagLayout(steps: StepLike[], token: GlobalToken): {
   return { nodes, edges };
 }
 
-import { getWorkflowNodeLabel } from "@/utils/workflowNodeLabel";
-
 // ---------------------------------------------------------------------------
 // WorkflowDagNode
 // ---------------------------------------------------------------------------
 
-const WorkflowDagNode: React.FC<NodeProps<WorkflowDagNodeData>> = memo(
+const WorkflowDagNode: React.FC<NodeProps> = memo(
   ({ data, selected }) => {
+    const dagData = data as unknown as WorkflowDagNodeData;
     const { token } = theme.useToken();
-    const { t } = useTranslation();
-    const label = getWorkflowNodeLabel(data.stepId, t);
-    const color = getStatusColor(data.status, token);
-    const isRunning = data.status === "running";
-    const isFailed = data.status === "failed";
+    const color = getStatusColor(dagData.status, token);
+    const isRunning = dagData.status === "running";
+    const isFailed = dagData.status === "failed";
 
     return (
       <div
@@ -341,7 +341,7 @@ const WorkflowDagNode: React.FC<NodeProps<WorkflowDagNodeData>> = memo(
           width: NODE_WIDTH,
           borderColor: selected ? token.colorPrimary : color,
           borderWidth: selected ? 2 : 1,
-          opacity: data.status === "skipped" ? 0.65 : 1,
+          opacity: dagData.status === "skipped" ? 0.65 : 1,
         }}
       >
         <Handle
@@ -365,14 +365,14 @@ const WorkflowDagNode: React.FC<NodeProps<WorkflowDagNodeData>> = memo(
             className="text-[10px] font-mono font-medium truncate"
             style={{ color }}
           >
-            {label}
+            {dagData.stepId}
           </span>
         </div>
         <div className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5 leading-tight">
-          {truncate(data.goal, 28)}
+          {truncate(dagData.goal, 28)}
         </div>
         <div className="text-[9px] text-zinc-400 dark:text-zinc-500 truncate">
-          {data.agentRole}
+          {dagData.agentRole}
         </div>
         <Handle
           type="source"
@@ -619,31 +619,28 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
 
   // --- Re-read storage when conversationId changes ---
   useEffect(() => {
-    const wid = getWorkflowIdFromStorage(conversationId);
-    if (wid !== workflowId) {
-      Promise.resolve().then(() => {
-        setWorkflowId(wid);
-      });
-    }
-  }, [conversationId, workflowId]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWorkflowId(getWorkflowIdFromStorage(conversationId));
+  }, [conversationId]);
 
   // --- Reset internal state on workflowId change ---
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    Promise.resolve().then(() => {
-      setWorkflow(null);
-      setLoading(false);
-      setError(null);
-      setExpandedSteps(new Set());
-      setShowDag(true);
-      setDagCollapsed(false);
-    });
+    setWorkflow(null);
+    setLoading(false);
+    setError(null);
+    setExpandedSteps(new Set());
+    setShowDag(true);
+    setDagCollapsed(false);
   }, [workflowId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Poll workflow status with race-condition protection & terminal stop ---
   const workflowRef = useRef(workflow);
   // eslint-disable-next-line react-hooks/refs
   workflowRef.current = workflow;
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
@@ -651,9 +648,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
     }
 
     if (!workflowId) {
-      Promise.resolve().then(() => {
-        setWorkflow(null);
-      });
+      setWorkflow(null);
       return;
     }
 
@@ -664,6 +659,10 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
         return;
       }
       const requestId = ++fetchIdRef.current;
+
+      if (requestId === 1) {
+        setLoading(true);
+      }
 
       try {
         const data = await invoke<WorkflowData>("workflow_get_status", {
@@ -681,19 +680,6 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
             clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
           }
-          // 工作流完成后自动展开所有失败步骤
-          const stepsData = toStepLike(data);
-          const failedIds = stepsData
-            .filter((s) => s.status === "failed")
-            .map((s) => s.id);
-          if (failedIds.length > 0) {
-            setExpandedSteps((prev) => {
-              const next = new Set(prev);
-              for (const id of failedIds) { next.add(id); }
-              return next;
-            });
-          }
-          setDagCollapsed(false);
         }
       } catch (e) {
         if (fetchIdRef.current !== requestId) {
@@ -705,15 +691,13 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
           message.warning(msg);
         }
         logIpcError("WorkflowProgressPanel.fetchStatus")(e);
+      } finally {
+        if (fetchIdRef.current === requestId) {
+          setLoading(false);
+        }
       }
     };
 
-    // Set loading asynchronously to avoid synchronous setState in effect
-    Promise.resolve().then(() => {
-      if (!stoppedByTerminal) {
-        setLoading(true);
-      }
-    });
     poll();
     pollTimerRef.current = setInterval(poll, POLL_INTERVAL_MS);
 
@@ -725,6 +709,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
       }
     };
   }, [workflowId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Step toggle ---
   const toggleStep = useCallback((stepId: string) => {
@@ -746,10 +731,10 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
     }
     setCancelling(true);
     try {
-      await invoke("workflow_cancel", { workflowId: workflowId });
+      await invoke("workflow_cancel", { workflow_id: workflowId });
       message.success(t("chat.workflow.cancelled"));
       const data = await invoke<WorkflowData>("workflow_get_status", {
-        workflowId: workflowId,
+        workflow_id: workflowId,
       });
       setWorkflow(data);
       setError(null);
@@ -913,7 +898,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
             </div>
           )
           : (
-            <div className={workflow && TERMINAL_STATUSES.has(workflow.status) ? "" : "max-h-64 overflow-auto"}>
+            <div className="max-h-64 overflow-auto">
               {steps.map((step) => (
                 <StepRow
                   key={step.id}

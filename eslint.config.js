@@ -5,6 +5,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
+  { ignores: ["src/i18n/compare_locales.js"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -22,6 +23,7 @@ export default tseslint.config(
       "no-unused-vars": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
       "react-hooks/exhaustive-deps": "warn",
+      "@typescript-eslint/ban-ts-comment": "warn",
     },
   },
   {
@@ -29,10 +31,18 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/ban-ts-comment": "off",
     },
   },
   {
     files: ["**/*.d.ts"],
+    rules: {
+      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/ban-ts-comment": "off",
+    },
+  },
+  {
+    files: ["src/components/workflow/Nodes/*.tsx"],
     rules: {
       "@typescript-eslint/no-unused-vars": "off",
     },

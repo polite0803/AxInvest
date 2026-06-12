@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! 反思工作流 Tauri 命令
 //!
 //! 关键改进：

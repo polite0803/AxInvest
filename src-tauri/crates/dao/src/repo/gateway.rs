@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use sea_orm::*;
 
 use axagent_crypto::crypto;
@@ -102,6 +104,16 @@ pub async fn update_last_used(db: &DatabaseConnection, id: &str) -> Result<()> {
         am.update(db).await?;
     }
     Ok(())
+}
+
+/// Look up a gateway key by its stable id (not the API key plaintext).
+/// Returns `Err(NotFound)` if the key does not exist.
+pub async fn get_by_id(db: &DatabaseConnection, key_id: &str) -> Result<GatewayKey> {
+    let row = gateway_keys::Entity::find_by_id(key_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| AxAgentError::NotFound(format!("GatewayKey {}", key_id)))?;
+    Ok(key_from_entity(row))
 }
 
 // --- Gateway Usage ---

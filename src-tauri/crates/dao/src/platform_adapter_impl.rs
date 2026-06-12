@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! `axagent_harness::platform_adapter::*` trait 的默认实现。
 //!
 //! 4 个 repo trait（ProviderRepository / SettingsRepository /
@@ -63,6 +65,13 @@ impl GatewayKeyRepository for DefaultGatewayKeyRepository {
         match repo::gateway::verify_key(&self.db, token, &self.master_key).await {
             Ok(k) => Ok(Some(k)),
             Err(_) => Ok(None), // 调用方用 .ok_or_else() 转成 auth error
+        }
+    }
+
+    async fn get_by_id(&self, key_id: &str) -> Result<Option<GatewayKey>> {
+        match repo::gateway::get_by_id(&self.db, key_id).await {
+            Ok(k) => Ok(Some(k)),
+            Err(_) => Ok(None),
         }
     }
 

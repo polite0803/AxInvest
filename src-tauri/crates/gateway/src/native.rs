@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use axagent_harness::ProviderRequestContext;
 use axagent_harness::core_error::AxAgentError;
 use axagent_harness::types::{
@@ -1293,6 +1295,14 @@ mod tests {
                     axagent_crypto::platform_adapter_impl::DefaultCryptoService::new(master_key),
                 ),
             ),
+            ticket_store: crate::realtime::default_ticket_store(),
+            // SECURITY (Phase 2 Task 2.3): 测试用独立 limiter 实例，
+            // 避免跨测试污染。设置一个很宽的阈值（100）让单测不会被
+            // 限流误伤。
+            key_verify_limiter: std::sync::Arc::new(crate::auth::KeyVerifyLimiter::new(
+                100,
+                std::time::Duration::from_secs(60),
+            )),
         };
         (create_router(state.clone()), handle, gateway_key.plain_key, state)
     }
@@ -1710,6 +1720,11 @@ mod tests {
                     axagent_crypto::platform_adapter_impl::DefaultCryptoService::new(master_key),
                 ),
             ),
+            ticket_store: crate::realtime::default_ticket_store(),
+            key_verify_limiter: std::sync::Arc::new(crate::auth::KeyVerifyLimiter::new(
+                100,
+                std::time::Duration::from_secs(60),
+            )),
         });
         let response = app
             .oneshot(

@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useWorkflowEditorStore } from "@/stores/feature/workflowEditorStore";
+import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { Button, theme, Tooltip } from "antd";
 import React, { memo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Handle, type NodeProps, Position } from "reactflow";
 
 const PURPLE_BASE = "#722ed1";
 const PURPLE_VAR = `var(--purple, ${PURPLE_BASE})`;
@@ -57,10 +59,8 @@ const STATUS_META: Record<
   },
 };
 
-const TriggerNodeComponent: React.FC<NodeProps<TriggerNodeData>> = ({
-  data,
-  selected,
-}) => {
+const TriggerNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as TriggerNodeData;
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const setSelectedNode = useWorkflowEditorStore((s) => s.setSelectedNode);

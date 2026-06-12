@@ -1,7 +1,8 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useTracerStore } from "@/stores/devtools/tracerStore";
 import type { TraceSummary } from "@/types";
-import { Card, DatePicker, Input, Space, Tag, Typography } from "antd";
+import { Card, DatePicker, Input, List, Space, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -95,7 +96,7 @@ export function TraceList() {
 
   return (
     <div className="p-3">
-      <Space orientation="vertical" className="w-full mb-4">
+      <Space direction="vertical" className="w-full mb-4">
         <Input.Search
           placeholder={t("devtools.searchTraceId")}
           onSearch={(value) => {

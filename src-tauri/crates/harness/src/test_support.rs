@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! 测试替身支持
 //!
 //! 提供 `axagent-harness` 自身定义的 mock / empty 实现，使测试代码
@@ -60,6 +62,9 @@ impl GatewayKeyRepository for EmptyGatewayKeyRepository {
         Ok(vec![])
     }
     async fn verify_key(&self, _token: &str) -> Result<Option<GatewayKey>> {
+        Ok(None)
+    }
+    async fn get_by_id(&self, _key_id: &str) -> Result<Option<GatewayKey>> {
         Ok(None)
     }
     async fn update_last_used(&self, _key_id: &str) -> Result<()> {

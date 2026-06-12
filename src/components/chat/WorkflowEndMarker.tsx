@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { Button, Card, theme, Typography } from "antd";
 import { Archive, CheckCircle, ListChecks } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -26,7 +28,9 @@ export function WorkflowEndMarker({
 
   const minutes = Math.floor(durationSeconds / 60);
   const seconds = durationSeconds % 60;
-  const durationStr = minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
+  const durationStr = minutes > 0
+    ? t("workflow.durationMinutes", { minutes, seconds })
+    : t("workflow.durationSeconds", { seconds });
 
   return (
     <Card

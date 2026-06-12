@@ -1,7 +1,8 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { BacklinkInfo } from "@/types";
-import { Empty, Spin, theme, Typography } from "antd";
+import { Empty, List, Spin, theme, Typography } from "antd";
 import { ArrowLeftRight, ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

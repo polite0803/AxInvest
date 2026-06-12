@@ -1,8 +1,9 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { useCitationStore } from "@/stores/feature/citationStore";
 import type { Citation, CitationStatsData } from "@/types";
 import { CheckCircleOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Space, Tag, Typography } from "antd";
+import { Button, List, Space, Tag, Typography } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CredibilityBadge } from "./CredibilityBadge";
@@ -242,7 +243,7 @@ export function CitationStats({
 
   return (
     <div className="citation-stats">
-      <Space orientation="vertical" size="small" style={{ width: "100%" }}>
+      <Space direction="vertical" size="small" style={{ width: "100%" }}>
         <div className="flex justify-between">
           <Text type="secondary">{t("citationManager.totalCitations")}</Text>
           <Text strong>{stats.total}</Text>

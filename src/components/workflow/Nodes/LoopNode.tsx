@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import type { NodeProps } from "@xyflow/react";
 import { Tag } from "antd";
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
-import type { NodeProps } from "reactflow";
 import type { ContainerNodeData } from "./ContainerNode";
 import { ContainerNode } from "./ContainerNode";
 
@@ -14,10 +16,8 @@ interface LoopNodeData extends ContainerNodeData {
   collectionVar?: string;
 }
 
-const LoopNodeComponent: React.FC<NodeProps<LoopNodeData>> = ({
-  data,
-  selected,
-}) => {
+const LoopNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as LoopNodeData;
   const { t } = useTranslation();
   const loopType = data.loopType || "count";
 

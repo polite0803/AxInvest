@@ -1,8 +1,9 @@
-import { List } from "@/components/common/AntdList";
+// SPDX-License-Identifier: AGPL-3.0-only
+
 import { invoke } from "@/lib/invoke";
 import { IngestResult, useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { DeleteOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, UploadOutlined } from "@ant-design/icons";
-import { Button, Card, Form, Input, message, Progress, Select, Space, Typography, Upload } from "antd";
+import { Button, Card, Form, Input, List, message, Progress, Select, Space, Typography, Upload } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -105,7 +106,7 @@ export function IngestPanel({ wikiId, onClose }: IngestPanelProps) {
   };
 
   return (
-    <Space orientation="vertical" size="large" style={{ width: "100%" }}>
+    <Space direction="vertical" size="large" style={{ width: "100%" }}>
       <Form form={form} layout="vertical" onFinish={handleIngest}>
         <Form.Item label={t("wiki.ingest.type")} required>
           <Select

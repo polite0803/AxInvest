@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { Tag, theme } from "antd";
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { Handle, type NodeProps, Position } from "reactflow";
 
 const SWITCH_COLOR = "#722ed1";
 
@@ -17,10 +19,8 @@ interface SwitchNodeData {
   input_var?: string;
 }
 
-const SwitchNodeComponent: React.FC<NodeProps<SwitchNodeData>> = ({
-  data,
-  selected,
-}) => {
+const SwitchNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as SwitchNodeData;
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const cases = data.cases || [];

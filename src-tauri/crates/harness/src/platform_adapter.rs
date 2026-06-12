@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Gateway 层访问 dao + crypto 的 trait 抽象。
 //!
 //! `PlatformAdapter` 是 facade trait，把 5 个子 trait 组合起来。
@@ -29,6 +31,10 @@ pub trait SettingsRepository: Send + Sync {
 pub trait GatewayKeyRepository: Send + Sync {
     async fn list_gateway_keys(&self) -> Result<Vec<GatewayKey>>;
     async fn verify_key(&self, token: &str) -> Result<Option<GatewayKey>>;
+    /// Look up a key by its stable id. Returns `None` if not found.
+    /// SECURITY: callers must not assume the key is enabled — check `key.enabled`
+    /// before granting access.
+    async fn get_by_id(&self, key_id: &str) -> Result<Option<GatewayKey>>;
     async fn update_last_used(&self, key_id: &str) -> Result<()>;
     #[allow(clippy::too_many_arguments)]
     async fn record_usage(

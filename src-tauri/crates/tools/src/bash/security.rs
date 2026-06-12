@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Bash 安全分析器
 //!
 //! 命令白名单、危险模式检测、安全 flag 映射。
@@ -86,7 +88,7 @@ impl SecurityAnalyzer {
         // 其他常用
         allowed.extend([
             "ssh", "scp", "rsync", "tar", "gzip", "gunzip", "zip", "unzip", "jq", "xargs", "tee",
-            "basename", "dirname", "realpath", "readlink",
+            "basename", "dirname", "realpath", "readlink", "sleep", "sleep", "sleep",
         ]);
 
         Self {

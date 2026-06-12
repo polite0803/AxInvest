@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { Tag, theme } from "antd";
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { Handle, type NodeProps, Position } from "reactflow";
 
 interface ToolNodeData {
   id: string;
@@ -16,10 +18,8 @@ interface ToolNodeData {
   outputVar?: string;
 }
 
-const ToolNodeComponent: React.FC<NodeProps<ToolNodeData>> = ({
-  data,
-  selected,
-}) => {
+const ToolNodeComponent: React.FC<NodeProps> = ({ data: _data, selected }) => {
+  const data = _data as unknown as ToolNodeData;
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const color = token.colorSuccess;

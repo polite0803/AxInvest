@@ -386,9 +386,9 @@ async fn seed_stock_analysis_workflow_template(
         JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig, MergeStrategy,
         NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode, ParallelNode,
         ParallelNodeConfig, Position, RetryConfig, RetryPolicy, StorageNode, StorageNodeConfig,
-        SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig,
-        TriggerNode, TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig,
-        Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        SubGraph, SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig,
+        TriggerConfig, TriggerNode, TriggerType, ValidationAssertion, ValidationNode,
+        ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -448,8 +448,9 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // v23: 修复子节点双重定义问题——subGraph 注入后从顶层 nodes 数组剔除子节点，
-    //   避免导出 JSON 中子节点同时存在于 subGraph 和顶层 nodes（导致编辑器渲染悬空连线）。
+    // v23: 恢复 subGraph 注入（编辑器渲染需要坐标转换：绝对→相对），
+    //     同时增加版本检查。子节点在顶层 nodes 和 subGraph 中并存，
+    //     编辑器保存时会自动去重（上游 WorkflowEditor.tsx save 路径过滤）。
     const TEMPLATE_VERSION: i32 = 23;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
@@ -1294,7 +1295,7 @@ async fn seed_stock_analysis_workflow_template(
             timeout: Some(600),
             aggregation: Some(MergeStrategy::All),
             auto_input_from_parent: false, // 不自动从父节点接收输入
-            sub_graph: None,               // v23: 保持 None，编辑器通过 parent_id + 步骤引用渲染
+            sub_graph: None,               // v23+：稍后通过 inject_container_subgraphs 注入
         },
     }));
 
@@ -1375,7 +1376,7 @@ async fn seed_stock_analysis_workflow_template(
             convergence_model_role: Some("decision-maker".into()),
             topic_var: "trigger.output".into(),
             output_var: "debate-result".into(),
-            sub_graph: None, // v23: 保持 None，编辑器通过 parent_id + 步骤引用渲染
+            sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
         },
     }));
 
@@ -1648,7 +1649,7 @@ async fn seed_stock_analysis_workflow_template(
             aggregation: Some(MergeStrategy::All),
             auto_input_from_parent: false,
             timeout: Some(600),
-            sub_graph: None, // v23: 保持 None，编辑器通过 parent_id + 步骤引用渲染
+            sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
         },
     }));
     edges.push(edge(
@@ -3696,11 +3697,56 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     let error_config_val = serde_json::to_string(&error_config)
         .map_err(|e| format!("序列化 ErrorConfig 失败: {e}"))?;
 
-    // ── 注：不再向容器注入 subGraph ──
-    // v23 修复: 子节点已通过 parent_id 关联到容器，编辑器通过步骤引用
-    //   为其设置 parentId + extent: "parent"，无需 subGraph 也可正常渲染。
-    //   避免 JSON 中子节点被双重定义（悬空连线/孤立节点）。
-    //   容器初始化时 sub_graph 已为 None，无需设置。
+    // ── 注入容器节点子图（subGraph）用于编辑器嵌套渲染 ──
+    // 子图仅在编辑器的 ReactFlow 渲染层中用于坐标转换（绝对→相对），
+    // 运行时引擎仍从顶层 nodes 读取所有节点。
+    // 编辑器保存时会自动去重（上游 WorkflowEditor.tsx save 路径过滤 subGraph 子节点）。
+    let container_nodes: &[&str] = &["p-analysts", "debate-bull-bear", "p-risk-assess"];
+    for &cid in container_nodes {
+        let child_ids: Vec<String> = nodes
+            .iter()
+            .filter(|n| n.base().parent_id.as_deref() == Some(cid))
+            .map(|n| n.base_id().to_string())
+            .collect();
+        if child_ids.is_empty() {
+            continue;
+        }
+        let child_node_ids: std::collections::HashSet<&str> =
+            child_ids.iter().map(|s| s.as_str()).collect();
+        let sub_edges: Vec<WorkflowEdge> = edges
+            .iter()
+            .filter(|e| {
+                child_node_ids.contains(e.source.as_str())
+                    && child_node_ids.contains(e.target.as_str())
+            })
+            .cloned()
+            .collect();
+        let sub_nodes: Vec<WorkflowNode> = nodes
+            .iter()
+            .filter(|n| child_node_ids.contains(n.base_id()))
+            .cloned()
+            .collect();
+        let sub_graph = SubGraph {
+            nodes: sub_nodes,
+            edges: sub_edges,
+        };
+        // 注入到容器节点 config 中
+        for n in nodes.iter_mut() {
+            if n.base_id() != cid {
+                continue;
+            }
+            match n {
+                WorkflowNode::Parallel(p) => {
+                    p.config.sub_graph = Some(sub_graph);
+                },
+                WorkflowNode::Debate(d) => {
+                    d.config.sub_graph = Some(sub_graph);
+                },
+                _ => {},
+            }
+            break;
+        }
+    }
     // 写入 DB
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
     // DEBUG: 验证前几个 Tool 节点的 type 字段

@@ -46,6 +46,7 @@ fn test_compute_indicators_basic() {
                 volume: 1000.0 + i as f64 * 10.0,
                 amount: price * 1100.0,
                 turnover_rate: None,
+                adj_factor: None,
             }
         })
         .collect();

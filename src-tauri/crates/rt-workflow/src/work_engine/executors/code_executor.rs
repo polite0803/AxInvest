@@ -138,10 +138,8 @@ fn dynamic_to_json_value(v: &rhai::Dynamic) -> Value {
     if v.is_bool() {
         return Value::Bool(v.as_bool().unwrap_or(false));
     }
-    if v.is_string() {
-        if let Ok(s) = v.clone().into_string() {
-            return Value::String(s);
-        }
+    if let Ok(s) = v.clone().into_string() {
+        return Value::String(s);
     }
     if let Ok(i) = v.as_int() {
         return Value::Number(serde_json::Number::from(i));

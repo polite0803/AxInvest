@@ -14,6 +14,7 @@
 //! `&DatabaseConnection`——sea_orm 没有提供 back-reference）。所有 call
 //! sites 传的都是 `&DatabaseConnection`，所以这个变化不破坏兼容性。
 
+use sea_orm::ConnectionTrait;
 use sea_orm::DatabaseConnection;
 use sea_orm::DbErr;
 

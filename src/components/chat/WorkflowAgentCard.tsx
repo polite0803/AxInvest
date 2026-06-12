@@ -49,6 +49,8 @@ function extractAgentBrief(report: string, maxLen = 180): string {
       parsed.argument,
       parsed.analysis,
       parsed.assessment,
+      // 催化剂分析师字段
+      parsed.catalyst_type,
       // 辩论字段
       parsed.our_claim,
       parsed.their_weakness,
@@ -73,7 +75,16 @@ function extractAgentBrief(report: string, maxLen = 180): string {
       }
     }
     // 提取 evidence / key_points / core_arguments / resonance_points 的前几项
-    for (const key of ["evidence", "key_points", "core_arguments", "resonance_points", "preempted_counter_attacks"]) {
+    for (
+      const key of [
+        "evidence",
+        "key_points",
+        "core_arguments",
+        "resonance_points",
+        "preempted_counter_attacks",
+        "key_events",
+      ]
+    ) {
       const arr = parsed[key];
       if (Array.isArray(arr) && arr.length > 0) {
         const first = arr[0];
@@ -83,6 +94,8 @@ function extractAgentBrief(report: string, maxLen = 180): string {
           ? String((first as Record<string, unknown>).point ?? "")
           : (first && typeof first === "object" && "claim" in first)
           ? String((first as Record<string, unknown>).claim ?? "")
+          : (first && typeof first === "object" && "event" in first)
+          ? String((first as Record<string, unknown>).event ?? "")
           : "";
         if (text.length > 5) {
           return text.length > maxLen ? text.slice(0, maxLen) + "..." : text;

@@ -20,6 +20,15 @@ export function cleanToolCallTags(text: string): string {
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|invoke[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/invoke\]/gi, "");
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|parameter[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/parameter\]/gi, "");
+  // <|PROVIDER|tool_calls|>...<|PROVIDER|/tool_calls|> 格式（CHAT2API 变体，外层用 | 闭合）
+  cleaned = cleaned.replace(/<\|[A-Z0-9_]+\|tool_calls\|>[\s\S]*?<\|[A-Z0-9_]+\|\/tool_calls\|>/gi, "");
+  // 清理所有残留的 <|PROVIDER|...> / </|PROVIDER|...> 标签（invoke/parameter 等内层标签用 > 闭合）
+  cleaned = cleaned.replace(/<\|[A-Z0-9_]+\|[\w-]+[^>]*\/?>[\s\S]*?<\/\|[A-Z0-9_]+\|[\w-]+\|?>/gi, "");
+  cleaned = cleaned.replace(/<\|[A-Z0-9_]+\|[\w-]+[^>]*\/?>/gi, "");
+  cleaned = cleaned.replace(/<\/\|[A-Z0-9_]+\|[\w-]+\|?>/gi, "");
+  // 清理 CDATA 包装
+  cleaned = cleaned.replace(/<!\[CDATA\[/g, "");
+  cleaned = cleaned.replace(/\]\]>/g, "");
   // 清理 UTF-8 替换字符（乱码）
   cleaned = cleaned.replace(/\uFFFD+/g, "...");
   return cleaned.replace(/\n{3,}/g, "\n\n").trim();

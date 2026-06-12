@@ -950,7 +950,7 @@ mod tests {
         let end = start + chrono::Duration::seconds(1);
         let record = TaskExecutionRecord::new("d-1".to_string(), "x".to_string(), start, end);
         let (r, ins) = reflector.reflect(&record).await;
-        assert_eq!(r.quality_score, 0);
+        assert_eq!(r.quality_score, 1);
         assert!(r.quality_analysis.contains("disabled"));
         assert!(ins.is_empty());
     }

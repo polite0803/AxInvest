@@ -3993,7 +3993,10 @@
       "axagentFolderHint": "选择包含 AxAgent 格式 JSON 文件的文件夹，将自动扫描并导入所有工作流模板。",
       "n8nFolderHint": "选择包含 n8n 格式 JSON 文件的文件夹，将自动转换并导入所有 n8n 工作流。",
       "importStructuralErrors": "导入的工作流存在 {{count}} 个结构错误：\n{{details}}",
-      "importValidationWarnings": "导入的工作流存在 {{count}} 个警告：\n{{details}}"
+      "importValidationWarnings": "导入的工作流存在 {{count}} 个警告：\n{{details}}",
+      "fileTooLarge": "文件过大",
+      "invalidJsonFile": "无效的 JSON 文件",
+      "jsonTooDeep": "JSON 嵌套过深"
     },
     "preview": "预览",
     "publish": "发布",
@@ -4048,7 +4051,12 @@
       "diffNodeTypeChanged": "节点类型变更",
       "diffNodeConfigChanged": "节点配置变更",
       "diffEdgeAdded": "新增边 ({{type}})",
-      "diffEdgeRemoved": "删除边 ({{type}})"
+      "diffEdgeRemoved": "删除边 ({{type}})",
+      "rollback": "回滚到此版本",
+      "rollbackConfirm": "确认回滚？",
+      "rollbackTo": "回滚到 {{version}}",
+      "rolledBack": "已回滚",
+      "latest": "最新"
     },
     "versionHistoryLoadFailed": "版本历史加载失败",
     "versionLoaded": "版本已加载",
@@ -4528,7 +4536,33 @@
       "toolSetSelector": "工具集"
     },
     "templateList": {
-      "moreActions": "「{{name}}」的更多操作"
+      "moreActions": "「{{name}}」的更多操作",
+      "searchPlaceholder": "搜索模板...",
+      "tagPlaceholder": "筛选标签...",
+      "typePlaceholder": "筛选类型...",
+      "preset": "预设",
+      "custom": "自定义",
+      "newTemplate": "新建模板",
+      "importPresetsTitle": "导入预设",
+      "importPresets": "导入预设",
+      "noTemplates": "暂无模板",
+      "confirmDelete": "确认删除",
+      "confirmDeleteMessage": "确定删除此模板？此操作不可撤销。",
+      "irreversible": "此操作不可撤销",
+      "delete": "删除",
+      "view": "查看",
+      "edit": "编辑",
+      "versionHistory": "版本历史",
+      "duplicate": "复制",
+      "noDescription": "暂无描述",
+      "noMatchFound": "未找到匹配的模板",
+      "readonly": "只读",
+      "copied": "已复制",
+      "copyFailed": "复制失败",
+      "deleted": "已删除",
+      "deleteFailed": "删除失败",
+      "presetsImportFailed": "导入预设失败",
+      "presetsImported": "预设已导入"
     },
     "undo": "撤销",
     "redo": "重做",
@@ -4754,7 +4788,12 @@
     "node": {
       "tickMode": "Tick 模式",
       "breakpoint": "断点",
-      "retryEnabled": "重试已启用"
+      "retryEnabled": "重试已启用",
+      "clickToExpandPorts": "点击展开端口",
+      "clickToCollapsePorts": "点击收起端口",
+      "inputs": "输入",
+      "outputs": "输出",
+      "type": "类型"
     },
     "debateNode": {
       "debaters": "辩手",
@@ -4778,7 +4817,12 @@
       "manual": "手动",
       "schedule": "定时",
       "event": "事件",
-      "title": "触发器"
+      "title": "触发器",
+      "statusActive": "运行中",
+      "statusDisabled": "已停用",
+      "statusUnconfigured": "未配置",
+      "configure": "配置触发器",
+      "configureHint": "配置触发条件和参数"
     },
     "documentParserNode": {
       "notSet": "未设置",
@@ -5224,7 +5268,16 @@
       "close": "关闭搜索",
       "placeholder": "搜索节点..."
     },
-    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}"
+    "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}",
+    "run": "运行",
+    "settings": "设置",
+    "decorativeContainerNoEdges": "装饰容器无连接",
+    "discard": "放弃",
+    "durationMinutes": "{{minutes}} 分钟",
+    "durationSeconds": "{{seconds}} 秒",
+    "keepEditing": "继续编辑",
+    "unsavedContent": "有未保存的更改。",
+    "unsavedTitle": "未保存的工作流"
   },
   "atomicSkill": {
     "entryType": "入口类型",
@@ -7900,7 +7953,8 @@
         "hot-money-tracker": "资金追踪师",
         "lockup-watcher": "解禁观察师",
         "research-analyst": "研报分析师",
-        "sector-analyst": "行业分析师"
+        "sector-analyst": "行业分析师",
+        "catalyst-analyst": "催化剂与叙事分析师"
       },
       "analystComplete": "分析完畢，请在分析页查看详细报告",
       "decisionTitle": "最終决策",
@@ -7952,9 +8006,9 @@
       "failedStepsWithCount": "失敗步驟（{{count}} 步）",
       "fetchFailed": "数据獲取失敗",
       "notification": "Analysis Complete Notification",
-      "riskAggressive": "Aggressive Risk Assessment",
-      "riskConservative": "Conservative Risk Assessment",
-      "riskNeutral": "Neutral Risk Assessment",
+      "riskAggressive": "激进风险评估",
+      "riskConservative": "保守风险评估",
+      "riskNeutral": "中性风险评估",
       "riskAggregation": "Risk Aggregation",
       "riskClassification": "Risk Classification",
       "bullAnalyst": "Bull",
@@ -7979,7 +8033,12 @@
     "risk": {
       "high": "高",
       "medium": "中",
-      "low": "低"
+      "low": "低",
+      "aggressive": "激进",
+      "conservative": "保守",
+      "neutral": "中性",
+      "researchManager": "研究经理",
+      "comprehensive": "综合"
     },
     "workflowStarting": "⏳ 正在启动 {{stockCode}} 股票分析工作流...",
     "success": "成功",

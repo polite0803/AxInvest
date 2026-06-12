@@ -2,8 +2,8 @@
 
 use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::SemanticCache;
-use axagent_astock_data::AStockClient;
 use crate::state::{AgentState, GatewayState, InfraState, MemoryState, SkillState, TaskState};
+use axagent_astock_data::AStockClient;
 use axagent_core::cloud_storage::SyncEngine;
 use axagent_core::file_authorizer::FileAuthorizer;
 use axagent_plugins::PluginManager;

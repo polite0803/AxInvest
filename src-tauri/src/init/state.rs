@@ -141,8 +141,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
             Ok(ms) => ms,
             Err(e) => {
                 tracing::error!("Failed to create MemoryService: {} — retrying once", e);
-                match axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone())
-                {
+                match axagent_trajectory::MemoryService::new(shared_trajectory_storage.clone()) {
                     Ok(ms) => ms,
                     Err(e2) => {
                         tracing::error!(
@@ -409,17 +408,21 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
                         "{asof_block}\n\n{}",
                         axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS
                     );
-                    axagent_rt_workflow::work_engine::domain_constraints::ConstraintBlocks::default()
-                        .with_head(head)
-                        .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
+                    axagent_rt_workflow::work_engine::domain_constraints::ConstraintBlocks::default(
+                    )
+                    .with_head(head)
+                    .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
                 } else {
-                    axagent_rt_workflow::work_engine::domain_constraints::ConstraintBlocks::default()
-                        .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
-                        .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
+                    axagent_rt_workflow::work_engine::domain_constraints::ConstraintBlocks::default(
+                    )
+                    .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
+                    .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
                 }
             } else {
                 // 非股票角色：使用通用领域约束
-                axagent_rt_workflow::work_engine::domain_constraints::DomainConstraints::by_role(role_name)
+                axagent_rt_workflow::work_engine::domain_constraints::DomainConstraints::by_role(
+                    role_name,
+                )
             }
         })));
         engine

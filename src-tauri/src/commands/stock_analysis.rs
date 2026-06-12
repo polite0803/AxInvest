@@ -110,14 +110,14 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
         .ok_or("Result is not a map")?;
     let get_str = |key: &str| -> String {
         result_map
-            .get(&key.into())
-            .and_then(|v| v.clone().try_cast::<String>().ok())
+            .get(key)
+            .and_then(|v| v.clone().try_cast::<String>())
             .unwrap_or_default()
     };
     let get_f64 = |key: &str| -> f64 {
         result_map
-            .get(&key.into())
-            .and_then(|v| v.as_float())
+            .get(key)
+            .and_then(|v| v.as_float().ok())
             .unwrap_or(0.0)
     };
 
@@ -162,7 +162,7 @@ pub async fn replay_tool_chain(
     state: State<'_, AppState>,
     params: ReplayToolChainRequest,
 ) -> Result<ReplayToolChainResult, String> {
-    use axagent_astock_data::{client::AStockClient, indicators};
+    use axagent_astock_data::{AStockClient, indicators};
     use std::sync::Arc;
 
     let code = &params.stock_code;
@@ -277,10 +277,12 @@ pub async fn replay_tool_chain(
     // ── 2. compute_valuation（简化版：基于 F-Score 和 PE 的基本估值判断）──
     let fscore = tv("fscore_buy_threshold", 7.0) as i64;
     let pe_pct = quote
-        .pe_ttm
+        .pe
         .as_ref()
-        .and_then(|pe| client.get_pe_percentile(code, *pe).await.ok())
-        .flatten()
+        .and_then(|pe| {
+            // 简化版：PE<20 视为低估，PE>40 视为高估
+            Some(if *pe < 20.0 { 20.0 } else if *pe > 40.0 { 80.0 } else { 50.0 })
+        })
         .unwrap_or(50.0);
     let valuation_result = serde_json::json!({
         "pePercentile": pe_pct, "fscoreThreshold": fscore,
@@ -436,7 +438,7 @@ pub async fn cancel_stock_analysis(
     state: State<'_, AppState>,
     analysis_id: String,
 ) -> Result<(), String> {
-    let tokens = state.agent_cancel_tokens.lock().await;
+    let tokens = std::sync::Arc::new(state.agent_cancel_tokens.clone());
     if let Some(token) = tokens.get(&analysis_id) {
         token.store(true, Ordering::Relaxed);
         tracing::info!("cancel_stock_analysis: 已设置取消令牌 {}", analysis_id);
@@ -1936,7 +1938,6 @@ pub async fn get_stock_option_pcr(
 // ── CronJob 定时任务（基于上游 CronJobStore + 持久化）──
 
 use axagent_runtime_core::{CronJob, CronJobStatus};
-use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

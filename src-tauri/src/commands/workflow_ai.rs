@@ -869,6 +869,8 @@ fn parse_llm_response(
                         code: "".to_string(),
                         output_var: "".to_string(),
                         tool_name: None,
+                        input_mapping: std::collections::HashMap::new(),
+                        execute_directly: false,
                     });
                 WorkflowNode::Code(CodeNode {
                     base,

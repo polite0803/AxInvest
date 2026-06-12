@@ -408,12 +408,12 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
                         "{asof_block}\n\n{}",
                         axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS
                     );
-                    axagent_rt_workflow::work_engine::domain_constraints::ConstraintBlocks::default(
+                    axagent_rt_workflow::work_engine::prompt_template::ConstraintBlocks::default(
                     )
                     .with_head(head)
                     .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)
                 } else {
-                    axagent_rt_workflow::work_engine::domain_constraints::ConstraintBlocks::default(
+                    axagent_rt_workflow::work_engine::prompt_template::ConstraintBlocks::default(
                     )
                     .with_head(axagent_stock_analysis::prompts::STOCK_HARD_CONSTRAINTS)
                     .with_tail(axagent_stock_analysis::prompts::STOCK_COLLAB_REMINDER)

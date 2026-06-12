@@ -386,7 +386,7 @@ async fn seed_stock_analysis_workflow_template(
         LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
         OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
         RetryPolicy, StorageNode, StorageNodeConfig, SwitchCase, SwitchNode, SwitchNodeConfig,
-        ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
+        CodeNode, CodeNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
         ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
         WorkflowNode, WorkflowNodeBase,
     };

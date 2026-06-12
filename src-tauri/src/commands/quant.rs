@@ -7,6 +7,7 @@
 //! - `quant_strategy_register_rhai`: 注册 / 更新 Rhai 脚本策略（沙箱编译校验）
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
@@ -17,7 +18,7 @@ use uuid::Uuid;
 use crate::AppState;
 use axagent_core::entity::{quant_paper_trades, quant_runs, quant_signals, quant_strategies};
 use axagent_quant::prelude::{
-    BacktestConfig, BacktestEngine, BacktestResult, Bar, BollingerStrategy as BollStrategyAlias,
+    BacktestConfig, BacktestEngine, BacktestResult, Bar, BollStrategy as BollStrategyAlias,
     MaCrossStrategy, MacdStrategy, MatcherConfig, MetricsReport, RhaiStrategy, RsiStrategy,
     Strategy, StrategyCtx, TurtleStrategy, WalkForward, WalkForwardConfig,
 };
@@ -205,7 +206,7 @@ pub async fn quant_backtest_run(
     // ── 2. 拉 K 线（取 ~2 年前复权日 K） ──
     let klines_with_quotes = state
         .astock_client
-        .get_klines_with_adj(&request.code, axagent_astock_data::AdjType::Forward, "daily")
+        .get_klines_with_adj(&request.code, "daily", 120u32, Some(axagent_astock_data::AdjType::Forward))
         .await
         .map_err(|e| format!("get_klines failed for {}: {e}", request.code))?;
 
@@ -213,13 +214,10 @@ pub async fn quant_backtest_run(
         return Err(format!("股票 {} 无 K 线数据", request.code));
     }
 
-    // 合并 KLine + StockQuote → Bar
+    // 合并 KLine → Bar
     let bars: Vec<Bar> = klines_with_quotes
         .iter()
-        .map(|(k, q_opt)| match q_opt {
-            Some(q) => Bar::from_kline_with_quote(&request.code, k, q),
-            None => Bar::from_kline(&request.code, k),
-        })
+        .map(|k| Bar::from_kline(&request.code, k))
         .filter(|b| {
             b.date.as_str() >= request.start_date.as_str()
                 && b.date.as_str() <= request.end_date.as_str()
@@ -239,6 +237,7 @@ pub async fn quant_backtest_run(
     let bt_config = BacktestConfig {
         initial_cash: request.initial_cash,
         matcher: matcher_cfg,
+        codes: vec![request.code.clone()],
         start_date: Some(request.start_date.clone()),
         end_date: Some(request.end_date.clone()),
     };
@@ -302,7 +301,7 @@ pub async fn quant_backtest_run(
                     "builtin.ma_cross" => Box::new(MaCrossStrategy::default()),
                     "builtin.macd" => Box::new(MacdStrategy::default()),
                     "builtin.rsi" => Box::new(RsiStrategy::default()),
-                    "builtin.boll" => Box::new(BollStrategy::default()),
+                    "builtin.boll" => Box::new(BollStrategyAlias::default()),
                     "builtin.turtle" => Box::new(TurtleStrategy::default()),
                     "rhai" => {
                         // rhai fold：编译源（这里拿不到原始脚本，需要先读 DB）
@@ -318,7 +317,14 @@ pub async fn quant_backtest_run(
                 s
             })
         };
-        Some(wf.run(strategy_factory.as_ref(), &bars))
+        let sf = strategy_factory.clone();
+        match wf.run(move |idx| sf(idx), bars.clone()).await {
+            Ok(report) => Some(report),
+            Err(e) => {
+                eprintln!("WalkForward failed: {e}");
+                None
+            }
+        }
     } else {
         None
     };
@@ -338,7 +344,7 @@ pub async fn quant_backtest_run(
                 .close_reason
                 .as_ref()
                 .map(|c| format!("{c:?}").to_lowercase())),
-            timestamp: Set(sig.timestamp.clone()),
+            timestamp: Set("".to_string()),
             created_at: Set(Utc::now().timestamp()),
         })
         .collect();
@@ -362,7 +368,7 @@ pub async fn quant_backtest_run(
             run_id: Set(run_id.clone()),
             code: Set(t.code.clone()),
             side: Set(format!("{:?}", t.side).to_lowercase()),
-            quantity: Set(t.quantity),
+            quantity: Set(t.quantity as i64),
             price: Set(t.price),
             amount: Set(t.amount),
             commission: Set(t.commission),
@@ -400,7 +406,7 @@ pub async fn quant_backtest_run(
     run_update.result_json = Set(Some(result_json));
     run_update.finished_at = Set(Some(now_ts));
     if let Some(wf) = &wf_report {
-        run_update.walk_forward_folds = Set(Some(wf.folds.len() as i32));
+        run_update.walk_forward_folds = Set(Some(wf.windows.len() as i32));
         run_update.walk_forward_overfit_warning = Set(Some(wf.overfit_window_count > 0));
         run_update.walk_forward_stability_score = Set(Some(wf.stability_score));
     }

@@ -281,7 +281,13 @@ pub async fn replay_tool_chain(
         .as_ref()
         .and_then(|pe| {
             // 简化版：PE<20 视为低估，PE>40 视为高估
-            Some(if *pe < 20.0 { 20.0 } else if *pe > 40.0 { 80.0 } else { 50.0 })
+            Some(if *pe < 20.0 {
+                20.0
+            } else if *pe > 40.0 {
+                80.0
+            } else {
+                50.0
+            })
         })
         .unwrap_or(50.0);
     let valuation_result = serde_json::json!({

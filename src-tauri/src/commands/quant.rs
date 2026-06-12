@@ -206,7 +206,12 @@ pub async fn quant_backtest_run(
     // ── 2. 拉 K 线（取 ~2 年前复权日 K） ──
     let klines_with_quotes = state
         .astock_client
-        .get_klines_with_adj(&request.code, "daily", 120u32, Some(axagent_astock_data::AdjType::Forward))
+        .get_klines_with_adj(
+            &request.code,
+            "daily",
+            120u32,
+            Some(axagent_astock_data::AdjType::Forward),
+        )
         .await
         .map_err(|e| format!("get_klines failed for {}: {e}", request.code))?;
 
@@ -323,7 +328,7 @@ pub async fn quant_backtest_run(
             Err(e) => {
                 eprintln!("WalkForward failed: {e}");
                 None
-            }
+            },
         }
     } else {
         None

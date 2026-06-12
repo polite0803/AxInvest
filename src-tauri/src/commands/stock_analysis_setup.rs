@@ -381,14 +381,14 @@ async fn seed_stock_analysis_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_harness::workflow_types::{
-        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, DebateNode,
-        DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode,
-        LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
-        OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
-        RetryPolicy, StorageNode, StorageNodeConfig, SwitchCase, SwitchNode, SwitchNodeConfig,
-        CodeNode, CodeNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
-        ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
-        WorkflowNode, WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, CodeNode,
+        CodeNodeConfig, DebateNode, DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema,
+        JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig, MergeStrategy,
+        NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode, ParallelNode,
+        ParallelNodeConfig, Position, RetryConfig, RetryPolicy, StorageNode, StorageNodeConfig,
+        SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig,
+        TriggerNode, TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig,
+        Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 

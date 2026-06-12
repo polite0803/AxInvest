@@ -86,7 +86,7 @@ pub async fn quant_strategies_list(
 
     // 2. 合并内置（DB 已有同 id 的则跳过）
     let mut items: Vec<StrategyListItem> = Vec::new();
-    let mut existing_ids: std::collections::HashSet<String> = db_rows
+    let existing_ids: std::collections::HashSet<String> = db_rows
         .iter()
         .map(|r| format!("{}|{}", r.strategy_type, r.name))
         .collect();

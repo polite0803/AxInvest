@@ -209,8 +209,6 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::CloseReason;
-    use chrono::NaiveDate;
 
     fn make_bar(code: &str, date: &str, open: f64, high: f64, low: f64, close: f64) -> Bar {
         Bar {

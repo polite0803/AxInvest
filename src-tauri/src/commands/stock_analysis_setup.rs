@@ -792,7 +792,7 @@ async fn seed_stock_analysis_workflow_template(
     let mut beta_props = std::collections::HashMap::new();
     beta_props.insert("stock_returns_json".into(), sc_prop("个股收益率JSON数组"));
     beta_props.insert("market_returns_json".into(), sc_prop("大盘收益率JSON数组"));
-    let td_beta = ToolDef {
+    let _td_beta = ToolDef {
         name: "calc_beta".into(),
         description: Some("计算 Beta 系数".into()),
         parameters: Some(JsonSchema {

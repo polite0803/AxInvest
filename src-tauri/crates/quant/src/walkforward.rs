@@ -176,7 +176,11 @@ impl WalkForward {
         loop {
             let train_start_offset = if self.config.anchored { 0 } else { cursor };
             let train_end_offset = train_start_offset + self.config.train_days;
-            let test_start_offset = train_end_offset;
+            let test_start_offset = if self.config.anchored {
+                self.config.train_days + cursor
+            } else {
+                train_end_offset
+            };
             let test_end_offset = test_start_offset + self.config.test_days;
             if test_end_offset > total_days {
                 break;

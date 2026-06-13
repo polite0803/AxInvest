@@ -448,10 +448,9 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // v23→v24: v23 初始种子没有 subGraph（被错误移除了），
-    //     后来恢复 subGraph 时没升版本，旧数据仍留在 DB 中。
-    //     升 v24 强制重新种子化，产生含正确 subGraph 的数据。
-    const TEMPLATE_VERSION: i32 = 24;
+    // v24→v25: 上一轮 v24 已经写入了 DB 但没有 subGraph
+    //     （二进制编译时间早于代码修改），再次升版强制重新种子化。
+    const TEMPLATE_VERSION: i32 = 25;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -4110,8 +4109,8 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     // v23 修复: 增加版本检查，当 stock-analysis 更新时重新克隆
-    // v23→v24: 同步 stock-analysis v24 强制重新克隆
-    const REFLECTION_MIN_VERSION: i32 = 24;
+    // v24→v25: 同步 stock-analysis v25
+    const REFLECTION_MIN_VERSION: i32 = 25;
 
     // 查重 + 版本检查（stock-analysis 更新后需要重新克隆 reflection）
     let existing = workflow_template::Entity::find_by_id("stock-reflection")

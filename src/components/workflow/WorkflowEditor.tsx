@@ -1666,7 +1666,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [t]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [t]);
 
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {

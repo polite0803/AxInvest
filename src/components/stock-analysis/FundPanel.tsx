@@ -56,8 +56,9 @@ export function FundPanel() {
   // 首次挂载加载（使用 loadData，避免与 useEffect 重复调用）
   useEffect(() => {
     mountedRef.current = true;
-    loadData();
+    const id = setTimeout(() => loadData(), 0);
     return () => {
+      clearTimeout(id);
       mountedRef.current = false;
     };
   }, [loadData]);

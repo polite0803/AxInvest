@@ -457,19 +457,18 @@ export function RiskMatrix() {
     };
   }, [expanded, riskAssessments, t, isDark, retryTick]);
 
-  if (Object.keys(riskAssessments).length === 0) { return null; }
-
-  const entries = Object.entries(riskAssessments);
-
   // 预计算所有风险条目的可读文本（仅在 riskAssessments 变化时重新计算）
   const readableCache = useMemo(() => {
     const cache = new Map<string, string>();
-    for (const [type, report] of entries) {
+    for (const [type, report] of Object.entries(riskAssessments)) {
       cache.set(type, extractReadableFromRiskReport(report));
     }
     return cache;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riskAssessments]);
+
+  if (Object.keys(riskAssessments).length === 0) { return null; }
+
+  const entries = Object.entries(riskAssessments);
 
   return (
     <>

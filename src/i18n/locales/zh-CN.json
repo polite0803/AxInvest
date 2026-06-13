@@ -4000,7 +4000,7 @@
     },
     "preview": "预览",
     "publish": "发布",
-    "saving": "保存中",
+    "saving": "保存中...",
     "save": "保存",
     "saveAsImage": "导出为图片",
     "exportEmpty": "暂无节点可导出",
@@ -4550,6 +4550,8 @@
       "confirmDeleteMessage": "确定删除此模板？此操作不可撤销。",
       "irreversible": "此操作不可撤销",
       "delete": "删除",
+      "noDescription": "暂无描述",
+      "readonly": "只读",
       "view": "查看",
       "edit": "编辑",
       "versionHistory": "版本历史",
@@ -4562,7 +4564,12 @@
       "deleted": "已删除",
       "deleteFailed": "删除失败",
       "presetsImportFailed": "导入预设失败",
-      "presetsImported": "预设已导入"
+      "presetsImported": "预设已导入",
+      "confirmDelete": "确认删除",
+      "confirmDeleteMessage": "确定要删除模板 {{name}} 吗？",
+      "irreversible": "此操作不可撤销",
+      "importPresetsTitle": "导入内置专家",
+      "importPresets": "导入"
     },
     "undo": "撤销",
     "redo": "重做",
@@ -7398,7 +7405,6 @@
       "ar": "العربية"
     }
   },
-  "chat:workflow.templateList.presetsImported": "导入成功",
   "agentRole": {
     "coordinator": "协调者",
     "researcher": "研究员",

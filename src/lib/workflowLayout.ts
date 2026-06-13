@@ -933,17 +933,10 @@ export function autoLayoutWorkflow(
     return { nodes: [...resolvedNodes, ...excludedNodes], edges: dagreResult.edges };
   }
 
-  // 1. 反算每个节点的当前绝对坐标（input 是 ReactFlow 坐标系，子节点为相对父）
-  // 使用拓扑排序保证父节点总在子节点之前处理
+  // 1. 输入已是画布绝对坐标（直接从 store 读取，非 ReactFlow 渲染层相对坐标）
   const currentAbs: Record<string, { x: number; y: number }> = {};
-
-  // 先处理无父节点（顶层节点）
-  const sorted: string[] = [];
   for (const n of nodes) {
-    if (!childOf[n.id]) {
-      sorted.push(n.id);
-      currentAbs[n.id] = { x: n.position.x, y: n.position.y };
-    }
+    currentAbs[n.id] = { x: n.position.x, y: n.position.y };
   }
 
   // 再处理子节点（已保证父节点 currentAbs 可用）

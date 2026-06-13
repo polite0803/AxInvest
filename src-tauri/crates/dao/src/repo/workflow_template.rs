@@ -135,6 +135,7 @@ pub async fn update_workflow_template(
 
     if let Some(t) = template {
         // D9: save old version as a snapshot before updating
+        // 使用 UPSERT (ON CONFLICT DO NOTHING) 防止版本记录 ID 冲突
         let version_snapshot = workflow_template_version::ActiveModel {
             id: Set(format!("{}_v{}", t.id, t.version)),
             template_id: Set(t.id.clone()),
@@ -155,7 +156,15 @@ pub async fn update_workflow_template(
             error_config: Set(t.error_config.clone()),
             created_at: Set(chrono::Utc::now().timestamp_millis()),
         };
-        version_snapshot.insert(db).await?;
+        // 版本快照：如果已存在则跳过（防止手动改库导致版本跳跃时报错）
+        let ver_id = format!("{}_v{}", t.id, t.version);
+        let exists = workflow_template_version::Entity::find_by_id(&ver_id)
+            .one(db)
+            .await?
+            .is_some();
+        if !exists {
+            version_snapshot.insert(db).await?;
+        }
 
         let mut active_model: workflow_template::ActiveModel = t.clone().into();
         active_model.name = Set(name);

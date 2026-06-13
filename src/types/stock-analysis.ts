@@ -123,7 +123,7 @@ export interface AnalysisEvent {
   payload: Record<string, unknown>;
 }
 
-export type AnalysisStatus = "idle" | "loading" | "running" | "completed" | "error";
+export type AnalysisStatus = "idle" | "loading" | "running" | "completed" | "error" | "cancelled";
 
 // ── 回测类型 ──
 

@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { computeStockConsensus } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/types/stock-analysis";
@@ -144,6 +145,17 @@ export function DecisionBanner() {
     && (!decision.reasoning || decision.reasoning.trim() === "");
   if (emptyDecision) { return null; }
 
+  // ── 决策 vs 分析师共识矛盾检测 ──
+  const isContradictory = useMemo(() => {
+    if (!analystReports || Object.keys(analystReports).length < 3 || !decision) { return false; }
+    const consensus = computeStockConsensus(analystReports);
+    const isBullishAction = decision.action === "BUY" || decision.action === "INCREASE";
+    const isBearishAction = decision.action === "SELL" || decision.action === "REDUCE";
+    if (isBullishAction && (consensus.consensus === "bearish" || consensus.consensus === "divided")) { return true; }
+    if (isBearishAction && (consensus.consensus === "bullish" || consensus.consensus === "divided")) { return true; }
+    return false;
+  }, [decision, analystReports]);
+
   const confidencePct = Math.round(decision.confidence ?? 0);
   const meterColor = confidencePct >= 70
     ? "var(--sa-green)"
@@ -171,6 +183,11 @@ export function DecisionBanner() {
             {asOfDate && (
               <Tag color="purple" title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}>
                 ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+              </Tag>
+            )}
+            {isContradictory && (
+              <Tag color="orange">
+                ⚠️ {t("stockAnalysis.contradiction")}
               </Tag>
             )}
           </div>

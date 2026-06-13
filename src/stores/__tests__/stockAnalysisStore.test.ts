@@ -198,7 +198,7 @@ describe("stockAnalysisStore", () => {
       await useStockAnalysisStore.getState().cancelAnalysis();
 
       expect(invokeMock).toHaveBeenCalledWith("cancel_stock_workflow", { workflowId: "wf-1" });
-      expect(useStockAnalysisStore.getState().status).toBe("idle");
+      expect(useStockAnalysisStore.getState().status).toBe("cancelled");
     });
   });
 });

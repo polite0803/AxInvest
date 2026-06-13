@@ -479,6 +479,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         } else if (isContainer) {
           const childIds = childrenOfParent[node.id] ?? [];
           // 同时考虑子图（subGraph）节点对容器尺寸的影响
+
           const subGraphChildren = subGraphNodes ?? [];
           let maxX = CONTAINER_MIN_W - CONTAINER_PADDING;
           let maxY = CONTAINER_MIN_H - CONTAINER_PADDING;
@@ -487,6 +488,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             if (!child) { continue; }
             const sz = getNodeSize(child.type);
             // 子节点在 Store 中是绝对坐标 —— 转为相对容器的偏移
+
             const relX = child.position.x - node.position.x;
             const relY = child.position.y - node.position.y;
             const cx = relX + sz.width;
@@ -500,6 +502,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             const relY = sgChild.position.y - node.position.y;
             const cx = relX + sz.width;
             const cy = relY + sz.height;
+
             if (cx > maxX) { maxX = cx; }
             if (cy > maxY) { maxY = cy; }
           }
@@ -508,15 +511,19 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             height: Math.max(CONTAINER_MIN_H, maxY + CONTAINER_PADDING + CONTAINER_HEADER_H),
           };
         }
-        // 折叠态下：容器内的子节点在画布上隐藏
+
+        // 判断当前节点是否是某个容器的子节点
         const parentId = parentRefs[node.id];
+        // 折叠态下：容器内的子节点在画布上隐藏
         const childIsHidden = parentId != null
           && useWorkflowEditorStore.getState().collapsedContainers.has(parentId);
         // 方案 A：全顶层节点，position 直接用 Store 中的绝对坐标
+
         return {
           id: node.id,
           type: rtType,
           position: node.position,
+          ...(parentId ? { parentId, extent: "parent" as const } : {}),
           ...(containerStyle ? { style: containerStyle } : {}),
           ...(isContainer ? { dragHandle: ".workflow-container-drag-handle", zIndex: 0 } : {}),
           ...(!isContainer ? { zIndex: 10 } : {}),
@@ -607,10 +614,13 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           },
         };
       });
-      // 将 ParallelNode 的 branches[].steps 和 MergeNode（auto-inputs）中的子节点挂载为容器子节点
-      // parentId 权威来源是 store.parentRefs（持久化），其次才回退到本次回填期望值。
+      // ═══════════════════════════════════════════════════════════════════════
+      // parentId 回填：从 config（branches.steps / debater_steps 等）推断预期的父子关系，
+      // 对 parentRefs 中尚未登记的节点写入期望值。
+      // 注意：主循环已经根据 parentRefs 完成 position 绝对→相对转换，
+      // 因此此处**不再重复修改 position**，只在 parentRefs 未登记时补 parentId/extent。
+      // ═══════════════════════════════════════════════════════════════════════
       const expectedParentByNode: Record<string, string> = {};
-      // 折叠态：收集所有"应隐藏"的子节点 ID（含 branches.steps + merge auto_inputs）
       const hiddenChildIds = new Set<string>();
       for (const node of nodes) {
         const scopedNode = node as unknown as Record<string, unknown>;
@@ -628,6 +638,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 if (isCollapsedParent) { hiddenChildIds.add(stepId); }
                 flowNodes[childIdx] = {
                   ...childFn,
+
                   hidden: isCollapsedParent ? true : childFn.hidden,
                 };
                 expectedParentByNode[stepId] = node.id;
@@ -635,7 +646,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             }
           }
         }
-        // 将 MergeNode（auto-inputs）也挂入同一容器
+        // 将 MergeNode（auto-inputs）也挂入同一容器 —— 只补 parentId，不再重算 position
         if (node.type === "merge" && scopedConfig?.auto_inputs_from_branches) {
           const inputs = scopedConfig?.inputs as string[] | undefined;
           if (inputs) {
@@ -676,12 +687,18 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             const childIdx = flowNodes.findIndex((fn) => fn.id === stepId);
             if (childIdx === -1) { continue; }
             const storedParent = parentRefs[stepId];
-            if (storedParent === undefined || storedParent === node.id) {
+            if (storedParent !== undefined && storedParent === node.id) {
+              expectedParentByNode[stepId] = node.id;
+              if (collapsedContainers.has(node.id)) { hiddenChildIds.add(stepId); }
+              continue;
+            }
+            if (storedParent === undefined) {
               const childFn = flowNodes[childIdx];
               const isCollapsedParent = collapsedContainers.has(node.id);
               if (isCollapsedParent) { hiddenChildIds.add(stepId); }
               flowNodes[childIdx] = {
                 ...childFn,
+
                 hidden: isCollapsedParent ? true : childFn.hidden,
               };
               expectedParentByNode[stepId] = node.id;
@@ -689,8 +706,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           }
         }
       }
-
-      // 把回填期望值持久化到 store：扫描结束后调 setParentRef，让 autosave 能保存到后端。
+      // 将回填期望值持久化到 store：扫描结束后调 setParentRef，让 autosave 能保存到后端。
       // 仅在"登记值与期望不一致"时写入，避免每次渲染都推撤销栈（虽然 setParentRef 本身不进栈）。
       for (const [childId, expectedParent] of Object.entries(expectedParentByNode)) {
         if (parentRefs[childId] !== expectedParent) {
@@ -964,6 +980,10 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   continue;
                 }
               }
+              updateNode(ln.id, { position: ln.position } as Partial<WorkflowNode>);
+            }
+            // 第二步：写入自动布局后的坐标
+            for (const ln of layouted) {
               updateNode(ln.id, { position: ln.position } as Partial<WorkflowNode>);
             }
           }, 100);
@@ -1646,7 +1666,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [t]);
+  }, [t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
@@ -1719,6 +1739,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           // 方案 A：所有节点都是顶层节点，ReactFlow 返回的 position 就是画布绝对坐标
           const storePos = { x: change.position.x, y: change.position.y };
           // RAF 批处理：同一次拖拽中只保留最终位置（容器子节点传播由 handleNodeDragStop 接管）
+
           pendingPositionsRef.current.set(change.id, storePos);
           if (posRafRef.current == null) {
             posRafRef.current = requestAnimationFrame(() => {
@@ -1805,10 +1826,22 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 
         const updatedNodes = rfNodes.map((n) => {
           if (n.id === node.id) {
-            return { ...n, position: safePos };
+            return { ...n, position: safePos }; // ReactFlow 继续使用相对坐标
           }
           if (n.selected && n.id !== node.id && n.position) {
-            updateNode(n.id, { position: n.position } as Partial<WorkflowNode>);
+            // 其他选中节点：同样转换相对 → 绝对
+            const pid = parentRefs[n.id];
+            let storePos = n.position;
+            if (pid) {
+              const parentNode = nodes.find((p) => p.id === pid);
+              if (parentNode) {
+                storePos = {
+                  x: n.position.x + parentNode.position.x,
+                  y: n.position.y + parentNode.position.y,
+                };
+              }
+            }
+            updateNode(n.id, { position: storePos } as Partial<WorkflowNode>);
           }
           return n;
         });
@@ -1880,6 +1913,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           continue;
         }
       }
+
       updateNode(ln.id, { position: ln.position } as Partial<WorkflowNode>);
     }
 
@@ -1953,7 +1987,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     }
 
     message.success(t("workflow.autoLayout"));
-  }, [reactFlowNodes, reactFlowEdges, parentRefs, setRNodes, updateNode, t, nodes]);
+  }, [reactFlowNodes, reactFlowEdges, parentRefs, setRNodes, updateNode, t]);
 
   const handleClose = useCallback(() => {
     if (isDirty) {

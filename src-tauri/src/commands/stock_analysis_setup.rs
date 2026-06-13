@@ -448,9 +448,8 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // v24→v25: 上一轮 v24 已经写入了 DB 但没有 subGraph
-    //     （二进制编译时间早于代码修改），再次升版强制重新种子化。
-    const TEMPLATE_VERSION: i32 = 25;
+    // v30→v31: 覆盖用户本地的 v30 脏数据，写入含正确 subGraph 的新数据
+    const TEMPLATE_VERSION: i32 = 2;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -1185,7 +1184,8 @@ async fn seed_stock_analysis_workflow_template(
     //   p-analysts 容器 (20, 80) 起,完整包络 3×3 网格
     let col_x = [40.0_f64, 520.0, 1000.0];
     let row_y_base = 100.0;
-    let row_dy = 120.0;
+    // FIX: agent 节点高度 160px, 之前 row_dy=120 导致连续行重叠 40px
+    let row_dy = 180.0;
     let mut analyst_branches: Vec<Branch> = Vec::with_capacity(tool_assignments.len());
     for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {
         let analyst_id = a_ids[i];
@@ -1341,7 +1341,15 @@ async fn seed_stock_analysis_workflow_template(
     //   trigger → tool → a-* → debate-bull-bear（立即完成）→ bull-r1
     //   后续轮次：bull-r{r+1} 等 bear-r{r}，bear-r{r} 等 bull-r{r}
     // parent_id：仅供前端编辑器嵌套渲染用
+    //
+    // ⚠️ 坐标约定（FIX: 所有节点位置为画布绝对坐标）：
+    //   容器 debate-bull-bear 放在 (DEBATE_X, DEBATE_Y)
+    //   辩手节点 x = DEBATE_X + 20px（容器内偏移）
+    //   辩手节点 y = DEBATE_Y + 40px + round*2*180px（按轮次纵向排列）
+    //   前端 WorkflowEditor 通过 parentId 减去容器坐标得到相对坐标交给 ReactFlow。
     // ═══════════════════════════════════════════════════════════════════════
+    const DEBATE_X: f64 = 300.0;
+    const DEBATE_Y: f64 = 1280.0;
     nodes.push(WorkflowNode::Debate(DebateNode {
         base: WorkflowNodeBase {
             id: "debate-bull-bear".into(),
@@ -1350,8 +1358,8 @@ async fn seed_stock_analysis_workflow_template(
                 "{debate_max_rounds} 轮多空辩论：多方构建论点 → 空方反驳 → 循环"
             )),
             position: Position {
-                x: 300.0,
-                y: 1280.0,
+                x: DEBATE_X,
+                y: DEBATE_Y,
             },
             retry: RetryConfig {
                 enabled: true,
@@ -1381,6 +1389,7 @@ async fn seed_stock_analysis_workflow_template(
 
     // DebateNode 的子节点：按轮次展开多方辩手和空方辩手
     // parentId 指向容器节点，前端将它们渲染在 DebateNode 内部
+    // 位置：容器内 20px 左偏移，按轮次纵向排列（绝对坐标 = 容器坐标 + 偏移）
     let bull_tools = vec![
         td_quote.clone(),
         td_kline.clone(),
@@ -1419,12 +1428,15 @@ async fn seed_stock_analysis_workflow_template(
         };
         let bull_title = format!("多方研究员·第{round_num}轮");
         let bear_title = format!("空方研究员·第{round_num}轮");
-        let bull_y = 40.0 + (round * 2) as f64 * 80.0;
-        let bear_y = 40.0 + (round * 2 + 1) as f64 * 80.0;
+        // 绝对坐标 = 容器基准 + 内部偏移
+        let bull_x = DEBATE_X + 20.0;
+        let bull_y = DEBATE_Y + 40.0 + (round * 2) as f64 * 180.0;
+        let bear_x = DEBATE_X + 20.0;
+        let bear_y = DEBATE_Y + 40.0 + (round * 2 + 1) as f64 * 180.0;
 
         // 多方辩手：首轮无前置辩论上下文，后续轮次引用所有前序辩论输出
         let mut bull_an =
-            agent(&bull_id, &bull_title, bull_expert, Some("debate-bull-bear"), 20.0, bull_y);
+            agent(&bull_id, &bull_title, bull_expert, Some("debate-bull-bear"), bull_x, bull_y);
         if let WorkflowNode::Agent(ref mut a) = bull_an {
             // v16: R2 质询型辩手强制 JSON 输出，工具轮次提升到 2
             if round_num == 2 {
@@ -1466,7 +1478,7 @@ async fn seed_stock_analysis_workflow_template(
 
         // 空方辩手：引用本轮多方输出 + 前序轮次辩论输出
         let mut bear_an =
-            agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), 20.0, bear_y);
+            agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), bear_x, bear_y);
         if let WorkflowNode::Agent(ref mut a) = bear_an {
             // v16: R2 质询型辩手强制 JSON 输出，工具轮次提升到 2
             if round_num == 2 {
@@ -1602,7 +1614,14 @@ async fn seed_stock_analysis_workflow_template(
     // 与 p-analysts 的区别：
     //   p-analysts 包裹 9 组 (Tool+Agent) 强调"数据预拉 + 分析"两阶段
     //   p-risk-assess 包裹纯 Agent，强调"同输入多视角并行评估"
+    //
+    // ⚠️ 坐标约定（FIX: 所有节点位置为画布绝对坐标）：
+    //   容器 p-risk-assess 放在 (RISK_X, RISK_Y)
+    //   子节点 x = RISK_X + 20px, y = RISK_Y + 40px + i*180px
+    //   前端 WorkflowEditor 通过 parentId 减去容器坐标得到相对坐标。
     // ═══════════════════════════════════════════════════════════════════════
+    const RISK_X: f64 = 300.0;
+    const RISK_Y: f64 = 1800.0;
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
             id: "p-risk-assess".into(),
@@ -1611,8 +1630,8 @@ async fn seed_stock_analysis_workflow_template(
             title: "三档风险评估分组".into(),
             description: Some("三种风险偏好并行评估".into()),
             position: Position {
-                x: 300.0,
-                y: 1800.0,
+                x: RISK_X,
+                y: RISK_Y,
             },
             retry: RetryConfig::default(),
             timeout: Some(600),
@@ -1702,8 +1721,9 @@ async fn seed_stock_analysis_workflow_template(
     .iter()
     .enumerate()
     {
-        let risk_y = 40.0 + i as f64 * 80.0;
-        let mut an = agent(rid, rtitle, rexpert, Some("p-risk-assess"), 20.0, risk_y);
+        let risk_y = RISK_Y + 40.0 + i as f64 * 180.0;
+        let risk_x = RISK_X + 20.0;
+        let mut an = agent(rid, rtitle, rexpert, Some("p-risk-assess"), risk_x, risk_y);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.tools = rtools.clone();
             a.config.max_tool_rounds = Some(2);
@@ -4108,36 +4128,29 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     use axagent_harness::workflow_types::{TriggerConfig, TriggerType};
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    // v23 修复: 增加版本检查，当 stock-analysis 更新时重新克隆
-    // v24→v25: 同步 stock-analysis v25
-    const REFLECTION_MIN_VERSION: i32 = 25;
+    // 读取 stock-analysis 原模板
+    let src = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(db)
+        .await
+        .map_err(|e| format!("读取 stock-analysis 模板失败: {e}"))?
+        .ok_or_else(|| "stock-analysis 模板不存在，请先创建".to_string())?;
 
-    // 查重 + 版本检查（stock-analysis 更新后需要重新克隆 reflection）
+    // 总是从 stock-analysis 重建反思复盘模板，确保布局与节点结构同步
     let existing = workflow_template::Entity::find_by_id("stock-reflection")
         .one(db)
         .await
         .map_err(|e| format!("查重失败: {e}"))?;
-
     if let Some(existing) = &existing {
-        if existing.version >= REFLECTION_MIN_VERSION {
-            return Ok(());
-        }
         tracing::info!(
-            "[stock_analysis_setup] 反思复盘模板版本落后 (v{} < v{REFLECTION_MIN_VERSION})，删除后重建",
-            existing.version
+            "[stock_analysis_setup] 重建反思复盘模板 (v{} → v{})",
+            existing.version,
+            src.version,
         );
         workflow_template::Entity::delete_by_id("stock-reflection")
             .exec(db)
             .await
             .map_err(|e| format!("删除旧反思模板失败: {e}"))?;
     }
-
-    // 读取原模板
-    let src = workflow_template::Entity::find_by_id("stock-analysis")
-        .one(db)
-        .await
-        .map_err(|e| format!("读取 stock-analysis 模板失败: {e}"))?
-        .ok_or_else(|| "stock-analysis 模板不存在，请先创建".to_string())?;
 
     // 追加反思专用的变量声明
     let mut variables: Vec<serde_json::Value> = src
@@ -4195,7 +4208,24 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             })
             .unwrap_or_default(),
         )),
-        nodes: Set(src.nodes),
+        // 克隆时明确去掉 raw-data 子节点的 parentId，
+        // 防止编辑器在加载时自动把 t-scoring/t-valuation/t-risk 嵌套进 raw-data 容器
+        // （它们的 position 是绝对坐标，不应被视为 raw-data 的子节点）
+        nodes: Set({
+            let mut raw_nodes: Vec<serde_json::Value> = serde_json::from_str(&src.nodes)
+                .unwrap_or_default();
+            for node in &mut raw_nodes {
+                if let Some(id) = node.get("id").and_then(|v| v.as_str()) {
+                    if matches!(id, "t-scoring" | "t-valuation" | "t-risk") {
+                        node.as_object_mut()
+                            .and_then(|obj| obj.remove("parentId"));
+                        // 如果原本是顶层节点但 position 与 raw-data 重叠，
+                        // 确保它在 raw-data 容器外部（保持绝对坐标）
+                    }
+                }
+            }
+            serde_json::to_string(&raw_nodes).unwrap_or(src.nodes.clone())
+        }),
         edges: Set(src.edges),
         input_schema: Set(src.input_schema),
         output_schema: Set(src.output_schema),

@@ -73,6 +73,19 @@ export function AnalysisProgress() {
 
   return (
     <div>
+      {status === "cancelled" && (
+        <div
+          className="mb-1 p-1.5 rounded flex justify-between items-center text-xs"
+          style={{ color: "var(--sa-amber)", background: "rgba(245,158,11,0.08)" }}
+        >
+          <span>{t("stockAnalysis.cancelled")}</span>
+          {stockCode && (
+            <Button size="small" onClick={() => startAnalysis(stockCode)}>
+              {t("stockAnalysis.retry")}
+            </Button>
+          )}
+        </div>
+      )}
       {error && (
         <div
           className="mb-1 p-1.5 rounded flex justify-between items-center text-xs"

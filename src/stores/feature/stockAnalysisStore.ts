@@ -569,6 +569,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       decision: null,
       _unlisten: null,
       timeline: [],
+      // 清理跨分析轮次缓存，防止上轮数据污染
+      stockCodeConsensus: {},
     });
 
     // 先拉取工作流模板（getDryRun），再注册事件监听
@@ -613,9 +615,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         progressPct: 5,
       });
 
-      // 异步拉取报价和 K 线（非阻塞，但失败时重置对应数据避免残留旧股数据）
-      get().getStockQuote(result.stockCode).catch(() => set({ quote: null }));
-      get().getStockKline(result.stockCode, "daily", 120).catch(() => set({ klineData: [] }));
+      // 异步拉取报价和 K 线
+      // 如果用户已通过 StockSearchBar 选中了同一股票，数据已就绪，跳过重复请求
+      const preloadedQuote = get().quote;
+      if (!preloadedQuote || preloadedQuote.code !== result.stockCode) {
+        get().getStockQuote(result.stockCode).catch(() => set({ quote: null }));
+      }
+      const preloadedKline = get().klineData;
+      if (preloadedKline.length === 0) {
+        get().getStockKline(result.stockCode, "daily", 120).catch(() => set({ klineData: [] }));
+      }
     } catch (e) {
       console.error("[StockAnalysis] Failed to start workflow:", e);
       // 清理可能已注册的监听器（getDryRun 之后 setupEventListener 可能已经成功）
@@ -636,7 +645,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       await invoke("cancel_stock_workflow", { workflowId });
     }
     if (_unlisten) { _unlisten(); }
-    set({ status: "idle", _unlisten: null, currentStage: 0, progressPct: 0 });
+    // 使用 "cancelled" 状态保留已收集的部分数据（面板仍显示，带"已取消"标记）
+    set({ status: "cancelled" as AnalysisStatus, _unlisten: null, currentStage: 0, progressPct: 0, workflowId: null });
   },
 
   fetchHistory: async (limit = 20, offset = 0) => {

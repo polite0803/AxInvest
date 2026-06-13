@@ -1,5 +1,5 @@
 import i18n from "@/i18n";
-import { extractContent } from "@/lib/agentOutput";
+import { extractContent, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
@@ -16,56 +16,14 @@ import type {
   TimelineNode,
   TimelinePhase,
 } from "@/types/stock-analysis";
-import {
-  computeStockConsensus,
-  parseAction,
-  parseRiskLevel,
-  StockAction,
-  StockRiskLevel,
-} from "@/types/stock-analysis";
+import { computeStockConsensus, StockAction, StockRiskLevel } from "@/types/stock-analysis";
 import { create } from "zustand";
 
+// ── 模块级缓存 ──
+let lastEarningsFetch: { stockCode: string; ts: number } | null = null;
+const EARNINGS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟
+
 // ── 工作流结果解析 ──
-
-/** 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护 */
-function normalizeDecision(raw: Record<string, unknown>): StockDecision {
-  const action = parseAction(raw.action ?? raw["action"]);
-  const positionPct = Number(raw.positionPct ?? raw.position_pct ?? 0);
-  const targetPrice = raw.targetPrice != null
-    ? Number(raw.targetPrice)
-    : (raw.target_price != null ? Number(raw.target_price) : null);
-  const stopLoss = raw.stopLoss != null ? Number(raw.stopLoss) : (raw.stop_loss != null ? Number(raw.stop_loss) : null);
-  const reasoning = String(raw.reasoning ?? "");
-  const riskLevel = parseRiskLevel(raw.riskLevel ?? raw.risk_level);
-  const confidence = Math.round(Math.max(0, Math.min(100, Number(raw.confidence ?? 0))));
-  return {
-    action,
-    positionPct: isNaN(positionPct) ? 0 : positionPct,
-    targetPrice: targetPrice != null && !isNaN(targetPrice) ? targetPrice : null,
-    stopLoss: stopLoss != null && !isNaN(stopLoss) ? stopLoss : null,
-    reasoning,
-    riskLevel,
-    confidence,
-  };
-}
-
-/** 尝试从文本中解析 JSON decision（兼容 markdown 代码块包裹） */
-function tryParseDecision(text: string): StockDecision | null {
-  const trimmed = text.trim();
-  const candidates = [trimmed];
-  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (m) { candidates.unshift(m[1].trim()); }
-  for (const candidate of candidates) {
-    if (!candidate.startsWith("{")) { continue; }
-    try {
-      const parsed = JSON.parse(candidate);
-      if (typeof parsed === "object" && parsed !== null) { return normalizeDecision(parsed); }
-    } catch { /* try next */ }
-  }
-  return null;
-}
-
-/** 从工作流 step results 解析结构化状态 */
 function parseWorkflowResults(results: Record<string, unknown>) {
   const analystReports: Record<string, string> = {};
   const debateRounds: Array<{ round: number; bull: string; bear: string }> = [];
@@ -339,7 +297,7 @@ interface StockAnalysisState {
   ) => void;
 
   // Actions
-  searchStock: (keyword: string) => Promise<void>;
+  searchStock: (keyword: string, skipDebounce?: boolean) => Promise<void>;
   getStockQuote: (code: string) => Promise<void>;
   getStockKline: (
     code: string,
@@ -485,7 +443,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   _unlisten: null,
   _searchTimer: null,
 
-  searchStock: async (keyword: string) => {
+  searchStock: async (keyword: string, skipDebounce?: boolean) => {
     set({ searchKeyword: keyword });
     if (keyword.length < 2) {
       set({ searchResults: [] });
@@ -493,6 +451,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
     const { _searchTimer } = get();
     if (_searchTimer) { clearTimeout(_searchTimer); }
+    if (skipDebounce) {
+      // Enter/点击搜索直接执行，跳过防抖
+      try {
+        const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
+        set({ searchResults: results });
+      } catch {
+        set({ searchResults: [] });
+      }
+      return;
+    }
     const timer = setTimeout(async () => {
       try {
         const results = await invoke<StockSearchResult[]>("search_stock", { keyword });
@@ -513,8 +481,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       })();
       const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
       set({ quote, stockCode: code, stockName: quote.name });
-      // R3-B: 切换股票后拉取对应的财报披露事件，用于 K 线叠加图标
-      get().fetchEarningsEvents(code);
+      // R3-B: 财报事件缓存 10 分钟，避免每次报价刷新都拉取
+      const now = Date.now();
+      if (
+        !lastEarningsFetch || lastEarningsFetch.stockCode !== code
+        || (now - lastEarningsFetch.ts) > EARNINGS_CACHE_TTL_MS
+      ) {
+        get().fetchEarningsEvents(code);
+        lastEarningsFetch = { stockCode: code, ts: now };
+      }
     } catch (e) {
       console.error("[StockAnalysis] Failed to get stock quote:", e);
     }
@@ -596,8 +571,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       timeline: [],
     });
 
-    // 先注册事件监听，再触发工作流
+    // 先拉取工作流模板（getDryRun），再注册事件监听
+    // 顺序不可颠倒：getDryRun 可能失败，此时不应注册监听器
     try {
+      const dryRun = await get().getDryRun();
+
       await get().setupEventListener();
 
       // 数据源健康检查（非阻塞，仅打日志）
@@ -609,7 +587,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         });
       }
 
-      const dryRun = await get().getDryRun();
       // 时间旅行模式：从 useTimeAnchorStore 读 as_of_date，透传给后端
       // 只在 replay / backtest_sweep 模式传日期，live 模式传 null 以避免 persist 残留
       const anchorMode = useTimeAnchorStore.getState().mode;
@@ -636,24 +613,30 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         progressPct: 5,
       });
 
-      get().getStockQuote(result.stockCode);
-      get().getStockKline(result.stockCode, "daily", 120);
+      // 异步拉取报价和 K 线（非阻塞，但失败时重置对应数据避免残留旧股数据）
+      get().getStockQuote(result.stockCode).catch(() => set({ quote: null }));
+      get().getStockKline(result.stockCode, "daily", 120).catch(() => set({ klineData: [] }));
     } catch (e) {
       console.error("[StockAnalysis] Failed to start workflow:", e);
+      // 清理可能已注册的监听器（getDryRun 之后 setupEventListener 可能已经成功）
+      const { _unlisten } = get();
+      if (_unlisten) { _unlisten(); }
       set({
         status: "error",
         error: typeof e === "string" ? e : (e as Error)?.message ?? i18n.t("stockAnalysis.workflow.startFailed"),
+        _unlisten: null,
         progressPct: 0,
       });
     }
   },
 
   cancelAnalysis: async () => {
-    const { workflowId } = get();
+    const { workflowId, _unlisten } = get();
     if (workflowId) {
       await invoke("cancel_stock_workflow", { workflowId });
     }
-    set({ status: "idle", currentStage: 0, progressPct: 0 });
+    if (_unlisten) { _unlisten(); }
+    set({ status: "idle", _unlisten: null, currentStage: 0, progressPct: 0 });
   },
 
   fetchHistory: async (limit = 20, offset = 0) => {
@@ -900,21 +883,27 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set((s) => ({
       sidebarCollapsed: { ...s.sidebarCollapsed, [key]: !s.sidebarCollapsed[key] },
     }));
-    // Persist to localStorage
+    // Persist to localStorage（延迟写入，避免高频 toggle 阻塞主线程）
     if (typeof window !== "undefined") {
-      const next = get().sidebarCollapsed;
-      try {
-        window.localStorage.setItem("ax_sidebar_collapsed", JSON.stringify(next));
-      } catch { /* noop */ }
+      // 使用 requestIdleCallback 或 setTimeout 延迟写入
+      const schedule = window.requestIdleCallback || ((cb: IdleRequestCallback) => setTimeout(cb, 200));
+      schedule(() => {
+        try {
+          window.localStorage.setItem("ax_sidebar_collapsed", JSON.stringify(get().sidebarCollapsed));
+        } catch { /* noop */ }
+      });
     }
   },
 
   reset: () => {
-    const { _unlisten } = get();
+    const { _unlisten, _searchTimer } = get();
     if (_unlisten) {
       _unlisten();
     }
-    set({ ...initialState, _unlisten: null, llmStatus: "unknown" as const });
+    if (_searchTimer) {
+      clearTimeout(_searchTimer);
+    }
+    set({ ...initialState, _searchTimer: null, _unlisten: null, llmStatus: "unknown" as const });
   },
 
   setAsOfDate: (date) => set({ asOfDate: date }),
@@ -999,202 +988,166 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       } catch { /* noop */ }
     }
 
-    // 中间步骤进度事件
-    const unlistenStep = await listen<{
-      workflowId: string;
-      nodeId: string;
-      status: string;
-      totalNodes: number;
-      completedNodes: number;
-      output?: unknown;
-      error?: string;
-    }>("workflow-step-done", (event) => {
-      const { nodeId, status, totalNodes, completedNodes, output, error } = event.payload;
-      const stage = inferStage(nodeId);
-      if (stage >= 0) { set({ currentStage: stage }); }
-      const pct = totalNodes > 0
-        ? Math.round((completedNodes / totalNodes) * 100)
-        : get().progressPct;
-      set({
-        progressPct: Math.max(pct, get().progressPct),
-        progressMessage: status === "completed"
-          ? i18n.t("stockAnalysis.progress.stepDone", { name: nodeId })
-          : status === "failed"
-          ? i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId })
-          : i18n.t("stockAnalysis.progress.stepRunning", { name: nodeId }),
-        failedNodes: status === "failed"
-          ? [...get().failedNodes, nodeId]
-          : get().failedNodes,
-        failedNodeErrors: status === "failed" && error
-          ? { ...get().failedNodeErrors, [nodeId]: error }
-          : get().failedNodeErrors,
-      });
-
-      // 失败节点也写入 timeline，状态为 "failed"，便于侧栏脊柱高亮红色
-      if (status === "failed") {
-        const phase = inferTimelinePhase(nodeId);
-        if (phase) {
-          get().pushTimelineNode({
-            id: nodeId,
-            phase,
-            agentId: nodeId,
-            agentName: agentDisplayName(nodeId),
-            title: agentDisplayName(nodeId),
-            summary: error ?? "",
-            confidence: 0,
-            status: "failed",
-            evidenceRefs: inferEvidenceRefs(nodeId),
-            startedAt: Date.now(),
-            finishedAt: Date.now(),
-          });
-        }
+    // 使用数组收集所有已注册的 unlisten 函数，即使中途失败也能统一清理
+    const unlisteners: Array<() => void> = [];
+    const unlistenAll = () => {
+      for (const u of unlisteners) {
+        try {
+          u();
+        } catch { /* noop */ }
       }
+    };
 
-      if (status === "completed" && output != null) {
-        const text = extractContent(output);
-        const s = get();
-        // 同步推送 timeline 节点(去重:同 id 的后续 push 视为 update)
-        const phase = inferTimelinePhase(nodeId);
-        if (phase) {
-          s.pushTimelineNode({
-            id: nodeId,
-            phase,
-            agentId: nodeId,
-            agentName: agentDisplayName(nodeId),
-            title: agentDisplayName(nodeId),
-            summary: text.slice(0, 200),
-            confidence: 0.5,
-            status: "done",
-            evidenceRefs: inferEvidenceRefs(nodeId),
-            startedAt: Date.now(),
-            finishedAt: Date.now(),
-          });
-        }
-        // ── spec §6.2: 3 阶段 LLM 未来引用检测 ──
-        // 仅在 as-of 模式下激活;live 模式(asOfDate=null)不做检测
-        const asOf = s.asOfDate;
-        if (asOf) {
-          const newViolations = detectFutureReferencesForNode(nodeId, text, asOf);
-          if (newViolations.length > 0) {
-            set({
-              violations: [...s.violations, ...newViolations],
+    // 手动 try-catch 包装每个 listen，一个失败不影响其他的
+    try {
+      const u1 = await listen<{
+        workflowId: string;
+        nodeId: string;
+        status: string;
+        totalNodes: number;
+        completedNodes: number;
+        output?: unknown;
+        error?: string;
+      }>("workflow-step-done", (event) => {
+        const { nodeId, status, totalNodes, completedNodes, output, error } = event.payload;
+        const stage = inferStage(nodeId);
+        if (stage >= 0) { set({ currentStage: stage }); }
+        const pct = totalNodes > 0
+          ? Math.round((completedNodes / totalNodes) * 100)
+          : get().progressPct;
+        set({
+          progressPct: Math.max(pct, get().progressPct),
+          progressMessage: status === "completed"
+            ? i18n.t("stockAnalysis.progress.stepDone", { name: nodeId })
+            : status === "failed"
+            ? i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId })
+            : i18n.t("stockAnalysis.progress.stepRunning", { name: nodeId }),
+          failedNodes: status === "failed"
+            ? [...get().failedNodes, nodeId]
+            : get().failedNodes,
+          failedNodeErrors: status === "failed" && error
+            ? { ...get().failedNodeErrors, [nodeId]: error }
+            : get().failedNodeErrors,
+        });
+
+        // 失败节点也写入 timeline，状态为 "failed"，便于侧栏脊柱高亮红色
+        if (status === "failed") {
+          const phase = inferTimelinePhase(nodeId);
+          if (phase) {
+            get().pushTimelineNode({
+              id: nodeId,
+              phase,
+              agentId: nodeId,
+              agentName: agentDisplayName(nodeId),
+              title: agentDisplayName(nodeId),
+              summary: error ?? "",
+              confidence: 0,
+              status: "failed",
+              evidenceRefs: inferEvidenceRefs(nodeId),
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
             });
           }
         }
-        if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
-          set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });
-        } else if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
-          // 辩论子节点: 实际 nodeId 为 "bull-researcher" (DAG 引擎单次执行)
-          // 兼容未来多轮模式: bull-r1, bull-r2...
-          const round = nodeId === "bull-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
-          const debates = [...s.debateRounds];
-          const idx = debates.findIndex((d) => d.round === round);
-          if (idx >= 0) {
-            debates[idx] = { ...debates[idx], bull: text };
-          } else {
-            debates.push({ round, bull: text, bear: "" });
+
+        if (status === "completed" && output != null) {
+          const text = extractContent(output);
+          const s = get();
+          // 同步推送 timeline 节点(去重:同 id 的后续 push 视为 update)
+          const phase = inferTimelinePhase(nodeId);
+          if (phase) {
+            s.pushTimelineNode({
+              id: nodeId,
+              phase,
+              agentId: nodeId,
+              agentName: agentDisplayName(nodeId),
+              title: agentDisplayName(nodeId),
+              summary: text.slice(0, 200),
+              confidence: 0.5,
+              status: "done",
+              evidenceRefs: inferEvidenceRefs(nodeId),
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+            });
           }
-          debates.sort((a, b) => a.round - b.round);
-          set({ debateRounds: debates });
-        } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
-          const round = nodeId === "bear-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
-          const debates = [...s.debateRounds];
-          const idx = debates.findIndex((d) => d.round === round);
-          if (idx >= 0) {
-            debates[idx] = { ...debates[idx], bear: text };
-          } else {
-            debates.push({ round, bull: "", bear: text });
+          // ── spec §6.2: 3 阶段 LLM 未来引用检测 ──
+          // 仅在 as-of 模式下激活;live 模式(asOfDate=null)不做检测
+          const asOf = s.asOfDate;
+          if (asOf) {
+            const newViolations = detectFutureReferencesForNode(nodeId, text, asOf);
+            if (newViolations.length > 0) {
+              set({
+                violations: [...s.violations, ...newViolations],
+              });
+            }
           }
-          debates.sort((a, b) => a.round - b.round);
-          set({ debateRounds: debates });
-        } else if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
-          set({ riskAssessments: { ...s.riskAssessments, [nodeId]: text } });
-        } else if (nodeId === "trader") {
-          set({ analystReports: { ...s.analystReports, "investment-plan": text } });
-        } else if (nodeId === "portfolio-mgr") {
-          const parsed = tryParseDecision(text);
-          set({
-            decision: parsed ?? {
-              action: StockAction.HOLD,
-              positionPct: 0,
-              targetPrice: null,
-              stopLoss: null,
-              reasoning: text,
-              riskLevel: StockRiskLevel.MID,
-              confidence: 0,
-            },
-          });
+          if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
+            set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });
+          } else if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
+            const round = nodeId === "bull-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
+            const debates = [...s.debateRounds];
+            const idx = debates.findIndex((d) => d.round === round);
+            if (idx >= 0) {
+              debates[idx] = { ...debates[idx], bull: text };
+            } else {
+              debates.push({ round, bull: text, bear: "" });
+            }
+            debates.sort((a, b) => a.round - b.round);
+            set({ debateRounds: debates });
+          } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
+            const round = nodeId === "bear-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
+            const debates = [...s.debateRounds];
+            const idx = debates.findIndex((d) => d.round === round);
+            if (idx >= 0) {
+              debates[idx] = { ...debates[idx], bear: text };
+            } else {
+              debates.push({ round, bull: "", bear: text });
+            }
+            debates.sort((a, b) => a.round - b.round);
+            set({ debateRounds: debates });
+          } else if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
+            set({ riskAssessments: { ...s.riskAssessments, [nodeId]: text } });
+          } else if (nodeId === "trader") {
+            set({ analystReports: { ...s.analystReports, "investment-plan": text } });
+          } else if (nodeId === "portfolio-mgr") {
+            const parsed = tryParseDecision(text);
+            set({
+              decision: parsed ?? {
+                action: StockAction.HOLD,
+                positionPct: 0,
+                targetPrice: null,
+                stopLoss: null,
+                reasoning: text,
+                riskLevel: StockRiskLevel.MID,
+                confidence: 0,
+              },
+            });
+          } else if (nodeId === "value-investor") {
+            set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
+          } else if (nodeId === "data-quality") {
+            set({ dataQualitySummary: text });
+          } else if (nodeId === "raw-data") {
+            set({ rawData: { ...s.rawData, [nodeId]: text } });
+          } else if (nodeId === "rule-check") {
+            set({ ruleCheckResults: { ...s.ruleCheckResults, [nodeId]: text } });
+          }
         }
-      }
-    });
-
-    // 工作流完成事件（Completed / PartiallyCompleted）
-    const unlistenComplete = await listen<{
-      workflowId: string;
-      results: Record<string, unknown>;
-      output?: unknown;
-    }>("workflow-completed", (event) => {
-      const { results, output } = event.payload;
-
-      // 优先从 portfolio-mgr 节点结果中提取决策（与分析页一致）
-      let decision: StockDecision | null = null;
-      const pmRaw = results["portfolio-mgr"];
-      if (pmRaw) {
-        const pmText = typeof pmRaw === "string"
-          ? pmRaw
-          : (pmRaw as Record<string, unknown>).content ?? JSON.stringify(pmRaw);
-        const parsed = tryParseDecision(String(pmText));
-        if (parsed) { decision = parsed; }
-      }
-
-      // 回退：从 parseWorkflowResults 中获取
-      if (!decision) {
-        const parsed = parseWorkflowResults(results);
-        decision = parsed.decision;
-      }
-
-      // 最后回退：尝试 output（最后一个节点输出，通常是 trader）
-      if (!decision && output) {
-        if (typeof output === "object" && output !== null) {
-          decision = normalizeDecision(output as Record<string, unknown>);
-        } else if (typeof output === "string") {
-          const tryParsed = tryParseDecision(output);
-          if (tryParsed) { decision = tryParsed; }
-        }
-      }
-
-      const parsed = parseWorkflowResults(results);
-      set({
-        ...parsed,
-        decision,
-        status: "completed",
-        progressMessage: i18n.t("stockAnalysis.progress.completed"),
-        progressPct: 100,
-        currentStage: 4,
       });
+      unlisteners.push(u1);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen workflow-step-done:", e);
+    }
 
-      // 荐股 ↔ 分析师交叉验证：把本次的分析师投票结果缓存到 stockCodeConsensus
-      // RecommendationPanel 会读取这个缓存来提示用户"推荐与共识是否一致"。
-      const stockCode = get().stockCode;
-      if (stockCode && parsed.analystReports && Object.keys(parsed.analystReports).length > 0) {
-        const consensus = computeStockConsensus(parsed.analystReports);
-        get().setStockCodeConsensus(stockCode, consensus);
-      }
-    });
+    try {
+      const u2 = await listen<{
+        workflowId: string;
+        results: Record<string, unknown>;
+        output?: unknown;
+      }>("workflow-completed", (event) => {
+        const { results, output } = event.payload;
 
-    const unlistenError = await listen<{
-      workflowId: string;
-      error: string;
-      errorCode?: string;
-      results?: Record<string, unknown>;
-      output?: StockDecision | null;
-    }>("workflow-error", (event) => {
-      const msg = event.payload.error;
-      const { results, output, errorCode } = event.payload;
-
-      // 即使失败也尝试解析已有的部分结果（优先 portfolio-mgr，与分析页一致）
-      let decision: StockDecision | null = null;
-      if (results) {
+        // 优先从 portfolio-mgr 节点结果中提取决策（与分析页一致）
+        let decision: StockDecision | null = null;
         const pmRaw = results["portfolio-mgr"];
         if (pmRaw) {
           const pmText = typeof pmRaw === "string"
@@ -1203,78 +1156,149 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           const parsed = tryParseDecision(String(pmText));
           if (parsed) { decision = parsed; }
         }
+
+        // 回退：从 parseWorkflowResults 中获取
         if (!decision) {
           const parsed = parseWorkflowResults(results);
           decision = parsed.decision;
         }
-      }
-      // 最后回退：尝试 output
-      if (!decision && output) {
-        decision = output;
-      }
 
-      // 空决策（全 0、无目标价、无理由）不写入 store，
-      // 避免 DecisionBanner 渲染无意义的 0% 仓位 / ¥0 目标价。
-      if (
-        decision
-        && decision.confidence === 0
-        && decision.positionPct === 0
-        && decision.targetPrice == null
-        && decision.stopLoss == null
-        && (!decision.reasoning || decision.reasoning.trim() === "")
-      ) {
-        decision = null;
-      }
+        // 最后回退：尝试 output（最后一个节点输出，通常是 trader）
+        if (!decision && output) {
+          if (typeof output === "object" && output !== null) {
+            decision = normalizeDecision(output as Record<string, unknown>);
+          } else if (typeof output === "string") {
+            const tryParsed = tryParseDecision(output);
+            if (tryParsed) { decision = tryParsed; }
+          }
+        }
 
-      // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
-      const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR");
-      const isLlmError = effectiveErrorCode.startsWith("LLM_");
-      set({
-        error: msg,
-        errorCode: effectiveErrorCode,
-        status: isLlmError ? "running" : "error",
-        llmStatus: isLlmError ? "placeholder" : get().llmStatus,
-        progressMessage: isLlmError
-          ? i18n.t("stockAnalysis.progress.llmFallback")
-          : msg,
-        progressPct: 100,
-        currentStage: 4,
-        decision,
+        const parsed = parseWorkflowResults(results);
+        // 增量合并 workflow-step-done 已填充的数据，避免覆盖实时进度
+        const s = get();
+        set({
+          analystReports: { ...s.analystReports, ...parsed.analystReports },
+          debateRounds: parsed.debateRounds.length > 0 ? parsed.debateRounds : s.debateRounds,
+          riskAssessments: { ...s.riskAssessments, ...parsed.riskAssessments },
+          valueAssessments: { ...s.valueAssessments, ...parsed.valueAssessments },
+          ruleCheckResults: { ...s.ruleCheckResults, ...parsed.ruleCheckResults },
+          dataQualitySummary: parsed.dataQualitySummary || s.dataQualitySummary,
+          rawData: { ...s.rawData, ...parsed.rawData },
+          decision,
+          status: "completed",
+          progressMessage: i18n.t("stockAnalysis.progress.completed"),
+          progressPct: 100,
+          currentStage: 4,
+        });
+
+        // 荐股 ↔ 分析师交叉验证：把本次的分析师投票结果缓存到 stockCodeConsensus
+        // RecommendationPanel 会读取这个缓存来提示用户"推荐与共识是否一致"。
+        const stockCode = get().stockCode;
+        if (stockCode && parsed.analystReports && Object.keys(parsed.analystReports).length > 0) {
+          const consensus = computeStockConsensus(parsed.analystReports);
+          get().setStockCodeConsensus(stockCode, consensus);
+        }
       });
-    });
+      unlisteners.push(u2);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen workflow-completed:", e);
+    }
 
-    // P2-6: 监听 RealtimeMonitor T+0 自动重跑事件
-    // 后端 monitor 检测到异常行情后,emit `stock-monitor-t0-rerun-requested`,
-    // 我们在这里用最新行情重跑一次 stock-analysis workflow
-    const unlistenT0 = await listen<{
-      stockCode: string;
-      reason: string;
-      currentPrice: number;
-      changePct: number;
-      turnoverRate: number;
-      timestamp: number;
-    }>("stock-monitor-t0-rerun-requested", (event) => {
-      const { stockCode, reason } = event.payload;
-      // 防抖: 当前正在跑 workflow 就不重入
-      const cur = get();
-      if (cur.status === "running" || cur.status === "loading") {
-        console.warn(`[t0] skip ${stockCode}: workflow 已在运行中`);
-        return;
-      }
-      console.info(
-        `[t0] 收到 T+0 重跑请求: stock=${stockCode} reason=${reason}`,
-      );
-      // 直接调 store 内的 startAnalysis (它会拉 quote/kline 再触发 workflow)
-      get().startAnalysis(stockCode);
-    });
+    try {
+      const u3 = await listen<{
+        workflowId: string;
+        error: string;
+        errorCode?: string;
+        results?: Record<string, unknown>;
+        output?: StockDecision | null;
+      }>("workflow-error", (event) => {
+        const msg = event.payload.error;
+        const { results, output, errorCode } = event.payload;
+
+        // 即使失败也尝试解析已有的部分结果（优先 portfolio-mgr，与分析页一致）
+        let decision: StockDecision | null = null;
+        if (results) {
+          const pmRaw = results["portfolio-mgr"];
+          if (pmRaw) {
+            const pmText = typeof pmRaw === "string"
+              ? pmRaw
+              : (pmRaw as Record<string, unknown>).content ?? JSON.stringify(pmRaw);
+            const parsed = tryParseDecision(String(pmText));
+            if (parsed) { decision = parsed; }
+          }
+          if (!decision) {
+            const parsed = parseWorkflowResults(results);
+            decision = parsed.decision;
+          }
+        }
+        // 最后回退：尝试 output
+        if (!decision && output) {
+          decision = output;
+        }
+
+        // 空决策（全 0、无目标价、无理由）不写入 store，
+        // 避免 DecisionBanner 渲染无意义的 0% 仓位 / ¥0 目标价。
+        if (
+          decision
+          && decision.confidence === 0
+          && decision.positionPct === 0
+          && decision.targetPrice == null
+          && decision.stopLoss == null
+          && (!decision.reasoning || decision.reasoning.trim() === "")
+        ) {
+          decision = null;
+        }
+
+        // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
+        const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR");
+        const isLlmError = effectiveErrorCode.startsWith("LLM_");
+        set({
+          error: msg,
+          errorCode: effectiveErrorCode,
+          status: isLlmError ? "running" : "error",
+          llmStatus: isLlmError ? "placeholder" : get().llmStatus,
+          progressMessage: isLlmError
+            ? i18n.t("stockAnalysis.progress.llmFallback")
+            : msg,
+          progressPct: 100,
+          currentStage: 4,
+          decision,
+        });
+      });
+      unlisteners.push(u3);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen workflow-error:", e);
+    }
+
+    try {
+      const u4 = await listen<{
+        stockCode: string;
+        reason: string;
+        currentPrice: number;
+        changePct: number;
+        turnoverRate: number;
+        timestamp: number;
+      }>("stock-monitor-t0-rerun-requested", (event) => {
+        const { stockCode, reason } = event.payload;
+        // 防抖: 当前正在跑 workflow 就不重入
+        const cur = get();
+        if (cur.status === "running" || cur.status === "loading") {
+          console.warn(`[t0] skip ${stockCode}: workflow 已在运行中`);
+          return;
+        }
+        console.info(
+          `[t0] 收到 T+0 重跑请求: stock=${stockCode} reason=${reason}`,
+        );
+        // 直接调 store 内的 startAnalysis (它会拉 quote/kline 再触发 workflow)
+        get().startAnalysis(stockCode);
+      });
+      unlisteners.push(u4);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen stock-monitor-t0-rerun-requested:", e);
+    }
 
     set({
-      _unlisten: () => {
-        unlistenStep();
-        unlistenComplete();
-        unlistenError();
-        unlistenT0();
-      },
+      _unlisten: unlistenAll,
     });
   },
 }));

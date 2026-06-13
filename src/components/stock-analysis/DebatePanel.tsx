@@ -1,4 +1,5 @@
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
+import { classifySentiment } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
 import { useMemo, useState } from "react";
@@ -345,15 +346,17 @@ export function DebatePanel() {
 
   const [sentimentRatio, bullCount, bearCount] = useMemo(() => {
     if (debateRounds.length === 0) { return [0.5, 0, 0]; }
-    const bulls = debateRounds.map((r) => r.bull);
-    const bears = debateRounds.map((r) => r.bear);
-    const bs = bulls.join("").length;
-    const bs2 = bears.join("").length;
-    const total = bs + bs2;
+    let bullish = 0;
+    let bearish = 0;
+    for (const r of debateRounds) {
+      if (classifySentiment(r.bull) === "bullish") { bullish++; }
+      if (classifySentiment(r.bear) === "bearish") { bearish++; }
+    }
+    const total = bullish + bearish;
     return [
-      total > 0 ? bs / total : 0.5,
-      debateRounds.length,
-      debateRounds.length,
+      total > 0 ? bullish / total : 0.5,
+      bullish,
+      bearish,
     ];
   }, [debateRounds]);
 

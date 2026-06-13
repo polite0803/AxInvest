@@ -2,7 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Button, Card, DatePicker, Input, InputNumber, message, Modal, Select, Space, Table } from "antd";
 import dayjs from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface FundTransfer {
   id: string;
@@ -26,6 +26,7 @@ export function FundPanel() {
   const [transfers, setTransfers] = useState<FundTransfer[]>([]);
   const [summary, setSummary] = useState<FundSummary | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const mountedRef = useRef(true);
   const [form, setForm] = useState({
     transferType: "deposit",
     amount: 0,
@@ -35,46 +36,31 @@ export function FundPanel() {
   });
 
   const loadData = useCallback(async () => {
+    if (!mountedRef.current) { return; }
     setLoading(true);
     try {
       const [t, s] = await Promise.all([
         invoke<FundTransfer[]>("list_fund_transfers", { limit: 100 }),
         invoke<FundSummary>("get_fund_summary"),
       ]);
+      if (!mountedRef.current) { return; }
       if (Array.isArray(t)) { setTransfers(t); }
       if (s) { setSummary(s); }
     } catch {
       // silent
     } finally {
-      setLoading(false);
+      if (mountedRef.current) { setLoading(false); }
     }
   }, []);
 
+  // 首次挂载加载（使用 loadData，避免与 useEffect 重复调用）
   useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setLoading(true);
-      return Promise.all([
-        invoke<FundTransfer[]>("list_fund_transfers", { limit: 100 }),
-        invoke<FundSummary>("get_fund_summary"),
-      ]);
-    })
-      .then((r) => {
-        if (!r) { return; }
-        const [t, s] = r;
-        if (cancelled) { return; }
-        if (Array.isArray(t)) { setTransfers(t); }
-        if (s) { setSummary(s); }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) { setLoading(false); }
-      });
+    mountedRef.current = true;
+    loadData();
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
-  }, []);
+  }, [loadData]);
 
   const handleRecord = async () => {
     if (form.amount <= 0) { return message.warning("金额必须 > 0"); }

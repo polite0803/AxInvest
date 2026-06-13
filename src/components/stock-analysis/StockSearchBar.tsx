@@ -38,7 +38,7 @@ export function StockSearchBar() {
           placeholder={`${t("stockAnalysis.searchPlaceholder")} (Ctrl+K)`}
           value={searchKeyword}
           onChange={(e) => searchStock(e.target.value)}
-          onSearch={(value) => searchStock(value)}
+          onSearch={(value) => searchStock(value, true)}
           style={{ maxWidth: 300 }}
           loading={status === "loading"}
         />

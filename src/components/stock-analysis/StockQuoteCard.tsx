@@ -17,7 +17,10 @@ export function StockQuoteCard() {
   useEffect(() => {
     if (autoRefresh && stockCode) {
       timerRef.current = setInterval(() => {
-        getStockQuote(stockCode);
+        const currentCode = useStockAnalysisStore.getState().stockCode;
+        if (currentCode === stockCode) {
+          getStockQuote(stockCode);
+        }
       }, 30000);
     }
     return () => {

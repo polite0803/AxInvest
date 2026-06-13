@@ -49,11 +49,12 @@ export function PortfolioMonitorPanel() {
   const fetchDashboard = useStockAnalysisStore((s) => s.fetchPortfolioDashboard);
   const fetchCorrelations = useStockAnalysisStore((s) => s.fetchPortfolioCorrelations);
   const refresh = useStockAnalysisStore((s) => s.refreshPortfolioMetrics);
-  const autoLoadedRef = useRef(false);
+  const lastAsOfRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!autoLoadedRef.current) {
-      autoLoadedRef.current = true;
+    // 首次加载或 asOfDate 变化时重新拉取数据
+    if (lastAsOfRef.current !== asOfDate) {
+      lastAsOfRef.current = asOfDate;
       void fetchDashboard(asOfDate);
       void fetchCorrelations(asOfDate);
     }

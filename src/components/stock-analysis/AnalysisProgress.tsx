@@ -11,8 +11,20 @@ const STAGES = [
   "stage.decision",
 ];
 
-const TOTAL_ANALYSTS = 9; // 技术/情绪/消息/基本面/政策/资金/解禁/研报/行业
-const TOTAL_DEBATE_ROUNDS = 6; // bull-r1..3 + bear-r1..3
+// 已知的分析师节点 ID（与 workflowChatBridge ANALYST_NODE_TO_NAME 同步）
+const ANALYST_NODE_IDS = [
+  "a-market-analyst",
+  "a-sentiment",
+  "a-news",
+  "a-fundamentals",
+  "a-policy",
+  "a-hot-money",
+  "a-lockup",
+  "a-research",
+  "a-sector",
+];
+// 最大辩论轮数（bull/bear 配对数），与 workflow template 中的 maxDebateRounds 同步
+const TOTAL_DEBATE_ROUNDS = 3;
 
 export function AnalysisProgress() {
   const { t } = useTranslation();
@@ -31,13 +43,16 @@ export function AnalysisProgress() {
   // Hooks 必须在 early return 之前 — 保持顺序稳定
   const subProgress = useMemo(() => {
     if (status === "idle") { return null; }
-    const analystCount = Object.keys(analystReports).filter((k) =>
+    // 动态计算分析师总数：已知 analyst node ID 中正在被使用的个数
+    const analystKeys = Object.keys(analystReports).filter((k) =>
       k !== "investment-plan" && k !== "bull-researcher" && k !== "bear-researcher"
-    ).length;
+    );
+    const activeAnalysts = ANALYST_NODE_IDS.filter((id) => analystKeys.includes(id));
+    const totalAnalysts = Math.max(activeAnalysts.length, ANALYST_NODE_IDS.length);
     switch (currentStage) {
       case 1:
-        return analystCount > 0
-          ? t("stockAnalysis.analystCount", { current: analystCount, total: TOTAL_ANALYSTS })
+        return analystKeys.length > 0
+          ? t("stockAnalysis.analystCount", { current: analystKeys.length, total: totalAnalysts })
           : null;
       case 2:
         return debateRounds.length > 0

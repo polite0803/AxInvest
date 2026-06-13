@@ -3,7 +3,7 @@ import { DownloadOutlined, ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Modal, Tag } from "antd";
 import * as echarts from "echarts";
 import NodeRenderer from "markstream-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags } from "./utils";
 
@@ -191,34 +191,52 @@ const RISK_LABEL_KEYS: Record<string, string> = {
 };
 
 /** 从风险评估文本中计算 0-100 的量化风险分 */
+// 预编译正则，避免每次调用重复创建
+const HIGH_RISK_PATTERNS = [
+  { re: /高风险/g, score: 8 },
+  { re: /重大风险/g, score: 8 },
+  { re: /严重/g, score: 8 },
+  { re: /危机/g, score: 8 },
+  { re: /暴跌/g, score: 8 },
+  { re: /崩盘/g, score: 8 },
+  { re: /预警/g, score: 8 },
+  { re: /危险/g, score: 8 },
+  { re: /不确定(?!性)/g, score: 5 },
+  { re: /大幅下/g, score: 8 },
+  { re: /极度/g, score: 6 },
+];
+const MID_RISK_PATTERNS = [
+  { re: /(?:无|没有|不|低|较[小低]|可控)\s*风险/g, score: -5 }, // 否定风险词 → 减分
+  {
+    re:
+      /(?:^|[^无没有不低较可控])\s*风险(?:较[高大]|水涨|加剧|上升|显著|突出|加大的|极高的|加大的|较大|高|大|显|剧|隐患|因素|敞口|暴露)/g,
+    score: 5,
+  },
+  { re: /(?<!无|没有|不|低|较[小低]|可控)风险(?!较[小低]|不[大高]|可控|较低|很小|不大)/g, score: 3 },
+  { re: /谨慎/g, score: 3 },
+  { re: /关注/g, score: 1 },
+  { re: /波动/g, score: 3 },
+  { re: /压力/g, score: 3 },
+  { re: /挑战/g, score: 2 },
+  { re: /不确定性/g, score: 4 },
+  { re: /潜在/g, score: 2 },
+  { re: /下行/g, score: 4 },
+  { re: /回落/g, score: 2 },
+];
 function computeRiskScore(text: string): number {
-  const highRiskWords = [
-    "高风险",
-    "重大风险",
-    "严重",
-    "危机",
-    "暴跌",
-    "崩盘",
-    "预警",
-    "危险",
-    "不确定",
-    "大幅下",
-    "极度",
-  ];
-  const midRiskWords = ["风险", "谨慎", "关注", "波动", "压力", "挑战", "不确定性", "潜在", "下行", "回落"];
   let score = 40; // 基准
-  for (const w of highRiskWords) {
-    const count = (text.match(new RegExp(w, "g")) || []).length;
-    score += count * 8;
+  for (const { re, score: s } of HIGH_RISK_PATTERNS) {
+    const matches = text.match(re);
+    score += (matches?.length ?? 0) * s;
   }
-  for (const w of midRiskWords) {
-    const count = (text.match(new RegExp(w, "g")) || []).length;
-    score += count * 3;
+  for (const { re, score: s } of MID_RISK_PATTERNS) {
+    const matches = text.match(re);
+    score += (matches?.length ?? 0) * s;
   }
   // 文本越长风险披露越充分 → 评分略增
-  if (text.length > 500) { score += 5; }
-  if (text.length > 1000) { score += 5; }
   if (text.length > 2000) { score += 5; }
+  else if (text.length > 1000) { score += 3; }
+  else if (text.length > 500) { score += 2; }
   return Math.min(100, Math.max(5, score));
 }
 
@@ -279,10 +297,11 @@ export function RiskMatrix() {
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
-  const [chartReady, setChartReady] = useState(false);
+  const [chartReady] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [retryTick, setRetryTick] = useState(0); // 用于 retry 计数，强制重试推图初始化
   const [selectedCard, setSelectedCard] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const expandedChartRef = useRef<HTMLDivElement>(null);
@@ -308,7 +327,7 @@ export function RiskMatrix() {
   useEffect(() => {
     if (!chartRef.current) { return; }
     if (chartRef.current.clientWidth === 0 || chartRef.current.clientHeight === 0) {
-      const timer = requestAnimationFrame(() => setChartReady((v) => !v ? v : true));
+      const timer = requestAnimationFrame(() => setRetryTick((t) => t + 1));
       return () => cancelAnimationFrame(timer);
     }
     instanceRef.current = echarts.init(chartRef.current, undefined, { renderer: "canvas" });
@@ -322,7 +341,7 @@ export function RiskMatrix() {
       chart.dispose();
       instanceRef.current = null;
     };
-  }, [chartReady]);
+  }, [chartReady, retryTick]);
 
   useEffect(() => {
     const chart = instanceRef.current;
@@ -385,7 +404,7 @@ export function RiskMatrix() {
       return;
     }
     if (expandedChartRef.current.clientWidth === 0 || expandedChartRef.current.clientHeight === 0) {
-      const timer = requestAnimationFrame(() => setExpanded((v) => v));
+      const timer = requestAnimationFrame(() => setRetryTick((t) => t + 1));
       return () => cancelAnimationFrame(timer);
     }
     expandedInstanceRef.current?.dispose();
@@ -436,11 +455,21 @@ export function RiskMatrix() {
       chart.dispose();
       expandedInstanceRef.current = null;
     };
-  }, [expanded, riskAssessments, t, isDark]);
+  }, [expanded, riskAssessments, t, isDark, retryTick]);
 
   if (Object.keys(riskAssessments).length === 0) { return null; }
 
   const entries = Object.entries(riskAssessments);
+
+  // 预计算所有风险条目的可读文本（仅在 riskAssessments 变化时重新计算）
+  const readableCache = useMemo(() => {
+    const cache = new Map<string, string>();
+    for (const [type, report] of entries) {
+      cache.set(type, extractReadableFromRiskReport(report));
+    }
+    return cache;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riskAssessments]);
 
   return (
     <>
@@ -492,7 +521,7 @@ export function RiskMatrix() {
                   style={{ maxHeight: 160, overflow: "auto" }}
                 >
                   {(() => {
-                    const readable = extractReadableFromRiskReport(report);
+                    const readable = readableCache.get(type) ?? "";
                     return readable
                       ? <NodeRenderer content={readable} isDark={isDark} />
                       : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;
@@ -546,7 +575,7 @@ export function RiskMatrix() {
                 </div>
                 <div className="sa-markdown-content text-sm leading-relaxed">
                   {(() => {
-                    const readable = extractReadableFromRiskReport(report);
+                    const readable = readableCache.get(type) ?? "";
                     return readable
                       ? <NodeRenderer content={readable} isDark={isDark} />
                       : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;
@@ -589,7 +618,7 @@ export function RiskMatrix() {
         {selectedCard && riskAssessments[selectedCard] && (
           <div className="sa-markdown-content leading-relaxed text-base">
             {(() => {
-              const readable = extractReadableFromRiskReport(riskAssessments[selectedCard]);
+              const readable = readableCache.get(selectedCard) ?? "";
               return readable
                 ? <NodeRenderer content={readable} isDark={isDark} />
                 : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;

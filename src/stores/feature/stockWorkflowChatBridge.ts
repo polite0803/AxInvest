@@ -1,10 +1,10 @@
 import { makeWorkflowContent, type WorkflowCardData } from "@/components/chat/WorkflowAgentCard";
-import { extractContent } from "@/lib/agentOutput";
+import { extractContent, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { useConversationStore } from "@/stores/domain/conversationStore";
 import type { Message } from "@/types";
-import { parseRiskLevel, StockRiskLevel } from "@/types/stock-analysis";
+import type { StockDecision } from "@/types/stock-analysis";
 import i18next from "i18next";
 
 const activeBridges = new Map<string, UnlistenFn[]>();
@@ -242,6 +242,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
 
   const dataSourcesMap = new Map<string, DataSourceEntry>();
   const completedNodes = new Set<string>();
+  let workflowTotalNodes = 30; // 默认值，会从首次 step-done 事件更新
   let finalDecision: WorkflowCardData | null = null;
 
   const buildAggregateContent = (
@@ -308,6 +309,8 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     output?: unknown;
   }>("workflow-step-done", async (event) => {
     const { nodeId, totalNodes, status, output } = event.payload;
+    // 从首次事件更新实际总节点数
+    if (totalNodes > 0) { workflowTotalNodes = totalNodes; }
     if (status === "completed" || status === "failed") {
       completedNodes.add(nodeId);
     }
@@ -429,72 +432,33 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
 
     // 优先从 portfolio-mgr 节点结果中提取决策（最可靠的来源）
     const pmRaw = results["portfolio-mgr"];
-    const decisionSrc = pmRaw ? extractContent(pmRaw) : (output ? JSON.stringify(output) : null);
+    let parsedDecision: StockDecision | null = null;
 
-    let finalRiskLevel: string = StockRiskLevel.MID;
-    let finalAction = "N/A";
-    let finalPct = 0;
-    let finalTarget = 0;
-    let finalStop = 0;
-    let finalReasoning = "";
-    let finalConfidence = 0;
+    if (pmRaw) {
+      const pmText = extractContent(pmRaw);
+      parsedDecision = tryParseDecision(pmText);
+    }
 
-    if (decisionSrc) {
-      try {
-        const parsed = JSON.parse(decisionSrc);
-        if (typeof parsed === "object" && parsed !== null) {
-          finalRiskLevel = parseRiskLevel(parsed.riskLevel ?? parsed.risk_level);
-          finalAction = String(parsed.action ?? parsed["action"] ?? "N/A");
-          finalPct = Number(parsed.positionPct ?? parsed.position_pct ?? 0);
-          finalTarget = Number(parsed.targetPrice ?? parsed.target_price ?? 0);
-          finalStop = Number(parsed.stopLoss ?? parsed.stop_loss ?? 0);
-          finalReasoning = String(parsed.reasoning ?? "");
-          finalConfidence = Number(parsed.confidence ?? 0);
-        }
-      } catch {
-        // 尝试从 markdown 代码块中提取 JSON
-        const m = decisionSrc.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (m) {
-          try {
-            const parsed = JSON.parse(m[1].trim());
-            if (typeof parsed === "object" && parsed !== null) {
-              finalRiskLevel = parseRiskLevel(parsed.riskLevel ?? parsed.risk_level);
-              finalAction = String(parsed.action ?? "N/A");
-              finalPct = Number(parsed.positionPct ?? parsed.position_pct ?? 0);
-              finalTarget = Number(parsed.targetPrice ?? parsed.target_price ?? 0);
-              finalStop = Number(parsed.stopLoss ?? parsed.stop_loss ?? 0);
-              finalReasoning = String(parsed.reasoning ?? "");
-              finalConfidence = Number(parsed.confidence ?? 0);
-            }
-          } catch { /* ignore */ }
-        }
+    // 回退到 output
+    if (!parsedDecision && output && typeof output === "object") {
+      parsedDecision = tryParseDecision(JSON.stringify(output)) ?? normalizeDecision(output as Record<string, unknown>);
+    }
+
+    finalDecision = parsedDecision
+      ? {
+        type: "decision" as const,
+        action: parsedDecision.action,
+        positionPct: parsedDecision.positionPct,
+        targetPrice: parsedDecision.targetPrice ?? 0,
+        stopLoss: parsedDecision.stopLoss ?? 0,
+        reasoning: parsedDecision.reasoning,
+        riskLevel: parsedDecision.riskLevel,
+        confidence: parsedDecision.confidence,
       }
-    }
-
-    // 如果上述解析失败，回退到 output
-    if (finalAction === "N/A" && output && typeof output === "object") {
-      finalRiskLevel = parseRiskLevel(output.riskLevel);
-      finalAction = String(output.action ?? "N/A");
-      finalPct = Number(output.positionPct ?? 0);
-      finalTarget = Number(output.targetPrice ?? 0);
-      finalStop = Number(output.stopLoss ?? 0);
-      finalReasoning = String(output.reasoning ?? "");
-      finalConfidence = Number(output.confidence ?? 0);
-    }
-
-    finalDecision = {
-      type: "decision",
-      action: finalAction,
-      positionPct: finalPct,
-      targetPrice: finalTarget,
-      stopLoss: finalStop,
-      reasoning: finalReasoning,
-      riskLevel: finalRiskLevel,
-      confidence: finalConfidence,
-    };
+      : null;
 
     if (aggregateMsgId) {
-      scheduleUpdate(buildAggregateContent("done", "done", completedNodes.size));
+      scheduleUpdate(buildAggregateContent("done", "done", workflowTotalNodes));
     }
 
     stopStockWorkflowChatBridge(conversationId);
@@ -505,7 +469,7 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     "workflow-error",
     async (event) => {
       if (aggregateMsgId) {
-        scheduleUpdate(buildAggregateContent("error", "error", completedNodes.size, event.payload.error));
+        scheduleUpdate(buildAggregateContent("error", "error", workflowTotalNodes, event.payload.error));
       }
       stopStockWorkflowChatBridge(conversationId);
     },

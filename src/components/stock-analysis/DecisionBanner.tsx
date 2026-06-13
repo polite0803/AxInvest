@@ -5,7 +5,7 @@ import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/type
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, message, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { cleanToolCallTags } from "./utils";
@@ -30,6 +30,9 @@ export function DecisionBanner() {
   const [adding, setAdding] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // 快速交易录入 ref（替代 getElementById，防止多实例 ID 冲突）
+  const tradePriceRef = useRef<HTMLInputElement>(null);
+  const tradeQtyRef = useRef<HTMLInputElement>(null);
 
   // stockCode 或自选列表变化时同步自选状态
   useEffect(() => {
@@ -66,15 +69,23 @@ export function DecisionBanner() {
 
   const actionLabel = (action: string) => t(getActionTKey(action));
 
-  // Hooks 必须在 early return 之前 — 闭包内部自己处理 null decision
-  const handleExport = useCallback(() => {
-    if (!decision || !stockCode || !stockName) { return; }
+  // 共享的决策上下文计算（避免 handleExport / handleAskAI 重复计算）
+  const decisionContext = useMemo(() => {
+    if (!decision || !stockCode || !stockName) { return null; }
     const currentPrice = quote?.price ?? 0;
     const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
     const upside = targetPriceNum > 0 && currentPrice > 0
       ? ((targetPriceNum - currentPrice) / currentPrice * 100)
       : null;
     const confidencePct = Math.round(decision.confidence ?? 0);
+    return { currentPrice, targetPriceNum, upside, confidencePct };
+  }, [decision, stockCode, stockName, quote]);
+
+  // Hooks 必须在 early return 之前 — 闭包内部自己处理 null decision
+  const handleExport = useCallback(() => {
+    const ctx = decisionContext;
+    if (!ctx || !decision || !stockCode || !stockName) { return; }
+    const { currentPrice, upside, confidencePct } = ctx;
     const lines = [
       t("stockAnalysis.export.title"),
       t("stockAnalysis.export.stock", { name: stockName, code: stockCode }),
@@ -101,16 +112,12 @@ export function DecisionBanner() {
     a.click();
     URL.revokeObjectURL(url);
     message.success(t("stockAnalysis.exported"));
-  }, [decision, stockCode, stockName, quote, analystReports, debateRounds, riskAssessments, t]);
+  }, [decision, stockCode, stockName, decisionContext, t, analystReports, debateRounds, riskAssessments]);
 
   const handleAskAI = useCallback(() => {
-    if (!decision || !stockCode || !stockName) { return; }
-    const currentPrice = quote?.price ?? 0;
-    const targetPriceNum = decision.targetPrice != null ? Number(decision.targetPrice) : 0;
-    const upside = targetPriceNum > 0 && currentPrice > 0
-      ? ((targetPriceNum - currentPrice) / currentPrice * 100)
-      : null;
-    const confidencePct = Math.round(decision.confidence ?? 0);
+    const ctx = decisionContext;
+    if (!ctx || !decision || !stockCode || !stockName) { return; }
+    const { currentPrice, upside, confidencePct } = ctx;
     const context = [
       t("stockAnalysis.askAi.prompt", { stockName, code: stockCode }),
       decision ? t("stockAnalysis.askAi.decision", { action: decision.action, confidence: confidencePct }) : "",
@@ -125,7 +132,7 @@ export function DecisionBanner() {
     }).catch(() => {
       navigate(`/chat?code=${stockCode}`);
     });
-  }, [decision, stockCode, stockName, quote, navigate, t]);
+  }, [decision, stockCode, stockName, decisionContext, navigate, t]);
 
   // ── 空决策检查：全 0 / 无目标价 / 无理由 时不渲染 ──
   if (!decision) { return null; }
@@ -267,7 +274,7 @@ export function DecisionBanner() {
         </div>
 
         {/* 快速交易录入 — 决策日可直接在此录入买卖 */}
-        {stockCode && (decision as { action?: string })?.action && (decision as { action?: string }).action !== "HOLD"
+        {stockCode && decision.action && decision.action !== "HOLD"
           && (
             <div
               className="flex items-center gap-2 p-2 mt-2 rounded"
@@ -279,8 +286,8 @@ export function DecisionBanner() {
               <input
                 type="number"
                 placeholder={t("trade.price")}
-                defaultValue={(decision as { targetPrice?: number })?.targetPrice ?? undefined}
-                id="trade-price-input"
+                defaultValue={decision.targetPrice ?? undefined}
+                ref={tradePriceRef}
                 className="text-xs"
                 style={{
                   width: 70,
@@ -295,7 +302,7 @@ export function DecisionBanner() {
                 type="number"
                 placeholder={t("trade.quantity")}
                 defaultValue={100}
-                id="trade-qty-input"
+                ref={tradeQtyRef}
                 className="text-xs"
                 style={{
                   width: 60,
@@ -311,17 +318,15 @@ export function DecisionBanner() {
                 type="primary"
                 style={{ fontSize: 11, lineHeight: "18px", height: 22, padding: "0 8px" }}
                 onClick={async () => {
-                  const priceEl = document.getElementById("trade-price-input") as HTMLInputElement;
-                  const qtyEl = document.getElementById("trade-qty-input") as HTMLInputElement;
-                  const price = parseFloat(priceEl?.value ?? "0");
-                  const qty = parseInt(qtyEl?.value ?? "100", 10);
+                  const price = parseFloat(tradePriceRef.current?.value ?? "0");
+                  const qty = parseInt(tradeQtyRef.current?.value ?? "100", 10);
                   if (price <= 0 || qty <= 0) { return; }
                   const analysisId = useStockAnalysisStore.getState().analysisId;
                   try {
                     await invoke("record_trade", {
                       stockCode,
                       stockName,
-                      direction: (decision as { action?: string }).action === "SELL" ? "sell" : "buy",
+                      direction: decision.action === "SELL" ? "sell" : "buy",
                       price,
                       quantity: Math.round(qty / 100) * 100,
                       tradeDate: new Date().toISOString().slice(0, 10),

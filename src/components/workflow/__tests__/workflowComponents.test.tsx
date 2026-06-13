@@ -189,6 +189,7 @@ vi.mock("@/stores", () => ({
 }));
 
 vi.mock("@xyflow/react", () => ({
+  ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useReactFlow: () => ({
     getNodes: () => [],
     getEdges: () => [],

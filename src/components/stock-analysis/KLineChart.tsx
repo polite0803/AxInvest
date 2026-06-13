@@ -82,6 +82,8 @@ export function KLineChart() {
   // 避免 zoomevent → setState → re-render → setOption → zoomevent 循环
   const zoomingRef = useRef(false);
   const lastTierRef = useRef<Tier | null>(null);
+  // 持久化 zoom handler 引用，init 时绑定一次，避免 setOption 每次重绑
+  const zoomHandlerRef = useRef<((params: unknown) => void) | null>(null);
 
   const getChart = useCallback((): echarts.ECharts | null => {
     const c = instanceRef.current;
@@ -97,25 +99,26 @@ export function KLineChart() {
     const ck = cacheKey(stockCode, period, limit, asOfDate);
     const cached = klineCache.get(ck);
     if (cached && Date.now() - cached.ts < KLINE_CACHE_TTL_MS) {
+      // 缓存命中：直接使用缓存数据，跳过网络请求
       klineCache.delete(ck);
       klineCache.set(ck, cached);
       useStockAnalysisStore.setState({ klineData: cached.data });
+      setKlinePeriod(period);
+      return;
     }
     setKlinePeriod(period);
     getStockKline(stockCode, period, limit);
   }, [stockCode, getStockKline, setKlinePeriod]);
 
   // ── 自适应 zoom 处理 ──
-  // 绑定在 setOption 之后，监听 dataZoom 事件
-  const setupZoomHandler = useCallback((chart: echarts.ECharts, datesLength: number) => {
-    chart.off("dataZoom");
-    chart.on("dataZoom", (params: unknown) => {
+  // 使用 ref 持久化 handler，只在 init 时绑定一次，避免 setOption 每次重建
+  const buildZoomHandler = useCallback((datesLength: number) => {
+    return (params: unknown) => {
       const p = params as { start?: number; end?: number; batch?: unknown };
       if (zoomingRef.current) { return; }
       const batch = Array.isArray(p) ? p : [p];
       const b = batch[0];
-      if (!b || b.batch != null) { return; // skip slider sub-batch
-       }
+      if (!b || b.batch != null) { return; }
       const start = b.start ?? 0;
       const end = b.end ?? 100;
       const visible = Math.round(datesLength * (end - start) / 100);
@@ -124,18 +127,15 @@ export function KLineChart() {
       if (!curTier || curTier.key !== bestTier.key) {
         zoomingRef.current = true;
         lastTierRef.current = bestTier;
-        // 保持当前可见 K 线数 ≈ 一样的量，在新数据中计算 start/end
         switchPeriod(bestTier.period, bestTier.limit);
-        // 新数据加载后，需要恢复 zoom 范围让 visible 根数 ≈ 同量
-        // 放一个微任务，等新数据 setOption 后再调
         requestAnimationFrame(() => {
           zoomingRef.current = false;
         });
       }
-    });
+    };
   }, [switchPeriod]);
 
-  // ── ECharts 初始化 ──
+  // ── ECharts 初始化 + 一次性的 zoom handler 绑定 ──
   useEffect(() => {
     const el = chartRef.current;
     if (!el) { return; }
@@ -145,6 +145,11 @@ export function KLineChart() {
       const existing = instanceRef.current;
       if (existing && !existing.isDisposed()) { existing.dispose(); }
       instanceRef.current = echarts.init(el, undefined, { renderer: "canvas" });
+      // init 时安装一次性的 zoom handler，注销旧 handler
+      const chart = instanceRef.current;
+      const oldHandler = zoomHandlerRef.current;
+      if (oldHandler) { chart.off("dataZoom", oldHandler); }
+      // 先用 placeholder，等 klineData 就绪后再建真实 handler
     };
     const onResize = () => {
       const c = instanceRef.current;
@@ -172,6 +177,7 @@ export function KLineChart() {
       const c = instanceRef.current;
       if (c && !c.isDisposed()) { c.dispose(); }
       instanceRef.current = null;
+      zoomHandlerRef.current = null;
     };
   }, []);
 
@@ -418,9 +424,13 @@ export function KLineChart() {
       ],
     });
 
-    // 绑定自适应 zoom
-    setupZoomHandler(chart, dates.length);
-  }, [klineData, t, indicators, getChart, earningsEvents, showEarningsOnChart, setupZoomHandler]);
+    // 通过 ref 安装/替换 zoom handler（只绑定一次，避免 setOption 每轮重建）
+    const oldHandler = zoomHandlerRef.current;
+    if (oldHandler) { chart.off("dataZoom", oldHandler); }
+    const newHandler = buildZoomHandler(dates.length);
+    zoomHandlerRef.current = newHandler;
+    chart.on("dataZoom", newHandler);
+  }, [klineData, t, indicators, getChart, earningsEvents, showEarningsOnChart, buildZoomHandler]);
 
   const chartHeight = Math.max(300, Math.min(520, window.innerHeight * 0.38));
   const curTierInfo = useMemo(() => {

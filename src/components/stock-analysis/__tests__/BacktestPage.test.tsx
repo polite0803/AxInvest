@@ -43,6 +43,6 @@ describe("BacktestPage", () => {
     const { container } = renderWithRouter();
     const body = container.querySelector(".space-y-4");
     expect(body).toBeTruthy();
-    expect(body?.children.length).toBe(2);
+    expect(body?.children.length).toBe(3);
   });
 });

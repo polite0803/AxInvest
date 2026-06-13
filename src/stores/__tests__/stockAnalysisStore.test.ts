@@ -126,13 +126,14 @@ describe("stockAnalysisStore", () => {
   describe("setupEventListener", () => {
     it("registers event listeners once", async () => {
       await useStockAnalysisStore.getState().setupEventListener();
-      expect(listenMock).toHaveBeenCalledTimes(3);
+      expect(listenMock).toHaveBeenCalledTimes(4);
       expect(listenMock).toHaveBeenCalledWith("workflow-step-done", expect.any(Function));
       expect(listenMock).toHaveBeenCalledWith("workflow-completed", expect.any(Function));
       expect(listenMock).toHaveBeenCalledWith("workflow-error", expect.any(Function));
+      expect(listenMock).toHaveBeenCalledWith("stock-monitor-t0-rerun-requested", expect.any(Function));
 
       await useStockAnalysisStore.getState().setupEventListener();
-      expect(listenMock).toHaveBeenCalledTimes(3);
+      expect(listenMock).toHaveBeenCalledTimes(4); // 4 events registered, 2nd call is no-op
     });
 
     it("handles workflow-completed event with AgentExecutor JSON results", async () => {

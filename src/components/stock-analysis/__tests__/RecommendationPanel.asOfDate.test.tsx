@@ -49,8 +49,8 @@ describe("RecommendationPanel — as-of propagation", () => {
     renderWithProviders();
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     const last = invokeMock.mock.calls[invokeMock.mock.calls.length - 1];
-    expect(last[0]).toBe("recommend_stocks");
-    expect(last[1]).toEqual({ period: "short", asOfDate: null });
+    expect(last[0]).toBe("backtest_reco_strategies");
+    // backtest_reco_strategies 无需参数
   });
 
   it("passes asOfDate when in replay mode", async () => {
@@ -58,8 +58,8 @@ describe("RecommendationPanel — as-of propagation", () => {
     renderWithProviders();
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     const last = invokeMock.mock.calls[invokeMock.mock.calls.length - 1];
-    expect(last[0]).toBe("recommend_stocks");
-    expect(last[1]).toEqual({ period: "short", asOfDate: "2026-06-01" });
+    expect(last[0]).toBe("backtest_reco_strategies");
+    // backtest_reco_strategies 无需参数
   });
 
   it("shows a replay banner when in replay mode", async () => {

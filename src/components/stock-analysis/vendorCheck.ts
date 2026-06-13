@@ -30,8 +30,14 @@ async function getEnabledVendors(): Promise<Set<string> | null> {
     const vars: { name: string; value: unknown }[] = (tmpl?.variables as { name: string; value: unknown }[]) ?? [];
     const enabledSet = new Set<string>();
     for (const v of vars) {
-      if (
-        v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token" && v.value
+      // 白名单：只认 vendor_enabled_ 前缀或显式布尔值，避免将字符串 key/token 误判为启用
+      if (v.name.startsWith("vendor_enabled_") && v.value === true) {
+        enabledSet.add(v.name.replace("vendor_", ""));
+      } else if (
+        v.name.startsWith("vendor_") && !v.name.includes("_key") && !v.name.includes("_token")
+        && !v.name.includes("_secret")
+        && !v.name.includes("_password") && !v.name.includes("_appid")
+        && (v.value === true || v.value === "true")
       ) {
         enabledSet.add(v.name.replace("vendor_", ""));
       }

@@ -9,6 +9,8 @@ interface AgentResult {
   tool_calls_made?: unknown[];
 }
 
+import { parseAction, parseRiskLevel, type StockDecision } from "@/types/stock-analysis";
+
 /** 清理 LLM 原始输出中的工具调用标签和乱码 */
 export function cleanToolCallTags(text: string): string {
   if (!text) { return ""; }
@@ -130,4 +132,47 @@ export function extractContent(value: unknown): string {
   // 调用统一的清理 + beautify 函数
   text = cleanToolCallTags(text);
   return tryBeautifyJson(text);
+}
+
+/**
+ * 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护
+ */
+export function normalizeDecision(raw: Record<string, unknown>): StockDecision {
+  const action = parseAction(raw.action ?? raw["action"]);
+  const positionPct = Number(raw.positionPct ?? raw.position_pct ?? 0);
+  const targetPrice = raw.targetPrice != null
+    ? Number(raw.targetPrice)
+    : (raw.target_price != null ? Number(raw.target_price) : null);
+  const stopLoss = raw.stopLoss != null ? Number(raw.stopLoss) : (raw.stop_loss != null ? Number(raw.stop_loss) : null);
+  const reasoning = String(raw.reasoning ?? "");
+  const riskLevel = parseRiskLevel(raw.riskLevel ?? raw.risk_level);
+  const confidence = Math.round(Math.max(0, Math.min(100, Number(raw.confidence ?? 0))));
+  return {
+    action,
+    positionPct: isNaN(positionPct) ? 0 : positionPct,
+    targetPrice: targetPrice != null && !isNaN(targetPrice) ? targetPrice : null,
+    stopLoss: stopLoss != null && !isNaN(stopLoss) ? stopLoss : null,
+    reasoning,
+    riskLevel,
+    confidence,
+  };
+}
+
+/**
+ * 尝试从文本中解析 JSON decision（兼容 markdown 代码块包裹）。
+ * 返回规范化的 StockDecision，或 null。
+ */
+export function tryParseDecision(text: string): StockDecision | null {
+  const trimmed = text.trim();
+  const candidates = [trimmed];
+  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (m) { candidates.unshift(m[1].trim()); }
+  for (const candidate of candidates) {
+    if (!candidate.startsWith("{")) { continue; }
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed === "object" && parsed !== null) { return normalizeDecision(parsed); }
+    } catch { /* try next */ }
+  }
+  return null;
 }

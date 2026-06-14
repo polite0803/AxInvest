@@ -939,30 +939,6 @@ export function autoLayoutWorkflow(
     currentAbs[n.id] = { x: n.position.x, y: n.position.y };
   }
 
-  // 再处理子节点（已保证父节点 currentAbs 可用）
-  const remaining = new Set(nodes.map((n) => n.id).filter((id) => childOf[id]));
-  let prevSize = remaining.size + 1;
-  while (remaining.size > 0 && remaining.size < prevSize) {
-    prevSize = remaining.size;
-    for (const id of [...remaining]) {
-      const pid = childOf[id];
-      if (pid && currentAbs[pid]) {
-        const n = nodes.find((x) => x.id === id);
-        if (n) {
-          currentAbs[id] = { x: n.position.x + currentAbs[pid].x, y: n.position.y + currentAbs[pid].y };
-        } else {
-          currentAbs[id] = { x: 0, y: 0 };
-        }
-        remaining.delete(id);
-      }
-    }
-  }
-  // 兜底：仍在 remaining 中的（孤儿引用/循环引用），使用原始位置
-  for (const id of remaining) {
-    const n = nodes.find((x) => x.id === id);
-    currentAbs[id] = n ? { x: n.position.x, y: n.position.y } : { x: 0, y: 0 };
-  }
-
   // 2. 对每个 parallel 容器：单独 dagre 排子节点 + 量 bbox + 归一化到原点
   const PADDING = 40;
   const HEADER_H = 60;

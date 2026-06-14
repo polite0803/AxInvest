@@ -449,7 +449,7 @@ async fn seed_stock_analysis_workflow_template(
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
     // v30→v31: 覆盖用户本地的 v30 脏数据，写入含正确 subGraph 的新数据
-    const TEMPLATE_VERSION: i32 = 2;
+    const TEMPLATE_VERSION: i32 = 32;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables = String::new();
@@ -3713,8 +3713,154 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         error_branch: None,
         compensation_steps: None,
     };
+
     let error_config_val = serde_json::to_string(&error_config)
         .map_err(|e| format!("序列化 ErrorConfig 失败: {e}"))?;
+
+    /// 将子图节点坐标从绝对坐标转换为相对容器的偏移。
+    /// 种子数据中的节点坐标是画布绝对坐标，但编辑器 Phase 3 的 subGraph 注入
+    /// 将 subGraph 节点 position 视为相对容器的偏移（editor 叠加容器 position
+    /// 计算绝对坐标），因此必须在注入前转换。
+    fn adjust_positions_to_relative(
+        mut sub_nodes: Vec<WorkflowNode>,
+        container_id: &str,
+        all_nodes: &[WorkflowNode],
+    ) -> Vec<WorkflowNode> {
+        let container_pos = all_nodes
+            .iter()
+            .find(|n| n.base_id() == container_id)
+            .map(|n| n.base().position.clone())
+            .unwrap_or(Position { x: 0.0, y: 0.0 });
+        for node in sub_nodes.iter_mut() {
+            match node {
+                WorkflowNode::Trigger(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Agent(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Llm(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Condition(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Parallel(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Loop(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Merge(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Delay(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Validation(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::SubWorkflow(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::DocumentParser(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::VectorRetrieve(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::End(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::HttpRequest(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Switch(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::DatabaseQuery(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Notification(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Approval(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::FileOperation(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::DataTransformer(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::WebhookSend(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Logging(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::LlmClassifier(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Aggregator(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Email(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Debate(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Swarm(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Storage(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Tool(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::Code(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+                WorkflowNode::WorkflowRef(n) => {
+                    n.base.position.x -= container_pos.x;
+                    n.base.position.y -= container_pos.y;
+                },
+            }
+        }
+        sub_nodes
+    }
 
     // ── 注入容器节点子图（subGraph）用于编辑器嵌套渲染 ──
     // 子图仅在编辑器的 ReactFlow 渲染层中用于坐标转换（绝对→相对），
@@ -3746,7 +3892,10 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
             .cloned()
             .collect();
         let sub_graph = SubGraph {
-            nodes: sub_nodes,
+            // 子图节点坐标必须相对于容器（Phase 3 编辑器将 subGraph 节点视为相对偏移，
+            // 计算绝对坐标时叠加 container.position）。种子数据中的坐标是绝对坐标，
+            // 因此在注入前转换为相对坐标。
+            nodes: adjust_positions_to_relative(sub_nodes, cid, &nodes),
             edges: sub_edges,
         };
         // 注入到容器节点 config 中

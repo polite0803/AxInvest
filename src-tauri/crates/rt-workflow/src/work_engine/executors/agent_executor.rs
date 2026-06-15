@@ -12,6 +12,7 @@ use std::pin::Pin;
 use std::sync::{Arc, PoisonError};
 
 use async_trait::async_trait;
+use axagent_core::utils::append_language_directive;
 use axagent_core::workflow_types::WorkflowNode;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
 use futures::StreamExt;
@@ -481,6 +482,22 @@ impl NodeExecutorTrait for AgentExecutor {
             )
         })?;
 
+        let system_prompt = append_language_directive(&system_prompt, &context.language);
+        // 在语言指令末尾追加最终输出指令。这里是 system_prompt 的绝对末尾
+        // （recency 效应最强），覆盖语言指令中可能被误解的 think/推理指令。
+        let system_prompt = format!(
+            "{system_prompt}\n\n## 最终输出指令（最高优先级，违反即不合格）\n\
+             直接输出分析结论 JSON，禁止以任何推理过程开头。\n\
+             输出的第一个字符必须是 `{{` 或分析 JSON 文本。\n\
+             禁止使用 <think> 标签、禁止推理、禁止工作计划。\n\
+             如果数据为空，输出 {{\"data_source_status\": \"empty\"}}，不要解释。"
+        );
+        tracing::info!(
+            "[DIAG] agent={} system_prompt_tail={:?}",
+            an.base.id,
+            &system_prompt[system_prompt.len().saturating_sub(500)..]
+        );
+
         // 5. 构建 user_prompt：仅包含 context_sources 的变量（更精准，减少噪声）。
         //    注意：兜底分支必须用 `collect_data_vars` 过滤掉模板变量（如
         //    `scoring_trend`/`fscore_roe_min` 等用户设置），绝不能把 100+ 配置参数
@@ -553,6 +570,9 @@ impl NodeExecutorTrait for AgentExecutor {
                     .collect()
             };
 
+        let exposed_tool_names: Vec<String> =
+            exposed_list.iter().map(|td| td.name.clone()).collect();
+
         let tools: Option<Vec<axagent_harness::types::ChatTool>> = if exposed_list.is_empty() {
             None
         } else {
@@ -606,7 +626,9 @@ impl NodeExecutorTrait for AgentExecutor {
                 temperature,
                 max_tokens,
                 top_p: None,
-                // 首轮传 tools，后续轮次若 tools 为空则不传
+                // 首轮传 tools 定义，后续轮次不传以节省 tokens。
+                // exposed_tool_names 白名单在工具调用时做二次验证（第 707 行），
+                // 即使 LLM 幻觉出未注册工具也会被拒绝并提示直接输出结论。
                 tools: if round == 0 { tools.clone() } else { None },
                 thinking_budget: None,
                 use_max_completion_tokens: None,
@@ -649,7 +671,13 @@ impl NodeExecutorTrait for AgentExecutor {
 
             total_usage.0 += stream_usage.0;
             total_usage.1 += stream_usage.1;
-            final_content = stream_content.clone();
+            // 只在有内容时覆盖 final_content，否则保留上一轮文本
+            // （防止最后一轮 LLM 只出 tool_use 不出文本导致卡片空白）
+            if !stream_content.is_empty() {
+                final_content = stream_content.clone();
+            }
+            // 清理 final_content 中的 <think> 标签及内容（推理过程不应该展示给前端）
+            final_content = strip_think_tags(&final_content);
             final_thinking = stream_thinking.clone();
 
             // 检查是否有工具调用
@@ -695,11 +723,31 @@ impl NodeExecutorTrait for AgentExecutor {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null);
 
-                let tool_result = execute_tool(context, &tc.function.name, args.clone()).await;
+                let tool_result = if !exposed_tool_names.is_empty()
+                    && !exposed_tool_names.contains(&tc.function.name)
+                {
+                    Err(format!(
+                        "工具 '{}' 不可用。你必须立即输出分析结论 JSON，不要调用任何工具，不要使用 <think> 标签，不要输出推理过程。直接输出 JSON。",
+                        tc.function.name
+                    ))
+                } else {
+                    execute_tool(context, &tc.function.name, args.clone()).await
+                };
 
                 let (result_str, is_error) = match &tool_result {
-                    Ok(v) => (serde_json::to_string(v).unwrap_or_else(|_| format!("{v}")), false),
-                    Err(e) => (format!("Error: {e}"), true),
+                    Ok(v) => {
+                        let s = serde_json::to_string(v).unwrap_or_else(|_| format!("{v}"));
+                        tracing::info!(
+                            "[DIAG] tool={} success result_preview={:?}",
+                            tc.function.name,
+                            &s[..s.char_indices().nth(200).map_or(s.len(), |(i, _)| i)]
+                        );
+                        (s, false)
+                    },
+                    Err(e) => {
+                        tracing::warn!("[DIAG] tool={} ERROR: {e}", tc.function.name);
+                        (format!("Error: {e}"), true)
+                    },
                 };
 
                 tool_calls_made.push(serde_json::json!({
@@ -717,6 +765,23 @@ impl NodeExecutorTrait for AgentExecutor {
                     tool_call_id: Some(tc.id.clone()),
                     thinking: None,
                 });
+            }
+
+            // 本轮的 stream_content 已被 strip_think_tags 清理，
+            // 但若清理后只剩空串/纯推理，需要检查：本轮所有工具调用都被拒绝了？
+            // 如果是 → LLM 已经证明它无法正确使用工具 → 不必再给下一轮。
+            // 检查 tc_list 中是否所有工具调用都被白名单拒绝
+            let all_rejected = tc_list.iter().all(|tc| {
+                !exposed_tool_names.is_empty() && !exposed_tool_names.contains(&tc.function.name)
+            });
+            if all_rejected && !exposed_tool_names.is_empty() {
+                // 所有工具都被拒绝 → LLM 在幻想未注册工具 → 直接结束，
+                // 使用当前 final_content（已被 strip_think_tags 清理）输出。
+                // 如果 final_content 为空，生成一个降级 JSON 输出
+                if final_content.trim().is_empty() {
+                    final_content = "数据源为空或工具调用失败，无法获取有效分析数据。".to_string();
+                }
+                break;
             }
 
             // 最后一轮即使还有 tool_calls 也结束
@@ -773,25 +838,69 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
-        // ── 4i. 结构化参数提取（结构化参数方案 Phase 1）──
-        // 从 LLM 回复文本中提取 JSON params，嵌入 output 的 "params" 键。
-        // 下游节点可通过 input_mapping: {"key": "node_id.params.field"}
-        // 或 resolve_var_path("node_id.params") 直接消费结构化参数，
-        // 无需 LLM 重新理解文本。
-        let extracted_params = super::extract_json_params(&final_content);
+        // ── 4i. 提取最终输出内容和结构化参数 ──
+        // 剥离 <think> 标签后，找到 ```json 代码块或整体 JSON
+        let cleaned_content = strip_think_tags(&final_content);
+        let cleaned_content = clean_provider_tags(&cleaned_content);
 
-        // ── 4j. 自然语言 params fallback（非 JSON 输出 → 生成默认占位符）
-        // 当 LLM 未输出结构化 JSON 时（如纯文本回复、RAG 查询），params 设为 null；
-        // 前端和下游可通过 `params == null` 判断是否可进行确定性计算。
-        let params = extracted_params.unwrap_or(Value::Null);
+        // 检测 LLM 输出是否仅为推理/计划文本（非实际分析结果）
+        if is_reasoning_text(&cleaned_content) {
+            tracing::info!(
+                node_id = %an.base.id,
+                "LLM 输出被识别为推理文本，降级为工具结果摘要",
+            );
+            // 降级：使用工具调用结果作为内容
+            let fallback = if !tool_calls_made.is_empty() {
+                "数据不足，工具返回结果为空。".to_string()
+            } else {
+                "数据不足，无法生成完整分析报告。".to_string()
+            };
+            let output_json = serde_json::json!({
+                "role": role_desc, "model": model_for_output,
+                "content": fallback, "thinking": final_thinking,
+                "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
+                "tool_calls_made": tool_calls_made,
+                "node_id": node.base_id(),
+                "params": serde_json::Value::Null,
+            });
+            return Ok(NodeOutput {
+                output: output_json,
+                output_var: Some(an.config.output_var.clone()),
+            });
+        }
 
+        let (display_text, params) = split_json_block(&cleaned_content);
+
+        // 决定 content（卡片展示）和 params（下游消费）：
+        let (safe_content, safe_params) =
+            if !display_text.trim().is_empty() || params.is_object() || params.is_array() {
+                (display_text.clone(), params.clone())
+            } else {
+                let fallback = if !cleaned_content.trim().is_empty() {
+                    cleaned_content
+                } else if !tool_calls_made.is_empty() {
+                    "数据不足，工具返回结果为空。".to_string()
+                } else {
+                    "数据不足，无法生成完整分析报告。".to_string()
+                };
+                (fallback, serde_json::Value::Null)
+            };
+        tracing::info!(
+            "[DIAG] agent={} content_len={} has_params={} safe_content={:?}",
+            an.base.id,
+            display_text.len(),
+            params.is_object() || params.is_array(),
+            &safe_content[..safe_content.char_indices().nth(80).map_or(safe_content.len(), |(i, _)| i)]
+        );
+
+        // ── 4j. 构建输出 ──
         let output_json = serde_json::json!({
             "role": role_desc, "model": model_for_output,
-            "content": final_content, "thinking": final_thinking,
+            "content": safe_content, "thinking": final_thinking,
             "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
             "tool_calls_made": tool_calls_made,
             "node_id": node.base_id(),
-            "params": params,
+            "params": safe_params,
         });
 
         Ok(NodeOutput {
@@ -1314,12 +1423,23 @@ fn format_context_source(name: &str, value: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Object(_) => {
             // 优先提取常见语义字段
-            if let Some(content) = target.get("content").and_then(|v| v.as_str()) {
-                content.to_string()
+            let content = if let Some(c) = target.get("content").and_then(|v| v.as_str()) {
+                c.to_string()
             } else if let Some(summary) = target.get("summary").and_then(|v| v.as_str()) {
                 summary.to_string()
             } else {
                 target.to_string()
+            };
+            // 追加 params 结构化数据（如果有），使下游 LLM 可精确引用
+            if let Some(params) = target.get("params") {
+                if params.is_object() || params.is_array() {
+                    let params_str = serde_json::to_string(params).unwrap_or_default();
+                    format!("{content}\n\n[结构化参数] {params_str}")
+                } else {
+                    content
+                }
+            } else {
+                content
             }
         },
         other => other.to_string(),
@@ -1453,4 +1573,154 @@ fn validate_strict_mode_output(
         }
     }
     Ok(())
+}
+
+/// 清理 LLM 输出中的 <think>...</think> 标签及内容。
+/// 某些 LLM 模型会在 <think> 标签内输出推理过程，
+/// 这些内容不应展示给前端或传递给下游节点。
+fn strip_think_tags(text: &str) -> String {
+    let mut result = text.to_string();
+    // 循环清理，处理嵌套或未闭合的情况
+    loop {
+        let start = result.find("<think>");
+        let end = result.find("</think>").map(|e| e + 8); // +len("</think>")
+        match (start, end) {
+            (Some(s), Some(e)) if e > s => {
+                result.replace_range(s..e, "");
+            },
+            (Some(s), None) => {
+                // 有 <think> 但无 </think> → 从 <think> 删到末尾
+                result.truncate(s);
+                break;
+            },
+            _ => break,
+        }
+    }
+    // 清理 <think> 标签后可能残留的连续空白
+    while result.contains("\n\n\n") {
+        result = result.replace("\n\n\n", "\n\n");
+    }
+    result.trim().to_string()
+}
+
+/// 清理 LLM 输出中 provider 注入的转义标签（如 CHAT2API 格式）。
+/// 示例：
+///   webSearch|CHAT2API|invoke name="get_stock_quote">...</invoke>
+///   |CHAT2API|tool_calls|...|CHAT2API|/tool_calls|
+fn clean_provider_tags(text: &str) -> String {
+    let re = regex::Regex::new(
+        r"(?i)(?:webSearch\s*\||\|\s*CHAT2API\s*\|)[^<\n]*?(?:>[\s\S]*?(?:</invoke>|</tool_call>|$)|$)"
+    ).ok();
+    let result = if let Some(ref re) = re {
+        re.replace_all(text, "").to_string()
+    } else {
+        text.to_string()
+    };
+    // 清理残留的 |CHAT2API| 标签
+    let result = result.replace("|CHAT2API|", "");
+    // 清理 webSearch 前缀
+    let result = result.replace("webSearch", "");
+    result.trim().to_string()
+}
+
+/// 判断文本是否为推理/计划而非分析结果。
+/// 清理 <think> 标签后，LLM 可能残留推理文本（如"用户要求我..."、"Let me analyze" 等）。
+/// 这些应被视为空内容，触发降级输出。
+fn is_reasoning_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    // 以推理句式开头
+    if trimmed.starts_with("用户要求")
+        || trimmed.starts_with("用户需要")
+        || trimmed.starts_with("让我")
+        || trimmed.starts_with("我需要")
+        || trimmed.starts_with("首先")
+        || trimmed.starts_with("好的")
+        || trimmed.starts_with("The user")
+        || trimmed.starts_with("Let me")
+        || trimmed.starts_with("I need")
+        || trimmed.starts_with("First")
+        || trimmed.starts_with("根据系统")
+        || trimmed.starts_with("根据指令")
+        || trimmed.starts_with("作为")
+        || trimmed.starts_with("我的职责")
+        || trimmed.starts_with("我作为")
+    {
+        return true;
+    }
+    // 内容包含工具调用规划（"调用get_stock_news"、"call get_"等），
+    // 但没有实际分析结论（JSON 代码块或 structured 字段）
+    let has_tool_plan = trimmed.contains("调用")
+        || trimmed.contains("call ")
+        || trimmed.contains("获取数据")
+        || trimmed.contains("工具获取");
+    let has_actual_analysis = trimmed.contains("```json")
+        || trimmed.contains("\"confidence\"")
+        || trimmed.contains("\"data_source_status\"")
+        || trimmed.contains("\"bull_score\"")
+        || trimmed.contains("\"summary\"");
+    if has_tool_plan && !has_actual_analysis {
+        return true;
+    }
+    false
+}
+
+/// 将 LLM 输出分割为展示文本（content）和结构化参数（params）。
+///
+/// 核心策略：
+/// 1. 查找 ```json ... ``` 代码块 → content = 代码块前的文本，params = 代码块中的 JSON
+/// 2. 整个文本即为合法 JSON（无代码块包裹）→ content = ""（空），params = JSON
+/// 3. 纯文本（无代码块、非 JSON）→ content = 完整文本，params = null
+///
+/// **特殊兜底**：当 content 为空但 params 有值时，自动将 params 格式化为 JSON 字符串
+/// 作为 content，确保前端 `extractContent()` 拿到可展示内容，不出现空白卡片。
+fn split_json_block(text: &str) -> (String, serde_json::Value) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return (text.to_string(), serde_json::Value::Null);
+    }
+
+    // 策略 1：查找 ``` 代码块标记（兼容 ```json、```JSON、```js、```javascript、``` 裸块）
+    if let Some(marker_start) = trimmed.find("```") {
+        let after_opener = &trimmed[marker_start + 3..];
+        let rest_line = after_opener.split('\n').next().unwrap_or("");
+        let rest_line = rest_line.trim_end_matches('\r');
+        let lang = rest_line.trim().to_lowercase();
+
+        let is_json_lang = lang.is_empty() || matches!(lang.as_str(), "json" | "js" | "javascript");
+
+        if is_json_lang {
+            let skip_len = 3 + rest_line.len() + 1; // ``` + lang + \n
+            let ap = &trimmed[marker_start + skip_len.min(trimmed.len() - marker_start)..];
+
+            if let Some(block_end) = ap.find("```") {
+                let json_str = ap[..block_end].trim();
+                if let Ok(params) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    let content = trimmed[..marker_start].trim().to_string();
+                    // 兜底：content 为空但 params 有值，用 params JSON 作为展示文本
+                    if content.is_empty() {
+                        return (
+                            serde_json::to_string_pretty(&params)
+                                .unwrap_or_else(|_| params.to_string()),
+                            params,
+                        );
+                    }
+                    return (content, params);
+                }
+            }
+        }
+    }
+
+    // 策略 2：整个文本是合法 JSON（无代码块包裹，常见于 OutputMode::Json）
+    if let Ok(params) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        // pure JSON 输出：content 为空（前端可能需展示 params 摘要），params 完整
+        // 返回 params.to_string() 作为兜底内容，确保前端不展示空白
+        let display = serde_json::to_string_pretty(&params).unwrap_or_else(|_| trimmed.to_string());
+        return (display, params);
+    }
+
+    // 策略 3：纯文本 → 全部作为 content，params = null
+    (text.to_string(), serde_json::Value::Null)
 }

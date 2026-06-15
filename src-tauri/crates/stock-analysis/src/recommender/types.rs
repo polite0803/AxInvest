@@ -31,10 +31,12 @@ impl Style {
     }
 }
 
-/// 持有周期（3 种）
+/// 持有周期（4 种）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Period {
+    /// 超短线 1-3 天（T+1 隔夜/事件驱动/情绪博弈）
+    UltraShort,
     /// 短线 1-2 周
     Short,
     /// 中线 3-8 周
@@ -46,6 +48,7 @@ pub enum Period {
 impl Period {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Period::UltraShort => "ultra_short",
             Period::Short => "short",
             Period::Mid => "mid",
             Period::Long => "long",
@@ -55,6 +58,7 @@ impl Period {
     /// 周期因子（用于动态仓位）
     pub fn factor(&self) -> f64 {
         match self {
+            Period::UltraShort => 0.4,
             Period::Short => 0.6,
             Period::Mid => 0.8,
             Period::Long => 1.0,
@@ -64,6 +68,7 @@ impl Period {
     /// 建议持有天数
     pub fn default_holding_days(&self) -> u32 {
         match self {
+            Period::UltraShort => 2,
             Period::Short => 5,
             Period::Mid => 28,
             Period::Long => 90,

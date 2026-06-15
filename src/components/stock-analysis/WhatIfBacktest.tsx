@@ -404,16 +404,16 @@ export function WhatIfBacktest() {
   return (
     <Card
       size="small"
-      title={<span>🔬 What-If Param Backtest</span>}
+      title={<span>🔬 {t("stockAnalysis.whatIfBacktest.title")}</span>}
       styles={{ body: { padding: "10px 12px" } }}
     >
       {/* Step 1: 选择历史分析 */}
       <div className="mb-3">
-        <div className="text-xs text-gray-500 mb-1">Step 1: 选择历史分析</div>
+        <div className="text-xs text-gray-500 mb-1">{t("stockAnalysis.whatIfBacktest.step1")}</div>
         <Select
           className="w-full"
           size="small"
-          placeholder={loading ? t("stockAnalysis.loading") : "选择一条分析记录..."}
+          placeholder={loading ? t("stockAnalysis.loading") : t("stockAnalysis.whatIfBacktest.selectHint")}
           loading={loading}
           value={selectedId}
           onChange={setSelectedId}
@@ -425,64 +425,64 @@ export function WhatIfBacktest() {
       </div>
 
       {!selectedId && (
-        <Empty description="请选择一条历史分析记录开始 What-If 回测" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t("stockAnalysis.whatIfBacktest.selectEmpty")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       )}
 
       {snapshot && (
         <>
           {/* Step 2: 参数编辑 */}
           <div className="mb-3">
-            <div className="text-xs text-gray-500 mb-1">Step 2: 调整参数</div>
+            <div className="text-xs text-gray-500 mb-1">{t("stockAnalysis.whatIfBacktest.step2")}</div>
             <div className="bg-gray-800/30 rounded p-2 space-y-2">
               <ParamSlider
-                label="totalScore（基础评分）"
+                label={t("stockAnalysis.whatIfBacktest.totalScoreLabel")}
                 value={params.totalScore}
                 min={0}
                 max={100}
                 onChange={(v) => setParams((p) => ({ ...p, totalScore: v }))}
               />
               <ParamSlider
-                label="dqiScore（数据质量）"
+                label={t("stockAnalysis.whatIfBacktest.dqiScoreLabel")}
                 value={params.dqiScore}
                 min={0}
                 max={100}
                 onChange={(v) => setParams((p) => ({ ...p, dqiScore: v }))}
               />
               <ParamSelect
-                label="overallRisk（风险等级）"
+                label={t("stockAnalysis.whatIfBacktest.overallRiskLabel")}
                 value={params.overallRisk}
                 options={[
-                  { value: "低", label: "低" },
-                  { value: "中", label: "中" },
-                  { value: "高", label: "高" },
-                  { value: "极高", label: "极高" },
+                  { value: "低", label: t("stockAnalysis.whatIfBacktest.riskLevels.low") },
+                  { value: "中", label: t("stockAnalysis.whatIfBacktest.riskLevels.medium") },
+                  { value: "高", label: t("stockAnalysis.whatIfBacktest.riskLevels.high") },
+                  { value: "极高", label: t("stockAnalysis.whatIfBacktest.riskLevels.veryHigh") },
                 ]}
                 onChange={(v) => setParams((p) => ({ ...p, overallRisk: v }))}
               />
               <ParamSelect
-                label="catalystLevel（催化剂级别）"
+                label={t("stockAnalysis.whatIfBacktest.catalystLevelLabel")}
                 value={params.catalystLevel}
                 options={[
-                  { value: "无催化剂", label: "无催化剂" },
-                  { value: "L1普通消息", label: "L1 普通消息" },
-                  { value: "L2业绩拐点级", label: "L2 业绩拐点级" },
-                  { value: "L3估值体系级", label: "L3 估值体系级" },
+                  { value: "无催化剂", label: t("stockAnalysis.whatIfBacktest.catalystLevels.none") },
+                  { value: "L1普通消息", label: t("stockAnalysis.whatIfBacktest.catalystLevels.l1") },
+                  { value: "L2业绩拐点级", label: t("stockAnalysis.whatIfBacktest.catalystLevels.l2") },
+                  { value: "L3估值体系级", label: t("stockAnalysis.whatIfBacktest.catalystLevels.l3") },
                 ]}
                 onChange={(v) => setParams((p) => ({ ...p, catalystLevel: v }))}
               />
               <ParamSelect
-                label="institutionalTrace（机构痕迹）"
+                label={t("stockAnalysis.whatIfBacktest.institutionalTraceLabel")}
                 value={params.institutionalTrace}
                 options={[
-                  { value: "无异常", label: "无异常" },
-                  { value: "疑似建仓", label: "疑似建仓" },
-                  { value: "有建仓痕迹", label: "有建仓痕迹" },
-                  { value: "资金出逃", label: "资金出逃" },
+                  { value: "无异常", label: t("stockAnalysis.whatIfBacktest.institutionalTraces.none") },
+                  { value: "疑似建仓", label: t("stockAnalysis.whatIfBacktest.institutionalTraces.suspectedBuilding") },
+                  { value: "有建仓痕迹", label: t("stockAnalysis.whatIfBacktest.institutionalTraces.building") },
+                  { value: "资金出逃", label: t("stockAnalysis.whatIfBacktest.institutionalTraces.escaping") },
                 ]}
                 onChange={(v) => setParams((p) => ({ ...p, institutionalTrace: v }))}
               />
               <ParamSlider
-                label="consensusScore（辩论收敛）"
+                label={t("stockAnalysis.whatIfBacktest.consensusScoreLabel")}
                 value={params.consensusScore}
                 min={0}
                 max={100}
@@ -490,7 +490,7 @@ export function WhatIfBacktest() {
               />
               <div className="flex justify-end gap-1">
                 <Button size="small" onClick={handleReset} disabled={!hasChanges}>
-                  重置
+                  {t("stockAnalysis.experiment.reset")}
                 </Button>
               </div>
             </div>
@@ -502,12 +502,16 @@ export function WhatIfBacktest() {
             size="small"
             items={[{
               key: "configOverrides",
-              label: <span className="text-xs font-medium">配置参数覆盖（评分权重/估值/风控）</span>,
-              extra: toolReplayLoading ? <span className="text-xs text-blue-400">计算中...</span> : undefined,
+              label: (
+                <span className="text-xs font-medium">{t("stockAnalysis.whatIfBacktest.configOverridesTitle")}</span>
+              ),
+              extra: toolReplayLoading
+                ? <span className="text-xs text-blue-400">{t("stockAnalysis.whatIfBacktest.calculating")}</span>
+                : undefined,
               children: (
                 <div className="space-y-2">
                   <div className="text-[10px] text-gray-500">
-                    修改这些参数会通过后端重新计算工具链（scoring + valuation + risk），进而影响 totalScore 和最终决策。
+                    {t("stockAnalysis.whatIfBacktest.configOverridesDesc")}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <ConfigParamSlider
@@ -598,7 +602,7 @@ export function WhatIfBacktest() {
                         setToolReplayLoading(false);
                       }}
                     >
-                      应用配置到后端重算
+                      {t("stockAnalysis.whatIfBacktest.applyToBackend")}
                     </Button>
                   </div>
                 </div>
@@ -609,8 +613,10 @@ export function WhatIfBacktest() {
           {/* Step 3: 对比结果 */}
           <div>
             <div className="text-xs text-gray-500 mb-1">
-              Step 3: 对比结果
-              {hasChanges && <Tag color="blue" className="ml-1 !text-[10px]">已修改</Tag>}
+              {t("stockAnalysis.whatIfBacktest.step3")}
+              {hasChanges && (
+                <Tag color="blue" className="ml-1 text-[10px]!">{t("stockAnalysis.whatIfBacktest.modified")}</Tag>
+              )}
             </div>
 
             {originalDecision && result && (
@@ -629,7 +635,7 @@ export function WhatIfBacktest() {
                       </span>
                       {f.changed && (
                         <>
-                          <ArrowRightOutlined className="text-blue-400 !text-[10px]" />
+                          <ArrowRightOutlined className="text-blue-400 text-[10px]!" />
                           <span className="text-blue-300 font-medium">{f.after}</span>
                         </>
                       )}
@@ -647,7 +653,7 @@ export function WhatIfBacktest() {
 
             {!originalDecision && (
               <Empty
-                description="未找到原始决策数据（该分析可能未完成或无 portfolio-mgr 输出）"
+                description={t("stockAnalysis.whatIfBacktest.noOriginalDecision")}
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
               />
             )}
@@ -678,14 +684,14 @@ function ParamSlider({
     <div className="flex items-center gap-2">
       <span className="text-xs text-gray-400 w-32 shrink-0">{label}</span>
       <Slider
-        className="flex-1 !mb-0"
+        className="flex-1 mb-0!"
         min={min}
         max={max}
         value={value}
         onChange={onChange}
       />
       <InputNumber
-        className="!w-16"
+        className="w-16!"
         size="small"
         min={min}
         max={max}
@@ -743,7 +749,7 @@ function ConfigParamSlider({
     <div className="flex items-center gap-1">
       <span className="text-[10px] text-gray-500 w-20 truncate" title={label}>{label}</span>
       <Slider
-        className="flex-1 !mb-0"
+        className="flex-1 mb-0!"
         min={min}
         max={max}
         step={step ?? 1}
@@ -751,7 +757,7 @@ function ConfigParamSlider({
         onChange={onChange}
       />
       <InputNumber
-        className="!w-14 !text-[11px]"
+        className="w-14! text-[11px]!"
         size="small"
         min={min}
         max={max}

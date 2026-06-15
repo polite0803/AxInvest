@@ -1,5 +1,5 @@
 import i18n from "@/i18n";
-import { extractContent, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
+import { extractContent, extractDecision, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
@@ -59,7 +59,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     } else if (stepId === "portfolio-mgr") {
       // 不要构造全 0 假决策——解析失败就保持 null，
       // 让调用方决定如何处理缺失决策。
-      const parsed = tryParseDecision(output);
+      const parsed = extractDecision(raw);
       if (parsed) { decision = parsed; }
     } else if (stepId === "value-investor") {
       // 巴菲特框架评估（与 risk-evaluator 并行，在辩论之后运行）
@@ -229,6 +229,8 @@ interface StockAnalysisState {
   errorCode: string | null;
   failedNodes: string[];
   failedNodeErrors: Record<string, string>;
+  /** 数据源降级/空数据警告（不阻断流程） */
+  dataWarnings: string[];
 
   history: AnalysisSummary[];
 
@@ -399,6 +401,7 @@ const initialState = {
   errorCode: null,
   failedNodes: [],
   failedNodeErrors: {},
+  dataWarnings: [],
   history: [],
   currentStage: 0,
   progressMessage: "",
@@ -554,6 +557,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       errorCode: null,
       failedNodes: [],
       failedNodeErrors: {},
+      dataWarnings: [],
       currentStage: 0,
       workflowId: null,
       progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
@@ -713,7 +717,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (record.stockCode && Object.keys(reports).length > 0) {
           get().setStockCodeConsensus(
             record.stockCode,
-            computeStockConsensus(reports, Date.now()),
+            computeStockConsensus(reports, Date.now(), get().decision?.timeHorizon),
           );
         }
       } catch (e) {
@@ -1040,6 +1044,29 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             : get().failedNodeErrors,
         });
 
+        // ── 数据源降级检测：新闻/情绪/公告工具返回空数据时发出警告 ──
+        if (
+          status === "completed"
+          && (nodeId === "t-news-data" || nodeId === "t-sentiment-data" || nodeId === "t-catalyst-data")
+        ) {
+          const outputValue = event.payload.output;
+          const isEmpty = outputValue == null
+            || (typeof outputValue === "string" && (outputValue === "[]" || outputValue.trim() === ""))
+            || (Array.isArray(outputValue) && outputValue.length === 0);
+          if (isEmpty) {
+            const label = nodeId === "t-news-data"
+              ? "新闻"
+              : nodeId === "t-sentiment-data"
+              ? "舆情"
+              : "公告";
+            const warnings = get().dataWarnings;
+            const msg = `⚠️ ${label}数据获取为空，相关分析师将基于有限数据分析`;
+            if (!warnings.includes(msg)) {
+              set({ dataWarnings: [...warnings, msg] });
+            }
+          }
+        }
+
         // 失败节点也写入 timeline，状态为 "failed"，便于侧栏脊柱高亮红色
         if (status === "failed") {
           const phase = inferTimelinePhase(nodeId);
@@ -1160,27 +1187,18 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         let decision: StockDecision | null = null;
         const pmRaw = results["portfolio-mgr"];
         if (pmRaw) {
-          const pmText = typeof pmRaw === "string"
-            ? pmRaw
-            : (pmRaw as Record<string, unknown>).content ?? JSON.stringify(pmRaw);
-          const parsed = tryParseDecision(String(pmText));
-          if (parsed) { decision = parsed; }
+          decision = extractDecision(pmRaw);
+        }
+
+        // 回退：从 output 中提取 decision
+        if (!decision && output !== undefined) {
+          decision = extractDecision(output);
         }
 
         // 回退：从 parseWorkflowResults 中获取
         if (!decision) {
           const parsed = parseWorkflowResults(results);
           decision = parsed.decision;
-        }
-
-        // 最后回退：尝试 output（最后一个节点输出，通常是 trader）
-        if (!decision && output) {
-          if (typeof output === "object" && output !== null) {
-            decision = normalizeDecision(output as Record<string, unknown>);
-          } else if (typeof output === "string") {
-            const tryParsed = tryParseDecision(output);
-            if (tryParsed) { decision = tryParsed; }
-          }
         }
 
         const parsed = parseWorkflowResults(results);
@@ -1205,7 +1223,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // RecommendationPanel 会读取这个缓存来提示用户"推荐与共识是否一致"。
         const stockCode = get().stockCode;
         if (stockCode && parsed.analystReports && Object.keys(parsed.analystReports).length > 0) {
-          const consensus = computeStockConsensus(parsed.analystReports);
+          const consensus = computeStockConsensus(parsed.analystReports, undefined, get().decision?.timeHorizon);
           get().setStockCodeConsensus(stockCode, consensus);
         }
       });
@@ -1220,43 +1238,28 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         error: string;
         errorCode?: string;
         results?: Record<string, unknown>;
-        output?: StockDecision | null;
+        output?: unknown;
       }>("workflow-error", (event) => {
         const msg = event.payload.error;
-        const { results, output, errorCode } = event.payload;
+        const { results, errorCode, output } = event.payload;
 
-        // 即使失败也尝试解析已有的部分结果（优先 portfolio-mgr，与分析页一致）
-        let decision: StockDecision | null = null;
+        // 即使失败也尝试解析已有的部分结果
         if (results) {
-          const pmRaw = results["portfolio-mgr"];
-          if (pmRaw) {
-            const pmText = typeof pmRaw === "string"
-              ? pmRaw
-              : (pmRaw as Record<string, unknown>).content ?? JSON.stringify(pmRaw);
-            const parsed = tryParseDecision(String(pmText));
-            if (parsed) { decision = parsed; }
-          }
-          if (!decision) {
-            const parsed = parseWorkflowResults(results);
-            decision = parsed.decision;
-          }
-        }
-        // 最后回退：尝试 output
-        if (!decision && output) {
-          decision = output;
-        }
-
-        // 空决策（全 0、无目标价、无理由）不写入 store，
-        // 避免 DecisionBanner 渲染无意义的 0% 仓位 / ¥0 目标价。
-        if (
-          decision
-          && decision.confidence === 0
-          && decision.positionPct === 0
-          && decision.targetPrice == null
-          && decision.stopLoss == null
-          && (!decision.reasoning || decision.reasoning.trim() === "")
-        ) {
-          decision = null;
+          const parsed = parseWorkflowResults(results);
+          set({
+            analystReports: parsed.analystReports,
+            debateRounds: parsed.debateRounds,
+            riskAssessments: parsed.riskAssessments,
+            valueAssessments: parsed.valueAssessments,
+            ruleCheckResults: parsed.ruleCheckResults,
+            dataQualitySummary: parsed.dataQualitySummary,
+            rawData: parsed.rawData,
+            decision: parsed.decision,
+          });
+        } else if (output) {
+          // 兜底：从 output 中解析决策（少数异常路径无 results 但含 output）
+          const parsed = extractDecision(output);
+          if (parsed) { set({ decision: parsed }); }
         }
 
         // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
@@ -1272,7 +1275,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             : msg,
           progressPct: 100,
           currentStage: 4,
-          decision,
         });
       });
       unlisteners.push(u3);

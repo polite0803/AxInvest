@@ -12,6 +12,10 @@ pub struct BacktestResult {
     pub analysis_date: String,
     pub decision_action: String,
     pub decision_confidence: f64,
+    /// 原始决策时间维度
+    pub time_horizon: Option<String>,
+    /// 原始期望持有天数
+    pub expected_holding_days: Option<u32>,
     /// 分析日的收盘价（入场价）
     pub entry_price: Option<f64>,
     /// 持有N日后的收盘价（出场价）
@@ -19,7 +23,7 @@ pub struct BacktestResult {
     pub holding_days: u32,
     /// 收益率（%）
     pub return_pct: f64,
-    /// 决策是否正确（买入/增持应涨，减持/卖出应跌）
+    /// 决策是否正确（买入/增持应涨，减持/卖出应跌，持有应平）
     pub was_correct: bool,
     /// 持有期间最大回撤（%）
     pub max_drawdown: f64,
@@ -41,6 +45,20 @@ pub struct BacktestStats {
     /// 超额收益 alpha（%），相对沪深300
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_pct: Option<f64>,
+    /// 按时间维度分组交叉统计
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub period_breakdown: Option<Vec<PeriodStats>>,
+}
+
+/// 按时间维度分组的回测统计
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeriodStats {
+    pub time_horizon: String,
+    pub count: u32,
+    pub accuracy_pct: f64,
+    pub avg_return_pct: f64,
+    pub avg_max_drawdown_pct: f64,
 }
 
 /// 基准对比结果
@@ -55,11 +73,18 @@ pub struct BenchmarkResult {
 
 /// 历史分析记录（用于回测输入）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoricalAnalysis {
     pub stock_code: String,
     pub analysis_date: String,
     pub decision_action: String,
     pub decision_confidence: f64,
+    /// 原始决策时间维度
+    #[serde(default)]
+    pub time_horizon: Option<String>,
+    /// 个性化持有天数（优先于 backtest_history 的统一参数）
+    #[serde(default)]
+    pub expected_holding_days: Option<u32>,
 }
 
 /// 回测引擎
@@ -77,6 +102,8 @@ impl BacktestEngine {
         decision_action: &str,
         decision_confidence: f64,
         holding_days: u32,
+        time_horizon: Option<String>,
+        expected_holding_days: Option<u32>,
     ) -> Result<BacktestResult, String> {
         // 取最近 500 日K线（约两个交易年），最大化覆盖 analysis_date 的概率
         // 注：get_klines 返回最近 N 根K线（按时间升序），若 analysis_date 超出范围则回测失败
@@ -132,11 +159,14 @@ impl BacktestEngine {
             _ => 0.0,
         };
 
-        // 判断决策是否正确：买入/增持应涨，减持/卖出应跌
+        // 判断决策是否正确：
+        //   买入/增持 → 上涨为正确（return_pct > 0）
+        //   减持/卖出 → 下跌为正确（return_pct < 0）
+        //   持有/观望 → |return_pct| < 0.5% 为正确（窄幅震荡），超出则为判断错误
         let was_correct = match decision_action {
             "买入" | "增持" => return_pct > 0.0,
             "减持" | "卖出" => return_pct < 0.0,
-            _ => true, // 持有/观望不算错
+            _ => return_pct.abs() < 0.5, // 持有：窄幅震荡算正确，超出算错
         };
 
         Ok(BacktestResult {
@@ -144,6 +174,8 @@ impl BacktestEngine {
             analysis_date: analysis_date.to_string(),
             decision_action: decision_action.to_string(),
             decision_confidence,
+            time_horizon,
+            expected_holding_days,
             entry_price,
             exit_price,
             holding_days,
@@ -154,13 +186,19 @@ impl BacktestEngine {
     }
 
     /// 批量回测历史分析记录
+    ///
+    /// 优先使用每条记录的 `expected_holding_days`（个性化持有期），
+    /// 仅当该字段为 None 时回退到统一的 `default_holding_days`。
     pub async fn backtest_history(
         client: &axagent_astock_data::AStockClient,
         analyses: Vec<HistoricalAnalysis>,
-        holding_days: u32,
+        default_holding_days: u32,
     ) -> Result<Vec<BacktestResult>, String> {
         let mut results = Vec::new();
         for analysis in analyses {
+            let holding_days = analysis
+                .expected_holding_days
+                .unwrap_or(default_holding_days);
             match Self::backtest_decision(
                 client,
                 &analysis.stock_code,
@@ -168,6 +206,8 @@ impl BacktestEngine {
                 &analysis.decision_action,
                 analysis.decision_confidence,
                 holding_days,
+                analysis.time_horizon.clone(),
+                analysis.expected_holding_days,
             )
             .await
             {
@@ -185,7 +225,7 @@ impl BacktestEngine {
         Ok(results)
     }
 
-    /// 计算回测统计指标
+    /// 计算回测统计指标（含按时间维度分组交叉统计）
     pub fn compute_stats(results: &[BacktestResult]) -> BacktestStats {
         let total = results.len() as f64;
         let correct = results.iter().filter(|r| r.was_correct).count() as f64;
@@ -211,6 +251,46 @@ impl BacktestEngine {
             0.0
         };
 
+        // 按时间维度分组统计
+        let mut period_groups: std::collections::HashMap<String, Vec<&BacktestResult>> =
+            std::collections::HashMap::new();
+        for r in results {
+            let key = r.time_horizon.as_deref().unwrap_or("unknown").to_string();
+            period_groups.entry(key).or_default().push(r);
+        }
+        let mut period_breakdown: Vec<PeriodStats> = period_groups
+            .into_iter()
+            .map(|(key, group)| {
+                let n = group.len() as f64;
+                let correct_n = group.iter().filter(|r| r.was_correct).count() as f64;
+                let acc = if n > 0.0 { (correct_n / n) * 100.0 } else { 0.0 };
+                let avg_r = if n > 0.0 {
+                    group.iter().map(|r| r.return_pct).sum::<f64>() / n
+                } else {
+                    0.0
+                };
+                let avg_dd = if n > 0.0 {
+                    group.iter().map(|r| r.max_drawdown).sum::<f64>() / n
+                } else {
+                    0.0
+                };
+                PeriodStats {
+                    time_horizon: key,
+                    count: group.len() as u32,
+                    accuracy_pct: acc,
+                    avg_return_pct: avg_r,
+                    avg_max_drawdown_pct: avg_dd,
+                }
+            })
+            .collect();
+        period_breakdown.sort_by_key(|p| match p.time_horizon.as_str() {
+            "ultra_short" => 0,
+            "short" => 1,
+            "mid" => 2,
+            "long" => 3,
+            _ => 9,
+        });
+
         BacktestStats {
             total_analyses: results.len() as u32,
             accuracy_pct: accuracy,
@@ -218,6 +298,7 @@ impl BacktestEngine {
             avg_max_drawdown_pct: avg_max_dd,
             avg_confidence,
             alpha_pct: None,
+            period_breakdown: Some(period_breakdown),
         }
     }
 

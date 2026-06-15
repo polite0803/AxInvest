@@ -97,6 +97,12 @@ export interface StockDecision {
   reasoning: string;
   riskLevel: StockRiskLevelType;
   confidence: number;
+  /** 时间维度: "ultra_short" | "short" | "mid" | "long" */
+  timeHorizon?: string | null;
+  /** 期望持有天数（交易日） */
+  expectedHoldingDays?: number | null;
+  /** 目标价预期实现时间框架: "1d" | "1w" | "1m" | "3m" | "6m" */
+  targetTimeframe?: string | null;
 }
 
 export interface AnalysisSummary {
@@ -207,6 +213,8 @@ export interface LatestAnalysisSummary {
   confidence: number | null;
   status: string;
   outcome: string | null;
+  decisionTimeHorizon?: string | null;
+  decisionExpectedHoldingDays?: number | null;
 }
 
 // ── 决策时间线类型 ──

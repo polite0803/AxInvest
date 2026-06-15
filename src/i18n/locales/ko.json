@@ -8026,11 +8026,12 @@
         "holding": "Holding",
         "confidence": "Confidence"
       },
+      "periodUltraShort": "Short",
       "periodShort": "Short",
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
-      "generatedAt": "Generated at {time}",
+      "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
       "empty": "No recommendation data",
@@ -8060,10 +8061,11 @@
       "backtestWinrate": "승률",
       "bannerDegraded": "데이터 스타일 {{styles}} 은(는) as-of {{date}} 잘림으로 인해 저하되어 출력됩니다. 비저하 스타일보다 낮은 신뢰도로 다루십시오."
     },
+    "periodUltraShort": "단기",
     "periodShort": "단기",
     "periodMid": "중기",
     "periodLong": "장기",
-    "generatedAt": "생성 시간: {time}",
+    "generatedAt": "생성 시간: {{time}}",
     "bannerVendorDisabled": "일부 스타일 비활성화: {styles}",
     "openSettings": "설정 열기",
     "empty": {

@@ -18,6 +18,15 @@ pub struct StockDecision {
     pub risk_level: String,
     /// 置信度 (0-100)
     pub confidence: f64,
+    /// 时间维度: "ultra_short" | "short" | "mid" | "long"
+    #[serde(default)]
+    pub time_horizon: Option<String>,
+    /// 期望持有天数（交易日）
+    #[serde(default)]
+    pub expected_holding_days: Option<u32>,
+    /// 目标价预期实现时间框架: "1d" | "1w" | "1m" | "3m" | "6m"
+    #[serde(default)]
+    pub target_timeframe: Option<String>,
 }
 
 /// 分析阶段性事件（通过 broadcast channel 推送前端）

@@ -11,7 +11,7 @@ interface AgentResult {
 
 import { parseAction, parseRiskLevel, type StockDecision } from "@/types/stock-analysis";
 
-/** 清理 LLM 原始输出中的工具调用标签和乱码 */
+/** 清理 LLM 原始输出中的工具调用标签、think 标签和乱码 */
 export function cleanToolCallTags(text: string): string {
   if (!text) { return ""; }
   let cleaned = text;
@@ -32,7 +32,11 @@ export function cleanToolCallTags(text: string): string {
   cleaned = cleaned.replace(/<!\[CDATA\[/g, "");
   cleaned = cleaned.replace(/\]\]>/g, "");
   // 清理 UTF-8 替换字符（乱码）
-  cleaned = cleaned.replace(/\uFFFD+/g, "...");
+  cleaned = cleaned.replace(/�+/g, "...");
+  // 清理 LLM 推理标签：<think>...</think>
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  cleaned = cleaned.replace(/<think>[\s\S]*?(?=\n|$)/gi, "");
+  // 清理后合并多余空行
   return cleaned.replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -138,15 +142,31 @@ export function extractContent(value: unknown): string {
  * 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护
  */
 export function normalizeDecision(raw: Record<string, unknown>): StockDecision {
-  const action = parseAction(raw.action ?? raw["action"]);
-  const positionPct = Number(raw.positionPct ?? raw.position_pct ?? 0);
-  const targetPrice = raw.targetPrice != null
-    ? Number(raw.targetPrice)
-    : (raw.target_price != null ? Number(raw.target_price) : null);
-  const stopLoss = raw.stopLoss != null ? Number(raw.stopLoss) : (raw.stop_loss != null ? Number(raw.stop_loss) : null);
-  const reasoning = String(raw.reasoning ?? "");
-  const riskLevel = parseRiskLevel(raw.riskLevel ?? raw.risk_level);
-  const confidence = Math.round(Math.max(0, Math.min(100, Number(raw.confidence ?? 0))));
+  // CodeNode 输出兼容：若顶层字段是 CodeNode 包装（status/result/params/node_id），
+  // 从 result 或 params 中提取
+  const source: Record<string, unknown> = (!("action" in raw) && !("confidence" in raw) && !raw.result && !raw.params)
+    ? raw
+    : (!("action" in raw) && !("confidence" in raw) && typeof raw.result === "object" && raw.result !== null)
+    ? (raw.result as Record<string, unknown>)
+    : (!("action" in raw) && !("confidence" in raw) && typeof raw.params === "object" && raw.params !== null)
+    ? (raw.params as Record<string, unknown>)
+    : raw;
+  const action = parseAction(source.action ?? source["action"]);
+  const positionPct = Number(source.positionPct ?? source.position_pct ?? 0);
+  const targetPrice = source.targetPrice != null
+    ? Number(source.targetPrice)
+    : (source.target_price != null ? Number(source.target_price) : null);
+  const stopLoss = source.stopLoss != null
+    ? Number(source.stopLoss)
+    : (source.stop_loss != null ? Number(source.stop_loss) : null);
+  const reasoning = String(source.reasoning ?? "");
+  const riskLevel = parseRiskLevel(source.riskLevel ?? source.risk_level);
+  const confidence = Math.round(Math.max(0, Math.min(100, Number(source.confidence ?? 0))));
+  const timeHorizon = String(source.timeHorizon ?? source.time_horizon ?? "") || null;
+  const expectedHoldingDays = source.expectedHoldingDays != null
+    ? Number(source.expectedHoldingDays)
+    : (source.expected_holding_days != null ? Number(source.expected_holding_days) : null);
+  const targetTimeframe = String(source.targetTimeframe ?? source.target_timeframe ?? "") || null;
   return {
     action,
     positionPct: isNaN(positionPct) ? 0 : positionPct,
@@ -155,6 +175,9 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision {
     reasoning,
     riskLevel,
     confidence,
+    timeHorizon: timeHorizon || null,
+    expectedHoldingDays: expectedHoldingDays != null && !isNaN(expectedHoldingDays) ? expectedHoldingDays : null,
+    targetTimeframe: targetTimeframe || null,
   };
 }
 
@@ -162,16 +185,109 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision {
  * 尝试从文本中解析 JSON decision（兼容 markdown 代码块包裹）。
  * 返回规范化的 StockDecision，或 null。
  */
+function findJsonCandidate(text: string): string | null {
+  const trimmed = text.trim();
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  if ((trimmed.startsWith('"{') && trimmed.endsWith('"')) || (trimmed.startsWith('"[') && trimmed.endsWith('"'))) {
+    try {
+      const unescaped = JSON.parse(trimmed);
+      if (typeof unescaped === "string") {
+        return unescaped.trim();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const firstObjectStart = trimmed.indexOf("{");
+  const firstArrayStart = trimmed.indexOf("[");
+  const openBraceOrder: Array<"{" | "["> = [];
+  if (firstObjectStart !== -1 && (firstArrayStart === -1 || firstObjectStart < firstArrayStart)) {
+    openBraceOrder.push("{");
+  }
+  if (firstArrayStart !== -1 && (firstObjectStart === -1 || firstArrayStart < firstObjectStart)) {
+    openBraceOrder.push("[");
+  }
+
+  for (const openBrace of openBraceOrder) {
+    const start = trimmed.indexOf(openBrace);
+    if (start === -1) { continue; }
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < trimmed.length; i += 1) {
+      const char = trimmed[i];
+      if (char === "\\" && !escaped) {
+        escaped = true;
+        continue;
+      }
+      if (char === '"' && !escaped) {
+        inString = !inString;
+      }
+      if (!inString) {
+        if (char === openBrace) {
+          depth += 1;
+        } else if ((openBrace === "{" && char === "}") || (openBrace === "[" && char === "]")) {
+          depth -= 1;
+          if (depth === 0) {
+            return trimmed.slice(start, i + 1).trim();
+          }
+        }
+      }
+      escaped = false;
+    }
+  }
+
+  return null;
+}
+
+export function extractDecision(value: unknown): StockDecision | null {
+  if (typeof value === "string") {
+    return tryParseDecision(value);
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const content = record.content;
+    if (typeof content === "string") {
+      const parsed = tryParseDecision(content);
+      if (parsed) {
+        return parsed;
+      }
+    }
+    if (content && typeof content === "object" && !Array.isArray(content)) {
+      return normalizeDecision(content as Record<string, unknown>);
+    }
+    // normalizeDecision 内部已处理 CodeNode 的 result/params 包装
+    if (
+      "action" in record || "confidence" in record || "positionPct" in record || "position_pct" in record
+      || "result" in record || "params" in record
+    ) {
+      return normalizeDecision(record);
+    }
+    return null;
+  }
+  return null;
+}
+
 export function tryParseDecision(text: string): StockDecision | null {
   const trimmed = text.trim();
   const candidates = [trimmed];
-  const m = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (m) { candidates.unshift(m[1].trim()); }
+  const extracted = findJsonCandidate(trimmed);
+  if (extracted && extracted !== trimmed) {
+    candidates.unshift(extracted);
+  }
   for (const candidate of candidates) {
-    if (!candidate.startsWith("{")) { continue; }
+    const candidateTrimmed = candidate.trim();
+    if (!candidateTrimmed.startsWith("{") && !candidateTrimmed.startsWith("[")) { continue; }
     try {
-      const parsed = JSON.parse(candidate);
-      if (typeof parsed === "object" && parsed !== null) { return normalizeDecision(parsed); }
+      const parsed = JSON.parse(candidateTrimmed);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return normalizeDecision(parsed as Record<string, unknown>);
+      }
     } catch { /* try next */ }
   }
   return null;

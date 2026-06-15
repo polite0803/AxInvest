@@ -18,6 +18,7 @@ use tauri::State;
 fn parse_periods(raw: Vec<String>) -> Result<Vec<Period>, String> {
     raw.into_iter()
         .map(|s| match s.as_str() {
+            "ultra_short" => Ok(Period::UltraShort),
             "short" => Ok(Period::Short),
             "mid" => Ok(Period::Mid),
             "long" => Ok(Period::Long),

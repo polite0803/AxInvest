@@ -211,6 +211,9 @@ pub struct ExecutionState {
     /// 通过 `notify_waiters()` 唤醒。
     #[serde(skip, default)]
     pub interrupt_signal: Option<std::sync::Arc<tokio::sync::Notify>>,
+    /// 语言代码，agent system_prompt 注入用，不序列化
+    #[serde(skip, default)]
+    pub language: String,
     pub execution_id: String,
     pub workflow_id: String,
     pub status: ExecutionStatus,
@@ -248,6 +251,7 @@ impl ExecutionState {
             tool_registry: None,
             partial_result_tx: None,
             interrupt_signal: None,
+            language: String::new(),
             total_time_ms: 0,
             created_at: now,
             updated_at: now,

@@ -24,7 +24,7 @@ pub const EXPERT_IDS: &[&str] = &[
     "neutral-debator",
     "research-manager",
     "trader",
-    "portfolio-manager",
+    "reflection",
     "value-investor",
     "data-quality-inspector",
     "rule-checker",

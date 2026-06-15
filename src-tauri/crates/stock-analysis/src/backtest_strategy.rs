@@ -18,7 +18,7 @@ use crate::recommender::indicators;
 use crate::recommender::types::Period;
 use axagent_astock_data::{AStockClient, KLine};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 // ── 类型 ──
@@ -150,6 +150,30 @@ fn detect_trend_long(klines: &[KLine]) -> Option<f64> {
         return None;
     }
     if last < ma60 * 0.95 {
+        return None;
+    }
+    Some(last)
+}
+
+fn detect_trend_ultra_short(klines: &[KLine]) -> Option<f64> {
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    if cs.len() < 10 {
+        return None;
+    }
+    // MA3 站上 + 今日涨幅 > 0
+    let ma3 = indicators::sma(&cs, 3)?;
+    if last < ma3 || cs[cs.len() - 1] <= cs[cs.len() - 2] {
+        return None;
+    }
+    // 前一日也站上 MA3（确认短期动量持续）
+    if cs[cs.len() - 2] < indicators::sma(&cs[..cs.len()-1], 3)? {
+        return None;
+    }
+    // 量价配合：当日成交量 > 5日均量
+    let today_vol = klines.last()?.amount;
+    let avg_vol_5 = indicators::avg_amount_n(klines, 5)?;
+    if avg_vol_5 <= 0.0 || today_vol < avg_vol_5 * 0.8 {
         return None;
     }
     Some(last)
@@ -345,6 +369,36 @@ fn detect_capital_long(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
+fn detect_value_ultra_short(klines: &[KLine]) -> Option<f64> {
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    if cs.len() < 15 { return None; }
+    // 超短线价值回归代理：RSI超卖 + 价格低于均线 + 低波幅
+    let rsi6 = indicators::rsi(klines, 6)?;
+    if rsi6 > 35.0 { return None; }  // RSI 超卖区
+    let ma5 = indicators::sma(&cs, 5)?;
+    let ma10 = indicators::sma(&cs, 10)?;
+    if last > ma5.min(ma10) * 0.998 { return None; }  // 价格低于短均
+    // 低波幅确认（不是单纯暴跌）
+    let high5 = klines.iter().rev().take(5).map(|k| k.high).fold(0.0_f64, f64::max);
+    let low5 = klines.iter().rev().take(5).map(|k| k.low).fold(f64::MAX, f64::min);
+    if high5 - low5 > low5 * 0.08 { return None; }  // 5日振幅 > 8% 则跳过（太剧烈）
+    Some(last)
+}
+
+fn detect_capital_ultra_short(klines: &[KLine]) -> Option<f64> {
+    let cs = closes(klines);
+    let last = *cs.last()?;
+    if cs.len() < 5 { return None; }
+    // 超短线资金驱动：放量 + 上涨
+    let avg_amt_5 = indicators::avg_amount_n(klines, 5)?;
+    let today_amt = klines.last()?.amount;
+    if avg_amt_5 <= 0.0 || today_amt < avg_amt_5 * 1.5 { return None; }
+    let ma3 = indicators::sma(&cs, 3)?;
+    if last < ma3 { return None; }
+    Some(last)
+}
+
 // ── 策略注册表 ──
 
 pub(crate) struct StratDef {
@@ -357,6 +411,14 @@ pub(crate) struct StratDef {
 }
 
 const STRATS: &[StratDef] = &[
+    StratDef {
+        id: "trend_ultra_short",
+        style: "trend",
+        period: "ultra_short",
+        period_enum: Period::UltraShort,
+        warmup: 5,
+        detect: detect_trend_ultra_short,
+    },
     StratDef {
         id: "trend_short",
         style: "trend",
@@ -422,6 +484,14 @@ const STRATS: &[StratDef] = &[
         warmup: 250,
         detect: detect_value_long,
     },
+    StratDef {
+        id: "value_ultra_short",
+        style: "value",
+        period: "ultra_short",
+        period_enum: Period::UltraShort,
+        warmup: 5,
+        detect: detect_value_ultra_short,
+    },
     // ── Capital（K 线代理） ──
     StratDef {
         id: "capital_short",
@@ -446,6 +516,14 @@ const STRATS: &[StratDef] = &[
         period_enum: Period::Long,
         warmup: 250,
         detect: detect_capital_long,
+    },
+    StratDef {
+        id: "capital_ultra_short",
+        style: "capital",
+        period: "ultra_short",
+        period_enum: Period::UltraShort,
+        warmup: 5,
+        detect: detect_capital_ultra_short,
     },
 ];
 
@@ -586,7 +664,13 @@ fn scan_one(
 ) -> Vec<StrategySignalResult> {
     let max_idx = klines.len().saturating_sub(holding as usize + 1);
     let mut out = Vec::new();
+    // cooldown_index: 上次信号触发的位置 + holding，此期间不产生新信号
+    // 避免滑动窗口在同一持仓期内产生多个重叠信号（高估可执行信号频率）
+    let mut cooldown_index: usize = 0;
     for i in warmup..max_idx {
+        if i <= cooldown_index {
+            continue;
+        }
         let window = &klines[..=i];
         if let Some(entry) = detect(window) {
             let exit_idx = (i + holding as usize).min(klines.len() - 1);
@@ -621,6 +705,8 @@ fn scan_one(
                 was_profitable: ret > 0.0,
                 max_drawdown_pct: max_dd * 100.0,
             });
+            // 设置冷却指数：本次信号触发+持有期内不产生新信号
+            cooldown_index = i + holding as usize;
         }
     }
     out
@@ -658,13 +744,21 @@ fn aggregate(sid: &str, style: &str, period: &str, sigs: &[StrategySignalResult]
         }
     }
 
+    // 夏普比率（已修正）：
+    //   Sharpe = (E[R] - Rf) / σ(R)
+    //   其中 E[R] = 信号平均单笔收益率
+    //         Rf  = 0 (假设无风险收益率为 0，对回测信号序列更合理)
+    //         σ   = 样本收益率标准差
+    //   注意：这是"信号级"夏普，非年化。信号周期不同时不能直接对比年化夏普。
     let sharpe = if total > 1 {
         let returns: Vec<f64> = sigs.iter().map(|s| s.return_pct / 100.0).collect();
-        let avg_r = returns.iter().sum::<f64>() / returns.len() as f64;
+        let n = returns.len() as f64;
+        let avg_r = returns.iter().sum::<f64>() / n;
         let var =
-            returns.iter().map(|r| (r - avg_r).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
+            returns.iter().map(|r| (r - avg_r).powi(2)).sum::<f64>() / (n - 1.0);
         if var > 0.0 {
-            Some((avg_r - 0.025_f64 / 252.0_f64.sqrt()) / var.sqrt())
+            let std = var.sqrt();
+            Some(avg_r / std)  // 信号级夏普，无风险利率=0
         } else {
             None
         }
@@ -710,6 +804,53 @@ fn aggregate(sid: &str, style: &str, period: &str, sigs: &[StrategySignalResult]
 }
 
 // ── 测试 ──
+
+// ── 权重自动调整 ──
+
+/// 根据正向组回测统计自动计算策略权重
+///
+/// `existing_weights` 可选：传入当前模板中已有的权重，权重为 0.0 的策略将被跳过（用户禁用保护）。
+/// 规则（基于置信度校准 + 夏普修正）：
+///   win_rate >= 55% → 1.0 + (wr-50)/100 × 0.5  （60%→1.05, 70%→1.10）
+///   win_rate 45-55% → 1.0 （维持不变）
+///   win_rate < 45%  → 1.0 - (50-wr)/100 × 0.8  （40%→0.92, 30%→0.84）
+///   额外：Shapre < 0.3 → -0.05（收益不稳降权）
+///   上下限：[0.5, 1.5]
+pub fn adjust_strategy_weights(
+    strategies: &HashMap<String, StrategyStats>,
+    existing_weights: Option<&BTreeMap<String, f64>>,
+) -> Result<BTreeMap<String, f64>, String> {
+    let mut weights: BTreeMap<String, f64> = BTreeMap::new();
+    for (sid, stats) in strategies {
+        if stats.total_signals < 5 {
+            continue; // 样本太少，不调整
+        }
+        // 用户禁用保护：权重为 0.0 的策略跳过（用户已手动禁用的不自动恢复）
+        if let Some(existing) = existing_weights {
+            if existing.get(sid) == Some(&0.0) {
+                weights.insert(sid.clone(), 0.0);
+                continue;
+            }
+        }
+        let offset = if stats.win_rate_pct >= 55.0 {
+            (stats.win_rate_pct - 50.0) / 100.0 * 0.5
+        } else if stats.win_rate_pct >= 45.0 {
+            0.0
+        } else {
+            -(50.0 - stats.win_rate_pct) / 100.0 * 0.8
+        };
+        let extra_penalty = stats
+            .sharpe_ratio
+            .map_or(0.0, |s| if s < 0.3 { -0.05 } else { 0.0 });
+        let weight = (1.0 + offset + extra_penalty).clamp(0.5, 1.5);
+        // 保留两位小数
+        weights.insert(sid.clone(), (weight * 100.0).round() / 100.0);
+    }
+    if weights.is_empty() {
+        return Err("无足够回测数据（至少需 5 个信号）".to_string());
+    }
+    Ok(weights)
+}
 
 #[cfg(test)]
 mod tests {
@@ -777,5 +918,115 @@ mod tests {
     fn aggregate_empty() {
         let s = aggregate("test", "test", "test", &[]);
         assert_eq!(s.total_signals, 0);
+    }
+
+    #[test]
+    fn adjust_weights_high_winrate() {
+        let mut strategies = HashMap::new();
+        strategies.insert(
+            "trend_short".into(),
+            StrategyStats {
+                strategy_id: "trend_short".into(),
+                style: "trend".into(),
+                period: "short".into(),
+                total_signals: 20,
+                win_count: 14,
+                loss_count: 6,
+                win_rate_pct: 70.0,
+                avg_return_pct: 3.5,
+                total_return_pct: 70.0,
+                avg_max_drawdown_pct: 5.0,
+                max_consecutive_losses: 2,
+                sharpe_ratio: Some(1.2),
+                profit_factor: Some(2.3),
+            },
+        );
+        let result = adjust_strategy_weights(&strategies, None).unwrap();
+        // wr=70% → 偏移 (70-50)/100*0.5=0.10 → 1.10；Sharpe>0.3 无惩罚
+        let w = result.get("trend_short").copied().unwrap_or(0.0);
+        assert!((w - 1.10).abs() < 0.01, "trend_short weight expected 1.10 got {w}");
+    }
+
+    #[test]
+    fn adjust_weights_low_winrate() {
+        let mut strategies = HashMap::new();
+        strategies.insert(
+            "capital_long".into(),
+            StrategyStats {
+                strategy_id: "capital_long".into(),
+                style: "capital".into(),
+                period: "long".into(),
+                total_signals: 15,
+                win_count: 5,
+                loss_count: 10,
+                win_rate_pct: 33.3,
+                avg_return_pct: -2.0,
+                total_return_pct: -30.0,
+                avg_max_drawdown_pct: 12.0,
+                max_consecutive_losses: 5,
+                sharpe_ratio: Some(0.1),
+                profit_factor: Some(0.6),
+            },
+        );
+        let result = adjust_strategy_weights(&strategies, None).unwrap();
+        // wr=33.3% → 偏移 -(50-33.3)/100*0.8=-0.134 → 0.866
+        // Sharpe<0.3 → -0.05 → 0.8167
+        let w = result.get("capital_long").copied().unwrap_or(0.0);
+        assert!((w - 0.82).abs() < 0.02, "capital_long weight expected ~0.82 got {w}");
+    }
+
+    #[test]
+    fn adjust_weights_insufficient_samples() {
+        let mut strategies = HashMap::new();
+        strategies.insert(
+            "trend_short".into(),
+            StrategyStats {
+                strategy_id: "trend_short".into(),
+                style: "trend".into(),
+                period: "short".into(),
+                total_signals: 3, // < 5，不满足最小样本
+                win_count: 3,
+                loss_count: 0,
+                win_rate_pct: 100.0,
+                avg_return_pct: 10.0,
+                total_return_pct: 30.0,
+                avg_max_drawdown_pct: 2.0,
+                max_consecutive_losses: 0,
+                sharpe_ratio: Some(3.0),
+                profit_factor: Some(999.0),
+            },
+        );
+        let result = adjust_strategy_weights(&strategies, None).unwrap();
+        // 样本不足 5 → 跳过，返回空 map
+        assert!(result.is_empty(), "应该跳过不足 5 个信号的策略");
+    }
+
+    #[test]
+    fn adjust_weights_preserves_user_disabled() {
+        let mut strategies = HashMap::new();
+        strategies.insert(
+            "value_long".into(),
+            StrategyStats {
+                strategy_id: "value_long".into(),
+                style: "value".into(),
+                period: "long".into(),
+                total_signals: 20,
+                win_count: 16,
+                loss_count: 4,
+                win_rate_pct: 80.0,
+                avg_return_pct: 5.0,
+                total_return_pct: 100.0,
+                avg_max_drawdown_pct: 4.0,
+                max_consecutive_losses: 1,
+                sharpe_ratio: Some(1.5),
+                profit_factor: Some(3.0),
+            },
+        );
+        let mut existing = BTreeMap::new();
+        existing.insert("value_long".into(), 0.0); // 用户已禁用
+        let result = adjust_strategy_weights(&strategies, Some(&existing)).unwrap();
+        // 用户禁用策略即使胜率高也应保持 0.0
+        let w = result.get("value_long").copied().unwrap_or(-1.0);
+        assert_eq!(w, 0.0, "用户禁用的策略 weight 必须保持 0.0");
     }
 }

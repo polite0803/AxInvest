@@ -6,8 +6,10 @@
  */
 
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+import { useTranslation } from "react-i18next";
 
 export function ExperimentTrail() {
+  const { t } = useTranslation();
   const experiments = useStockAnalysisStore((s) => s.experiments);
   const decision = useStockAnalysisStore((s) => s.decision);
 
@@ -15,7 +17,7 @@ export function ExperimentTrail() {
 
   const steps = [
     {
-      label: "Original analysis",
+      label: t("stockAnalysis.experimentTrail.originalAnalysis"),
       sub: decision
         ? `${decision.action} / ${decision.confidence}% / ${decision.positionPct}%`
         : "—",
@@ -23,7 +25,7 @@ export function ExperimentTrail() {
       color: "var(--color-background-secondary)",
     },
     ...experiments.map((e, i) => ({
-      label: `Experiment #${e.step}`,
+      label: t("stockAnalysis.experimentTrail.experiment", { n: e.step }),
       sub: `${e.decisionAfter.action ?? "—"} / ${e.decisionAfter.confidence ?? "—"}% / ${
         e.decisionAfter.positionPct ?? "—"
       }%`,
@@ -35,8 +37,8 @@ export function ExperimentTrail() {
         .join(", "),
     })),
     {
-      label: "Execute",
-      sub: "accept or skip",
+      label: t("stockAnalysis.experimentTrail.execute"),
+      sub: t("stockAnalysis.experimentTrail.acceptOrSkip"),
       active: false,
       color: "var(--color-border-tertiary)",
       dashed: true,
@@ -45,7 +47,7 @@ export function ExperimentTrail() {
 
   return (
     <div style={{ marginTop: 16, borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 12 }}>
-      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>Experiment trail</div>
+      <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 10 }}>{t("stockAnalysis.experimentTrail.trail")}</div>
       <div style={{ display: "flex", gap: 0, fontSize: 11 }}>
         {steps.map((step, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 0, flex: 1 }}>

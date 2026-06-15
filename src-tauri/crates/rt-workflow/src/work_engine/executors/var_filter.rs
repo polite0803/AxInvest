@@ -95,6 +95,7 @@ pub fn resolve_var_path(path: &str, variables: &HashMap<String, Value>) -> Optio
 /// 3. 直接尝试解析整个文本
 ///
 /// 如果 LLM 输出为纯文本（无 JSON 结构），返回 `None`。
+#[cfg(test)]
 pub fn extract_json_params(text: &str) -> Option<Value> {
     // 策略 1：查找 ```json ... ``` 代码块
     for marker in &["```json\n", "```json\r\n", "```\n", "```\r\n"] {

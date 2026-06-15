@@ -11,6 +11,7 @@ import { type ExperimentRecord, useStockAnalysisStore } from "@/stores/feature/s
 import { parseAction, parseRiskLevel } from "@/types/stock-analysis";
 import { Button, InputNumber, Select, Slider } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 // ── 类型定义 ──
 
@@ -76,6 +77,7 @@ function computeDecision(params: WhatIfParams): {
 // ── 组件 ──
 
 export function ExperimentSidebar() {
+  const { t } = useTranslation();
   const decision = useStockAnalysisStore((s) => s.decision);
   const pushExperiment = useStockAnalysisStore((s) => s.pushExperiment);
   const experiments = useStockAnalysisStore((s) => s.experiments);
@@ -186,11 +188,19 @@ export function ExperimentSidebar() {
   const diffItems = useMemo(() => {
     if (!originalDecision) { return []; }
     return [
-      { label: "Decision", before: originalDecision.decision, after: result.decision },
-      { label: "Confidence", before: `${originalDecision.confidence}%`, after: `${result.confidence}%` },
-      { label: "Position", before: `${originalDecision.positionPct}%`, after: `${result.positionPct}%` },
+      { label: t("stockAnalysis.experiment.decision"), before: originalDecision.decision, after: result.decision },
+      {
+        label: t("stockAnalysis.experiment.confidence"),
+        before: `${originalDecision.confidence}%`,
+        after: `${result.confidence}%`,
+      },
+      {
+        label: t("stockAnalysis.experiment.position"),
+        before: `${originalDecision.positionPct}%`,
+        after: `${result.positionPct}%`,
+      },
     ];
-  }, [originalDecision, result]);
+  }, [originalDecision, result, t]);
 
   return (
     <div
@@ -211,9 +221,9 @@ export function ExperimentSidebar() {
           fontSize: 13,
         }}
       >
-        Experiment
+        {t("stockAnalysis.experiment.title")}
         <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.7, marginTop: 2 }}>
-          Modify params &middot; preview changes &middot; accept
+          {t("stockAnalysis.experiment.subtitle")}
         </div>
       </div>
 
@@ -221,42 +231,44 @@ export function ExperimentSidebar() {
       <div style={{ padding: "10px 12px" }}>
         {/* What-If params */}
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 11 }}>What-If parameters</div>
+          <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 11 }}>
+            {t("stockAnalysis.experiment.whatIfParameters")}
+          </div>
           <ParamSlider
-            label="consensusScore"
+            label={t("stockAnalysis.experiment.consensusScore")}
             value={params.consensusScore}
             min={0}
             max={100}
             onChange={(v) => setParams((p) => ({ ...p, consensusScore: v }))}
           />
           <ParamSlider
-            label="totalScore"
+            label={t("stockAnalysis.experiment.totalScore")}
             value={params.totalScore}
             min={0}
             max={100}
             onChange={(v) => setParams((p) => ({ ...p, totalScore: v }))}
           />
           <ParamSlider
-            label="dqiScore"
+            label={t("stockAnalysis.experiment.dqiScore")}
             value={params.dqiScore}
             min={0}
             max={100}
             onChange={(v) => setParams((p) => ({ ...p, dqiScore: v }))}
           />
           <ParamSelect
-            label="overallRisk"
+            label={t("stockAnalysis.whatIfBacktest.overallRiskLabel")}
             value={params.overallRisk}
             options={["低", "中", "高", "极高"]}
             onChange={(v) => setParams((p) => ({ ...p, overallRisk: v }))}
           />
           <ParamSelect
-            label="catalystLevel"
+            label={t("stockAnalysis.whatIfBacktest.catalystLevelLabel")}
             value={params.catalystLevel}
             options={["无催化剂", "L1普通消息", "L2业绩拐点级", "L3估值体系级"]}
             onChange={(v) => setParams((p) => ({ ...p, catalystLevel: v }))}
           />
           <ParamSelect
-            label="institutionalTrace"
+            label={t("stockAnalysis.whatIfBacktest.institutionalTraceLabel")}
             value={params.institutionalTrace}
             options={["无异常", "疑似建仓", "有建仓痕迹", "资金出逃"]}
             onChange={(v) => setParams((p) => ({ ...p, institutionalTrace: v }))}
@@ -269,7 +281,7 @@ export function ExperimentSidebar() {
             onClick={() => setShowConfig(!showConfig)}
             style={{ cursor: "pointer", fontWeight: 500, fontSize: 11, marginBottom: showConfig ? 6 : 0 }}
           >
-            {showConfig ? "▾" : "▸"} Config overrides
+            {showConfig ? "▾" : "▸"} {t("stockAnalysis.experiment.configOverrides")}
           </div>
           {showConfig && (
             <div>
@@ -297,7 +309,7 @@ export function ExperimentSidebar() {
               />
               <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end" }}>
                 <Button size="small" loading={toolReplayLoading} onClick={handleApplyConfig}>
-                  Apply
+                  {t("stockAnalysis.experiment.apply")}
                 </Button>
               </div>
             </div>
@@ -306,11 +318,15 @@ export function ExperimentSidebar() {
 
         {/* Live preview */}
         <div style={{ borderTop: "0.5px solid var(--color-border-tertiary)", paddingTop: 8, marginBottom: 10 }}>
-          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 4 }}>Preview</div>
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 4 }}>
+            {t("stockAnalysis.experiment.preview")}
+          </div>
           <div style={{ border: "0.5px solid var(--color-border-success)", borderRadius: 6, padding: "8px 10px" }}>
             <div style={{ display: "flex", gap: 16 }}>
               <div>
-                <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>Original</div>
+                <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>
+                  {t("stockAnalysis.experiment.original")}
+                </div>
                 {diffItems.map((item) => (
                   <div key={item.label} style={{ fontSize: 11, marginTop: 2, color: "var(--color-text-secondary)" }}>
                     {item.before}
@@ -319,7 +335,7 @@ export function ExperimentSidebar() {
               </div>
               <div>
                 <div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>
-                  {hasChanges ? "Modified" : "Same"}
+                  {hasChanges ? t("stockAnalysis.experiment.modified") : t("stockAnalysis.experiment.same")}
                 </div>
                 <div
                   style={{
@@ -332,7 +348,9 @@ export function ExperimentSidebar() {
                   {result.decision === "buy" ? "买入" : result.decision === "sell" ? "卖出" : "持有"}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>
-                  conf {result.confidence}% &middot; pos {result.positionPct}%
+                  {t("stockAnalysis.experiment.conf")} {result.confidence}% &middot; {t("stockAnalysis.experiment.pos")}
+                  {" "}
+                  {result.positionPct}%
                 </div>
               </div>
             </div>
@@ -342,10 +360,10 @@ export function ExperimentSidebar() {
         {/* Actions */}
         <div style={{ display: "flex", gap: 6 }}>
           <Button size="small" type="primary" disabled={!hasChanges} onClick={handleAccept} style={{ flex: 1 }}>
-            Accept
+            {t("stockAnalysis.experiment.accept")}
           </Button>
           <Button size="small" onClick={handleReset} style={{ flex: 1 }}>
-            Reset
+            {t("stockAnalysis.experiment.reset")}
           </Button>
         </div>
       </div>
@@ -379,7 +397,7 @@ function ParamSlider({ label, value, min, max, step, onChange }: {
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <Slider
-          className="flex-1 !mb-0"
+          className="flex-1 mb-0!"
           min={min}
           max={max}
           step={step ?? 1}
@@ -387,7 +405,7 @@ function ParamSlider({ label, value, min, max, step, onChange }: {
           onChange={onChange}
         />
         <InputNumber
-          className="!w-14 !text-[11px]"
+          className="w-14! text-[11px]!"
           size="small"
           min={min}
           max={max}

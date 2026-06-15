@@ -130,10 +130,13 @@ function extractTags(parsed: ParsedReport): string[] {
   if (parsed.dragon_tiger_signal) { tags.push(parsed.dragon_tiger_signal); }
   if (parsed.moat_rating) { tags.push(`护城河:${parsed.moat_rating}`); }
   if (typeof parsed.bull_score === "number" && parsed.bull_score > 0) {
-    tags.push(`看多:${parsed.bull_score}`);
+    // 归一化到百分制：十分制(≤10) ×10，百分制(>10) 不处理
+    const normalized = parsed.bull_score <= 10 ? parsed.bull_score * 10 : parsed.bull_score;
+    tags.push(`看多:${Math.round(normalized)}`);
   }
   if (typeof parsed.bear_score === "number" && parsed.bear_score > 0) {
-    tags.push(`看空:${parsed.bear_score}`);
+    const normalized = parsed.bear_score <= 10 ? parsed.bear_score * 10 : parsed.bear_score;
+    tags.push(`看空:${Math.round(normalized)}`);
   }
   return tags;
 }
@@ -191,7 +194,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
   const themeMode = useSettingsStore((s) => s.settings.theme_mode);
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  const name = ANALYST_NAMES[expertId] || expertId;
+  const name = t(`stockAnalysis.workflow.analyst.${expertId}`, ANALYST_NAMES[expertId] ?? expertId);
   const cleanedReport = cleanToolCallTags(report);
   const beautified = tryBeautifyJson(cleanedReport);
   const parsed = tryParse(beautified);
@@ -379,11 +382,19 @@ export function AnalystReportCard({ expertId, report }: Props) {
       }
     }
 
-    // 提取 bull_score / bear_score
+    // 提取 bull_score / bear_score（归一化到百分制）
     const bullMatch = text.match(/"bull_score"\s*:\s*(\d+)/);
     const bearMatch = text.match(/"bear_score"\s*:\s*(\d+)/);
-    if (bullMatch) { tags.push(`看多:${bullMatch[1]}`); }
-    if (bearMatch) { tags.push(`看空:${bearMatch[1]}`); }
+    if (bullMatch) {
+      const raw = parseInt(bullMatch[1], 10);
+      const normalized = raw <= 10 ? raw * 10 : raw;
+      tags.push(`看多:${Math.round(normalized)}`);
+    }
+    if (bearMatch) {
+      const raw = parseInt(bearMatch[1], 10);
+      const normalized = raw <= 10 ? raw * 10 : raw;
+      tags.push(`看空:${Math.round(normalized)}`);
+    }
 
     // 提取 stance / action
     const stanceMatch = text.match(/"stance"\s*:\s*"([^"]*)"/);
@@ -409,24 +420,27 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
     // 纯文本 fallback：内容不像 JSON 但有实质文字，提取前 200 字作为摘要
     if (!summary && points.length === 0 && tags.length === 0) {
-      const isJsonLike = text.trim().startsWith("{") || text.trim().startsWith("[");
-      if (!isJsonLike && text.length > 30) {
-        // 去掉常见噪音前缀
-        const cleaned = text
-          .replace(/由于上游工具调用返回了.*?的错误[，。]/g, "")
-          .replace(/根据系统指令.*?[，。]/g, "")
-          .replace(/我的职责是.*?[，。]/g, "")
-          .replace(/在上游数据缺失.*?[，。]/g, "")
-          .replace(/我无法获取.*?[，。]/g, "")
-          .replace(/我必须诚实反映.*?[，。]/g, "")
-          .replace(/以下是基于当前可用上下文.*?[，。]/g, "")
-          .replace(/请注意，由于缺乏.*?[，。]/g, "")
-          .replace(/^\s*[-*]\s+/gm, "") // markdown list
-          .replace(/\s+/g, " ")
-          .trim();
-        if (cleaned.length > 30) {
-          summary = cleaned.slice(0, 200) + (cleaned.length > 200 ? "..." : "");
-        }
+      const cleaned = text
+        .replace(/由于上游工具调用返回了.*?的错误[，。]/g, "")
+        .replace(/根据系统指令.*?[，。]/g, "")
+        .replace(/我的职责是.*?[，。]/g, "")
+        .replace(/在上游数据缺失.*?[，。]/g, "")
+        .replace(/我无法获取.*?[，。]/g, "")
+        .replace(/我必须诚实反映.*?[，。]/g, "")
+        .replace(/以下是基于当前可用上下文.*?[，。]/g, "")
+        .replace(/请注意，由于缺乏.*?[，。]/g, "")
+        .replace(/我需要调用.*?[，。]/g, "")
+        .replace(/让我先调用.*?[，。]/g, "")
+        .replace(/首先我需要.*?[。]/g, "")
+        .replace(/用户要求.*?进行.*?[。]/g, "")
+        .replace(/用户需要.*?[。]/g, "")
+        .replace(/^\s*[-*]\s+/gm, "") // markdown list
+        .replace(/\s+/g, " ")
+        .trim();
+      if (cleaned.length > 30) {
+        summary = cleaned.slice(0, 200) + (cleaned.length > 200 ? "..." : "");
+      } else if (!text.trim().startsWith("{") && !text.trim().startsWith("[") && text.length > 30) {
+        summary = text.slice(0, 200) + "...";
       }
     }
 
@@ -469,7 +483,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
         )}
         {fuzzy.empty && displayContent && (
           <div className="text-xs" style={{ color: "var(--muted)" }}>
-            分析完成，但未返回结构化内容
+            数据不足
           </div>
         )}
         {!displayContent && (

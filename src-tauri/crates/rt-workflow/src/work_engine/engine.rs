@@ -118,6 +118,8 @@ pub struct RunOptions {
     pub parent_execution_id: Option<String>,
     pub execution_id: Option<String>,
     pub parent_cancel_token: Option<CancellationToken>,
+    /// 语言代码（如 "zh-CN"），注入到 agent system_prompt
+    pub language: String,
 }
 
 /// 步骤进度事件
@@ -177,6 +179,7 @@ impl Default for RunOptions {
             parent_execution_id: None,
             execution_id: None,
             parent_cancel_token: None,
+            language: "zh-CN".to_string(),
         }
     }
 }
@@ -1641,6 +1644,7 @@ impl WorkEngine {
                     workflow_id.to_string(),
                     serde_json::json!({}),
                 );
+                exec_ctx.language = options.language.clone();
                 // 关键修复：合并工作流全局变量与上游节点结果。历史 bug：
                 // 直接 `exec_ctx.variables = deps_results` 会丢失 stock_code 等
                 // 全局变量 → tool 节点 input_mapping 解析 stock_code 返回 None
@@ -1874,6 +1878,21 @@ impl WorkEngine {
                         )
                         .await
                         .ok();
+
+                        // 将节点输出同步存入 state.variables，确保下游节点（如 Storage）
+                        // 即使通过 state.variables 路径也能读到该输出
+                        {
+                            let mut execs = self.executions.lock().await;
+                            if let Some(st) = execs.get_mut(&execution_id) {
+                                st.variables
+                                    .insert(nr.node_id.clone(), output.output.clone());
+                                if let Some(ref var) = out_var
+                                    && var != &nr.node_id
+                                {
+                                    st.variables.insert(var.clone(), output.output.clone());
+                                }
+                            }
+                        }
 
                         let node_name = Some(nr.node.base_title().to_string());
                         let node_type_str = node_type_name(&nr.node).to_string();
@@ -2413,6 +2432,7 @@ impl WorkEngine {
         let execution_id = preset_execution_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let mut state =
             ExecutionState::new(execution_id.clone(), workflow_id.to_string(), input.clone());
+        state.language = "zh-CN".to_string();
         state.business_rule_engine = self.business_rule_engine();
         state.tool_registry = self.tool_registry();
         let input_params = serde_json::to_string(&input).ok();

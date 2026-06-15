@@ -8026,11 +8026,12 @@
         "holding": "Holding",
         "confidence": "Confidence"
       },
+      "periodUltraShort": "Short",
       "periodShort": "Short",
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
-      "generatedAt": "Generated at {time}",
+      "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
       "empty": "No recommendation data",
@@ -8060,10 +8061,11 @@
       "backtestWinrate": "Процент выигрышей",
       "bannerDegraded": "Стили данных {{styles}} были ухудшены (as-of {{date}}). Относитесь к их достоверности как к более низкой, чем у не ухудшенных стилей."
     },
+    "periodUltraShort": "Краткосрочно",
     "periodShort": "Краткосрочно",
     "periodMid": "Среднесрочно",
     "periodLong": "Долгосрочно",
-    "generatedAt": "Сгенерировано: {time}",
+    "generatedAt": "Сгенерировано: {{time}}",
     "bannerVendorDisabled": "Некоторые стили отключены: {styles}",
     "openSettings": "Открыть настройки",
     "empty": {

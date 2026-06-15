@@ -14,6 +14,11 @@ pub struct TrendStrategy {
 }
 
 impl TrendStrategy {
+    pub const fn ultra_short() -> Self {
+        Self {
+            period: Period::UltraShort,
+        }
+    }
     pub const fn short() -> Self {
         Self {
             period: Period::Short,
@@ -38,7 +43,13 @@ impl TrendStrategy {
         sector: Option<String>,
         vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
-        let kline_limit = read_f64(vars, "trend_kline_limit", 250.0) as u32;
+        // 按 period 差异化 K 线拉取量：超短只需少量，长线需要大量
+        let kline_limit = match self.period {
+            Period::UltraShort => read_f64(vars, "trend_ultra_short_kline_limit", 20.0) as u32,
+            Period::Short => read_f64(vars, "trend_short_kline_limit", 60.0) as u32,
+            Period::Mid => read_f64(vars, "trend_mid_kline_limit", 150.0) as u32,
+            Period::Long => read_f64(vars, "trend_long_kline_limit", 300.0) as u32,
+        };
         let klines = client.get_klines(code, "daily", kline_limit).await.ok()?;
         let min_kline_len = read_f64(vars, "trend_min_kline_len", 30.0) as usize;
         if klines.len() < min_kline_len {
@@ -59,6 +70,36 @@ impl TrendStrategy {
 
         let (entry_low, entry_high, stop_loss, target_price, base_position, reasons) =
             match self.period {
+                Period::UltraShort => {
+                    let ma_period_1 = read_f64(vars, "trend_ma_ultra_short_1", 5.0) as usize;
+                    let ma_period_2 = read_f64(vars, "trend_ma_ultra_short_2", 10.0) as usize;
+                    let ma5 = indicators::sma(&cs, ma_period_1)?;
+                    let ma10 = indicators::sma(&cs, ma_period_2)?;
+                    if !(ma5 > ma10) {
+                        return None;
+                    }
+                    let high_period = read_f64(vars, "trend_high_ultra_short_period", 5.0) as usize;
+                    let high_threshold = read_f64(vars, "trend_high_ultra_short_threshold", 0.995);
+                    let high_5 = indicators::highest(&klines, high_period)?;
+                    if last < high_5 * high_threshold {
+                        return None;
+                    }
+                    let amount_ratio_min = read_f64(vars, "trend_amount_ratio_min", 0.8);
+                    if amount_ratio < amount_ratio_min {
+                        return None;
+                    }
+                    let reasons = vec![
+                        format!("MA{} {:.2} > MA{} {:.2}", ma_period_1, ma5, ma_period_2, ma10),
+                        format!("突破 {} 日高 {:.2}", high_period, high_5),
+                        format!("量比 {:.2}", amount_ratio),
+                    ];
+                    let el = read_f64(vars, "trend_ultra_short_entry_low", 0.995);
+                    let eh = read_f64(vars, "trend_ultra_short_entry_high", 1.005);
+                    let sl = read_f64(vars, "trend_ultra_short_stop", 0.98);
+                    let tg = read_f64(vars, "trend_ultra_short_target", 1.05);
+                    let bp = read_f64(vars, "trend_ultra_short_base_pos", 3.0);
+                    (ma5 * el, ma5 * eh, ma5 * sl, ma5 * tg, bp, reasons)
+                },
                 Period::Short => {
                     let ma_period_1 = read_f64(vars, "trend_ma_short_1", 5.0) as usize;
                     let ma_period_2 = read_f64(vars, "trend_ma_short_2", 10.0) as usize;
@@ -199,6 +240,7 @@ impl TrendStrategy {
 impl RecommendStrategy for TrendStrategy {
     fn id(&self) -> &'static str {
         match self.period {
+            Period::UltraShort => "trend_ultra_short",
             Period::Short => "trend_short",
             Period::Mid => "trend_mid",
             Period::Long => "trend_long",

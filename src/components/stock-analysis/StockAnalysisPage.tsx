@@ -2,6 +2,7 @@ import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettin
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { invoke } from "@/lib/invoke";
+import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
@@ -277,18 +278,18 @@ export function StockAnalysisPage() {
           >
             <StockSearchBar />
 
-            <div className="sa-body-inner">
-              {/* Decision hero (full width, at top) */}
-              {status === "completed" && (
-                <div style={{ margin: "0 16px 12px 16px" }}>
-                  <DecisionBanner />
-                  {/* Analyst consensus summary */}
-                  <AnalystConsensusBar />
-                  {/* Experiment trail */}
-                  <ExperimentTrail />
-                </div>
-              )}
+            {/* Decision hero (full width, at top) — outside flex row to avoid layout shift */}
+            {status === "completed" && (
+              <div style={{ margin: "0 16px 12px 16px" }}>
+                <DecisionBanner />
+                {/* Analyst consensus summary */}
+                <AnalystConsensusBar />
+                {/* Experiment trail */}
+                <ExperimentTrail />
+              </div>
+            )}
 
+            <div className="sa-body-inner">
               <div className="sa-main">
                 {settingsOpen && !isMobile
                   ? (
@@ -443,7 +444,7 @@ export function StockAnalysisPage() {
                         color: "var(--color-text-secondary)",
                       }}
                     >
-                      Execute trade &rarr;
+                      {t("stockAnalysis.executeTrade")} →
                     </div>
                   </>
                 )}
@@ -530,21 +531,20 @@ export function StockAnalysisPage() {
 
 /** 分析师共识条 — 在 Decision Hero 下方显示 10 位分析师的 bull/bear/neutral 投票分布 */
 function AnalystConsensusBar() {
+  const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const reports = Object.values(analystReports).filter(Boolean) as string[];
   const total = reports.length;
   if (total === 0) { return null; }
 
-  // Simple heuristic: count bullish/bearish keywords in each report text
+  // Use classifySentiment (same logic as AnalystReportGrid) to ensure consistency
   let bull = 0;
   let bear = 0;
   let neutral = 0;
   for (const text of reports) {
-    const lower = text.toLowerCase();
-    const b = (lower.match(/看多|bullish|买入|positive|利好/g) || []).length;
-    const be = (lower.match(/看空|bearish|卖出|negative|利空/g) || []).length;
-    if (b > be * 1.5) { bull++; }
-    else if (be > b * 1.5) { bear++; }
+    const s = classifySentiment(text);
+    if (s === "bullish") { bull++; }
+    else if (s === "bearish") { bear++; }
     else { neutral++; }
   }
 
@@ -562,21 +562,21 @@ function AnalystConsensusBar() {
       }}
     >
       <span style={{ fontWeight: 500, color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
-        Analyst consensus
+        {t("stockAnalysis.analystConsensus")}
       </span>
       {bull > 0 && (
         <span style={{ color: "var(--sa-red)" }}>
-          {bull} bullish
+          {bull} {t("stockAnalysis.bullish")}
         </span>
       )}
       {bear > 0 && (
         <span style={{ color: "var(--sa-green)" }}>
-          {bear} bearish
+          {bear} {t("stockAnalysis.bearish")}
         </span>
       )}
       {neutral > 0 && (
         <span style={{ color: "var(--color-text-tertiary)" }}>
-          {neutral} neutral
+          {neutral} {t("stockAnalysis.neutral")}
         </span>
       )}
     </div>

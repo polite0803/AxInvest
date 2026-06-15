@@ -6,7 +6,7 @@ import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { LatestAnalysisSummary, StockConsensus } from "@/types/stock-analysis";
 import { parseAction } from "@/types/stock-analysis";
 import type { BacktestComparisonResponse } from "@/types/stock-analysis";
-import { Alert, Button, Card, Collapse, Empty, Spin, Tabs, Tag, Tooltip } from "antd";
+import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
@@ -24,7 +24,7 @@ interface RecommendationPanelProps {
 const noop = () => {};
 
 type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist";
-type PeriodKey = "short" | "mid" | "long";
+type PeriodKey = "ultra_short" | "short" | "mid" | "long";
 
 interface RecoPick {
   stockCode: string;
@@ -304,6 +304,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   }, [data]);
 
   const periodItems = [
+    { key: "ultra_short", label: t("stockAnalysis.recommendation.periodUltraShort") },
     { key: "short", label: t("stockAnalysis.recommendation.periodShort") },
     { key: "mid", label: t("stockAnalysis.recommendation.periodMid") },
     { key: "long", label: t("stockAnalysis.recommendation.periodLong") },
@@ -331,6 +332,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           <Button size="small" loading={loading} onClick={() => load()}>
             {t("stockAnalysis.settings.panels.refresh")}
           </Button>
+          <AutoCalibrateButton t={t} />
         </div>
       }
     >
@@ -758,5 +760,142 @@ function PickRow(
         {content}
       </List.Item>
     </Tooltip>
+  );
+}
+
+/** 自动校准按钮：预览 → 确认 → 应用 */
+function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [diff, setDiff] = useState<
+    Array<{
+      strategyId: string;
+      oldWeight: number;
+      newWeight: number;
+      delta: number;
+    }>
+  >([]);
+  const [checked, setChecked] = useState<string[]>([]);
+  const [applying, setApplying] = useState(false);
+
+  const handlePreview = async () => {
+    if (loading) { return; }
+    setLoading(true);
+    try {
+      const result = await invoke<{
+        totalStrategies: number;
+        changed: number;
+        weights: Array<{
+          strategyId: string;
+          oldWeight: number;
+          newWeight: number;
+          delta: number;
+        }>;
+      }>("preview_adjust_reco_weights", {});
+      setDiff(result.weights);
+      setChecked(result.weights.map((w) => w.strategyId));
+      setModalOpen(true);
+    } catch (e) {
+      message.error(`校准预览失败: ${e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApply = async () => {
+    const selected = diff.filter((d) => checked.includes(d.strategyId));
+    if (selected.length === 0) { return; }
+    setApplying(true);
+    try {
+      const result = await invoke<{ applied: number }>("apply_reco_weights", {
+        weights: selected.map((d) => ({
+          strategyId: d.strategyId,
+          weight: d.newWeight,
+        })),
+      });
+      message.success(`已应用 ${result.applied} 个策略权重调整`);
+      setModalOpen(false);
+    } catch (e) {
+      message.error(`应用失败: ${e}`);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <>
+      <Button size="small" loading={loading} onClick={handlePreview} style={{ marginLeft: 4 }}>
+        ⚡ {t("stockAnalysis.recommendation.calibrate") ?? "权重校准"}
+      </Button>
+      <Modal
+        title="策略权重校准预览"
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setModalOpen(false)}>取消</Button>,
+          <Button
+            key="apply"
+            type="primary"
+            loading={applying}
+            disabled={checked.length === 0}
+            onClick={handleApply}
+          >
+            应用选中项 ({checked.length})
+          </Button>,
+        ]}
+        width={600}
+      >
+        {diff.length === 0
+          ? <p style={{ color: "var(--muted)" }}>当前无建议调整</p>
+          : (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--color-border-tertiary)" }}>
+                  <th style={{ padding: 4, textAlign: "left" }}>策略</th>
+                  <th style={{ padding: 4, textAlign: "right" }}>当前权重</th>
+                  <th style={{ padding: 4, textAlign: "right" }}>建议权重</th>
+                  <th style={{ padding: 4, textAlign: "right" }}>变动</th>
+                  <th style={{ padding: 4 }}>应用</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diff.map((d) => (
+                  <tr key={d.strategyId} style={{ borderBottom: "1px solid var(--color-border-tertiary)" }}>
+                    <td style={{ padding: 4 }}>{d.strategyId}</td>
+                    <td style={{ padding: 4, textAlign: "right" }}>{d.oldWeight.toFixed(2)}</td>
+                    <td style={{ padding: 4, textAlign: "right", fontWeight: 600 }}>
+                      {d.newWeight.toFixed(2)}
+                    </td>
+                    <td
+                      style={{
+                        padding: 4,
+                        textAlign: "right",
+                        color: d.delta > 0 ? "var(--sa-green)" : d.delta < 0 ? "var(--sa-red)" : undefined,
+                      }}
+                    >
+                      {d.delta > 0 ? "+" : ""}
+                      {d.delta.toFixed(2)}
+                    </td>
+                    <td style={{ padding: 4, textAlign: "center" }}>
+                      <Checkbox
+                        checked={checked.includes(d.strategyId)}
+                        onChange={(e) => {
+                          setChecked(
+                            e.target.checked
+                              ? [...checked, d.strategyId]
+                              : checked.filter((id) =>
+                                id !== d.strategyId
+                              ),
+                          );
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </Modal>
+    </>
   );
 }

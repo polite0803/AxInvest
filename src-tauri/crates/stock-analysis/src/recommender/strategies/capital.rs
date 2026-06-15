@@ -16,6 +16,11 @@ pub struct CapitalStrategy {
 }
 
 impl CapitalStrategy {
+    pub const fn ultra_short() -> Self {
+        Self {
+            period: Period::UltraShort,
+        }
+    }
     pub const fn short() -> Self {
         Self {
             period: Period::Short,
@@ -66,6 +71,25 @@ impl CapitalStrategy {
             .unwrap_or(0.0);
 
         let (pass, reasons) = match self.period {
+            Period::UltraShort => {
+                // 超短线只看龙虎榜 — 游资隔夜行为
+                let dt_net_min = read_f64(vars, "cap_ultra_short_dt_net_min", 100.0);
+                if dt_net_wan.abs() < dt_net_min {
+                    return None;
+                }
+                let turnover_min = read_f64(vars, "cap_ultra_short_turnover_min", 5.0);
+                if quote.turnover_rate < turnover_min {
+                    return None;
+                }
+                let mut r = Vec::new();
+                if dt_net_wan > 0.0 {
+                    r.push(format!("龙虎榜净买入 {:.0} 万", dt_net_wan));
+                } else {
+                    r.push(format!("龙虎榜净卖出 {:.0} 万（反弹博弈）", dt_net_wan.abs()));
+                }
+                r.push(format!("换手 {:.2}%", quote.turnover_rate));
+                (true, r)
+            },
             Period::Short => {
                 let main_inflow_min = read_f64(vars, "cap_short_main_inflow_min", 200.0);
                 if main_inflow_wan < main_inflow_min {
@@ -121,6 +145,14 @@ impl CapitalStrategy {
         }
 
         let (entry_low, entry_high, stop_loss, target, base_position) = match self.period {
+            Period::UltraShort => {
+                let el = read_f64(vars, "cap_ultra_short_entry_low", 0.998);
+                let eh = read_f64(vars, "cap_ultra_short_entry_high", 1.005);
+                let sl = read_f64(vars, "cap_ultra_short_stop", 0.97);
+                let tg = read_f64(vars, "cap_ultra_short_target", 1.05);
+                let bp = read_f64(vars, "cap_ultra_short_base_pos", 3.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
             Period::Short => {
                 let el = read_f64(vars, "cap_short_entry_low", 0.97);
                 let eh = read_f64(vars, "cap_short_entry_high", 1.03);
@@ -157,6 +189,7 @@ impl CapitalStrategy {
         let position = calc_position(base_position, conf, self.period);
 
         let risk = match self.period {
+            Period::UltraShort => vec!["次日冲高回落 / T+1 无法止损".to_string()],
             Period::Short => vec!["次日冲高回落".to_string()],
             Period::Mid => vec!["资金切换 / 主力出货".to_string()],
             Period::Long => vec!["机构持仓变动".to_string()],
@@ -188,6 +221,7 @@ impl CapitalStrategy {
 impl RecommendStrategy for CapitalStrategy {
     fn id(&self) -> &'static str {
         match self.period {
+            Period::UltraShort => "capital_ultra_short",
             Period::Short => "capital_short",
             Period::Mid => "capital_mid",
             Period::Long => "capital_long",
@@ -224,6 +258,7 @@ mod tests {
 
     #[test]
     fn capital_strategy_ids() {
+        assert_eq!(CapitalStrategy::ultra_short().id(), "capital_ultra_short");
         assert_eq!(CapitalStrategy::short().id(), "capital_short");
         assert_eq!(CapitalStrategy::mid().id(), "capital_mid");
         assert_eq!(CapitalStrategy::long().id(), "capital_long");

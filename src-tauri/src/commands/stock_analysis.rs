@@ -708,6 +708,8 @@ pub async fn backtest_analysis(
             &decision_action,
             decision_confidence,
             holding_days,
+            None, // time_horizon (old analyses won't have it)
+            None, // expected_holding_days
         )
         .await
     })
@@ -757,10 +759,13 @@ pub async fn backtest_all_history(
                     .clone()
                     .unwrap_or_else(|| "持有".to_string()),
                 decision_confidence: confidence,
+                time_horizon: a.decision_time_horizon.clone(),
+                expected_holding_days: a.decision_expected_holding_days.clone(),
             }
         })
         .collect();
 
+    // 默认持有期参数保留向后兼容，backtest_history 内部会优先使用每条记录的个性化持有期
     let results =
         BacktestEngine::backtest_history(&state.astock_client, historical, holding_days).await?;
     let stats = BacktestEngine::compute_stats(&results);
@@ -769,13 +774,17 @@ pub async fn backtest_all_history(
 
 // ── Replay Sweep (spec §5 Step 8, §9.3) ──
 
-/// 单条 sweep 项：(代码, as-of 截止日, 假设决策, 置信度)
+/// 单条 sweep 项：(代码, as-of 截止日, 假设决策, 置信度, 时间维度, 期望持有天数)
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct ReplaySweepItem {
     pub stock_code: String,
     pub as_of_date: String,
     pub decision_action: String,
     pub decision_confidence: f64,
+    #[serde(default)]
+    pub time_horizon: Option<String>,
+    #[serde(default)]
+    pub expected_holding_days: Option<u32>,
 }
 
 /// Sweep 中失败的样本 + 失败原因
@@ -816,16 +825,38 @@ pub async fn run_replay_backtest(
     let mut invalid_details: Vec<ReplaySweepInvalid> = Vec::new();
 
     for item in items {
-        match BacktestEngine::backtest_decision(
-            &state.astock_client,
-            &item.stock_code,
-            &item.as_of_date,
-            &item.decision_action,
-            item.decision_confidence,
-            holding_days,
-        )
-        .await
-        {
+        // 设置 as_of 上下文，保证 backtest_decision 内部 get_klines 获取的是截止日的 K 线
+        let ctx = match AsOfContext::parse_optional(Some(item.as_of_date.as_str())) {
+            Ok(c) => c,
+            Err(e) => {
+                invalid_details.push(ReplaySweepInvalid {
+                    stock_code: item.stock_code.clone(),
+                    as_of_date: item.as_of_date.clone(),
+                    reason: format!("as_of 解析失败: {e}"),
+                });
+                continue;
+            },
+        };
+        let effective_holding = item.expected_holding_days.unwrap_or(holding_days);
+        let result = as_of::with_optional_asof(
+            Some(ctx),
+            async {
+                BacktestEngine::backtest_decision(
+                        &state.astock_client,
+                        &item.stock_code,
+                        &item.as_of_date,
+                        &item.decision_action,
+                        item.decision_confidence,
+                        effective_holding,
+                        item.time_horizon.clone(),
+                        item.expected_holding_days,
+                    )
+                    .await
+                },
+            )
+            .await;
+
+        match result {
             Ok(r) => results.push(r),
             Err(e) => invalid_details.push(ReplaySweepInvalid {
                 stock_code: item.stock_code,
@@ -1378,6 +1409,181 @@ async fn backtest_reco_strategies_inner(
         &negative_stocks,
     )
     .await
+}
+
+/// 根据回测结果自动调整荐股策略权重
+/// 预览荐股策略权重调整（只读，不写入）
+///
+/// 返回新旧权重对比，供用户确认后再调 apply。
+#[tauri::command]
+pub async fn preview_adjust_reco_weights(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use axagent_stock_analysis::backtest_strategy::adjust_strategy_weights;
+    use axagent_core::entity::workflow_template;
+    use std::collections::BTreeMap;
+
+    let db = state.harness.db();
+
+    // 1. 读取模板已有权重
+    let tmpl = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(db)
+        .await
+        .map_err(|e| format!("读取模板失败: {e}"))?
+        .ok_or_else(|| "stock-analysis 模板不存在".to_string())?;
+
+    let existing: BTreeMap<String, f64> = tmpl
+        .variables
+        .as_deref()
+        .and_then(|v| serde_json::from_str::<Vec<serde_json::Value>>(v).ok())
+        .and_then(|vars| {
+            // find 闭包不能用 ?，改写成显式检查
+            let mut found = None;
+            for v in &vars {
+                if let Some(name) = v.get("name").and_then(|n| n.as_str()) {
+                    if name == "reco_strategy_weights" {
+                        if let Some(val) = v.get("value").and_then(|val| val.as_object().cloned()) {
+                            found = Some(val);
+                        }
+                        break;
+                    }
+                }
+            }
+            found
+        })
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_f64().map(|f| (k.clone(), f)))
+                .collect::<BTreeMap<String, f64>>()
+        })
+        .unwrap_or_default();
+
+    // 2. 跑回测
+    let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
+    let bt_result = axagent_astock_data::as_of::with_optional_asof(ctx, async {
+        backtest_reco_strategies_inner(&state).await
+    })
+    .await?;
+
+    // 3. 计算新权重
+    let new_weights = adjust_strategy_weights(&bt_result.positive.strategies, Some(&existing))?;
+
+    // 4. 构建 diff
+    let mut diff: Vec<serde_json::Value> = Vec::new();
+    for (sid, new_w) in &new_weights {
+        let old_w = existing.get(sid).copied().unwrap_or(1.0);
+        if (old_w - new_w).abs() > 0.001 {
+            diff.push(serde_json::json!({
+                "strategyId": sid,
+                "oldWeight": (old_w * 100.0).round() / 100.0,
+                "newWeight": (new_w * 100.0).round() / 100.0,
+                "delta": ((new_w - old_w) * 100.0).round() / 100.0,
+            }));
+        }
+    }
+
+    Ok(serde_json::json!({
+        "totalStrategies": bt_result.positive.strategies.len(),
+        "changed": diff.len(),
+        "weights": diff,
+    }))
+}
+
+/// 应用荐股策略权重调整（用户确认后）
+///
+/// 如果传了 `weights` 则只应用其中列出的策略；不传则全部应用（向后兼容）。
+#[tauri::command]
+pub async fn apply_reco_weights(
+    state: State<'_, AppState>,
+    weights: Option<Vec<serde_json::Value>>,
+) -> Result<serde_json::Value, String> {
+    use axagent_core::entity::workflow_template;
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{EntityTrait, QueryFilter};
+    use std::collections::BTreeMap;
+
+    let db = state.harness.db();
+
+    // 1. 读取模板
+    let tmpl = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(db)
+        .await
+        .map_err(|e| format!("读取模板失败: {e}"))?
+        .ok_or_else(|| "stock-analysis 模板不存在".to_string())?;
+
+    let mut vars: Vec<serde_json::Value> = tmpl
+        .variables
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+
+    // 2. 构建要写入的 weight map
+    let weight_map: BTreeMap<String, f64> = match weights {
+        Some(list) => list
+            .into_iter()
+            .filter_map(|v| {
+                let sid = v.get("strategyId")?.as_str()?.to_string();
+                let w = v.get("weight")?.as_f64()?;
+                Some((sid, w))
+            })
+            .collect(),
+        None => {
+            // 没有指定 weights → 跑一次完整回测再全部应用（向后兼容）
+            return Err("请先调用 preview_adjust_reco_weights 获取建议权重再确认应用".to_string());
+        },
+    };
+
+    if weight_map.is_empty() {
+        return Err("未选中任何权重调整项".to_string());
+    }
+
+    // 3. 更新或创建 reco_strategy_weights
+    let mut found = false;
+    let weights_value = serde_json::to_value(&weight_map).map_err(|e| e.to_string())?;
+    for v in &mut vars {
+        if v.get("name").and_then(|n| n.as_str()) == Some("reco_strategy_weights") {
+            if let Some(obj) = v.as_object_mut() {
+                if let Some(existing) = obj.get("value").and_then(|e| e.as_object()) {
+                    let mut merged = existing.clone();
+                    for (k, w) in &weight_map {
+                        merged.insert(k.clone(), serde_json::json!(w));
+                    }
+                    obj.insert("value".into(), serde_json::json!(merged));
+                } else {
+                    obj.insert("value".into(), weights_value.clone());
+                }
+                found = true;
+            }
+            break;
+        }
+    }
+    if !found {
+        vars.push(serde_json::json!({
+            "name": "reco_strategy_weights",
+            "var_type": "object",
+            "value": weights_value,
+            "description": "荐股策略权重（用户确认后应用）",
+            "is_secret": false,
+        }));
+    }
+
+    // 4. 写回 DB
+    let vars_str = serde_json::to_string(&vars).map_err(|e| e.to_string())?;
+    workflow_template::Entity::update_many()
+        .col_expr(
+            workflow_template::Column::Variables,
+            Expr::value(vars_str),
+        )
+        .filter(workflow_template::Column::Id.eq("stock-analysis"))
+        .exec(db)
+        .await
+        .map_err(|e| format!("写入模板变量失败: {e}"))?;
+
+    Ok(serde_json::json!({
+        "applied": weight_map.len(),
+        "weights": weight_map,
+    }))
 }
 
 // ── RecoSignalTimeline ──
@@ -2042,6 +2248,35 @@ pub async fn delete_stock_cron(state: State<'_, AppState>, id: String) -> Result
 /// 检查指定数据源的连接可用性
 #[tauri::command]
 pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
+    // 对需要 token/密钥的 vendor，先从数据库加载凭据到内存
+    if vendor == "xueqiu" || vendor == "iwencai" {
+        let template = axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")
+            .one(state.harness.db())
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(t) = template {
+            let vars = extract_template_vars(&t);
+            for (name, value) in &vars {
+                if name == "vendor_xueqiu_token" {
+                    if let serde_json::Value::String(token) = value {
+                        if !token.is_empty() {
+                            if let Some(ref xq) = state.astock_client.xq_token {
+                                *xq.write().await = token.clone();
+                            }
+                        }
+                    }
+                }
+                if name == "vendor_iwencai_key" {
+                    if let serde_json::Value::String(key) = value {
+                        if !key.is_empty() {
+                            *state.astock_client.iwencai_key.write().await = key.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     state
         .astock_client
         .check_vendor_health(&vendor)
@@ -2092,6 +2327,19 @@ pub async fn recommend_stocks(
             .to_string();
         let created_at = generated_at.clone();
 
+        // 构建策略权重快照（用于回溯某次荐股时的权重配置）
+        let strategy_weights_json: Option<String> = {
+            let vars_clone: Vec<(String, serde_json::Value)> = vars.clone();
+            vars_clone.iter().find(|(k, _)| k == "reco_strategy_weights")
+                .and_then(|(_, v)| {
+                    if v.is_object() {
+                        Some(v.to_string())
+                    } else {
+                        None
+                    }
+                })
+        };
+
         // 构建候选池快照（用于回测的负向样本）
         use axagent_stock_analysis::recommender::pool::build_seed_pool;
         let seed = build_seed_pool(&state.astock_client).await;
@@ -2116,6 +2364,7 @@ pub async fn recommend_stocks(
                     confidence: sea_orm::Set(pick.confidence as i32),
                     synthetic: sea_orm::Set(if pick.synthetic { 1 } else { 0 }),
                     seed_pool_json: sea_orm::Set(Some(seed_pool_json.clone())),
+                    strategy_weights_json: sea_orm::Set(strategy_weights_json.clone()),
                     created_at: sea_orm::Set(created_at.clone()),
                 };
                 let _ = am.insert(state.harness.db()).await;
@@ -2143,6 +2392,8 @@ pub struct LatestAnalysisSummary {
     pub confidence: Option<i32>, // 加权置信度 0-100，从 decision_json 提取
     pub status: String,          // completed / running / failed
     pub outcome: Option<String>, // win / loss / pending
+    pub decision_time_horizon: Option<String>,
+    pub decision_expected_holding_days: Option<i32>,
 }
 
 /// 查询个股最近一次已完成分析的决策摘要
@@ -2197,6 +2448,8 @@ pub async fn get_latest_analysis_for_stock(
         confidence,
         status: model.status,
         outcome: model.outcome,
+        decision_time_horizon: model.decision_time_horizon,
+        decision_expected_holding_days: model.decision_expected_holding_days.map(|d| d as i32),
     }))
 }
 
@@ -2210,6 +2463,7 @@ pub async fn get_latest_analyses_for_stocks(
     stock_codes: Vec<String>,
     as_of_date: Option<String>,
 ) -> Result<std::collections::HashMap<String, Option<LatestAnalysisSummary>>, String> {
+    use sea_orm::sea_query::Expr;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
     let db = state.harness.db();
@@ -2253,6 +2507,8 @@ pub async fn get_latest_analyses_for_stocks(
                 confidence,
                 status: model.status,
                 outcome: model.outcome,
+                decision_time_horizon: model.decision_time_horizon,
+                decision_expected_holding_days: model.decision_expected_holding_days.map(|d| d as i32),
             }
         });
 
@@ -2478,12 +2734,165 @@ pub async fn list_reflections(
                 "whatWentWrong": r.what_went_wrong,
                 "missedSignals": r.missed_signals,
                 "fixForFuture": r.fix_for_future,
+                "decisionJson": r.decision_json,
                 "status": r.status,
                 "createdAt": r.created_at,
             })
         })
         .collect();
     Ok(result)
+}
+
+/// 手动触发反思复盘工作流（在前端复盘 tab 点击"开始反思"时调用）
+#[tauri::command]
+pub async fn run_reflection_now(
+    state: State<'_, AppState>,
+    stock_code: String,
+    stock_name: String,
+    as_of_date: String,
+    actual_outcome: String,
+    reflection_depth: Option<String>,
+) -> Result<String, String> {
+    let db = state.harness.db();
+    let client = &state.astock_client;
+    let engine = &state.work_engine;
+    let vs = &state.vector_store;
+    let mk = state.harness.master_key();
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
+
+    crate::commands::stock_workflow::run_reflection_workflow(
+        db,
+        client,
+        engine,
+        vs,
+        mk,
+        &stock_code,
+        &stock_name,
+        "", // original_analysis_id — 手动触发时不需要
+        &actual_outcome,
+        &as_of_date,
+        &today,
+        0u8, // min_confidence_threshold — 手动触发时全量
+        &depth,
+    )
+    .await
+}
+
+/// 获取某只股票最近未处理的参数调整建议
+#[tauri::command]
+pub async fn list_param_suggestions(
+    state: State<'_, AppState>,
+    stock_code: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    use axagent_core::entity::stock_reflections;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let db = state.harness.db();
+    let mut query = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.eq("completed"))
+        .order_by(stock_reflections::Column::CreatedAt, sea_orm::Order::Desc);
+    if let Some(ref code) = stock_code {
+        query = query.filter(stock_reflections::Column::StockCode.eq(code));
+    }
+    let items = query
+        .all(db)
+        .await
+        .map_err(|e| format!("查询参数建议失败: {e}"))?;
+
+    let result: Vec<serde_json::Value> = items
+        .into_iter()
+        .filter_map(|r| {
+            let dj = r.decision_json.as_deref()?;
+            let parsed: serde_json::Value = serde_json::from_str(dj).ok()?;
+            let suggestions = parsed.get("params_suggestion")?;
+            if suggestions.as_array()?.is_empty() {
+                return None;
+            }
+            Some(serde_json::json!({
+                "reflectionId": r.id,
+                "stockCode": r.stock_code,
+                "stockName": r.stock_name,
+                "asOfDate": r.as_of_date,
+                "createdAt": r.created_at,
+                "suggestions": suggestions,
+            }))
+        })
+        .take(20)
+        .collect();
+    Ok(result)
+}
+
+/// 应用用户选中的参数调整建议到 stock-analysis 模板变量
+#[tauri::command]
+pub async fn apply_param_suggestions(
+    state: State<'_, AppState>,
+    updates: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    use axagent_core::entity::workflow_template;
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{EntityTrait, QueryFilter};
+
+    let db = state.harness.db();
+
+    // 1. 读取 stock-analysis 模板的 variables
+    let tmpl = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(db)
+        .await
+        .map_err(|e| format!("读取模板失败: {e}"))?
+        .ok_or_else(|| "stock-analysis 模板不存在".to_string())?;
+
+    let mut vars: Vec<serde_json::Value> = tmpl
+        .variables
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or_default();
+
+    // 2. 逐个更新
+    for update in &updates {
+        let param_name = update.get("param").and_then(|v| v.as_str()).ok_or("缺少 param")?;
+        let new_value = update.get("value").ok_or("缺少 value")?;
+
+        // 找到匹配的变量并更新 value
+        let mut found = false;
+        for v in &mut vars {
+            if v.get("name").and_then(|n| n.as_str()) == Some(param_name) {
+                if let Some(val_field) = v.as_object_mut() {
+                    // 只允许修改 number 类型的变量，跳过 secret
+                    if val_field.get("var_type").and_then(|t| t.as_str()) == Some("number")
+                        && val_field.get("is_secret") != Some(&serde_json::Value::Bool(true))
+                    {
+                        val_field.insert("value".into(), new_value.clone());
+                        found = true;
+                    }
+                }
+                break;
+            }
+        }
+        if !found {
+            tracing::warn!("[param_suggestions] 参数 {param_name} 不存在或不可修改，跳过");
+        }
+    }
+
+    // 3. 持久化
+    let vars_json = serde_json::to_string(&vars).map_err(|e| format!("序列化失败: {e}"))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    workflow_template::Entity::update_many()
+        .col_expr(
+            workflow_template::Column::Variables,
+            Expr::value(vars_json),
+        )
+        .col_expr(
+            workflow_template::Column::UpdatedAt,
+            Expr::value(now),
+        )
+        .filter(workflow_template::Column::Id.eq("stock-analysis"))
+        .exec(db)
+        .await
+        .map_err(|e| format!("更新模板变量失败: {e}"))?;
+
+    tracing::info!("[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板", updates.len());
+    Ok(())
 }
 
 // ── R1 复盘→进化：EvolutionDriftPanel 命令 ──

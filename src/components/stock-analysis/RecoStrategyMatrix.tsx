@@ -41,7 +41,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<BacktestComparisonResponse>("get_reco_strategies", { group });
+      return invoke<BacktestComparisonResponse>("backtest_reco_strategies", { group });
     })
       .then((data) => {
         if (!cancelled) { setInternalData(data ?? null); }

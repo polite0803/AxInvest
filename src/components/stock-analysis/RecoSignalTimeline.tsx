@@ -27,7 +27,7 @@ export function RecoSignalTimeline({ strategyId }: RecoSignalTimelineProps) {
     Promise.resolve().then(() => {
       if (cancelled) { return; }
       setLoading(true);
-      return invoke<StrategySignalResult[]>("get_reco_signals", { strategyId });
+      return invoke<StrategySignalResult[]>("get_reco_signal_history", { strategyId });
     })
       .then((data) => {
         if (!cancelled) { setSignals(data ?? []); }

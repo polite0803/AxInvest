@@ -22,6 +22,7 @@ const ANALYST_NODE_IDS = [
   "a-lockup",
   "a-research",
   "a-sector",
+  "a-catalyst",
 ];
 // 最大辩论轮数（bull/bear 配对数），与 workflow template 中的 maxDebateRounds 同步
 const TOTAL_DEBATE_ROUNDS = 3;
@@ -38,6 +39,7 @@ export function AnalysisProgress() {
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const progressMessage = useStockAnalysisStore((s) => s.progressMessage);
   const progressPct = useStockAnalysisStore((s) => s.progressPct);
+  const dataWarnings = useStockAnalysisStore((s) => s.dataWarnings);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
 
   // Hooks 必须在 early return 之前 — 保持顺序稳定
@@ -107,6 +109,21 @@ export function AnalysisProgress() {
         <Tag color="orange" style={{ marginBottom: 8 }}>
           ⚠️ {t("stockAnalysis.offlineMode")}
         </Tag>
+      )}
+
+      {/* 数据源降级警告 */}
+      {dataWarnings.length > 0 && (
+        <div style={{ marginBottom: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+          {dataWarnings.map((w, i) => (
+            <Tag
+              key={i}
+              color="orange"
+              style={{ fontSize: 11, whiteSpace: "normal", height: "auto", padding: "2px 6px" }}
+            >
+              {w}
+            </Tag>
+          ))}
+        </div>
       )}
       <Steps
         size="small"

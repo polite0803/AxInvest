@@ -28,6 +28,11 @@ impl ValueStrategy {
             period: Period::Long,
         }
     }
+    pub const fn ultra_short() -> Self {
+        Self {
+            period: Period::UltraShort,
+        }
+    }
 
     async fn scan_one(
         &self,
@@ -46,6 +51,34 @@ impl ValueStrategy {
         }
 
         let (pre_filter_ok, mut reasons) = match self.period {
+            Period::UltraShort => {
+                let pe_max = read_f64(vars, "val_ultra_short_pe_max", 60.0);
+                if pe > 0.0 && pe > pe_max {
+                    return None;
+                }
+                let kline_limit = read_f64(vars, "val_ultra_short_kline_limit", 10.0) as u32;
+                let klines = client.get_klines(code, "daily", kline_limit).await.ok()?;
+                let min_kline_len = read_f64(vars, "val_ultra_short_min_kline_len", 5.0) as usize;
+                if klines.len() < min_kline_len {
+                    return None;
+                }
+                let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
+                let ma_period = read_f64(vars, "val_ultra_short_ma_period", 10.0) as usize;
+                let ma10 = crate::recommender::indicators::sma(&cs, ma_period)?;
+                let ma_mult = read_f64(vars, "val_ultra_short_ma_mult", 1.005);
+                if price > ma10 * ma_mult {
+                    return None;
+                }
+                let mut r = Vec::new();
+                if pe > 0.0 {
+                    r.push(format!("PE {:.1} 严重压缩", pe));
+                }
+                if pb > 0.0 {
+                    r.push(format!("PB {:.2}", pb));
+                }
+                r.push(format!("10日均线下方 {:.2}", ma10));
+                (true, r)
+            },
             Period::Short => {
                 let pe_max = read_f64(vars, "val_short_pe_max", 50.0);
                 if pe > 0.0 && pe > pe_max {
@@ -117,6 +150,14 @@ impl ValueStrategy {
         }
 
         let (entry_low, entry_high, stop_loss, target, base_position) = match self.period {
+            Period::UltraShort => {
+                let el = read_f64(vars, "val_ultra_short_entry_low", 0.998);
+                let eh = read_f64(vars, "val_ultra_short_entry_high", 1.005);
+                let sl = read_f64(vars, "val_ultra_short_stop", 0.97);
+                let tg = read_f64(vars, "val_ultra_short_target", 1.03);
+                let bp = read_f64(vars, "val_ultra_short_base_pos", 3.0);
+                (price * el, price * eh, price * sl, price * tg, bp)
+            },
             Period::Short => {
                 let el = read_f64(vars, "val_short_entry_low", 0.98);
                 let eh = read_f64(vars, "val_short_entry_high", 1.02);
@@ -170,6 +211,12 @@ impl ValueStrategy {
         );
         let position = calc_position(base_position, conf, self.period);
 
+        let _risk = if matches!(self.period, Period::UltraShort) {
+            "超短线估值博弈，次日即需监控"
+        } else {
+            "行业基本面恶化"
+        };
+
         Some(RecoPick {
             stock_code: code.into(),
             stock_name: name.into(),
@@ -185,7 +232,7 @@ impl ValueStrategy {
             holding_days: self.period.default_holding_days(),
             confidence: conf,
             reasons,
-            risk_notes: vec!["行业基本面恶化".to_string()],
+            risk_notes: vec![_risk.to_string()],
             secondary_styles: vec![],
             synthetic: false,
         })
@@ -196,6 +243,7 @@ impl ValueStrategy {
 impl RecommendStrategy for ValueStrategy {
     fn id(&self) -> &'static str {
         match self.period {
+            Period::UltraShort => "value_ultra_short",
             Period::Short => "value_short",
             Period::Mid => "value_mid",
             Period::Long => "value_long",
@@ -232,6 +280,7 @@ mod tests {
 
     #[test]
     fn value_strategy_ids() {
+        assert_eq!(ValueStrategy::ultra_short().id(), "value_ultra_short");
         assert_eq!(ValueStrategy::short().id(), "value_short");
         assert_eq!(ValueStrategy::mid().id(), "value_mid");
         assert_eq!(ValueStrategy::long().id(), "value_long");

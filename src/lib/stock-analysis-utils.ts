@@ -378,23 +378,90 @@ export interface StockConsensus {
   updatedAt: number;
 }
 
+/** 分析师按 ID 后缀的领域权重：value=价值/长线, technical=技术/短线, sentiment=情绪, macro=宏观 */
+const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
+  // 长线决策：价值投资者和分析师权重最高，技术面被削弱
+  long: {
+    "fundamental": 1.5,
+    "a-fundamentals": 1.5,
+    "value-investor": 2.0,
+    "a-macro": 1.3,
+    "macro": 1.3,
+    "a-sector": 1.2,
+    "research-mgr": 1.5,
+    "a-news": 0.7,
+    "sentiment": 0.7,
+    "a-sentiment": 0.7,
+    "a-hot-money": 0.5,
+    "capital": 0.5,
+    "a-technical": 0.6,
+    "a-market": 0.6,
+    default: 1.0,
+  },
+  // 短线决策：技术面、资金面、情绪权重最高
+  short: {
+    "a-market": 1.5,
+    "a-technical": 1.5,
+    "a-hot-money": 1.5,
+    "capital": 1.5,
+    "a-sentiment": 1.3,
+    "sentiment": 1.3,
+    "a-news": 1.2,
+    "value-investor": 0.5,
+    "a-fundamentals": 0.6,
+    "fundamental": 0.6,
+    "a-macro": 0.7,
+    default: 1.0,
+  },
+  // 超短线：资金面、情绪权重最高，基本面几乎不考虑
+  ultra_short: {
+    "a-hot-money": 2.0,
+    "capital": 2.0,
+    "a-sentiment": 1.5,
+    "sentiment": 1.5,
+    "a-news": 1.5,
+    "a-market": 1.3,
+    "value-investor": 0.3,
+    "a-fundamentals": 0.3,
+    "fundamental": 0.3,
+    "a-macro": 0.3,
+    "research-mgr": 0.5,
+    default: 1.0,
+  },
+};
+
+/** 根据分析师 ID 获取时间维度权重 */
+function getAnalystWeight(analystId: string, timeHorizon?: string | null): number {
+  const weights = ANALYST_TIME_HORIZON_WEIGHT[timeHorizon || "mid"] || ANALYST_TIME_HORIZON_WEIGHT.mid;
+  // 精确匹配
+  if (weights[analystId] != null) { return weights[analystId]; }
+  // 后缀模糊匹配
+  for (const [suffix, w] of Object.entries(weights)) {
+    if (suffix === "default") { continue; }
+    if (analystId.includes(suffix)) { return w; }
+  }
+  return weights.default ?? 1.0;
+}
+
 /**
  * 聚合分析师报告/投票，推最终共识。
- * 计分规则：bullish=+1, bearish=-1, neutral=0；
- * 总分 > N/3 且不为 0 → 看多；< -N/3 → 看空；其余 → 分歧或中性。
+ * 支持 timeHorizon 参数：不同时间维度下分析师权重不同
+ * （长线重基本面、短线重技术面动量、超短线重资金流）。
  */
 export function computeStockConsensus(
   reports: Record<string, string>,
   updatedAt?: number,
+  timeHorizon?: string | null,
 ): StockConsensus {
   let bullish = 0;
   let bearish = 0;
   let neutral = 0;
-  for (const text of Object.values(reports)) {
+  for (const [analystId, text] of Object.entries(reports)) {
     const s = classifySentiment(text);
-    if (s === "bullish") { bullish++; }
-    else if (s === "bearish") { bearish++; }
-    else { neutral++; }
+    const w = getAnalystWeight(analystId, timeHorizon);
+    if (s === "bullish") { bullish += w; }
+    else if (s === "bearish") { bearish += w; }
+    else { neutral += w; }
   }
   const total = bullish + bearish + neutral;
   let consensus: Consensus;
@@ -402,13 +469,21 @@ export function computeStockConsensus(
     consensus = "neutral";
   } else {
     const net = bullish - bearish;
-    const threshold = Math.ceil(total / 3);
+    // 加权后阈值：加权 net > 加权 total × 0.3 → bullish（等效 N/3）
+    const threshold = total * 0.3;
     if (net > threshold) { consensus = "bullish"; }
     else if (net < -threshold) { consensus = "bearish"; }
     else if (bullish > 0 && bearish > 0) { consensus = "divided"; }
     else { consensus = "neutral"; }
   }
-  return { consensus, bullish, bearish, neutral, total, updatedAt: updatedAt ?? Date.now() };
+  return {
+    consensus,
+    bullish: Math.round(bullish * 10) / 10,
+    bearish: Math.round(bearish * 10) / 10,
+    neutral: Math.round(neutral * 10) / 10,
+    total: Math.round(total * 10) / 10,
+    updatedAt: updatedAt ?? Date.now(),
+  };
 }
 
 // ── 分析师名称映射 ──
@@ -416,12 +491,21 @@ export function computeStockConsensus(
 export const ANALYST_NAMES: Record<string, string> = {
   "market-analyst": "技术分析师",
   "sentiment-analyst": "情绪分析师",
+  "sentiment": "情绪分析师",
   "news-analyst": "消息面分析师",
+  "news": "消息面分析师",
   "fundamentals-analyst": "基本面分析师",
+  "fundamentals": "基本面分析师",
   "policy-analyst": "政策分析师",
+  "policy": "政策分析师",
   "hot-money-tracker": "资金面分析师",
+  "hot-money": "资金面分析师",
   "lockup-watcher": "解禁观察员",
+  "lockup": "解禁观察员",
   "research-analyst": "券商研报分析师",
+  "research": "券商研报分析师",
   "sector-analyst": "行业分析师",
+  "sector": "行业分析师",
+  "catalyst": "催化剂与叙事分析师",
   "investment-plan": "投资规划",
 };

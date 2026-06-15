@@ -69,10 +69,6 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     ),
     ("trader", include_str!("../../agency_experts/stock-analysis/trader.md")),
     (
-        "portfolio-manager",
-        include_str!("../../agency_experts/stock-analysis/portfolio-manager.md"),
-    ),
-    (
         "value-investor",
         include_str!("../../agency_experts/stock-analysis/custom/value-investor.md"),
     ),
@@ -91,6 +87,10 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     (
         "debate-convergence",
         include_str!("../../agency_experts/stock-analysis/debate-convergence.md"),
+    ),
+    (
+        "reflection",
+        include_str!("../../agency_experts/stock-analysis/reflection.md"),
     ),
 ];
 
@@ -113,12 +113,12 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("neutral-debator", "risk-evaluator"),
     ("research-manager", "decision-maker"),
     ("trader", "trader"),
-    ("portfolio-manager", "decision-maker"),
     ("value-investor", "stock-analyst"),
     ("data-quality-inspector", "stock-analyst"),
     ("rule-checker", "risk-evaluator"),
     ("catalyst-analyst", "stock-analyst"),
     ("debate-convergence", "debater"),
+    ("reflection", "decision-maker"),
 ];
 
 struct StockRoleDef {
@@ -284,16 +284,6 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ),
     ("trader", &["get_stock_quote", "compute_scoring", "search_stock"]),
     (
-        "portfolio-manager",
-        &[
-            "compute_scoring",
-            "compute_valuation",
-            "compute_portfolio_risk",
-            "get_index_quotes",
-            "search_stock",
-        ],
-    ),
-    (
         "value-investor",
         &[
             "get_stock_financials",
@@ -448,11 +438,14 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // v30→v31: 覆盖用户本地的 v30 脏数据，写入含正确 subGraph 的新数据
-    const TEMPLATE_VERSION: i32 = 32;
+    // stock-analysis 模板版本管理从 v1 开始。
+    // 升级时递增 version、写历史快照到 workflow_template_versions 表、
+    // 保留用户自定义变量值（不覆盖已修改的参数）。
+    // 版本号注释应写明每次变更的实质内容，便于追溯。
+    const TEMPLATE_VERSION: i32 = 1;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
-    let mut old_variables = String::new();
+    let mut old_variables: Option<String> = None;
 
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
         .one(db)
@@ -470,11 +463,40 @@ async fn seed_stock_analysis_workflow_template(
             "[stock_analysis_setup] 更新股票分析工作流模板 v{} → v{TEMPLATE_VERSION}",
             existing.version
         );
-        old_variables = existing.variables.clone().unwrap_or_default();
-        workflow_template::Entity::delete_by_id(TEMPLATE_ID)
-            .exec(db)
+        // 写版本快照（复用 update_workflow_template 的 snapshot 机制）
+        let ver_id = format!("{}_v{}", TEMPLATE_ID, existing.version);
+        if axagent_core::entity::workflow_template_version::Entity::find_by_id(&ver_id)
+            .one(db)
             .await
-            .map_err(|e| format!("删除旧模板失败: {e}"))?;
+            .map_err(|e| format!("查重失败: {e}"))?
+            .is_none()
+        {
+            use sea_orm::ActiveModelTrait;
+            let snapshot = axagent_core::entity::workflow_template_version::ActiveModel {
+                id: Set(ver_id),
+                template_id: Set(TEMPLATE_ID.to_string()),
+                name: Set(existing.name.clone()),
+                description: Set(existing.description.clone()),
+                icon: Set(existing.icon.clone()),
+                tags: Set(existing.tags.clone()),
+                version: Set(existing.version),
+                is_preset: Set(existing.is_preset),
+                is_editable: Set(existing.is_editable),
+                is_public: Set(existing.is_public),
+                trigger_config: Set(existing.trigger_config.clone()),
+                nodes: Set(existing.nodes.clone()),
+                edges: Set(existing.edges.clone()),
+                input_schema: Set(existing.input_schema.clone()),
+                output_schema: Set(existing.output_schema.clone()),
+                variables: Set(existing.variables.clone()),
+                error_config: Set(existing.error_config.clone()),
+                created_at: Set(chrono::Utc::now().timestamp_millis()),
+            };
+            snapshot.insert(db).await.map_err(|e| format!("写入版本快照失败: {e}"))?;
+            tracing::info!("[stock_analysis_setup] 旧版本快照已保存: {ver_id}");
+        }
+        old_variables = existing.variables.clone();
+        // 用 UPDATE 替代 DELETE，保留用户自定义变量
     }
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -1143,7 +1165,10 @@ async fn seed_stock_analysis_workflow_template(
         // 修复: t-sentiment-data 原调用 get_hot_stocks（热门股票列表，非个股新闻），
         // 导致情绪面分析师拿不到个股新闻舆情数据。改为 get_stock_news。
         ("t-sentiment-data", "获取新闻+热门", "get_stock_news", "stock_code"),
-        ("t-news-data", "获取新闻+公告", "get_announcements", "stock_code"),
+        // 修复: t-news-data 原调用 get_announcements（公告），导致消息面分析师
+        // 拿不到个股新闻数据。改为 get_stock_news 与 a-news 的 data_sources 匹配。
+        // 公告数据已由 t-catalyst-data 负责获取。
+        ("t-news-data", "获取新闻+公告", "get_stock_news", "stock_code"),
         // 修复 P1: 基本面分析师前置数据改用 get_stock_financials（财报）而非
         // get_consensus_eps（一致预期），让 a-fundamentals 启动时就能拿到
         // 营收/利润/资产负债等核心财务数据。
@@ -1247,6 +1272,10 @@ async fn seed_stock_analysis_workflow_template(
             a.config.exposed_tools = vec![]; // 空 = 暴露全部 tools，允许 Agent 在 ToolNode 数据不足时自行补充调用
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+            // 环 A: 注入历史反思教训，让分析师看到该股之前的错因和改进建议
+            a.config.input_mapping = std::collections::HashMap::from([
+                ("stock_lessons".into(), "stock_lessons".into()),
+            ]);
         }
         nodes.push(an);
     }
@@ -1305,14 +1334,13 @@ async fn seed_stock_analysis_workflow_template(
     // 用户在「股票分析设置 → 参数 → 工作流 → 多空辩论轮数」中调整的 `debate_rounds`
     // 会在旧模板升级时被 merge_variable_values 保留到 old_variables 里；这里
     // 优先读旧值，确保重建后的 DAG 与用户当前意图一致；缺失/越界时回退到 3。
-    let debate_max_rounds: usize = if old_variables.is_empty() {
-        3
-    } else {
-        serde_json::from_str::<Vec<serde_json::Value>>(&old_variables)
-            .ok()
-            .and_then(|arr| {
-                arr.into_iter().find_map(|v| {
-                    let name = v.get("name")?.as_str()?;
+    let debate_max_rounds: usize = match old_variables.as_deref() {
+        Some(s) if !s.is_empty() => {
+            serde_json::from_str::<Vec<serde_json::Value>>(s)
+                .ok()
+                .and_then(|arr| {
+                    arr.into_iter().find_map(|v| {
+                        let name = v.get("name")?.as_str()?;
                     if name != "debate_rounds" {
                         return None;
                     }
@@ -1321,6 +1349,8 @@ async fn seed_stock_analysis_workflow_template(
             })
             .map(|n| n.clamp(1, 10))
             .unwrap_or(3)
+        },
+        _ => 3,
     };
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1376,13 +1406,11 @@ async fn seed_stock_analysis_workflow_template(
                 .flat_map(|r| vec![format!("bull-r{}", r + 1), format!("bear-r{}", r + 1)])
                 .collect(),
             max_rounds: debate_max_rounds as u32,
-            convergence_prompt: Some(
-                include_str!("../../agency_experts/stock-analysis/debate-convergence.md").into(),
-            ),
-            convergence_model: Some("auto".into()),
-            convergence_model_role: Some("decision-maker".into()),
+            convergence_prompt: None,
+            convergence_model: None,
+            convergence_model_role: None,
             topic_var: "trigger.output".into(),
-            output_var: "debate-result".into(),
+            output_var: String::new(),
             sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
         },
     }));
@@ -1473,6 +1501,8 @@ async fn seed_stock_analysis_workflow_template(
                 ctx.push(aid.to_string());
             }
             a.config.context_sources = ctx;
+            // 注入分析师 params 作为结构化输入（resolve_var_path 支持点号路径）
+            a.config.input_mapping = build_analyst_input_mapping(&a_ids);
         }
         nodes.push(bull_an);
 
@@ -1516,6 +1546,8 @@ async fn seed_stock_analysis_workflow_template(
                 ctx.push(aid.to_string());
             }
             a.config.context_sources = ctx;
+            // 注入分析师 params 作为结构化输入
+            a.config.input_mapping = build_analyst_input_mapping(&a_ids);
         }
         nodes.push(bear_an);
 
@@ -1547,17 +1579,17 @@ async fn seed_stock_analysis_workflow_template(
             1420.0,
         );
         if let WorkflowNode::Agent(ref mut a) = dc {
-            a.config.context_sources = vec![
-                "bull-r1".into(),
-                "bull-r2".into(),
-                "bull-r3".into(),
-                "bear-r1".into(),
-                "bear-r2".into(),
-                "bear-r3".into(),
-            ];
+            // 动态构建 context_sources：根据实际辩论轮数引用所有辩手输出
+            let mut ctx: Vec<String> = Vec::new();
+            for r in 1..=debate_max_rounds {
+                ctx.push(format!("bull-r{r}"));
+                ctx.push(format!("bear-r{r}"));
+            }
+            a.config.context_sources = ctx;
             a.config.model_role = Some("debater".into());
             a.config.max_tool_rounds = Some(1);
             a.config.output_mode = OutputMode::Json;
+            a.config.input_mapping = build_analyst_input_mapping(&a_ids);
         }
         nodes.push(dc);
         edges.push(edge("e-bear-r3-debate-convergence", &last_debate_node, "debate-convergence"));
@@ -1579,6 +1611,7 @@ async fn seed_stock_analysis_workflow_template(
                 "a-sector".into(),
                 // 改为辩论最后一轮空方的输出（真辩论结论），而非 DebateNode 容器
                 last_debate_node.clone(),
+                "debate-convergence".into(),
             ];
             a.config.model_role = Some("stock-analyst".into());
             a.config.max_tool_rounds = Some(2);
@@ -1595,6 +1628,10 @@ async fn seed_stock_analysis_workflow_template(
             a.config.exposed_tools = tool_names.iter().map(|&tn| tn.to_string()).collect();
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+            // 环 A: 注入历史反思教训
+            a.config.input_mapping = std::collections::HashMap::from([
+                ("stock_lessons".into(), "stock_lessons".into()),
+            ]);
         }
         nodes.push(vi);
         edges.push(edge("e-debate-value-investor", &last_debate_node, vi_id));
@@ -1744,9 +1781,16 @@ async fn seed_stock_analysis_workflow_template(
                 "a-catalyst".into(),
                 format!("bull-r{debate_max_rounds}"),
                 format!("bear-r{debate_max_rounds}"),
+                "debate-convergence".into(),
                 "t-scoring".into(),
                 "t-valuation".into(),
             ];
+            a.config.input_mapping = {
+                let mut m = build_analyst_input_mapping(&a_ids);
+                // 注入辩论收敛的 consensus_score 供 Kelly 公式使用
+                m.insert("consensus_score".to_string(), "debate-convergence.params.consensus_score".to_string());
+                m
+            };
         }
         nodes.push(an);
         // p-risk-assess 容器 → 子节点依赖边：防止子节点被独立调度
@@ -1801,7 +1845,7 @@ async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 
     // ── P3 (real-nodes): raw-data 聚合节点 ──
-    // 把 12 个 t-* tool 节点的输出聚合成单个 raw 对象，供 portfolio-mgr 决策时
+    // 把 13 个 t-* / algo 工具节点的输出聚合成单个 raw 对象，供 portfolio-mgr 决策时
     // 通过 context_sources 读取 "raw-data-aggregated" 变量。
     //
     // F-5 修复: 显式追加 e-raw-data-portfolio-mgr 边。
@@ -1820,7 +1864,7 @@ async fn seed_stock_analysis_workflow_template(
         base: WorkflowNodeBase {
             id: "raw-data".into(),
             title: "原始数据聚合".into(),
-            description: Some("聚合 12 个 t-* 工具节点的原始输出".into()),
+            description: Some("聚合 13 个工具节点的原始输出（10 个数据源 + 3 个算法）".into()),
             position: Position {
                 x: 840.0,
                 y: 2700.0,
@@ -1842,9 +1886,9 @@ async fn seed_stock_analysis_workflow_template(
             sub_graph: None,
         },
     }));
-    // 修复 Defect #8: 为 raw-data 显式添加 12 个 tool 节点的入边。
+    // 修复 Defect #8: 为 raw-data 显式添加 13 个 tool 节点的入边。
     // 之前只有 1 条 e-t-risk-raw-data 边，依赖关系是"隐性"的（依赖 t-risk 是
-    // 12 个 tool 节点中最深的间接前置）。改成显式声明后，调度器会等待所有 12
+    // 13 个 tool 节点中最深的间接前置）。改成显式声明后，调度器会等待所有 13
     // 个上游 tool 节点都完成才启动 raw-data，input_sources 才有数据可读。
     // 迭代器自然包含 e-t-risk-raw-data（来自 algo_tools 末项）。
     for src in algo_tools
@@ -2035,6 +2079,8 @@ async fn seed_stock_analysis_workflow_template(
             ("agg_risk_pos", "risk-aggregated.params.aggressive_pct"),
             ("cons_risk_pos", "risk-aggregated.params.conservative_pct"),
             ("neut_risk_pos", "risk-aggregated.params.neutral_pct"),
+            ("consensus_score", "debate-convergence.params.consensus_score"),
+            ("stock_lessons", "stock_lessons"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -2099,6 +2145,13 @@ async fn seed_stock_analysis_workflow_template(
         a.config.system_prompt =
             format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
+        a.config.input_mapping = [
+            ("consensus_score", "debate-convergence.params.consensus_score"),
+            ("stock_lessons", "stock_lessons"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
     }
     nodes.push(trader);
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
@@ -2139,6 +2192,8 @@ async fn seed_stock_analysis_workflow_template(
                 ("catalyst_level", "a-catalyst.params.catalyst_level"),
                 ("institutional_trace", "a-catalyst.params.institutional_trace"),
                 ("consensusScore", "debate-convergence.params.consensus_score"),
+                ("trader_time_horizon", "trader.params.timeHorizon"),
+                ("trader_holding_days", "trader.params.expectedHoldingDays"),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -2154,6 +2209,8 @@ async fn seed_stock_analysis_workflow_template(
         "debate-convergence",
         "portfolio-mgr",
     ));
+    // data-quality → portfolio-mgr: 显式边确保 dqi_score 在 Rhai 公式执行前就绪
+    edges.push(edge("e-data-quality-portfolio-mgr", "data-quality", "portfolio-mgr"));
 
     // ── P3 (real-nodes): rule-check 规则检查 Agent ──
     // 在 portfolio-mgr 完成后启动，对照硬性规则阈值（RSI/乖离率/止损/放量下跌/空头排列）
@@ -2190,6 +2247,8 @@ async fn seed_stock_analysis_workflow_template(
         // 直连，避免通知在规则检查改写决策之前发出）──
         edges.push(edge("e-portfolio-mgr-rule-check", "portfolio-mgr", rc_id));
         edges.push(edge("e-rule-check-quality-gate", rc_id, "quality-gate"));
+        // data-quality → quality-gate: 显式边确保 data-quality 变量在 switch 判断前就绪
+        edges.push(edge("e-data-quality-quality-gate", "data-quality", "quality-gate"));
     }
 
     // ── SwitchNode: 数据质量门禁 ──
@@ -2233,7 +2292,7 @@ async fn seed_stock_analysis_workflow_template(
         let mut fq = agent(
             fq_id,
             fq_title,
-            "portfolio-manager", // 复用投资决策专家提示词
+            "value-investor", // 仅用于占位，system_prompt 会完全覆盖
             None,
             20.0,
             fq_y,
@@ -3357,99 +3416,7 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("干跑模式：不调用 LLM，用 mock 输出验证流程".into()),
             is_secret: false,
         },
-        // ── B 类补全：finance.rs calc_* 工具参数 ──
-        Variable {
-            name: "risk_free_rate".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.03),
-            description: Some("无风险利率（用于夏普比率）".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "var_confidence".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.95),
-            description: Some("VaR 置信度（0-1）".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "kelly_default_win_rate".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.5),
-            description: Some("凯利公式默认胜率".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "kelly_default_avg_win".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.05),
-            description: Some("凯利公式默认平均盈利".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "kelly_default_avg_loss".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.05),
-            description: Some("凯利公式默认平均亏损".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "signal_ma_fast".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(5),
-            description: Some("MA 金叉死叉检测 - 快线周期".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "signal_ma_slow".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(20),
-            description: Some("MA 金叉死叉检测 - 慢线周期".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "atr_period".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(14),
-            description: Some("ATR 平均真实波幅周期".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "kdj_n".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(9),
-            description: Some("KDJ 随机指标 N 周期".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "outlier_method".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("zscore"),
-            description: Some("异常值剔除方法 (zscore/iqr)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "outlier_threshold".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(2.0),
-            description: Some("异常值剔除阈值 (Z 分数或 IQR 倍数)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "fill_missing_method".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("forward"),
-            description: Some("缺失值填充方法 (forward/linear)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "breakout_volume_threshold".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(1.5),
-            description: Some("支撑阻力突破的成交量确认阈值（量比 > 此值判为有效突破）".into()),
-            is_secret: false,
-        },
-        // 业绩超预期分级阈值
+        // ── 业绩超预期分级阈值
         Variable {
             name: "earnings_th_huge_pos".into(),
             var_type: "number".into(),
@@ -3663,11 +3630,12 @@ async fn seed_stock_analysis_workflow_template(
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;
 
     // ── 合并旧版本的变量值（保留用户自定义的评分权重/阈值等）──
-    let variables_val = if !old_variables.is_empty() {
-        merge_variable_values(&variables_val, &old_variables)
-            .unwrap_or_else(|_| variables_val.clone())
-    } else {
-        variables_val
+    let variables_val = match old_variables {
+        Some(ref ov) if !ov.is_empty() => {
+            merge_variable_values(&variables_val, ov)
+                .unwrap_or_else(|_| variables_val.clone())
+        },
+        _ => variables_val,
     };
 
     // ── Phase 3/4: Rhai 综合评分工具 + ErrorConfig ──
@@ -3965,14 +3933,38 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         edges: Set(edges_json),
         input_schema: Set(Some(input_schema_val)),
         output_schema: Set(Some(output_schema_val)),
-        variables: Set(Some(variables_val)),
+        variables: Set(if let Some(ref ov) = old_variables {
+            // 升级时保留用户自定义的变量值
+            let new_vars: Vec<serde_json::Value> =
+                serde_json::from_str(&variables_val).unwrap_or_default();
+            let mut final_vars = new_vars.clone();
+            if let Ok(old_parsed) = serde_json::from_str::<Vec<serde_json::Value>>(ov) {
+                for nv in &mut final_vars {
+                    let nv_name = nv.get("name").and_then(|n| n.as_str());
+                    if let Some(nv_name) = nv_name {
+                        if let Some(old_v) = old_parsed
+                            .iter()
+                            .find(|ov| ov.get("name").and_then(|n| n.as_str()) == Some(nv_name))
+                        {
+                            if let Some(old_val) = old_v.get("value") {
+                                nv.as_object_mut()
+                                    .map(|o| o.insert("value".into(), old_val.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+            Some(serde_json::to_string(&final_vars).unwrap_or(variables_val.clone()))
+        } else {
+            Some(variables_val.clone())
+        }),
         error_config: Set(Some(error_config_val)),
         composite_source: Set(None),
         tool_defs: Set(Some(tool_defs_val)),
         created_at: Set(now),
         updated_at: Set(now),
     }
-    .insert(db)
+    .save(db)
     .await
     .map_err(|e| format!("写入工作流模板失败: {e}"))?;
 
@@ -4157,7 +4149,6 @@ fn expert_id_to_display(id: &str) -> String {
         "neutral-debator" => "中性风险评估".to_string(),
         "research-manager" => "研究经理".to_string(),
         "trader" => "交易员".to_string(),
-        "portfolio-manager" => "投资组合经理".to_string(),
         "value-investor" => "价值投资者（巴菲特框架）".to_string(),
         "catalyst-analyst" => "催化剂与叙事分析师".to_string(),
         o => o.to_string(),
@@ -4171,8 +4162,36 @@ fn role_id_to_display(id: &str) -> String {
         "risk-evaluator" => "风险评估师".to_string(),
         "trader" => "交易员".to_string(),
         "decision-maker" => "决策者".to_string(),
+        "reflection" => "投资复盘官".to_string(),
         o => o.to_string(),
     }
+}
+
+/// 构建分析师 params 的 input_mapping：为每个分析师注入 bull_score/bear_score/consensus_score
+/// 例如 a-market-analyst → 【market_bull_score】:75 【market_bear_score】:25
+fn build_analyst_input_mapping(a_ids: &[&str]) -> std::collections::HashMap<String, String> {
+    use std::collections::HashMap;
+    let mut map = HashMap::new();
+    for aid in a_ids {
+        // a-market-analyst → market, a-sentiment → sentiment, etc.
+        let prefix = aid.strip_prefix("a-").unwrap_or(aid);
+        map.insert(
+            format!("{prefix}_bull_score"),
+            format!("{aid}.params.bull_score"),
+        );
+        map.insert(
+            format!("{prefix}_bear_score"),
+            format!("{aid}.params.bear_score"),
+        );
+        // consensus_score = bull - bear（聚合分数）
+        map.insert(
+            format!("{prefix}_consensus"),
+            format!("{aid}.params.consensus_score"),
+        );
+    }
+    // 为所有辩论/风险节点注入历史反思教训
+    map.insert("stock_lessons".into(), "stock_lessons".into());
+    map
 }
 
 /// 合并新模板变量与旧模板变量的值。
@@ -4273,115 +4292,162 @@ fn merge_variable_values(
 /// 从已存在的 "stock-analysis" 模板克隆 DAG 结构，修改 ID/名称/变量声明。
 /// 运行时 portfolio-manager 通过 `{{actual_outcome}}` 变量切换到反思模式。
 async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
-    use axagent_core::entity::workflow_template;
-    use axagent_harness::workflow_types::{TriggerConfig, TriggerType};
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    // 读取 stock-analysis 原模板
-    let src = workflow_template::Entity::find_by_id("stock-analysis")
-        .one(db)
-        .await
-        .map_err(|e| format!("读取 stock-analysis 模板失败: {e}"))?
-        .ok_or_else(|| "stock-analysis 模板不存在，请先创建".to_string())?;
+    let now = chrono::Utc::now().timestamp_millis();
 
-    // 总是从 stock-analysis 重建反思复盘模板，确保布局与节点结构同步
-    let existing = workflow_template::Entity::find_by_id("stock-reflection")
+    let nodes = serde_json::json!([
+        {
+            "id": "trigger",
+            "type": "trigger",
+            "position": { "x": 20, "y": 20 },
+            "config": {
+                "name": "反思复盘触发器",
+                "description": "触发反思复盘工作流，传入 stock_code / as_of_date"
+            }
+        },
+        {
+            "id": "sub-analysis",
+            "type": "subWorkflow",
+            "position": { "x": 20, "y": 120 },
+            "config": {
+                "sub_workflow_id": "stock-analysis",
+                "input_mapping": {
+                    "stock_code": "trigger.stock_code",
+                    "as_of_date": "trigger.as_of_date"
+                },
+                "output_var": "sub-analysis"
+            }
+        },
+        {
+            "id": "reflection-agent",
+            "type": "agent",
+            "position": { "x": 20, "y": 260 },
+            "config": {
+                "expert_id": "reflection",
+                "system_prompt": "",
+                "model_role": "decision-maker",
+                "context_sources": ["sub-analysis"],
+                "input_mapping": {
+                    "actual_outcome": "trigger.actual_outcome",
+                    "reflection_depth": "trigger.reflection_depth",
+                    "stock_code": "trigger.stock_code"
+                },
+                "output_var": "reflection"
+            }
+        },
+        {
+            "id": "store-ref",
+            "type": "storage",
+            "position": { "x": 20, "y": 400 },
+            "config": {
+                "backend": "sqlite",
+                "operation": "insert",
+                "input_var": "reflection",
+                "collection": "stock_reflections",
+                "output_var": "storage-result"
+            }
+        }
+    ]);
+
+    let edges = serde_json::json!([
+        { "id": "e-trigger-sub-analysis", "source": "trigger", "target": "sub-analysis" },
+        { "id": "e-sub-analysis-reflection", "source": "sub-analysis", "target": "reflection-agent" },
+        { "id": "e-reflection-store", "source": "reflection-agent", "target": "store-ref" }
+    ]);
+
+    let trigger_config = serde_json::json!({
+        "trigger_type": "manual",
+        "config": {
+            "description": "as-of 重放: 选择历史日期对分析结果进行反思复盘",
+            "required_params": ["as_of_date", "stock_code"],
+            "param_schema": {
+                "as_of_date": { "type": "date", "description": "原始分析日期，决定数据时间锚点" },
+                "stock_code": { "type": "string", "description": "股票代码" }
+            }
+        }
+    });
+
+    let variables = serde_json::json!([
+        {
+            "name": "actual_outcome",
+            "var_type": "string",
+            "value": "",
+            "description": "实际走势结果，如 '30天跌8% → 失败'，非空时触发反思模式",
+            "is_secret": false
+        },
+        {
+            "name": "reflection_depth",
+            "var_type": "string",
+            "value": "light",
+            "description": "反思深度：light(简要) / deep(详细推理链)",
+            "is_secret": false
+        }
+    ]);
+
+    let existing = axagent_core::entity::workflow_template::Entity::find_by_id("stock-reflection")
         .one(db)
         .await
         .map_err(|e| format!("查重失败: {e}"))?;
-    if let Some(existing) = &existing {
-        tracing::info!(
-            "[stock_analysis_setup] 重建反思复盘模板 (v{} → v{})",
-            existing.version,
-            src.version,
-        );
-        workflow_template::Entity::delete_by_id("stock-reflection")
-            .exec(db)
+    let reflection_version = match &existing {
+        Some(t) => t.version + 1, // 递增
+        None => 1,                // 初次创建
+    };
+    // 如果已有记录，保存旧版本快照
+    if let Some(ref t) = existing {
+        let ver_id = format!("stock-reflection_v{}", t.version);
+        if axagent_core::entity::workflow_template_version::Entity::find_by_id(&ver_id)
+            .one(db)
             .await
-            .map_err(|e| format!("删除旧反思模板失败: {e}"))?;
+            .map_err(|e| format!("查重失败: {e}"))?
+            .is_none()
+        {
+            use sea_orm::ActiveModelTrait;
+            let snapshot = axagent_core::entity::workflow_template_version::ActiveModel {
+                id: Set(ver_id.clone()),
+                template_id: Set("stock-reflection".to_string()),
+                name: Set(t.name.clone()),
+                description: Set(t.description.clone()),
+                icon: Set(t.icon.clone()),
+                tags: Set(t.tags.clone()),
+                version: Set(t.version),
+                is_preset: Set(t.is_preset),
+                is_editable: Set(t.is_editable),
+                is_public: Set(t.is_public),
+                trigger_config: Set(t.trigger_config.clone()),
+                nodes: Set(t.nodes.clone()),
+                edges: Set(t.edges.clone()),
+                input_schema: Set(t.input_schema.clone()),
+                output_schema: Set(t.output_schema.clone()),
+                variables: Set(t.variables.clone()),
+                error_config: Set(t.error_config.clone()),
+                created_at: Set(chrono::Utc::now().timestamp_millis()),
+            };
+            snapshot.insert(db).await.map_err(|e| format!("写入版本快照失败: {e}"))?;
+            tracing::info!("[stock_analysis_setup] 反思模板旧版本快照已保存: {ver_id}");
+        }
+        // 不再 DELETE，改为 save
     }
 
-    // 追加反思专用的变量声明
-    let mut variables: Vec<serde_json::Value> = src
-        .variables
-        .as_deref()
-        .and_then(|v| serde_json::from_str(v).ok())
-        .unwrap_or_default();
-    variables.push(serde_json::json!({
-        "name": "actual_outcome",
-        "type": "string",
-        "description": "实际走势结果，如 '30天跌8% → 失败'，非空时触发反思模式",
-        "default": "",
-    }));
-    variables.push(serde_json::json!({
-        "name": "reflection_depth",
-        "type": "string",
-        "description": "反思深度：light(简要) / deep(详细推理链)",
-        "default": "light",
-    }));
-
-    let now = chrono::Utc::now().timestamp_millis();
-    workflow_template::ActiveModel {
+    axagent_core::entity::workflow_template::ActiveModel {
         id: Set("stock-reflection".to_string()),
         name: Set("A股反思复盘".to_string()),
-        description: Set(Some("嵌套原股票分析工作流的 as-of 重放，注入实际走势结果，portfolio-manager 输出反思而非交易决策".to_string())),
+        description: Set(Some("嵌套 stock-analysis 子工作流的 as-of 重放，注入实际走势结果后反思".to_string())),
         icon: Set("search".into()),
-        tags: Set(Some(serde_json::to_string(&["stock", "reflection", "A股"]).map_err(|e| format!("序列化标签失败: {e}"))?)),
-        version: Set(src.version),
+        tags: Set(Some(r#"["stock","reflection","A股"]"#.to_string())),
+        version: Set(reflection_version),
         is_preset: Set(true),
         is_editable: Set(true),
         is_public: Set(true),
-        // F-10 修复: 反思复盘是"as-of 重放"语义,需要手动触发并指定回放日期,
-        //   不应该被 schedule 自动跑(那样会污染当前真实市场状态)。
-        //   trigger_config 改为 Manual 类型,带 required 字段 as_of_date,
-        //   触发器面板会要求用户输入日期,作为 context 注入到 a-* 工具调用。
-        //   原设计 trigger_config: Set(None) 让人困惑(看起来是未配置),现在显式
-        //   声明为 Manual + 必填参数,触发器 UI 看到 🟡 disabled 徽章。
-        trigger_config: Set(Some(
-            serde_json::to_string(&TriggerConfig {
-                trigger_type: TriggerType::Manual,
-                config: serde_json::json!({
-                    "description": "as-of 重放: 选择历史日期重跑分析",
-                    "required_params": ["as_of_date", "stock_codes"],
-                    "param_schema": {
-                        "as_of_date": {
-                            "type": "date",
-                            "description": "回放日期,格式 YYYY-MM-DD,决定数据时间锚点"
-                        },
-                        "stock_codes": {
-                            "type": "string[]",
-                            "description": "要复盘的股票代码列表"
-                        }
-                    }
-                }),
-            })
-            .unwrap_or_default(),
-        )),
-        // 克隆时明确去掉 raw-data 子节点的 parentId，
-        // 防止编辑器在加载时自动把 t-scoring/t-valuation/t-risk 嵌套进 raw-data 容器
-        // （它们的 position 是绝对坐标，不应被视为 raw-data 的子节点）
-        nodes: Set({
-            let mut raw_nodes: Vec<serde_json::Value> = serde_json::from_str(&src.nodes)
-                .unwrap_or_default();
-            for node in &mut raw_nodes {
-                if let Some(id) = node.get("id").and_then(|v| v.as_str()) {
-                    if matches!(id, "t-scoring" | "t-valuation" | "t-risk") {
-                        node.as_object_mut()
-                            .and_then(|obj| obj.remove("parentId"));
-                        // 如果原本是顶层节点但 position 与 raw-data 重叠，
-                        // 确保它在 raw-data 容器外部（保持绝对坐标）
-                    }
-                }
-            }
-            serde_json::to_string(&raw_nodes).unwrap_or(src.nodes.clone())
-        }),
-        edges: Set(src.edges),
-        input_schema: Set(src.input_schema),
-        output_schema: Set(src.output_schema),
-        variables: Set(Some(serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?)),
-        error_config: Set(src.error_config),
+        trigger_config: Set(Some(trigger_config.to_string())),
+        nodes: Set(nodes.to_string()),
+        edges: Set(edges.to_string()),
+        input_schema: Set(None),
+        output_schema: Set(None),
+        variables: Set(Some(variables.to_string())),
+        error_config: Set(None),
         composite_source: Set(None),
-        tool_defs: Set(src.tool_defs),
+        tool_defs: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     }
@@ -4389,6 +4455,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     .await
     .map_err(|e| format!("写入反思模板失败: {e}"))?;
 
-    tracing::info!("[stock_analysis_setup] 反思复盘工作流模板已种子化 (stock-reflection)");
+    tracing::info!("[stock_analysis_setup] 反思复盘工作流模板已创建 (stock-reflection, SubWorkflowNode 嵌套)");
     Ok(())
 }
+

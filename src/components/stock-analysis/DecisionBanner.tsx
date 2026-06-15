@@ -148,7 +148,7 @@ export function DecisionBanner() {
   // ── 决策 vs 分析师共识矛盾检测 ──
   const isContradictory = useMemo(() => {
     if (!analystReports || Object.keys(analystReports).length < 3 || !decision) { return false; }
-    const consensus = computeStockConsensus(analystReports);
+    const consensus = computeStockConsensus(analystReports, undefined, decision.timeHorizon);
     const isBullishAction = decision.action === "BUY" || decision.action === "INCREASE";
     const isBearishAction = decision.action === "SELL" || decision.action === "REDUCE";
     if (isBullishAction && (consensus.consensus === "bearish" || consensus.consensus === "divided")) { return true; }
@@ -188,6 +188,19 @@ export function DecisionBanner() {
             {isContradictory && (
               <Tag color="orange">
                 ⚠️ {t("stockAnalysis.contradiction")}
+              </Tag>
+            )}
+            {decision.timeHorizon && (
+              <Tag color="geekblue">
+                {t(`stockAnalysis.timeHorizon${
+                  decision.timeHorizon === "ultra_short"
+                    ? "UltraShort"
+                    : decision.timeHorizon === "short"
+                    ? "Short"
+                    : decision.timeHorizon === "mid"
+                    ? "Mid"
+                    : "Long"
+                }`)}
               </Tag>
             )}
           </div>
@@ -288,6 +301,18 @@ export function DecisionBanner() {
               {t(getRiskTKey(decision.riskLevel))}
             </div>
           </div>
+          {decision.expectedHoldingDays && (
+            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDays")}</div>
+              <div className="text-sm font-semibold font-mono">{decision.expectedHoldingDays}天</div>
+            </div>
+          )}
+          {decision.targetTimeframe && (
+            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</div>
+              <div className="text-sm font-semibold font-mono">{decision.targetTimeframe}</div>
+            </div>
+          )}
         </div>
 
         {/* 快速交易录入 — 决策日可直接在此录入买卖 */}

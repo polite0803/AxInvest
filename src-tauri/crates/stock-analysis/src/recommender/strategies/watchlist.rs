@@ -22,6 +22,11 @@ pub struct WatchlistStrategy {
 }
 
 impl WatchlistStrategy {
+    pub const fn ultra_short() -> Self {
+        Self {
+            period: Period::UltraShort,
+        }
+    }
     pub const fn short() -> Self {
         Self {
             period: Period::Short,
@@ -59,6 +64,23 @@ impl WatchlistStrategy {
         // 按周期给不同的振幅
         let (entry_low, entry_high, stop_loss, target_price, base_position, holding_days, reason) =
             match self.period {
+                Period::UltraShort => {
+                    let el = read_f64(vars, "wl_ultra_short_entry_low", 0.998);
+                    let eh = read_f64(vars, "wl_ultra_short_entry_high", 1.005);
+                    let sl = read_f64(vars, "wl_ultra_short_stop", 0.98);
+                    let tg = read_f64(vars, "wl_ultra_short_target", 1.03);
+                    let bp = read_f64(vars, "wl_ultra_short_base_pos", 2.0);
+                    let hd = read_f64(vars, "wl_ultra_short_holding_days", 2.0) as u32;
+                    (
+                        price * el,
+                        price * eh,
+                        price * sl,
+                        price * tg,
+                        bp,
+                        hd,
+                        "候选池初筛（超短线：-0.2% 进场，+3% 目标）",
+                    )
+                },
                 Period::Short => {
                     let el = read_f64(vars, "wl_short_entry_low", 0.99);
                     let eh = read_f64(vars, "wl_short_entry_high", 1.01);
@@ -151,6 +173,7 @@ impl WatchlistStrategy {
 impl RecommendStrategy for WatchlistStrategy {
     fn id(&self) -> &'static str {
         match self.period {
+            Period::UltraShort => "watchlist_ultra_short",
             Period::Short => "watchlist_short",
             Period::Mid => "watchlist_mid",
             Period::Long => "watchlist_long",
@@ -253,6 +276,23 @@ async fn scan_synthetic_one(
 
     let (entry_low, entry_high, stop_loss, target_price, base_position, holding_days, reason) =
         match period {
+            Period::UltraShort => {
+                let el = read_f64(vars, "syn_ultra_short_entry_low", 0.998);
+                let eh = read_f64(vars, "syn_ultra_short_entry_high", 1.005);
+                let sl = read_f64(vars, "syn_ultra_short_stop", 0.98);
+                let tg = read_f64(vars, "syn_ultra_short_target", 1.03);
+                let bp = read_f64(vars, "syn_ultra_short_base_pos", 2.0);
+                let hd = read_f64(vars, "syn_ultra_short_holding_days", 2.0) as u32;
+                (
+                    price * el,
+                    price * eh,
+                    price * sl,
+                    price * tg,
+                    bp,
+                    hd,
+                    format!("候选池初筛（超短线 — {} 信号缺失，按现价合成）", style_label),
+                )
+            },
             Period::Short => {
                 let el = read_f64(vars, "syn_short_entry_low", 0.99);
                 let eh = read_f64(vars, "syn_short_entry_high", 1.01);

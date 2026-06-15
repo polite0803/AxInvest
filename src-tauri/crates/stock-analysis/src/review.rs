@@ -44,6 +44,10 @@ pub struct DecisionComparison {
     pub target_price: Option<f64>,
     pub stop_loss: Option<f64>,
     pub days_since_analysis: u32,
+    /// 原始决策时间维度
+    pub time_horizon: Option<String>,
+    /// 原始期望持有天数
+    pub expected_holding_days: Option<u32>,
     /// 收盘价在目标区间内？(仅 BUY)
     pub in_target_zone: bool,
     /// 已触发止损？
@@ -195,12 +199,38 @@ async fn fetch_latest_analysis_decision(
     let stop_loss_hit = stop_loss.is_some_and(|s| price <= s);
     let target_hit = target.is_some_and(|t| price >= t);
 
+    // 从 DB 列或 decision_json 提取时间维度
+    let time_horizon = row.decision_time_horizon.or_else(|| {
+        row.decision_json.as_ref().and_then(|raw| {
+            serde_json::from_str::<serde_json::Value>(raw)
+                .ok()
+                .and_then(|v| {
+                    v.get("timeHorizon")
+                        .or_else(|| v.get("time_horizon"))
+                        .and_then(|s| s.as_str().map(|s| s.to_string()))
+                })
+        })
+    });
+    let expected_holding_days = row.decision_expected_holding_days.or_else(|| {
+        row.decision_json.as_ref().and_then(|raw| {
+            serde_json::from_str::<serde_json::Value>(raw)
+                .ok()
+                .and_then(|v| {
+                    v.get("expectedHoldingDays")
+                        .or_else(|| v.get("expected_holding_days"))
+                        .and_then(|n| n.as_u64().map(|n| n as u32))
+                })
+        })
+    });
+
     Some(DecisionComparison {
         analysis_date: row.analysis_date,
         action,
         target_price: target,
         stop_loss,
         days_since_analysis: days_since,
+        time_horizon,
+        expected_holding_days,
         in_target_zone,
         stop_loss_hit,
         target_hit,

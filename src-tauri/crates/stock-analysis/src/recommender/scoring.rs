@@ -8,17 +8,22 @@ use std::collections::HashMap;
 /// - `score_consistency`: 子策略内多因子方向一致率 (0-1)
 /// - `signal_strength`: 关键因子偏离度分位 (0-1)
 /// - `liquidity_score`: 成交额 / 换手率分位 (0-1)
-/// - `market_regime`: 大盘环境 (-0.5 ~ +0.5)
-/// - `turnover_anomaly`: 今日成交额 / 20日均（> 3 视为异常）
+/// - `price_momentum`: 距均线偏离 / 近期涨跌幅分位 (-0.5 ~ +0.5)，正=趋势有利
+/// - `turnover_anomaly`: 今日成交额 / 20日均 (> 1.0 为正常，> 3.0 视为异常)
+///
+/// 权重分配依据：
+///   - consistency(0.45) 为第一权重：多因子方向一致是置信度的核心
+///   - signal_strength(0.35) 为第二权重：关键指标偏离度代表信号稀缺性
+///   - liquidity(0.15) 为辅助权重：流动性能保证策略可执行
+///   - price_momentum(0.05) 为微调权重：避免严重逆势入场
 pub fn calc_confidence(
     score_consistency: f64,
     signal_strength: f64,
     liquidity_score: f64,
-    market_regime: f64,
+    price_momentum: f64,
     turnover_anomaly: f64,
 ) -> u8 {
-    // P3-1: sanitize inputs — NaN/Inf propagates through arithmetic and breaks .round() downstream.
-    // Rust 1.74+ f64::clamp(NaN, ...) panics, so we must catch both.
+    // sanitize inputs
     let clean = |v: f64| {
         if v.is_nan() || v.is_infinite() {
             0.0
@@ -29,17 +34,25 @@ pub fn calc_confidence(
     let score_consistency = clean(score_consistency);
     let signal_strength = clean(signal_strength);
     let liquidity_score = clean(liquidity_score);
-    let market_regime = clean(market_regime);
+    let price_momentum = clean(price_momentum);
     let turnover_anomaly = clean(turnover_anomaly);
 
     let mut c = 0.45 * score_consistency
-        + 0.25 * signal_strength
+        + 0.35 * signal_strength
         + 0.15 * liquidity_score
-        + 0.15 * market_regime;
+        + 0.05 * price_momentum;
 
-    // 成交额异常否决：> 3x 平均 → 减 40% 封顶（不低于原值 60%）
-    if turnover_anomaly > 3.0 {
-        c *= 0.6;
+    // 成交额异常阶梯惩罚（替代原断崖式 40%）：
+    //   1.0-2.0x → 无惩罚（正常交易）
+    //   2.0-3.0x → 10% 置信度衰减（温和放量）
+    //   3.0-5.0x → 25% 置信度衰减（异常放量，可能是出货）
+    //   >5.0x    → 40% 置信度衰减（极端放量，高概率操纵）
+    if turnover_anomaly > 5.0 {
+        c *= 0.60;  // −40%
+    } else if turnover_anomaly > 3.0 {
+        c *= 0.75;  // −25%
+    } else if turnover_anomaly > 2.0 {
+        c *= 0.90;  // −10%
     }
 
     if c.is_nan() || c.is_infinite() {
@@ -48,7 +61,18 @@ pub fn calc_confidence(
     (c * 100.0).clamp(0.0, 100.0).round() as u8
 }
 
-/// 仓位动态化：base × confidence/100 × period_factor
+/// 仓位动态化：Kelly 公式近似
+///
+/// 标准 Kelly: f* = (p·b − q) / b
+///   其中 p=胜率, q=1−p, b=盈亏比(target/stop)
+///
+/// 本实现：base × confidence/100 × period_factor
+///   - confidence/100 近似 p（置信度 ∝ 预期胜率）
+///   - base 由各策略按 target/stop 比预先设定（近似 Kelly f*）
+///   - period_factor 按持有期缩放（超短线 0.4 → 长线 1.0）
+///
+/// 简化原因：p 和 b 无法在子策略内精确估计（依赖 K 线外数据），
+/// 故用信度代理概率、用参数化的 base 代理赔率调整。
 pub fn calc_position(base: f64, confidence: u8, period: Period) -> f64 {
     if base.is_nan() {
         return 0.0;
@@ -112,23 +136,23 @@ mod tests {
 
     #[test]
     fn confidence_basic_80() {
-        // 全 0.8 因子 → 0.45*0.8 + 0.25*0.8 + 0.15*0.8 + 0.15*0.0 = 0.68 → 68
+        // 0.45*0.8 + 0.35*0.8 + 0.15*0.8 + 0.05*0.0 = 0.36+0.28+0.12 = 0.76 → 76
         let c = calc_confidence(0.8, 0.8, 0.8, 0.0, 1.0);
-        assert_eq!(c, 68, "expected 68 got {}", c);
+        assert_eq!(c, 76, "expected 76 got {}", c);
     }
 
     #[test]
     fn confidence_full_bull() {
-        // 全 1.0 因子 + 牛市 +0.5 → 0.45+0.25+0.15+0.075 = 0.925 → 93
+        // 0.45+0.35+0.15+0.05*0.5 = 0.45+0.35+0.15+0.025 = 0.975 → 98
         let c = calc_confidence(1.0, 1.0, 1.0, 0.5, 1.0);
-        assert_eq!(c, 93, "expected 93 got {}", c);
+        assert_eq!(c, 98, "expected 98 got {}", c);
     }
 
     #[test]
-    fn confidence_turnover_anomaly_caps_at_minus_40pct() {
-        // 正常 80 → 异常减 40% 封顶 → 80 * 0.6 = 48
-        let c = calc_confidence(0.8, 0.8, 0.8, 0.0, 5.0);
-        assert_eq!(c, 41, "expected 41 got {}", c); // 0.68 * 0.6 = 0.408 → 41
+    fn confidence_turnover_anomaly_graded() {
+        // 正常 score 0.76 → 3-5x 扣 25% → 0.76*0.75 = 0.57 → 57
+        let c = calc_confidence(0.8, 0.8, 0.8, 0.0, 4.0);
+        assert_eq!(c, 57, "expected 57 got {}", c);
     }
 
     #[test]

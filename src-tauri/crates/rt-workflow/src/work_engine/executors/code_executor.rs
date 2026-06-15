@@ -204,6 +204,8 @@ impl NodeExecutorTrait for CodeExecutor {
                     "result": result,
                     "input_params": input_params,
                     "node_id": node.base_id(),
+                    // 将 result 中的关键决策字段提升到 params 层，供下游 resolve_var_path 消费
+                    "params": result,
                 }),
                 output_var: Some(code_node.config.output_var.clone()),
             });

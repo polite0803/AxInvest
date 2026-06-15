@@ -8026,11 +8026,12 @@
         "holding": "Holding",
         "confidence": "Confidence"
       },
+      "periodUltraShort": "Short",
       "periodShort": "Short",
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
-      "generatedAt": "Generated at {time}",
+      "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
       "empty": "No recommendation data",
@@ -8060,10 +8061,11 @@
       "backtestWinrate": "Gewinnrate",
       "bannerDegraded": "Datenstile {{styles}} wurden in der Treue reduziert (as-of {{date}}). Behandeln Sie ihre Konfidenz niedriger als bei nicht-degradierten Stilen."
     },
+    "periodUltraShort": "Kurz",
     "periodShort": "Kurz",
     "periodMid": "Mittel",
     "periodLong": "Lang",
-    "generatedAt": "Generiert am {time}",
+    "generatedAt": "Generiert am {{time}}",
     "bannerVendorDisabled": "Einige Stile sind deaktiviert: {styles}",
     "openSettings": "Einstellungen öffnen",
     "empty": {

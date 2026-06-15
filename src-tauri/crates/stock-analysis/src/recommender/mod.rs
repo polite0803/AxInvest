@@ -1,7 +1,7 @@
 //! 智能荐股 — 顶层模块
 //!
 //! ## 架构
-//! - 12 个子策略（4 风格 × 3 周期）实现 [`strategy::RecommendStrategy`]
+//! - 18 个子策略（5 风格 × 4 周期，超跌反弹仅短/中线）实现 [`strategy::RecommendStrategy`]
 //! - [`recommend_stocks`] 是组合入口：seed pool → 候选过滤 → vendor 降级 → 并行扫描 → 去重 → 按风格分组
 //! - 5 min 内存缓存（按 period 维度）
 //!
@@ -22,7 +22,7 @@ use axagent_astock_data::as_of;
 use axagent_astock_data::AStockClient;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant};
 // `HashSet` 在 Rust 2024 edition 已加入 prelude
 
@@ -44,7 +44,7 @@ use crate::recommender::strategy::PerCodeLocks;
 ///
 /// 格式：`reco_strategy_weights` 是一个 JSON 对象：
 /// ```json
-/// { "trend_short": 1.2, "value_mid": 0.8, ... }
+/// { "trend_short": 1.2, "trend_ultra_short": 0.8, "value_mid": 0.8, ... }
 /// ```
 /// 缺失的 (style, period) 默认 1.0（不调整）。
 pub(crate) fn parse_strategy_weights(
@@ -58,23 +58,22 @@ pub(crate) fn parse_strategy_weights(
         let Some(obj) = value.as_object() else { continue };
         for (key, val) in obj {
             let Some(weight) = val.as_f64() else { continue };
-            // key 形如 "trend_short" / "value_mid" / "watchlist_long"
-            let parts: Vec<&str> = key.split('_').collect();
-            if parts.len() != 2 {
-                continue;
-            }
-            let style = match parts[0] {
-                "trend" => Style::Trend,
-                "value" => Style::Value,
-                "capital" => Style::Capital,
-                "reversion" => Style::Reversion,
-                "watchlist" => Style::Watchlist,
+            // key 形如 "trend_short" / "trend_ultra_short" / "value_mid" / "watchlist_long"
+            // 用 splitn(2, '_') 处理 ultra_short 自带下划线的情况
+            let mut parts = key.splitn(2, '_');
+            let style = match parts.next() {
+                Some("trend") => Style::Trend,
+                Some("value") => Style::Value,
+                Some("capital") => Style::Capital,
+                Some("reversion") => Style::Reversion,
+                Some("watchlist") => Style::Watchlist,
                 _ => continue,
             };
-            let period = match parts[1] {
-                "short" => Period::Short,
-                "mid" => Period::Mid,
-                "long" => Period::Long,
+            let period = match parts.next() {
+                Some("ultra_short") => Period::UltraShort,
+                Some("short") => Period::Short,
+                Some("mid") => Period::Mid,
+                Some("long") => Period::Long,
                 _ => continue,
             };
             out.insert((style, period), weight.clamp(0.0, 2.0));
@@ -84,11 +83,13 @@ pub(crate) fn parse_strategy_weights(
 }
 
 // ── 缓存 ──
-//
 // 缓存 key 由 (period, as_of) 二元组组成，确保 live / replay 互相隔离。
-// replay 模式缓存 key 后缀为 `asof-YYYYMMDD`，由 `as_of::cache_suffix()` 提供。
+// 之前为单条目 RwLock<Option>，同时请求不同 period 会互相驱逐。
+// 改为 HashMap<(Period, String), (RecoResponse, Instant)> 后多 period 独立缓存。
+// replay 模式后缀为 `asof-YYYYMMDD`，由 `as_of::cache_suffix()` 提供。
 
-static RESULT_CACHE: RwLock<Option<(Period, String, RecoResponse, Instant)>> = RwLock::new(None);
+static RESULT_CACHE: LazyLock<RwLock<HashMap<(Period, String), (RecoResponse, Instant)>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 /// 缓存 TTL：从 5 min 缩短到 60 s。
 ///
 /// 荐股的 entry / target / stop_loss 是基于扫描时刻的现价算的，
@@ -178,18 +179,15 @@ fn parse_reco_config(template_vars: &[(String, serde_json::Value)]) -> RecoConfi
 fn cache_get(period: Period) -> Option<RecoResponse> {
     let suffix = as_of::cache_suffix();
     let g = RESULT_CACHE.read().unwrap_or_else(|e| e.into_inner());
-    if let Some((p, sfx, resp, ts)) = g.as_ref() {
-        if *p == period && sfx == &suffix && ts.elapsed() < CACHE_TTL {
-            return Some(resp.clone());
-        }
-    }
-    None
+    g.get(&(period, suffix.clone()))
+        .filter(|(_, ts)| ts.elapsed() < CACHE_TTL)
+        .map(|(resp, _)| resp.clone())
 }
 
 fn cache_put(period: Period, resp: RecoResponse) {
     let suffix = as_of::cache_suffix();
     let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
-    *g = Some((period, suffix, resp, Instant::now()));
+    g.insert((period, suffix), (resp, Instant::now()));
 }
 
 /// 主动失效缓存（设置页保存 vendor 后调用）
@@ -197,7 +195,7 @@ fn cache_put(period: Period, resp: RecoResponse) {
 /// 同时清 vendor 启用集合缓存 + 推荐结果缓存，保证下次调用立即反映新 vendor 状态
 pub fn invalidate_cache() {
     let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
-    *g = None;
+    g.clear();
     clear_cached_vendors();
 }
 
@@ -233,17 +231,16 @@ pub async fn recommend_stocks(
     seed = liquidity_filter_and_truncate(client.clone(), seed).await;
 
     // 流动性过滤兜底：若 vendor 拿不到 60 日 K 线 / 全部不达标，过滤后池子可能
-    // 全空。这种情况下 4 个主策略（trend/value/capital/reversion）会遍历 0 次
-    // 直接返回空 picks —— 表现就是面板上"趋势/价值/资金/超跌"全空，只剩
-    // Watchlist（用 raw_seed）有数据。回退到 raw_seed 让 4 个主策略至少有机会跑
-    // 一遍（它们各自的 `scan_one` 内部还会再判空，自然剔掉真没数据的票）。
+    // 全空。这种情况下 4 个主策略（trend/value/capital/reversion）会直接跳过。
+    // Watchlist 用 raw_seed（不过流动性过滤），保证面板至少显示内容。
+    // 注意：非 Watchlist 策略不再 fallback 到 raw_seed——raw_seed 未过滤流动性，
+    // 可能导致大量无效 scan_one 调用（scan_one 内部判空后 return None）。
     if seed.is_empty() && !raw_seed.is_empty() {
         eprintln!(
             "[recommender] liquidity filter removed all {} stocks; \
-             falling back to raw seed pool (4 main strategies will scan raw)",
+             Watchlist will use raw seed, main strategies skip",
             raw_seed_pool_size
         );
-        seed = raw_seed.clone();
     }
 
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
@@ -252,6 +249,13 @@ pub async fn recommend_stocks(
     //    现在所有 style 都跑；data 真的取不到时该 style 自然返回空 picks，
     //    前端展示 "no data" 而非误报 "数据源未启用"）
     let all_strategies: Vec<Box<dyn RecommendStrategy>> = match period {
+        Period::UltraShort => vec![
+            Box::new(TrendStrategy::ultra_short()),
+            Box::new(ValueStrategy::ultra_short()),
+            Box::new(CapitalStrategy::ultra_short()),
+            // ReversionStrategy ultra_short 不做（超跌反弹至少需要中线）
+            Box::new(WatchlistStrategy::ultra_short()),
+        ],
         Period::Short => vec![
             Box::new(TrendStrategy::short()),
             Box::new(ValueStrategy::short()),
@@ -335,7 +339,13 @@ pub async fn recommend_stocks(
             for p in raw.iter_mut() {
                 let new_conf = (p.confidence as f64 * style_weight).clamp(0.0, 100.0) as u8;
                 p.confidence = new_conf;
-                p.position_pct = (p.position_pct * style_weight).clamp(0.0, 100.0);
+                // 权重缩放后仓位重新经过 calc_position（含 period_factor），
+                // 而非独立 scaling——确保缩放后的置信度与仓位参数一致
+                p.position_pct = crate::recommender::scoring::calc_position(
+                    p.position_pct / style_weight, // 还原 base
+                    new_conf,
+                    period_val,
+                );
             }
             Ok::<_, String>(raw)
         };

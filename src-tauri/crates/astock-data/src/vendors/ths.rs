@@ -38,8 +38,76 @@ impl StockVendor for ThsVendor {
         Ok(vec![])
     }
 
-    async fn get_news(&self, _: &str, _: u32) -> Result<Vec<NewsItem>, DataError> {
-        Ok(vec![])
+    async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        // 同花顺个股新闻：https://basic.10jqka.com.cn/{stock_code}/news.html
+        let url = format!(
+            "https://basic.10jqka.com.cn/api/stockph.php?code={}&type=news&page=1&limit={}",
+            stock_code,
+            limit.min(50)
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header("Referer", format!("https://basic.10jqka.com.cn/{}/", stock_code))
+            .send()
+            .await?;
+
+        let text = resp.text().await?;
+        let json: Value = serde_json::from_str(&text).map_err(|e| {
+            DataError::ParseError(format!("ths news parse failed: {e}, raw: {}", &text[..text.len().min(120)]))
+        })?;
+
+        // ths 返回格式: { "data": { "items": [...] } } 或 { "status_code": 0, "data": [...] }
+        let items = json["data"]["items"]
+            .as_array()
+            .or_else(|| json["data"].as_array())
+            .or_else(|| json["list"].as_array())
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+
+        Ok(items
+            .iter()
+            .map(|item| {
+                let title = item["title"]
+                    .as_str()
+                    .or_else(|| item["news_title"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let summary = item["summary"]
+                    .as_str()
+                    .or_else(|| item["content"].as_str())
+                    .or_else(|| item["digest"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let source = item["source"]
+                    .as_str()
+                    .or_else(|| item["from"].as_str())
+                    .unwrap_or("同花顺")
+                    .to_string();
+                let url = item["url"]
+                    .as_str()
+                    .or_else(|| item["news_url"].as_str())
+                    .or_else(|| item["link"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let publish_time = item["publish_time"]
+                    .as_str()
+                    .or_else(|| item["date"].as_str())
+                    .or_else(|| item["ctime"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                NewsItem {
+                    title,
+                    summary,
+                    source,
+                    url,
+                    publish_time,
+                    sentiment_score: None,
+                }
+            })
+            .collect())
     }
 
     async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
@@ -356,6 +424,7 @@ impl StockVendor for ThsVendor {
     // - get_north_bound_flow:带 date 字段 → Fallthrough
     // - get_consensus_eps:带 year 字段 → Fallthrough
     // - get_concept_blocks:当下概念分类 → NoHistoricalSemantic
+    // - get_news:带 publish_time 字段 → Fallthrough
     // 其他 stub:Fallthrough
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
@@ -393,6 +462,7 @@ mod capability_tests {
     fn ths_real_date_methods_are_fallthrough() {
         let v = make_vendor();
         for m in &[
+            "get_news",
             "get_market_dragon_tiger",
             "get_north_bound_flow",
             "get_consensus_eps",
@@ -408,7 +478,6 @@ mod capability_tests {
             "get_quote",
             "get_klines",
             "get_financials",
-            "get_news",
             "get_money_flow",
             "get_dragon_tiger",
             "get_lockup_schedule",

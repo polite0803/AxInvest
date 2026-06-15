@@ -31,7 +31,7 @@ neutral_self_pct = 你自己的独立判断（基准 50%）
 
 # 2. 计算共识度（基于位置分歧）
 position_range = abs(aggressive_pct - conservative_pct)
-consensus_score = max(0, 1 - position_range / 50)
+local_consensus = max(0, 1 - position_range / 50)
 # 共识度 0-1：分歧 0pp → 1.0；分歧 50pp → 0.0
 
 # 3. 加权中位
@@ -40,15 +40,15 @@ candidates_sorted = sort(candidates)
 median_pct = candidates_sorted[1]
 
 # 4. 共识度折回
-if consensus_score >= 0.7:        # 强共识
+if local_consensus >= 0.7:        # 强共识
     positionPct = round(median_pct)
-elif consensus_score >= 0.4:      # 中等共识
+elif local_consensus >= 0.4:      # 中等共识
     positionPct = round(median_pct * 0.85)
 else:                              # 弱共识 / 严重分歧
     positionPct = round(median_pct * 0.5)
 
 # 5. 盲点调整
-if 辩论 consensus_score < 50:    # 辩论本身未收敛
+if 【consensus_score】 < 50:      # 辩论本身未收敛（0-100），使用输入的结构化值
     positionPct = min(positionPct, 20)
 
 # 6. 钳制

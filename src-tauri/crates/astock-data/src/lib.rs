@@ -122,6 +122,7 @@ impl VendorRouting {
                 "xueqiu".into(),
                 "sina".into(),
                 "eastmoney".into(),
+                "ths".into(),
                 "baidu_stock".into(),
                 "akshare".into(),
             ],
@@ -1447,12 +1448,20 @@ impl AStockClient {
     ) -> Result<Vec<Announcement>, DataError> {
         for name in &self.routing.announcements {
             if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_announcements(stock_code).await {
-                    let result = Self::truncate_announcements_by_asof(result);
-                    let cache_key = Self::cache_key_for("announcements", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
-                    self.cache_set(cache_key, json, 3600).await;
-                    return Ok(result);
+                match vendor.get_announcements(stock_code).await {
+                    Ok(result) => {
+                        if !result.is_empty() {
+                            let result = Self::truncate_announcements_by_asof(result);
+                            let cache_key = Self::cache_key_for("announcements", stock_code);
+                            let json = serde_json::to_string(&result).unwrap_or_default();
+                            self.cache_set(cache_key, json, 3600).await;
+                            return Ok(result);
+                        }
+                        tracing::warn!("[降级] {} 公告返回空，尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} 公告获取失败: {}", name, e);
+                    },
                 }
             }
         }

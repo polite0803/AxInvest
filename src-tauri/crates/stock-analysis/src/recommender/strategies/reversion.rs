@@ -16,6 +16,11 @@ pub struct ReversionStrategy {
 }
 
 impl ReversionStrategy {
+    pub const fn ultra_short() -> Self {
+        Self {
+            period: Period::UltraShort,
+        }
+    }
     pub const fn short() -> Self {
         Self {
             period: Period::Short,
@@ -46,6 +51,7 @@ impl ReversionStrategy {
         let rsi_value = indicators::rsi(&klines, rsi_period)?;
 
         let (pass, reasons) = match self.period {
+            Period::UltraShort => return None, // 超短线不适用超跌反弹
             Period::Short => {
                 let rsi_short_max = read_f64(vars, "rev_rsi_short_max", 35.0);
                 if rsi_value >= rsi_short_max {
@@ -95,6 +101,7 @@ impl ReversionStrategy {
         }
 
         let (entry_low, entry_high, stop_loss, target, base_position) = match self.period {
+            Period::UltraShort => return None,
             Period::Short => {
                 let el = read_f64(vars, "rev_short_entry_low", 0.97);
                 let eh = read_f64(vars, "rev_short_entry_high", 1.03);
@@ -149,6 +156,7 @@ impl ReversionStrategy {
 impl RecommendStrategy for ReversionStrategy {
     fn id(&self) -> &'static str {
         match self.period {
+            Period::UltraShort => "rev_ultra_short",
             Period::Short => "rev_short",
             Period::Mid => "rev_mid",
             Period::Long => "rev_long",
@@ -185,6 +193,7 @@ mod tests {
 
     #[test]
     fn reversion_strategy_ids() {
+        assert_eq!(ReversionStrategy::ultra_short().id(), "rev_ultra_short");
         assert_eq!(ReversionStrategy::short().id(), "rev_short");
         assert_eq!(ReversionStrategy::mid().id(), "rev_mid");
     }

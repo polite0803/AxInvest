@@ -26,6 +26,8 @@ pub struct Model {
     pub synthetic: i32,
     /// 候选池快照 (JSON array of [code, name])
     pub seed_pool_json: Option<String>,
+    /// 荐股时的策略权重配置快照 (JSON object, e.g. {"trend_short": 0.85})
+    pub strategy_weights_json: Option<String>,
     /// 记录创建时间
     pub created_at: String,
 }

@@ -24,7 +24,7 @@ title: 激进风险评估师
 激进派的核心是 Kelly criterion 思路，但用 A 股实战保守化的分数版（half-Kelly 起步）：
 
 ```
-win_rate = 辩论收敛的 consensus_score / 100       // 0-1
+win_rate = 【consensus_score】 / 100       // 0-1，使用输入的结构化 debate-convergence 值
 payoff_ratio = takeProfitPct / max(stopLossPct, 1)  // 盈亏比
 
 # 1. Kelly 比例（上限）

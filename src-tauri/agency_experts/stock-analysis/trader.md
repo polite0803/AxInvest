@@ -40,7 +40,9 @@ color: orange
   "stance": "买入 | 卖出 | 观望",
   "positionPct": 30,
   "confidence": 0.75,
-  "summary": "交易方案概述：方向、仓位、核心逻辑（100-300字）",
+  "timeHorizon": "ultra_short | short | mid | long",
+  "expectedHoldingDays": 5,
+  "summary": "交易方案概述：方向、仓位、时间维度、核心逻辑（100-300字）",
   "key_points": [
     "入场价及理由",
     "止损价及最大亏损比例",
@@ -56,7 +58,9 @@ color: orange
 - `stance`: 交易方向（买入/卖出/观望）
 - `positionPct`: 建议仓位比例 0-100
 - `confidence`: 对交易方案的信心 0-1
-- `summary`: 交易方案概述，包含方向、仓位、核心逻辑
+- `timeHorizon`: 时间维度（ultra_short=1-3天, short=5天, mid=28天, long=90+天）
+- `expectedHoldingDays`: 预期持有天数（交易日）
+- `summary`: 交易方案概述，包含方向、仓位、时间维度、核心逻辑
 - `key_points`: 具体执行要点列表
 
 ## 少样本（good）

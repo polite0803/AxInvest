@@ -1,5 +1,5 @@
 import { makeWorkflowContent, type WorkflowCardData } from "@/components/chat/WorkflowAgentCard";
-import { extractContent, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
+import { extractContent, extractDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { useConversationStore } from "@/stores/domain/conversationStore";
@@ -11,14 +11,15 @@ const activeBridges = new Map<string, UnlistenFn[]>();
 
 const ANALYST_NODE_TO_NAME: Record<string, string> = {
   "a-market-analyst": "market-analyst",
-  "a-sentiment": "sentiment-analyst",
-  "a-news": "news-analyst",
-  "a-fundamentals": "fundamentals-analyst",
-  "a-policy": "policy-analyst",
-  "a-hot-money": "hot-money-tracker",
-  "a-lockup": "lockup-watcher",
-  "a-research": "research-analyst",
-  "a-sector": "sector-analyst",
+  "a-sentiment": "sentiment",
+  "a-news": "news",
+  "a-fundamentals": "fundamentals",
+  "a-policy": "policy",
+  "a-hot-money": "hot-money",
+  "a-lockup": "lockup",
+  "a-research": "research",
+  "a-sector": "sector",
+  "a-catalyst": "catalyst",
 };
 
 const TOOL_NODE_TO_LABEL: Record<string, string> = {
@@ -374,9 +375,15 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       }
     }
 
-    // ── 辩论节点 (DebateNode 子节点: bull-researcher / bear-researcher) ──
-    if (debatesMap.has(nodeId)) {
-      const debater = debatesMap.get(nodeId)!;
+    // ── 辩论节点 (DebateNode 子节点: bull-researcher / bear-researcher / bull-r* / bear-r*) ──
+    const debateNodeId = nodeId === "bull-researcher"
+      ? "bull-r1"
+      : nodeId === "bear-researcher"
+      ? "bear-r1"
+      : nodeId;
+
+    if (debatesMap.has(debateNodeId)) {
+      const debater = debatesMap.get(debateNodeId)!;
       if (status === "running") {
         debater.status = "running";
       } else if (status === "completed") {
@@ -435,13 +442,12 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     let parsedDecision: StockDecision | null = null;
 
     if (pmRaw) {
-      const pmText = extractContent(pmRaw);
-      parsedDecision = tryParseDecision(pmText);
+      parsedDecision = extractDecision(pmRaw);
     }
 
     // 回退到 output
-    if (!parsedDecision && output && typeof output === "object") {
-      parsedDecision = tryParseDecision(JSON.stringify(output)) ?? normalizeDecision(output as Record<string, unknown>);
+    if (!parsedDecision && output !== undefined) {
+      parsedDecision = extractDecision(output);
     }
 
     finalDecision = parsedDecision

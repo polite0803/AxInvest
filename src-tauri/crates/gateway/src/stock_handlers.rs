@@ -164,6 +164,8 @@ pub async fn start_analysis(
         model_version: Set(None),
         data_snapshot_id: Set(None),
         outcome: Set(None),
+        decision_time_horizon: Set(None),
+        decision_expected_holding_days: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     };

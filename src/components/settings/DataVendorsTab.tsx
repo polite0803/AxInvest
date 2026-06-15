@@ -362,7 +362,18 @@ export function DataVendorsTab() {
 
   const checkAll = useCallback(async () => {
     setCheckingAll(true);
-    const names = ["tencent", "eastmoney", "sina", "ths", "cninfo", "baidu_stock", "iwencai", "akshare", "mootdx"];
+    const names = [
+      "tencent",
+      "eastmoney",
+      "sina",
+      "ths",
+      "cninfo",
+      "baidu_stock",
+      "iwencai",
+      "akshare",
+      "mootdx",
+      "xueqiu",
+    ];
     for (const n of names) { setHealth((prev) => ({ ...prev, [n]: "pending" })); }
     for (const n of names) { await checkOne(n); }
     setCheckingAll(false);

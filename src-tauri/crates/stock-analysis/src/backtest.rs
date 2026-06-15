@@ -263,7 +263,11 @@ impl BacktestEngine {
             .map(|(key, group)| {
                 let n = group.len() as f64;
                 let correct_n = group.iter().filter(|r| r.was_correct).count() as f64;
-                let acc = if n > 0.0 { (correct_n / n) * 100.0 } else { 0.0 };
+                let acc = if n > 0.0 {
+                    (correct_n / n) * 100.0
+                } else {
+                    0.0
+                };
                 let avg_r = if n > 0.0 {
                     group.iter().map(|r| r.return_pct).sum::<f64>() / n
                 } else {

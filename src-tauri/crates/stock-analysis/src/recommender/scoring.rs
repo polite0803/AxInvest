@@ -48,11 +48,11 @@ pub fn calc_confidence(
     //   3.0-5.0x → 25% 置信度衰减（异常放量，可能是出货）
     //   >5.0x    → 40% 置信度衰减（极端放量，高概率操纵）
     if turnover_anomaly > 5.0 {
-        c *= 0.60;  // −40%
+        c *= 0.60; // −40%
     } else if turnover_anomaly > 3.0 {
-        c *= 0.75;  // −25%
+        c *= 0.75; // −25%
     } else if turnover_anomaly > 2.0 {
-        c *= 0.90;  // −10%
+        c *= 0.90; // −10%
     }
 
     if c.is_nan() || c.is_infinite() {

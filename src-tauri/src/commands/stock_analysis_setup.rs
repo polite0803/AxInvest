@@ -88,10 +88,7 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "debate-convergence",
         include_str!("../../agency_experts/stock-analysis/debate-convergence.md"),
     ),
-    (
-        "reflection",
-        include_str!("../../agency_experts/stock-analysis/reflection.md"),
-    ),
+    ("reflection", include_str!("../../agency_experts/stock-analysis/reflection.md")),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -492,7 +489,10 @@ async fn seed_stock_analysis_workflow_template(
                 error_config: Set(existing.error_config.clone()),
                 created_at: Set(chrono::Utc::now().timestamp_millis()),
             };
-            snapshot.insert(db).await.map_err(|e| format!("写入版本快照失败: {e}"))?;
+            snapshot
+                .insert(db)
+                .await
+                .map_err(|e| format!("写入版本快照失败: {e}"))?;
             tracing::info!("[stock_analysis_setup] 旧版本快照已保存: {ver_id}");
         }
         old_variables = existing.variables.clone();
@@ -1273,9 +1273,8 @@ async fn seed_stock_analysis_workflow_template(
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
             // 环 A: 注入历史反思教训，让分析师看到该股之前的错因和改进建议
-            a.config.input_mapping = std::collections::HashMap::from([
-                ("stock_lessons".into(), "stock_lessons".into()),
-            ]);
+            a.config.input_mapping =
+                std::collections::HashMap::from([("stock_lessons".into(), "stock_lessons".into())]);
         }
         nodes.push(an);
     }
@@ -1335,12 +1334,11 @@ async fn seed_stock_analysis_workflow_template(
     // 会在旧模板升级时被 merge_variable_values 保留到 old_variables 里；这里
     // 优先读旧值，确保重建后的 DAG 与用户当前意图一致；缺失/越界时回退到 3。
     let debate_max_rounds: usize = match old_variables.as_deref() {
-        Some(s) if !s.is_empty() => {
-            serde_json::from_str::<Vec<serde_json::Value>>(s)
-                .ok()
-                .and_then(|arr| {
-                    arr.into_iter().find_map(|v| {
-                        let name = v.get("name")?.as_str()?;
+        Some(s) if !s.is_empty() => serde_json::from_str::<Vec<serde_json::Value>>(s)
+            .ok()
+            .and_then(|arr| {
+                arr.into_iter().find_map(|v| {
+                    let name = v.get("name")?.as_str()?;
                     if name != "debate_rounds" {
                         return None;
                     }
@@ -1348,8 +1346,7 @@ async fn seed_stock_analysis_workflow_template(
                 })
             })
             .map(|n| n.clamp(1, 10))
-            .unwrap_or(3)
-        },
+            .unwrap_or(3),
         _ => 3,
     };
 
@@ -1629,9 +1626,8 @@ async fn seed_stock_analysis_workflow_template(
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
             // 环 A: 注入历史反思教训
-            a.config.input_mapping = std::collections::HashMap::from([
-                ("stock_lessons".into(), "stock_lessons".into()),
-            ]);
+            a.config.input_mapping =
+                std::collections::HashMap::from([("stock_lessons".into(), "stock_lessons".into())]);
         }
         nodes.push(vi);
         edges.push(edge("e-debate-value-investor", &last_debate_node, vi_id));
@@ -1788,7 +1784,10 @@ async fn seed_stock_analysis_workflow_template(
             a.config.input_mapping = {
                 let mut m = build_analyst_input_mapping(&a_ids);
                 // 注入辩论收敛的 consensus_score 供 Kelly 公式使用
-                m.insert("consensus_score".to_string(), "debate-convergence.params.consensus_score".to_string());
+                m.insert(
+                    "consensus_score".to_string(),
+                    "debate-convergence.params.consensus_score".to_string(),
+                );
                 m
             };
         }
@@ -3632,8 +3631,7 @@ async fn seed_stock_analysis_workflow_template(
     // ── 合并旧版本的变量值（保留用户自定义的评分权重/阈值等）──
     let variables_val = match old_variables {
         Some(ref ov) if !ov.is_empty() => {
-            merge_variable_values(&variables_val, ov)
-                .unwrap_or_else(|_| variables_val.clone())
+            merge_variable_values(&variables_val, ov).unwrap_or_else(|_| variables_val.clone())
         },
         _ => variables_val,
     };
@@ -4175,19 +4173,10 @@ fn build_analyst_input_mapping(a_ids: &[&str]) -> std::collections::HashMap<Stri
     for aid in a_ids {
         // a-market-analyst → market, a-sentiment → sentiment, etc.
         let prefix = aid.strip_prefix("a-").unwrap_or(aid);
-        map.insert(
-            format!("{prefix}_bull_score"),
-            format!("{aid}.params.bull_score"),
-        );
-        map.insert(
-            format!("{prefix}_bear_score"),
-            format!("{aid}.params.bear_score"),
-        );
+        map.insert(format!("{prefix}_bull_score"), format!("{aid}.params.bull_score"));
+        map.insert(format!("{prefix}_bear_score"), format!("{aid}.params.bear_score"));
         // consensus_score = bull - bear（聚合分数）
-        map.insert(
-            format!("{prefix}_consensus"),
-            format!("{aid}.params.consensus_score"),
-        );
+        map.insert(format!("{prefix}_consensus"), format!("{aid}.params.consensus_score"));
     }
     // 为所有辩论/风险节点注入历史反思教训
     map.insert("stock_lessons".into(), "stock_lessons".into());
@@ -4423,7 +4412,10 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 error_config: Set(t.error_config.clone()),
                 created_at: Set(chrono::Utc::now().timestamp_millis()),
             };
-            snapshot.insert(db).await.map_err(|e| format!("写入版本快照失败: {e}"))?;
+            snapshot
+                .insert(db)
+                .await
+                .map_err(|e| format!("写入版本快照失败: {e}"))?;
             tracing::info!("[stock_analysis_setup] 反思模板旧版本快照已保存: {ver_id}");
         }
         // 不再 DELETE，改为 save
@@ -4432,7 +4424,9 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     axagent_core::entity::workflow_template::ActiveModel {
         id: Set("stock-reflection".to_string()),
         name: Set("A股反思复盘".to_string()),
-        description: Set(Some("嵌套 stock-analysis 子工作流的 as-of 重放，注入实际走势结果后反思".to_string())),
+        description: Set(Some(
+            "嵌套 stock-analysis 子工作流的 as-of 重放，注入实际走势结果后反思".to_string(),
+        )),
         icon: Set("search".into()),
         tags: Set(Some(r#"["stock","reflection","A股"]"#.to_string())),
         version: Set(reflection_version),
@@ -4455,7 +4449,8 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     .await
     .map_err(|e| format!("写入反思模板失败: {e}"))?;
 
-    tracing::info!("[stock_analysis_setup] 反思复盘工作流模板已创建 (stock-reflection, SubWorkflowNode 嵌套)");
+    tracing::info!(
+        "[stock_analysis_setup] 反思复盘工作流模板已创建 (stock-reflection, SubWorkflowNode 嵌套)"
+    );
     Ok(())
 }
-

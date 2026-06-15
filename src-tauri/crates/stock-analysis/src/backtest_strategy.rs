@@ -167,7 +167,7 @@ fn detect_trend_ultra_short(klines: &[KLine]) -> Option<f64> {
         return None;
     }
     // 前一日也站上 MA3（确认短期动量持续）
-    if cs[cs.len() - 2] < indicators::sma(&cs[..cs.len()-1], 3)? {
+    if cs[cs.len() - 2] < indicators::sma(&cs[..cs.len() - 1], 3)? {
         return None;
     }
     // 量价配合：当日成交量 > 5日均量
@@ -372,30 +372,54 @@ fn detect_capital_long(klines: &[KLine]) -> Option<f64> {
 fn detect_value_ultra_short(klines: &[KLine]) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
-    if cs.len() < 15 { return None; }
+    if cs.len() < 15 {
+        return None;
+    }
     // 超短线价值回归代理：RSI超卖 + 价格低于均线 + 低波幅
     let rsi6 = indicators::rsi(klines, 6)?;
-    if rsi6 > 35.0 { return None; }  // RSI 超卖区
+    if rsi6 > 35.0 {
+        return None;
+    } // RSI 超卖区
     let ma5 = indicators::sma(&cs, 5)?;
     let ma10 = indicators::sma(&cs, 10)?;
-    if last > ma5.min(ma10) * 0.998 { return None; }  // 价格低于短均
-    // 低波幅确认（不是单纯暴跌）
-    let high5 = klines.iter().rev().take(5).map(|k| k.high).fold(0.0_f64, f64::max);
-    let low5 = klines.iter().rev().take(5).map(|k| k.low).fold(f64::MAX, f64::min);
-    if high5 - low5 > low5 * 0.08 { return None; }  // 5日振幅 > 8% 则跳过（太剧烈）
+    if last > ma5.min(ma10) * 0.998 {
+        return None;
+    } // 价格低于短均
+      // 低波幅确认（不是单纯暴跌）
+    let high5 = klines
+        .iter()
+        .rev()
+        .take(5)
+        .map(|k| k.high)
+        .fold(0.0_f64, f64::max);
+    let low5 = klines
+        .iter()
+        .rev()
+        .take(5)
+        .map(|k| k.low)
+        .fold(f64::MAX, f64::min);
+    if high5 - low5 > low5 * 0.08 {
+        return None;
+    } // 5日振幅 > 8% 则跳过（太剧烈）
     Some(last)
 }
 
 fn detect_capital_ultra_short(klines: &[KLine]) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
-    if cs.len() < 5 { return None; }
+    if cs.len() < 5 {
+        return None;
+    }
     // 超短线资金驱动：放量 + 上涨
     let avg_amt_5 = indicators::avg_amount_n(klines, 5)?;
     let today_amt = klines.last()?.amount;
-    if avg_amt_5 <= 0.0 || today_amt < avg_amt_5 * 1.5 { return None; }
+    if avg_amt_5 <= 0.0 || today_amt < avg_amt_5 * 1.5 {
+        return None;
+    }
     let ma3 = indicators::sma(&cs, 3)?;
-    if last < ma3 { return None; }
+    if last < ma3 {
+        return None;
+    }
     Some(last)
 }
 
@@ -754,11 +778,10 @@ fn aggregate(sid: &str, style: &str, period: &str, sigs: &[StrategySignalResult]
         let returns: Vec<f64> = sigs.iter().map(|s| s.return_pct / 100.0).collect();
         let n = returns.len() as f64;
         let avg_r = returns.iter().sum::<f64>() / n;
-        let var =
-            returns.iter().map(|r| (r - avg_r).powi(2)).sum::<f64>() / (n - 1.0);
+        let var = returns.iter().map(|r| (r - avg_r).powi(2)).sum::<f64>() / (n - 1.0);
         if var > 0.0 {
             let std = var.sqrt();
-            Some(avg_r / std)  // 信号级夏普，无风险利率=0
+            Some(avg_r / std) // 信号级夏普，无风险利率=0
         } else {
             None
         }

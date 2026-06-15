@@ -890,7 +890,10 @@ impl NodeExecutorTrait for AgentExecutor {
             an.base.id,
             display_text.len(),
             params.is_object() || params.is_array(),
-            &safe_content[..safe_content.char_indices().nth(80).map_or(safe_content.len(), |(i, _)| i)]
+            &safe_content[..safe_content
+                .char_indices()
+                .nth(80)
+                .map_or(safe_content.len(), |(i, _)| i)]
         );
 
         // ── 4j. 构建输出 ──

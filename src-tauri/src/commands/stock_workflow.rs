@@ -295,8 +295,11 @@ fn extract_decision_fields(
         .get("expectedHoldingDays")
         .or_else(|| parsed.get("expected_holding_days"))
         .and_then(|v| {
-            if v.is_number() { v.as_u64().map(|n| n as u32) }
-            else { None }
+            if v.is_number() {
+                v.as_u64().map(|n| n as u32)
+            } else {
+                None
+            }
         });
     (action, position_pct, reasoning, time_horizon, expected_holding_days)
 }
@@ -766,8 +769,13 @@ async fn run_stock_workflow_inner(
                                     .get("portfolio-mgr")
                                     .and_then(|v| serde_json::to_string(v).ok())
                             });
-                        let (mut action, position_pct, mut reasoning, time_horizon, expected_holding_days) =
-                            extract_decision_fields(&decision_json);
+                        let (
+                            mut action,
+                            position_pct,
+                            mut reasoning,
+                            time_horizon,
+                            expected_holding_days,
+                        ) = extract_decision_fields(&decision_json);
                         // Level 1: min_confidence 过滤 — 若 LLM 自报置信度低于阈值，
                         // 将 action 覆盖为 "uncertain" 并标注在 reasoning 中
                         if min_confidence > 0 {
@@ -1210,18 +1218,20 @@ pub async fn run_reflection_workflow(
     let wf_id = workflow.id.clone();
 
     // 4. 加载原始决策的时间维度信息
-    let original_time_horizon: Option<String> = stock_analyses::Entity::find_by_id(original_analysis_id)
-        .one(db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|a| a.decision_time_horizon);
-    let original_holding_days: Option<i64> = stock_analyses::Entity::find_by_id(original_analysis_id)
-        .one(db)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|a| a.decision_expected_holding_days.map(|d| d as i64));
+    let original_time_horizon: Option<String> =
+        stock_analyses::Entity::find_by_id(original_analysis_id)
+            .one(db)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|a| a.decision_time_horizon);
+    let original_holding_days: Option<i64> =
+        stock_analyses::Entity::find_by_id(original_analysis_id)
+            .one(db)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|a| a.decision_expected_holding_days.map(|d| d as i64));
 
     // 5. 注入变量
     let opts = axagent_rt_workflow::work_engine::RunOptions {
@@ -1250,8 +1260,13 @@ pub async fn run_reflection_workflow(
             axagent_harness::workflow_types::Variable {
                 name: "original_time_horizon".into(),
                 var_type: "string".into(),
-                value: serde_json::Value::String(original_time_horizon.unwrap_or_else(|| "unknown".to_string())),
-                description: Some("原始决策的时间维度：ultra_short(1-3天)/short(5天)/mid(28天)/long(90天+)".into()),
+                value: serde_json::Value::String(
+                    original_time_horizon.unwrap_or_else(|| "unknown".to_string()),
+                ),
+                description: Some(
+                    "原始决策的时间维度：ultra_short(1-3天)/short(5天)/mid(28天)/long(90天+)"
+                        .into(),
+                ),
                 is_secret: false,
             },
             axagent_harness::workflow_types::Variable {

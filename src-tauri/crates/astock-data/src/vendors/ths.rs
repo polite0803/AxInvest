@@ -55,7 +55,10 @@ impl StockVendor for ThsVendor {
 
         let text = resp.text().await?;
         let json: Value = serde_json::from_str(&text).map_err(|e| {
-            DataError::ParseError(format!("ths news parse failed: {e}, raw: {}", &text[..text.len().min(120)]))
+            DataError::ParseError(format!(
+                "ths news parse failed: {e}, raw: {}",
+                &text[..text.len().min(120)]
+            ))
         })?;
 
         // ths 返回格式: { "data": { "items": [...] } } 或 { "status_code": 0, "data": [...] }

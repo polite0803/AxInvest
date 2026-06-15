@@ -838,23 +838,20 @@ pub async fn run_replay_backtest(
             },
         };
         let effective_holding = item.expected_holding_days.unwrap_or(holding_days);
-        let result = as_of::with_optional_asof(
-            Some(ctx),
-            async {
-                BacktestEngine::backtest_decision(
-                        &state.astock_client,
-                        &item.stock_code,
-                        &item.as_of_date,
-                        &item.decision_action,
-                        item.decision_confidence,
-                        effective_holding,
-                        item.time_horizon.clone(),
-                        item.expected_holding_days,
-                    )
-                    .await
-                },
+        let result = as_of::with_optional_asof(Some(ctx), async {
+            BacktestEngine::backtest_decision(
+                &state.astock_client,
+                &item.stock_code,
+                &item.as_of_date,
+                &item.decision_action,
+                item.decision_confidence,
+                effective_holding,
+                item.time_horizon.clone(),
+                item.expected_holding_days,
             )
-            .await;
+            .await
+        })
+        .await;
 
         match result {
             Ok(r) => results.push(r),
@@ -1420,8 +1417,8 @@ pub async fn preview_adjust_reco_weights(
     state: State<'_, AppState>,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    use axagent_stock_analysis::backtest_strategy::adjust_strategy_weights;
     use axagent_core::entity::workflow_template;
+    use axagent_stock_analysis::backtest_strategy::adjust_strategy_weights;
     use std::collections::BTreeMap;
 
     let db = state.harness.db();
@@ -1571,10 +1568,7 @@ pub async fn apply_reco_weights(
     // 4. 写回 DB
     let vars_str = serde_json::to_string(&vars).map_err(|e| e.to_string())?;
     workflow_template::Entity::update_many()
-        .col_expr(
-            workflow_template::Column::Variables,
-            Expr::value(vars_str),
-        )
+        .col_expr(workflow_template::Column::Variables, Expr::value(vars_str))
         .filter(workflow_template::Column::Id.eq("stock-analysis"))
         .exec(db)
         .await
@@ -2250,10 +2244,11 @@ pub async fn delete_stock_cron(state: State<'_, AppState>, id: String) -> Result
 pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
     // 对需要 token/密钥的 vendor，先从数据库加载凭据到内存
     if vendor == "xueqiu" || vendor == "iwencai" {
-        let template = axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")
-            .one(state.harness.db())
-            .await
-            .map_err(|e| e.to_string())?;
+        let template =
+            axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")
+                .one(state.harness.db())
+                .await
+                .map_err(|e| e.to_string())?;
         if let Some(t) = template {
             let vars = extract_template_vars(&t);
             for (name, value) in &vars {
@@ -2330,7 +2325,9 @@ pub async fn recommend_stocks(
         // 构建策略权重快照（用于回溯某次荐股时的权重配置）
         let strategy_weights_json: Option<String> = {
             let vars_clone: Vec<(String, serde_json::Value)> = vars.clone();
-            vars_clone.iter().find(|(k, _)| k == "reco_strategy_weights")
+            vars_clone
+                .iter()
+                .find(|(k, _)| k == "reco_strategy_weights")
                 .and_then(|(_, v)| {
                     if v.is_object() {
                         Some(v.to_string())
@@ -2508,7 +2505,9 @@ pub async fn get_latest_analyses_for_stocks(
                 status: model.status,
                 outcome: model.outcome,
                 decision_time_horizon: model.decision_time_horizon,
-                decision_expected_holding_days: model.decision_expected_holding_days.map(|d| d as i32),
+                decision_expected_holding_days: model
+                    .decision_expected_holding_days
+                    .map(|d| d as i32),
             }
         });
 
@@ -2850,7 +2849,10 @@ pub async fn apply_param_suggestions(
 
     // 2. 逐个更新
     for update in &updates {
-        let param_name = update.get("param").and_then(|v| v.as_str()).ok_or("缺少 param")?;
+        let param_name = update
+            .get("param")
+            .and_then(|v| v.as_str())
+            .ok_or("缺少 param")?;
         let new_value = update.get("value").ok_or("缺少 value")?;
 
         // 找到匹配的变量并更新 value
@@ -2878,14 +2880,8 @@ pub async fn apply_param_suggestions(
     let vars_json = serde_json::to_string(&vars).map_err(|e| format!("序列化失败: {e}"))?;
     let now = chrono::Utc::now().timestamp_millis();
     workflow_template::Entity::update_many()
-        .col_expr(
-            workflow_template::Column::Variables,
-            Expr::value(vars_json),
-        )
-        .col_expr(
-            workflow_template::Column::UpdatedAt,
-            Expr::value(now),
-        )
+        .col_expr(workflow_template::Column::Variables, Expr::value(vars_json))
+        .col_expr(workflow_template::Column::UpdatedAt, Expr::value(now))
         .filter(workflow_template::Column::Id.eq("stock-analysis"))
         .exec(db)
         .await

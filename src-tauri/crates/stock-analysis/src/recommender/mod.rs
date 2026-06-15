@@ -88,6 +88,7 @@ pub(crate) fn parse_strategy_weights(
 // 改为 HashMap<(Period, String), (RecoResponse, Instant)> 后多 period 独立缓存。
 // replay 模式后缀为 `asof-YYYYMMDD`，由 `as_of::cache_suffix()` 提供。
 
+#[allow(clippy::type_complexity)]
 static RESULT_CACHE: LazyLock<RwLock<HashMap<(Period, String), (RecoResponse, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 /// 缓存 TTL：从 5 min 缩短到 60 s。

@@ -75,7 +75,7 @@ impl TrendStrategy {
                     let ma_period_2 = read_f64(vars, "trend_ma_ultra_short_2", 10.0) as usize;
                     let ma5 = indicators::sma(&cs, ma_period_1)?;
                     let ma10 = indicators::sma(&cs, ma_period_2)?;
-                    if !(ma5 > ma10) {
+                    if ma5 <= ma10 {
                         return None;
                     }
                     let high_period = read_f64(vars, "trend_high_ultra_short_period", 5.0) as usize;

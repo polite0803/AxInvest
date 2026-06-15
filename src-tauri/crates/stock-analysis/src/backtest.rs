@@ -95,6 +95,7 @@ impl BacktestEngine {
     ///
     /// 策略：假设在 `analysis_date` 以收盘价入场，持有 `holding_days` 后以收盘价出场。
     /// 从 API 获取 `holding_days + 10` 根日 K 线以覆盖分析日之后的数据。
+    #[allow(clippy::too_many_arguments)]
     pub async fn backtest_decision(
         client: &axagent_astock_data::AStockClient,
         stock_code: &str,

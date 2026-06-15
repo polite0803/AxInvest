@@ -870,7 +870,7 @@ pub fn adjust_strategy_weights(
         weights.insert(sid.clone(), (weight * 100.0).round() / 100.0);
     }
     if weights.is_empty() {
-        return Err("无足够回测数据（至少需 5 个信号）".to_string());
+        return Ok(weights); // 无策略可调整时返回空 map，非错误
     }
     Ok(weights)
 }

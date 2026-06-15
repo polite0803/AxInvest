@@ -67,7 +67,6 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
             style TEXT NOT NULL, confidence INTEGER NOT NULL DEFAULT 0, \
             synthetic INTEGER NOT NULL DEFAULT 0, \
             seed_pool_json TEXT, created_at TEXT NOT NULL)",
-        "ALTER TABLE reco_picks ADD COLUMN strategy_weights_json TEXT",
         // ========================================================================
         // SECTION L: AxInvest — Quant (量化交易 + 量化回测)
         // ========================================================================
@@ -205,6 +204,7 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
         "ALTER TABLE stock_analyses ADD COLUMN outcome TEXT DEFAULT 'pending'",
         "ALTER TABLE stock_analyses ADD COLUMN decision_time_horizon TEXT",
         "ALTER TABLE stock_analyses ADD COLUMN decision_expected_holding_days INTEGER",
+        "ALTER TABLE reco_picks ADD COLUMN strategy_weights_json TEXT",
     ] {
         let _ = db.execute_unprepared(sql).await;
     }

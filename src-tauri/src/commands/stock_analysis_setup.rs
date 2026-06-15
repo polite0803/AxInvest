@@ -4374,17 +4374,24 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         }
     ]);
 
-    let existing = axagent_core::entity::workflow_template::Entity::find_by_id("stock-reflection")
-        .one(db)
-        .await
-        .map_err(|e| format!("查重失败: {e}"))?;
-    let reflection_version = match &existing {
-        Some(t) => t.version + 1, // 递增
-        None => 1,                // 初次创建
-    };
-    // 如果已有记录，保存旧版本快照
-    if let Some(ref t) = existing {
-        let ver_id = format!("stock-reflection_v{}", t.version);
+    const REFLECTION_TEMPLATE_VERSION: i32 = 1;
+
+    // 版本检查：已有同版本或更新的记录则跳过
+    if let Some(ref existing) =
+        axagent_core::entity::workflow_template::Entity::find_by_id("stock-reflection")
+            .one(db)
+            .await
+            .map_err(|e| format!("查重失败: {e}"))?
+    {
+        if existing.version >= REFLECTION_TEMPLATE_VERSION {
+            tracing::info!(
+                "[stock_analysis_setup] 反思模板已是最新 v{}，跳过种子化",
+                existing.version
+            );
+            return Ok(());
+        }
+        // 旧版本 → 保存快照
+        let ver_id = format!("stock-reflection_v{}", existing.version);
         if axagent_core::entity::workflow_template_version::Entity::find_by_id(&ver_id)
             .one(db)
             .await
@@ -4395,21 +4402,21 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             let snapshot = axagent_core::entity::workflow_template_version::ActiveModel {
                 id: Set(ver_id.clone()),
                 template_id: Set("stock-reflection".to_string()),
-                name: Set(t.name.clone()),
-                description: Set(t.description.clone()),
-                icon: Set(t.icon.clone()),
-                tags: Set(t.tags.clone()),
-                version: Set(t.version),
-                is_preset: Set(t.is_preset),
-                is_editable: Set(t.is_editable),
-                is_public: Set(t.is_public),
-                trigger_config: Set(t.trigger_config.clone()),
-                nodes: Set(t.nodes.clone()),
-                edges: Set(t.edges.clone()),
-                input_schema: Set(t.input_schema.clone()),
-                output_schema: Set(t.output_schema.clone()),
-                variables: Set(t.variables.clone()),
-                error_config: Set(t.error_config.clone()),
+                name: Set(existing.name.clone()),
+                description: Set(existing.description.clone()),
+                icon: Set(existing.icon.clone()),
+                tags: Set(existing.tags.clone()),
+                version: Set(existing.version),
+                is_preset: Set(existing.is_preset),
+                is_editable: Set(existing.is_editable),
+                is_public: Set(existing.is_public),
+                trigger_config: Set(existing.trigger_config.clone()),
+                nodes: Set(existing.nodes.clone()),
+                edges: Set(existing.edges.clone()),
+                input_schema: Set(existing.input_schema.clone()),
+                output_schema: Set(existing.output_schema.clone()),
+                variables: Set(existing.variables.clone()),
+                error_config: Set(existing.error_config.clone()),
                 created_at: Set(chrono::Utc::now().timestamp_millis()),
             };
             snapshot
@@ -4418,7 +4425,6 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 .map_err(|e| format!("写入版本快照失败: {e}"))?;
             tracing::info!("[stock_analysis_setup] 反思模板旧版本快照已保存: {ver_id}");
         }
-        // 不再 DELETE，改为 save
     }
 
     axagent_core::entity::workflow_template::ActiveModel {
@@ -4429,7 +4435,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         )),
         icon: Set("search".into()),
         tags: Set(Some(r#"["stock","reflection","A股"]"#.to_string())),
-        version: Set(reflection_version),
+        version: Set(REFLECTION_TEMPLATE_VERSION),
         is_preset: Set(true),
         is_editable: Set(true),
         is_public: Set(true),

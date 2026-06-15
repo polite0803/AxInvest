@@ -255,7 +255,9 @@ export function ReflectionPanel() {
               expandable={{
                 expandedRowKeys: expandedId ? [expandedId] : [],
                 onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedId(keys[0] as string || null),
-                expandedRowRender: (r: ReflectionRow) => <ExpandedReflectionRow row={r} t={t as (key: string, opts?: object) => string} />,
+                expandedRowRender: (r: ReflectionRow) => (
+                  <ExpandedReflectionRow row={r} t={t as (key: string, opts?: object) => string} />
+                ),
               }}
             >
               <Table.Column title={t("stockAnalysis.reflection.colCode")} dataIndex="stockCode" width={90} />
@@ -302,7 +304,6 @@ interface ParamSuggestion {
   suggested_value: number;
   reason: string;
 }
-
 
 function parseParamsSuggestion(row: ReflectionRow): ParamSuggestion[] {
   if (!row.decisionJson) { return []; }

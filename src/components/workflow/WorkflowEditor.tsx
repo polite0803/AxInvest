@@ -1856,7 +1856,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         reactFlowInstance?.setNodes(updatedNodes);
       }
     },
-    [updateNode, reactFlowInstance],
+    [updateNode, reactFlowInstance, nodes, parentRefs],
   );
 
   const handleEdgesChange = useCallback(

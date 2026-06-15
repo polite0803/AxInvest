@@ -146,7 +146,7 @@ export function DecisionBanner() {
   if (emptyDecision) { return null; }
 
   // ── 决策 vs 分析师共识矛盾检测 ──
-  const isContradictory = useMemo(() => {
+  const isContradictory = (() => {
     if (!analystReports || Object.keys(analystReports).length < 3 || !decision) { return false; }
     const consensus = computeStockConsensus(analystReports, undefined, decision.timeHorizon);
     const isBullishAction = decision.action === "BUY" || decision.action === "INCREASE";
@@ -154,7 +154,7 @@ export function DecisionBanner() {
     if (isBullishAction && (consensus.consensus === "bearish" || consensus.consensus === "divided")) { return true; }
     if (isBearishAction && (consensus.consensus === "bullish" || consensus.consensus === "divided")) { return true; }
     return false;
-  }, [decision, analystReports]);
+  })();
 
   const confidencePct = Math.round(decision.confidence ?? 0);
   const meterColor = confidencePct >= 70

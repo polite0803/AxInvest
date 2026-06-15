@@ -32,6 +32,7 @@ function NodeBadge({ name }: { name: string }) {
 
 /** 证据 chip:点击 → useRightPanel.navigateTo */
 function EvidenceChip({ evidence: ev }: { evidence: EvidenceRef }) {
+  const { t } = useTranslation();
   const { navigateTo } = useRightPanel();
   return (
     <button
@@ -45,7 +46,7 @@ function EvidenceChip({ evidence: ev }: { evidence: EvidenceRef }) {
       onClick={() => navigateTo(ev.tabKey, ev.panelKey, ev.anchor)}
       title={`${ev.tabKey} / ${ev.panelKey}`}
     >
-      🔗 {ev.snippet}
+      🔗 {t(`stockAnalysis.evidence.${ev.panelKey}`, ev.snippet)}
     </button>
   );
 }

@@ -8711,20 +8711,21 @@
         "fundamentals": "Fundamentals Analyst",
         "fundamentals-analyst": "Fundamentals Analyst",
         "hot-money": "Capital Flow Analyst",
-        "hot-money-tracker": "Capital Flow Tracker",
-        "lockup": "Lockup Observer",
-        "lockup-watcher": "Lockup Observer",
+        "hot-money-tracker": "Capital Flow Analyst",
+        "lockup": "Lockup Monitor",
+        "lockup-watcher": "Lockup Monitor",
         "market-analyst": "Technical Analyst",
         "news": "News Analyst",
         "news-analyst": "News Analyst",
         "policy": "Policy Analyst",
         "policy-analyst": "Policy Analyst",
-        "research": "Research Report Analyst",
+        "research": "Research Analyst",
         "research-analyst": "Research Analyst",
         "sector": "Sector Analyst",
         "sector-analyst": "Sector Analyst",
         "sentiment": "Sentiment Analyst",
-        "sentiment-analyst": "Sentiment Analyst"
+        "sentiment-analyst": "Sentiment Analyst",
+        "investment-plan": "Investment Plan"
       },
       "analystComplete": "Analysis complete. View the detailed report on the analysis page.",
       "analystFallback": "Analyst",
@@ -8804,7 +8805,20 @@
       "vValidate": "Validate Data"
     },
     "workflowStarting": "⏳ Starting {{stockCode}} stock analysis workflow...",
-    "yiUnit": "100M"
+    "yiUnit": "100M",
+    "evidence": {
+      "concepts": "Fundamentals / Valuation",
+      "announcements": "News / Policy",
+      "industry": "Industry Ranking",
+      "screener": "Screener Score",
+      "north": "Northbound / Risk",
+      "analysts": "Analyst Reports",
+      "debate": "Bull-Bear Debate",
+      "risk": "Risk Assessment",
+      "value": "Valuation",
+      "trade": "Trading Plan",
+      "decision": "Final Decision"
+    }
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

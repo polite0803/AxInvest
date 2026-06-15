@@ -1,7 +1,6 @@
 // ── 运行时工具函数（实现已在 @/lib/stock-analysis-utils.ts） ──
 // 向后兼容的 re-export，新代码应直接从 @/lib/stock-analysis-utils 导入
 export {
-  ANALYST_NAMES,
   classifySentiment,
   computeStockConsensus,
   type Consensus,

@@ -486,26 +486,4 @@ export function computeStockConsensus(
   };
 }
 
-// ── 分析师名称映射 ──
-
-export const ANALYST_NAMES: Record<string, string> = {
-  "market-analyst": "技术分析师",
-  "sentiment-analyst": "情绪分析师",
-  "sentiment": "情绪分析师",
-  "news-analyst": "消息面分析师",
-  "news": "消息面分析师",
-  "fundamentals-analyst": "基本面分析师",
-  "fundamentals": "基本面分析师",
-  "policy-analyst": "政策分析师",
-  "policy": "政策分析师",
-  "hot-money-tracker": "资金面分析师",
-  "hot-money": "资金面分析师",
-  "lockup-watcher": "解禁观察员",
-  "lockup": "解禁观察员",
-  "research-analyst": "券商研报分析师",
-  "research": "券商研报分析师",
-  "sector-analyst": "行业分析师",
-  "sector": "行业分析师",
-  "catalyst": "催化剂与叙事分析师",
-  "investment-plan": "投资规划",
-};
+// ── 分析师名称映射（已迁移至 i18n: stockAnalysis.workflow.analyst.*）──

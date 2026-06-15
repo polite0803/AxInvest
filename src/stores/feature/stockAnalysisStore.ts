@@ -1427,16 +1427,16 @@ function inferEvidenceRefs(
   }
   // 风险/研究/价值/规则
   if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
-    return [{ tabKey: "analyze", panelKey: "risk", snippet: "风险评估" }];
+    return [{ tabKey: "analyze", panelKey: "risk", snippet: "Risk Assessment" }];
   }
   if (nodeId === "value-investor") {
-    return [{ tabKey: "analyze", panelKey: "value", snippet: "价值评估" }];
+    return [{ tabKey: "analyze", panelKey: "value", snippet: "Valuation" }];
   }
   if (nodeId === "trader") {
-    return [{ tabKey: "execute", panelKey: "trade", snippet: "交易计划" }];
+    return [{ tabKey: "execute", panelKey: "trade", snippet: "Trading Plan" }];
   }
   if (nodeId === "portfolio-mgr" || nodeId === "rule-check") {
-    return [{ tabKey: "analyze", panelKey: "decision", snippet: "最终决策" }];
+    return [{ tabKey: "analyze", panelKey: "decision", snippet: "Final Decision" }];
   }
   return [];
 }

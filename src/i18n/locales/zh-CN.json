@@ -7952,14 +7952,24 @@
       "analyst": {
         "market-analyst": "技术分析师",
         "sentiment-analyst": "情绪分析师",
-        "news-analyst": "新闻分析师",
+        "news-analyst": "消息面分析师",
         "fundamentals-analyst": "基本面分析师",
         "policy-analyst": "政策分析师",
-        "hot-money-tracker": "资金追踪师",
-        "lockup-watcher": "解禁观察师",
-        "research-analyst": "研报分析师",
+        "hot-money-tracker": "资金面分析师",
+        "lockup-watcher": "解禁观察员",
+        "research-analyst": "券商研报分析师",
         "sector-analyst": "行业分析师",
-        "catalyst-analyst": "催化剂与叙事分析师"
+        "catalyst-analyst": "催化剂与叙事分析师",
+        "sentiment": "情绪分析师",
+        "news": "消息面分析师",
+        "fundamentals": "基本面分析师",
+        "policy": "政策分析师",
+        "hot-money": "资金面分析师",
+        "lockup": "解禁观察员",
+        "research": "券商研报分析师",
+        "sector": "行业分析师",
+        "catalyst": "催化剂与叙事分析师",
+        "investment-plan": "投资规划"
       },
       "analystComplete": "分析完畢，请在分析页查看详细报告",
       "decisionTitle": "最終决策",
@@ -8817,6 +8827,19 @@
       "1w": "周线",
       "1M": "月线",
       "zoomHint": "框选缩放"
+    },
+    "evidence": {
+      "concepts": "基本面/估值数据",
+      "announcements": "新闻/政策公告",
+      "industry": "行业排名",
+      "screener": "推荐评分",
+      "north": "北向资金/风险",
+      "analysts": "分析师报告",
+      "debate": "多空辩论",
+      "risk": "风险评估",
+      "value": "价值评估",
+      "trade": "交易计划",
+      "decision": "最终决策"
     }
   },
   "trade": {

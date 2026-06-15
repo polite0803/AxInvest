@@ -1,5 +1,4 @@
 import { useSettingsStore } from "@/stores";
-import { ANALYST_NAMES } from "@/types/stock-analysis";
 import { getSignalColor } from "@/types/stock-analysis";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
@@ -194,7 +193,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
   const themeMode = useSettingsStore((s) => s.settings.theme_mode);
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  const name = t(`stockAnalysis.workflow.analyst.${expertId}`, ANALYST_NAMES[expertId] ?? expertId);
+  const name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
   const cleanedReport = cleanToolCallTags(report);
   const beautified = tryBeautifyJson(cleanedReport);
   const parsed = tryParse(beautified);

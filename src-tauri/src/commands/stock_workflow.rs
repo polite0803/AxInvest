@@ -263,6 +263,7 @@ async fn load_and_inject_template(
 
 /// 工作流结果 → blackboard_snapshot — 现已委托给 axagent-stock-analysis::blackboard 模块
 /// 此处保留占位以便未来重新内联
+#[allow(clippy::type_complexity)]
 fn extract_decision_fields(
     decision_json: &Option<String>,
 ) -> (Option<String>, Option<f64>, Option<String>, Option<String>, Option<u32>) {

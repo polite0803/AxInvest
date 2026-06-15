@@ -760,7 +760,7 @@ pub async fn backtest_all_history(
                     .unwrap_or_else(|| "持有".to_string()),
                 decision_confidence: confidence,
                 time_horizon: a.decision_time_horizon.clone(),
-                expected_holding_days: a.decision_expected_holding_days.clone(),
+                expected_holding_days: a.decision_expected_holding_days,
             }
         })
         .collect();

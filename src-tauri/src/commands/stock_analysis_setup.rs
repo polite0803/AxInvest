@@ -4451,7 +4451,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         created_at: Set(now),
         updated_at: Set(now),
     }
-    .insert(db)
+    .save(db)
     .await
     .map_err(|e| format!("写入反思模板失败: {e}"))?;
 

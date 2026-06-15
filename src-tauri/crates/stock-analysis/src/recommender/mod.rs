@@ -543,10 +543,13 @@ mod tests {
             .expect("replay cache miss after put");
         assert_eq!(replay_cached.generated_at, 2);
 
-        // 5) 切回 live 后再读：suffix 变化，cache miss
-        assert!(
-            cache_get(Period::Short).is_none(),
-            "after leaving replay scope, live cache should miss (suffix changed)"
+        // 5) 切回 live 后再读：不会读到 replay 写入的脏数据，应返回 step 1 的 live entry
+        let live_hit = cache_get(Period::Short);
+        assert!(live_hit.is_some(), "live cache entry from step 1 should still exist");
+        assert_eq!(
+            live_hit.unwrap().generated_at,
+            1,
+            "replay entry (generated_at=2) must not leak into live cache"
         );
 
         // 6) live scope 再次写入 → 覆盖

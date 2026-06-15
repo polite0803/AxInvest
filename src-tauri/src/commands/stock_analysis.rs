@@ -838,7 +838,7 @@ pub async fn run_replay_backtest(
             },
         };
         let effective_holding = item.expected_holding_days.unwrap_or(holding_days);
-        let result = as_of::with_optional_asof(Some(ctx), async {
+        let result = as_of::with_optional_asof(ctx, async {
             BacktestEngine::backtest_decision(
                 &state.astock_client,
                 &item.stock_code,
@@ -2460,7 +2460,6 @@ pub async fn get_latest_analyses_for_stocks(
     stock_codes: Vec<String>,
     as_of_date: Option<String>,
 ) -> Result<std::collections::HashMap<String, Option<LatestAnalysisSummary>>, String> {
-    use sea_orm::sea_query::Expr;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
     let db = state.harness.db();

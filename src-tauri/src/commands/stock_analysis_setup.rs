@@ -470,7 +470,7 @@ async fn seed_stock_analysis_workflow_template(
         {
             use sea_orm::ActiveModelTrait;
             let snapshot = axagent_core::entity::workflow_template_version::ActiveModel {
-                id: Set(ver_id),
+                id: Set(ver_id.clone()),
                 template_id: Set(TEMPLATE_ID.to_string()),
                 name: Set(existing.name.clone()),
                 description: Set(existing.description.clone()),

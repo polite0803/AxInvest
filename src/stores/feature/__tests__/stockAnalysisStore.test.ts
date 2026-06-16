@@ -418,7 +418,7 @@ describe("stockAnalysisStore - feature coverage", () => {
       expect(state.llmStatus).toBe("unknown");
     });
 
-    it("错误信息包含 'LLM' → status: 'running' (LLM 回退时保持运行态)", async () => {
+    it("错误信息包含 'LLM' → status: 'completed' (LLM 回退时工作流已终止)", async () => {
       const errorHandler = await setupErrorHandler();
 
       errorHandler({
@@ -426,12 +426,12 @@ describe("stockAnalysisStore - feature coverage", () => {
       });
 
       const state = useStockAnalysisStore.getState();
-      expect(state.status).toBe("running");
+      expect(state.status).toBe("completed");
       expect(state.llmStatus).toBe("placeholder");
     });
 
-    // 修复 #9 后: store 将用结构化 errorCode 字段替代 msg.includes("LLM") 字符串匹配
-    it("使用 errorCode: 'LLM_FALLBACK' 也能触发 running 状态 (修复 #9 后启用)", async () => {
+    // 修复 #4: LLM 错误时 status 为 completed（llmStatus="placeholder" 已表达降级语义）
+    it("使用 errorCode: 'LLM_FALLBACK' 也能触发 completed 状态", async () => {
       const errorHandler = await setupErrorHandler();
 
       errorHandler({
@@ -439,7 +439,7 @@ describe("stockAnalysisStore - feature coverage", () => {
       });
 
       const state = useStockAnalysisStore.getState();
-      expect(state.status).toBe("running");
+      expect(state.status).toBe("completed");
       expect(state.llmStatus).toBe("placeholder");
       expect(state.errorCode).toBe("LLM_FALLBACK");
     });

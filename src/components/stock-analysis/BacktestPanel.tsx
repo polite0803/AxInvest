@@ -2,8 +2,8 @@ import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBad
 import { invoke } from "@/lib/invoke";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { BacktestComparisonResponse, BacktestStats, GroupBacktestResult } from "@/types/stock-analysis";
-import { Alert, Button, Card, Empty, Segmented, Spin, Statistic, Table, Tag, Tooltip } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { Alert, Button, Card, Empty, InputNumber, Segmented, Spin, Statistic, Table, Tag, Tooltip } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type BacktestScope = "all" | "live" | "replay";
@@ -16,7 +16,8 @@ export function BacktestPanel() {
   const [stats, setStats] = useState<BacktestStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(false);
-  const holdingDays = 5;
+  // Bug 5 修复: 持有天数改为可配置(原硬编码 5)
+  const [holdingDays, setHoldingDays] = useState<number>(5);
   const isReplay = anchorMode === "replay" && asOfDate !== null;
 
   // ── 策略回测状态 ──
@@ -24,7 +25,16 @@ export function BacktestPanel() {
   const [strategyLoading, setStrategyLoading] = useState(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
 
-  const load = async () => {
+  // Bug 4 修复: 统一请求级取消令牌
+  const reqTokenRef = useRef(0);
+
+  /**
+   * 统一加载入口(useEffect 与"重试"按钮共用)。
+   * 旧的 `load` 没有任何取消机制,与 useEffect 的 `cancelled` 各管各的,
+   * 快速连点"重试"会拿到乱序 stats。
+   */
+  const load = useCallback(async () => {
+    const myToken = ++reqTokenRef.current;
     setLoading(true);
     setFetchError(false);
     try {
@@ -32,38 +42,19 @@ export function BacktestPanel() {
         holdingDays,
         scope,
       });
+      if (myToken !== reqTokenRef.current) { return; }
       setStats(result);
     } catch {
+      if (myToken !== reqTokenRef.current) { return; }
       setFetchError(true);
+    } finally {
+      if (myToken === reqTokenRef.current) { setLoading(false); }
     }
-    setLoading(false);
-  };
+  }, [holdingDays, scope]);
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setLoading(true);
-      setFetchError(false);
-      return invoke<BacktestStats>("backtest_all_history", {
-        holdingDays,
-        scope,
-      });
-    })
-      .then((result) => {
-        if (cancelled || !result) { return; }
-        setStats(result);
-      })
-      .catch(() => {
-        if (!cancelled) { setFetchError(true); }
-      })
-      .finally(() => {
-        if (!cancelled) { setLoading(false); }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [holdingDays, scope]);
+    load();
+  }, [load]);
 
   const runStrategyBacktest = useCallback(async () => {
     setStrategyLoading(true);
@@ -111,7 +102,7 @@ export function BacktestPanel() {
           }
         />
       )}
-      <div className="mb-2">
+      <div className="mb-2 flex items-center gap-2 flex-wrap">
         <Segmented
           size="small"
           value={scope}
@@ -121,6 +112,19 @@ export function BacktestPanel() {
             { label: t("stockAnalysis.backtest.scopeLive"), value: "live" },
             { label: t("stockAnalysis.backtest.scopeReplay"), value: "replay" },
           ]}
+        />
+        {/* Bug 5 修复: 持有天数可配置 —— 触发 useEffect 重拉 */}
+        <span className="text-xs text-gray-500">
+          {t("stockAnalysis.backtest.holdingDays") ?? "持有天数"}
+        </span>
+        <InputNumber
+          size="small"
+          min={1}
+          max={120}
+          step={1}
+          value={holdingDays}
+          onChange={(v) => v != null && setHoldingDays(v)}
+          style={{ width: 80 }}
         />
       </div>
       <div style={{ position: "relative" }}>

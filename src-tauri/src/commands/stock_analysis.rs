@@ -688,6 +688,22 @@ pub async fn execute_stock_mcp_tool(
 
 // ── Backtesting ──
 
+/// Bug 6 修复: 把 action → strategy_id 的映射抽成可复用函数,集中维护。
+///
+/// 之前在 backtest_analysis 里 inline 写死了 5 行 match,既无法测试,
+/// 改策略时容易漏改。这里抽成 free function,接受标准化后的 action_token
+/// (大写英文,前后空白已 trim),所有未识别的 action 都回退到 "watchlist"。
+pub(crate) fn map_action_to_strategy_id(action: &str) -> &'static str {
+    // 注意大小写不敏感(既支持中文,也支持 BUY/Hold 等英文)
+    match action.trim().to_ascii_uppercase().as_str() {
+        "买入" | "BUY" | "增持" | "INCREASE" => "trend",
+        "卖出" | "SELL" | "减持" | "REDUCE" => "reversion",
+        "持有" | "HOLD" => "value",
+        "观望" | "UNCERTAIN" => "capital",
+        _ => "watchlist",
+    }
+}
+
 /// 回测单个分析决策
 #[tauri::command]
 pub async fn backtest_analysis(
@@ -716,13 +732,7 @@ pub async fn backtest_analysis(
     .await?;
 
     // 写入 strategy_performance 表，让分析回测参与权重进化
-    let strategy_id = match decision_action.as_str() {
-        "买入" | "增持" | "BUY" | "INCREASE" => "trend",
-        "卖出" | "减持" | "SELL" | "REDUCE" => "reversion",
-        "持有" | "HOLD" => "value",
-        "观望" | "UNCERTAIN" => "capital",
-        _ => "watchlist",
-    };
+    let strategy_id = map_action_to_strategy_id(&decision_action);
     let decision_ms = chrono::NaiveDate::parse_from_str(&analysis_date, "%Y-%m-%d")
         .ok()
         .and_then(|d| d.and_hms_opt(0, 0, 0))
@@ -2799,6 +2809,25 @@ pub async fn run_reflection_now(
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
 
+    // Bug 3 修复: 前端表单未让用户填 stockName(避免冗余输入),
+    // 后端必须用 stock_code 反查股票名,确保反思历史 / RAG 索引都有正确名称。
+    // 失败时回退到原值(空字符串),但不阻塞流程。
+    let resolved_name = if stock_name.trim().is_empty() {
+        match client.get_quote(&stock_code).await {
+            Ok(q) if !q.name.is_empty() => q.name,
+            Ok(_) => stock_code.clone(),
+            Err(e) => {
+                tracing::warn!(
+                    "[run_reflection_now] 无法获取 {} 名称: {e},使用代码占位",
+                    stock_code
+                );
+                stock_code.clone()
+            },
+        }
+    } else {
+        stock_name.clone()
+    };
+
     crate::commands::stock_workflow::run_reflection_workflow(
         db,
         client,
@@ -2806,8 +2835,8 @@ pub async fn run_reflection_now(
         vs,
         mk,
         &stock_code,
-        &stock_name,
-        "", // original_analysis_id — 手动触发时不需要
+        &resolved_name,
+        "", // original_analysis_id — 手动触发时无原始决策,run_reflection_workflow 已处理跳过
         &actual_outcome,
         &as_of_date,
         &today,

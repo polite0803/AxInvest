@@ -7,7 +7,7 @@ import type { LatestAnalysisSummary, StockConsensus } from "@/types/stock-analys
 import { parseAction } from "@/types/stock-analysis";
 import type { BacktestComparisonResponse } from "@/types/stock-analysis";
 import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -106,7 +106,14 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   const reqTokenRef = useRef(0);
 
-  const load = async () => {
+  /**
+   * 统一数据加载入口。所有数据拉取都走这里,避免 useEffect 与 onClick
+   * 双轨加载造成的中间态闪烁 / 乱序写入(Bug 4 修复)。
+   *
+   * 用 `reqTokenRef` 做请求级取消:每次调用 +1,旧请求的响应会被丢弃,
+   * 不会覆盖新一次调用的结果。
+   */
+  const load = useCallback(async () => {
     const myToken = ++reqTokenRef.current;
     setLoading(true);
     setEmptyKind(null);
@@ -132,7 +139,27 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         }),
       );
 
-      fetchLatestAnalyses(r);
+      // 同一 token 下串行拉"最近分析",避免与 useEffect 内联请求重复(Bug 7 修复)
+      const allCodes = new Set<string>();
+      for (const arr of Object.values(r.picks ?? {})) {
+        if (!arr) { continue; }
+        for (const p of arr) {
+          if (!p.synthetic) { allCodes.add(p.stockCode); }
+        }
+      }
+      if (allCodes.size > 0) {
+        try {
+          const result = await invoke<Record<string, LatestAnalysisSummary | null>>(
+            "get_latest_analyses_for_stocks",
+            { stockCodes: Array.from(allCodes), asOfDate },
+          );
+          if (myToken === reqTokenRef.current && result) {
+            setLatestAnalyses(result);
+          }
+        } catch (e) {
+          console.warn("[RecommendationPanel] Failed to load latest analyses:", e);
+        }
+      }
     } catch (e: unknown) {
       console.error("[RecommendationPanel] load failed:", e);
       if (myToken !== reqTokenRef.current) { return; }
@@ -140,69 +167,12 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setEmptyKind("connectionFailed");
     }
     if (myToken === reqTokenRef.current) { setLoading(false); }
-  };
+  }, [period, asOfDate, i18n.language]);
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setLoading(true);
-      setEmptyKind(null);
-      return invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
-    }).then((r) => {
-      if (cancelled) { return; }
-      if (!r || !r.picks || Object.keys(r.picks).length === 0) {
-        setData(r ?? null);
-        if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
-          setEmptyKind("vendorDisabled");
-        } else {
-          setEmptyKind("noData");
-        }
-        return;
-      }
-      setData(r);
-      const d = new Date(r.generatedAt);
-      setGeneratedAtText(
-        d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
-      return r;
-    })
-      .then((r) => {
-        if (cancelled || !r) { return; }
-        const allCodes = new Set<string>();
-        for (const arr of Object.values(r.picks ?? {})) {
-          if (!arr) { continue; }
-          for (const p of arr) {
-            if (!p.synthetic) { allCodes.add(p.stockCode); }
-          }
-        }
-        if (allCodes.size === 0) { return; }
-        return invoke<Record<string, LatestAnalysisSummary | null>>(
-          "get_latest_analyses_for_stocks",
-          { stockCodes: Array.from(allCodes), asOfDate },
-        );
-      })
-      .then((result) => {
-        if (cancelled) { return; }
-        if (result) { setLatestAnalyses(result); }
-      })
-      .catch((e: unknown) => {
-        console.error("[RecommendationPanel] load failed:", e);
-        if (!cancelled) {
-          setData(null);
-          setEmptyKind("connectionFailed");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) { setLoading(false); }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [period, asOfDate, i18n.language]);
+    // Bug 4 修复: useEffect 只负责触发 load(),不再有第二套加载逻辑
+    load();
+  }, [load]);
 
   // P0-2: 加载策略回测统计（仅加载一次）
   useEffect(() => {
@@ -250,31 +220,10 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     startAnalysis(code);
   };
 
-  // P0-1: 批量加载所有 picks 的最近分析结果
-  const fetchLatestAnalyses = async (resp: RecoResponse) => {
-    const allCodes = new Set<string>();
-    for (const arr of Object.values(resp.picks ?? {})) {
-      if (!arr) { continue; }
-      for (const p of arr) {
-        if (!p.synthetic) { allCodes.add(p.stockCode); }
-      }
-    }
-    if (allCodes.size === 0) { return; }
-
-    try {
-      const result = await invoke<Record<string, LatestAnalysisSummary | null>>(
-        "get_latest_analyses_for_stocks",
-        {
-          stockCodes: Array.from(allCodes),
-          asOfDate,
-        },
-      );
-      setLatestAnalyses(result ?? {});
-    } catch (e) {
-      console.warn("[RecommendationPanel] Failed to load latest analyses:", e);
-      // 降级：显示为空，不影响主流程
-    }
-  };
+  // P0-1: 批量加载所有 picks 的最近分析结果。
+  // Bug 7 修复: 该函数已合并进 load() 内部,避免 useEffect 和 onClick
+  // 各自发起一次重复请求,造成 RPC 浪费。
+  // （保留此注释作为变更记录。）
 
   const disabledStyleSet = useMemo(() => new Set(data?.disabledStyles ?? []), [data]);
   const disabledStyleNames = useMemo(() => {
@@ -329,7 +278,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
               {t("stockAnalysis.recommendation.generatedAt", { time: generatedAtText })}
             </span>
           )}
-          <Button size="small" loading={loading} onClick={() => load()}>
+          <Button size="small" loading={loading} onClick={load}>
             {t("stockAnalysis.settings.panels.refresh")}
           </Button>
           <AutoCalibrateButton t={t} />

@@ -1220,22 +1220,70 @@ pub async fn run_reflection_workflow(
     let wf_id = workflow.id.clone();
 
     // 4. 加载原始决策的时间维度信息
-    let original_time_horizon: Option<String> =
-        stock_analyses::Entity::find_by_id(original_analysis_id)
+    // 手动触发时 original_analysis_id="" —— 不注入这俩变量,让工作流模板
+    // 自己决定怎么处理"无原始分析上下文"的情况。盲目注入 "unknown" / 0
+    // 会污染反思推理的前提(持仓期对齐、时间维度匹配)。
+    let original_ctx: Option<(String, i64)> = if original_analysis_id.is_empty() {
+        None
+    } else {
+        let time_horizon = stock_analyses::Entity::find_by_id(original_analysis_id)
             .one(db)
             .await
             .ok()
             .flatten()
             .and_then(|a| a.decision_time_horizon);
-    let original_holding_days: Option<i64> =
-        stock_analyses::Entity::find_by_id(original_analysis_id)
+        let holding_days = stock_analyses::Entity::find_by_id(original_analysis_id)
             .one(db)
             .await
             .ok()
             .flatten()
             .and_then(|a| a.decision_expected_holding_days.map(|d| d as i64));
+        match (time_horizon, holding_days) {
+            (Some(t), Some(h)) => Some((t, h)),
+            _ => None,
+        }
+    };
 
     // 5. 注入变量
+    let mut variables = vec![
+        axagent_harness::workflow_types::Variable {
+            name: "actual_outcome".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(actual_outcome.to_string()),
+            description: Some("实际走势结果，格式如 '30天跌8% → 失败'".into()),
+            is_secret: false,
+        },
+        axagent_harness::workflow_types::Variable {
+            name: "reflection_depth".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(reflection_depth.to_string()),
+            description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
+            is_secret: false,
+        },
+    ];
+    if let Some((time_horizon, holding_days)) = original_ctx {
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "original_time_horizon".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(time_horizon),
+            description: Some(
+                "原始决策的时间维度：ultra_short(1-3天)/short(5天)/mid(28天)/long(90天+)".into(),
+            ),
+            is_secret: false,
+        });
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "original_holding_days".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(holding_days),
+            description: Some("原始决策期望持有天数（交易日）".into()),
+            is_secret: false,
+        });
+    } else {
+        tracing::info!(
+            "[reflection] {}: 无原始分析上下文(original_analysis_id={:?}),跳过 original_* 变量注入",
+            stock_code, original_analysis_id
+        );
+    }
     let opts = axagent_rt_workflow::work_engine::RunOptions {
         max_concurrent,
         step_timeout,
@@ -1244,41 +1292,7 @@ pub async fn run_reflection_workflow(
         input_schema: loaded.input_schema,
         output_schema: loaded.output_schema,
         dry_run: false,
-        variables: Some(vec![
-            axagent_harness::workflow_types::Variable {
-                name: "actual_outcome".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(actual_outcome.to_string()),
-                description: Some("实际走势结果，格式如 '30天跌8% → 失败'".into()),
-                is_secret: false,
-            },
-            axagent_harness::workflow_types::Variable {
-                name: "reflection_depth".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(reflection_depth.to_string()),
-                description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
-                is_secret: false,
-            },
-            axagent_harness::workflow_types::Variable {
-                name: "original_time_horizon".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(
-                    original_time_horizon.unwrap_or_else(|| "unknown".to_string()),
-                ),
-                description: Some(
-                    "原始决策的时间维度：ultra_short(1-3天)/short(5天)/mid(28天)/long(90天+)"
-                        .into(),
-                ),
-                is_secret: false,
-            },
-            axagent_harness::workflow_types::Variable {
-                name: "original_holding_days".into(),
-                var_type: "number".into(),
-                value: serde_json::json!(original_holding_days.unwrap_or(0)),
-                description: Some("原始决策期望持有天数（交易日）".into()),
-                is_secret: false,
-            },
-        ]),
+        variables: Some(variables),
         ..Default::default()
     };
 

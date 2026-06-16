@@ -95,7 +95,12 @@ data_sources: [get_stock_kline, get_industry_ranking]
     "key_drivers": ["量价共振突破", "行业排名提升"],
     "scenarios": [
       { "scenario": "base", "probability": 0.5, "outcome": "区间震荡，等待方向", "trigger": "成交量维持当前水平" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "放量突破阻力位", "trigger": "成交量>20日均量150%+板块领涨" },
+      {
+        "scenario": "bull",
+        "probability": 0.3,
+        "outcome": "放量突破阻力位",
+        "trigger": "成交量>20日均量150%+板块领涨"
+      },
       { "scenario": "bear", "probability": 0.2, "outcome": "跌破支撑位", "trigger": "缩量跌破支撑+均线死叉" }
     ]
   }

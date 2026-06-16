@@ -186,9 +186,7 @@ export function StockScreenerPanel() {
   // 这里用 Promise.resolve().then() 把 setState 推迟到 effect 同步阶段之后,
   // 规避 react-hooks/set-state-in-effect 规则。
   useEffect(() => {
-    Promise.resolve().then(() =>
-      setSelectedCount(Object.values(factors).filter((f) => f.enabled).length),
-    );
+    Promise.resolve().then(() => setSelectedCount(Object.values(factors).filter((f) => f.enabled).length));
   }, [factors]);
 
   const setValue = (key: string, v: number | null) => {

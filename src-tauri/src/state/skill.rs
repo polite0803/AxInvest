@@ -138,6 +138,7 @@ pub enum SandboxExecutorField {
 /// between desktop and Android builds.
 #[allow(dead_code)]
 pub enum BrowserClientField {
+    #[cfg(not(target_os = "android"))]
     Real(Arc<tokio::sync::Mutex<Option<axagent_core::browser_automation::PlaywrightClient>>>),
     Dummy,
 }

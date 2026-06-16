@@ -81,8 +81,11 @@ export function ReflectionPanel() {
     };
   }, []);
 
-  const activeCron = cronJobs.find((j) => j.status === "Active") || cronJobs[0];
-  const isEnabled = cronJobs.some((j) => j.status === "Active");
+  // 后端 CronJobStatus 用 #[serde(rename_all = "snake_case")] 序列化,
+  // 实际 status 字符串是 "active" / "paused" / "disabled"（小写）
+  // 这里必须用小写比较,否则 isEnabled/activeCron 永远错误。
+  const activeCron = cronJobs.find((j) => j.status === "active") ?? cronJobs[0];
+  const isEnabled = cronJobs.some((j) => j.status === "active");
 
   const toggleCron = async (enable: boolean) => {
     try {

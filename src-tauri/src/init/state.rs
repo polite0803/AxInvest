@@ -197,7 +197,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
     let (astock_client, l2_handle) = {
         let l2_path: PathBuf = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".axagent")
+            .join(".axinvest")
             .join("astock_l2_cache.json");
         if let Some(parent) = l2_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -501,7 +501,8 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         tokio::sync::Mutex<Option<axagent_core::browser_automation::PlaywrightClient>>,
     > = Arc::new(tokio::sync::Mutex::new(None));
     #[cfg(target_os = "android")]
-    let browser_client: Arc<tokio::sync::Mutex<Option<()>>> = Arc::new(tokio::sync::Mutex::new(None));
+    let browser_client: Arc<tokio::sync::Mutex<Option<()>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
     let dream_consolidator =
         Arc::new(axagent_trajectory::DreamConsolidator::new().with_data_provider(Arc::new(
             axagent_trajectory::TrajectoryDreamDataProvider::new(shared_trajectory_storage.clone()),

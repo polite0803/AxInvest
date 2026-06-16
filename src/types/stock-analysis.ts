@@ -216,6 +216,70 @@ export interface LatestAnalysisSummary {
   decisionExpectedHoldingDays?: number | null;
 }
 
+// ── 荐股结果 (Bug 10 抽离) ──
+// 与后端 crates/stock-analysis/src/recommender/types.rs::RecoPick 一一对应,
+// 字段顺序、类型、可选性保持一致(camelCase 由 serde rename_all 转换)。
+
+export type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist";
+export type PeriodKey = "ultra_short" | "short" | "mid" | "long";
+
+/** 荐股单条 pick — 完整字段版,直接对应后端 schema */
+export interface RecoPick {
+  stockCode: string;
+  stockName: string;
+  /** 行业/板块(后端 Option + skip_serializing_if=None) */
+  sector?: string | null;
+  /** 主风格 — 后端 serde(rename_all="lowercase"),必填 */
+  style: StyleKey;
+  /** 持有周期 — 后端 serde(rename_all="lowercase"),必填 */
+  period: PeriodKey;
+  /** 当前价 */
+  price: number;
+  /** 入场下沿 */
+  entryLow: number;
+  /** 入场上沿 */
+  entryHigh: number;
+  /** 止损 */
+  stopLoss: number;
+  /** 目标位 */
+  targetPrice: number;
+  /** 建议仓位(%) */
+  positionPct: number;
+  /** 持有天数(后端 u32) */
+  holdingDays: number;
+  /** 置信度 0-100(后端 u8) */
+  confidence: number;
+  /** 命中理由(可能为空数组) */
+  reasons: string[];
+  /** 风险提示(可能为空数组) */
+  riskNotes: string[];
+  /** 风格拆分后的副策略 tag,如 ["trend","capital"];空数组时后端跳过序列化 */
+  secondaryStyles?: StyleKey[];
+  /** true = 系统初筛 / 数据稀疏兜底(无技术信号),false = 主策略真实命中 */
+  synthetic?: boolean;
+}
+
+/** 荐股接口响应 — 完整字段版 */
+export interface RecoResponse {
+  period: PeriodKey;
+  /** 按风格分组的 picks,每组 ≤ 10。后端 HashMap<Style, Vec<RecoPick>> */
+  picks: Partial<Record<StyleKey, RecoPick[]>>;
+  /** 被 vendor 缺失禁用的风格(live 模式下由 vendor 状态决定) */
+  disabledStyles: StyleKey[];
+  /** as-of 模式下被降级(≠ 缺失)的风格(spec §8)。live 模式恒为空数组。 */
+  degradedStyles?: StyleKey[];
+  /** degradedStyles 中各风格的具体降级原因,key=styleKey, value=本地化文本 */
+  degradedReasons?: Record<string, string>;
+  /** 生成时间戳(毫秒) */
+  generatedAt: number;
+  /** 过滤前的 seed pool 大小(hot + industry 龙头去重后) */
+  rawSeedPoolSize: number;
+  /** 时间旅行模式截止日 YYYY-MM-DD;live 时 undefined */
+  asOfDate?: string;
+  /** 模式标签: live / replay / backtest_sweep — 后端 spec §8 注入,必填 */
+  mode: string;
+}
+
 // ── 决策时间线类型 ──
 
 /** 时间线 4 阶段：扫描 → 诊断 → 辩论 → 决策 */

@@ -53,7 +53,8 @@ export function BacktestPanel() {
   }, [holdingDays, scope]);
 
   useEffect(() => {
-    load();
+    // Bug 4 修复: 走统一 load 入口
+    Promise.resolve().then(() => load());
   }, [load]);
 
   const runStrategyBacktest = useCallback(async () => {

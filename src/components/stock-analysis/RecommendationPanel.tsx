@@ -3,9 +3,16 @@ import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBad
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { LatestAnalysisSummary, StockConsensus } from "@/types/stock-analysis";
+import type {
+  BacktestComparisonResponse,
+  LatestAnalysisSummary,
+  PeriodKey,
+  RecoPick,
+  RecoResponse,
+  StockConsensus,
+  StyleKey,
+} from "@/types/stock-analysis";
 import { parseAction } from "@/types/stock-analysis";
-import type { BacktestComparisonResponse } from "@/types/stock-analysis";
 import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,45 +30,11 @@ interface RecommendationPanelProps {
 
 const noop = () => {};
 
-type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist";
-type PeriodKey = "ultra_short" | "short" | "mid" | "long";
-
-interface RecoPick {
-  stockCode: string;
-  stockName: string;
-  sector?: string | null;
-  style: StyleKey;
-  period: PeriodKey;
-  price: number;
-  entryLow: number;
-  entryHigh: number;
-  stopLoss: number;
-  targetPrice: number;
-  positionPct: number;
-  holdingDays: number;
-  confidence: number;
-  reasons: string[];
-  riskNotes: string[];
-  secondaryStyles?: StyleKey[];
-  /** true = 系统初筛 / 数据稀疏兜底（无技术信号），false = 主策略真实命中 */
-  synthetic?: boolean;
-}
-
-interface RecoResponse {
-  period: PeriodKey;
-  picks: Partial<Record<StyleKey, RecoPick[]>>;
-  disabledStyles: StyleKey[];
-  /** as-of 模式下被降级(≠ 缺失)的风格(spec §8)。live 模式恒为空数组。 */
-  degradedStyles?: StyleKey[];
-  /** degradedStyles 中各风格的具体降级原因,key=styleKey, value=本地化文本 */
-  degradedReasons?: Record<string, string>;
-  generatedAt: number;
-  rawSeedPoolSize: number;
-  /** 模式标签: live / replay / backtest_sweep — 后端 spec §8 注入 */
-  mode?: string;
-  /** 时间旅行模式截止日 YYYY-MM-DD;live 时 undefined */
-  asOfDate?: string;
-}
+// Bug 10 修复: RecoResponse / StyleKey / PeriodKey / RecoPick 统一从
+// @/types/stock-analysis 导入,与后端 crates/stock-analysis/src/recommender/types.rs
+// 的 RecoPick schema 一一对应(完整字段版,含 sector/style/period/price/entryLow/
+// entryHigh/stopLoss/targetPrice/positionPct/holdingDays/riskNotes 等)。
+// 这里不再保留本地 panel-specific 富化类型。
 
 const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist"];
 const STYLE_COLOR: Record<StyleKey, string> = {
@@ -171,7 +144,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   useEffect(() => {
     // Bug 4 修复: useEffect 只负责触发 load(),不再有第二套加载逻辑
-    load();
+    Promise.resolve().then(() => load());
   }, [load]);
 
   // P0-2: 加载策略回测统计（仅加载一次）

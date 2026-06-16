@@ -364,7 +364,11 @@ pub async fn recommend_stocks(
                     _ => 1.0,
                 };
                 let combined = quality_factor * refl;
-                let delta = if combined > 1.0 { combined - 1.0 } else { 1.0 - combined };
+                let delta = if combined > 1.0 {
+                    combined - 1.0
+                } else {
+                    1.0 - combined
+                };
                 if delta > 0.01 {
                     p.confidence = (p.confidence as f64 * combined).clamp(0.0, 100.0) as u8;
                     p.position_pct = (p.position_pct * combined).clamp(0.0, 100.0);

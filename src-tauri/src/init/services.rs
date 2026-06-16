@@ -1304,7 +1304,7 @@ fn start_cron_scheduler(state: &AppState) {
             tokio::task::spawn(async move {
                 use axagent_core::entity::stock_analyses;
                 use chrono::NaiveDate;
-                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
@@ -1416,15 +1416,27 @@ fn start_cron_scheduler(state: &AppState) {
 
                     // ── R1 复盘→进化：把每次决策校验的结果写入 strategy_performance ──
                     if outcome == "win" || outcome == "loss" {
-                        // 推断 strategy_id（action 1:1 映射到 5 大策略的近似）
-                        let strategy_id = match action {
-                            "买入" | "BUY" | "增持" | "INCREASE" => "trend",
-                            "卖出" | "SELL" | "减持" | "REDUCE" => "reversion",
-                            "持有" | "HOLD" => "value",
-                            "观望" | "UNCERTAIN" => "capital",
-                            _ => "watchlist",
+                        // 优先从 reco_picks 获取精确 strategy_id
+                        let strategy_id = 'guess: {
+                            if let Ok(Some(pick)) = axagent_core::entity::reco_picks::Entity::find()
+                                .filter(axagent_core::entity::reco_picks::Column::StockCode.eq(code))
+                                .filter(
+                                    axagent_core::entity::reco_picks::Column::GeneratedAt
+                                        .lte(date.to_string()),
+                                )
+                                .order_by_desc(axagent_core::entity::reco_picks::Column::GeneratedAt)
+                                .one(&database)
+                                .await
+                            {
+                                break 'guess pick.style;
+                            }
+                            // 回退到动作→策略近似映射
+                            crate::commands::stock_analysis::map_action_to_strategy_id(action).to_string()
                         };
-                        let period = "short"; // 第一版统一 short
+                        let period = a.decision_time_horizon
+                            .as_deref()
+                            .unwrap_or("short")
+                            .to_string();
                         let return_pct = if price_after > 0.0 {
                             (later_close / price_after - 1.0) * 100.0
                         } else {
@@ -1444,8 +1456,8 @@ fn start_cron_scheduler(state: &AppState) {
                         .to_string();
                         let _ = axagent_stock_analysis::evolution_drift::record_performance(
                             &database,
-                            strategy_id,
-                            period,
+                            &strategy_id,
+                            &period,
                             code,
                             &a.stock_name,
                             decision_ms,

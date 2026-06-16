@@ -429,9 +429,7 @@ fn detect_capital_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Op
 #[allow(dead_code)]
 /// Read a f64 variable from vars with fallback default
 fn read_f64(vars: &serde_json::Value, name: &str, default: f64) -> f64 {
-    vars.get(name)
-        .and_then(|v| v.as_f64())
-        .unwrap_or(default)
+    vars.get(name).and_then(|v| v.as_f64()).unwrap_or(default)
 }
 
 pub(crate) struct StratDef {
@@ -592,7 +590,16 @@ pub async fn run_signal_history(
             Ok(k) if k.len() >= strat.warmup => k,
             _ => continue,
         };
-        let sigs = scan_one(&klines, code, name, sid, strat.detect, holding, strat.warmup, &serde_json::Value::Null);
+        let sigs = scan_one(
+            &klines,
+            code,
+            name,
+            sid,
+            strat.detect,
+            holding,
+            strat.warmup,
+            &serde_json::Value::Null,
+        );
         results.extend(sigs);
     }
     results.sort_by(|a, b| b.signal_date.cmp(&a.signal_date));
@@ -915,7 +922,9 @@ pub fn update_signal_quality_cache(positive_stats: &HashMap<String, StrategyStat
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
-    let mut cache = SIGNAL_QUALITY_CACHE.write().unwrap_or_else(|e| e.into_inner());
+    let mut cache = SIGNAL_QUALITY_CACHE
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
     for (sid, stats) in positive_stats {
         if stats.total_signals < 5 {
             continue;
@@ -937,7 +946,9 @@ pub fn update_signal_quality_cache(positive_stats: &HashMap<String, StrategyStat
 /// 查询策略信号质量（自动注入 as-of 后缀隔离 live/replay）
 pub fn get_signal_quality(strategy_id: &str) -> Option<SignalQualityStats> {
     let suffix = axagent_astock_data::as_of::cache_suffix();
-    let cache = SIGNAL_QUALITY_CACHE.read().unwrap_or_else(|e| e.into_inner());
+    let cache = SIGNAL_QUALITY_CACHE
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
     cache.get(&(strategy_id.to_string(), suffix)).cloned()
 }
 
@@ -950,7 +961,7 @@ pub fn signal_quality_multiplier(strategy_id: &str) -> f64 {
     match get_signal_quality(strategy_id) {
         Some(q) if q.total_signals >= 5 => {
             let factor = q.win_rate_pct / 50.0; // 50% 为基线
-            factor.clamp(0.7, 1.3).max(0.4)     // 极端保护
+            factor.clamp(0.7, 1.3).max(0.4) // 极端保护
         },
         _ => 1.0, // 无数据 → 不调整
     }
@@ -968,10 +979,7 @@ pub fn signal_quality_multiplier(strategy_id: &str) -> f64 {
 ///
 /// 其中 prior_weight=20 为"虚拟样本量"，代表我们对先验的信赖程度。
 /// 信号数<20 时后验显著向先验收缩；信号数>200 时后验接近原始胜率。
-pub fn bayesian_signal_quality(
-    strategy_id: &str,
-    market_regime: &str,
-) -> (f64, u32, f64) {
+pub fn bayesian_signal_quality(strategy_id: &str, market_regime: &str) -> (f64, u32, f64) {
     let prior = match market_regime {
         "bull" => 0.55,
         "bear" => 0.45,
@@ -982,8 +990,8 @@ pub fn bayesian_signal_quality(
     match get_signal_quality(strategy_id) {
         Some(q) if q.total_signals >= 5 => {
             let n = q.total_signals as f64;
-            let posterior = (PRIOR_WEIGHT * prior + n * q.win_rate_pct / 100.0)
-                / (PRIOR_WEIGHT + n);
+            let posterior =
+                (PRIOR_WEIGHT * prior + n * q.win_rate_pct / 100.0) / (PRIOR_WEIGHT + n);
             (posterior, q.total_signals, prior)
         },
         _ => (prior, 0, prior), // 无数据 → 只用先验
@@ -1000,10 +1008,15 @@ pub fn bayesian_signal_quality(
 /// 原理：高拥挤/高波动环境下，技术信号的反身性效应显著——
 ///   信号本身改变了市场参与者的行为，使信号的可预测性下降。
 pub fn reflexivity_discount(risk_level: &str) -> f64 {
-    if risk_level.contains("极高") { 0.60 }
-    else if risk_level.contains("高风险") || risk_level.contains("高") { 0.85 }
-    else if risk_level.contains("低风险") || risk_level.contains("低") { 1.10 }
-    else { 1.0 }
+    if risk_level.contains("极高") {
+        0.60
+    } else if risk_level.contains("高风险") || risk_level.contains("高") {
+        0.85
+    } else if risk_level.contains("低风险") || risk_level.contains("低") {
+        1.10
+    } else {
+        1.0
+    }
 }
 
 #[cfg(test)]
@@ -1029,10 +1042,10 @@ mod tests {
         let klines: Vec<KLine> = (0..50)
             .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
             .collect();
-        assert!(detect_trend_short(&klines).is_none());
-        assert!(detect_reversion_short(&klines).is_none());
+        assert!(detect_trend_short(&klines, &serde_json::Value::Null).is_none());
+        assert!(detect_reversion_short(&klines, &serde_json::Value::Null).is_none());
         // 资金策略需要放量，平盘不放量也为 None
-        assert!(detect_capital_short(&klines).is_none());
+        assert!(detect_capital_short(&klines, &serde_json::Value::Null).is_none());
     }
 
     #[test]
@@ -1041,7 +1054,7 @@ mod tests {
             .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
             .collect();
         // 平盘 = 低波幅+均线附近 = 价值股典型 K 线特征
-        assert!(detect_value_short(&klines).is_some());
+        assert!(detect_value_short(&klines, &serde_json::Value::Null).is_some());
     }
 
     #[test]
@@ -1050,7 +1063,7 @@ mod tests {
         let flat: Vec<KLine> = (0..50)
             .map(|i| k(10.0, &format!("d{}", i % 28 + 1), 10_000_000.0))
             .collect();
-        assert!(detect_capital_short(&flat).is_none());
+        assert!(detect_capital_short(&flat, &serde_json::Value::Null).is_none());
 
         // 第 2 部分：最后一日放量 + 上涨 → 有信号
         let mut spike = flat.clone();
@@ -1065,7 +1078,7 @@ mod tests {
             turnover_rate: Some(3.0),
             adj_factor: None,
         });
-        assert!(detect_capital_short(&spike).is_some());
+        assert!(detect_capital_short(&spike, &serde_json::Value::Null).is_some());
     }
 
     #[test]

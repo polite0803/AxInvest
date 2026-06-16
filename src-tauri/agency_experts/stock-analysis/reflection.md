@@ -65,10 +65,26 @@ title: 投资复盘官
 
 | 字段              | 说明                                                              |
 | ----------------- | ----------------------------------------------------------------- |
-| `param`           | 参数名（全小写 snake_case，如 `kelly_fraction`、`scoring_trend`） |
+| `param`           | 参数名（全小写 snake_case，如 `kelly_fraction`、`scoring_trend`），**必须精确匹配模板变量名** |
 | `current_value`   | 当前值（数字）                                                    |
 | `suggested_value` | 建议值（数字）                                                    |
 | `reason`          | 调整原因（引用具体相关分析作为证据，不超过 100 字）               |
+
+### 可用的参数名（必须精确匹配以下列表）
+
+参数名来自 stock-analysis 模板的 variables 定义，只允许修改数值型、非敏感（is_secret=false）的变量：
+
+- `trend_high_20_threshold` — 短线突破阈值（默认 0.99）
+- `trend_ma60_threshold` — 中线站上 MA60 阈值（默认 0.995）
+- `reversion_rsi_threshold` — 超跌 RSI 阈值
+- `scoring_consistency_weight` — 评分一致性权重
+- `scoring_signal_strength_weight` — 评分信号强度权重
+- `scoring_liquidity_weight` — 评分流动性权重
+- `scoring_momentum_weight` — 评分动量权重
+- `stop_loss_default_pct` — 默认止损百分比
+- `take_profit_default_pct` — 默认止盈百分比
+
+不在上述列表中的参数名会被 `apply_param_suggestions` 忽略。
 
 限制：
 

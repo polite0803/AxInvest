@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Checkbox, Empty, Input, message, Select, Space, Switch, Table, Tag, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
@@ -53,32 +53,25 @@ export function ReflectionPanel() {
   const [manualDepth, setManualDepth] = useState("light");
   const [running, setRunning] = useState(false);
 
+  // Bug 4 修复: 统一请求级取消令牌,避免 useEffect 与 onClick 双轨加载
+  // 各自维护一份 cancelled 标记造成的乱序写入。
+  const loadTokenRef = useRef(0);
   const load = async () => {
+    const myToken = ++loadTokenRef.current;
     try {
       const [r, c] = await Promise.all([
         invoke<ReflectionRow[]>("list_reflections", {}),
         invoke<CronJobResponse[]>("list_validate_decisions_crons", {}),
       ]);
+      if (myToken !== loadTokenRef.current) { return; }
       if (Array.isArray(r)) { setReflections(r); }
       if (Array.isArray(c)) { setCronJobs(c); }
     } catch { /* ignore */ }
   };
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      invoke<ReflectionRow[]>("list_reflections", {}),
-      invoke<CronJobResponse[]>("list_validate_decisions_crons", {}),
-    ])
-      .then(([r, c]) => {
-        if (cancelled) { return; }
-        if (Array.isArray(r)) { setReflections(r); }
-        if (Array.isArray(c)) { setCronJobs(c); }
-      })
-      .catch(() => {/* ignore */});
-    return () => {
-      cancelled = true;
-    };
+    // Bug 4 修复: 走统一入口
+    Promise.resolve().then(() => load());
   }, []);
 
   // 后端 CronJobStatus 用 #[serde(rename_all = "snake_case")] 序列化,
@@ -312,7 +305,12 @@ function parseParamsSuggestion(row: ReflectionRow): ParamSuggestion[] {
   if (!row.decisionJson) { return []; }
   try {
     const parsed = JSON.parse(row.decisionJson);
-    const raw = parsed?.params_suggestion ?? parsed?.reflection?.params_suggestion;
+    // 后端 stock_workflow.rs 写入的 decision_json 结构是
+    //   { reflection: { what_went_wrong, missed_signals, fix_for_future, params_suggestion, ... } }
+    // 因此 params_suggestion 一定在 parsed.reflection 下。
+    // Bug 11 修复: 删掉 `parsed?.params_suggestion` 这条死分支(永远不会命中),
+    // 避免误导后续维护者。
+    const raw = parsed?.reflection?.params_suggestion;
     if (Array.isArray(raw)) {
       return raw as ParamSuggestion[];
     }

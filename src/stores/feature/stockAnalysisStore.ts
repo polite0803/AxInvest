@@ -677,6 +677,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
     if (record.blackboardSnapshot) {
       try {
+        // 后端 axagent_stock_analysis::blackboard::build_blackboard_snapshot 会把
+        // 节点 ID 重写为带前缀的 key(见 blackboard.rs:25-51):
+        //   a-*        → report.{nodeId}
+        //   trader     → report.investment-plan
+        //   value-*    → value.*
+        //   rule-check → rule_check.*
+        //   data-quality → data_quality_summary
+        //   raw-data   → raw.*
+        // 其它节点保留原 nodeId。
+        // 这里用本地解析把 snapshot 还原成结构化字段。
         const snap: Record<string, string> = JSON.parse(record.blackboardSnapshot);
         const reports: Record<string, string> = {};
         const debates: Array<{ round: number; bull: string; bear: string }> = [];
@@ -1013,6 +1023,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       }
     };
 
+    // Bug 14 修复: 把 _unlisten = unlistenAll 提前到第一个 try 之前。
+    // 旧实现 4 个 listen 都在 try/catch 里,任意一个抛异常时:
+    //   - catch 命中后,执行流跳走,line 1333 的 set _unlisten 永远不会执行
+    //   - 已成功注册的 listen (push 到 unlisteners[]) 永久失去引用 → 泄漏
+    // 现在 _unlisten 在最开始就指向 unlistenAll,即使后续 listen 失败,
+    // 下次 setupEventListener 进入时 existing 仍是非空值,不会再注册新监听,
+    // 而且 cancelAnalysis / reset / 下次 startAnalysis 调 _unlisten() 时
+    // 已注册的部分也会被清理。
+    set({ _unlisten: unlistenAll });
+
     // 手动 try-catch 包装每个 listen，一个失败不影响其他的
     try {
       const u1 = await listen<{
@@ -1319,10 +1339,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     } catch (e) {
       console.error("[StockAnalysis] Failed to listen stock-monitor-t0-rerun-requested:", e);
     }
-
-    set({
-      _unlisten: unlistenAll,
-    });
+    // _unlisten 已在函数顶部 set 过(line 1034),这里不再重复 set。
   },
 }));
 

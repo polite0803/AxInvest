@@ -36,10 +36,18 @@ export function ScreenerPage() {
         <div className={["flex-1 overflow-auto space-y-4", isMobile ? "p-2" : "p-4"].join(" ")}>
           {/* 顶部:统一入口的"智能荐股 / 我的筛选"切换 */}
           <div>
+            {/* Bug 13 修复: destroyOnHidden 让切走的 tab 立即 unmount,
+                避免:
+                  1. RecommendationPanel 内部 useEffect 中晚到的 invoke 在
+                     hidden 时还去 setState,造成后续切回时显示过时/乱序数据
+                  2. StockScreenerPanel 的因子勾选状态在两次 "我的筛选" 切换之间
+                     残留,让用户对结果感到困惑
+                切回时各 panel 重新 mount 并 invoke 自己的数据,语义最干净。 */}
             <Tabs
               activeKey={activeTab}
               onChange={setActiveTab}
               size={isMobile ? "small" : "middle"}
+              destroyOnHidden
               items={[
                 {
                   key: "reco",

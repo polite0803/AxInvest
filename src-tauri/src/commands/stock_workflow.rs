@@ -1281,7 +1281,8 @@ pub async fn run_reflection_workflow(
     } else {
         tracing::info!(
             "[reflection] {}: 无原始分析上下文(original_analysis_id={:?}),跳过 original_* 变量注入",
-            stock_code, original_analysis_id
+            stock_code,
+            original_analysis_id
         );
     }
     let opts = axagent_rt_workflow::work_engine::RunOptions {

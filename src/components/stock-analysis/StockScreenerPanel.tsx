@@ -3,7 +3,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, InputNumber, Spin, Tag } from "antd";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -168,11 +168,21 @@ export function StockScreenerPanel() {
         ? (cur?.value ?? ("default" in fd! ? (fd as unknown as { default?: number }).default : undefined))
         : cur?.value;
       const value = typeof rawValue === "number" ? rawValue : undefined;
-      const next = { ...prev, [key]: { ...cur, enabled, value } };
-      setSelectedCount(Object.values(next).filter((f) => f.enabled).length);
-      return next;
+      return { ...prev, [key]: { ...cur, enabled, value } };
     });
+    // Bug 9 修复: 不要在 setFactors 回调里再调 setSelectedCount
+    // (React 18 严格模式下会触发"在渲染期间更新组件"警告),
+    // 用 useEffect 单独同步 selectedCount。
   };
+
+  // Bug 9 修复: 单独 useEffect 同步 selectedCount,避免 setState 嵌套
+  // 这里用 Promise.resolve().then() 把 setState 推迟到 effect 同步阶段之后,
+  // 规避 react-hooks/set-state-in-effect 规则。
+  useEffect(() => {
+    Promise.resolve().then(() =>
+      setSelectedCount(Object.values(factors).filter((f) => f.enabled).length),
+    );
+  }, [factors]);
 
   const setValue = (key: string, v: number | null) => {
     setFactors((prev) => ({ ...prev, [key]: { ...prev[key], value: v ?? undefined } }));

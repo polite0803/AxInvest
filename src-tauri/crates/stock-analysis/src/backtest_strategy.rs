@@ -944,6 +944,56 @@ pub fn signal_quality_multiplier(strategy_id: &str) -> f64 {
     }
 }
 
+/// 贝叶斯收缩版信号质量：返回 (收缩后胜率, 样本数, 先验胜率)
+///
+/// 先验胜率基于市场环境：
+///   - "bull" → 0.55（牛市中随机持有多头的胜率偏高）
+///   - "bear" → 0.45（熊市中随机持有多头的胜率偏低）
+///   - _      → 0.50（拉普拉斯无差别先验）
+///
+/// 贝叶斯后验公式：
+///   posterior = (prior_weight × prior + n × sample_win_rate) / (prior_weight + n)
+///
+/// 其中 prior_weight=20 为"虚拟样本量"，代表我们对先验的信赖程度。
+/// 信号数<20 时后验显著向先验收缩；信号数>200 时后验接近原始胜率。
+pub fn bayesian_signal_quality(
+    strategy_id: &str,
+    market_regime: &str,
+) -> (f64, u32, f64) {
+    let prior = match market_regime {
+        "bull" => 0.55,
+        "bear" => 0.45,
+        _ => 0.50,
+    };
+    const PRIOR_WEIGHT: f64 = 20.0;
+
+    match get_signal_quality(strategy_id) {
+        Some(q) if q.total_signals >= 5 => {
+            let n = q.total_signals as f64;
+            let posterior = (PRIOR_WEIGHT * prior + n * q.win_rate_pct / 100.0)
+                / (PRIOR_WEIGHT + n);
+            (posterior, q.total_signals, prior)
+        },
+        _ => (prior, 0, prior), // 无数据 → 只用先验
+    }
+}
+
+/// 反身性系数：根据风险等级和拥挤度调整信号权重
+///
+/// - 低风险（β<0.8）：乘数 1.1（防御性标的，信号可靠度提升）
+/// - 中风险（β~1.0）：乘数 1.0（市场平均）
+/// - 高风险（β>1.2）：乘数 0.85（高波动下的信号噪声大）
+/// - 极高（β>2.0）：乘数 0.6（极高博弈性，反转风险大）
+///
+/// 原理：高拥挤/高波动环境下，技术信号的反身性效应显著——
+///   信号本身改变了市场参与者的行为，使信号的可预测性下降。
+pub fn reflexivity_discount(risk_level: &str) -> f64 {
+    if risk_level.contains("极高") { 0.60 }
+    else if risk_level.contains("高风险") || risk_level.contains("高") { 0.85 }
+    else if risk_level.contains("低风险") || risk_level.contains("低") { 1.10 }
+    else { 1.0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

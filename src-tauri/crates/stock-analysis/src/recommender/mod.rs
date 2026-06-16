@@ -347,13 +347,27 @@ pub async fn recommend_stocks(
                     new_conf,
                     period_val,
                 );
-                // 信号质量校准：用回测历史胜率调整置信度
-                // 格式: "trend_short", "value_long" 等
+                // 信号质量校准（贝叶斯收缩 + 反身性）：
+                //   三层框架 — 统计学(开仓勇气) × 反身性(持仓理性) × 贝叶斯(空仓定力)
                 let quality_id = format!("{}_{}", p.style.as_str(), p.period.as_str());
-                let quality_mult = crate::backtest_strategy::signal_quality_multiplier(&quality_id);
-                if (quality_mult - 1.0).abs() > 0.01 {
-                    p.confidence = (p.confidence as f64 * quality_mult).clamp(0.0, 100.0) as u8;
-                    p.position_pct = (p.position_pct * quality_mult).clamp(0.0, 100.0);
+                let (posterior_win_rate, sample_count, _prior) =
+                    crate::backtest_strategy::bayesian_signal_quality(&quality_id, "neutral");
+                let quality_factor = if sample_count >= 5 {
+                    // 贝叶斯后验映射到 [0.7, 1.3]
+                    ((posterior_win_rate / 0.50) - 0.20).clamp(0.7, 1.3)
+                } else {
+                    1.0
+                };
+                // 反身性：高风险策略信号噪声大 → 额外折扣
+                let refl = match p.period {
+                    crate::recommender::types::Period::UltraShort => 0.85, // 超短线博弈性强
+                    _ => 1.0,
+                };
+                let combined = quality_factor * refl;
+                let delta = if combined > 1.0 { combined - 1.0 } else { 1.0 - combined };
+                if delta > 0.01 {
+                    p.confidence = (p.confidence as f64 * combined).clamp(0.0, 100.0) as u8;
+                    p.position_pct = (p.position_pct * combined).clamp(0.0, 100.0);
                 }
             }
             Ok::<_, String>(raw)

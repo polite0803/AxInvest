@@ -64,10 +64,11 @@ const FALLBACK_STOCKS: &[(&str, &str)] = &[
 
 /// 构造 seed pool
 ///
-/// 顺序：get_hot_stocks(30) ∪ get_industry_ranking 龙头(10) ∪ FALLBACK_STOCKS 兜底
+/// 顺序：get_hot_stocks(30) ∪ get_industry_ranking 龙头(20) ∪ FALLBACK_STOCKS 冷门补全
 ///
-/// `get_hot_stocks` / `get_industry_ranking` 在 vendor 未启用 / 网络失败时返回 `Ok(vec![])`，
-/// 因此函数末尾兜底加入 [`FALLBACK_STOCKS`]，保证 seed pool 永远非空。
+/// **冷门补全逻辑**：热门股池天然包含已上涨标的，但策略需要同样扫描未热门的潜在标的。
+/// FALLBACK_STOCKS 覆盖沪深300+行业龙头+硬科技约80只，确保策略有足够多样化样本。
+/// 流动性过滤（≥1亿日均成交额）会进一步筛除不活跃标的。
 pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<SeedItem> = Vec::new();
@@ -81,9 +82,9 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
         }
     }
 
-    // 2. 行业排名龙头
+    // 2. 行业排名龙头（扩大到20个行业）
     if let Ok(industries) = client.get_industry_ranking().await {
-        for ind in industries.iter().take(10) {
+        for ind in industries.iter().take(20) {
             if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
                 if seen.insert(code.clone()) {
                     out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
@@ -92,13 +93,11 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
         }
     }
 
-    // 3. 兜底：若前两个源都没拿到（vendor 缺失 / 网络失败 / 非交易时段），
-    // 退到一组已知活跃股，至少能跑 K 线 / 估值等基础策略
-    if out.is_empty() {
-        for (code, name) in FALLBACK_STOCKS {
-            if seen.insert((*code).to_string()) {
-                out.push(((*code).to_string(), (*name).to_string(), None));
-            }
+    // 3. 冷门补全：始终混入 FALLBACK_STOCKS 中未被前两个源覆盖的标的
+    //    防止种子池只有"已涨的"——给予策略发现潜在冷门标的机会
+    for (code, name) in FALLBACK_STOCKS {
+        if seen.insert((*code).to_string()) {
+            out.push(((*code).to_string(), (*name).to_string(), None));
         }
     }
 

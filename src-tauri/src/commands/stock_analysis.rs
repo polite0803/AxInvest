@@ -1400,12 +1400,19 @@ async fn backtest_reco_strategies_inner(
         .collect();
 
     // 5. 跑回测
-    axagent_stock_analysis::backtest_strategy::backtest_two_groups(
+    let bt_result = axagent_stock_analysis::backtest_strategy::backtest_two_groups(
         state.astock_client.clone(),
         &positive_stocks,
         &negative_stocks,
     )
-    .await
+    .await?;
+
+    // 6. 更新信号质量缓存（供给侧反馈 → 荐股读取）
+    axagent_stock_analysis::backtest_strategy::update_signal_quality_cache(
+        &bt_result.positive.strategies,
+    );
+
+    Ok(bt_result)
 }
 
 /// 根据回测结果自动调整荐股策略权重

@@ -20,6 +20,7 @@ use axagent_astock_data::{AStockClient, KLine};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
+use std::sync::RwLock;
 
 // ── 类型 ──
 
@@ -873,6 +874,74 @@ pub fn adjust_strategy_weights(
         return Ok(weights); // 无策略可调整时返回空 map，非错误
     }
     Ok(weights)
+}
+
+// ── 信号质量缓存（回测历史胜率 → 推荐置信度校准） ──
+// 回测系统已经计算了每个策略的 win_rate/avg_return/sharpe。
+// 这些统计值不应只用于权重调整，还应直接反馈到单次信号的质量判断上。
+// 例如：trend_short 历史胜率 38% → 新产生的信号置信度应下调。
+
+use std::sync::LazyLock;
+
+/// 信号质量快照：每个策略的历史统计表现
+#[derive(Debug, Clone)]
+pub struct SignalQualityStats {
+    pub strategy_id: String,
+    pub period: String,
+    pub total_signals: u32,
+    pub win_rate_pct: f64,
+    pub avg_return_pct: f64,
+    pub last_updated: u64, // Unix timestamp ms
+}
+
+/// 全局信号质量缓存（按 "style_period" 索引）
+static SIGNAL_QUALITY_CACHE: LazyLock<RwLock<HashMap<String, SignalQualityStats>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// 从回测 groups 结果更新信号质量缓存
+pub fn update_signal_quality_cache(positive_stats: &HashMap<String, StrategyStats>) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let mut cache = SIGNAL_QUALITY_CACHE.write().unwrap_or_else(|e| e.into_inner());
+    for (sid, stats) in positive_stats {
+        if stats.total_signals < 5 {
+            continue; // 样本太少不可靠
+        }
+        cache.insert(
+            sid.clone(),
+            SignalQualityStats {
+                strategy_id: sid.clone(),
+                period: stats.period.clone(),
+                total_signals: stats.total_signals,
+                win_rate_pct: stats.win_rate_pct,
+                avg_return_pct: stats.avg_return_pct,
+                last_updated: now,
+            },
+        );
+    }
+}
+
+/// 查询策略信号质量（用于推荐时校准置信度）
+pub fn get_signal_quality(strategy_id: &str) -> Option<SignalQualityStats> {
+    let cache = SIGNAL_QUALITY_CACHE.read().unwrap_or_else(|e| e.into_inner());
+    cache.get(strategy_id).cloned()
+}
+
+/// 信号质量调整系数：将历史胜率映射到 [0.7, 1.3] 的乘数
+/// - win_rate >= 55% → 乘数 ≥ 1.0（提升置信度）
+/// - win_rate 45-55% → 乘数 ≈ 1.0（不调整）
+/// - win_rate < 45%  → 乘数 ≤ 1.0（压低置信度）
+/// - 无数据（缓存未命中）→ 乘数 = 1.0（不调整）
+pub fn signal_quality_multiplier(strategy_id: &str) -> f64 {
+    match get_signal_quality(strategy_id) {
+        Some(q) if q.total_signals >= 5 => {
+            let factor = q.win_rate_pct / 50.0; // 50% 为基线
+            factor.clamp(0.7, 1.3).max(0.4)     // 极端保护
+        },
+        _ => 1.0, // 无数据 → 不调整
+    }
 }
 
 #[cfg(test)]

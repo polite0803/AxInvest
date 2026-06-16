@@ -347,6 +347,14 @@ pub async fn recommend_stocks(
                     new_conf,
                     period_val,
                 );
+                // 信号质量校准：用回测历史胜率调整置信度
+                // 格式: "trend_short", "value_long" 等
+                let quality_id = format!("{}_{}", p.style.as_str(), p.period.as_str());
+                let quality_mult = crate::backtest_strategy::signal_quality_multiplier(&quality_id);
+                if (quality_mult - 1.0).abs() > 0.01 {
+                    p.confidence = (p.confidence as f64 * quality_mult).clamp(0.0, 100.0) as u8;
+                    p.position_pct = (p.position_pct * quality_mult).clamp(0.0, 100.0);
+                }
             }
             Ok::<_, String>(raw)
         };

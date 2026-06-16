@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
 use crate::memory_provider::{MemoryEntry, MemoryProvider, MemoryQuery, MemoryQueryResult};
 use crate::memory_providers::service::{MemoryNature, MemoryTier};
 use async_trait::async_trait;
@@ -9,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HonchoConfig {
+pub(crate) struct HonchoConfig {
     pub api_url: String,
     pub api_key: Option<String>,
     pub user_id: String,
@@ -27,13 +29,13 @@ impl Default for HonchoConfig {
     }
 }
 
-pub struct HonchoProvider {
+pub(crate) struct HonchoProvider {
     config: HonchoConfig,
     local_cache: Arc<RwLock<HashMap<String, Vec<MemoryEntry>>>>,
 }
 
 impl HonchoProvider {
-    pub fn new(config: HonchoConfig) -> Self {
+    pub(crate) fn new(config: HonchoConfig) -> Self {
         Self {
             config,
             local_cache: Arc::new(RwLock::new(HashMap::new())),

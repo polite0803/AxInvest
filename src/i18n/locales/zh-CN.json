@@ -5573,6 +5573,7 @@
     "new": "新建模板",
     "nameRequired": "请输入名称",
     "namePlaceholder": "模板名称",
+    "unnamed": "未命名",
     "descPlaceholder": "模板描述",
     "contentRequired": "请输入模板内容",
     "contentPlaceholder": "模板内容，支持 {variable} 占位符",
@@ -6059,7 +6060,8 @@
     "tutorialKnowledgeDesc": "上传文档构建知识库，AI 将基于你的文档提供上下文感知回答",
     "moreModels": "+{{count}} 个",
     "targetNotFound": "目标元素未找到，请先进入聊天页面",
-    "goToSettings": "前往设置添加 API Key"
+    "goToSettings": "前往设置添加 API Key",
+    "presetApplyFailed": "预设应用失败"
   },
   "help": {
     "title": "帮助中心",
@@ -9085,6 +9087,11 @@
     },
     "common": {
       "empty": "暂无数据"
+    }
+  },
+  "chat:workflow": {
+    "templateList": {
+      "presetsImported": "导入成功"
     }
   }
 }

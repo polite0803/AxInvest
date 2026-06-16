@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
 #[cfg(not(target_os = "android"))]
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_os = "android"))]
@@ -67,7 +69,7 @@ pub struct SkillSandboxExecutor {
 
 #[cfg(not(target_os = "android"))]
 impl SkillSandboxExecutor {
-    pub fn new(policy: SandboxPolicy) -> Self {
+    pub(crate) fn new(policy: SandboxPolicy) -> Self {
         Self { policy }
     }
 
@@ -297,17 +299,17 @@ impl SandboxExecutor for SkillSandboxExecutor {
 }
 
 #[cfg(not(target_os = "android"))]
-pub struct DryRunSandboxExecutor {
+pub(crate) struct DryRunSandboxExecutor {
     policy: SandboxPolicy,
 }
 
 #[cfg(not(target_os = "android"))]
 impl DryRunSandboxExecutor {
-    pub fn new(policy: SandboxPolicy) -> Self {
+    pub(crate) fn new(policy: SandboxPolicy) -> Self {
         Self { policy }
     }
 
-    pub fn with_default_policy() -> Self {
+    pub(crate) fn with_default_policy() -> Self {
         Self::new(SandboxPolicy::default())
     }
 

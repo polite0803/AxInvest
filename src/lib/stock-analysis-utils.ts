@@ -380,6 +380,24 @@ export interface StockConsensus {
 
 /** 分析师按 ID 后缀的领域权重：value=价值/长线, technical=技术/短线, sentiment=情绪, macro=宏观 */
 const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
+  // 中线决策：基本面与技术面均衡，各分析师权重接近
+  mid: {
+    "a-fundamentals": 1.2,
+    "fundamental": 1.2,
+    "value-investor": 1.2,
+    "a-macro": 1.1,
+    "macro": 1.1,
+    "a-sector": 1.1,
+    "research-mgr": 1.1,
+    "a-market": 1.0,
+    "a-technical": 1.0,
+    "a-sentiment": 1.0,
+    "sentiment": 1.0,
+    "a-news": 1.0,
+    "a-hot-money": 0.9,
+    "capital": 0.9,
+    default: 1.0,
+  },
   // 长线决策：价值投资者和分析师权重最高，技术面被削弱
   long: {
     "fundamental": 1.5,

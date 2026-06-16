@@ -638,6 +638,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         status: "error",
         error: typeof e === "string" ? e : (e as Error)?.message ?? i18n.t("stockAnalysis.workflow.startFailed"),
         _unlisten: null,
+        workflowId: null,
         progressPct: 0,
       });
     }
@@ -1196,12 +1197,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         }
 
         // 回退：从 parseWorkflowResults 中获取
+        const parsed = parseWorkflowResults(results);
         if (!decision) {
-          const parsed = parseWorkflowResults(results);
           decision = parsed.decision;
         }
 
-        const parsed = parseWorkflowResults(results);
+        // 修复 #5: 三层回退全失败时记录警告，避免静默丢失决策
+        if (!decision) {
+          console.warn(
+            "[StockAnalysis] workflow-completed 三层回退均未能解析决策",
+            { hasPortfolioMgr: !!pmRaw, hasOutput: output !== undefined },
+          );
+        }
+
         // 增量合并 workflow-step-done 已填充的数据，避免覆盖实时进度
         const s = get();
         set({
@@ -1265,16 +1273,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
         const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR");
         const isLlmError = effectiveErrorCode.startsWith("LLM_");
+        const cur = get();
         set({
           error: msg,
           errorCode: effectiveErrorCode,
-          status: isLlmError ? "running" : "error",
-          llmStatus: isLlmError ? "placeholder" : get().llmStatus,
+          // 修复 #4: LLM 错误时工作流已终止，status 应为 "completed" 而非 "running"，
+          // llmStatus="placeholder" 已表达降级语义，progressPct 保持实际进度不虚报 100%
+          status: isLlmError ? "completed" : "error",
+          llmStatus: isLlmError ? "placeholder" : cur.llmStatus,
           progressMessage: isLlmError
             ? i18n.t("stockAnalysis.progress.llmFallback")
             : msg,
-          progressPct: 100,
-          currentStage: 4,
+          progressPct: cur.progressPct,
+          currentStage: cur.currentStage,
         });
       });
       unlisteners.push(u3);

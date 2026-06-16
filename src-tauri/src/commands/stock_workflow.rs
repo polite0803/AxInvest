@@ -1031,7 +1031,7 @@ pub async fn run_single_stock_analysis(
             // 更新为完成状态
             let decision_output = wf
                 .results
-                .get("portfolio-manager")
+                .get("portfolio-mgr")
                 .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok());
 
             let decision_action = decision_output.as_ref().and_then(|d| {

@@ -292,14 +292,20 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     );
   };
 
-  try {
-    const m = await invoke<Message>("send_system_message", {
-      conversationId,
-      content: buildAggregateContent("trigger", "running", 30),
-    });
-    aggregateMsgId = m.id;
-    appendMessageToStore(conversationId, m);
-  } catch { /* silent */ }
+  const tryCreateAggregateMsg = async (): Promise<string | null> => {
+    try {
+      const m = await invoke<Message>("send_system_message", {
+        conversationId,
+        content: buildAggregateContent("trigger", "running", 30),
+      });
+      appendMessageToStore(conversationId, m);
+      return m.id;
+    } catch (e) {
+      console.error("[StockWorkflowChatBridge] 创建聚合消息失败，将在首个节点完成时重试:", e);
+      return null;
+    }
+  };
+  aggregateMsgId = await tryCreateAggregateMsg();
 
   const u1 = await listen<{
     workflowId: string;
@@ -424,6 +430,9 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     }
 
     // ── 更新聚合卡片 ──
+    if (!aggregateMsgId && status === "completed") {
+      aggregateMsgId = await tryCreateAggregateMsg();
+    }
     if (aggregateMsgId) {
       scheduleUpdate(buildAggregateContent(nodeId, "running", totalNodes));
     }

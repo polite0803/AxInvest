@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 use super::tool_resolver::ToolDependency;
@@ -15,7 +17,8 @@ pub struct CodeBlock {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SkillContentType {
+#[allow(dead_code)]
+pub(crate) enum SkillContentType {
     Metadata,
     TextualInstruction,
     CodeScript,
@@ -40,6 +43,7 @@ impl CodeBlock {
         }
     }
 
+    #[allow(dead_code)]
     pub fn infer_dependencies(&self) -> Vec<String> {
         let mut deps = Vec::new();
 
@@ -106,6 +110,7 @@ impl CodeBlock {
         deps
     }
 
+    #[allow(dead_code)]
     pub fn infer_schema(&self) -> Option<serde_json::Value> {
         match self.language.as_deref() {
             Some("json") => {
@@ -123,6 +128,7 @@ impl CodeBlock {
         None
     }
 
+    #[allow(dead_code)]
     pub fn is_script(&self) -> bool {
         matches!(
             self.language.as_deref(),
@@ -142,6 +148,7 @@ impl CodeBlock {
         )
     }
 
+    #[allow(dead_code)]
     pub fn is_config(&self) -> bool {
         matches!(
             self.language.as_deref(),
@@ -150,7 +157,7 @@ impl CodeBlock {
     }
 }
 
-pub struct ContentPreprocessor;
+pub(crate) struct ContentPreprocessor;
 
 impl ContentPreprocessor {
     pub fn extract_code_blocks(content: &str) -> (String, Vec<CodeBlock>) {
@@ -209,6 +216,7 @@ impl ContentPreprocessor {
         (result, blocks)
     }
 
+    #[allow(dead_code)]
     pub fn restore_code_blocks(content: &str, blocks: &[CodeBlock]) -> String {
         let mut result = content.to_string();
         for (i, block) in blocks.iter().enumerate() {
@@ -360,11 +368,13 @@ impl ParsedStep {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_code_blocks(mut self, blocks: Vec<CodeBlock>) -> Self {
         self.code_blocks = blocks;
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_code_blocks_from_content(mut self, content: &str) -> Self {
         let (_, blocks) = ContentPreprocessor::extract_code_blocks(content);
         self.code_blocks = blocks;
@@ -381,7 +391,7 @@ pub struct DecompositionResult {
     pub original_source: CompositeSourceInfo,
     pub original_content: String,
     pub parsed_steps_metadata: Vec<StepMetadata>,
-    pub code_blocks: Vec<CodeBlock>,
+    pub(crate) code_blocks: Vec<CodeBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1187,7 +1197,7 @@ impl SkillDecomposer {
         steps
     }
 
-    pub fn parse_with_fallback(
+    pub(crate) fn parse_with_fallback(
         composite: &CompositeSkillData,
         llm_parser: Option<&dyn crate::skill_decomposition::llm_assisted::LlmAssistedParser>,
         llm_request: Option<&crate::skill_decomposition::llm_assisted::LlmParseRequest>,

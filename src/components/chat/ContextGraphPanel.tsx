@@ -24,6 +24,10 @@ import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import "@xyflow/react/dist/style.css";
 import { useKnowledgeStore, useMcpStore, useMemoryStore, useSkillExtensionStore } from "@/stores";
+import type { KnowledgeBase } from "@/types";
+import type { MemoryNamespace } from "@/types";
+import type { McpServer } from "@/types";
+import type { Skill } from "@/types";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -251,14 +255,10 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
     const edges: ContextGraphEdge[] = [];
 
     // 预构建查找映射，避免在循环中调用 find
-
-    const kbMap = new Map(knowledgeBases.map((k) => [k.id, k]));
-
-    const nsMap = new Map(memoryNamespaces.map((n) => [n.id, n]));
-
-    const srvMap = new Map(mcpServers.map((s) => [s.id, s]));
-
-    const skillMap = new Map(installedSkills.map((s) => [s.name, s]));
+    const kbMap = new Map(knowledgeBases.map((k: KnowledgeBase) => [k.id, k]));
+    const nsMap = new Map(memoryNamespaces.map((n: MemoryNamespace) => [n.id, n]));
+    const srvMap = new Map(mcpServers.map((s: McpServer) => [s.id, s]));
+    const skillMap = new Map(installedSkills.map((s: Skill) => [s.name, s]));
 
     // Conversation node (center)
     const convName = conversationTitle
@@ -492,14 +492,10 @@ export const ContextGraphPanel = React.memo(function ContextGraphPanel({
               {(() => {
                 const pills: { label: string; color: string }[] = [];
                 // 预构建查找映射，避免在循环中调用 find
-
-                const kbMap = new Map(knowledgeBases.map((k) => [k.id, k]));
-
-                const nsMap = new Map(memoryNamespaces.map((n) => [n.id, n]));
-
-                const srvMap = new Map(mcpServers.map((s) => [s.id, s]));
-
-                const skillMap = new Map(installedSkills.map((s) => [s.name, s]));
+                const kbMap = new Map(knowledgeBases.map((k: KnowledgeBase) => [k.id, k]));
+                const nsMap = new Map(memoryNamespaces.map((n: MemoryNamespace) => [n.id, n]));
+                const srvMap = new Map(mcpServers.map((s: McpServer) => [s.id, s]));
+                const skillMap = new Map(installedSkills.map((s: Skill) => [s.name, s]));
                 if (modelName) {
                   pills.push({
                     label: modelName.slice(0, 12),

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,7 +9,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum CapabilityType {
+pub(crate) enum CapabilityType {
     ContextPrediction,
     ProactiveSuggestion,
     TaskPrefetch,
@@ -15,7 +17,7 @@ pub enum CapabilityType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProactiveCapability {
+pub(crate) struct ProactiveCapability {
     pub capability_type: CapabilityType,
     pub confidence: f32,
     pub trigger_conditions: Vec<TriggerCondition>,
@@ -23,7 +25,7 @@ pub struct ProactiveCapability {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TriggerCondition {
+pub(crate) struct TriggerCondition {
     pub condition_type: TriggerConditionType,
     pub threshold: Option<f32>,
     pub context_key: Option<String>,
@@ -31,7 +33,7 @@ pub struct TriggerCondition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum TriggerConditionType {
+pub(crate) enum TriggerConditionType {
     FileOpened,
     ErrorDetected,
     TimeBased,
@@ -42,7 +44,7 @@ pub enum TriggerConditionType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ProactiveAction {
+pub(crate) enum ProactiveAction {
     ShowSuggestion,
     PrefetchResource,
     SendReminder,

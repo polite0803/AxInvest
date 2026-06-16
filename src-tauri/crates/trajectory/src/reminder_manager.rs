@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
 use crate::proactive_assistant::{
     ProactiveAssistant, RecurrenceFrequency, Reminder, ReminderRecurrence,
 };
@@ -8,14 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReminderSchedule {
+pub(crate) struct ReminderSchedule {
     pub reminder_id: String,
     pub next_trigger: DateTime<Utc>,
     pub recurrence: Option<ReminderRecurrence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReminderNotification {
+pub(crate) struct ReminderNotification {
     pub notification_id: String,
     pub reminder: Reminder,
     pub triggered_at: DateTime<Utc>,
@@ -23,7 +25,7 @@ pub struct ReminderNotification {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReminderManagerConfig {
+pub(crate) struct ReminderManagerConfig {
     pub enabled: bool,
     pub max_active_reminders: usize,
     pub snooze_duration_minutes: i64,
@@ -43,7 +45,7 @@ impl Default for ReminderManagerConfig {
     }
 }
 
-pub struct ReminderManager {
+pub(crate) struct ReminderManager {
     config: ReminderManagerConfig,
     reminders: HashMap<String, Reminder>,
     schedules: HashMap<String, ReminderSchedule>,
@@ -300,7 +302,7 @@ impl ReminderManager {
 }
 
 #[derive(Debug, Clone)]
-pub enum ReminderError {
+pub(crate) enum ReminderError {
     NotFound,
     LimitReached { max: usize },
     AlreadyCompleted,

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
 //! Nudge service module
 //!
 //! Replaces TypeScript `NudgeService.ts` with Rust implementation.
@@ -29,7 +31,7 @@ impl Urgency {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum NudgeType {
+pub(crate) enum NudgeType {
     LowActivity,
     BestPractice,
     Improvement,
@@ -38,7 +40,7 @@ pub enum NudgeType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NudgeMessage {
+pub(crate) struct NudgeMessage {
     pub id: String,
     #[serde(rename = "nudgeType")]
     pub nudge_type: NudgeType,

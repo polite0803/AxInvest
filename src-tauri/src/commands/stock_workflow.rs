@@ -1195,6 +1195,7 @@ pub async fn run_reflection_workflow(
         what_went_wrong: Set(None),
         missed_signals: Set(None),
         fix_for_future: Set(None),
+        parameter_suggestions_json: Set(None),
         decision_json: Set(None),
         blackboard_snapshot: Set(None),
         model_version: Set(None),
@@ -1295,7 +1296,7 @@ pub async fn run_reflection_workflow(
                 .get("reflection")
                 .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok());
 
-            let (what_went_wrong, missed_signals, fix_for_future) = reflection_json
+            let (what_went_wrong, missed_signals, fix_for_future, params_suggestion_json) = reflection_json
                 .as_ref()
                 .and_then(|v| v.get("reflection"))
                 .map(|r| {
@@ -1308,9 +1309,10 @@ pub async fn run_reflection_workflow(
                         .get("fix_for_future")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    (w, m, f)
+                    let p = r.get("params_suggestion").map(|v| v.to_string());
+                    (w, m, f, p)
                 })
-                .unwrap_or((None, None, None));
+                .unwrap_or((None, None, None, None));
 
             let bb_text = serde_json::to_string(&wf.results).unwrap_or_default();
             let dj_text = reflection_json.as_ref().map(|v| v.to_string());
@@ -1324,6 +1326,10 @@ pub async fn run_reflection_workflow(
                 )
                 .col_expr(stock_reflections::Column::MissedSignals, Expr::value(missed_signals))
                 .col_expr(stock_reflections::Column::FixForFuture, Expr::value(fix_for_future))
+                .col_expr(
+                    stock_reflections::Column::ParameterSuggestionsJson,
+                    Expr::value(params_suggestion_json),
+                )
                 .col_expr(stock_reflections::Column::BlackboardSnapshot, Expr::value(bb_text))
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)

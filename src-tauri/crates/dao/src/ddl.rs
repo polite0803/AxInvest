@@ -225,6 +225,11 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
             created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
         )
         .await;
+    let _ = db
+        .execute_unprepared(
+            "ALTER TABLE stock_reflections ADD COLUMN parameter_suggestions_json TEXT",
+        )
+        .await;
 
     // --- Time-travel mode: market_data_history L2 cache 表 ---
     db.execute_unprepared(

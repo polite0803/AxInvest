@@ -27,6 +27,8 @@ pub struct Model {
     pub missed_signals: Option<String>,
     /// 反思摘要：改进建议
     pub fix_for_future: Option<String>,
+    /// 反思 agent 输出的参数调整建议（params_suggestion JSON 数组字符串）
+    pub parameter_suggestions_json: Option<String>,
     /// portfolio-manager 完整输出 JSON
     pub decision_json: Option<String>,
     /// 工作流完整结果（用于追溯）

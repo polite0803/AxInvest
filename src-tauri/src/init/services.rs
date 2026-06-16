@@ -1324,6 +1324,7 @@ fn start_cron_scheduler(state: &AppState) {
 
                 let mut _success = 0u32;
                 let mut perfs_logged: u32 = 0;
+                let mut reflection_ids: Vec<String> = Vec::new();
                 for a in &pending {
                     let action = a.decision_action.as_deref().unwrap_or("");
                     let code = &a.stock_code;
@@ -1379,7 +1380,7 @@ fn start_cron_scheduler(state: &AppState) {
                         .exec(&database)
                         .await;
 
-                    // 判定 loss → 触发反思工作流（嵌套原工作流 as-of 重放 + hindsight 注入）
+                    // 判定 loss → 触发反思工作流
                     if outcome == "loss" {
                         let pct = if price_after > 0.0 {
                             format!("{:.1}%", (later_close / price_after - 1.0) * 100.0)
@@ -1387,7 +1388,7 @@ fn start_cron_scheduler(state: &AppState) {
                             "下跌".to_string()
                         };
                         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-                        let _ = crate::commands::stock_workflow::run_reflection_workflow(
+                        let reflection_result = crate::commands::stock_workflow::run_reflection_workflow(
                             &database,
                             &client,
                             &engine,
@@ -1395,14 +1396,22 @@ fn start_cron_scheduler(state: &AppState) {
                             &mk,
                             code,
                             a.stock_name.as_str(),
-                            &a.id,                             // original_analysis_id
-                            &format!("30天后 {} → 失败", pct), // actual_outcome
-                            date.as_str(),                     // as_of_date = 原始分析日期
-                            &today,                            // hindsight_date = 校验触发日期
-                            0u8,     // min_confidence_threshold (0 = 全部触发)
-                            "light", // reflection_depth
+                            &a.id,
+                            &format!("30天后 {} → 失败", pct),
+                            date.as_str(),
+                            &today,
+                            0u8,
+                            "light",
                         )
                         .await;
+                        match reflection_result {
+                            Ok(ref_id) => {
+                                reflection_ids.push(ref_id);
+                            }
+                            Err(e) => {
+                                tracing::warn!("[evolution_drift] 反思工作流失败: {e}");
+                            }
+                        }
                     }
 
                     // ── R1 复盘→进化：把每次决策校验的结果写入 strategy_performance ──
@@ -1457,10 +1466,11 @@ fn start_cron_scheduler(state: &AppState) {
 
                 // ── R1 复盘→进化：决策校验完成后重算所有 (strategy, period) 权重 ──
                 if perfs_logged > 0 {
+                    let ref_id = if reflection_ids.is_empty() { None } else { Some(reflection_ids.first().unwrap().as_str()) };
                     match axagent_stock_analysis::evolution_drift::recalc_and_persist(
                         &database,
                         "cron",
-                        None,
+                        ref_id,
                         None,
                     )
                     .await

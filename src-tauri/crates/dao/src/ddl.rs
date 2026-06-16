@@ -60,8 +60,8 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
             direction TEXT NOT NULL, price REAL NOT NULL, quantity INTEGER NOT NULL, \
             trade_date TEXT NOT NULL, trade_time TEXT NOT NULL, \
             fee REAL, realized_pnl REAL, notes TEXT, \
+            strategy TEXT, \
             created_at INTEGER NOT NULL)",
-        "ALTER TABLE trades ADD COLUMN strategy TEXT",
         "CREATE TABLE IF NOT EXISTS reco_picks (\
             id TEXT NOT NULL PRIMARY KEY, generated_at TEXT NOT NULL, \
             period TEXT NOT NULL, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
@@ -206,6 +206,7 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
         "ALTER TABLE stock_analyses ADD COLUMN decision_time_horizon TEXT",
         "ALTER TABLE stock_analyses ADD COLUMN decision_expected_holding_days INTEGER",
         "ALTER TABLE reco_picks ADD COLUMN strategy_weights_json TEXT",
+        "ALTER TABLE trades ADD COLUMN strategy TEXT",
     ] {
         let _ = db.execute_unprepared(sql).await;
     }

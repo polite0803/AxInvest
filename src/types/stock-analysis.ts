@@ -229,7 +229,7 @@ export interface EvidenceRef {
   tabKey: "market" | "analyze" | "execute";
   panelKey: string;
   anchor?: string;
-  snippet: string;
+  snippet?: string;
 }
 
 /** 单个时间线节点 */

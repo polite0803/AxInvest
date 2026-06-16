@@ -8385,7 +8385,20 @@
       "m20": "Market -20%",
       "blackSwan": "Black Swan (-30%)"
     },
-    "changePct": "Change %"
+    "changePct": "Change %",
+    "evidence": {
+      "concepts": "Фундаментальные/Оценка",
+      "announcements": "Новости/Политика",
+      "industry": "Рейтинг отрасли",
+      "screener": "Оценка скринера",
+      "north": "Северный поток/Риск",
+      "analysts": "Отчеты аналитиков",
+      "debate": "Дебаты быков и медведей",
+      "risk": "Оценка рисков",
+      "value": "Оценка",
+      "trade": "Торговый план",
+      "decision": "Итоговое решение"
+    }
   },
   "trade": {
     "title": "Trading Log",

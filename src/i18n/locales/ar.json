@@ -8385,7 +8385,20 @@
       "m20": "Market -20%",
       "blackSwan": "Black Swan (-30%)"
     },
-    "changePct": "Change %"
+    "changePct": "Change %",
+    "evidence": {
+      "concepts": "الأساسيات/التقييم",
+      "announcements": "الأخبار/السياسات",
+      "industry": "تصنيف القطاع",
+      "screener": "درجة الفرز",
+      "north": "التدفقات الشمالية/المخاطر",
+      "analysts": "تقارير المحللين",
+      "debate": "نقاش الثيران والدببة",
+      "risk": "تقييم المخاطر",
+      "value": "التقييم",
+      "trade": "خطة التداول",
+      "decision": "القرار النهائي"
+    }
   },
   "trade": {
     "title": "Trading Log",

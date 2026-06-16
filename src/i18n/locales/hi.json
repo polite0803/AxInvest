@@ -8385,7 +8385,20 @@
       "m20": "Market -20%",
       "blackSwan": "Black Swan (-30%)"
     },
-    "changePct": "Change %"
+    "changePct": "Change %",
+    "evidence": {
+      "concepts": "फंडामेंटल/मूल्यांकन",
+      "announcements": "समाचार/नीति",
+      "industry": "उद्योग रैंकिंग",
+      "screener": "स्क्रीनर स्कोर",
+      "north": "नॉर्थबाउंड/जोखिम",
+      "analysts": "विश्लेषक रिपोर्ट",
+      "debate": "बुल-बियर बहस",
+      "risk": "जोखिम मूल्यांकन",
+      "value": "मूल्यांकन",
+      "trade": "ट्रेडिंग प्लान",
+      "decision": "अंतिम निर्णय"
+    }
   },
   "trade": {
     "title": "Trading Log",

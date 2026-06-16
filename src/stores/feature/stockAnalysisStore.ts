@@ -1411,43 +1411,43 @@ function agentDisplayName(nodeId: string): string {
 /** 节点 → 证据引用：根据 nodeId 推断其结果会落在哪个侧栏 sheet panel */
 function inferEvidenceRefs(
   nodeId: string,
-): Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string; snippet: string }> {
+): Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string }> {
   // 工具节点 → 行情/概念面板
   if (nodeId === "t-fundamentals-data" || nodeId === "t-valuation") {
-    return [{ tabKey: "market", panelKey: "concepts", snippet: "基本面/估值数据" }];
+    return [{ tabKey: "market", panelKey: "concepts" }];
   }
   if (nodeId === "t-news-data" || nodeId === "t-policy-data") {
-    return [{ tabKey: "market", panelKey: "announcements", snippet: "新闻/政策公告" }];
+    return [{ tabKey: "market", panelKey: "announcements" }];
   }
   if (nodeId === "t-research-data") {
-    return [{ tabKey: "market", panelKey: "industry", snippet: "行业排名" }];
+    return [{ tabKey: "market", panelKey: "industry" }];
   }
   if (nodeId === "t-scoring") {
-    return [{ tabKey: "market", panelKey: "screener", snippet: "推荐评分" }];
+    return [{ tabKey: "market", panelKey: "screener" }];
   }
   if (nodeId === "t-risk") {
-    return [{ tabKey: "market", panelKey: "north", snippet: "北向资金/风险" }];
+    return [{ tabKey: "market", panelKey: "north" }];
   }
   // 分析师节点 → 报告
   if (nodeId.startsWith("a-")) {
-    return [{ tabKey: "analyze", panelKey: "analysts", snippet: "分析师报告" }];
+    return [{ tabKey: "analyze", panelKey: "analysts" }];
   }
   // 辩论 → 辩论
   if (nodeId.startsWith("bull-") || nodeId.startsWith("bear-")) {
-    return [{ tabKey: "analyze", panelKey: "debate", snippet: "多空辩论" }];
+    return [{ tabKey: "analyze", panelKey: "debate" }];
   }
   // 风险/研究/价值/规则
   if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
-    return [{ tabKey: "analyze", panelKey: "risk", snippet: "Risk Assessment" }];
+    return [{ tabKey: "analyze", panelKey: "risk" }];
   }
   if (nodeId === "value-investor") {
-    return [{ tabKey: "analyze", panelKey: "value", snippet: "Valuation" }];
+    return [{ tabKey: "analyze", panelKey: "value" }];
   }
   if (nodeId === "trader") {
-    return [{ tabKey: "execute", panelKey: "trade", snippet: "Trading Plan" }];
+    return [{ tabKey: "execute", panelKey: "trade" }];
   }
   if (nodeId === "portfolio-mgr" || nodeId === "rule-check") {
-    return [{ tabKey: "analyze", panelKey: "decision", snippet: "Final Decision" }];
+    return [{ tabKey: "analyze", panelKey: "decision" }];
   }
   return [];
 }

@@ -8508,7 +8508,20 @@
       "m20": "Market -20%",
       "blackSwan": "Black Swan (-30%)"
     },
-    "changePct": "Change %"
+    "changePct": "Change %",
+    "evidence": {
+      "concepts": "基本面/估值數據",
+      "announcements": "新聞/政策公告",
+      "industry": "行業排名",
+      "screener": "推薦評分",
+      "north": "北向資金/風險",
+      "analysts": "分析師報告",
+      "debate": "多空辯論",
+      "risk": "風險評估",
+      "value": "價值評估",
+      "trade": "交易計劃",
+      "decision": "最終決策"
+    }
   },
   "trade": {
     "title": "交易日志",

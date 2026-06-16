@@ -8385,7 +8385,20 @@
       "m20": "Market -20%",
       "blackSwan": "Black Swan (-30%)"
     },
-    "changePct": "Change %"
+    "changePct": "Change %",
+    "evidence": {
+      "concepts": "Fundamentaldaten/Bewertung",
+      "announcements": "Nachrichten/Richtlinien",
+      "industry": "Branchenranking",
+      "screener": "Screener-Bewertung",
+      "north": "Northbound/Risiko",
+      "analysts": "Analystenberichte",
+      "debate": "Bullen-Bären-Debatte",
+      "risk": "Risikobewertung",
+      "value": "Bewertung",
+      "trade": "Handelsplan",
+      "decision": "Endgültige Entscheidung"
+    }
   },
   "trade": {
     "title": "Trading Log",

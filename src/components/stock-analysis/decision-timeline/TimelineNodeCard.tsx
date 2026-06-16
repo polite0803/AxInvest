@@ -46,7 +46,7 @@ function EvidenceChip({ evidence: ev }: { evidence: EvidenceRef }) {
       onClick={() => navigateTo(ev.tabKey, ev.panelKey, ev.anchor)}
       title={`${ev.tabKey} / ${ev.panelKey}`}
     >
-      🔗 {t(`stockAnalysis.evidence.${ev.panelKey}`, ev.snippet)}
+      🔗 {t(`stockAnalysis.evidence.${ev.panelKey}`)}
     </button>
   );
 }

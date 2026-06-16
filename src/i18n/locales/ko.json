@@ -8385,7 +8385,20 @@
       "m20": "Market -20%",
       "blackSwan": "Black Swan (-30%)"
     },
-    "changePct": "Change %"
+    "changePct": "Change %",
+    "evidence": {
+      "concepts": "펀더멘털/가치평가",
+      "announcements": "뉴스/정책",
+      "industry": "산업 순위",
+      "screener": "스크리너 점수",
+      "north": "북향자금/리스크",
+      "analysts": "애널리스트 보고서",
+      "debate": "강세-약세 토론",
+      "risk": "위험 평가",
+      "value": "가치평가",
+      "trade": "거래 계획",
+      "decision": "최종 결정"
+    }
   },
   "trade": {
     "title": "Trading Log",

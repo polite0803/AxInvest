@@ -3974,7 +3974,7 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         created_at: Set(now),
         updated_at: Set(now),
     }
-    .save(db)
+    .insert(db)
     .await
     .map_err(|e| format!("写入工作流模板失败: {e}"))?;
 
@@ -4290,102 +4290,207 @@ fn merge_variable_values(
 
 /// 种子化反思复盘工作流模板（stock-reflection）。
 ///
-/// 从已存在的 "stock-analysis" 模板克隆 DAG 结构，修改 ID/名称/变量声明。
+/// 与 stock-analysis 同款：用 Rust 类型（`WorkflowNode` / `WorkflowNodeBase` /
+/// `WorkflowNodeConfig::*`）构造节点，再 `serde_json::to_string` 序列化入库。
+/// 这样编译器会强制要求所有必填字段（id/title/position/retry/enabled…），
+/// 避免 `serde_json::json!()` 裸写漏字段导致反序列化静默失败、编辑器看不到节点。
+///
 /// 运行时 portfolio-manager 通过 `{{actual_outcome}}` 变量切换到反思模式。
 async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
+    use axagent_harness::workflow_types::{
+        AgentNode, AgentNodeConfig, EdgeType, OutputMode, Position, RetryConfig, StorageNode,
+        StorageNodeConfig, SubWorkflowNode, SubWorkflowNodeConfig, TriggerConfig, TriggerNode,
+        TriggerType, Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+    };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     let now = chrono::Utc::now().timestamp_millis();
 
-    let nodes = serde_json::json!([
-        {
-            "id": "trigger",
-            "type": "trigger",
-            "position": { "x": 20, "y": 20 },
-            "config": {
-                "name": "反思复盘触发器",
-                "description": "触发反思复盘工作流，传入 stock_code / as_of_date"
-            }
-        },
-        {
-            "id": "sub-analysis",
-            "type": "subWorkflow",
-            "position": { "x": 20, "y": 120 },
-            "config": {
-                "sub_workflow_id": "stock-analysis",
-                "input_mapping": {
-                    "stock_code": "trigger.stock_code",
-                    "as_of_date": "trigger.as_of_date"
+    // ── 节点定义（与 stock-analysis 同款：Rust 类型构造，编译期校验必填字段）──
+    let nodes: Vec<WorkflowNode> = vec![
+        // 1. 触发器：手动模式，传入 stock_code / as_of_date / actual_outcome / reflection_depth
+        WorkflowNode::Trigger(TriggerNode {
+            base: WorkflowNodeBase {
+                id: "trigger".into(),
+                title: "反思复盘触发器".into(),
+                description: Some("触发反思复盘工作流，传入 stock_code / as_of_date".into()),
+                position: Position { x: 20.0, y: 20.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({
+                    "description": "as-of 重放: 选择历史日期对分析结果进行反思复盘",
+                    "required_params": ["as_of_date", "stock_code"],
+                    "param_schema": {
+                        "as_of_date": { "type": "date", "description": "原始分析日期，决定数据时间锚点" },
+                        "stock_code": { "type": "string", "description": "股票代码" }
+                    }
+                }),
+            },
+        }),
+        // 2. 嵌套子工作流：复用 stock-analysis 模板的分析能力
+        WorkflowNode::SubWorkflow(SubWorkflowNode {
+            base: WorkflowNodeBase {
+                id: "sub-analysis".into(),
+                title: "调用股票分析子工作流".into(),
+                description: Some("嵌套 stock-analysis 子工作流，复用其 9 维度分析能力".into()),
+                position: Position { x: 20.0, y: 120.0 },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
                 },
-                "output_var": "sub-analysis"
-            }
-        },
-        {
-            "id": "reflection-agent",
-            "type": "agent",
-            "position": { "x": 20, "y": 260 },
-            "config": {
-                "expert_id": "reflection",
-                "system_prompt": "",
-                "model_role": "decision-maker",
-                "context_sources": ["sub-analysis"],
-                "input_mapping": {
-                    "actual_outcome": "trigger.actual_outcome",
-                    "reflection_depth": "trigger.reflection_depth",
-                    "stock_code": "trigger.stock_code"
+                timeout: Some(600),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: SubWorkflowNodeConfig {
+                sub_workflow_id: "stock-analysis".into(),
+                input_mapping: [
+                    ("stock_code".to_string(), "trigger".to_string()),
+                    ("as_of_date".to_string(), "trigger".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                output_var: "sub-analysis".into(),
+                is_async: false,
+                sub_graph: None,
+            },
+        }),
+        // 3. 反思复盘 Agent：注入实际走势结果 + 反思深度，驱动 portfolio-manager 切反思模式
+        WorkflowNode::Agent(AgentNode {
+            base: WorkflowNodeBase {
+                id: "reflection-agent".into(),
+                title: "反思复盘".into(),
+                description: Some("基于实际走势结果对历史分析做反思复盘".into()),
+                position: Position { x: 20.0, y: 260.0 },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
                 },
-                "output_var": "reflection"
-            }
+                timeout: Some(300),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: AgentNodeConfig {
+                system_prompt: "你的任务：对历史股票分析进行反思复盘。\n\
+                    目标股票代码: {{stock_code}}，股票名称: {{stock_name}}\n\
+                    实际走势结果: {{actual_outcome}}（非空 → 反思模式）\n\
+                    反思深度: {{reflection_depth}}（light = 简要；deep = 详细推理链）\n\n\
+                    重要原则：\n\
+                    1. 必须严格基于 actual_outcome 提供的实际走势与上游分析结论做对比，识别错因。\n\
+                    2. 输出应包含：错因分析（哪个判断失误 / 哪个信号被忽略）、改进建议（下次如何避免）。\n\
+                    3. 严禁输出空结果或只列 data_gaps。\n\
+                    4. 反思深度=deep 时给出可执行的检查清单（具体指标阈值、信号确认步骤）。"
+                    .into(),
+                context_sources: vec!["sub-analysis".into()],
+                input_mapping: [
+                    ("stock_code".to_string(), "trigger".to_string()),
+                    ("stock_name".to_string(), "trigger".to_string()),
+                    ("actual_outcome".to_string(), "trigger".to_string()),
+                    ("reflection_depth".to_string(), "trigger".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+                output_var: "reflection".into(),
+                model: None,
+                temperature: Some(0.3),
+                max_tokens: Some(4096),
+                tools: vec![],
+                exposed_tools: vec![],
+                output_mode: OutputMode::Text,
+                agent_profile_id: Some("stock-reflection".into()),
+                max_tool_rounds: None,
+                execution_mode: None,
+                rag_source_ids: vec![],
+                model_role: Some("decision-maker".into()),
+                consistency_check: None,
+                hallucination_guard: None,
+            },
+        }),
+        // 4. 反思记录持久化：写入 stock_reflections 表供后续查询/复盘
+        WorkflowNode::Storage(StorageNode {
+            base: WorkflowNodeBase {
+                id: "store-ref".into(),
+                title: "反思记录持久化".into(),
+                description: Some("写入反思记录到 stock_reflections 表".into()),
+                position: Position { x: 20.0, y: 400.0 },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
+                },
+                timeout: Some(30),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: StorageNodeConfig {
+                backend: "sqlite".into(),
+                operation: "insert".into(),
+                input_var: "reflection".into(),
+                collection: "stock_reflections".into(),
+                key_var: None,
+                output_var: "storage-result".into(),
+            },
+        }),
+    ];
+
+    let edges: Vec<WorkflowEdge> = vec![
+        WorkflowEdge {
+            id: "e-trigger-sub-analysis".into(),
+            source: "trigger".into(),
+            source_handle: None,
+            target: "sub-analysis".into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
         },
-        {
-            "id": "store-ref",
-            "type": "storage",
-            "position": { "x": 20, "y": 400 },
-            "config": {
-                "backend": "sqlite",
-                "operation": "insert",
-                "input_var": "reflection",
-                "collection": "stock_reflections",
-                "output_var": "storage-result"
-            }
-        }
-    ]);
-
-    let edges = serde_json::json!([
-        { "id": "e-trigger-sub-analysis", "source": "trigger", "target": "sub-analysis" },
-        { "id": "e-sub-analysis-reflection", "source": "sub-analysis", "target": "reflection-agent" },
-        { "id": "e-reflection-store", "source": "reflection-agent", "target": "store-ref" }
-    ]);
-
-    let trigger_config = serde_json::json!({
-        "trigger_type": "manual",
-        "config": {
-            "description": "as-of 重放: 选择历史日期对分析结果进行反思复盘",
-            "required_params": ["as_of_date", "stock_code"],
-            "param_schema": {
-                "as_of_date": { "type": "date", "description": "原始分析日期，决定数据时间锚点" },
-                "stock_code": { "type": "string", "description": "股票代码" }
-            }
-        }
-    });
-
-    let variables = serde_json::json!([
-        {
-            "name": "actual_outcome",
-            "var_type": "string",
-            "value": "",
-            "description": "实际走势结果，如 '30天跌8% → 失败'，非空时触发反思模式",
-            "is_secret": false
+        WorkflowEdge {
+            id: "e-sub-analysis-reflection".into(),
+            source: "sub-analysis".into(),
+            source_handle: None,
+            target: "reflection-agent".into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
         },
-        {
-            "name": "reflection_depth",
-            "var_type": "string",
-            "value": "light",
-            "description": "反思深度：light(简要) / deep(详细推理链)",
-            "is_secret": false
-        }
-    ]);
+        WorkflowEdge {
+            id: "e-reflection-store".into(),
+            source: "reflection-agent".into(),
+            source_handle: None,
+            target: "store-ref".into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        },
+    ];
+
+    let variables: Vec<Variable> = vec![
+        Variable {
+            name: "actual_outcome".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String("".into()),
+            description: Some("实际走势结果，如 '30天跌8% → 失败'，非空时触发反思模式".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reflection_depth".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String("light".into()),
+            description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
+            is_secret: false,
+        },
+    ];
 
     const REFLECTION_TEMPLATE_VERSION: i32 = 1;
 
@@ -4440,35 +4545,56 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         }
     }
 
+    // 走 stock-analysis 同款序列化路径：编译期校验 + 字段齐全
+    let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化反思节点失败: {e}"))?;
+    let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化反思边失败: {e}"))?;
+    let variables_json =
+        serde_json::to_string(&variables).map_err(|e| format!("序列化反思变量失败: {e}"))?;
+    let tags_json = serde_json::to_string(&["stock", "reflection", "A股"])
+        .map_err(|e| format!("序列化反思标签失败: {e}"))?;
+
     // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id("stock-reflection")
         .exec(db)
         .await;
-    axagent_core::entity::workflow_template::ActiveModel {
+    workflow_template::ActiveModel {
         id: Set("stock-reflection".to_string()),
         name: Set("A股反思复盘".to_string()),
         description: Set(Some(
             "嵌套 stock-analysis 子工作流的 as-of 重放，注入实际走势结果后反思".to_string(),
         )),
         icon: Set("search".into()),
-        tags: Set(Some(r#"["stock","reflection","A股"]"#.to_string())),
+        tags: Set(Some(tags_json)),
         version: Set(REFLECTION_TEMPLATE_VERSION),
         is_preset: Set(true),
         is_editable: Set(true),
         is_public: Set(true),
-        trigger_config: Set(Some(trigger_config.to_string())),
-        nodes: Set(nodes.to_string()),
-        edges: Set(edges.to_string()),
+        trigger_config: Set(Some(
+            serde_json::to_string(&TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({
+                    "description": "as-of 重放: 选择历史日期对分析结果进行反思复盘",
+                    "required_params": ["as_of_date", "stock_code"],
+                    "param_schema": {
+                        "as_of_date": { "type": "date", "description": "原始分析日期，决定数据时间锚点" },
+                        "stock_code": { "type": "string", "description": "股票代码" }
+                    }
+                }),
+            })
+            .map_err(|e| format!("序列化触发器配置失败: {e}"))?,
+        )),
+        nodes: Set(nodes_json),
+        edges: Set(edges_json),
         input_schema: Set(None),
         output_schema: Set(None),
-        variables: Set(Some(variables.to_string())),
+        variables: Set(Some(variables_json)),
         error_config: Set(None),
         composite_source: Set(None),
         tool_defs: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     }
-    .save(db)
+    .insert(db)
     .await
     .map_err(|e| format!("写入反思模板失败: {e}"))?;
 

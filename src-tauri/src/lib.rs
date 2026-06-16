@@ -1373,17 +1373,14 @@ pub fn run() {
             };
             #[cfg(mobile)]
             let tray_language = "en".to_string();
-            init::services::start_background_services(app.handle(), &state, app_dir.clone(), tray_language);
 
-            // Seed stock analysis experts/roles/profiles
-            {
-                let seed_db = state.harness.db().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(&seed_db).await {
-                        tracing::warn!("[stock_analysis_setup] 种子化失败: {e}");
-                    }
-                });
-            }
+            // 异步启动：不阻塞 UI
+            let seed_db = state.harness.db().clone();
+            tauri::async_runtime::spawn(async move {
+                // 种子化失败不阻塞，load_and_inject_template 有自愈机制
+                let _ = commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(&seed_db).await;
+            });
+            init::services::start_background_services(app.handle(), &state, app_dir.clone(), tray_language);
 
             android_utils::mark_startup_phase("setup_complete");
             Ok(())

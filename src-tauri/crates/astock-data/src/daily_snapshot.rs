@@ -29,6 +29,17 @@ pub const SNAPSHOT_METHODS: &[&str] = &[
     "get_concept_blocks",
     "search_stock",
     "get_sector_info",
+    "get_money_flow",
+    "get_north_bound_holding",
+    "get_margin_data",
+    "get_index_quotes",
+];
+
+/// 需要遍历个股的 per-stock 快照方法（相对于全市场方法）
+pub const PER_STOCK_METHODS: &[&str] = &[
+    "get_money_flow",
+    "get_north_bound_holding",
+    "get_margin_data",
 ];
 
 /// 每日快照缓存
@@ -43,6 +54,24 @@ impl DailySnapshotCache {
     /// 从已存在的 DiskCache 创建每日快照缓存
     pub fn from_disk(disk: Arc<DiskCache>) -> Self {
         Self { disk }
+    }
+
+    /// 执行一次完整的每日快照采集（由 Tauri command 调用）
+    /// : 全市场方法的结果 json，key 为 method 名
+    /// : 逐个股票采集的结果，key 为 "{method}:{stock_code}"
+    /// Tue Jun 16 18:13:05     2026: 快照日期 YYYY-MM-DD
+    /// 存入全市场快照（热门股、行业排名、快讯、概念板块等）
+    /// 由 Tauri command sweep_daily_snapshots 采集后调用
+    pub fn set_snapshot(&self, method: &str, date: &str, json: &str) {
+        let key = Self::cache_key(method, date);
+        self.disk.set(key, json.to_string(), 0i64);
+    }
+
+    /// 存入个股级快照（资金流向、北向持仓等），key 含股票代码
+    /// 调用方遍历股票列表逐只采集后逐只存入
+    pub fn set_stock_snapshot(&self, method: &str, stock_code: &str, date: &str, json: &str) {
+        let key = format!("{SNAPSHOT_PREFIX}:{method}:{stock_code}:{date}");
+        self.disk.set(key, json.to_string(), 0i64);
     }
 
     fn cache_key(method: &str, date: &str) -> String {

@@ -671,6 +671,20 @@ impl AStockClient {
             .and_then(|c| c.get(method, date))
     }
 
+    /// 设置每日快照（全市场方法），供 Tauri command 写入
+    pub fn set_daily_snapshot(&self, method: &str, date: &str, json: &str) {
+        if let Some(ref snap) = self.daily_snapshot {
+            snap.set_snapshot(method, date, json);
+        }
+    }
+
+    /// 设置个股级每日快照，供 Tauri command 写入
+    pub fn set_stock_daily_snapshot(&self, method: &str, stock_code: &str, date: &str, json: &str) {
+        if let Some(ref snap) = self.daily_snapshot {
+            snap.set_stock_snapshot(method, stock_code, date, json);
+        }
+    }
+
     /// 检查指定 vendor 的连接可用性（按实际能力选择探针方法）
     pub async fn check_vendor_health(&self, vendor_name: &str) -> Result<(), DataError> {
         let vendor = self

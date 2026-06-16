@@ -1063,6 +1063,7 @@ pub fn run() {
             commands::stock_analysis::get_stock_peers,
             commands::stock_analysis::get_stock_option_pcr,
             commands::stock_analysis::check_vendor_health,
+            commands::stock_analysis::sweep_daily_snapshots,
             // 缺陷 E 修复: as-of 降级实时计数
             commands::stock_analysis::get_asof_degradation_count,
             commands::stock_analysis::get_asof_degradation_log,

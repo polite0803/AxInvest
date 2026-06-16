@@ -738,10 +738,11 @@ pub async fn backtest_analysis(
         .and_then(|d| d.and_hms_opt(0, 0, 0))
         .map(|d| d.and_utc().timestamp_millis())
         .unwrap_or(0);
+    let period = result.time_horizon.as_deref().unwrap_or("short");
     let _ = axagent_stock_analysis::evolution_drift::record_performance(
         state.harness.db(),
         strategy_id,
-        "short",
+        period,
         &stock_code,
         "",
         decision_ms,
@@ -2327,6 +2328,115 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
         .check_vendor_health(&vendor)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 执行每日快照采集：遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 DiskCache
+///
+/// 调用一次即可采集当日快照；as-of 模式下的 NoHistoricalSemantic 方法会优先查快照缓存。
+/// 建议在每日收盘后（15:30 以后）通过 cron 调用。
+#[tauri::command]
+pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String, String> {
+    use axagent_astock_data::daily_snapshot::{PER_STOCK_METHODS, SNAPSHOT_METHODS};
+    use chrono::Local;
+
+    let date = Local::now().format("%Y-%m-%d").to_string();
+    let client = &state.astock_client;
+    let mut market_count = 0u32;
+    let mut stock_count = 0u32;
+
+    // 获取自选股列表作为个股遍历的候选池
+    let watchlist_codes: Vec<String> = axagent_core::entity::watchlist_items::Entity::find()
+        .all(state.harness.db())
+        .await
+        .map_err(|e| format!("读取自选股失败: {e}"))?
+        .into_iter()
+        .map(|w| w.stock_code)
+        .collect();
+
+    // 遍历所有快照方法
+    for method in SNAPSHOT_METHODS {
+        if PER_STOCK_METHODS.contains(method) {
+            // 个股级方法：遍历自选股逐只采集
+            for code in &watchlist_codes {
+                let json = match *method {
+                    "get_money_flow" => match client.get_money_flow(code).await {
+                        Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
+                        _ => continue,
+                    },
+                    "get_north_bound_holding" => match client.get_north_bound_holding(code).await {
+                        Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
+                        _ => continue,
+                    },
+                    "get_margin_data" => match client.get_margin_data(code).await {
+                        Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
+                        _ => continue,
+                    },
+                    _ => continue,
+                };
+                client.set_stock_daily_snapshot(method, code, &date, &json);
+                stock_count += 1;
+            }
+        } else {
+            // 全市场方法
+            let json = match *method {
+                "get_hot_stocks" => match client.get_hot_stocks().await {
+                    Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
+                    _ => continue,
+                },
+                "get_industry_ranking" => match client.get_industry_ranking().await {
+                    Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
+                    _ => continue,
+                },
+                "get_cls_flash" => match client.get_cls_flash().await {
+                    Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
+                    _ => continue,
+                },
+                "get_concept_blocks" => {
+                    // 概念板块需要个股参数，遍历自选股
+                    for code in &watchlist_codes {
+                        match client.get_concept_blocks(code).await {
+                            Ok(Some(r)) => {
+                                let json = serde_json::to_string(&r).unwrap_or_default();
+                                client.set_stock_daily_snapshot(method, code, &date, &json);
+                                stock_count += 1;
+                            },
+                            _ => continue,
+                        }
+                    }
+                    continue;
+                },
+                "search_stock" => {
+                    // 不需要采集全市场搜索快照，跳过
+                    continue;
+                },
+                "get_sector_info" => {
+                    // 行业分类是个股维度，遍历自选股
+                    for code in &watchlist_codes {
+                        match client.get_sector_info(code).await {
+                            Ok(Some(r)) => {
+                                let json = serde_json::to_string(&r).unwrap_or_default();
+                                client.set_stock_daily_snapshot(method, code, &date, &json);
+                                stock_count += 1;
+                            },
+                            _ => continue,
+                        }
+                    }
+                    continue;
+                },
+                "get_index_quotes" => match client.get_index_quotes().await {
+                    Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            if !json.is_empty() {
+                client.set_daily_snapshot(method, &date, &json);
+                market_count += 1;
+            }
+        }
+    }
+
+    Ok(format!("快照采集完成: 全市场 {} 项, 个股 {} 条", market_count, stock_count))
 }
 
 /// 拉取智能荐股结果（按周期）

@@ -713,7 +713,18 @@ impl AStockClient {
         if crate::as_of::is_asof_active() {
             match self.get_klines(stock_code, "daily", 5).await {
                 Ok(ks) => {
-                    if let Some(q) = Self::quote_from_klines(stock_code, &ks) {
+                    if let Some(mut q) = Self::quote_from_klines(stock_code, &ks) {
+                        // as-of 下从最新财报推导 PE/PB（K 线合成不包含估值字段）
+                        if let Ok(fins) = self.get_financials(stock_code).await {
+                            if let Some(latest) = fins.into_iter().next() {
+                                if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
+                                    q.pe = Some(q.price / eps);
+                                }
+                                if let Some(bps) = latest.bps.filter(|&v| v > 0.0) {
+                                    q.pb = Some(q.price / bps);
+                                }
+                            }
+                        }
                         return Ok(q);
                     }
                     tracing::warn!("[asof] {stock_code} K线为空，无法合成 quote");
@@ -1344,6 +1355,24 @@ impl AStockClient {
                             );
                             continue;
                         },
+                    }
+                }
+            }
+            // as-of 下尝试从最新财报计算 trailing EPS
+            if let Ok(fins) = self.get_financials(stock_code).await {
+                if let Some(latest) = fins.into_iter().next() {
+                    if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
+                        let year = crate::as_of::current_as_of()
+                            .map(|ctx| ctx.as_of_date.format("%Y").to_string())
+                            .unwrap_or_else(|| Local::now().format("%Y").to_string());
+                        return Ok(Some(ConsensusEPS {
+                            stock_code: stock_code.to_string(),
+                            consensus_eps: Some(eps),
+                            consensus_target_price: None,
+                            rating_avg: None,
+                            rating_count: None,
+                            year,
+                        }));
                     }
                 }
             }

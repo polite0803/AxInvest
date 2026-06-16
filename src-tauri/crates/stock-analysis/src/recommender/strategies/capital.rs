@@ -31,6 +31,92 @@ impl CapitalStrategy {
             period: Period::Mid,
         }
     }
+    // as-of K线代理回退
+
+    /// as-of 模式下 money_flow / north_bound 不可用，回退到 K 线量价检测
+    async fn scan_from_klines(
+        &self,
+        client: &AStockClient,
+        code: &str,
+        name: &str,
+        sector: Option<String>,
+        vars: &HashMap<String, Value>,
+    ) -> Option<RecoPick> {
+        let quote = client.get_quote(code).await.ok()?;
+        let price = quote.price;
+        let klines = client.get_klines(code, "daily", 60).await.ok()?;
+        if klines.len() < 20 {
+            return None;
+        }
+
+        // 量价信号：最近 5 日平均量 / 20 日平均量 > 阈值
+        let volumes_5: Vec<f64> = klines.iter().rev().take(5).map(|k| k.amount).collect();
+        let avg_vol_5 = volumes_5.iter().sum::<f64>() / volumes_5.len() as f64;
+        let avg_vol_20: f64 = klines.iter().take(20).map(|k| k.amount).sum::<f64>() / 20.0;
+        let vol_ratio = if avg_vol_20 > 0.0 {
+            avg_vol_5 / avg_vol_20
+        } else {
+            1.0
+        };
+
+        // 价格动量：最近 5 日涨幅
+        let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
+        let mom_5 = if closes.len() >= 6 {
+            closes[closes.len() - 1] / closes[closes.len() - 6] - 1.0
+        } else {
+            0.0
+        };
+
+        let vol_ratio_min = read_f64(vars, "cap_kline_vol_ratio_min", 1.5);
+        let mom_5_min = read_f64(vars, "cap_kline_mom_5_min", -0.02);
+        let mom_5_max = read_f64(vars, "cap_kline_mom_5_max", 0.10);
+
+        if vol_ratio < vol_ratio_min || mom_5 < mom_5_min || mom_5 > mom_5_max {
+            return None;
+        }
+
+        // 计算置信度（量比贡献 0.6，动量贡献 0.4）
+        let vol_score = ((vol_ratio - 1.0) / 3.0).clamp(0.0, 1.0);
+        let mom_score = ((mom_5 - mom_5_min) / (mom_5_max - mom_5_min)).clamp(0.0, 1.0);
+        let conf_raw = 0.6 * vol_score + 0.4 * mom_score;
+
+        let (entry_low, entry_high, stop_loss, target, base_position, holding_days) =
+            match self.period {
+                Period::UltraShort => {
+                    (price * 0.998, price * 1.005, price * 0.97, price * 1.05, 3.0, 2)
+                },
+                Period::Short => (price * 0.97, price * 1.03, price * 0.93, price * 1.10, 5.0, 7),
+                Period::Mid => (price * 0.95, price * 1.05, price * 0.90, price * 1.20, 8.0, 28),
+                Period::Long => (price * 0.95, price * 1.05, price * 0.88, price * 1.30, 10.0, 90),
+            };
+
+        let conf = (conf_raw * 100.0).round() as u8;
+        let position = calc_position(base_position, conf, self.period);
+
+        Some(RecoPick {
+            stock_code: code.into(),
+            stock_name: name.into(),
+            sector,
+            style: Style::Capital,
+            period: self.period,
+            price,
+            entry_low,
+            entry_high,
+            stop_loss,
+            target_price: target,
+            position_pct: position,
+            holding_days,
+            confidence: conf,
+            reasons: vec![
+                format!("K线量比 {:.2}x", vol_ratio),
+                format!("5日动量 {:.2}%", mom_5 * 100.0),
+            ],
+            risk_notes: vec!["K线代理模式：无资金流向数据，仅基于量价".to_string()],
+            secondary_styles: vec![],
+            synthetic: true,
+        })
+    }
+
     pub const fn long() -> Self {
         Self {
             period: Period::Long,
@@ -52,9 +138,11 @@ impl CapitalStrategy {
         let nb = client.get_north_bound_holding(code).await.ok().flatten();
         let dt = client.get_dragon_tiger(code).await.ok();
 
-        // 三个资金数据源至少有一个能拿到真实数据，否则视为数据缺失直接放弃
+        // 三个资金数据源在 as-of 下可能全部不可用，回退到 K 线量价检测
         if mf.is_none() && nb.is_none() && dt.as_ref().is_none_or(|e| e.is_empty()) {
-            return None;
+            return self
+                .scan_from_klines(client, code, name, sector, vars)
+                .await;
         }
 
         // 主力净流入

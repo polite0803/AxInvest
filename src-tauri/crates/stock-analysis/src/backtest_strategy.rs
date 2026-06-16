@@ -894,12 +894,13 @@ pub struct SignalQualityStats {
     pub last_updated: u64, // Unix timestamp ms
 }
 
-/// 全局信号质量缓存（按 "style_period" 索引）
-static SIGNAL_QUALITY_CACHE: LazyLock<RwLock<HashMap<String, SignalQualityStats>>> =
+/// 全局信号质量缓存（按 (strategy_id, as_of_suffix) 索引，live/replay 隔离）
+static SIGNAL_QUALITY_CACHE: LazyLock<RwLock<HashMap<(String, String), SignalQualityStats>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-/// 从回测 groups 结果更新信号质量缓存
+/// 从回测 groups 结果更新信号质量缓存（自动注入 as-of 后缀隔离 live/replay）
 pub fn update_signal_quality_cache(positive_stats: &HashMap<String, StrategyStats>) {
+    let suffix = axagent_astock_data::as_of::cache_suffix();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -907,10 +908,10 @@ pub fn update_signal_quality_cache(positive_stats: &HashMap<String, StrategyStat
     let mut cache = SIGNAL_QUALITY_CACHE.write().unwrap_or_else(|e| e.into_inner());
     for (sid, stats) in positive_stats {
         if stats.total_signals < 5 {
-            continue; // 样本太少不可靠
+            continue;
         }
         cache.insert(
-            sid.clone(),
+            (sid.clone(), suffix.clone()),
             SignalQualityStats {
                 strategy_id: sid.clone(),
                 period: stats.period.clone(),
@@ -923,10 +924,11 @@ pub fn update_signal_quality_cache(positive_stats: &HashMap<String, StrategyStat
     }
 }
 
-/// 查询策略信号质量（用于推荐时校准置信度）
+/// 查询策略信号质量（自动注入 as-of 后缀隔离 live/replay）
 pub fn get_signal_quality(strategy_id: &str) -> Option<SignalQualityStats> {
+    let suffix = axagent_astock_data::as_of::cache_suffix();
     let cache = SIGNAL_QUALITY_CACHE.read().unwrap_or_else(|e| e.into_inner());
-    cache.get(strategy_id).cloned()
+    cache.get(&(strategy_id.to_string(), suffix)).cloned()
 }
 
 /// 信号质量调整系数：将历史胜率映射到 [0.7, 1.3] 的乘数

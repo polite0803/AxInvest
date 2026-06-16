@@ -233,9 +233,8 @@ export function findCyclicSCCs(nodes: NodeLike[], edges: EdgeLike[]): string[][]
 
 /** 提取节点标题：优先 data.title（ReactFlow），回退到 WorkflowNode.title */
 function titleOf(n: NodeLike): string {
-  if (typeof (n as NodeLike & { title?: string }).title === "string") {
-    return (n as NodeLike & { title?: string }).title ?? "";
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof (n as any).title === "string") { return (n as any).title; }
   if (typeof n.data?.title === "string") { return n.data.title; }
   return "";
 }
@@ -301,8 +300,8 @@ export function validate_workflow(
 ): ValidationResult {
   // 过滤分组/装饰边——不参与结构校验
   const realEdges = edges.filter(
-    (e) =>
-      e.edge_type !== "grouping" && (e as EdgeLike & { data?: { edgeType?: string } }).data?.edgeType !== "grouping",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (e) => e.edge_type !== "grouping" && (e as any).data?.edgeType !== "grouping",
   );
   const issues: ValidateIssue[] = [];
   const indegree = buildIndegree(realEdges);
@@ -354,9 +353,10 @@ export function validate_workflow(
 
     // decorative 容器跳过入度/出度检查（仅供视觉分组，调度引擎忽略）
     if (
-      (n as NodeLike & { kind?: string }).kind === "decorative"
-      || (n as NodeLike & { data?: { kind?: string } }).data?.kind === "decorative"
-      || (n as NodeLike & { config?: { kind?: string } }).config?.kind === "decorative"
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (n as any).kind === "decorative" || (n as any).data?.kind === "decorative"
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      || (n as any).config?.kind === "decorative"
     ) { continue; }
 
     const hasChildren = nodes.some((x) => x.parentId === n.id);
@@ -562,7 +562,8 @@ export function validate_workflow(
 
 /** 从节点中提取 config 字段值（兼容 WorkflowNode 和 ReactFlow Node） */
 function extractConfig(n: NodeLike, key: string): string | undefined {
-  const cfg = (n as NodeLike & { config?: Record<string, unknown> }).config;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cfg = (n as any).config;
   if (cfg && typeof cfg[key] === "string") { return cfg[key]; }
   if (n.data && typeof n.data[key] === "string") { return n.data[key] as string; }
   if (n.data?.config && typeof (n.data.config as Record<string, unknown>)[key] === "string") {
@@ -615,22 +616,6 @@ export function getNodeSize(type: string): { width: number; height: number } {
   return NODE_SIZE[type] || DEFAULT_SIZE;
 }
 
-/** 将节点均匀展开到网格中，用于 dagre 布局失败时的兜底 */
-function spreadGrid(
-  nodes: Node[],
-  cols: number,
-  cellW: number,
-  cellH: number,
-  startX = MARGIN_X,
-  startY = MARGIN_Y,
-): void {
-  nodes.forEach((n, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    n.position = { x: startX + col * cellW, y: startY + row * cellH };
-  });
-}
-
 // ── Grid 吸附与碰撞避免 ─────────────────────────────────────
 
 /**
@@ -661,6 +646,19 @@ export interface SiblingInfo {
 
 /**
  * 在 4 个象限中为候选节点找最近的**不重叠**位置。
+ *
+ * 策略：
+ * 1. 若候选与所有 sibling 无重叠，直接返回原位置
+ * 2. 若重叠，对每个重叠的 sibling 尝试上/下/左/右 4 个方向避开
+ * 3. 筛选出不产生新重叠的方向，按距离排序取最近者
+ * 4. 若 4 方向均产生新重叠，尝试对角线（右+下）回退
+ * 5. 最终位置会被 snap_to_grid 吸附
+ *
+ * @param candidate - 候选位置（含可选 id）
+ * @param nodeType - 候选节点类型（用于 getNodeSize）
+ * @param siblings - 画布上其他节点的快照（不含自身及同组选中节点）
+ * @param min_gap  - 节点间最小间隙（默认 10px）
+ * @returns 安全的网格吸附坐标
  */
 export function find_safe_position(
   candidate: { x: number; y: number; id?: string },
@@ -774,10 +772,10 @@ export function find_safe_position(
 }
 
 /** 间距常量 */
-const RANK_SEP = 140; // 层间垂直间距
-const NODE_SEP = 80; // 同层节点水平间距
-const MARGIN_X = 80; // 左边距
-const MARGIN_Y = 80; // 上边距
+const RANK_SEP = 80; // 层间垂直间距
+const NODE_SEP = 50; // 同层节点水平间距
+const MARGIN_X = 60; // 左边距
+const MARGIN_Y = 60; // 上边距
 
 /**
  * 使用 Dagre 对工作流节点进行自动布局。
@@ -822,10 +820,7 @@ export function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges
   // 应用位置
   const layoutedNodes = nodes.map((node) => {
     const dagreNode = g.node(node.id);
-    if (!dagreNode) {
-      // 兜底：dagre 未返回位置的节点（如重复 ID），保留原点并标记
-      return { ...node, position: { x: node.position.x || 60, y: node.position.y || 60 } };
-    }
+    if (!dagreNode) { return node; }
 
     const nodeType = (node.data?.type || node.type || "") as string;
     const size = NODE_SIZE[nodeType] || DEFAULT_SIZE;
@@ -838,15 +833,6 @@ export function autoLayout(nodes: Node[], edges: Edge[]): { nodes: Node[]; edges
       },
     };
   });
-
-  // 安全检查：如果 >40% 节点仍在原点(0±5,0±5)，dagre 可能因无效边/缺失边而失败，采用网格展开
-  const atOrigin = layoutedNodes.filter(
-    (n) => Math.abs(n.position.x) < 5 && Math.abs(n.position.y) < 5,
-  );
-  if (atOrigin.length > 0 && atOrigin.length >= layoutedNodes.length * 0.4) {
-    const GRID_COLS = Math.ceil(Math.sqrt(layoutedNodes.length));
-    spreadGrid(layoutedNodes, GRID_COLS, 240, 180);
-  }
 
   return { nodes: layoutedNodes, edges };
 }
@@ -1009,12 +995,6 @@ export function autoLayoutWorkflow(
   }
 
   // 3. 主 dagre：只放顶层节点（容器节点 + 无父孤立节点）
-  //
-  // 关键：跨容器边界的边（子节点 → 容器外节点）必须反映到主 dagre 图中，
-  // 否则 dagre 不知道容器之间的先后关系，布局会乱。
-  // 策略：对每条跨边界边，补一条"代理边"——
-  //   子节点 src 在容器 C 内、target 是顶层节点 T → 加边 C → T
-  //   子节点 target 在容器 C 内、source 是顶层节点 T → 加边 T → C
   const topLevelIds = new Set<string>();
   for (const n of nodes) {
     if (CONTAINER_NODE_TYPES.has(n.type || "") || !childOf[n.id]) {
@@ -1022,33 +1002,7 @@ export function autoLayoutWorkflow(
     }
   }
   const topLevelNodes = nodes.filter((n) => topLevelIds.has(n.id));
-
-  const proxyEdges = new Set<string>(); // "src->tgt" 去重
-  const interEdges: Array<{ source: string; target: string }> = [];
-
-  for (const e of edges) {
-    const srcInContainer = childOf[e.source];
-    const tgtInContainer = childOf[e.target];
-    if (topLevelIds.has(e.source) && topLevelIds.has(e.target)) {
-      // 两端都是顶层：直接保留
-      interEdges.push({ source: e.source, target: e.target });
-    } else if (srcInContainer && topLevelIds.has(e.target)) {
-      // 源在容器内，目标是顶层 → 代理边：容器 → 目标
-      const key = `${srcInContainer}->${e.target}`;
-      if (!proxyEdges.has(key)) {
-        proxyEdges.add(key);
-        interEdges.push({ source: srcInContainer, target: e.target });
-      }
-    } else if (tgtInContainer && topLevelIds.has(e.source)) {
-      // 目标在容器内，源是顶层 → 代理边：源 → 容器
-      const key = `${e.source}->${tgtInContainer}`;
-      if (!proxyEdges.has(key)) {
-        proxyEdges.add(key);
-        interEdges.push({ source: e.source, target: tgtInContainer });
-      }
-    }
-    // 两端都在容器内（可能不同容器）：忽略，子图布局已独立处理
-  }
+  const topLevelEdges = edges.filter((e) => topLevelIds.has(e.source) && topLevelIds.has(e.target));
 
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
@@ -1067,7 +1021,7 @@ export function autoLayoutWorkflow(
       : getNodeSize(t);
     g.setNode(n.id, { width: size.width, height: size.height });
   }
-  for (const e of interEdges) {
+  for (const e of topLevelEdges) {
     g.setEdge(e.source, e.target);
   }
   dagre.layout(g);

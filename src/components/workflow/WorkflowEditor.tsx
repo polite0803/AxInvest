@@ -476,44 +476,14 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         const isContainerCollapsed = isContainer
           && useWorkflowEditorStore.getState().collapsedContainers.has(node.id);
         // 折叠态：容器自身缩为紧凑尺寸
-        const CONTAINER_PADDING = 20;
         const CONTAINER_MIN_W = 260;
         const CONTAINER_MIN_H = 130;
         let containerStyle: React.CSSProperties | undefined;
         if (isContainerCollapsed) {
           containerStyle = { width: 200, height: 60 };
         } else if (isContainer) {
-          const childIds = childrenOfParent[node.id] ?? [];
-          // 同时考虑子图（subGraph）节点对容器尺寸的影响
-
-          const subGraphChildren = subGraphNodes ?? [];
-          let maxX = CONTAINER_MIN_W - CONTAINER_PADDING;
-          let maxY = CONTAINER_MIN_H - CONTAINER_PADDING;
-          for (const childId of childIds) {
-            const child = nodeById[childId];
-            if (!child) { continue; }
-            const sz = getNodeSize(child.type);
-            // 子节点在 Store 中是绝对坐标 —— 转为相对容器的偏移
-
-            const relX = child.position.x - node.position.x;
-            const relY = child.position.y - node.position.y;
-            const cx = relX + sz.width;
-            const cy = relY + sz.height;
-            if (cx > maxX) { maxX = cx; }
-            if (cy > maxY) { maxY = cy; }
-          }
-          for (const sgChild of subGraphChildren as { type?: string; position: { x: number; y: number } }[]) {
-            const sz = getNodeSize(sgChild.type ?? "base");
-            // subGraph 中的 position 始终是相对容器的偏移（种子数据已转换为相对坐标，
-            // 保存时也写回相对坐标），无需再减容器绝对坐标。
-            const relX = sgChild.position.x;
-            const relY = sgChild.position.y;
-            const cx = relX + sz.width;
-            const cy = relY + sz.height;
-
-            if (cx > maxX) { maxX = cx; }
-            if (cy > maxY) { maxY = cy; }
-          }
+          // 容器尺寸由 ReactFlow measured 自动计算（基于子节点位置 + extent:"parent"），
+          // 此处仅设 minWidth/minHeight 下限
           containerStyle = {
             minWidth: CONTAINER_MIN_W,
             minHeight: CONTAINER_MIN_H,
@@ -626,13 +596,10 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           },
         };
       });
-      // ═══════════════════════════════════════════════════════════════════════
-      // parentId 回填：从 config（branches.steps / debater_steps 等）推断预期的父子关系，
-      // 对 parentRefs 中尚未登记的节点写入期望值。
-      // 注意：主循环已经根据 parentRefs 完成 position 绝对→相对转换，
-      // 因此此处**不再重复修改 position**，只在 parentRefs 未登记时补 parentId/extent。
-      // ═══════════════════════════════════════════════════════════════════════
+      // 将 ParallelNode 的 branches[].steps 和 MergeNode（auto-inputs）中的子节点挂载为容器子节点
+      // parentId 权威来源是 store.parentRefs（持久化），其次才回退到本次回填期望值。
       const expectedParentByNode: Record<string, string> = {};
+      // 折叠态：收集所有"应隐藏"的子节点 ID（含 branches.steps + merge auto_inputs）
       const hiddenChildIds = new Set<string>();
       for (const node of nodes) {
         const scopedNode = node as unknown as Record<string, unknown>;
@@ -650,7 +617,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 if (isCollapsedParent) { hiddenChildIds.add(stepId); }
                 flowNodes[childIdx] = {
                   ...childFn,
-
                   hidden: isCollapsedParent ? true : childFn.hidden,
                 };
                 expectedParentByNode[stepId] = node.id;
@@ -658,7 +624,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             }
           }
         }
-        // 将 MergeNode（auto-inputs）也挂入同一容器 —— 只补 parentId，不再重算 position
+        // 将 MergeNode（auto-inputs）也挂入同一容器
         if (node.type === "merge" && scopedConfig?.auto_inputs_from_branches) {
           const inputs = scopedConfig?.inputs as string[] | undefined;
           if (inputs) {
@@ -699,18 +665,12 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             const childIdx = flowNodes.findIndex((fn) => fn.id === stepId);
             if (childIdx === -1) { continue; }
             const storedParent = parentRefs[stepId];
-            if (storedParent !== undefined && storedParent === node.id) {
-              expectedParentByNode[stepId] = node.id;
-              if (collapsedContainers.has(node.id)) { hiddenChildIds.add(stepId); }
-              continue;
-            }
-            if (storedParent === undefined) {
+            if (storedParent === undefined || storedParent === node.id) {
               const childFn = flowNodes[childIdx];
               const isCollapsedParent = collapsedContainers.has(node.id);
               if (isCollapsedParent) { hiddenChildIds.add(stepId); }
               flowNodes[childIdx] = {
                 ...childFn,
-
                 hidden: isCollapsedParent ? true : childFn.hidden,
               };
               expectedParentByNode[stepId] = node.id;
@@ -718,7 +678,8 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           }
         }
       }
-      // 将回填期望值持久化到 store：扫描结束后调 setParentRef，让 autosave 能保存到后端。
+
+      // 把回填期望值持久化到 store：扫描结束后调 setParentRef，让 autosave 能保存到后端。
       // 仅在"登记值与期望不一致"时写入，避免每次渲染都推撤销栈（虽然 setParentRef 本身不进栈）。
       for (const [childId, expectedParent] of Object.entries(expectedParentByNode)) {
         if (parentRefs[childId] !== expectedParent) {
@@ -992,10 +953,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   continue;
                 }
               }
-              updateNode(ln.id, { position: ln.position } as Partial<WorkflowNode>);
-            }
-            // 第二步：写入自动布局后的坐标
-            for (const ln of layouted) {
               updateNode(ln.id, { position: ln.position } as Partial<WorkflowNode>);
             }
           }, 100);
@@ -2080,7 +2037,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           continue;
         }
       }
-
       updateNode(ln.id, { position: ln.position } as Partial<WorkflowNode>);
     }
 

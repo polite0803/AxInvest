@@ -753,19 +753,37 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
 
   const handleApply = async () => {
     const selected = diff.filter((d) => checked.includes(d.strategyId));
-    if (selected.length === 0) { return; }
+    if (selected.length === 0) {
+      message.warning("请先勾选要应用的策略");
+      return;
+    }
+    // Bug 8 修复: 防御 weight 为 NaN / undefined,避免后端
+    // 返回 "未选中任何权重调整项" 这种误报。
+    const validPayload = selected
+      .map((d) => ({ strategyId: d.strategyId, weight: d.newWeight }))
+      .filter(
+        (w) =>
+          typeof w.strategyId === "string"
+          && w.strategyId.length > 0
+          && typeof w.weight === "number"
+          && Number.isFinite(w.weight),
+      );
+    if (validPayload.length === 0) {
+      message.error("所选项的权重值无效(NaN/缺失),无法应用");
+      return;
+    }
     setApplying(true);
     try {
       const result = await invoke<{ applied: number }>("apply_reco_weights", {
-        weights: selected.map((d) => ({
-          strategyId: d.strategyId,
-          weight: d.newWeight,
-        })),
+        weights: validPayload,
       });
       message.success(`已应用 ${result.applied} 个策略权重调整`);
       setModalOpen(false);
     } catch (e) {
-      message.error(`应用失败: ${e}`);
+      // 后端在 weights=null 时返回 "请先调用 preview...",
+      // 这里把后端字符串错误直接抛到 toast 之外加 prefix,便于排查
+      const msg = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+      message.error(`应用失败: ${msg}`);
     } finally {
       setApplying(false);
     }

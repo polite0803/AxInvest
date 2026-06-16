@@ -16,7 +16,13 @@ pub fn start_background_services(
     start_auto_backup(app, state, app_dir.clone());
     start_webdav_sync(app, state, app_dir);
     #[cfg(not(mobile))]
-    start_tray(app, &_tray_language);
+    {
+        let app_handle = app.clone();
+        let tl = _tray_language.clone();
+        std::thread::spawn(move || {
+            start_tray(&app_handle, &tl);
+        });
+    }
     start_closed_loop_service(app, state);
     start_insight_generation(state);
     start_pattern_learning(state);

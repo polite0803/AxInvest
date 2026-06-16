@@ -43,7 +43,7 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
   ],
   "if_data_gaps": false,
   "confidence": 0,
-  "data_gaps": ["信息缺失项"]
+  "data_gaps": ["信息缺失项"],
   "prediction": {
     "timeframe": "short_term | mid_term | long_term",
     "direction": "bullish | bearish | neutral",
@@ -82,7 +82,18 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
     { "point": "近 5 日主力净流入累计 4.2 亿", "data": "[主力资金 2024-10-23~10-30 累计 +4.2亿]", "weight": 7 },
     { "point": "龙虎榜显示 3 家机构席位净买入合计 6800 万", "data": "[龙虎榜 2024-10-29]", "weight": 6 }
   ],
-  "data_gaps": ["融资融券数据未提供"]
+  "data_gaps": ["保留原有缺失项"],
+  "prediction": {
+    "timeframe": "mid_term",
+    "direction": "bullish",
+    "confidence": 0.6,
+    "key_drivers": ["此为示例请替换为实际因素"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.25, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.25, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 
@@ -104,3 +115,7 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
 - ② `active_player` 是否明确区分了机构/游资/北向（不是笼统"主力"）？
 - ③ `main_flow_state` 是否反映了趋势（不是单日异动）？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
+- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

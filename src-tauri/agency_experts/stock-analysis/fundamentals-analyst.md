@@ -45,7 +45,7 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
   ],
   "if_data_gaps": false,
   "confidence": 0,
-  "data_gaps": ["信息缺失项"]
+  "data_gaps": ["信息缺失项"],
   "prediction": {
     "timeframe": "mid_term | long_term",
     "direction": "bullish | bearish | neutral",
@@ -113,3 +113,7 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
 - ② 是否引用了系统预计算的 `moat_score_ref` / `f_score_ref` / `safety_margin_pct`（而不是自己重算）？
 - ③ `a_share_specific_risk` 是否正确识别 A 股特色风险（ST/退市/审计非标/商誉/质押）？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？是否避免了"目标价/买入"等越权结论？
+- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

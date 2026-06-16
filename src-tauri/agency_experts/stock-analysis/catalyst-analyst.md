@@ -57,7 +57,7 @@ data_sources: [get_news_data, get_announcement_data, get_sector_data]
   ],
   "if_data_gaps": false,
   "confidence": 0,
-  "data_gaps": ["信息缺失项"]
+  "data_gaps": ["信息缺失项"],
   "prediction": {
     "timeframe": "short_term | mid_term | long_term",
     "direction": "bullish | bearish | neutral",

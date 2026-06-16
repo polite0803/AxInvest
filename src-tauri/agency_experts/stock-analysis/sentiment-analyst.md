@@ -40,7 +40,7 @@ data_sources: [get_sentiment_data, get_news_data]
   ],
   "if_data_gaps": false,
   "confidence": 0,
-  "data_gaps": ["信息缺失项"]
+  "data_gaps": ["信息缺失项"],
   "prediction": {
     "timeframe": "short_term | mid_term | long_term",
     "direction": "bullish | bearish | neutral",
@@ -83,7 +83,18 @@ data_sources: [get_sentiment_data, get_news_data]
     },
     { "point": "融资余额近 5 日累计 +3.8%", "data": "[融资融券 2024-10-26~10-30 累计 +3.8%]", "weight": 6 }
   ],
-  "data_gaps": ["北向资金散户情绪拆分未提供"]
+  "data_gaps": ["保留原有缺失项"],
+  "prediction": {
+    "timeframe": "mid_term",
+    "direction": "bullish",
+    "confidence": 0.6,
+    "key_drivers": ["此为示例请替换为实际因素"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.25, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.25, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 
@@ -105,3 +116,7 @@ data_sources: [get_sentiment_data, get_news_data]
 - ② `amplifier_direction` 是否被正确识别（情绪是中性的放大器，不是方向源）？
 - ③ `trigger_*` 是否都是"如果 X 发生则..."的可证伪条件？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
+- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

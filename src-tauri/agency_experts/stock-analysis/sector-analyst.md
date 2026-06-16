@@ -43,7 +43,7 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
   ],
   "if_data_gaps": false,
   "confidence": 0,
-  "data_gaps": ["信息缺失项"]
+  "data_gaps": ["信息缺失项"],
   "prediction": {
     "timeframe": "short_term | mid_term | long_term",
     "direction": "bullish | bearish | neutral",
@@ -108,3 +108,7 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
 - ② `target_theme_position` 是否区分了"主线核心 / 主线边缘 / 概念擦边 / 无关"（不是笼统"热门题材"）？
 - ③ `fund_flow_confirmation` 是否被独立评估（资金是否投票验证题材）？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？是否避免了"目标价"等越权结论？
+- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

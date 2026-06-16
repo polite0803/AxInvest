@@ -43,7 +43,7 @@ data_sources: [get_research_report_data]
   ],
   "if_data_gaps": false,
   "confidence": 0,
-  "data_gaps": ["信息缺失项"]
+  "data_gaps": ["信息缺失项"],
   "prediction": {
     "timeframe": "short_term | mid_term | long_term",
     "direction": "bullish | bearish | neutral",
@@ -109,3 +109,7 @@ data_sources: [get_research_report_data]
 - ② `eps_revision_trend` 是否反映了方向性趋势（不是单点 EPS 绝对值）？
 - ③ `report_quality_signal` 是否正确识别了"吹票"嫌疑？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
+- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

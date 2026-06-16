@@ -3,7 +3,7 @@ import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, InputNumber, Spin, Tag } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -113,12 +113,17 @@ export function StockScreenerPanel() {
   const [factors, setFactors] = useState<Record<string, FactorState>>({});
   const [selectedCount, setSelectedCount] = useState(0);
 
+  // R2-Bug-A 修复: 快速连点"筛选"会产生并发请求,加 token 拒绝乱序慢响应
+  const screenTokenRef = useRef(0);
+
   const screen = useCallback(async () => {
+    const myToken = ++screenTokenRef.current;
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
     try {
       const check = await checkVendorEnabled("screener");
+      if (myToken !== screenTokenRef.current) { return; }
       if (check.status === "disabled") {
         setResults([]);
         setEmptyKind("vendorDisabled");
@@ -144,6 +149,7 @@ export function StockScreenerPanel() {
         else if (f.value != null) { criteria[fd.key] = f.value; }
       }
       const r = await invoke<ScreenResult[]>("screen_stocks", { criteria });
+      if (myToken !== screenTokenRef.current) { return; }
       if (Array.isArray(r)) {
         setResults(r);
         if (r.length === 0) { setEmptyKind("noData"); }
@@ -152,11 +158,12 @@ export function StockScreenerPanel() {
         setEmptyKind("noData");
       }
     } catch (e) {
+      if (myToken !== screenTokenRef.current) { return; }
       console.error("[StockScreenerPanel] screen_stocks 失败:", e);
       setResults([]);
       setEmptyKind("connectionFailed");
     }
-    setLoading(false);
+    if (myToken === screenTokenRef.current) { setLoading(false); }
   }, [factors]);
 
   const toggleFactor = (key: string) => {

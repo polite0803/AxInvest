@@ -351,6 +351,10 @@ impl TradingEngine {
             trade_time: Set(trade_time.to_string()),
             fee: Set(None),
             realized_pnl: Set(realized_pnl),
+            // R2-遗留修复: trades entity 有 strategy 字段,之前漏写导致 cargo check E0063。
+            // 用户手动 record_trade 走的是 stock_analysis command,不带 strategy 上下文,
+            // 与 trade_import.rs:412 的 Set(None) 保持一致(手动录入不属于任何自动策略)。
+            strategy: Set(None),
             notes: Set(notes.map(|s| s.to_string())),
             // analysis_id 当前未持久化（trades entity 暂未挂该字段，留作未来扩展）
             created_at: Set(now),

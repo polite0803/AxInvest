@@ -27,6 +27,8 @@ export function BacktestPanel() {
 
   // Bug 4 修复: 统一请求级取消令牌
   const reqTokenRef = useRef(0);
+  // R2-Bug-I 修复: 策略回测独立 token,避免和 load 互相取消
+  const strategyTokenRef = useRef(0);
 
   /**
    * 统一加载入口(useEffect 与"重试"按钮共用)。
@@ -58,18 +60,23 @@ export function BacktestPanel() {
   }, [load]);
 
   const runStrategyBacktest = useCallback(async () => {
+    // R2-Bug-I 修复: 快速双击"策略回测"按钮会产生并发请求,
+    // 此处用独立 token 让后返回的慢请求无法覆盖较新的快请求结果。
+    const myToken = ++strategyTokenRef.current;
     setStrategyLoading(true);
     setStrategyResult(null);
     setStrategyError(null);
     try {
       const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
+      if (myToken !== strategyTokenRef.current) { return; }
       setStrategyResult(result);
     } catch (e: unknown) {
+      if (myToken !== strategyTokenRef.current) { return; }
       setStrategyError(
         typeof e === "string" ? e : e instanceof Error ? e.message : t("stockAnalysis.backtest.strategyFailed"),
       );
     }
-    setStrategyLoading(false);
+    if (myToken === strategyTokenRef.current) { setStrategyLoading(false); }
   }, [t]);
 
   const accuracyColor = stats ? stats.accuracyPct >= 60 ? "var(--sa-red)" : "var(--sa-green)" : undefined;

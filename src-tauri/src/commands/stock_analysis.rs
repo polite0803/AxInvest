@@ -490,13 +490,15 @@ pub async fn add_to_watchlist(
     state: State<'_, AppState>,
     stock_code: String,
     stock_name: String,
+    notes: Option<String>,
 ) -> Result<watchlist_items::Model, String> {
     let now = chrono::Utc::now().timestamp_millis();
     let model = watchlist_items::ActiveModel {
         id: Set(uuid::Uuid::new_v4().to_string()),
         stock_code: Set(stock_code),
         stock_name: Set(stock_name),
-        notes: Set(None),
+        // R2-Bug-B1 修复: 之前硬编码 Set(None),前端传来的 group 信息全丢
+        notes: Set(notes),
         created_at: Set(now),
         updated_at: Set(now),
     };

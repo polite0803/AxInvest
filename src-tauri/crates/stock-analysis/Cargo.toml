@@ -16,6 +16,7 @@ axagent-providers = { path = "../providers" }
 axagent-runtime-core = { path = "../runtime-core" }
 axagent-tools = { path = "../tools" }
 chrono = { workspace = true }
+csv = "1"
 futures = "0.3"
 sea-orm = { workspace = true }
 serde = { workspace = true }

@@ -61,6 +61,7 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
             trade_date TEXT NOT NULL, trade_time TEXT NOT NULL, \
             fee REAL, realized_pnl REAL, notes TEXT, \
             created_at INTEGER NOT NULL)",
+        "ALTER TABLE trades ADD COLUMN strategy TEXT",
         "CREATE TABLE IF NOT EXISTS reco_picks (\
             id TEXT NOT NULL PRIMARY KEY, generated_at TEXT NOT NULL, \
             period TEXT NOT NULL, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \

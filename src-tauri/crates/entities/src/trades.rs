@@ -24,6 +24,8 @@ pub struct Model {
     pub fee: Option<f64>,
     /// 卖出时计算的已实现盈亏
     pub realized_pnl: Option<f64>,
+    /// 所属策略: "trend" | "value" | "capital" | "reversion" | "watchlist"
+    pub strategy: Option<String>,
     pub notes: Option<String>,
     pub created_at: i64,
 }

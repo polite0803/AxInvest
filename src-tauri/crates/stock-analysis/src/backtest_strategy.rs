@@ -90,7 +90,7 @@ fn closes(klines: &[KLine]) -> Vec<f64> {
     klines.iter().map(|k| k.close).collect()
 }
 
-fn detect_trend_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_trend_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if klines.len() < 30 {
@@ -103,27 +103,27 @@ fn detect_trend_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64
         return None;
     }
     let high = indicators::highest(klines, 20)?;
-    if last < high * 0.99 {
+    if last < high * read_f64(vars, "trend_high_20_threshold", 0.99) {
         return None;
     }
     let amt_ratio = klines.last()?.amount / indicators::avg_amount_20d(klines)?;
-    if amt_ratio < 0.8 {
+    if amt_ratio < read_f64(vars, "trend_vol_ratio_threshold", 0.8) {
         return None;
     }
     Some(last)
 }
 
-fn detect_trend_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_trend_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if klines.len() < 100 {
         return None;
     }
     let ma60 = indicators::sma(&cs, 60)?;
-    if ma60.is_nan() || last < ma60 * 0.995 {
+    if ma60.is_nan() || last < ma60 * read_f64(vars, "trend_ma60_threshold", 0.995) {
         return None;
     }
-    if indicators::highest(klines, 60)? * 0.98 > last {
+    if indicators::highest(klines, 60)? * read_f64(vars, "trend_high_60_threshold", 0.98) > last {
         return None;
     }
     if let Some((dif, dea, _)) = indicators::macd(klines, 12, 26, 9) {
@@ -136,7 +136,7 @@ fn detect_trend_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> 
     Some(last)
 }
 
-fn detect_trend_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_trend_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 250 {
@@ -156,7 +156,7 @@ fn detect_trend_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64>
     Some(last)
 }
 
-fn detect_trend_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_trend_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 10 {
@@ -180,7 +180,7 @@ fn detect_trend_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Opti
     Some(last)
 }
 
-fn detect_reversion_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_reversion_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -199,7 +199,7 @@ fn detect_reversion_short(klines: &[KLine], _vars: &serde_json::Value) -> Option
     Some(klines.last()?.close)
 }
 
-fn detect_reversion_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_reversion_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -220,7 +220,7 @@ fn detect_reversion_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f
 // 此处用 K 线形态近似：低波幅 + 价格在均线附近 + 无异常放量，
 // 反映"低估值股票"在 K 线上的典型特征（稳定、非投机）。
 
-fn detect_value_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_value_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -228,7 +228,7 @@ fn detect_value_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64
     let last = *cs.last()?;
     let ma20 = indicators::sma(&cs, 20)?;
     // 价格在 MA20 附近（偏离 < 2%），不在上涨趋势中
-    if last > ma20 * 1.02 || last < ma20 * 0.90 {
+    if last > ma20 * read_f64(vars, "value_upper_deviation", 1.02) || last < ma20 * read_f64(vars, "value_lower_deviation", 0.90) {
         return None;
     }
     // 低波幅：20 日振幅 < 15%
@@ -246,7 +246,7 @@ fn detect_value_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64
     Some(last)
 }
 
-fn detect_value_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_value_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -266,7 +266,7 @@ fn detect_value_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> 
     Some(last)
 }
 
-fn detect_value_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_value_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 250 {
         return None;
     }
@@ -294,7 +294,7 @@ fn detect_value_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64>
 // 实际 Capital 策略依赖北向持仓/主力净流入/龙虎榜资金流数据。
 // 此处用量价配合近似：放量上涨 + 成交额放大反映资金介入。
 
-fn detect_capital_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -318,7 +318,7 @@ fn detect_capital_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f
     Some(last)
 }
 
-fn detect_capital_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -344,7 +344,7 @@ fn detect_capital_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64
     Some(last)
 }
 
-fn detect_capital_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 250 {
         return None;
     }
@@ -370,7 +370,7 @@ fn detect_capital_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f6
     Some(last)
 }
 
-fn detect_value_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_value_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 15 {
@@ -383,7 +383,7 @@ fn detect_value_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Opti
     } // RSI 超卖区
     let ma5 = indicators::sma(&cs, 5)?;
     let ma10 = indicators::sma(&cs, 10)?;
-    if last > ma5.min(ma10) * 0.998 {
+    if last > ma5.min(ma10) * read_f64(vars, "value_ultra_short_entry_threshold", 0.998) {
         return None;
     } // 价格低于短均
       // 低波幅确认（不是单纯暴跌）
@@ -405,7 +405,7 @@ fn detect_value_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Opti
     Some(last)
 }
 
-fn detect_capital_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 5 {

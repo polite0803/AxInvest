@@ -725,6 +725,8 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
   };
 
   const handleApply = async () => {
+    // R2-Bug-X 修复: 防止极快双击触发并发 apply_reco_weights
+    if (applying) { return; }
     const selected = diff.filter((d) => checked.includes(d.strategyId));
     if (selected.length === 0) {
       message.warning("请先勾选要应用的策略");
@@ -764,7 +766,13 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
 
   return (
     <>
-      <Button size="small" loading={loading} onClick={handlePreview} style={{ marginLeft: 4 }}>
+      <Button
+        size="small"
+        loading={loading}
+        disabled={loading}
+        onClick={handlePreview}
+        style={{ marginLeft: 4 }}
+      >
         ⚡ {t("stockAnalysis.recommendation.calibrate") ?? "权重校准"}
       </Button>
       <Modal
@@ -777,7 +785,7 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
             key="apply"
             type="primary"
             loading={applying}
-            disabled={checked.length === 0}
+            disabled={applying || checked.length === 0}
             onClick={handleApply}
           >
             应用选中项 ({checked.length})

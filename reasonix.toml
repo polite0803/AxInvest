@@ -104,6 +104,8 @@ allow = [
   "Bash(cd /d D:\\OneManager\\AxAgent && npx tsc --noEmit 2>&1 | head -80)",
   "Bash(cd /d \"D:\\OneManager\\AxAgent\" && npx tsc --noEmit 2>&1 | head -80)",
   "Bash(cd \"D:/OneManager/AxAgent\" && npx tsc --noEmit 2>&1 | head -80)",
+  "Bash(grep -n \"name\" src-tauri/Cargo.toml | head -10)",
+  "Bash(grep -n -B2 -A2 \"name\\|bin\" src-tauri/Cargo.toml | head -30)",
 ]
 # ask = ["Edit(src/**)"]   # force a prompt even if otherwise allowed
 

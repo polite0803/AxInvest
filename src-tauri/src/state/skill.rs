@@ -87,11 +87,9 @@ impl SkillState {
                 },
             },
             #[cfg(target_os = "android")]
-            sandbox_executor: match sandbox_executor {
-                SandboxExecutorField::Dummy => Arc::new(()),
-                SandboxExecutorField::Real(_) => {
-                    panic!("SandboxExecutorField mismatch (real provided on android)")
-                },
+            sandbox_executor: {
+                let _ = sandbox_executor; // silence unused
+                Arc::new(())
             },
             dashboard_registry,
             webhook_subscription_manager,
@@ -107,11 +105,9 @@ impl SkillState {
                 },
             },
             #[cfg(target_os = "android")]
-            browser_client: match browser_client {
-                BrowserClientField::Dummy => Arc::new(tokio::sync::Mutex::new(None)),
-                BrowserClientField::Real(_) => {
-                    panic!("BrowserClientField mismatch (real provided on android)")
-                },
+            browser_client: {
+                let _ = browser_client; // silence unused
+                Arc::new(tokio::sync::Mutex::new(None))
             },
             text_grad_engine,
             auto_tool_creator,

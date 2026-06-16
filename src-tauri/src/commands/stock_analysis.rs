@@ -700,7 +700,7 @@ pub async fn backtest_analysis(
     as_of_date: Option<String>,
 ) -> Result<BacktestResult, String> {
     let ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
-    axagent_astock_data::as_of::with_optional_asof(ctx, async {
+    let result = axagent_astock_data::as_of::with_optional_asof(ctx, async {
         BacktestEngine::backtest_decision(
             &state.astock_client,
             &stock_code,
@@ -708,12 +708,45 @@ pub async fn backtest_analysis(
             &decision_action,
             decision_confidence,
             holding_days,
-            None, // time_horizon (old analyses won't have it)
-            None, // expected_holding_days
+            None,
+            None,
         )
         .await
     })
+    .await?;
+
+    // 写入 strategy_performance 表，让分析回测参与权重进化
+    let strategy_id = match decision_action.as_str() {
+        "买入" | "增持" | "BUY" | "INCREASE" => "trend",
+        "卖出" | "减持" | "SELL" | "REDUCE" => "reversion",
+        "持有" | "HOLD" => "value",
+        "观望" | "UNCERTAIN" => "capital",
+        _ => "watchlist",
+    };
+    let decision_ms = chrono::NaiveDate::parse_from_str(&analysis_date, "%Y-%m-%d")
+        .ok()
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .map(|d| d.and_utc().timestamp_millis())
+        .unwrap_or(0);
+    let _ = axagent_stock_analysis::evolution_drift::record_performance(
+        state.harness.db(),
+        strategy_id,
+        "short",
+        &stock_code,
+        "",
+        decision_ms,
+        chrono::Utc::now().timestamp_millis(),
+        result.holding_days as i32,
+        result.return_pct,
+        if result.was_correct { 1 } else { 0 },
+        decision_confidence as i32,
+        None,
+    )
     .await
+    .map_err(|e| tracing::warn!("[backtest_analysis] record_performance 失败: {e}"))
+    .ok();
+
+    Ok(result)
 }
 
 /// 批量回测历史分析（已完成的分析）
@@ -2894,6 +2927,20 @@ pub async fn apply_param_suggestions(
         .map_err(|e| format!("更新模板变量失败: {e}"))?;
 
     tracing::info!("[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板", updates.len());
+
+    // 4. 同时触发策略权重重新计算，使 params_suggestion 间接影响荐股权重
+    let _ = axagent_stock_analysis::evolution_drift::recalc_and_persist(
+        db,
+        "manual",
+        None,
+        None,
+    )
+    .await
+    .map(|(written, _)| {
+        tracing::info!("[param_suggestions] 参数调整触发策略权重重算，{written} 项更新");
+    })
+    .map_err(|e| tracing::warn!("[param_suggestions] 策略权重重算失败: {e}"));
+
     Ok(())
 }
 

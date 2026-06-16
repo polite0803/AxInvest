@@ -90,7 +90,7 @@ fn closes(klines: &[KLine]) -> Vec<f64> {
     klines.iter().map(|k| k.close).collect()
 }
 
-fn detect_trend_short(klines: &[KLine]) -> Option<f64> {
+fn detect_trend_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if klines.len() < 30 {
@@ -113,7 +113,7 @@ fn detect_trend_short(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_trend_mid(klines: &[KLine]) -> Option<f64> {
+fn detect_trend_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if klines.len() < 100 {
@@ -136,7 +136,7 @@ fn detect_trend_mid(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_trend_long(klines: &[KLine]) -> Option<f64> {
+fn detect_trend_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 250 {
@@ -156,7 +156,7 @@ fn detect_trend_long(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_trend_ultra_short(klines: &[KLine]) -> Option<f64> {
+fn detect_trend_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 10 {
@@ -180,7 +180,7 @@ fn detect_trend_ultra_short(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_reversion_short(klines: &[KLine]) -> Option<f64> {
+fn detect_reversion_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -199,7 +199,7 @@ fn detect_reversion_short(klines: &[KLine]) -> Option<f64> {
     Some(klines.last()?.close)
 }
 
-fn detect_reversion_mid(klines: &[KLine]) -> Option<f64> {
+fn detect_reversion_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -220,7 +220,7 @@ fn detect_reversion_mid(klines: &[KLine]) -> Option<f64> {
 // 此处用 K 线形态近似：低波幅 + 价格在均线附近 + 无异常放量，
 // 反映"低估值股票"在 K 线上的典型特征（稳定、非投机）。
 
-fn detect_value_short(klines: &[KLine]) -> Option<f64> {
+fn detect_value_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -246,7 +246,7 @@ fn detect_value_short(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_value_mid(klines: &[KLine]) -> Option<f64> {
+fn detect_value_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -266,7 +266,7 @@ fn detect_value_mid(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_value_long(klines: &[KLine]) -> Option<f64> {
+fn detect_value_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 250 {
         return None;
     }
@@ -294,7 +294,7 @@ fn detect_value_long(klines: &[KLine]) -> Option<f64> {
 // 实际 Capital 策略依赖北向持仓/主力净流入/龙虎榜资金流数据。
 // 此处用量价配合近似：放量上涨 + 成交额放大反映资金介入。
 
-fn detect_capital_short(klines: &[KLine]) -> Option<f64> {
+fn detect_capital_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -318,7 +318,7 @@ fn detect_capital_short(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_capital_mid(klines: &[KLine]) -> Option<f64> {
+fn detect_capital_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -344,7 +344,7 @@ fn detect_capital_mid(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_capital_long(klines: &[KLine]) -> Option<f64> {
+fn detect_capital_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 250 {
         return None;
     }
@@ -370,7 +370,7 @@ fn detect_capital_long(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_value_ultra_short(klines: &[KLine]) -> Option<f64> {
+fn detect_value_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 15 {
@@ -405,7 +405,7 @@ fn detect_value_ultra_short(klines: &[KLine]) -> Option<f64> {
     Some(last)
 }
 
-fn detect_capital_ultra_short(klines: &[KLine]) -> Option<f64> {
+fn detect_capital_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 5 {
@@ -426,13 +426,21 @@ fn detect_capital_ultra_short(klines: &[KLine]) -> Option<f64> {
 
 // ── 策略注册表 ──
 
+#[allow(dead_code)]
+/// Read a f64 variable from vars with fallback default
+fn read_f64(vars: &serde_json::Value, name: &str, default: f64) -> f64 {
+    vars.get(name)
+        .and_then(|v| v.as_f64())
+        .unwrap_or(default)
+}
+
 pub(crate) struct StratDef {
     id: &'static str,
     style: &'static str,
     period: &'static str,
     period_enum: Period,
     warmup: usize,
-    detect: fn(&[KLine]) -> Option<f64>,
+    detect: fn(&[KLine], &serde_json::Value) -> Option<f64>,
 }
 
 const STRATS: &[StratDef] = &[
@@ -584,7 +592,7 @@ pub async fn run_signal_history(
             Ok(k) if k.len() >= strat.warmup => k,
             _ => continue,
         };
-        let sigs = scan_one(&klines, code, name, sid, strat.detect, holding, strat.warmup);
+        let sigs = scan_one(&klines, code, name, sid, strat.detect, holding, strat.warmup, &serde_json::Value::Null);
         results.extend(sigs);
     }
     results.sort_by(|a, b| b.signal_date.cmp(&a.signal_date));
@@ -652,6 +660,7 @@ async fn run_group(
                 strat.detect,
                 holding,
                 strat.warmup,
+                &serde_json::Value::Null,
             );
             all_sigs.extend(sigs);
         }
@@ -683,9 +692,10 @@ fn scan_one(
     code: &str,
     name: &str,
     sid: &str,
-    detect: fn(&[KLine]) -> Option<f64>,
+    detect: fn(&[KLine], &serde_json::Value) -> Option<f64>,
     holding: u32,
     warmup: usize,
+    vars_ref: &serde_json::Value,
 ) -> Vec<StrategySignalResult> {
     let max_idx = klines.len().saturating_sub(holding as usize + 1);
     let mut out = Vec::new();
@@ -697,7 +707,7 @@ fn scan_one(
             continue;
         }
         let window = &klines[..=i];
-        if let Some(entry) = detect(window) {
+        if let Some(entry) = detect(window, vars_ref) {
             let exit_idx = (i + holding as usize).min(klines.len() - 1);
             let exit_price = klines[exit_idx].close;
             let mut peak = 0.0_f64;

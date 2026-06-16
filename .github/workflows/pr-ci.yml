@@ -182,6 +182,14 @@ jobs:
     needs: [should-run-heavy]
     if: needs.should-run-heavy.outputs.skip != 'true'
     runs-on: macos-latest
+    # E2E 在历史上经常因为 brew install 卡死超过 60 分钟。
+    # 显式设 30 分钟硬上限,失败比无限等更友好。
+    timeout-minutes: 30
+    env:
+      # 关键:不让 brew 在 CI 里 auto-update(那是 --with-deps 卡死的根因)
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      # 让 Playwright 把浏览器装到 node_modules 旁,避免 macOS 路径权限问题
+      PLAYWRIGHT_BROWSERS_PATH: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -203,7 +211,14 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        run: npx --yes playwright install chromium --with-deps
+        # 注意:故意不使用 --with-deps。
+        # 在 macOS 上 --with-deps 会调用 `brew install` 安装系统依赖,
+        # 在 GitHub-hosted CI 里 brew auto-update 或 sudo 提示会让 step
+        # 永远不退出(用户报告 100% 下载完成后无响应 → job 卡死)。
+        # GitHub macos-latest 镜像已预装 Playwright Chromium 所需的系统库,
+        # 不需要再装依赖;job 级别 env 里也设了 HOMEBREW_NO_AUTO_UPDATE=1
+        # 和 PLAYWRIGHT_BROWSERS_PATH=0 作为额外保险。
+        run: npx --yes playwright install chromium
 
       - name: Run E2E tests
         run: npm run test:e2e

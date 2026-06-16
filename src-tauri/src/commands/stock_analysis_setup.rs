@@ -3905,6 +3905,10 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     let tags = serde_json::to_string(&["stock", "analysis", "A股"])
         .map_err(|e| format!("序列化标签失败: {e}"))?;
 
+    // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
+    let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID)
+        .exec(db)
+        .await;
     workflow_template::ActiveModel {
         id: Set(TEMPLATE_ID.to_string()),
         name: Set("A股多维度分析".to_string()),
@@ -4289,6 +4293,7 @@ fn merge_variable_values(
 /// 从已存在的 "stock-analysis" 模板克隆 DAG 结构，修改 ID/名称/变量声明。
 /// 运行时 portfolio-manager 通过 `{{actual_outcome}}` 变量切换到反思模式。
 async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
+    use axagent_core::entity::workflow_template;
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -4435,6 +4440,10 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         }
     }
 
+    // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
+    let _ = workflow_template::Entity::delete_by_id("stock-reflection")
+        .exec(db)
+        .await;
     axagent_core::entity::workflow_template::ActiveModel {
         id: Set("stock-reflection".to_string()),
         name: Set("A股反思复盘".to_string()),

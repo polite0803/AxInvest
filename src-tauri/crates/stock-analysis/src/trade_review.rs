@@ -102,7 +102,7 @@ pub async fn get_trade_review(db: &DatabaseConnection) -> Result<TradeReviewSumm
         };
 
         // 评级
-        let (grade, comment): (String, String) = if pnl_pct > 10.0 && deviation.map_or(false, |d| d.abs() < 15.0) {
+        let (grade, comment): (String, String) = if pnl_pct > 10.0 && deviation.is_some_and(|d| d.abs() < 15.0) {
             ("优秀".into(), format!("盈利 {:.1}%，接近分析目标，执行良好", pnl_pct))
         } else if pnl_pct > 5.0 {
             ("良好".into(), format!("盈利 {:.1}%，但可考虑更接近目标价出场", pnl_pct))

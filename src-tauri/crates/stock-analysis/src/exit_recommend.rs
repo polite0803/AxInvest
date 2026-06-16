@@ -246,7 +246,7 @@ async fn evaluate_position(
                     } else if let Some(sl) = stop_loss {
                         // 接近止损（距止损 < 3%）
                         let distance = (current_price_f64 - sl) / sl * 100.0;
-                        if distance >= 0.0 && distance < 3.0 {
+                        if (0.0..3.0).contains(&distance) {
                             score += SCORE_STOP_LOSS_NEAR;
                             signals.push(ExitSignal {
                                 signal_type: "stop_loss_near".into(),

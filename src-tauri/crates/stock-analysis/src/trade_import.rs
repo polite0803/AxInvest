@@ -161,7 +161,7 @@ pub fn parse_csv(file_path: &str) -> Result<Vec<ImportRow>, String> {
         .headers()
         .map_err(|e| format!("CSV 表头读取失败: {e}"))?
         .iter()
-        .map(|h| normalize_header(h))
+        .map(normalize_header)
         .collect();
 
     // 检查必填列

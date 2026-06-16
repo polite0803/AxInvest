@@ -86,8 +86,8 @@ pub async fn get_trade_stats(db: &DatabaseConnection) -> Result<TradeStatsSummar
     let buys: Vec<_> = all_trades.iter().filter(|t| t.direction == "buy").collect();
     let sells: Vec<_> = all_trades.iter().filter(|t| t.direction == "sell").collect();
     let total_realized: f64 = sells.iter().filter_map(|t| t.realized_pnl).sum();
-    let wins: Vec<_> = sells.iter().filter(|t| t.realized_pnl.map_or(false, |p| p > 0.0)).collect();
-    let losses: Vec<_> = sells.iter().filter(|t| t.realized_pnl.map_or(false, |p| p <= 0.0)).collect();
+    let wins: Vec<_> = sells.iter().filter(|t| t.realized_pnl.is_some_and(|p| p > 0.0)).collect();
+    let losses: Vec<_> = sells.iter().filter(|t| t.realized_pnl.is_some_and(|p| p <= 0.0)).collect();
 
     let win_count = wins.len();
     let loss_count = losses.len();
@@ -128,7 +128,7 @@ pub async fn get_trade_stats(db: &DatabaseConnection) -> Result<TradeStatsSummar
 
     // 持有期分布（仅已配对卖出的交易）
     let mut holding_days: Vec<(i64, f64)> = Vec::new();
-    for (_code, trades) in &by_stock {
+    for trades in by_stock.values() {
         let mut sorted_trades = trades.clone();
         sorted_trades.sort_by_key(|t| t.created_at);
         let mut buy_date: Option<&str> = None;

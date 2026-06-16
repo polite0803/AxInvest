@@ -136,7 +136,7 @@ fn detect_trend_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     Some(last)
 }
 
-fn detect_trend_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_trend_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 250 {
@@ -156,7 +156,7 @@ fn detect_trend_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> 
     Some(last)
 }
 
-fn detect_trend_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_trend_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 10 {
@@ -180,7 +180,7 @@ fn detect_trend_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Optio
     Some(last)
 }
 
-fn detect_reversion_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_reversion_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -199,7 +199,7 @@ fn detect_reversion_short(klines: &[KLine], vars: &serde_json::Value) -> Option<
     Some(klines.last()?.close)
 }
 
-fn detect_reversion_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_reversion_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -246,7 +246,7 @@ fn detect_value_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64>
     Some(last)
 }
 
-fn detect_value_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_value_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -266,7 +266,7 @@ fn detect_value_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
     Some(last)
 }
 
-fn detect_value_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_value_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 250 {
         return None;
     }
@@ -294,7 +294,7 @@ fn detect_value_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> 
 // 实际 Capital 策略依赖北向持仓/主力净流入/龙虎榜资金流数据。
 // 此处用量价配合近似：放量上涨 + 成交额放大反映资金介入。
 
-fn detect_capital_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 30 {
         return None;
     }
@@ -318,7 +318,7 @@ fn detect_capital_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f6
     Some(last)
 }
 
-fn detect_capital_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_mid(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 100 {
         return None;
     }
@@ -344,7 +344,7 @@ fn detect_capital_mid(klines: &[KLine], vars: &serde_json::Value) -> Option<f64>
     Some(last)
 }
 
-fn detect_capital_long(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_long(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     if klines.len() < 250 {
         return None;
     }
@@ -405,7 +405,7 @@ fn detect_value_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Optio
     Some(last)
 }
 
-fn detect_capital_ultra_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64> {
+fn detect_capital_ultra_short(klines: &[KLine], _vars: &serde_json::Value) -> Option<f64> {
     let cs = closes(klines);
     let last = *cs.last()?;
     if cs.len() < 5 {
@@ -694,6 +694,7 @@ async fn run_group(
 
 // ── 滑动窗口扫描 ──
 
+#[allow(clippy::too_many_arguments)]
 fn scan_one(
     klines: &[KLine],
     code: &str,

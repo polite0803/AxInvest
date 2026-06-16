@@ -4147,6 +4147,18 @@
       "code": "代码",
       "codePlaceholder": "输入代码...",
       "inputVariable": "输入变量",
+      "inputVariablePlaceholder": "例: data.result",
+      "backend": "存储后端",
+      "vectorDb": "向量数据库",
+      "fileSystem": "文件系统",
+      "operation": "操作模式",
+      "insert": "插入",
+      "upsert": "更新或插入",
+      "append": "追加",
+      "collection": "集合/表名",
+      "collectionPlaceholder": "例: records",
+      "keyVariable": "匹配键变量",
+      "keyVariablePlaceholder": "例: record.id",
       "inputVarDocument": "文档",
       "parserType": "解析器类型",
       "outputVarParsed": "解析内容",
@@ -4720,6 +4732,51 @@
       "autoInput": "自动接收父节点输入",
       "waitAll": "等待全部",
       "waitAny": "等待任一"
+    },
+    "containerNode": {
+      "nodes": "节点",
+      "branchTimeout": "已配置分支超时"
+    },
+    "swarmNode": {
+      "agents": "智能体",
+      "rounds": "轮",
+      "newAgent": "智能体",
+      "noAgentsHint": "在此容器内添加智能体节点",
+      "addAgent": "添加智能体"
+    },
+    "groupNode": {
+      "untitled": "分组",
+      "folded": "已折叠"
+    },
+    "workflowRef": {
+      "targetWorkflow": "目标工作流",
+      "contextMode": "上下文模式",
+      "inherit": "继承",
+      "isolated": "隔离"
+    },
+    "phaseSeparator": {
+      "defaultLabel": "阶段"
+    },
+    "canvasTitle": {
+      "clickToRename": "点击重命名"
+    },
+    "node": {
+      "tickMode": "Tick 模式",
+      "breakpoint": "断点",
+      "retryEnabled": "重试已启用"
+    },
+    "debateNode": {
+      "debaters": "辩手",
+      "rounds": "轮",
+      "expand": "展开",
+      "collapse": "折叠",
+      "newDebater": "辩手",
+      "noDebatersHint": "在容器内添加辩手 Agent 节点",
+      "defaultRole": "— 默认 —",
+      "stancePro": "正方（支持）",
+      "stanceCon": "反方（反对）",
+      "stanceNth": "第 {{count}} 方",
+      "stanceSystemPromptFallback": "你是辩论的{{stance}}，请针对主题进行论证。"
     },
     "toolNode": {
       "notSelected": "未选择",

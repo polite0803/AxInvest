@@ -228,7 +228,9 @@ fn detect_value_short(klines: &[KLine], vars: &serde_json::Value) -> Option<f64>
     let last = *cs.last()?;
     let ma20 = indicators::sma(&cs, 20)?;
     // 价格在 MA20 附近（偏离 < 2%），不在上涨趋势中
-    if last > ma20 * read_f64(vars, "value_upper_deviation", 1.02) || last < ma20 * read_f64(vars, "value_lower_deviation", 0.90) {
+    if last > ma20 * read_f64(vars, "value_upper_deviation", 1.02)
+        || last < ma20 * read_f64(vars, "value_lower_deviation", 0.90)
+    {
         return None;
     }
     // 低波幅：20 日振幅 < 15%

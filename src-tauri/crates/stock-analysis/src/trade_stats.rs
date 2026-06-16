@@ -84,10 +84,19 @@ pub async fn get_trade_stats(db: &DatabaseConnection) -> Result<TradeStatsSummar
 
     // 统计基础
     let buys: Vec<_> = all_trades.iter().filter(|t| t.direction == "buy").collect();
-    let sells: Vec<_> = all_trades.iter().filter(|t| t.direction == "sell").collect();
+    let sells: Vec<_> = all_trades
+        .iter()
+        .filter(|t| t.direction == "sell")
+        .collect();
     let total_realized: f64 = sells.iter().filter_map(|t| t.realized_pnl).sum();
-    let wins: Vec<_> = sells.iter().filter(|t| t.realized_pnl.is_some_and(|p| p > 0.0)).collect();
-    let losses: Vec<_> = sells.iter().filter(|t| t.realized_pnl.is_some_and(|p| p <= 0.0)).collect();
+    let wins: Vec<_> = sells
+        .iter()
+        .filter(|t| t.realized_pnl.is_some_and(|p| p > 0.0))
+        .collect();
+    let losses: Vec<_> = sells
+        .iter()
+        .filter(|t| t.realized_pnl.is_some_and(|p| p <= 0.0))
+        .collect();
 
     let win_count = wins.len();
     let loss_count = losses.len();
@@ -222,7 +231,11 @@ pub async fn get_trade_stats(db: &DatabaseConnection) -> Result<TradeStatsSummar
     let strategy_breakdown: Vec<StrategyBreakdown> = strat_map
         .into_iter()
         .map(|(s, (cnt, pnl, w))| StrategyBreakdown {
-            win_rate: if cnt > 0 { w as f64 / cnt as f64 * 100.0 } else { 0.0 },
+            win_rate: if cnt > 0 {
+                w as f64 / cnt as f64 * 100.0
+            } else {
+                0.0
+            },
             strategy: s,
             trade_count: cnt,
             total_pnl: pnl,

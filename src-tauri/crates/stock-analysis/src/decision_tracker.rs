@@ -68,7 +68,10 @@ pub fn load_records() -> Vec<DecisionRecord> {
 /// 计算指定股票的历史推荐准确率
 pub fn accuracy_for_stock(stock_code: &str) -> Option<(usize, usize, f64)> {
     let records = load_records();
-    let stock_records: Vec<_> = records.iter().filter(|r| r.stock_code == stock_code).collect();
+    let stock_records: Vec<_> = records
+        .iter()
+        .filter(|r| r.stock_code == stock_code)
+        .collect();
     if stock_records.is_empty() {
         return None;
     }
@@ -77,7 +80,8 @@ pub fn accuracy_for_stock(stock_code: &str) -> Option<(usize, usize, f64)> {
     let _sells = stock_records.iter().filter(|r| r.action == "sell").count();
     let _holds = stock_records.iter().filter(|r| r.action == "hold").count();
     // 平均置信度
-    let avg_conf = stock_records.iter().map(|r| r.confidence).sum::<f64>() / stock_records.len() as f64;
+    let avg_conf =
+        stock_records.iter().map(|r| r.confidence).sum::<f64>() / stock_records.len() as f64;
     Some((0, 0, avg_conf))
 }
 

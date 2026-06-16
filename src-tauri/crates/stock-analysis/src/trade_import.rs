@@ -6,9 +6,7 @@
 //! - 通用格式（通过列名映射）
 
 use csv::ReaderBuilder;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use std::path::Path;
 
 // ── 导入结果类型 ──
@@ -51,8 +49,8 @@ fn normalize_header(name: &str) -> String {
         "证券代码" | "股票代码" | "代码" | "合约代码" | "合约" | "StockCode" | "stock_code"
         | "sec_code" | "secCode" | "code" => "stock_code".into(),
         // 证券名称
-        "证券名称" | "股票名称" | "名称" | "合约名称" | "StockName" | "stock_name"
-        | "sec_name" | "name" => "stock_name".into(),
+        "证券名称" | "股票名称" | "名称" | "合约名称" | "StockName" | "stock_name" | "sec_name"
+        | "name" => "stock_name".into(),
         // 买卖方向
         "买卖方向" | "买卖标志" | "方向" | "成交方向" | "业务类型" | "业务名称" | "Direction"
         | "direction" | "bs_flag" | "bsFlag" | "BSFlag" => "direction".into(),
@@ -219,7 +217,7 @@ pub fn parse_csv(file_path: &str) -> Result<Vec<ImportRow>, String> {
                     errors: vec![format!("CSV 解析错误: {e}")],
                 });
                 continue;
-            }
+            },
         };
 
         let mut errors: Vec<String> = Vec::new();
@@ -241,7 +239,7 @@ pub fn parse_csv(file_path: &str) -> Result<Vec<ImportRow>, String> {
             Err(e) => {
                 errors.push(e);
                 String::new()
-            }
+            },
         };
 
         // 解析价格
@@ -294,7 +292,11 @@ pub fn parse_csv(file_path: &str) -> Result<Vec<ImportRow>, String> {
             trade_date,
             trade_time,
             fee,
-            notes: if notes_raw.is_empty() { None } else { Some(notes_raw) },
+            notes: if notes_raw.is_empty() {
+                None
+            } else {
+                Some(notes_raw)
+            },
             errors,
         });
     }
@@ -331,9 +333,7 @@ pub async fn batch_import_trades(
     for row in rows {
         if !row.errors.is_empty() {
             summary.failed += 1;
-            summary
-                .errors
-                .push((row.row, row.errors.join("; ")));
+            summary.errors.push((row.row, row.errors.join("; ")));
             continue;
         }
 
@@ -362,9 +362,7 @@ pub async fn batch_import_trades(
         } else {
             // 卖出：减仓
             let holdings = axagent_entities::portfolio_holdings::Entity::find()
-                .filter(
-                    axagent_entities::portfolio_holdings::Column::StockCode.eq(&row.stock_code),
-                )
+                .filter(axagent_entities::portfolio_holdings::Column::StockCode.eq(&row.stock_code))
                 .one(db)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -386,10 +384,7 @@ pub async fn batch_import_trades(
                     let mut holding: axagent_entities::portfolio_holdings::ActiveModel = h.into();
                     holding.shares = Set(remaining);
                     holding.updated_at = Set(now);
-                    holding
-                        .update(db)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    holding.update(db).await.map_err(|e| e.to_string())?;
                 }
             }
         }

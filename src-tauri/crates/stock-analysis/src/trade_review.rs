@@ -75,25 +75,44 @@ pub async fn get_trade_review(db: &DatabaseConnection) -> Result<TradeReviewSumm
 
         let pnl = sell.realized_pnl.unwrap_or(0.0);
         total_pnl += pnl;
-        if pnl > 0.0 { win_count += 1; }
+        if pnl > 0.0 {
+            win_count += 1;
+        }
 
         // 获取分析预测对比
         let (target, stop, deviation) = if let Some(analysis) =
             axagent_core::entity::stock_analyses::Entity::find()
-                .filter(axagent_core::entity::stock_analyses::Column::StockCode.eq(&sell.stock_code))
+                .filter(
+                    axagent_core::entity::stock_analyses::Column::StockCode.eq(&sell.stock_code),
+                )
                 .filter(axagent_core::entity::stock_analyses::Column::Status.eq("completed"))
                 .order_by_desc(axagent_core::entity::stock_analyses::Column::CreatedAt)
-                .one(db).await.ok().flatten()
+                .one(db)
+                .await
+                .ok()
+                .flatten()
         {
             if let Some(ref djson) = analysis.decision_json {
                 if let Ok(d) = serde_json::from_str::<serde_json::Value>(djson) {
                     let tp = d["targetPrice"].as_f64();
                     let sl = d["stopLoss"].as_f64();
-                    let dev = tp.map(|t| if t != 0.0 { (sell.price - t) / t * 100.0 } else { 0.0 });
+                    let dev = tp.map(|t| {
+                        if t != 0.0 {
+                            (sell.price - t) / t * 100.0
+                        } else {
+                            0.0
+                        }
+                    });
                     (tp, sl, dev)
-                } else { (None, None, None) }
-            } else { (None, None, None) }
-        } else { (None, None, None) };
+                } else {
+                    (None, None, None)
+                }
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
 
         let pnl_pct = if entry_price > 0.0 {
             (sell.price - entry_price) / entry_price * 100.0
@@ -102,17 +121,21 @@ pub async fn get_trade_review(db: &DatabaseConnection) -> Result<TradeReviewSumm
         };
 
         // 评级
-        let (grade, comment): (String, String) = if pnl_pct > 10.0 && deviation.is_some_and(|d| d.abs() < 15.0) {
-            ("优秀".into(), format!("盈利 {:.1}%，接近分析目标，执行良好", pnl_pct))
-        } else if pnl_pct > 5.0 {
-            ("良好".into(), format!("盈利 {:.1}%，但可考虑更接近目标价出场", pnl_pct))
-        } else if pnl_pct > 0.0 {
-            ("及格".into(), format!("微盈 {:.1}%，注意目标价 {:.2}", pnl_pct, target.unwrap_or(0.0)))
-        } else if pnl_pct > -10.0 {
-            ("需改进".into(), format!("亏损 {:.1}%，建议严格止损纪律", pnl_pct))
-        } else {
-            ("需改进".into(), format!("大幅亏损 {:.1}%，需复盘入场逻辑", pnl_pct))
-        };
+        let (grade, comment): (String, String) =
+            if pnl_pct > 10.0 && deviation.is_some_and(|d| d.abs() < 15.0) {
+                ("优秀".into(), format!("盈利 {:.1}%，接近分析目标，执行良好", pnl_pct))
+            } else if pnl_pct > 5.0 {
+                ("良好".into(), format!("盈利 {:.1}%，但可考虑更接近目标价出场", pnl_pct))
+            } else if pnl_pct > 0.0 {
+                (
+                    "及格".into(),
+                    format!("微盈 {:.1}%，注意目标价 {:.2}", pnl_pct, target.unwrap_or(0.0)),
+                )
+            } else if pnl_pct > -10.0 {
+                ("需改进".into(), format!("亏损 {:.1}%，建议严格止损纪律", pnl_pct))
+            } else {
+                ("需改进".into(), format!("大幅亏损 {:.1}%，需复盘入场逻辑", pnl_pct))
+            };
 
         items.push(TradeReviewItem {
             stock_code: sell.stock_code.clone(),
@@ -133,8 +156,18 @@ pub async fn get_trade_review(db: &DatabaseConnection) -> Result<TradeReviewSumm
     }
 
     let total = items.len();
-    let win_rate = if total > 0 { win_count as f64 / total as f64 * 100.0 } else { 0.0 };
-    let avg_grade = if win_rate >= 60.0 { "良好" } else if win_rate >= 40.0 { "及格" } else { "需改进" };
+    let win_rate = if total > 0 {
+        win_count as f64 / total as f64 * 100.0
+    } else {
+        0.0
+    };
+    let avg_grade = if win_rate >= 60.0 {
+        "良好"
+    } else if win_rate >= 40.0 {
+        "及格"
+    } else {
+        "需改进"
+    };
 
     let mut suggestions = Vec::new();
     if win_rate < 50.0 {

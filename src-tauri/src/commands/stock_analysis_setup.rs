@@ -4546,7 +4546,8 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     }
 
     // 走 stock-analysis 同款序列化路径：编译期校验 + 字段齐全
-    let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化反思节点失败: {e}"))?;
+    let nodes_json =
+        serde_json::to_string(&nodes).map_err(|e| format!("序列化反思节点失败: {e}"))?;
     let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化反思边失败: {e}"))?;
     let variables_json =
         serde_json::to_string(&variables).map_err(|e| format!("序列化反思变量失败: {e}"))?;

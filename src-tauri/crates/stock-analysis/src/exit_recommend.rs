@@ -61,7 +61,7 @@ pub enum ExitAction {
 #[serde(rename_all = "camelCase")]
 pub struct ExitSignal {
     pub signal_type: String,
-    pub severity: String,  // "critical" | "high" | "medium" | "low"
+    pub severity: String, // "critical" | "high" | "medium" | "low"
     pub detail: String,
 }
 
@@ -138,10 +138,22 @@ pub async fn get_exit_recommendations(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let urgent = recommendations.iter().filter(|r| matches!(r.action, ExitAction::SellNow)).count();
-    let limit = recommendations.iter().filter(|r| matches!(r.action, ExitAction::SellAtLimit)).count();
-    let stop = recommendations.iter().filter(|r| matches!(r.action, ExitAction::SetStopLoss)).count();
-    let hold = recommendations.iter().filter(|r| matches!(r.action, ExitAction::Hold)).count();
+    let urgent = recommendations
+        .iter()
+        .filter(|r| matches!(r.action, ExitAction::SellNow))
+        .count();
+    let limit = recommendations
+        .iter()
+        .filter(|r| matches!(r.action, ExitAction::SellAtLimit))
+        .count();
+    let stop = recommendations
+        .iter()
+        .filter(|r| matches!(r.action, ExitAction::SetStopLoss))
+        .count();
+    let hold = recommendations
+        .iter()
+        .filter(|r| matches!(r.action, ExitAction::Hold))
+        .count();
 
     Ok(ExitSummary {
         total_positions: holdings.len(),
@@ -251,7 +263,10 @@ async fn evaluate_position(
                             signals.push(ExitSignal {
                                 signal_type: "stop_loss_near".into(),
                                 severity: "high".into(),
-                                detail: format!("现价 {:.2} 距止损 {:.2} 仅 {:.1}%", current_price_f64, sl, distance),
+                                detail: format!(
+                                    "现价 {:.2} 距止损 {:.2} 仅 {:.1}%",
+                                    current_price_f64, sl, distance
+                                ),
                             });
                         }
                     }
@@ -383,7 +398,10 @@ async fn evaluate_position(
         signals.push(ExitSignal {
             signal_type: "risk_parity".into(),
             severity: "medium".into(),
-            detail: format!("盈利 {:.1}% 且仓位 {:.0}%，建议部分止盈恢复风险平衡", pnl_pct, position_pct),
+            detail: format!(
+                "盈利 {:.1}% 且仓位 {:.0}%，建议部分止盈恢复风险平衡",
+                pnl_pct, position_pct
+            ),
         });
     }
 
@@ -403,7 +421,9 @@ async fn evaluate_position(
         } else {
             action = ExitAction::SellAtLimit;
             // 建议价：取 targetPrice / stopLoss / 当前价 * 1.005 三者的最优
-            let limit = target_price.or(stop_loss).unwrap_or(current_price_f64 * 1.005);
+            let limit = target_price
+                .or(stop_loss)
+                .unwrap_or(current_price_f64 * 1.005);
             suggested_price = Some(limit);
             timeframe = "本周内".into();
         }

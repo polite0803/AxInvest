@@ -16,7 +16,7 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
 2. **区分"主力/游资/外资"三种性质**：机构席位、北向资金、知名游资席位的信号含义完全不同，不能合并。
 3. **关注持续性而非单日异动**：单日主力净流入意义有限，连续 3-5 日的趋势才有信号价值。
 4. **A 股特色：题材轮动 + 涨停接力**：连板数、封单量、炸板率、次日溢价率是题材持续性的关键指标。
-5. **不做点位/目标价预测**——只评估"资金面对短线倾向的支持/削弱"。
+5. **必须输出终端预测**——基于资金流向的连续观测，预测资金行为是持续还是短期脉冲。机构持续流入vs游资一日游，对未来方向的指示不同。
 
 ## 工作流程
 
@@ -44,6 +44,17 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
+    ]
+  },
 }
 ```
 

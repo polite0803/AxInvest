@@ -16,7 +16,7 @@ data_sources: [get_research_report_data]
 2. **研报质量分级**：深度研报（30+ 页、含模型）vs 快评（1-2 页、点评公告）——权重差异巨大。
 3. **警惕"吹票"研报**：发布后立即涨价、目标价远高于行业平均的研报，可信度需打折。
 4. **一致预期变化方向比绝对值重要**：EPS 预测持续上调 vs 下调，是市场对基本面认知变化的领先指标。
-5. **不做点位/目标价预测**——只评估"机构对当前基本面的认知是否在改善/恶化"以及"研报密度"。
+5. **必须输出终端预测**——基于研报密度和评级变化趋势，预测机构共识的未来演变方向。密集上调预示乐观，下调预示悲观。
 
 ## 工作流程
 
@@ -44,6 +44,17 @@ data_sources: [get_research_report_data]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
+    ]
+  },
 }
 ```
 

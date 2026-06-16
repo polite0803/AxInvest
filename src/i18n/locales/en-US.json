@@ -8176,7 +8176,8 @@
       "syntheticTooltip": "Data-sparse fallback",
       "tagReal": "Real",
       "tagSynthetic": "Fallback",
-      "title": "Recommendations"
+      "title": "Recommendations",
+      "calibrate": "Weight Calibration"
     },
     "reflection": {
       "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}",

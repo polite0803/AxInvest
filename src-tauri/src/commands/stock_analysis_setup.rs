@@ -2193,6 +2193,8 @@ async fn seed_stock_analysis_workflow_template(
                 ("consensusScore", "debate-convergence.params.consensus_score"),
                 ("trader_time_horizon", "trader.params.timeHorizon"),
                 ("trader_holding_days", "trader.params.expectedHoldingDays"),
+                ("aggregate_direction", "debate-convergence.params.aggregate_prediction.direction"),
+                ("aggregate_confidence", "debate-convergence.params.aggregate_prediction.confidence"),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))

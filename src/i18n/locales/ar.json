@@ -29,7 +29,9 @@
     "screener": "المُصفّي",
     "trade": "التداول",
     "backtest": "اختبار رجعي",
-    "compare": "مقارنة"
+    "compare": "مقارنة",
+    "quant": "Quant",
+    "replayWorkbench": "Replay Workbench"
   },
   "sidebar": {
     "sectionWork": "العمل",
@@ -38,7 +40,10 @@
     "sectionInfrastructure": "البنية التحتية",
     "sectionPlugins": "الإضافات",
     "expand": "توسيع الشريط الجانبي",
-    "collapse": "طي الشريط الجانبي"
+    "collapse": "طي الشريط الجانبي",
+    "sectionInvestDiscover": "Discover",
+    "sectionInvestExecute": "Execute",
+    "sectionInvestReview": "Review"
   },
   "chat": {
     "newConversation": "محادثة جديدة",
@@ -2565,7 +2570,8 @@
     "provider": {
       "deepseekBalance": "رصيد DeepSeek",
       "noValidKey": "لا مفتاح صالح"
-    }
+    },
+    "stockAnalysis": "Stock Analysis"
   },
   "backup": {
     "title": "مركز النسخ الاحتياطي",
@@ -2775,7 +2781,11 @@
     "key": "",
     "value": "",
     "hide": "إخفاء",
-    "searchPlaceholder": "بحث..."
+    "searchPlaceholder": "بحث...",
+    "exportMarkdown": "Export Markdown",
+    "saveFailed": "Save failed",
+    "saved": "Saved",
+    "unknownError": "Unknown error"
   },
   "image": {
     "loadError": "فشل تحميل الصورة",
@@ -3976,7 +3986,10 @@
       "axagentFolderHint": "حدد مجلداً يحتوي على ملفات JSON بتنسيق AxAgent. سيتم فحص جميع قوالب سير العمل واستيرادها تلقائياً.",
       "n8nFolderHint": "حدد مجلداً يحتوي على ملفات JSON بتنسيق n8n. سيتم تحويل جميع مهام n8n واستيرادها تلقائياً.",
       "importStructuralErrors": "Imported workflow has {{count}} structural error(s):\n{{details}}",
-      "importValidationWarnings": "Imported workflow has {{count}} warning(s):\n{{details}}"
+      "importValidationWarnings": "Imported workflow has {{count}} warning(s):\n{{details}}",
+      "fileTooLarge": "File too large",
+      "invalidJsonFile": "Invalid JSON file",
+      "jsonTooDeep": "JSON nesting too deep"
     },
     "preview": "معاينة",
     "publish": "نشر",
@@ -4029,7 +4042,12 @@
       "diffNodeTypeChanged": "Node type changed",
       "diffNodeConfigChanged": "Node config changed",
       "diffEdgeAdded": "Edge added ({{type}})",
-      "diffEdgeRemoved": "Edge removed ({{type}})"
+      "diffEdgeRemoved": "Edge removed ({{type}})",
+      "latest": "Latest",
+      "rollback": "Rollback to This Version",
+      "rollbackConfirm": "Confirm rollback?",
+      "rollbackTo": "Rollback to {{version}}",
+      "rolledBack": "Rolled back"
     },
     "versionHistoryLoadFailed": "فشل تحميل سجل الإصدارات",
     "versionLoaded": "الإصدار{{version}} loaded",
@@ -4712,7 +4730,12 @@
       "manual": "يدوي",
       "schedule": "مجدول",
       "event": "حدث",
-      "title": "مشغل"
+      "title": "مشغل",
+      "configure": "Configure Trigger",
+      "configureHint": "Configure trigger conditions and parameters",
+      "statusActive": "Running",
+      "statusDisabled": "Disabled",
+      "statusUnconfigured": "Unconfigured"
     },
     "documentParserNode": {
       "notSet": "غير محدد",
@@ -4758,7 +4781,12 @@
     "node": {
       "tickMode": "وضع Tick",
       "breakpoint": "نقطة توقف",
-      "retryEnabled": "إعادة المحاولة مفعلة"
+      "retryEnabled": "إعادة المحاولة مفعلة",
+      "clickToCollapsePorts": "Click to collapse ports",
+      "clickToExpandPorts": "Click to expand ports",
+      "inputs": "Inputs",
+      "outputs": "Outputs",
+      "type": "Type"
     },
     "code": {
       "rhaiDynamicTool": "🦀 Rhai (أداة ديناميكية)",
@@ -5236,7 +5264,14 @@
       "placeholder": "Search nodes..."
     },
     "run": "Run",
-    "settings": "Settings"
+    "settings": "Settings",
+    "decorativeContainerNoEdges": "Decorative container has no connections",
+    "discard": "Discard",
+    "durationMinutes": "{{minutes}} min",
+    "durationSeconds": "{{seconds}} sec",
+    "keepEditing": "Keep Editing",
+    "unsavedContent": "You have unsaved changes.",
+    "unsavedTitle": "Unsaved Workflow"
   },
   "atomicSkill": {
     "entryType": "نوع الإدخال",
@@ -7317,7 +7352,50 @@
     "errorRecoveryScore": "استرداد الأخطاء",
     "goalCompletionScore": "تحقيق الأهداف",
     "reflectError": "فشل التأمل",
-    "retry": "إعادة المحاولة"
+    "retry": "إعادة المحاولة",
+    "autoTrigger": "Auto-Triggered",
+    "delete": {
+      "confirm": "Delete this insight?",
+      "failed": "Failed to delete insight",
+      "success": "Insight deleted"
+    },
+    "deleteInsight": "Delete Insight",
+    "feedback": {
+      "failed": "Feedback submission failed",
+      "notFound": "Insight not found",
+      "thanksNotUseful": "Thanks! Marked as not useful",
+      "thanksUseful": "Thanks! Marked as useful"
+    },
+    "notUseful": "Not Useful",
+    "settings": {
+      "cancel": "Cancel",
+      "core": "Core Settings",
+      "decayDays": "Decay Days",
+      "maxHistory": "Max History",
+      "maxInsights": "Max Insights",
+      "qualityThreshold": "Quality Threshold",
+      "reset": "Reset",
+      "save": "Save",
+      "saved": "Settings saved",
+      "title": "Reflection Settings",
+      "decayDaysHint": "Insights automatically decay in weight after N days",
+      "enabled": "Enable Auto-Reflection",
+      "enabledHint": "Auto-trigger reflection after task execution",
+      "errorSection": "Error Analysis",
+      "insightSection": "Insight Settings",
+      "maxHistoryHint": "Keep the most recent N reflection history entries",
+      "maxInsightsHint": "Keep at most N insight records",
+      "qualitySection": "Quality Threshold",
+      "qualityThresholdHint": "Insights below this threshold will be filtered out",
+      "saveFailed": "Save failed",
+      "storageSection": "Storage Settings",
+      "storeInsights": "Persist Insights",
+      "storeInsightsHint": "Insights will be saved locally and available across sessions",
+      "subtitle": "Configure auto-reflection and insight management",
+      "useErrorClassifier": "Enable Error Classifier",
+      "useErrorClassifierHint": "Auto-classify error patterns for analysis"
+    },
+    "useful": "Useful"
   },
   "subAgentCard": {
     "viewConversation": "عرض المحادثة الفرعية",
@@ -7405,7 +7483,9 @@
     "steerInput": "قيادة",
     "showExtras": "المزيد",
     "hideExtras": "إخفاء",
-    "close": "إغلاق"
+    "close": "إغلاق",
+    "collapse": "Collapse Panel",
+    "expand": "Expand Panel"
   },
   "knowledgeSettings": {
     "title": "المعرفة"
@@ -7873,7 +7953,18 @@
         "hot-money-tracker": "متتبع تدفق رأس المال",
         "lockup-watcher": "مراقب الحظر",
         "research-analyst": "محلل البحث",
-        "sector-analyst": "محلل القطاع"
+        "sector-analyst": "محلل القطاع",
+        "catalyst": "Catalyst & Narrative Analyst",
+        "catalyst-analyst": "Catalyst & Narrative Analyst",
+        "fundamentals": "Fundamentals Analyst",
+        "hot-money": "Capital Flow Analyst",
+        "lockup": "Lockup Monitor",
+        "news": "News Analyst",
+        "policy": "Policy Analyst",
+        "research": "Research Analyst",
+        "sector": "Sector Analyst",
+        "sentiment": "Sentiment Analyst",
+        "investment-plan": "Investment Plan"
       },
       "analystComplete": "اكتمل التحليل",
       "decisionTitle": "القرار النهائي",
@@ -7919,7 +8010,8 @@
         "t-quality": "بوابة الجودة",
         "research-mgr": "توليف البحث",
         "trader": "خطة التداول",
-        "portfolio-mgr": "القرار النهائي"
+        "portfolio-mgr": "القرار النهائي",
+        "rule-check": "Rule Check"
       },
       "failedStepsWithCount": "Failed Steps ({{count}})",
       "fetchFailed": "فشل في جلب البيانات",
@@ -7945,7 +8037,8 @@
       "startFailed": "startFailed",
       "vValidate": "التحقق من البيانات",
       "aggRisk": "المخاطر العدوانية",
-      "notifyResult": "إخطار بالنتيجة"
+      "notifyResult": "إخطار بالنتيجة",
+      "analystFallback": "Analyst"
     },
     "risk": {
       "high": "مرتفع",
@@ -8021,7 +8114,41 @@
       "scopeAll": "الكل",
       "scopeLive": "Live فقط",
       "scopeReplay": "Replay فقط",
-      "sectionTitle": "Backtest"
+      "sectionTitle": "Backtest",
+      "colAvgReturn": "Avg Return",
+      "colCode": "Code",
+      "colDate": "Date",
+      "colEntry": "Entry Price",
+      "colExit": "Exit Price",
+      "colHolding": "Holding Days",
+      "colMaxDrawdown": "Max Drawdown",
+      "colMaxLossStreak": "Max Losing Streak",
+      "colName": "Name",
+      "colProfitFactor": "Profit Factor",
+      "colReturn": "Return",
+      "colSignalCount": "Signals",
+      "colStrategy": "Strategy",
+      "colStyle": "Style",
+      "colTotalReturn": "Total Return",
+      "colWinRate": "Win Rate",
+      "filterStock": "Filter Stock",
+      "groupNegative": "Losing Group",
+      "groupPositive": "Winning Group",
+      "matrixTitle": "Backtest Matrix",
+      "signalEmpty": "No signals",
+      "signalHistory": "Signal History",
+      "signalSelectHint": "Click a signal for details",
+      "strategyEmpty": "No strategies",
+      "strategyFailed": "Strategy execution failed",
+      "strategyNegative": "Strategy has losses",
+      "strategyPositive": "Strategy has gains",
+      "strategyRun": "Run Strategy",
+      "strategyRunning": "Strategy running...",
+      "strategySkipped": "Strategy skipped",
+      "strategyTitle": "Strategy Backtest",
+      "tabAnalysis": "Analysis Backtest",
+      "tabStrategy": "Strategy Backtest",
+      "winsAndLosses": "Win/Loss Stats"
     },
     "chart": {
       "restore": "restore",
@@ -8114,7 +8241,9 @@
       "stopLoss": "stopLoss",
       "totalPnl": "totalPnl",
       "totalTrades": "totalTrades",
-      "winRate": "winRate"
+      "winRate": "winRate",
+      "fromDecision": "From Decision",
+      "record": "Record Trade"
     },
     "valueAssessment": {
       "dataQuality": "dataQuality",
@@ -8228,7 +8357,16 @@
       "crossCheckTitle": "التحقق المتبادل من المحللين (آخر {{updatedAt}})",
       "dataQualitySummary": "{{real}} حقيقي + {{synthetic}} احتياطي",
       "backtestWinrate": "نسبة الربح",
-      "bannerDegraded": "تم تخفيض دقة أنماط البيانات {{styles}} (as-of {{date}}). عامل ثقتها بأنها أقل من الأساليب غير المتدهورة."
+      "bannerDegraded": "تم تخفيض دقة أنماط البيانات {{styles}} (as-of {{date}}). عامل ثقتها بأنها أقل من الأساليب غير المتدهورة.",
+      "lastAnalysis": "Last Analysis",
+      "outcome": "Outcome",
+      "outcomeLoss": "Loss",
+      "outcomeWin": "Win",
+      "styleCapital": "Capital Flow",
+      "styleReversion": "Mean Reversion",
+      "styleTrend": "Trend Following",
+      "styleValue": "Value Investing",
+      "styleWatchlist": "Watchlist"
     },
     "periodUltraShort": "Short",
     "periodShort": "Short",
@@ -8242,7 +8380,8 @@
       "replayDegraded": "This data source has no historical semantics in replay mode and was skipped automatically.",
       "replayDegradedWithCount": "{{n}} data sources were skipped in replay mode; this panel is hidden.",
       "replayDegradedWithReason": "Degraded in replay mode: {{reason}}",
-      "_fallback": "No recommendation data"
+      "_fallback": "No recommendation data",
+      "empty": "No recommendation data"
     },
     "styleDisabled": "(Disabled)",
     "styleDisabledReason": "Style {style} is disabled in settings",
@@ -8268,7 +8407,16 @@
       "recommendations": "Recommendations",
       "regenerate": "Regenerate",
       "title": "Daily Review",
-      "watchlist": "Watchlist"
+      "watchlist": "Watchlist",
+      "backtest": "Backtest",
+      "decisionAction": "Decision Action",
+      "inZone": "In Range",
+      "lastAnalysis": "Last Analysis",
+      "reflect": "Reflect",
+      "stopLoss": "Stop Loss",
+      "stopLossHit": "Stop Loss Hit",
+      "target": "Target Price",
+      "targetHit": "Target Reached"
     },
     "indexQuoteEmpty": "Index Quote Empty",
     "optionsEmpty": "Options Empty",
@@ -8352,7 +8500,24 @@
       "daily1200": "Daily 12:00",
       "daily1800": "Daily 18:00",
       "weekday0600": "Weekdays 6:00",
-      "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}"
+      "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}",
+      "manualTitle": "Manual Reflection",
+      "startReflection": "Start Reflection",
+      "placeholderCode": "Stock Code",
+      "placeholderDate": "Analysis Date (YYYY-MM-DD)",
+      "placeholderOutcome": "Actual outcome (e.g. -8% in 30d)",
+      "fillRequired": "Please fill in stock code, analysis date and actual outcome",
+      "triggerSuccess": "Reflection workflow triggered, check history for results",
+      "triggerFailed": "Reflection failed: {error}",
+      "manualHint": "Enter parameters and click 'Start Reflection'. The workflow will replay analysis as-of the specified date and output reflection conclusions",
+      "paramSuggestTitle": "Parameter Adjustment Suggestions",
+      "paramCol": "Parameter",
+      "paramCurrent": "Current",
+      "paramSuggested": "Suggested",
+      "paramReason": "Reason",
+      "applyParamsBtn": "Apply {{count}} Selected",
+      "applySuccess": "Parameters applied to stock-analysis template",
+      "applyFailed": "Failed to apply parameters: {error}"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -8398,6 +8563,138 @@
       "value": "التقييم",
       "trade": "خطة التداول",
       "decision": "القرار النهائي"
+    },
+    "actionUncertain": "Uncertain",
+    "amplitude": "Amplitude",
+    "analystConsensus": "Analyst Consensus",
+    "bearish": "Bearish",
+    "bullish": "Bullish",
+    "cancelled": "Analysis cancelled — showing partial data",
+    "contradiction": "Decision Contradiction",
+    "dashboard": {
+      "analyzeStock": "Analyze Stock",
+      "bear": "Bear Market",
+      "bull": "Bull Market",
+      "confidence": "Confidence",
+      "dailyReview": "Daily Review",
+      "highVol": "High Volatility",
+      "marketState": "Market State",
+      "recentAnalyses": "Recent Analyses",
+      "recommendations": "Recommendations",
+      "recordTrade": "Record Trade",
+      "sideways": "Sideways",
+      "title": "Investment Dashboard",
+      "viewAll": "View All"
+    },
+    "debtRatio": "Debt Ratio",
+    "decision": {
+      "action": "Suggested Action",
+      "confidence": "Confidence",
+      "positionPct": "Position %",
+      "riskLevel": "Risk Level"
+    },
+    "earningsOnChart": "Earnings Labels",
+    "timeHorizon": "Time Horizon",
+    "expectedHoldingDays": "Holding Days",
+    "targetTimeframe": "Target Timeline",
+    "timeHorizonUltraShort": "Ultra Short",
+    "timeHorizonShort": "Short Term",
+    "timeHorizonMid": "Mid Term",
+    "timeHorizonLong": "Long Term",
+    "experiment": {
+      "accept": "Accept",
+      "acceptAndClose": "Accept & Close",
+      "acceptAndCloseDesc": "Accept modified parameters and close experiment panel",
+      "acceptDecision": "Accept This Decision",
+      "acceptFailed": "Accept failed",
+      "apply": "Apply",
+      "bearish": "Bearish",
+      "bullish": "Bullish",
+      "conf": "Conf.",
+      "confidence": "Confidence",
+      "configOverrides": "Config Overrides",
+      "consensusScore": "Consensus Score",
+      "decision": "Decision",
+      "dqiScore": "Data Quality Score",
+      "executeTrade": "Execute Trade →",
+      "experimentCount": "Experiment #{{n}}",
+      "modified": "Modified",
+      "neutral": "Neutral",
+      "noExperiment": "No experiment records",
+      "original": "Original",
+      "pos": "Pos.",
+      "position": "Position",
+      "preview": "Preview",
+      "reset": "Reset",
+      "same": "Same",
+      "subtitle": "Tweak parameters · Preview changes · Accept results",
+      "title": "Experiment Mode",
+      "totalScore": "Total Score",
+      "whatIfParameters": "What-If Parameters"
+    },
+    "experimentTrail": {
+      "acceptOrSkip": "Accept or Skip",
+      "execute": "Execute",
+      "experiment": "Experiment #{{n}}",
+      "originalAnalysis": "Original Analysis",
+      "trail": "Experiment Trail"
+    },
+    "financialMetrics": "Financial Metrics",
+    "goToTrade": "Go to Trade",
+    "grossMargin": "Gross Margin",
+    "holdingsSheet": "Holdings Table",
+    "loading": "Loading...",
+    "neutral": "Neutral",
+    "noHoldings": "No holdings",
+    "period": {
+      "15m": "15m",
+      "1M": "Monthly",
+      "1d": "Daily",
+      "1w": "Weekly",
+      "30m": "30m",
+      "5m": "5m",
+      "60m": "60m",
+      "zoomHint": "Drag to zoom"
+    },
+    "profitGrowth": "Profit Growth",
+    "revenueGrowth": "Revenue Growth",
+    "whatIfBacktest": {
+      "applyToBackend": "Apply config to backend recalc",
+      "calculating": "Calculating...",
+      "catalystLevelLabel": "Catalyst Level",
+      "catalystLevels": {
+        "l1": "L1 Routine News",
+        "l2": "L2 Earnings Inflection",
+        "l3": "L3 Valuation System Shift",
+        "none": "No Catalyst"
+      },
+      "configOverridesDesc": "Modifying these params will trigger a backend toolchain recalculation...",
+      "configOverridesTitle": "Config Parameter Overrides (Scoring/Valuation/Risk)",
+      "consensusScoreLabel": "Consensus Score (Debate Convergence)",
+      "dqiScoreLabel": "DQI Score (Data Quality)",
+      "institutionalTraceLabel": "Institutional Trace",
+      "institutionalTraces": {
+        "building": "Building Position",
+        "escaping": "Capital Flight",
+        "none": "No Anomaly",
+        "suspectedBuilding": "Suspected Building"
+      },
+      "modified": "Modified",
+      "noOriginalDecision": "No original decision data found",
+      "overallRiskLabel": "Overall Risk Level",
+      "riskLevels": {
+        "high": "High",
+        "low": "Low",
+        "medium": "Medium",
+        "veryHigh": "Very High"
+      },
+      "selectEmpty": "Please select a historical analysis record to start What-If backtesting",
+      "selectHint": "Select an analysis record...",
+      "step1": "Step 1: Select Historical Analysis",
+      "step2": "Step 2: Adjust Parameters",
+      "step3": "Step 3: Compare Results",
+      "title": "What-If Parameter Backtest",
+      "totalScoreLabel": "Total Score (Base Scoring)"
     }
   },
   "trade": {
@@ -8481,7 +8778,9 @@
     },
     "replayBadge": {
       "label": "إعادة · {{date}}",
-      "tooltip": "جميع البيانات والمطالبات والأحكام في هذا العرض مرساة في {{date}}. لا تستخدم للتداول المباشر."
+      "tooltip": "جميع البيانات والمطالبات والأحكام في هذا العرض مرساة في {{date}}. لا تستخدم للتداول المباشر.",
+      "replay": "Replay {{date}}",
+      "sweep": "Batch Scan"
     },
     "replayWatermark": {
       "label": "حتى {{date}}"
@@ -8550,5 +8849,97 @@
     "notice": "جميع البيانات والمطالبات والأحكام في هذه الطاولة مرساة في التاريخ المختار. تتطلب العودة إلى الوضع المباشر تأكيداً صريحاً.",
     "exitHint": "لا تزال في وضع الإعادة. أي تحليل جديد يتم بدؤه في مكان آخر سيكون أيضاً مرساة في الإعادة.",
     "exitBtn": "العودة إلى المباشر"
+  },
+  "quant": {
+    "backtest": {
+      "code": "Stock Code",
+      "codePlaceholder": "Enter stock code (e.g., 600519)",
+      "endDate": "End Date",
+      "errorRunning": "Backtest execution error",
+      "initialCash": "Initial Capital",
+      "noResult": "No backtest results",
+      "overfitWarning": "Overfitting Warning",
+      "result": "Backtest Result",
+      "run": "Run Backtest",
+      "running": "Backtesting...",
+      "selectStrategy": "Select Strategy",
+      "stabilityScore": "Stability Score",
+      "startDate": "Start Date",
+      "title": "Strategy Backtest",
+      "walkForward": "Walk-Forward",
+      "walkForwardForceOff": "Disable Walk-Forward",
+      "walkForwardTitle": "Walk-Forward Backtest"
+    },
+    "common": {
+      "empty": "No data"
+    },
+    "compare": {
+      "compare": "Start Compare",
+      "comparing": "Comparing...",
+      "selectRuns": "Select backtest runs",
+      "title": "Strategy Comparison"
+    },
+    "metrics": {
+      "annualizedReturn": "Annualized Return",
+      "bestBy": "Best Parameters",
+      "maxDrawdownPct": "Max Drawdown",
+      "sharpe": "Sharpe Ratio",
+      "totalReturn": "Total Return",
+      "totalTrades": "Total Trades",
+      "winRate": "Win Rate"
+    },
+    "rhai": {
+      "compileError": "Compile Error",
+      "hint": "Write trading strategy logic in Rhai language",
+      "name": "Script Name",
+      "save": "Save",
+      "saved": "Saved",
+      "source": "Source Code",
+      "title": "Rhai Script Editor",
+      "version": "Version"
+    },
+    "strategy": {
+      "builtin": "Built-in Strategy",
+      "description": "Strategy Description",
+      "lastUpdated": "Last Updated",
+      "name": "Strategy Name",
+      "params": "Strategy Parameters",
+      "rhai": "Rhai Script Strategy",
+      "type": "Strategy Type",
+      "version": "Version"
+    },
+    "subtitle": "Strategy Backtest · Parameter Optimization · Signal Evaluation",
+    "tabs": {
+      "backtest": "Backtest",
+      "compare": "Compare",
+      "rhai": "Rhai Script",
+      "strategies": "Strategies"
+    },
+    "title": "Quant Lab",
+    "trades": {
+      "amount": "Amount",
+      "code": "Code",
+      "empty": "No trade records",
+      "fee": "Fee",
+      "filterAll": "All",
+      "flat": "Close",
+      "flatCount": "Closed Trades",
+      "long": "Long",
+      "longCount": "Long Trades",
+      "price": "Price",
+      "quantity": "Qty",
+      "realizedPnl": "Realized P&L",
+      "reason": "Reason",
+      "searchPlaceholder": "Search trade records",
+      "short": "Short",
+      "shortCount": "Short Trades",
+      "side": "Side",
+      "time": "Time",
+      "totalAmount": "Total Amount",
+      "totalCount": "Total Trades",
+      "totalFee": "Total Fee",
+      "totalPnl": "Total P&L",
+      "totalRows": "{{count}} records"
+    }
   }
 }

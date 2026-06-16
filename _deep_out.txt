@@ -1,1 +1,0 @@
-  t-risk                     title=风险评估                  tool=compute_portfolio_risk

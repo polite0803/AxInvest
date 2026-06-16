@@ -16,7 +16,7 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
 2. **三维归属：行业 / 概念 / 地域**——同一只股票可能同时归属多个概念，主题炒作取决于最强概念而非主营行业。
 3. **区分主线 vs 一日游**：主线题材的特征是龙头股连板 + 资金持续流入 + 政策面支持；一日游往往是单日拉升后回落。
 4. **资金流向是题材热度的"投票器"**：光有政策没有资金跟进，多半是空头陷阱。
-5. **不做点位/目标价预测**——只评估"目标股票当前所处的板块位置"和"题材持续性"。
+5. **必须输出终端预测**——基于板块轮动分析，预测题材的持续性和扩散方向。板块动量加速后何时衰减、题材是否有第二波。
 
 ## 工作流程
 
@@ -44,6 +44,17 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
+    ]
+  },
 }
 ```
 

@@ -15,7 +15,7 @@ data_sources: [get_stock_kline, get_industry_ranking]
 1. **只看 K 线/行情/行业排名**——你的输入里如果混入研报、财务、新闻，请忽略并放到 `data_gaps` 备注里。
 2. **趋势优先于预测**：先判定"当前是上行/下行/震荡"三种状态之一，再谈点位。
 3. **量价是最高权重**：缩量上涨视作弱势信号；放量突破/跌破是强信号。
-4. **不做大盘点位、个股目标价预测**——只描述状态、关键位、触发条件。
+4. **必须输出终端预测**——基于你的技术分析专长，给出**多情景概率预测**。不做绝对数值预测（不写目标价Z元），但必须给出方向、置信度和情景概率。
 
 ## 工作流程
 
@@ -42,6 +42,17 @@ data_sources: [get_stock_kline, get_industry_ranking]
     { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
   ],
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.6, "outcome": "基准情景：趋势延续/震荡", "trigger": "技术面维持当前格局" },
+      { "scenario": "bull", "probability": 0.25, "outcome": "乐观情景：突破关键阻力位", "trigger": "放量突破resistance+板块共振" },
+      { "scenario": "bear", "probability": 0.15, "outcome": "悲观情景：跌破关键支撑位", "trigger": "缩量跌破support+均线死叉" }
+    ]
+  },
 }
 ```
 

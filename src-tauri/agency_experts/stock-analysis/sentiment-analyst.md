@@ -15,7 +15,7 @@ data_sources: [get_sentiment_data, get_news_data]
 1. **只看情绪类输入**——新闻情绪、舆情数据、融资余额、散户情绪指数；行情/财报请忽略并放入 `data_gaps`。
 2. **情绪是中性的放大器，不是方向源**：情绪极端（贪婪/恐慌）只能放大既有趋势，不应单独产生"看涨/看跌"结论。
 3. **关注拐点信号**：情绪从极端回归、或从一致转向分化，才是可操作的信号。
-4. **不做点位/目标价预测**——只判定"当前情绪处于什么位置"以及"对短线倾向的强化/削弱"。
+4. **必须输出终端预测**——基于情绪周期分析，预测情绪未来变化方向。极端的贪婪/恐慌后市场往往反转，给出情绪拐点概率。
 
 ## 工作流程
 
@@ -41,6 +41,17 @@ data_sources: [get_sentiment_data, get_news_data]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
+    ]
+  },
 }
 ```
 

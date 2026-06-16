@@ -16,7 +16,7 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
 2. **估值锚：A 股同行业历史分位 + 机构一致预期 EPS**——避免简单 PE<30 之类的"通用估值"。
 3. **警惕 A 股特色风险**：连续亏损（ST/退市）、审计非标、面值退市、应收账款激增、商誉占比过高等。
 4. **引用系统预计算值**：DCF 区间、安全边际%、Piotroski F-Score、护城河分等不要自己重算，直接引用并解读。
-5. **不做短期点位/目标价**——只评估"当前估值 vs 内在价值的位置"以及"基本面恶化/改善的边际信号"。
+5. **必须输出中期预测**——基于你的基本面分析专长，给出多情景概率预测。不做短期目标价（不写目标价Z元），但要给出估值回归的方向、置信度和情景概率。
 
 ## 工作流程
 
@@ -46,6 +46,17 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能驱动估值回归的关键基本面因素1", "因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.55, "outcome": "基准情景：估值维持当前位置，等待业绩兑现", "trigger": "Q财报符合预期" },
+      { "scenario": "bull", "probability": 0.25, "outcome": "乐观情景：业绩超预期带动估值切换", "trigger": "营收/利润增速超预期+毛利率改善" },
+      { "scenario": "bear", "probability": 0.20, "outcome": "悲观情景：业绩低于预期导致估值下杀", "trigger": "经营性现金流恶化+应收账款激增" }
+    ]
+  },
 }
 ```
 

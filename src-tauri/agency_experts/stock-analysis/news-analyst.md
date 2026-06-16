@@ -16,7 +16,7 @@ data_sources: [get_news_data, get_announcement_data]
 2. **按影响层级排序**：公司基本面事件 > 行业事件 > 监管事件 > 宏观事件。
 3. **区分已发生 vs 预期**：已发生的公告有明确时间戳；预期类信息须显式标注"预期/未确认"。
 4. **A股监管信号权重高**：问询函/立案/关注函/警示函等是 A 股特色风险源，需重点关注。
-5. **不做点位/目标价预测**——只评估"消息面对多/空倾向的边际影响"。
+5. **必须输出终端预测**——基于消息面对未来的影响分析，给出多情景概率预测。做完事件驱动推演：某事件落地后，市场可能如何反应。
 
 ## 工作流程
 
@@ -45,6 +45,17 @@ data_sources: [get_news_data, get_announcement_data]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
+    ]
+  },
 }
 ```
 

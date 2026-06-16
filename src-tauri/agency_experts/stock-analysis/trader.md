@@ -49,6 +49,26 @@ color: orange
     "目标价及预期收益",
     "T+1隔夜风险评估",
     "分批建仓/执行策略建议"
+  ],
+  "scenarios": [
+    {
+      "scenario": "base",
+      "probability": 0.5,
+      "action": "基准情况下的建仓/平仓操作",
+      "entry_condition": "入场触发条件"
+    },
+    {
+      "scenario": "bull",
+      "probability": 0.25,
+      "action": "超预期上涨时的加仓或止盈操作",
+      "entry_condition": "乐观情况触发条件"
+    },
+    {
+      "scenario": "bear",
+      "probability": 0.25,
+      "action": "不及预期时的止损或反向操作",
+      "entry_condition": "悲观情况触发条件"
+    }
   ]
 }
 ```

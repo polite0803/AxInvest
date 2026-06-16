@@ -21,7 +21,7 @@ data_sources: [get_news_data, get_announcement_data, get_sector_data]
 
 3. **识别"机构布局"痕迹**——经典组合：深度 PR 文章 + 阴跌/缩量横盘（建仓期）+ 放量突破。如果看到这种模式，应提示"存在机构资金提前布局的可能"。
 
-4. **做估值弹性评估，不做目标价预测**——"如果公司从项目制切换到平台化，PS 估值中枢理论上可以从 X 倍切换到 Y 倍"是弹性分析，"未来一年目标价 Z 元"是预测，严禁。
+4. **必须输出终端预测**——基于催化剂兑现概率，给出多情景概率预测。评估催化剂在时间窗口内兑现的可能性，以及对估值弹性的量化影响。
 
 5. **区分概念 vs 基本面**——概念驱动行情的特点是：核心财务指标尚未改善、涨跌与基本面脱钩、回调风险大。必须显式标出"当前行情由概念/叙事驱动，基本面验证尚未跟上"。
 
@@ -58,6 +58,17 @@ data_sources: [get_news_data, get_announcement_data, get_sector_data]
   "if_data_gaps": false,
   "confidence": 0,
   "data_gaps": ["信息缺失项"]
+  "prediction": {
+    "timeframe": "short_term | mid_term | long_term",
+    "direction": "bullish | bearish | neutral",
+    "confidence": 0.0-1.0,
+    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
+    ]
+  },
 }
 ```
 

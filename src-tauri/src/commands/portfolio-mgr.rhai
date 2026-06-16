@@ -1,8 +1,9 @@
-// portfolio-mgr.rhai — 确定性决策公式（含多时间维度）
+// portfolio-mgr.rhai — 预测集成决策公式
 // Input via input_mapping:
 //   totalScore, dqi_score, overall_risk, catalyst_level,
 //   institutional_trace, consensusScore,
 //   trader_time_horizon, trader_holding_days (optional overrides)
+//   aggregate_direction, aggregate_confidence (aggregate_prediction from debate-convergence)
 // All inputs have safe defaults when missing
 //
 // 时间维度定义（与 Period::default_holding_days 一致）：
@@ -29,6 +30,10 @@ let consensus_score = safe_num(consensusScore, 50.0);
 let trader_time_horizon_raw = safe_str(trader_time_horizon, "");
 let trader_holding_days_raw = safe_num(trader_holding_days, 0.0);
 let has_trader_input = trader_time_horizon_raw != "" && trader_holding_days_raw > 0.0;
+// aggregate_prediction 字段（来自 debate-convergence）
+let aggregate_direction_str = safe_str(aggregate_direction, "");
+let aggregate_confidence_num = safe_num(aggregate_confidence, 0.0);
+let has_aggregate_prediction = aggregate_direction_str != "" && aggregate_confidence_num > 0.0;
 
 // ── 辅助函数 ──
 let consensus_adj = (consensus_score - 50.0) / 100.0 * 10.0;
@@ -164,6 +169,35 @@ let long_action = if long_confidence >= 65.0 { "买入" }
     else if long_confidence >= 45.0 { "持有" }
     else { "观望" };
 
+// ── 预测集成（叠加分析师预测对数值公式的修正） ──
+// 当 aggregate_prediction 高度一致（方向明确且置信度高）时：
+//   整体决策向预测方向倾斜
+// 当 aggregate_prediction 分歧（direction=divided）或低置信度时：
+//   保持公式结果不变
+let prediction_boost = if has_aggregate_prediction && aggregate_direction_str == "bullish" {
+    aggregate_confidence_num * 15.0  // +0~15，强一致看多时提升置信度
+} else if has_aggregate_prediction && aggregate_direction_str == "bearish" {
+    -(aggregate_confidence_num * 20.0)  // -0~20，强一致看空时压低置信度
+} else if has_aggregate_prediction && aggregate_direction_str == "divided" {
+    -5.0  // 分析师分歧 → 降低信心
+} else { 0.0 };
+
+// 应用预测修正到置信度
+let adjusted_confidence = clamp(confidence + prediction_boost, 0.0, 100.0);
+
+// 预测修正后的整体决策
+let overall_action = if adjusted_confidence >= 80.0 && position_pct >= 30.0 { "增持" }
+    else if adjusted_confidence >= 60.0 { "买入" }
+    else if adjusted_confidence >= 40.0 { "持有" }
+    else if adjusted_confidence < 30.0 { "卖出" }
+    else if position_pct < 20.0 { "减持" }
+    else { "持有" };
+
+// 预测集成后的 reasoning
+let pred_note = if has_aggregate_prediction {
+    ` | 预测聚合: ${aggregate_direction_str}(${aggregate_confidence_num}), 修正=${prediction_boost}`
+} else { "" };
+
 // ── 按时间维度差异化止损/止盈/仓位系数 ──
 let stop_loss_pct = switch time_horizon {
     "ultra_short" => 3.0,
@@ -185,11 +219,11 @@ let take_profit_pct = switch time_horizon {
     // 整体决策（向下兼容）
     "action": overall_action,
     "positionPct": position_pct,
-    "confidence": confidence,
+    "confidence": adjusted_confidence,
     "riskLevel": overall_risk_str,
     "stopLossPct": if position_pct > 0.0 { stop_loss_pct } else { 0.0 },
     "takeProfitPct": if position_pct > 0.0 { take_profit_pct } else { 0.0 },
-    "reasoning": `确定性决策：总分=${total_score}, 决策=${overall_action}, 置信度=${confidence}, 仓位=${position_pct}%, 风险=${overall_risk_str}, 共识=${consensus_score}`,
+    "reasoning": `确定性决策：总分=${total_score}, 决策=${overall_action}, 置信度=${adjusted_confidence}, 仓位=${position_pct}%, 风险=${overall_risk_str}, 共识=${consensus_score}${pred_note}`,
     "key_conditions_to_track": [],
     "decisive_bull_acks": [],
     "decisive_bear_acks": [],
@@ -233,5 +267,5 @@ let take_profit_pct = switch time_horizon {
         "reasoning": `长线：数据质量=${dqi_score_num}, 风险=${overall_risk_str}, 置信度=${long_confidence}`
     },
 
-    "computation_logs": `整体: conf=${total_score}+(con=${consensus_score} dqi=${dqi_adj} risk=${risk_adj} cat=${cat_bonus} inst=${inst_bonus})=${confidence} | 时间=${time_horizon}, 持有=${expected_holding_days}天 | 超短=${ultra_short_confidence} 短=${short_confidence} 中=${mid_confidence} 长=${long_confidence}`
+    "computation_logs": `整体: conf=${total_score}+(con=${consensus_score} dqi=${dqi_adj} risk=${risk_adj} cat=${cat_bonus} inst=${inst_bonus})=${confidence} pred_boost=${prediction_boost}=${adjusted_confidence} | 时间=${time_horizon}, 持有=${expected_holding_days}天 | 超短=${ultra_short_confidence} 短=${short_confidence} 中=${mid_confidence} 长=${long_confidence}`
 }

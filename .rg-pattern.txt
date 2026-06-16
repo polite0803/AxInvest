@@ -1,1 +1,0 @@
-launch_analysis_worker|run_scheduled_analysis

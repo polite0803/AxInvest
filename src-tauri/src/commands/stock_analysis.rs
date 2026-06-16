@@ -2929,17 +2929,12 @@ pub async fn apply_param_suggestions(
     tracing::info!("[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板", updates.len());
 
     // 4. 同时触发策略权重重新计算，使 params_suggestion 间接影响荐股权重
-    let _ = axagent_stock_analysis::evolution_drift::recalc_and_persist(
-        db,
-        "manual",
-        None,
-        None,
-    )
-    .await
-    .map(|(written, _)| {
-        tracing::info!("[param_suggestions] 参数调整触发策略权重重算，{written} 项更新");
-    })
-    .map_err(|e| tracing::warn!("[param_suggestions] 策略权重重算失败: {e}"));
+    let _ = axagent_stock_analysis::evolution_drift::recalc_and_persist(db, "manual", None, None)
+        .await
+        .map(|(written, _)| {
+            tracing::info!("[param_suggestions] 参数调整触发策略权重重算，{written} 项更新");
+        })
+        .map_err(|e| tracing::warn!("[param_suggestions] 策略权重重算失败: {e}"));
 
     Ok(())
 }

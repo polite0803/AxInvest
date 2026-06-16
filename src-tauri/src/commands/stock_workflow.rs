@@ -1296,23 +1296,24 @@ pub async fn run_reflection_workflow(
                 .get("reflection")
                 .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok());
 
-            let (what_went_wrong, missed_signals, fix_for_future, params_suggestion_json) = reflection_json
-                .as_ref()
-                .and_then(|v| v.get("reflection"))
-                .map(|r| {
-                    let w = r
-                        .get("what_went_wrong")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let m = r.get("missed_signals").map(|v| v.to_string());
-                    let f = r
-                        .get("fix_for_future")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let p = r.get("params_suggestion").map(|v| v.to_string());
-                    (w, m, f, p)
-                })
-                .unwrap_or((None, None, None, None));
+            let (what_went_wrong, missed_signals, fix_for_future, params_suggestion_json) =
+                reflection_json
+                    .as_ref()
+                    .and_then(|v| v.get("reflection"))
+                    .map(|r| {
+                        let w = r
+                            .get("what_went_wrong")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let m = r.get("missed_signals").map(|v| v.to_string());
+                        let f = r
+                            .get("fix_for_future")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        let p = r.get("params_suggestion").map(|v| v.to_string());
+                        (w, m, f, p)
+                    })
+                    .unwrap_or((None, None, None, None));
 
             let bb_text = serde_json::to_string(&wf.results).unwrap_or_default();
             let dj_text = reflection_json.as_ref().map(|v| v.to_string());

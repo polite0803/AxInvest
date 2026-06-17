@@ -47,7 +47,7 @@ describe(".github/workflows/pr-ci.yml — Playwright 安装步骤", () => {
     expect(jobIdx).toBeGreaterThan(0);
     // job 块:从 jobIdx 到下一个 "^  [a-zA-Z][a-zA-Z0-9_-]*:" 之前
     const after = yml.slice(jobIdx);
-    const nextJobMatch = after.slice(1).search(/\n  [a-zA-Z][a-zA-Z0-9_-]*:/);
+    const nextJobMatch = after.slice(1).search(/\n {2}[a-zA-Z][a-zA-Z0-9_-]*:/);
     const end = nextJobMatch > 0 ? jobIdx + 1 + nextJobMatch : yml.length;
     const jobBlock = yml.slice(jobIdx, end);
     expect(jobBlock).toMatch(/timeout-minutes:\s*\d+/);

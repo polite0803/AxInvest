@@ -9,7 +9,8 @@ interface AgentResult {
   tool_calls_made?: unknown[];
 }
 
-import { parseAction, parseRiskLevel, type StockDecision } from "@/types/stock-analysis";
+import { parseAction, parseRiskLevel } from "@/lib/stock-analysis-utils";
+import type { StockDecision } from "@/types/stock-analysis";
 
 /** 清理 LLM 原始输出中的工具调用标签、think 标签和乱码 */
 export function cleanToolCallTags(text: string): string {
@@ -28,6 +29,10 @@ export function cleanToolCallTags(text: string): string {
   cleaned = cleaned.replace(/<\/function>/gi, "");
   cleaned = cleaned.replace(/<parameter[=\s][^>]*>[\s\S]*?<\/parameter>/gi, "");
   cleaned = cleaned.replace(/<parameter[=\s][^>]*\/?>/gi, "");
+  // Anthropic/Claude 风格 tool_calls（复数+下划线，invoke 子标签）
+  cleaned = cleaned.replace(/<tool_calls>[\s\S]*?<\/tool_calls>/gi, "");
+  cleaned = cleaned.replace(/<invoke[^>]*>[\s\S]*?<\/invoke>/gi, "");
+  cleaned = cleaned.replace(/<invoke[^>]*\/>/gi, "");
   cleaned = cleaned.replace(/<\/parameter>/gi, "");
   // [PROVIDER|tool_calls]...[PROVIDER|/tool_calls] 格式（如 CHAT2API）
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");

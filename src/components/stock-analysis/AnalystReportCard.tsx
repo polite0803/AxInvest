@@ -1,5 +1,5 @@
 import { useSettingsStore } from "@/stores";
-import { getSignalColor } from "@/types/stock-analysis";
+import { getSignalColor } from "@/lib/stock-analysis-utils";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
@@ -221,7 +221,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
     const riskFlags = extractRiskFlags(parsed);
     const empty = isEmptyAnalysis(parsed);
     const confidence = typeof parsed.confidence === "number"
-      ? parsed.confidence
+      ? (parsed.confidence > 1 ? parsed.confidence : parsed.confidence * 100)
       : (typeof parsed.positionPct === "number" ? parsed.positionPct : null);
 
     return (
@@ -265,7 +265,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
           )}
           {confidence != null && (
             <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.confidence")}: {(confidence * 100).toFixed(0)}%
+              {t("stockAnalysis.confidence")}: {confidence.toFixed(0)}%
             </div>
           )}
           {!summary && points.length === 0 && tags.length === 0 && (

@@ -836,7 +836,14 @@ impl AStockClient {
                     Ok(result) if !result.is_empty() => {
                         let result = Self::truncate_klines_by_asof(result);
                         if result.is_empty() {
-                            tracing::warn!("[asof] {} K线全部晚于截止日，尝试下一源", name);
+                            tracing::warn!(
+                                "{}",
+                                if crate::as_of::is_asof_active() {
+                                    format!("[asof] {} K线全部晚于截止日，尝试下一源", name)
+                                } else {
+                                    format!("[vendor] {} K线返回空，尝试下一源", name)
+                                }
+                            );
                             continue;
                         }
                         let json = serde_json::to_string(&result).unwrap_or_default();
@@ -894,7 +901,14 @@ impl AStockClient {
                     Ok(result) if !result.is_empty() => {
                         let result = Self::truncate_financials_by_asof(result);
                         if result.is_empty() {
-                            tracing::warn!("[asof] {} 财报全部晚于截止日，尝试下一源", name);
+                            tracing::warn!(
+                                "{}",
+                                if crate::as_of::is_asof_active() {
+                                    format!("[asof] {} 财报全部晚于截止日，尝试下一源", name)
+                                } else {
+                                    format!("[vendor] {} 财报返回空，尝试下一源", name)
+                                }
+                            );
                             continue;
                         }
                         let cache_key = Self::cache_key_for("financials", stock_code);
@@ -936,7 +950,14 @@ impl AStockClient {
                     Ok(result) if !result.is_empty() => {
                         let result = Self::truncate_news_by_asof(result);
                         if result.is_empty() {
-                            tracing::warn!("[asof] {} 新闻全部晚于截止日，尝试下一源", name);
+                            tracing::warn!(
+                                "{}",
+                                if crate::as_of::is_asof_active() {
+                                    format!("[asof] {} 新闻全部晚于截止日，尝试下一源", name)
+                                } else {
+                                    format!("[vendor] {} 新闻返回空，尝试下一源", name)
+                                }
+                            );
                             continue;
                         }
                         let cache_key =
@@ -1045,7 +1066,14 @@ impl AStockClient {
                 if let Ok(result) = vendor.get_dragon_tiger(stock_code).await {
                     let result = Self::truncate_dragon_tiger_by_asof(result);
                     if result.is_empty() {
-                        tracing::warn!("[asof] {} 龙虎榜全部晚于截止日，尝试下一源", name);
+                        tracing::warn!(
+                            "{}",
+                            if crate::as_of::is_asof_active() {
+                                format!("[asof] {} 龙虎榜全部晚于截止日，尝试下一源", name)
+                            } else {
+                                format!("[vendor] {} 龙虎榜返回空，尝试下一源", name)
+                            }
+                        );
                         continue;
                     }
                     let cache_key = Self::cache_key_for("dragon_tiger", stock_code);

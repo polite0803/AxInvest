@@ -178,7 +178,7 @@ export function BacktestTab() {
         </Form>
       </Card>
 
-      {error && <Alert type="error" showIcon message={t("quant.backtest.errorRunning")} description={error} closable />}
+      {error && <Alert type="error" showIcon title={t("quant.backtest.errorRunning")} description={error} closable />}
 
       {currentRun && currentResult && (
         <Card title={t("quant.backtest.result")} size="small">
@@ -232,7 +232,7 @@ export function BacktestTab() {
               style={{ marginTop: 16 }}
               type={overfitCount > 0 ? "warning" : "info"}
               showIcon
-              message={t("quant.backtest.walkForwardTitle")}
+              title={t("quant.backtest.walkForwardTitle")}
               description={
                 <Space direction="vertical" size={4}>
                   <Text>

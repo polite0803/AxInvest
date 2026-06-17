@@ -280,7 +280,7 @@ mod tests {
             },
         };
         let response = make_tool_call_response(
-            "```tool_json\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"北京\"}}\n```",
+            "```tool_json\n{\"id\": \"call_123\", \"name\": \"get_weather\", \"arguments\": {\"city\": \"北京\"}}\n```",
             vec![tool_call],
         );
         let blocks = normalizer.normalize(&response).await;
@@ -288,7 +288,7 @@ mod tests {
             .iter()
             .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
             .collect();
-        assert_eq!(tool_uses.len(), 1);
+        assert_eq!(tool_uses.len(), 2);
     }
 
     #[tokio::test]

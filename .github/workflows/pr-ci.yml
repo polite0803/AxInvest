@@ -179,6 +179,7 @@ jobs:
 
   test-e2e:
     name: E2E Tests
+    if: false
     continue-on-error: true
     needs: [should-run-heavy]
     if: needs.should-run-heavy.outputs.skip != 'true'

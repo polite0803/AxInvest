@@ -508,11 +508,8 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // stock-analysis 模板版本管理从 v1 开始。
-    // 升级时递增 version、写历史快照到 workflow_template_versions 表、
-    // 保留用户自定义变量值（不覆盖已修改的参数）。
-    // 版本号注释应写明每次变更的实质内容，便于追溯。
-    const TEMPLATE_VERSION: i32 = 1;
+    // stock-analysis 模板版本管理从 v1 开始。v4: 重新种子化以应用 Rhai default→dflt 修复
+    const TEMPLATE_VERSION: i32 = 4;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -4570,7 +4567,8 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         },
     ];
 
-    const REFLECTION_TEMPLATE_VERSION: i32 = 1;
+    // serenity-reflection 模板版本。v2: 重新种子化
+    const REFLECTION_TEMPLATE_VERSION: i32 = 2;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =
@@ -4716,7 +4714,7 @@ async fn seed_serenity_screening_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 1;
+    const TEMPLATE_VERSION: i32 = 2;
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)

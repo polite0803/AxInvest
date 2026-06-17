@@ -346,7 +346,7 @@ export function SessionSearchPanel({
             </div>
           )}
 
-          {error && <Alert type="error" title={error} style={{ marginTop: 8 }} />}
+          {error && <Alert type="error" message={error} style={{ marginTop: 8 }} />}
 
           {results.length > 0
             ? (

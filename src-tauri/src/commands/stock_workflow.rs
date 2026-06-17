@@ -1458,11 +1458,7 @@ pub async fn run_serenity_screening(
 
     let exec = async { engine.run_workflow(&wf_id, opts).await };
 
-    let result = if let Some(ctx) = as_of_ctx {
-        as_of::AS_OF.scope(Some(ctx), exec).await
-    } else {
-        exec.await
-    };
+    let result = as_of::AS_OF.scope(as_of_ctx, exec).await;
 
     match result {
         Ok(wf_result) => {

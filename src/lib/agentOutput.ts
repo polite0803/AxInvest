@@ -22,8 +22,8 @@ export function cleanToolCallTags(text: string): string {
   // 通用 Hermes/Qwen 风格工具调用：<tool_call>...<function=name>...<parameter=name>val</parameter>...</function>...</tool_call>
   // 注意：<function=name> 与 <parameter=name> 使用 "=" 分隔名称（无空格），需与 HTML 标签区分
   cleaned = cleaned.replace(/<tool_call[^>]*>[\s\S]*?<\/tool_call>/gi, "");
-  cleaned = cleaned.replace(/<tool_call[^>]*\/?>/gi, "");
-  cleaned = cleaned.replace(/<\/tool_call>/gi, "");
+  cleaned = cleaned.replace(/<tool_calls?[^>]*\/?>/gi, "");
+  cleaned = cleaned.replace(/<\/tool_calls?>/gi, "");
   cleaned = cleaned.replace(/<function[=\s][^>]*>[\s\S]*?<\/function>/gi, "");
   cleaned = cleaned.replace(/<function[=\s][^>]*\/?>/gi, "");
   cleaned = cleaned.replace(/<\/function>/gi, "");

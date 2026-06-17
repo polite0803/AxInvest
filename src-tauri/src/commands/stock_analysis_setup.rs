@@ -5106,32 +5106,7 @@ async fn seed_serenity_screening_workflow_template(
     }
 
     // ── Phase 2: 候选公司映射 ──
-    // 先集合所有 chokepoint 输出的候选股票，拉取财务数据验证
-    nodes.push(tool_node(
-        "t-candidates-finance",
-        "候选公司财务验证",
-        "get_stock_financials",
-        "t-candidates-finance",
-        340.0,
-        540.0,
-    ));
-    edges.push(edge(
-        "e-a-chokepoint-trend1-t-candidates",
-        "a-chokepoint-trend1",
-        "t-candidates-finance",
-    ));
-    edges.push(edge(
-        "e-a-chokepoint-trend2-t-candidates",
-        "a-chokepoint-trend2",
-        "t-candidates-finance",
-    ));
-    edges.push(edge(
-        "e-a-chokepoint-trend3-t-candidates",
-        "a-chokepoint-trend3",
-        "t-candidates-finance",
-    ));
-
-    // a-candidate-mapper: 综合所有瓶颈鉴定结果，输出最终候选股清单
+    // a-candidate-mapper: Agent 直接调用工具筛选，无需前置 ToolNode 综合所有瓶颈鉴定结果，输出最终候选股清单
     let mapper_prompt = "你的任务：综合所有瓶颈鉴定结果，对候选公司进行二次筛选和打分。\
          \n\n\
          核心原则：\n\

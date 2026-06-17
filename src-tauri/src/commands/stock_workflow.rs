@@ -1401,8 +1401,12 @@ pub async fn run_reflection_workflow(
 pub async fn run_serenity_screening(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
+    as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let engine = Arc::clone(&state.work_engine);
+
+    // 解析 as_of_date（支持回放模式）
+    let as_of_ctx = parse_asof_param(as_of_date.clone())?;
 
     // 1. 加载 serenity-screening 模板
     let loaded = load_and_inject_template(state.harness.db(), "", "", "serenity-screening").await?;
@@ -1440,7 +1444,7 @@ pub async fn run_serenity_screening(
         })
     });
 
-    // 4. 运行
+    // 4. 运行（支持 as-of 时间截断）
     let opts = RunOptions {
         max_concurrent,
         step_timeout,
@@ -1452,9 +1456,17 @@ pub async fn run_serenity_screening(
         ..Default::default()
     };
 
-    match engine.run_workflow(&wf_id, opts).await {
-        Ok(result) => {
-            let candidates_raw = result
+    let exec = async { engine.run_workflow(&wf_id, opts).await };
+
+    let result = if let Some(ctx) = as_of_ctx {
+        as_of::AS_OF.scope(Some(ctx), exec).await
+    } else {
+        exec.await
+    };
+
+    match result {
+        Ok(wf_result) => {
+            let candidates_raw = wf_result
                 .results
                 .get("a-candidate-mapper")
                 .cloned()

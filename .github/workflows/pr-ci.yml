@@ -203,7 +203,13 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        run: npx --yes playwright install chromium --with-deps
+        # 注意:不使用 --with-deps。
+        # 在 macOS 上 --with-deps 会调用 brew install,在 cache miss 时
+        # 会触发 brew auto-update → 永不退出 → job 卡死。
+        # GitHub macos-latest 镜像已预装 Playwright Chromium 所需系统库。
+        # cache hit 时不需要 install,cache miss 时才下载 165MB,
+        # 没有 brew 调用就不会卡死。
+        run: npx --yes playwright install chromium
 
       - name: Run E2E tests
         run: npm run test:e2e

@@ -8769,7 +8769,7 @@
     "stage_saving": "ステージ 4/4: 結果の保存",
     "stage_done": "スクリーニング完了",
     "stage_error": "スクリーニング失敗",
-    "analyizing": "産業チェーンデータを分析中、LLM 推論には 1-3 分鐘かかります...",
+    "analyzing": "産業チェーンデータを分析中、LLM 推論には 1-3 分かかります...",
     "trendTitle": "発見された産業トレンド",
     "bottleneckLink": "ボトルネック: ",
     "candidateTitle": "候補銘柄",

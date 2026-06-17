@@ -55,16 +55,17 @@ describe("ScreenerPage", () => {
     // Only count the page-level Tabs header (not the nested period Tabs
     // inside RecommendationPanel, which has 3 short/mid/long entries).
     const navHeaders = tabs?.querySelectorAll(":scope > .ant-tabs-nav .ant-tabs-tab");
-    expect(navHeaders?.length).toBe(2);
+    expect(navHeaders?.length).toBe(3);
     // Default active tab should be the smart-reco tab.
     const activeHeader = tabs?.querySelector(".ant-tabs-nav .ant-tabs-tab-active");
     expect(activeHeader?.textContent).toContain("screener.tab.smartReco");
   });
 
-  it("renders both tab labels via i18n", () => {
+  it("renders all three tab labels via i18n", () => {
     const { container } = renderWithRouter();
     expect(container.textContent).toContain("screener.tab.smartReco");
     expect(container.textContent).toContain("screener.tab.myFilter");
+    expect(container.textContent).toContain("screener.tab.serenity");
   });
 
   it("renders 3 accordion items for HotStocks / LimitUp / DragonTiger", () => {

@@ -8564,7 +8564,7 @@
     "stage_saving": "단계 4/4: 결과 저장",
     "stage_done": "스크리닝 완료",
     "stage_error": "스크리닝 실패",
-    "analyizing": "산업 체인 데이터 분석 중, LLM 추론에 1-3 분 소요...",
+    "analyzing": "산업 체인 데이터 분석 중, LLM 추론에 1-3 분 소요...",
     "trendTitle": "발견된 산업 트렌드",
     "bottleneckLink": "병목: ",
     "candidateTitle": "후보 대상",

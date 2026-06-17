@@ -115,7 +115,7 @@ pub async fn liquidity_filter_and_truncate(
     use futures::stream::{FuturesUnordered, StreamExt};
     use tokio::sync::Semaphore;
 
-    let sem = Arc::new(Semaphore::new(8));
+    let sem = Arc::new(Semaphore::new(3));
     let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
 
     for item in seed {
@@ -145,13 +145,20 @@ async fn filter_one(client: &AStockClient, item: SeedItem) -> Option<SeedItem> {
     if quote.is_st {
         return None;
     }
-    let klines = client.get_klines(&code, "daily", 60).await.ok()?;
-    if klines.len() < 55 {
-        return None;
-    }
-    let avg: f64 = klines.iter().map(|k| k.amount).sum::<f64>() / klines.len() as f64;
-    if avg < 100_000_000.0 {
-        return None;
+    // K 线数据不可用时（vendor 限流/超时），降级：不过流动性检查，保留该股票
+    // 主策略（trend/value/capital）在 scan_one 中会自行判空后返回 None，
+    // Watchlist 策略仅依赖 quote 即可工作。
+    let klines = client.get_klines(&code, "daily", 60).await;
+    match klines {
+        Ok(ref k) if k.len() >= 55 => {
+            let avg: f64 = k.iter().map(|k| k.amount).sum::<f64>() / k.len() as f64;
+            if avg < 100_000_000.0 {
+                return None;
+            }
+        },
+        _ => {
+            // K 线不可用，跳过流动性检查，保留股票供其他策略使用
+        },
     }
     Some((code, name, sector))
 }

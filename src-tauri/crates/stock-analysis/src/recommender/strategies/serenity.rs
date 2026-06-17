@@ -84,10 +84,10 @@ impl SerenityStrategy {
         let conf_growth = (rev_growth / 50.0).min(1.0); // 增速越高，但上限 50%
         let conf = calc_confidence(
             conf_quality * 0.6 + conf_growth * 0.4, // consistency
-            conf_quality,                            // signal_strength
-            0.8,   // liquidity（Serenity 标的通常流动性尚可）
-            0.3,   // price_momentum（保守，不追涨）
-            1.0,   // turnover_anomaly（正常）
+            conf_quality,                           // signal_strength
+            0.8,                                    // liquidity（Serenity 标的通常流动性尚可）
+            0.3,                                    // price_momentum（保守，不追涨）
+            1.0,                                    // turnover_anomaly（正常）
         );
         let position = calc_position(base_position, conf, self.period);
 

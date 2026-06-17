@@ -18,6 +18,17 @@ export function cleanToolCallTags(text: string): string {
   // XML 格式：<provider:tool_call>...</provider:tool_call>
   cleaned = cleaned.replace(/<[a-z][\w-]*:tool_call[^>]*>[\s\S]*?<\/[a-z][\w-]*:tool_call>/gi, "");
   cleaned = cleaned.replace(/<[a-z][\w-]*:tool_call[^>]*\/?>/gi, "");
+  // 通用 Hermes/Qwen 风格工具调用：<tool_call>...<function=name>...<parameter=name>val</parameter>...</function>...</tool_call>
+  // 注意：<function=name> 与 <parameter=name> 使用 "=" 分隔名称（无空格），需与 HTML 标签区分
+  cleaned = cleaned.replace(/<tool_call[^>]*>[\s\S]*?<\/tool_call>/gi, "");
+  cleaned = cleaned.replace(/<tool_call[^>]*\/?>/gi, "");
+  cleaned = cleaned.replace(/<\/tool_call>/gi, "");
+  cleaned = cleaned.replace(/<function[=\s][^>]*>[\s\S]*?<\/function>/gi, "");
+  cleaned = cleaned.replace(/<function[=\s][^>]*\/?>/gi, "");
+  cleaned = cleaned.replace(/<\/function>/gi, "");
+  cleaned = cleaned.replace(/<parameter[=\s][^>]*>[\s\S]*?<\/parameter>/gi, "");
+  cleaned = cleaned.replace(/<parameter[=\s][^>]*\/?>/gi, "");
+  cleaned = cleaned.replace(/<\/parameter>/gi, "");
   // [PROVIDER|tool_calls]...[PROVIDER|/tool_calls] 格式（如 CHAT2API）
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|invoke[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/invoke\]/gi, "");

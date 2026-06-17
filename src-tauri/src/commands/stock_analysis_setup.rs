@@ -4729,10 +4729,10 @@ async fn seed_serenity_screening_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_harness::workflow_types::{
-        AgentNode, AgentNodeConfig, EdgeType, JsonSchema,
-        JsonSchemaProperty, OutputMode, Position, RetryConfig, StorageNode, StorageNodeConfig,
-        ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, Variable,
-        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, EdgeType, JsonSchema, JsonSchemaProperty, OutputMode, Position,
+        RetryConfig, StorageNode, StorageNodeConfig, ToolDef, ToolNode, ToolNodeConfig,
+        TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 

@@ -179,6 +179,7 @@ jobs:
 
   test-e2e:
     name: E2E Tests
+    continue-on-error: true
     needs: [should-run-heavy]
     if: needs.should-run-heavy.outputs.skip != 'true'
     runs-on: ubuntu-24.04

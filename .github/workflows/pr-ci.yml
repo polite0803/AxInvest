@@ -216,7 +216,10 @@ jobs:
             echo "Playwright Chromium 已缓存，跳过安装"
           else
             echo "下载 Playwright Chromium..."
-            npx playwright install chromium
+            # 直接调用本地 binary 而非 npx（npx 在 macOS 上可能触发意外网络请求挂死）
+            node_modules/.bin/playwright install chromium
+            # 清除 macOS gatekeeper quarantine，防止 .app 签名校验在 headless 环境挂死
+            xattr -cr ~/Library/Caches/ms-playwright 2>/dev/null || true
           fi
 
       - name: Run E2E tests

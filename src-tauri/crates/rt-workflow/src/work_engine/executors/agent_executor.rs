@@ -491,8 +491,7 @@ impl NodeExecutorTrait for AgentExecutor {
              直接输出分析结论 JSON，禁止以任何推理过程开头。\n\
              输出的第一个字符必须是 `{{` 或分析 JSON 文本。\n\
              禁止使用 <think> 标签、禁止推理、禁止工作计划。\n\
-             如果数据为空，输出 {{\"data_source_status\": \"empty\"}}，不要解释。"
-        );
+                     );
         tracing::info!(
             "[DIAG] agent={} system_prompt_tail={:?}",
             an.base.id,

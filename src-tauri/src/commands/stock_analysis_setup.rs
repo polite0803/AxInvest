@@ -2271,6 +2271,10 @@ async fn seed_stock_analysis_workflow_template(
                     "aggregate_confidence",
                     "debate-convergence.params.aggregate_prediction.confidence",
                 ),
+                // 可选 Bayesian/回测变量：无对应上游节点，resolve 返回 None → safe_num() 走默认值
+                ("market_regime", ""),
+                ("signal_quality_win_rate", ""),
+                ("signal_quality_sample_count", ""),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))

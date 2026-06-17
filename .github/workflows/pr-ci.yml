@@ -182,11 +182,6 @@ jobs:
     needs: [should-run-heavy]
     if: needs.should-run-heavy.outputs.skip != 'true'
     runs-on: macos-latest
-    # E2E 在历史上经常因为 brew install 卡死超过 60 分钟。
-    # 设 60 分钟硬上限;30 分钟不够 165MB Chromium 下载+cache miss。
-    timeout-minutes: 60
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -208,7 +203,7 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        run: npx --yes playwright install chromium
+        run: npx --yes playwright install chromium --with-deps
 
       - name: Run E2E tests
         run: npm run test:e2e

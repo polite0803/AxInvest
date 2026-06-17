@@ -63,10 +63,12 @@ data_sources: [get_lockup_data, get_shareholder_data]
   "shareholder_behavior": "质押增加",
   "pledge_risk": "高",
   "concentration_trend": "分散",
-  "bull_score": 2,
-  "bear_score": 7,
+  "bull_score": 20,
+  "bear_score": 70,
   "trigger_bull": "大股东在解禁前发布增持公告且质押率降至 30% 以下",
   "trigger_bear": "解禁后 30 日内大宗交易折价 > 8% 且股东人数单季 +15%",
+  "confidence": 75,
+  "if_data_gaps": true,
   "evidence": [
     {
       "point": "未来 60 日解禁占总股本 12% 解禁股东为原始 PE 机构",

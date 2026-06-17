@@ -90,35 +90,47 @@ export function StockAnalysisPage() {
   }, []);
 
   useEffect(() => {
-    invoke<{ status: string }>("get_market_status").then((r) => setMarketStatus(r.status)).catch(() => {});
+    let cancelled = false;
+    invoke<{ status: string }>("get_market_status").then((r) => {
+      if (!cancelled) { setMarketStatus(r.status); }
+    }).catch((e) => {
+      if (!cancelled) { console.warn("[StockAnalysis] get_market_status failed:", e); }
+    });
+    return () => { cancelled = true; };
   }, []);
 
-  // 注意：setupEventListener 改为仅在 startAnalysis 内调�? ?
-  // 之前 L76-78 在页面挂载时也调用， ? startAnalysis  ? await setupEventListener
-  // 存在竞态——两 ? listen 会同时进行，后一 ? set({_unlisten}) 覆盖前一次，
-  // 前一次的 3 个监听句柄变成孤儿（永远不会 ? unlisten�? ?
-  // 现在挂载时不再注册，只在用户点击"开始分 ?"时由 startAnalysis 负责注册 ?
+  // 注意：setupEventListener 改为仅在 startAnalysis 内调用。
+  // 之前 L76-78 在页面挂载时也调用，startAnalysis 已 await setupEventListener，
+  // 存在竞态——两个 listen 会同时进行，后一个 set({_unlisten}) 覆盖前一次，
+  // 前一次的 3 个监听句柄变成孤儿（永远不会 unlisten）。
+  // 现在挂载时不再注册，只在用户点击"开始分析"时由 startAnalysis 负责注册。
 
   useEffect(() => {
+    let cancelled = false;
     const code = searchParams.get("code");
     if (code) {
       getStockQuote(code);
       const kp = PERIOD_MAP[klinePeriod] ?? PERIOD_MAP["6m"];
-      getStockKline(code, kp.period, kp.limit);
+      getStockKline(code, kp.period, kp.limit).then(() => {
+        if (cancelled) { return; }
+      });
     }
+    return () => { cancelled = true; };
   }, [searchParams, getStockQuote, getStockKline, klinePeriod]);
 
   useEffect(() => {
-    if (id) {
-      loadAnalysis(id).then(() => {
-        const code = useStockAnalysisStore.getState().stockCode;
-        if (code) {
-          getStockQuote(code);
-          const kp = PERIOD_MAP[useStockAnalysisStore.getState().klinePeriod] ?? PERIOD_MAP["6m"];
-          getStockKline(code, kp.period, kp.limit);
-        }
-      });
-    }
+    if (!id) { return; }
+    let cancelled = false;
+    loadAnalysis(id).then(() => {
+      if (cancelled) { return; }
+      const code = useStockAnalysisStore.getState().stockCode;
+      if (code) {
+        getStockQuote(code);
+        const kp = PERIOD_MAP[useStockAnalysisStore.getState().klinePeriod] ?? PERIOD_MAP["6m"];
+        getStockKline(code, kp.period, kp.limit);
+      }
+    });
+    return () => { cancelled = true; };
   }, [id, loadAnalysis, getStockQuote, getStockKline]);
 
   // Decision Timeline 证据芯片 → 切换主 tab（useRightPanel 派发的 timeline-jump 事件）

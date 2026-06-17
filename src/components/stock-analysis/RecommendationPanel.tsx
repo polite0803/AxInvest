@@ -12,7 +12,7 @@ import type {
   StockConsensus,
   StyleKey,
 } from "@/types/stock-analysis";
-import { parseAction } from "@/types/stock-analysis";
+import { parseAction } from "@/lib/stock-analysis-utils";
 import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

@@ -1,5 +1,5 @@
 import { useStockAnalysisStore } from "@/stores";
-import { getActionColor } from "@/types/stock-analysis";
+import { getActionColor } from "@/lib/stock-analysis-utils";
 import { Button, Progress, Tag, theme } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";

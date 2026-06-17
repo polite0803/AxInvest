@@ -94,10 +94,12 @@ data_sources: [get_news_data, get_announcement_data]
     }
   ],
   "regulatory_risk": "中",
-  "bull_score": 6,
-  "bear_score": 4,
+  "bull_score": 60,
+  "bear_score": 40,
   "trigger_bull": "问询函在 5 个交易日内完成回复且会计师出具无保留意见",
   "trigger_bear": "问询函延期回复或被立案调查",
+  "confidence": 68,
+  "if_data_gaps": true,
   "evidence": [
     {
       "point": "Q3 业绩超预期但应收账款增速 95% > 营收增速 58%",
@@ -105,7 +107,18 @@ data_sources: [get_news_data, get_announcement_data]
       "weight": 7
     }
   ],
-  "data_gaps": ["问询函具体问询条目未提供"]
+  "data_gaps": ["问询函具体问询条目未提供"],
+  "prediction": {
+    "timeframe": "short_term",
+    "direction": "bearish",
+    "confidence": 0.7,
+    "key_drivers": ["问询函回复进度", "应收账款质量"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 

@@ -22,10 +22,12 @@ pub use confidence::{ConfidenceAction, ConfidenceConfig, ConfidenceOutput};
 pub mod constants;
 pub mod core_error;
 pub mod error_codes;
+pub mod ir_renderer;
 mod persistence_mod;
 pub mod plan_types;
 pub mod platform_config;
 pub mod rag_config;
+pub mod response_normalizer;
 pub mod types;
 pub mod url_utils;
 pub mod util_fns;
@@ -112,6 +114,10 @@ pub mod trajectory_types;
 pub use context_builder::build_provider_request_context;
 pub use has_provider_registry::HasProviderRegistry;
 pub use provider::{ProviderAdapter, ProviderProxyConfig, ProviderRequestContext};
+
+// ── ResponseNormalizer / IrRenderer 契约重导出 ──
+pub use ir_renderer::IrRenderer;
+pub use response_normalizer::ResponseNormalizer;
 pub use url_utils::{
     default_version_for_type, resolve_base_url, resolve_base_url_for_type, resolve_chat_url,
 };

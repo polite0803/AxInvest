@@ -3,7 +3,7 @@
  * 输入:分析师报告 { expertId: report }
  * 输出:共识标签 + 多空条 + Top 3 报告摘要
  */
-import { classifySentiment } from "@/types/stock-analysis";
+import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { Tooltip } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";

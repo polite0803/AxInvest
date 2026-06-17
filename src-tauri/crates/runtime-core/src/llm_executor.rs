@@ -12,7 +12,8 @@
 use axagent_harness::audit_trail::{AuditEntry, AuditRecorder};
 use axagent_harness::prompt_guard::PromptGuard;
 use axagent_harness::provider::{ProviderAdapter, ProviderRequestContext};
-use axagent_harness::types::{ChatContent, ChatRequest, ChatResponse};
+use axagent_harness::response_normalizer::ResponseNormalizer;
+use axagent_harness::types::{ChatContent, ChatRequest, ChatResponse, ContentBlock};
 use std::sync::Arc;
 
 /// LLM 调用结果（标准化包装器）
@@ -21,10 +22,18 @@ pub struct LlmCallResult {
     pub usage: LlmUsage,
     pub duration_ms: u64,
     pub cached: bool,
+    /// 规范化后的中间表示（ContentBlock 列表），
+    /// 在 execute_llm() 中由 LlmCallConfig.response_normalizer 填充。
+    pub ir: Vec<ContentBlock>,
 }
 
 impl LlmCallResult {
-    pub fn from_raw(response: ChatResponse, duration_ms: u64, cached: bool) -> Self {
+    pub fn from_raw(
+        response: ChatResponse,
+        duration_ms: u64,
+        cached: bool,
+        ir: Vec<ContentBlock>,
+    ) -> Self {
         let usage = LlmUsage {
             prompt_tokens: response.usage.prompt_tokens,
             completion_tokens: response.usage.completion_tokens,
@@ -35,6 +44,7 @@ impl LlmCallResult {
             usage,
             duration_ms,
             cached,
+            ir,
         }
     }
 }
@@ -50,6 +60,7 @@ pub struct LlmUsage {
 use crate::retry_policy::RetryPolicy;
 
 /// LLM 调用配置 — 所有约束功能通过 Option 控制
+#[derive(Clone)]
 pub struct LlmCallConfig {
     /// PromptGuard 过滤器（可选）
     pub prompt_guard: Option<Arc<dyn PromptGuard>>,
@@ -81,6 +92,8 @@ pub struct LlmCallConfig {
     pub node_id: Option<String>,
     /// 工作流 ID（用于审计记录）
     pub workflow_id: Option<String>,
+    /// 响应规范化器（可选），配置后 adapter.chat 返回自动调用 normalize 转换为 IR
+    pub response_normalizer: Option<Arc<dyn ResponseNormalizer>>,
 }
 
 impl Default for LlmCallConfig {
@@ -101,6 +114,7 @@ impl Default for LlmCallConfig {
             cache_ttl_secs: 300,
             node_id: None,
             workflow_id: None,
+            response_normalizer: None,
         }
     }
 }
@@ -127,27 +141,24 @@ pub async fn execute_llm(
     if let Some(ref guard) = config.prompt_guard {
         for msg in &mut request.messages {
             match &mut msg.content {
-                ChatContent::Text(text) => {
-                    match guard.process_user_input(text) {
-                        Ok(safe) => {
-                            *text = safe;
-                        },
-                        Err(blocked) => {
-                            let err = format!("PromptGuard 阻断: {}", blocked);
-                            tracing::warn!("[execute_llm] {}", &err);
-                            // 记录审计（如果配置）
-                            if let Some(ref recorder) = config.audit_recorder {
-                                recorder.record(AuditEntry {
-                                    execution_type: "llm_call".into(),
-                                    duration_ms: 0,
-                                    status: "blocked".into(),
-                                    error: Some(err.clone()),
-                                    ..Default::default()
-                                });
-                            }
-                            return Err(err);
-                        },
-                    }
+                ChatContent::Text(text) => match guard.process_user_input(text) {
+                    Ok(safe) => {
+                        *text = safe;
+                    },
+                    Err(blocked) => {
+                        let err = format!("PromptGuard 阻断: {}", blocked);
+                        tracing::warn!("[execute_llm] {}", &err);
+                        if let Some(ref recorder) = config.audit_recorder {
+                            recorder.record(AuditEntry {
+                                execution_type: "llm_call".into(),
+                                duration_ms: 0,
+                                status: "blocked".into(),
+                                error: Some(err.clone()),
+                                ..Default::default()
+                            });
+                        }
+                        return Err(err);
+                    },
                 },
                 ChatContent::Multipart(parts) => {
                     let mut modified = false;
@@ -222,7 +233,6 @@ pub async fn execute_llm(
             tracing::warn!(
                 "[execute_llm] 上下文估算 {estimated_tokens} token 超过限制 {available_input_tokens}，执行截断"
             );
-            // 从最早的非 system 消息开始截断
             while estimated_tokens > available_input_tokens && request.messages.len() > 2 {
                 if let Some(pos) = request.messages.iter().position(|m| m.role != "system") {
                     let text_content = match &request.messages[pos].content {
@@ -255,7 +265,6 @@ pub async fn execute_llm(
                         estimated_tokens = estimated_tokens.saturating_sub(old_est) + new_est;
                     } else {
                         request.messages.remove(pos);
-                        // 重新估算
                         estimated_tokens = request
                             .messages
                             .iter()
@@ -304,6 +313,7 @@ pub async fn execute_llm(
             usage: LlmUsage::default(),
             duration_ms,
             cached: true,
+            ir: Vec::new(),
         });
     }
 
@@ -351,7 +361,14 @@ pub async fn execute_llm(
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
-    let result = LlmCallResult::from_raw(response, duration_ms, false);
+    // ── 4.5 IR 规范化（adapter.chat 之后、缓存写入之前） ──
+    let ir = if let Some(ref normalizer) = config.response_normalizer {
+        normalizer.normalize(&response).await
+    } else {
+        Vec::new()
+    };
+
+    let result = LlmCallResult::from_raw(response, duration_ms, false, ir);
 
     // ── 写入缓存（调用成功后） ──
     if let Some(ref cache) = config.cache
@@ -385,14 +402,21 @@ pub async fn execute_llm(
                         },
                         axagent_harness::confidence::ConfidenceAction::FallbackToDefault => {
                             if let Some(ref default) = conf_cfg.default_output {
+                                let fallback_response = ChatResponse {
+                                    content: default.to_string(),
+                                    ..Default::default()
+                                };
+                                let ir = if let Some(ref normalizer) = config.response_normalizer {
+                                    normalizer.normalize(&fallback_response).await
+                                } else {
+                                    Vec::new()
+                                };
                                 return Ok(LlmCallResult {
-                                    response: ChatResponse {
-                                        content: default.to_string(),
-                                        ..Default::default()
-                                    },
+                                    response: fallback_response,
                                     usage: LlmUsage::default(),
                                     duration_ms,
                                     cached: false,
+                                    ir,
                                 });
                             }
                         },

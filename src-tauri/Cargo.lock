@@ -1316,6 +1316,7 @@ dependencies = [
  "axagent-prompt-guard",
  "axagent-telemetry",
  "hex",
+ "regex",
  "reqwest 0.13.2",
  "sea-orm",
  "serde",

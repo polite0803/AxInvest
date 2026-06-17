@@ -2,13 +2,16 @@
 
 use crate::action_executor::ActionExecutor;
 use crate::cycle_detector::CycleDetector;
+use crate::ir_renderer::DefaultIrRenderer;
 use crate::reasoning_state::{ActionType, ReActConfig, ReasoningContext, ReasoningState};
 use crate::self_verifier::{SelfVerifier, VerificationResult};
 use crate::thought_chain::{Action, ChainSummary, ThoughtChain, ThoughtEvent, ThoughtStep};
 use axagent_core::token_budget::{TokenBudgetDecision, TokenBudgetTracker};
 use axagent_core::token_counter::estimate_tokens;
+use axagent_harness::ir_renderer::IrRenderer;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_harness::{ProviderAdapter, ProviderRequestContext};
+use axagent_runtime_core::normalizer::DefaultResponseNormalizer;
 use axagent_runtime_core::{LlmCallConfig, execute_llm};
 use std::sync::Arc;
 use std::time::Duration;
@@ -281,7 +284,21 @@ impl LlmDrivenReasoningProvider {
         self.llm_call_config = Some(config);
         self
     }
+}
 
+/// 确保 LlmCallConfig 中注入了 response_normalizer。
+/// 如果调用方未配置，自动注入 DefaultResponseNormalizer。
+fn ensure_normalizer(config: &LlmCallConfig) -> LlmCallConfig {
+    if config.response_normalizer.is_some() {
+        config.clone()
+    } else {
+        let mut c = config.clone();
+        c.response_normalizer = Some(Arc::new(DefaultResponseNormalizer));
+        c
+    }
+}
+
+impl LlmDrivenReasoningProvider {
     async fn call_llm(&self, system_prompt: &str, user_prompt: &str) -> Result<String, ReActError> {
         let request = ChatRequest {
             model: self.model.clone(),
@@ -318,8 +335,13 @@ impl LlmDrivenReasoningProvider {
 
         // ── 中心化路径：如果配置了 LlmCallConfig，走 execute_llm() ──
         if let Some(ref config) = self.llm_call_config {
-            return match execute_llm(&*self.adapter, &self.ctx, request, config).await {
-                Ok(result) => Ok(result.response.content),
+            // 确保 response_normalizer 已注入（调用方可能遗漏）
+            let effective_config = ensure_normalizer(config);
+            return match execute_llm(&*self.adapter, &self.ctx, request, &effective_config).await {
+                Ok(result) => {
+                    // 返回原始 content 供内部解析（JSON 提取工具调用等）
+                    Ok(result.response.content)
+                },
                 Err(e) => Err(ReActError::LlmReasoningError(e)),
             };
         }
@@ -355,6 +377,66 @@ impl LlmDrivenReasoningProvider {
         Err(ReActError::LlmReasoningError(
             last_error.unwrap_or_else(|| "LLM call failed after retries".to_string()),
         ))
+    }
+
+    /// 调用 LLM 并返回渲染后的清爽文本（适用于用户展示，如 synthesize）。
+    ///
+    /// 在 execute_llm 中心化路径下，使用 DefaultIrRenderer 将 IR 渲染为最终文本。
+    /// 未配置中心化路径时回退到原始 content。
+    async fn call_llm_rendered(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, ReActError> {
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: ChatContent::Text(system_prompt.to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: None,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text(user_prompt.to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: None,
+                },
+            ],
+            stream: false,
+            temperature: Some(0.3),
+            max_tokens: Some(2048),
+            top_p: None,
+            tools: None,
+            thinking_budget: None,
+            use_max_completion_tokens: None,
+            thinking_param_style: None,
+            api_mode: None,
+            instructions: None,
+            conversation: None,
+            previous_response_id: None,
+            store: None,
+        };
+
+        if let Some(ref config) = self.llm_call_config {
+            let effective_config = ensure_normalizer(config);
+            return match execute_llm(&*self.adapter, &self.ctx, request, &effective_config).await {
+                Ok(result) => {
+                    if result.ir.is_empty() {
+                        Ok(result.response.content)
+                    } else {
+                        let renderer = DefaultIrRenderer;
+                        Ok(renderer.render(&result.ir).await)
+                    }
+                },
+                Err(e) => Err(ReActError::LlmReasoningError(e)),
+            };
+        }
+
+        self.call_llm(system_prompt, user_prompt).await
     }
 
     fn parse_action_from_response(&self, response: &str) -> Option<Action> {
@@ -619,7 +701,7 @@ impl LlmReasoningProvider for LlmDrivenReasoningProvider {
             observations
         );
 
-        match self.call_llm(system_prompt, &user_prompt).await {
+        match self.call_llm_rendered(system_prompt, &user_prompt).await {
             Ok(result) if !result.trim().is_empty() => Ok(result),
             _ => self.fallback.synthesize(chain, context).await,
         }

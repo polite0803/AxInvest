@@ -75,10 +75,12 @@ data_sources: [get_research_report_data]
   "eps_revision_trend": "持续上调",
   "rating_distribution": "买入主导",
   "report_quality_signal": "深度研报主导",
-  "bull_score": 7,
-  "bear_score": 2,
+  "bull_score": 70,
+  "bear_score": 20,
   "trigger_bull": "Q3 业绩公布后 EPS 一致预期再次上调 > 5%",
   "trigger_bear": "Q3 业绩低于一致预期 10% 触发下调潮",
+  "confidence": 72,
+  "if_data_gaps": false,
   "evidence": [
     {
       "point": "近 3 月 12 家券商覆盖 一致预期 EPS 从 0.85 上调至 0.92",
@@ -87,7 +89,18 @@ data_sources: [get_research_report_data]
     },
     { "point": "评级分布 70% 买入 25% 增持 5% 中性", "data": "[评级分布 2024-10-30]", "weight": 5 }
   ],
-  "data_gaps": ["目标价中位数变化趋势未提供"]
+  "data_gaps": ["目标价中位数变化趋势未提供"],
+  "prediction": {
+    "timeframe": "mid_term",
+    "direction": "bullish",
+    "confidence": 0.72,
+    "key_drivers": ["EPS 持续上调趋势", "深度研报覆盖增加"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 

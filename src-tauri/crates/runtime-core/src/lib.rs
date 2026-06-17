@@ -24,11 +24,13 @@ pub mod hook_chain;
 pub mod hooks;
 pub mod json;
 pub mod message_importance;
+pub mod normalizer;
 pub mod permission_enforcer;
 pub mod retry_policy;
 pub use retry_policy::{BackoffStrategy, FallbackStrategy, RetryPolicy};
 pub mod llm_executor;
 pub use llm_executor::{LlmCallConfig, execute_llm};
+pub use normalizer::DefaultResponseNormalizer;
 pub mod permissions;
 pub mod plugin_hooks;
 pub mod prompt_cache;
@@ -36,6 +38,8 @@ pub mod sandbox;
 pub mod session;
 pub mod session_control;
 pub mod session_memory_compact;
+pub mod text_clean;
+pub use text_clean::clean_output;
 pub mod usage;
 
 // ── Public Re-exports ────────────────────────────────────────────────

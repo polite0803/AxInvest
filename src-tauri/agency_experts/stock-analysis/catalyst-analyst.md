@@ -95,17 +95,30 @@ data_sources: [get_news_data, get_announcement_data, get_sector_data]
   "valuation_rerating_logic": "若平台化转型被市场认可，估值体系可从 PS 3-5x（项目制）切换至 PS 8-12x（平台SaaS类比），市值弹性 2-3 倍",
   "is_concept_driven": true,
   "concept_risk": "中（部分验证中）",
-  "bull_score": 7,
-  "bear_score": 5,
+  "bull_score": 70,
+  "bear_score": 50,
   "trigger_bull": "XSim 平台 Q3 确认首笔外部客户合同",
   "trigger_bear": "后续财报显示项目制收入仍占 90%+ 且毛利率持续下滑",
+  "confidence": 65,
+  "if_data_gaps": true,
   "evidence": [
     { "point": "5月25日深度文章传播 XSim 叙事，典型的机构 PR 节奏", "data": "[QQ新闻 2026-05-25]", "weight": 8 },
     { "point": "Q1 营收增长 + 亏损收窄 58% 构成拐点信号", "data": "[财报 2026Q1]", "weight": 7 },
     { "point": "2025 年营收 +21.5% 但绝对值仅 3 亿，基数极小", "data": "[财报 2025]", "weight": 5 },
     { "point": "PE -23.76x，基本面尚未转正", "data": "[行情 2026-06 市盈率]", "weight": 6 }
   ],
-  "data_gaps": ["XSim 平台的存量/增量客户数未披露", "军事智能软件市场的国产替代渗透率缺乏权威第三方数据"]
+  "data_gaps": ["XSim 平台的存量/增量客户数未披露", "军事智能软件市场的国产替代渗透率缺乏权威第三方数据"],
+  "prediction": {
+    "timeframe": "mid_term",
+    "direction": "bullish",
+    "confidence": 0.65,
+    "key_drivers": ["平台化转型进度", "外部客户合同验证"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 

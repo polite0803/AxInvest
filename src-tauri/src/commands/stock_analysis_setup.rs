@@ -509,7 +509,7 @@ async fn seed_stock_analysis_workflow_template(
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
     // stock-analysis 模板版本管理从 v1 开始。v4: 重新种子化以应用 Rhai default→dflt 修复
-    const TEMPLATE_VERSION: i32 = 6;
+    const TEMPLATE_VERSION: i32 = 7;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;

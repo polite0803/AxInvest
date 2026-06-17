@@ -74,10 +74,12 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
   "target_theme_position": "主线核心",
   "sector_momentum": "稳定",
   "fund_flow_confirmation": "资金跟进",
-  "bull_score": 7,
-  "bear_score": 3,
+  "bull_score": 70,
+  "bear_score": 30,
   "trigger_bull": "板块龙头股维持 5 日新高且板块资金连续 3 日净流入",
   "trigger_bear": "龙头股放量跌破 5 日线 + 板块资金单日净流出 > 5%",
+  "confidence": 75,
+  "if_data_gaps": false,
   "evidence": [
     {
       "point": "目标股票为 AI 算力板块核心标的近 5 日 +12%",
@@ -86,7 +88,18 @@ data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
     },
     { "point": "AI 算力板块近 5 日主力净流入 18 亿", "data": "[板块资金 2024-10-23~10-30 累计 +18亿]", "weight": 6 }
   ],
-  "data_gaps": ["概念板块地域归属未提供"]
+  "data_gaps": ["概念板块地域归属未提供"],
+  "prediction": {
+    "timeframe": "short_term",
+    "direction": "bullish",
+    "confidence": 0.75,
+    "key_drivers": ["板块资金持续净流入", "龙头股连板效应"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 

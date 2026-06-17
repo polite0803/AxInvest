@@ -77,10 +77,12 @@ data_sources: [get_sentiment_data, get_news_data]
   "sentiment_state": "贪婪",
   "consensus_state": "一致看多",
   "amplifier_direction": "强化多头",
-  "bull_score": 6,
-  "bear_score": 2,
+  "bull_score": 60,
+  "bear_score": 20,
   "trigger_bull": "融资余额 5 日净流入 > 3% 且散户情绪指数维持 80 以上",
   "trigger_bear": "融资余额单日净流出 > 2% 同时舆情转空比例超 40%",
+  "confidence": 70,
+  "if_data_gaps": false,
   "evidence": [
     {
       "point": "散户情绪指数升至 85 处于近 1 年 95 分位",

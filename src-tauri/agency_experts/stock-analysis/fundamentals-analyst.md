@@ -78,10 +78,12 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
   "f_score_ref": 6,
   "safety_margin_pct": 22.5,
   "a_share_specific_risk": ["商誉占比过高"],
-  "bull_score": 7,
-  "bear_score": 3,
+  "bull_score": 70,
+  "bear_score": 30,
   "trigger_bull": "Q4 应收账款周转天数回到行业均值 + 商誉减值测试通过",
   "trigger_bear": "商誉减值计提 > 净利润 30% 或年报被审计非标",
+  "confidence": 75,
+  "if_data_gaps": false,
   "evidence": [
     {
       "point": "近 3 年 ROE 稳定 15-18% 毛利率 38%",
@@ -90,7 +92,18 @@ data_sources: [get_fundamentals_data, get_financial_indicators]
     },
     { "point": "当前 PE 22 处于近 5 年 30 分位", "data": "[估值 2024-10-30 PE_TTM 22 历史分位 30%]", "weight": 6 }
   ],
-  "data_gaps": ["Q4 业绩预告未发布"]
+  "data_gaps": ["Q4 业绩预告未发布"],
+  "prediction": {
+    "timeframe": "long_term",
+    "direction": "bullish",
+    "confidence": 0.7,
+    "key_drivers": ["ROE 持续稳定性", "商誉风险可控"],
+    "scenarios": [
+      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
+      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景", "trigger": "利好触发" },
+      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景", "trigger": "利空触发" }
+    ]
+  }
 }
 ```
 

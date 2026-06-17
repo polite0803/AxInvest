@@ -1,5 +1,5 @@
 import { useStockAnalysisStore } from "@/stores";
-import { classifySentiment } from "@/types/stock-analysis";
+import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { Tooltip } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";

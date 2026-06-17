@@ -167,7 +167,17 @@ impl VendorRouting {
             replay: {
                 let mut m: HashMap<&'static str, Vec<String>> = HashMap::new();
                 m.insert("quote", vec!["tencent".into(), "mootdx".into(), "eastmoney".into()]);
-                m.insert("klines", vec!["tencent".into(), "eastmoney".into(), "sina".into(), "mootdx".into(), "xueqiu".into(), "baidu_stock".into()]);
+                m.insert(
+                    "klines",
+                    vec![
+                        "tencent".into(),
+                        "eastmoney".into(),
+                        "sina".into(),
+                        "mootdx".into(),
+                        "xueqiu".into(),
+                        "baidu_stock".into(),
+                    ],
+                );
                 m.insert("financials", vec!["eastmoney".into(), "baidu_stock".into()]);
                 m
             },

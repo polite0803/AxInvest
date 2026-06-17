@@ -266,21 +266,82 @@ impl Tool for StockIndustryRankTool {
         "get_industry_ranking"
     }
     fn description(&self) -> &str {
-        "获取申万行业板块涨跌排名"
+        "获取行业板块涨跌排名，传入 stock_code 时自动筛选目标股票所属行业"
     }
     fn input_schema(&self) -> Value {
-        json!({"type":"object","properties":{}})
+        json!({
+            "type": "object",
+            "properties": {
+                "stock_code": {
+                    "type": "string",
+                    "description": "6位股票代码（可选，传入时返回目标股票的行业归属+该行业排名数据）"
+                }
+            }
+        })
     }
     fn category(&self) -> ToolCategory {
         ToolCategory::Finance
     }
-    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let r = self
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let stock_code = input["stock_code"].as_str().filter(|s| !s.is_empty());
+        let all_rankings = self
             .client
             .get_industry_ranking()
             .await
             .map_err(|e| te(e.to_string()))?;
-        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+
+        // 如果提供了 stock_code，查询该股票的行业归属并在返回数据中高亮
+        if let Some(code) = stock_code {
+            let maybe_blocks = self.client.get_concept_blocks(code).await.ok().flatten();
+
+            let stock_industry: &str = maybe_blocks
+                .as_ref()
+                .map(|cb| cb.industry.as_str())
+                .unwrap_or("");
+
+            // 在返回结果中标记目标股票的行业位置
+            let enriched: Vec<serde_json::Value> = all_rankings
+                .iter()
+                .map(|r| {
+                    let is_target = !stock_industry.is_empty() && r.industry_name == stock_industry;
+                    serde_json::json!({
+                        "industryName": r.industry_name,
+                        "changePct": r.change_pct,
+                        "mainInflow": r.main_inflow,
+                        "leaderCode": r.leader_code,
+                        "leaderName": r.leader_name,
+                        "leaderChangePct": r.leader_change_pct,
+                        "isTargetStockIndustry": is_target,
+                    })
+                })
+                .collect();
+
+            let has_match = !stock_industry.is_empty()
+                && all_rankings
+                    .iter()
+                    .any(|r| r.industry_name == stock_industry);
+
+            let mut result = serde_json::json!({
+                "rankings": enriched,
+                "targetStockIndustry": stock_industry,
+                "hasMatchInRankings": has_match,
+            });
+
+            // 附加概念/地域标签（用 as_ref 避免 move 冲突）
+            if let Some(ref cb) = maybe_blocks {
+                result["conceptTags"] =
+                    serde_json::to_value(cb.concepts.iter().map(|c| &c.name).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                result["regionTags"] =
+                    serde_json::to_value(cb.regions.iter().map(|r| &r.name).collect::<Vec<_>>())
+                        .unwrap_or_default();
+            }
+
+            Ok(ToolResult::success(serde_json::to_string_pretty(&result).unwrap_or_default()))
+        } else {
+            // 无 stock_code 时返回原始排名（向后兼容）
+            Ok(ToolResult::success(serde_json::to_string(&all_rankings).unwrap_or_default()))
+        }
     }
 }
 

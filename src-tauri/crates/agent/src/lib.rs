@@ -43,6 +43,7 @@ pub mod ingest_pipeline;
 pub mod ingest_queue;
 pub mod insight_generator;
 pub mod interrupt;
+pub mod ir_renderer;
 pub mod lint_checker;
 pub mod llm_bridge;
 pub mod metrics;
@@ -145,6 +146,9 @@ pub use fine_tune::{
     ActiveModelConfig, BaseModelInfo, TrainingJob, lora::LoRAAdapterInfo,
     trainer::TrainingStats as FineTuneTrainingStats,
 };
+
+// ir_renderer — 内部使用（通过 LlmCallConfig 注入）
+pub use ir_renderer::{DefaultIrRenderer, clean_output};
 
 // agent_runtime — 内部引用：agent_adapter
 pub use agent_runtime::{AgentOutput, AgentRuntimeError};

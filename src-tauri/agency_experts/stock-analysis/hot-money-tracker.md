@@ -74,10 +74,12 @@ data_sources: [get_hot_money_data, get_dragon_tiger_list]
   "active_player": "多方共振",
   "dragon_tiger_signal": "机构扫货",
   "limit_up_sustainability": "强",
-  "bull_score": 7,
-  "bear_score": 2,
+  "bull_score": 70,
+  "bear_score": 20,
   "trigger_bull": "主力净流入连续 5 日且龙虎榜机构净买入 > 5000 万",
   "trigger_bear": "主力单日净流出 > 2 亿且北向连续 3 日净流出",
+  "confidence": 72,
+  "if_data_gaps": false,
   "evidence": [
     { "point": "近 5 日主力净流入累计 4.2 亿", "data": "[主力资金 2024-10-23~10-30 累计 +4.2亿]", "weight": 7 },
     { "point": "龙虎榜显示 3 家机构席位净买入合计 6800 万", "data": "[龙虎榜 2024-10-29]", "weight": 6 }

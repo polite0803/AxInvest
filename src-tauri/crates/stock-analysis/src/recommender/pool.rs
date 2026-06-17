@@ -141,27 +141,14 @@ pub async fn liquidity_filter_and_truncate(
 
 async fn filter_one(client: &AStockClient, item: SeedItem) -> Option<SeedItem> {
     let (code, name, sector) = item;
-    // 获取行情用于 ST 检查；失败时保留股票（降级，让后续策略自行决定）
-    let quote = client.get_quote(&code).await.ok();
-    if let Some(ref q) = quote {
-        if q.is_st {
-            return None;
-        }
+    // 行情数据必须可获取，否则无法交易（quote 走 tencent 路由，通常稳定）
+    let quote = client.get_quote(&code).await.ok()?;
+    if quote.is_st {
+        return None;
     }
-    // K 线数据不可用时（vendor 限流/超时），降级：不过流动性检查，保留该股票
-    // 主策略（trend/value/capital）在 scan_one 中会自行判空后返回 None，
-    // Watchlist 策略仅依赖 quote 即可工作。
-    let klines = client.get_klines(&code, "daily", 60).await;
-    match klines {
-        Ok(ref k) if k.len() >= 55 => {
-            let avg: f64 = k.iter().map(|k| k.amount).sum::<f64>() / k.len() as f64;
-            if avg < 100_000_000.0 {
-                return None;
-            }
-        },
-        _ => {
-            // K 线不可用，跳过流动性检查，保留股票供其他策略使用
-        },
+    // 用当日成交额估算流动性（替代 60 天 K 线平均成交额，消除额外 HTTP 请求）
+    if quote.amount < 100_000_000.0 {
+        return None;
     }
     Some((code, name, sector))
 }

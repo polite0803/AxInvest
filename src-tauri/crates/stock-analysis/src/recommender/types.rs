@@ -41,6 +41,7 @@ impl Style {
 #[serde(rename_all = "lowercase")]
 pub enum Period {
     /// 超短线 1-3 天（T+1 隔夜/事件驱动/情绪博弈）
+    #[serde(alias = "ultra_short")]
     UltraShort,
     /// 短线 1-2 周
     Short,

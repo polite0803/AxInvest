@@ -63,10 +63,12 @@ data_sources: [get_policy_data, get_news_data]
   "duration_type": "长期趋势(>6月)",
   "transmission_path": "新质生产力战略→工信部专项政策→高端制造/AI/半导体设备→龙头公司订单加速",
   "beneficiary_type": "直接受益",
-  "bull_score": 7,
-  "bear_score": 2,
+  "bull_score": 70,
+  "bear_score": 20,
   "trigger_bull": "工信部专项补贴细则在 Q4 落地且龙头公司 Q4 订单同比 +20%",
   "trigger_bear": "专项政策延期或补贴金额显著低于市场预期",
+  "confidence": 72,
+  "if_data_gaps": false,
   "evidence": [
     { "point": "中央层面多次提及新质生产力且写入 2024 政府工作报告", "data": "[政府工作报告 2024-03]", "weight": 8 },
     { "point": "工信部同期发布高端制造专项指南", "data": "[工信部 2024-09]", "weight": 6 }

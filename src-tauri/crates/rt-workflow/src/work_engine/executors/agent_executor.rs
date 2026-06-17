@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use axagent_core::utils::append_language_directive;
 use axagent_core::workflow_types::WorkflowNode;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
+use axagent_runtime_core::clean_output;
 use futures::StreamExt;
 use sea_orm::DatabaseConnection;
 use serde_json::Value;
@@ -678,6 +679,8 @@ impl NodeExecutorTrait for AgentExecutor {
             }
             // 清理 final_content 中的 <think> 标签及内容（推理过程不应该展示给前端）
             final_content = strip_think_tags(&final_content);
+            // 清理多余空行、特殊占位符、重复标点等 LLM 输出噪音
+            final_content = clean_output(&final_content);
             final_thinking = stream_thinking.clone();
 
             // 检查是否有工具调用
@@ -874,7 +877,7 @@ impl NodeExecutorTrait for AgentExecutor {
         // 决定 content（卡片展示）和 params（下游消费）：
         let (safe_content, safe_params) =
             if !display_text.trim().is_empty() || params.is_object() || params.is_array() {
-                (display_text.clone(), params.clone())
+                (clean_output(&display_text), params.clone())
             } else {
                 let fallback = if !cleaned_content.trim().is_empty() {
                     cleaned_content

@@ -1,6 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
-import { getActionColor } from "@/types/stock-analysis";
+import { getActionColor } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Input, message, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";

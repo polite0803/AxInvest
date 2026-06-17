@@ -2,7 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { computeStockConsensus } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/types/stock-analysis";
+import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/stock-analysis-utils";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, message, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";

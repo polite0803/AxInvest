@@ -104,7 +104,7 @@ impl NodeExecutorTrait for SwitchExecutor {
                         }
                         // 构造 Rhai 脚本：将实际值赋给 _value 变量，执行表达式
                         let script = format!("let _value = {}; {}", rhai_value, expr);
-                        match rhai::Engine::new().eval_expression::<bool>(&script) {
+                        match rhai::Engine::new().eval::<bool>(&script) {
                             Ok(true) => {
                                 found = Some(case.label.clone());
                                 break;

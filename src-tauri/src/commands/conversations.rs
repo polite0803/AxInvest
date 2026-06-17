@@ -9,6 +9,7 @@ use crate::commands::error_code::thinking as thinking_err;
 use crate::commands::error_code::title as title_err;
 #[cfg(test)]
 use crate::commands::proactive::ProactiveService;
+use axagent_agent::clean_output;
 use axagent_harness::types::*;
 use axagent_harness::url_utils::resolve_base_url_for_type;
 use axagent_providers::{ProviderRequestContext, extract_reasoning_from_text};
@@ -2650,10 +2651,11 @@ fn spawn_stream_task(
             let prompt_tokens = total_usage.as_ref().map(|u| u.prompt_tokens);
             let completion_tokens = total_usage.as_ref().map(|u| u.completion_tokens);
             // Prepend memory retrieval tag (if any) so it persists in DB
+            let cleaned_total = clean_output(&total_content);
             let saved_content = if content_prefix.is_empty() {
-                total_content.clone()
+                cleaned_total
             } else {
-                format!("{}{}", content_prefix, total_content)
+                format!("{}{}", content_prefix, cleaned_total)
             };
             if let Err(e) = axagent_core::entity::messages::Entity::update(
                 axagent_core::entity::messages::ActiveModel {

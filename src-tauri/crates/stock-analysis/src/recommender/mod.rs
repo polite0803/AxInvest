@@ -212,6 +212,11 @@ fn cache_get(period: Period) -> Option<RecoResponse> {
 
 fn cache_put(period: Period, resp: RecoResponse) {
     let suffix = as_of::cache_suffix();
+    // 空结果不缓存，避免"零时延返回空"的误导体验
+    let all_empty = resp.picks.values().all(|v| v.is_empty());
+    if all_empty {
+        return;
+    }
     let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
     g.insert((period, suffix), (resp, Instant::now()));
 }

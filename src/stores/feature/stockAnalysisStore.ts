@@ -16,14 +16,13 @@ import type {
   TimelineNode,
   TimelinePhase,
 } from "@/types/stock-analysis";
-import { computeStockConsensus, StockAction, StockRiskLevel } from "@/types/stock-analysis";
+import { computeStockConsensus } from "@/lib/stock-analysis-utils";
 import { create } from "zustand";
 
 // ── 模块级缓存 ──
-let lastEarningsFetch: { stockCode: string; ts: number } | null = null;
+// Bug #P0-3: 模块级变量在 reset() 后不清空，
+// 改为 store 内 state 字段管理生命周期。
 const EARNINGS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟
-
-// ── 工作流结果解析 ──
 function parseWorkflowResults(results: Record<string, unknown>) {
   const analystReports: Record<string, string> = {};
   const debateRounds: Array<{ round: number; bull: string; bear: string }> = [];
@@ -132,9 +131,6 @@ export interface EvolutionDriftDashboard {
   strategySummary: EvolutionStrategySummaryRow[];
 }
 
-/** getDryRun 模块级缓存 (60s TTL) */
-let dryRunCache: { value: boolean; ts: number } | null = null;
-
 // ── R2 组合监控类型 ──
 
 /** R2 压测单条结果 */
@@ -215,7 +211,11 @@ interface StockAnalysisState {
   status: AnalysisStatus;
 
   quote: StockQuote | null;
+  quoteError: string | null;
+  quoteLoading: boolean;
   klineData: KLine[];
+  klineError: string | null;
+  klineLoading: boolean;
   analystReports: Record<string, string>;
   debateRounds: Array<{ round: number; bull: string; bear: string }>;
   riskAssessments: Record<string, string>;
@@ -326,6 +326,7 @@ interface StockAnalysisState {
   // R2 组合监控
   portfolioDashboard: PortfolioDashboard | null;
   portfolioCorrelations: PortfolioCorrelationCell[];
+  portfolioCorrelationsError: string | null;
   portfolioRefreshing: boolean;
   portfolioLastError: string | null;
   fetchPortfolioDashboard: (asOfDate?: string | null) => Promise<void>;
@@ -340,6 +341,7 @@ interface StockAnalysisState {
   // R3-B: 财报披露事件 — K 线叠加图标用
   earningsEvents: EarningsEvent[];
   earningsLoading: boolean;
+  earningsError: string | null;
   showEarningsOnChart: boolean;
   setShowEarningsOnChart: (show: boolean) => void;
   fetchEarningsEvents: (stockCode: string) => Promise<void>;
@@ -361,6 +363,10 @@ interface StockAnalysisState {
     }>,
   ) => Promise<void>;
   fetchT0Config: () => Promise<void>;
+
+  // 模块级缓存迁入 store（防止 reset() 后泄漏） #P0-3
+  _lastEarningsFetch: { stockCode: string; ts: number } | null;
+  _dryRunCache: { value: boolean; ts: number } | null;
 
   _unlisten: UnlistenFn | null;
   setupEventListener: () => Promise<void>;
@@ -388,7 +394,11 @@ const initialState = {
   analysisDate: "",
   status: "idle" as AnalysisStatus,
   quote: null,
+  quoteError: null,
+  quoteLoading: false,
   klineData: [],
+  klineError: null,
+  klineLoading: false,
   analystReports: {},
   debateRounds: [],
   riskAssessments: {},
@@ -425,10 +435,12 @@ const initialState = {
   evolutionLastError: null,
   portfolioDashboard: null,
   portfolioCorrelations: [],
+  portfolioCorrelationsError: null,
   portfolioRefreshing: false,
   portfolioLastError: null,
   earningsEvents: [],
   earningsLoading: false,
+  earningsError: null,
   showEarningsOnChart: true,
   t0Config: {
     enabled: false,
@@ -439,6 +451,8 @@ const initialState = {
   t0Loading: false,
   decisionMode: "view" as "view" | "experiment" | "execute",
   experiments: [],
+  _lastEarningsFetch: null,
+  _dryRunCache: null,
 };
 
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
@@ -476,6 +490,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   getStockQuote: async (code: string) => {
+    set({ quoteLoading: true, quoteError: null });
     try {
       // 时间旅行：从 timeAnchorStore 读 as_of_date，透传给后端（仅 replay/backtest_sweep 模式）
       const asOfDate = (() => {
@@ -483,18 +498,21 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         return state.mode === "replay" || state.mode === "backtest_sweep" ? state.asOfDate : null;
       })();
       const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
-      set({ quote, stockCode: code, stockName: quote.name });
+      set({ quote, stockCode: code, stockName: quote.name, quoteLoading: false });
       // R3-B: 财报事件缓存 10 分钟，避免每次报价刷新都拉取
       const now = Date.now();
+      const lastFetch = get()._lastEarningsFetch;
       if (
-        !lastEarningsFetch || lastEarningsFetch.stockCode !== code
-        || (now - lastEarningsFetch.ts) > EARNINGS_CACHE_TTL_MS
+        !lastFetch || lastFetch.stockCode !== code
+        || (now - lastFetch.ts) > EARNINGS_CACHE_TTL_MS
       ) {
         get().fetchEarningsEvents(code);
-        lastEarningsFetch = { stockCode: code, ts: now };
+        set({ _lastEarningsFetch: { stockCode: code, ts: now } });
       }
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("[StockAnalysis] Failed to get stock quote:", e);
+      set({ quoteError: msg, quoteLoading: false });
     }
   },
 
@@ -504,6 +522,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     limit: number,
     adj?: "auto" | "none" | "forward" | "backward",
   ) => {
+    set({ klineLoading: true, klineError: null });
     try {
       // 时间旅行：K 线按 as_of_date 截断（仅 replay/backtest_sweep 模式）
       const asOfDate = (() => {
@@ -517,24 +536,27 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         asOfDate,
         adj: adj ?? get().klineAdj,
       });
-      set({ klineData });
+      set({ klineData, klineLoading: false });
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("[StockAnalysis] Failed to get kline:", e);
+      set({ klineError: msg, klineLoading: false });
     }
   },
 
-  /** 读取 analysis_dry_run 模板变量 (60s 模块级缓存) */
+  /** 读取 analysis_dry_run 模板变量 (60s store 内缓存) */
   getDryRun: async () => {
     const now = Date.now();
-    if (dryRunCache && now - dryRunCache.ts < DRY_RUN_TTL_MS) {
-      return dryRunCache.value;
+    const cached = get()._dryRunCache;
+    if (cached && now - cached.ts < DRY_RUN_TTL_MS) {
+      return cached.value;
     }
     try {
       const tmpl = await invoke<Record<string, unknown>>("get_workflow_template", { id: "stock-analysis" });
       const vars = (tmpl?.variables ?? []) as Record<string, unknown>[];
       const v = vars.find((x: Record<string, unknown>) => x.name === "analysis_dry_run");
       const value = !!v?.value;
-      dryRunCache = { value, ts: now };
+      set({ _dryRunCache: { value, ts: now } });
       return value;
     } catch {
       return false;
@@ -623,11 +645,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // 如果用户已通过 StockSearchBar 选中了同一股票，数据已就绪，跳过重复请求
       const preloadedQuote = get().quote;
       if (!preloadedQuote || preloadedQuote.code !== result.stockCode) {
-        get().getStockQuote(result.stockCode).catch(() => set({ quote: null }));
+        get().getStockQuote(result.stockCode);
       }
       const preloadedKline = get().klineData;
       if (preloadedKline.length === 0) {
-        get().getStockKline(result.stockCode, "daily", 120).catch(() => set({ klineData: [] }));
+        get().getStockKline(result.stockCode, "daily", 120);
       }
     } catch (e) {
       console.error("[StockAnalysis] Failed to start workflow:", e);
@@ -821,9 +843,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         "get_portfolio_correlations",
         { asOfDate: asOfDate ?? null },
       );
-      set({ portfolioCorrelations: data });
+      set({ portfolioCorrelations: data, portfolioCorrelationsError: null });
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("[PortfolioMonitor] fetch correlations failed:", e);
+      set({ portfolioCorrelationsError: msg });
     }
   },
 
@@ -928,7 +952,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     if (_searchTimer) {
       clearTimeout(_searchTimer);
     }
-    set({ ...initialState, _searchTimer: null, _unlisten: null, llmStatus: "unknown" as const });
+    set({
+      ...initialState,
+      _searchTimer: null,
+      _unlisten: null,
+      _lastEarningsFetch: null,
+      _dryRunCache: null,
+      llmStatus: "unknown" as const,
+    });
   },
 
   setAsOfDate: (date) => set({ asOfDate: date }),
@@ -954,10 +985,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({ earningsLoading: true });
     try {
       const events = await invoke<EarningsEvent[]>("get_earnings_calendar", { stockCode });
-      set({ earningsEvents: Array.isArray(events) ? events : [], earningsLoading: false });
+      set({ earningsEvents: Array.isArray(events) ? events : [], earningsLoading: false, earningsError: null });
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("[StockAnalysis] Failed to fetch earnings events:", e);
-      set({ earningsEvents: [], earningsLoading: false });
+      set({ earningsEvents: [], earningsLoading: false, earningsError: msg });
     }
   },
 
@@ -1033,6 +1065,93 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     // 已注册的部分也会被清理。
     set({ _unlisten: unlistenAll });
 
+    // ── 共享辅助函数（在 workflow-step-done 内使用） ──
+
+    /** 合并辩论轮次（去重 bull/bear 重复逻辑） */
+    function updateDebateRound(
+      nodeId: string,
+      side: "bull" | "bear",
+      text: string,
+    ) {
+      const round = nodeId === `${side}-researcher` ? 1 : parseInt(nodeId.slice(`${side}-r`.length), 10);
+      const debates = [...get().debateRounds];
+      const idx = debates.findIndex((d) => d.round === round);
+      if (idx >= 0) {
+        debates[idx] = { ...debates[idx], [side]: text };
+      } else {
+        const entry: { round: number; bull: string; bear: string } = { round, bull: "", bear: "" };
+        entry[side] = text;
+        debates.push(entry);
+      }
+      debates.sort((a, b) => a.round - b.round);
+      set({ debateRounds: debates });
+    }
+
+    /** 推送 timeline 节点（失败或完成共用，靠 status 区分） */
+    function pushNodeTimeline(
+      nodeId: string,
+      status: "done" | "failed",
+      summary: string,
+    ) {
+      const phase = inferTimelinePhase(nodeId);
+      if (!phase) { return; }
+      get().pushTimelineNode({
+        id: nodeId,
+        phase,
+        agentId: nodeId,
+        agentName: agentDisplayName(nodeId),
+        title: agentDisplayName(nodeId),
+        summary,
+        confidence: status === "done" ? 0.5 : 0,
+        status,
+        evidenceRefs: inferEvidenceRefs(nodeId),
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+    }
+
+    /** 解析分析师节点（a-* 开头，排除辩论） */
+    function handleAnalystReport(nodeId: string, text: string) {
+      if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
+        set({ analystReports: { ...get().analystReports, [nodeId.slice(2)]: text } });
+        return true;
+      }
+      return false;
+    }
+
+    /** 按节点类型路由输出到对应 store 字段 */
+    function routeNodeOutput(nodeId: string, text: string): void {
+      const s = get();
+      if (handleAnalystReport(nodeId, text)) { return; }
+
+      if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
+        updateDebateRound(nodeId, "bull", text);
+      } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
+        updateDebateRound(nodeId, "bear", text);
+      } else if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
+        set({ riskAssessments: { ...s.riskAssessments, [nodeId]: text } });
+      } else if (nodeId === "trader") {
+        set({ analystReports: { ...s.analystReports, "investment-plan": text } });
+      } else if (nodeId === "portfolio-mgr") {
+        const parsed = tryParseDecision(text);
+        // Bug #P1-7: 决策解析失败时不构造假 HOLD 决策。
+        // 保持 decision=null 让 workflow-completed 用三层回退解析。
+        if (parsed) {
+          set({ decision: parsed });
+        } else {
+          console.warn("[StockAnalysis] workflow-step-done: portfolio-mgr decision parse failed, deferring to workflow-completed");
+        }
+      } else if (nodeId === "value-investor") {
+        set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
+      } else if (nodeId === "data-quality") {
+        set({ dataQualitySummary: text });
+      } else if (nodeId === "raw-data") {
+        set({ rawData: { ...s.rawData, [nodeId]: text } });
+      } else if (nodeId === "rule-check") {
+        set({ ruleCheckResults: { ...s.ruleCheckResults, [nodeId]: text } });
+      }
+    }
+
     // 手动 try-catch 包装每个 listen，一个失败不影响其他的
     try {
       const u1 = await listen<{
@@ -1045,6 +1164,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         error?: string;
       }>("workflow-step-done", (event) => {
         const { nodeId, status, totalNodes, completedNodes, output, error } = event.payload;
+
+        // Handler 1: 进度 & 阶段 & 失败节点
         const stage = inferStage(nodeId);
         if (stage >= 0) { set({ currentStage: stage }); }
         const pct = totalNodes > 0
@@ -1065,7 +1186,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             : get().failedNodeErrors,
         });
 
-        // ── 数据源降级检测：新闻/情绪/公告工具返回空数据时发出警告 ──
+        // Handler 2: 数据源降级检测
         if (
           status === "completed"
           && (nodeId === "t-news-data" || nodeId === "t-sentiment-data" || nodeId === "t-catalyst-data")
@@ -1075,11 +1196,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             || (typeof outputValue === "string" && (outputValue === "[]" || outputValue.trim() === ""))
             || (Array.isArray(outputValue) && outputValue.length === 0);
           if (isEmpty) {
-            const label = nodeId === "t-news-data"
-              ? "新闻"
-              : nodeId === "t-sentiment-data"
-              ? "舆情"
-              : "公告";
+            const label = nodeId === "t-news-data" ? "新闻" : nodeId === "t-sentiment-data" ? "舆情" : "公告";
             const warnings = get().dataWarnings;
             const msg = `⚠️ ${label}数据获取为空，相关分析师将基于有限数据分析`;
             if (!warnings.includes(msg)) {
@@ -1088,107 +1205,28 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }
         }
 
-        // 失败节点也写入 timeline，状态为 "failed"，便于侧栏脊柱高亮红色
-        if (status === "failed") {
-          const phase = inferTimelinePhase(nodeId);
-          if (phase) {
-            get().pushTimelineNode({
-              id: nodeId,
-              phase,
-              agentId: nodeId,
-              agentName: agentDisplayName(nodeId),
-              title: agentDisplayName(nodeId),
-              summary: error ?? "",
-              confidence: 0,
-              status: "failed",
-              evidenceRefs: inferEvidenceRefs(nodeId),
-              startedAt: Date.now(),
-              finishedAt: Date.now(),
-            });
-          }
+        // Handler 3: 失败节点 timeline 推送
+        if (status === "failed" && error) {
+          pushNodeTimeline(nodeId, "failed", error);
         }
 
+        // Handler 4: 完成节点 → timeline + 未来引用检测 + 输出路由
         if (status === "completed" && output != null) {
           const text = extractContent(output);
           const s = get();
-          // 同步推送 timeline 节点(去重:同 id 的后续 push 视为 update)
-          const phase = inferTimelinePhase(nodeId);
-          if (phase) {
-            s.pushTimelineNode({
-              id: nodeId,
-              phase,
-              agentId: nodeId,
-              agentName: agentDisplayName(nodeId),
-              title: agentDisplayName(nodeId),
-              summary: text.slice(0, 200),
-              confidence: 0.5,
-              status: "done",
-              evidenceRefs: inferEvidenceRefs(nodeId),
-              startedAt: Date.now(),
-              finishedAt: Date.now(),
-            });
-          }
-          // ── spec §6.2: 3 阶段 LLM 未来引用检测 ──
-          // 仅在 as-of 模式下激活;live 模式(asOfDate=null)不做检测
+
+          pushNodeTimeline(nodeId, "done", text.slice(0, 200));
+
+          // 未来引用检测（仅 as-of 模式）
           const asOf = s.asOfDate;
           if (asOf) {
             const newViolations = detectFutureReferencesForNode(nodeId, text, asOf);
             if (newViolations.length > 0) {
-              set({
-                violations: [...s.violations, ...newViolations],
-              });
+              set({ violations: [...s.violations, ...newViolations] });
             }
           }
-          if (nodeId.startsWith("a-") && !nodeId.includes("bull") && !nodeId.includes("bear")) {
-            set({ analystReports: { ...s.analystReports, [nodeId.slice(2)]: text } });
-          } else if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
-            const round = nodeId === "bull-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
-            const debates = [...s.debateRounds];
-            const idx = debates.findIndex((d) => d.round === round);
-            if (idx >= 0) {
-              debates[idx] = { ...debates[idx], bull: text };
-            } else {
-              debates.push({ round, bull: text, bear: "" });
-            }
-            debates.sort((a, b) => a.round - b.round);
-            set({ debateRounds: debates });
-          } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
-            const round = nodeId === "bear-researcher" ? 1 : parseInt(nodeId.slice(6), 10);
-            const debates = [...s.debateRounds];
-            const idx = debates.findIndex((d) => d.round === round);
-            if (idx >= 0) {
-              debates[idx] = { ...debates[idx], bear: text };
-            } else {
-              debates.push({ round, bull: "", bear: text });
-            }
-            debates.sort((a, b) => a.round - b.round);
-            set({ debateRounds: debates });
-          } else if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
-            set({ riskAssessments: { ...s.riskAssessments, [nodeId]: text } });
-          } else if (nodeId === "trader") {
-            set({ analystReports: { ...s.analystReports, "investment-plan": text } });
-          } else if (nodeId === "portfolio-mgr") {
-            const parsed = tryParseDecision(text);
-            set({
-              decision: parsed ?? {
-                action: StockAction.HOLD,
-                positionPct: 0,
-                targetPrice: null,
-                stopLoss: null,
-                reasoning: text,
-                riskLevel: StockRiskLevel.MID,
-                confidence: 0,
-              },
-            });
-          } else if (nodeId === "value-investor") {
-            set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
-          } else if (nodeId === "data-quality") {
-            set({ dataQualitySummary: text });
-          } else if (nodeId === "raw-data") {
-            set({ rawData: { ...s.rawData, [nodeId]: text } });
-          } else if (nodeId === "rule-check") {
-            set({ ruleCheckResults: { ...s.ruleCheckResults, [nodeId]: text } });
-          }
+
+          routeNodeOutput(nodeId, text);
         }
       });
       unlisteners.push(u1);
@@ -1343,75 +1381,69 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 }));
 
+// ── 节点 ID 分类配置表 ──
+// 单一事实来源：inferStage / inferTimelinePhase / agentDisplayName / inferEvidenceRefs 均从此表派生。
+// 新增节点类型只需在此添加一行，无需同时改三个函数。
+interface NodeClassEntry {
+  /** 匹配模式 — startsWith 字符串前缀或精确匹配字符串 */
+  match: string | string[];
+  /** 工作流管线阶段（0-4） */
+  stage: number;
+  /** 决策时间线阶段（null = 不进 timeline） */
+  phase: TimelinePhase | null;
+  /** 证据引用（侧栏面板导航） */
+  evidence: Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string }>;
+  /** 是否精确匹配（默认 false = startsWith） */
+  exact?: boolean;
+}
+
+const NODE_CLASS_TABLE: NodeClassEntry[] = [
+  // 阶段 0: 触发器（数据准备）
+  { match: "trigger", stage: 0, phase: null, evidence: [], exact: true },
+
+  // 阶段 1: 数据采集 & 分析师分析
+  { match: "t-", stage: 1, phase: "scan", evidence: [{ tabKey: "market", panelKey: "concepts" }] },
+  { match: "a-", stage: 1, phase: "diagnose", evidence: [{ tabKey: "analyze", panelKey: "analysts" }] },
+  { match: "p-analysts", stage: 1, phase: null, evidence: [], exact: true },
+
+  // 阶段 2: 多空辩论
+  { match: "debate-bull-bear", stage: 2, phase: null, evidence: [], exact: true },
+  { match: ["bull-researcher", "bear-researcher"], stage: 2, phase: "debate", evidence: [{ tabKey: "analyze", panelKey: "debate" }], exact: true },
+  { match: "bull-r", stage: 2, phase: "debate", evidence: [{ tabKey: "analyze", panelKey: "debate" }] },
+  { match: "bear-r", stage: 2, phase: "debate", evidence: [{ tabKey: "analyze", panelKey: "debate" }] },
+
+  // 阶段 3: 风险评估
+  { match: "value-investor", stage: 3, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "value" }], exact: true },
+  { match: "risk-", stage: 3, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "risk" }] },
+  { match: ["research-mgr", "p-risk-assess"], stage: 3, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "risk" }], exact: true },
+  { match: "data-quality", stage: 3, phase: null, evidence: [], exact: true },
+  { match: "raw-data", stage: 3, phase: null, evidence: [], exact: true },
+
+  // 阶段 4: 决策 & 后处理
+  { match: "trader", stage: 4, phase: "decide", evidence: [{ tabKey: "execute", panelKey: "trade" }], exact: true },
+  { match: "portfolio-mgr", stage: 4, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "decision" }], exact: true },
+  { match: "rule-check", stage: 4, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "decision" }], exact: true },
+  { match: ["agg-risk", "cls-risk-level", "v-validate", "notify-result"], stage: 4, phase: null, evidence: [], exact: true },
+];
+
+function matchNodeClass(nodeId: string): NodeClassEntry | undefined {
+  return NODE_CLASS_TABLE.find((entry) => {
+    const patterns = Array.isArray(entry.match) ? entry.match : [entry.match];
+    return patterns.some((p) => entry.exact ? nodeId === p : nodeId.startsWith(p));
+  });
+}
+
 /** 从节点 ID 推断当前管线阶段 */
 function inferStage(nodeId: string): number {
-  // 触发器节点（工作流入口）→ 阶段 0（数据准备）
-  if (nodeId === "trigger") { return 0; }
-  // 工具节点 t-* （t-fundamentals-data / t-news-data / t-policy-data /
-  // t-research-data / t-scoring / t-valuation / t-risk）→ 阶段 1
-  // 这些节点给 a-* 分析师提供数据，与分析师同属"数据采集与分析"阶段。
-  if (nodeId.startsWith("t-")) { return 1; }
-  // a-* 分析师节点 → 阶段 1
-  if (nodeId.startsWith("a-")) { return 1; }
-  // 装饰节点 p-analysts（分析师容器）→ 阶段 1
-  if (nodeId === "p-analysts") { return 1; }
-  // 辩论相关节点 → 阶段 2
-  // - debate-bull-bear：装饰容器（容器本身立即成功，但前端希望进度能反映
-  //   用户已进入辩论阶段）
-  // - bull-r{1,2,3} / bear-r{1,2,3}：实际辩论节点（后端统一使用 bull-rN 命名）
-  // - bull-researcher / bear-researcher：早期版本使用的别名（已不再生成，
-  //   但保留兼容以便历史快照/外部测试用例不丢阶段号）
-  if (nodeId === "debate-bull-bear") { return 2; }
-  if (
-    nodeId === "bull-researcher" || nodeId === "bear-researcher" || nodeId.startsWith("bull-r")
-    || nodeId.startsWith("bear-r")
-  ) { return 2; }
-  // 风险评估阶段节点 → 阶段 3
-  // - value-investor：巴菲特框架（与 risk-evaluator 并行运行）
-  // - risk-agg / risk-con / risk-neu：激进/保守/中性风险评估
-  // - research-mgr：研究主管
-  // - p-risk-assess：装饰容器
-  if (
-    nodeId === "value-investor" || nodeId.startsWith("risk-") || nodeId === "research-mgr"
-    || nodeId === "p-risk-assess"
-  ) { return 3; }
-  // 决策阶段节点 → 阶段 4
-  if (nodeId === "trader" || nodeId === "portfolio-mgr") { return 4; }
-  // 决策后处理节点 → 阶段 4（最大阶段，进度 100%）
-  if (nodeId === "agg-risk" || nodeId === "cls-risk-level" || nodeId === "v-validate" || nodeId === "notify-result") {
-    return 4;
-  }
-  // P3 (real-nodes) 决策辅助节点：
-  // - data-quality：数据质量检查（v-validate 之后启动）→ 阶段 3
-  // - raw-data：12 个 t-* 工具节点原始数据聚合（t-risk 之后启动）→ 阶段 3
-  // - rule-check：硬性规则检查（portfolio-mgr 之后启动）→ 阶段 4
-  if (nodeId === "data-quality" || nodeId === "raw-data") { return 3; }
-  if (nodeId === "rule-check") { return 4; }
-  return -1;
+  return matchNodeClass(nodeId)?.stage ?? -1;
 }
 
 // 暴露给单元测试使用
-export { inferStage };
-
-// ── Decision Timeline helpers（Phase 8）──
+export { inferStage, NODE_CLASS_TABLE };
 
 /** 从节点 ID 推断时间线 4 阶段之一；非业务节点返回 null 不进 timeline */
 function inferTimelinePhase(nodeId: string): TimelinePhase | null {
-  // scan: 工具节点（数据采集）
-  if (nodeId.startsWith("t-")) { return "scan"; }
-  // diagnose: 分析师节点
-  if (nodeId.startsWith("a-")) { return "diagnose"; }
-  // debate: bull/bear 辩论（含早期别名）
-  if (
-    nodeId === "bull-researcher" || nodeId === "bear-researcher" || nodeId.startsWith("bull-r")
-    || nodeId.startsWith("bear-r")
-  ) { return "debate"; }
-  // decide: 决策与决策后处理
-  if (
-    nodeId === "trader" || nodeId === "portfolio-mgr" || nodeId === "rule-check"
-    || nodeId === "value-investor" || nodeId === "research-mgr" || nodeId.startsWith("risk-")
-  ) { return "decide"; }
-  return null;
+  return matchNodeClass(nodeId)?.phase ?? null;
 }
 
 /** Agent 显示名：去前缀 + 首字母大写。a-tech-analyst → Tech Analyst */
@@ -1429,42 +1461,5 @@ function agentDisplayName(nodeId: string): string {
 function inferEvidenceRefs(
   nodeId: string,
 ): Array<{ tabKey: "market" | "analyze" | "execute"; panelKey: string }> {
-  // 工具节点 → 行情/概念面板
-  if (nodeId === "t-fundamentals-data" || nodeId === "t-valuation") {
-    return [{ tabKey: "market", panelKey: "concepts" }];
-  }
-  if (nodeId === "t-news-data" || nodeId === "t-policy-data") {
-    return [{ tabKey: "market", panelKey: "announcements" }];
-  }
-  if (nodeId === "t-research-data") {
-    return [{ tabKey: "market", panelKey: "industry" }];
-  }
-  if (nodeId === "t-scoring") {
-    return [{ tabKey: "market", panelKey: "screener" }];
-  }
-  if (nodeId === "t-risk") {
-    return [{ tabKey: "market", panelKey: "north" }];
-  }
-  // 分析师节点 → 报告
-  if (nodeId.startsWith("a-")) {
-    return [{ tabKey: "analyze", panelKey: "analysts" }];
-  }
-  // 辩论 → 辩论
-  if (nodeId.startsWith("bull-") || nodeId.startsWith("bear-")) {
-    return [{ tabKey: "analyze", panelKey: "debate" }];
-  }
-  // 风险/研究/价值/规则
-  if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
-    return [{ tabKey: "analyze", panelKey: "risk" }];
-  }
-  if (nodeId === "value-investor") {
-    return [{ tabKey: "analyze", panelKey: "value" }];
-  }
-  if (nodeId === "trader") {
-    return [{ tabKey: "execute", panelKey: "trade" }];
-  }
-  if (nodeId === "portfolio-mgr" || nodeId === "rule-check") {
-    return [{ tabKey: "analyze", panelKey: "decision" }];
-  }
-  return [];
+  return matchNodeClass(nodeId)?.evidence ?? [];
 }

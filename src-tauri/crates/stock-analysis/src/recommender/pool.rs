@@ -229,6 +229,8 @@ pub fn required_vendors_for_style(
         Reversion => &["eastmoney", "tencent", "ths", "akshare"],
         // 候选池兜底：只依赖实时 quote
         Watchlist => &["tencent", "eastmoney", "mootdx"],
+        // Serenity：依赖财务数据做确定性验证
+        Serenity => &["eastmoney", "ths", "akshare"],
     }
 }
 
@@ -290,6 +292,7 @@ mod tests {
             Style::Capital,
             Style::Reversion,
             Style::Watchlist,
+            Style::Serenity,
         ] {
             let v = required_vendors_for_style(s);
             assert!(!v.is_empty(), "{:?} missing vendors", s);

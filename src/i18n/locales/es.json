@@ -8228,7 +8228,8 @@
       "crossCheckTitle": "Verificación cruzada (últ. {{updatedAt}})",
       "dataQualitySummary": "{{real}} real + {{synthetic}} respaldo",
       "backtestWinrate": "Tasa de acierto",
-      "bannerDegraded": "Los estilos de datos {{styles}} se redujeron en fidelidad (as-of {{date}}). Trate su confianza como inferior a la de los estilos no degradados."
+      "bannerDegraded": "Los estilos de datos {{styles}} se redujeron en fidelidad (as-of {{date}}). Trate su confianza como inferior a la de los estilos no degradados.",
+      "styleSerenity": "Caza de cuellos de botella"
     },
     "periodUltraShort": "Corto",
     "periodShort": "Corto",
@@ -8550,5 +8551,32 @@
     "notice": "Todos los datos, prompts y veredictos de este banco de trabajo están anclados a la fecha elegida. Volver al modo En vivo requiere confirmación explícita.",
     "exitHint": "Aún está en modo Replay. Cualquier análisis nuevo iniciado en otro lugar también estará anclado al replay.",
     "exitBtn": "Volver a En vivo"
+  },
+  "serenityPanel": {
+    "desc": "Método de cuellos de botella Serenity: cribar automáticamente acciones potenciales descubriendo enlaces de cuellos de botella en la cadena industrial a partir de datos del mercado",
+    "run": "Ejecutar cribado Serenity",
+    "running": "Cribando...",
+    "stage_loading": "Cargando plantilla de flujo de trabajo...",
+    "stage_scanning": "Etapa 0/4: Escaneando tendencias del mercado",
+    "stage_decomposing": "Etapa 1/4: Descomponiendo cadena industrial",
+    "stage_identifying": "Etapa 2/4: Identificando enlaces de cuellos de botella",
+    "stage_mapping": "Etapa 3/4: Mapeando empresas candidatas",
+    "stage_saving": "Etapa 4/4: Guardando resultados",
+    "stage_done": "Cribado completado",
+    "stage_error": "Fallo en el cribado",
+    "analyizing": "Analizando datos de la cadena industrial, el razonamiento LLM requiere 1-3 minutos...",
+    "trendTitle": "Tendencias industriales descubiertas",
+    "bottleneckLink": "Enlace de cuello de botella: ",
+    "candidateTitle": "Objetivos candidatos",
+    "directBenefit": "Beneficiario directo",
+    "indirectBenefit": "Beneficiario indirecto",
+    "themeRelated": "Tema relacionado",
+    "bottleneckProduct": "Producto de cuello de botella: ",
+    "riskPrefix": "Riesgo: ",
+    "confidencePrefix": "Confianza ",
+    "scoreSuffix": " puntos",
+    "emptyHint": "Haga clic en el botón de arriba para ejecutar el cribado de cuellos de botella Serenity",
+    "errorUnknown": "Error desconocido",
+    "callFailed": "Llamada fallida"
   }
 }

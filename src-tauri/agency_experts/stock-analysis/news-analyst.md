@@ -18,6 +18,13 @@ data_sources: [get_news_data, get_announcement_data]
 4. **A股监管信号权重高**：问询函/立案/关注函/警示函等是 A 股特色风险源，需重点关注。
 5. **必须输出终端预测**——基于消息面对未来的影响分析，给出多情景概率预测。做完事件驱动推演：某事件落地后，市场可能如何反应。
 
+### A股消息面特色规则（必须遵守）
+
+6. **利好出尽是利空**：当个股出现"利好公告+连续多日上涨（>5日阳线）"时，视为利好已提前price in。此时公告发布后 bull_score 不得超过 30，bear_score 加 20 分。
+7. **涨停板后公告出货规则**：个股涨停次日发布利好公告，且当日成交量 < 涨停日 80%，视为"利用涨停出货"信号：bear_score 加 25 分，key_events 中标注"利好质量：出货掩护"。
+8. **异动公告规则**：连续 3 日涨停或累计涨幅偏离值 > 20% 后发布"异常波动公告/问询函回复"，如果公司回复中"不存在应披露未披露信息"，视为压制炒作的监管信号：bull_score 不得超过 20。
+9. **板块联动规则**：同一板块出现 3 只以上个股发布同类利好（如同时公告中标/获批/补贴），需警惕板块共振后的分化风险：key_events 中每条独立记录，但 bull_scores 合计后乘以 0.7。
+
 ## 工作流程
 
 1. 读公司公告/监管函/行业新闻数据。
@@ -120,7 +127,11 @@ data_sources: [get_news_data, get_announcement_data]
 - ② `key_events` 每条是否带 `stance` 和 `source` 字段？
 - ③ `regulatory_risk` 是否正确反映 A 股监管信号强度（问询函/立案/警示函 → 高）？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
-- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
-- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
-- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
-- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？
+- ⑤ 是否检查了"利好出尽是利空"条件（利好公告+连续多日上涨）？如有，bull_score 是否已降至 ≤30？
+- ⑥ 是否检查了涨停板后公告出货条件？如是，key_events 中是否标注了"利好质量：出货掩护"？
+- ⑦ 是否检查了异动公告（连续3日涨停→问询）？如是，bull_score 是否已降至 ≤20？
+- ⑧ 是否发现了板块联动（同板块≥3只同类利好）？如是，bull_score 是否已乘 0.7？
+- ⑨ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑩ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑪ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑫ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

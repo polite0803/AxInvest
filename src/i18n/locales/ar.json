@@ -8366,7 +8366,8 @@
       "styleReversion": "Mean Reversion",
       "styleTrend": "Trend Following",
       "styleValue": "Value Investing",
-      "styleWatchlist": "Watchlist"
+      "styleWatchlist": "Watchlist",
+      "styleSerenity": "صيد الاختناقات"
     },
     "periodUltraShort": "Short",
     "periodShort": "Short",
@@ -8941,5 +8942,32 @@
       "totalPnl": "Total P&L",
       "totalRows": "{{count}} records"
     }
+  },
+  "serenityPanel": {
+    "desc": "طريقة اختناقات Serenity: فحص تلقائي للأسهم المحتملة من خلال اكتشاف روابط اختناق في سلسلة الصناعة من بيانات السوق",
+    "run": "تشغيل فحص Serenity",
+    "running": "جاري الفحص...",
+    "stage_loading": "جاري تحميل قالب سير العمل...",
+    "stage_scanning": "المرحلة 0/4: مسح اتجاهات السوق",
+    "stage_decomposing": "المرحلة 1/4: تفكيك سلسلة الصناعة",
+    "stage_identifying": "المرحلة 2/4: تحديد روابط الاختناق",
+    "stage_mapping": "المرحلة 3/4: ربط الشركات المرشحة",
+    "stage_saving": "المرحلة 4/4: حفظ النتائج",
+    "stage_done": "اكتمل الفحص",
+    "stage_error": "فشل الفحص",
+    "analyizing": "جاري تحليل بيانات سلسلة الصناعة, يتطلب استنتاج LLM 1-3 دقائق...",
+    "trendTitle": "اتجاهات الصناعة المكتشفة",
+    "bottleneckLink": "رابط الاختناق: ",
+    "candidateTitle": "الأهداف المرشحة",
+    "directBenefit": "مستفيد مباشر",
+    "indirectBenefit": "مستفيد غیر مباشر",
+    "themeRelated": "موضوع ذو صلة",
+    "bottleneckProduct": "منتج الاختناق: ",
+    "riskPrefix": "المخاطر: ",
+    "confidencePrefix": "الثقة ",
+    "scoreSuffix": " نقطة",
+    "emptyHint": "انقر على الزر أعلاه لتشغيل فحص اختناقات Serenity",
+    "errorUnknown": "خطأ غير معروف",
+    "callFailed": "فشل الاتصال"
   }
 }

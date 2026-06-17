@@ -32,8 +32,8 @@ use crate::recommender::pool::{
 };
 use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim};
 use crate::recommender::strategies::{
-    emit_synthetic_picks, CapitalStrategy, ReversionStrategy, TrendStrategy, ValueStrategy,
-    WatchlistStrategy,
+    emit_synthetic_picks, CapitalStrategy, ReversionStrategy, SerenityStrategy, TrendStrategy,
+    ValueStrategy, WatchlistStrategy,
 };
 use crate::recommender::strategy::PerCodeLocks;
 
@@ -67,6 +67,7 @@ pub(crate) fn parse_strategy_weights(
                 Some("capital") => Style::Capital,
                 Some("reversion") => Style::Reversion,
                 Some("watchlist") => Style::Watchlist,
+                Some("serenity") => Style::Serenity,
                 _ => continue,
             };
             let period = match parts.next() {
@@ -108,6 +109,7 @@ struct RecoConfig {
     value_enabled: bool,
     capital_enabled: bool,
     watchlist_enabled: bool,
+    serenity_enabled: bool,
     min_confidence: u8,
 }
 
@@ -119,6 +121,7 @@ impl Default for RecoConfig {
             value_enabled: true,
             capital_enabled: true,
             watchlist_enabled: true,
+            serenity_enabled: true,
             min_confidence: 0, // 0 = 不筛选
         }
     }
@@ -164,6 +167,11 @@ fn parse_reco_config(template_vars: &[(String, serde_json::Value)]) -> RecoConfi
             "reco_watchlist_enabled" => {
                 if let Some(v) = bool_val() {
                     cfg.watchlist_enabled = v;
+                }
+            },
+            "reco_serenity_enabled" => {
+                if let Some(v) = bool_val() {
+                    cfg.serenity_enabled = v;
                 }
             },
             "reco_min_confidence" => {
@@ -269,6 +277,7 @@ pub async fn recommend_stocks(
             Box::new(ValueStrategy::mid()),
             Box::new(CapitalStrategy::mid()),
             Box::new(ReversionStrategy::mid()),
+            Box::new(SerenityStrategy::mid()),
             Box::new(WatchlistStrategy::mid()),
         ],
         Period::Long => vec![
@@ -276,6 +285,7 @@ pub async fn recommend_stocks(
             Box::new(ValueStrategy::long()),
             Box::new(CapitalStrategy::long()),
             // ReversionStrategy long 不做
+            Box::new(SerenityStrategy::long()),
             Box::new(WatchlistStrategy::long()),
         ],
     };
@@ -294,6 +304,7 @@ pub async fn recommend_stocks(
                 Style::Capital => reco_cfg.capital_enabled,
                 Style::Reversion => reco_cfg.reversion_enabled,
                 Style::Watchlist => reco_cfg.watchlist_enabled,
+                Style::Serenity => reco_cfg.serenity_enabled,
             };
             if !ok {
                 disabled_styles_set.insert(s.style());
@@ -432,6 +443,7 @@ pub async fn recommend_stocks(
             Style::Capital,
             Style::Reversion,
             Style::Watchlist,
+            Style::Serenity,
         ] {
             // 用户已禁用的风格不补充合成 picks
             if disabled_styles_set.contains(&style) {

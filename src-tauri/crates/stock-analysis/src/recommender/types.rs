@@ -17,6 +17,10 @@ pub enum Style {
     /// 候选池兜底：仅依赖 quote 数据的"系统初筛"列表，
     /// 当 4 个主风格都拿不到数据时充当 fallback，确保面板始终有内容
     Watchlist,
+    /// Serenity 瓶颈分析：基于产业链供应链拆解的选股策略，
+    /// 种子池由 serenity-screening workflow 生成，
+    /// 确定性扫描验证财务/估值/扩产周期信号
+    Serenity,
 }
 
 impl Style {
@@ -27,6 +31,7 @@ impl Style {
             Style::Capital => "capital",
             Style::Reversion => "reversion",
             Style::Watchlist => "watchlist",
+            Style::Serenity => "serenity",
         }
     }
 }

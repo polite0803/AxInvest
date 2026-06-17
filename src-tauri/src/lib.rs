@@ -970,6 +970,7 @@ pub fn run() {
             commands::stock_analysis::get_stock_kline,
             commands::stock_workflow::run_stock_workflow,
             commands::stock_workflow::cancel_stock_workflow,
+            commands::stock_workflow::run_serenity_screening,
             commands::stock_analysis::cancel_stock_analysis,
             commands::stock_analysis::compute_what_if,
             commands::stock_analysis::replay_tool_chain,

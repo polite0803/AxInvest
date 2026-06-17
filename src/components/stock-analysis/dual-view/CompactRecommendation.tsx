@@ -26,6 +26,7 @@ const STYLE_LABEL: Record<string, string> = {
   value: "价值",
   capital: "资金",
   reversion: "反转",
+  serenity: "瓶颈",
 };
 
 const STYLE_COLOR: Record<string, string> = {
@@ -33,6 +34,7 @@ const STYLE_COLOR: Record<string, string> = {
   value: "gold",
   capital: "magenta",
   reversion: "green",
+  serenity: "purple",
 };
 
 interface CompactRecommendationProps {

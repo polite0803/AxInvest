@@ -7,6 +7,7 @@ use crate::AppState;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_core::entity::stock_analyses;
 use axagent_core::entity::stock_reflections;
+use axagent_core::entity::reco_picks;
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
@@ -1383,6 +1384,151 @@ pub async fn run_reflection_workflow(
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
+            Err(err_msg)
+        },
+    }
+}
+
+// ── Serenity 瓶颈筛选工作流 ──
+
+/// 运行 Serenity 瓶颈筛选工作流（serenity-screening 模板）。
+///
+/// 与 run_stock_workflow 不同：
+///   - 不需要 stock_code 输入（自驱动，从市场数据发现趋势）
+///   - 不写 stock_analyses 表
+///   - 返回候选股清单（而非单只股票的分析结论）
+#[tauri::command]
+pub async fn run_serenity_screening(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let engine = Arc::clone(&state.work_engine);
+
+    // 1. 加载 serenity-screening 模板
+    let loaded = load_and_inject_template(
+        state.harness.db(),
+        "",
+        "",
+        "serenity-screening",
+    )
+    .await?;
+
+    let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
+
+    // 2. 创建 Workflow
+    let wf_name = format!("serenity-screening-{}", chrono::Utc::now().timestamp_millis());
+    let workflow = engine
+        .create_workflow(&wf_name, loaded.nodes, loaded.edges)
+        .await
+        .map_err(|e| format!("创建工作流失败: {e}"))?;
+    let wf_id = workflow.id.clone();
+    let wf_id_ret = wf_id.clone();
+    let app_h = app.clone();
+
+    // 3. 进度回调
+    let progress_app = app.clone();
+    let progress_wf_id = wf_id.clone();
+    let progress_cb: ProgressCallback = Arc::new(move |event: StepProgressEvent| {
+        let app = progress_app.clone();
+        let wf_id = progress_wf_id.clone();
+        Box::pin(async move {
+            let payload = serde_json::json!({
+                "workflowId": wf_id,
+                "type": "serenity-screening",
+                "nodeId": event.node_id,
+                "status": event.status,
+                "totalNodes": event.total_nodes,
+                "completedNodes": event.completed_nodes,
+                "output": event.output,
+                "elapsedMs": event.elapsed_ms,
+            });
+            let _ = app.emit("serenity-screening-step", payload);
+        })
+    });
+
+    // 4. 运行
+    let opts = RunOptions {
+        max_concurrent,
+        step_timeout,
+        progress_callback: Some(progress_cb),
+        input: None,
+        input_schema: loaded.input_schema.clone(),
+        output_schema: loaded.output_schema.clone(),
+        dry_run: false,
+        ..Default::default()
+    };
+
+    match engine.run_workflow(&wf_id, opts).await {
+        Ok(result) => {
+            let candidates = result
+                .results
+                .get("a-candidate-mapper")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+
+            // 持久化 Serenity 候选到 reco_picks 表（style="serenity"）
+            {
+                let db = state.harness.db();
+                let now_str = chrono::Utc::now().to_rfc3339();
+                let ts_ms = chrono::Utc::now().timestamp_millis();
+                // candidates 可能是 { candidates: [...] } 对象，也可能是原始数组
+                let candidate_list: Vec<&serde_json::Value> = candidates
+                    .as_object()
+                    .and_then(|obj| obj.get("candidates"))
+                    .and_then(|v| v.as_array())
+                    .or_else(|| candidates.as_array())
+                    .map(|arr| arr.iter().collect())
+                    .unwrap_or_default();
+                for (i, c) in candidate_list.iter().enumerate() {
+                    let code = c["stock_code"].as_str().unwrap_or("");
+                    let name = c["stock_name"].as_str().unwrap_or("");
+                    let conf = c["confidence"].as_i64().unwrap_or(50) as i32;
+                    if code.is_empty() {
+                        continue;
+                    }
+                    let pick_id = format!("serenity-{ts_ms}-{i}-{code}");
+                    reco_picks::ActiveModel {
+                        id: Set(pick_id),
+                        generated_at: Set(now_str.clone()),
+                        period: Set("mid".to_string()),
+                        stock_code: Set(code.to_string()),
+                        stock_name: Set(name.to_string()),
+                        style: Set("serenity".to_string()),
+                        confidence: Set(conf),
+                        synthetic: Set(0),
+                        seed_pool_json: Set(None),
+                        strategy_weights_json: Set(None),
+                        created_at: Set(now_str.clone()),
+                    }
+                    .insert(db)
+                    .await
+                    .map_err(|e| format!("写入 Serenity 候选到 reco_picks 失败: {e}"))?;
+                }
+            }
+
+            let _ = app_h.emit(
+                "serenity-screening-completed",
+                serde_json::json!({
+                    "workflowId": wf_id_ret,
+                    "status": "completed",
+                    "result": candidates,
+                }),
+            );
+            Ok(serde_json::json!({
+                "status": "completed",
+                "candidates": candidates,
+            }))
+        },
+        Err(e) => {
+            let err_msg = format!("Serenity 筛选工作流失败: {e}");
+            let _ = app_h.emit(
+                "serenity-screening-completed",
+                serde_json::json!({
+                    "workflowId": wf_id_ret,
+                    "status": "failed",
+                    "error": err_msg,
+                }),
+            );
             Err(err_msg)
         },
     }

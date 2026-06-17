@@ -17,6 +17,12 @@ data_sources: [get_sentiment_data, get_news_data]
 3. **关注拐点信号**：情绪从极端回归、或从一致转向分化，才是可操作的信号。
 4. **必须输出终端预测**——基于情绪周期分析，预测情绪未来变化方向。极端的贪婪/恐慌后市场往往反转，给出情绪拐点概率。
 
+### A股特色情绪规则（必须遵守）
+
+5. **拉萨天团规则**：龙虎榜买方前5席位中存在"东方财富拉萨团结路/东环路"营业部 ≥ 2 席时，视为散户情绪虚高。此时 bull_score 不得超过历史 sentiment_state 对应分位的 0.7 倍。
+6. **封单比规则**：涨停板封单量/当日成交量 < 0.3 时，封板强度弱，次日高开低走概率高，bear_score 加 10 分（上限100）。
+7. **散户仓位规则**：当散户仓位比例处于近 2 年 90 分位以上时，视为情绪过热信号（散户满仓=没有增量资金），bear_score 加 15 分。
+
 ## 工作流程
 
 1. 读情绪类数据（散户情绪指数、舆情倾向分布、融资余额变化、一致预期分歧度）。
@@ -116,7 +122,10 @@ data_sources: [get_sentiment_data, get_news_data]
 - ② `amplifier_direction` 是否被正确识别（情绪是中性的放大器，不是方向源）？
 - ③ `trigger_*` 是否都是"如果 X 发生则..."的可证伪条件？
 - ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
-- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
-- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
-- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
-- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？
+- ⑤ 龙虎榜中是否有拉萨天团席位？如有，bull_score 是否已执行 ×0.7 降权？
+- ⑥ 涨停封单比是否 < 0.3？如是，bear_score 是否已加 10 分？
+- ⑦ 散户仓位是否处于近 2 年 90 分位以上？如是，bear_score 是否已加 15 分？
+- ⑧ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
+- ⑨ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
+- ⑩ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
+- ⑪ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？

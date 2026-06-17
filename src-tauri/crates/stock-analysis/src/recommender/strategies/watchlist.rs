@@ -272,6 +272,7 @@ async fn scan_synthetic_one(
         Style::Capital => "资金驱动",
         Style::Reversion => "超跌反弹",
         Style::Watchlist => "系统初筛",
+        Style::Serenity => "瓶颈掘金（Serenity 合成）",
     };
 
     let (entry_low, entry_high, stop_loss, target_price, base_position, holding_days, reason) =

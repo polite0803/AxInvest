@@ -8348,7 +8348,8 @@
       "crossCheckTitle": "分析師交叉驗證 (更新於 {{updatedAt}})",
       "dataQualitySummary": "{{real}} 真實 + {{synthetic}} 兜底",
       "backtestWinrate": "勝率",
-      "bannerDegraded": "資料風格 {{styles}} 因 as-of {{date}} 截斷,已以降級模式輸出,請低於非降級風格的可信度處理。"
+      "bannerDegraded": "資料風格 {{styles}} 因 as-of {{date}} 截斷,已以降級模式輸出,請低於非降級風格的可信度處理。",
+      "styleSerenity": "瓶頸掘金"
     },
     "periodUltraShort": "超短线",
     "periodShort": "短期",
@@ -8673,5 +8674,32 @@
     "notice": "此工作台中的所有資料、提示詞與結論都以選定日期為錨點。切回 Live 模式需要顯式確認。",
     "exitHint": "你仍在回放模式。在別處發起的任何新分析都會帶 as-of 錨點。",
     "exitBtn": "切回 Live"
+  },
+  "serenityPanel": {
+    "desc": "Serenity 瓶頸分析法：從市場數據中發現產業鏈瓶頸環節，自動篩選潛在標的",
+    "run": "運行 Serenity 篩選",
+    "running": "篩選中...",
+    "stage_loading": "載入工作流範本...",
+    "stage_scanning": "階段 0/4: 掃描市場趨勢",
+    "stage_decomposing": "階段 1/4: 拆解產業鏈",
+    "stage_identifying": "階段 2/4: 鑑定瓶頸環節",
+    "stage_mapping": "階段 3/4: 映射候選公司",
+    "stage_saving": "階段 4/4: 儲存結果",
+    "stage_done": "篩選完成",
+    "stage_error": "篩選失敗",
+    "analyzing": "正在分析產業鏈數據，LLM 推理需要 1-3 分鐘...",
+    "trendTitle": "發現的產業趨勢",
+    "bottleneckLink": "瓶頸環節: ",
+    "candidateTitle": "候選標的",
+    "directBenefit": "直接受益",
+    "indirectBenefit": "間接受益",
+    "themeRelated": "主題相關",
+    "bottleneckProduct": "瓶頸產品: ",
+    "riskPrefix": "風險: ",
+    "confidencePrefix": "置信度 ",
+    "scoreSuffix": "分",
+    "emptyHint": "點擊上方按鈕運行 Serenity 瓶頸篩選",
+    "errorUnknown": "未知錯誤",
+    "callFailed": "呼叫失敗"
   }
 }

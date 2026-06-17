@@ -36,13 +36,14 @@ const noop = () => {};
 // entryHigh/stopLoss/targetPrice/positionPct/holdingDays/riskNotes 等)。
 // 这里不再保留本地 panel-specific 富化类型。
 
-const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist"];
+const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist", "serenity"];
 const STYLE_COLOR: Record<StyleKey, string> = {
   trend: "blue",
   value: "gold",
   capital: "magenta",
   reversion: "green",
   watchlist: "default",
+  serenity: "purple",
 };
 
 const FALLBACK = "—";

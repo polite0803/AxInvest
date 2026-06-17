@@ -7728,9 +7728,37 @@
     "placeholder": "Filter stocks by conditions",
     "tab": {
       "myFilter": "My Filters",
-      "smartReco": "Smart Recommendations"
+      "smartReco": "Smart Recommendations",
+      "serenity": "Bottleneck Hunt"
     },
     "title": "Stock Screener"
+  },
+  "serenityPanel": {
+    "desc": "Serenity bottleneck method: automatically screen potential stocks by discovering bottleneck links in the industry chain from market data",
+    "run": "Run Serenity Screen",
+    "running": "Screening...",
+    "stage_loading": "Loading workflow template...",
+    "stage_scanning": "Stage 0/4: Scanning market trends",
+    "stage_decomposing": "Stage 1/4: Decomposing industry chain",
+    "stage_identifying": "Stage 2/4: Identifying bottleneck links",
+    "stage_mapping": "Stage 3/4: Mapping candidate companies",
+    "stage_saving": "Stage 4/4: Saving results",
+    "stage_done": "Screening completed",
+    "stage_error": "Screening failed",
+    "analyzing": "Analyzing industry chain data, LLM reasoning requires 1-3 minutes...",
+    "trendTitle": "Discovered industry trends",
+    "bottleneckLink": "Bottleneck link: ",
+    "candidateTitle": "Candidate targets",
+    "directBenefit": "Direct beneficiary",
+    "indirectBenefit": "Indirect beneficiary",
+    "themeRelated": "Theme related",
+    "bottleneckProduct": "Bottleneck product: ",
+    "riskPrefix": "Risk: ",
+    "confidencePrefix": "Confidence ",
+    "scoreSuffix": " points",
+    "emptyHint": "Click the button above to run Serenity bottleneck screening",
+    "errorUnknown": "Unknown error",
+    "callFailed": "Call failed"
   },
   "stockAnalysis": {
     "actionBuy": "Buy",
@@ -8194,6 +8222,7 @@
       "styleTrend": "Trend Following",
       "styleValue": "Value Investing",
       "styleWatchlist": "Watchlist",
+      "styleSerenity": "Bottleneck Hunt",
       "syntheticTooltip": "Data-sparse fallback",
       "tagReal": "Real",
       "tagSynthetic": "Fallback",

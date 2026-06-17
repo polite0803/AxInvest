@@ -220,7 +220,7 @@ export interface LatestAnalysisSummary {
 // 与后端 crates/stock-analysis/src/recommender/types.rs::RecoPick 一一对应,
 // 字段顺序、类型、可选性保持一致(camelCase 由 serde rename_all 转换)。
 
-export type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist";
+export type StyleKey = "trend" | "value" | "capital" | "reversion" | "watchlist" | "serenity";
 export type PeriodKey = "ultra_short" | "short" | "mid" | "long";
 
 /** 荐股单条 pick — 完整字段版,直接对应后端 schema */

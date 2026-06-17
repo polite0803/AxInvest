@@ -7,6 +7,7 @@ import { DragonTigerPanel } from "./DragonTigerPanel";
 import { HotStocksPanel } from "./HotStocksPanel";
 import { LimitUpPanel } from "./LimitUpPanel";
 import { RecommendationPanel } from "./RecommendationPanel";
+import { SerenityScreeningPanel } from "./SerenityScreeningPanel";
 import { StockScreenerPanel } from "./StockScreenerPanel";
 
 const { useBreakpoint } = Grid;
@@ -59,6 +60,15 @@ export function ScreenerPage() {
                     </span>
                   ),
                   children: <RecommendationPanel />,
+                },
+                {
+                  key: "serenity",
+                  label: (
+                    <span className="text-sm font-medium">
+                      {t("screener.tab.serenity")}
+                    </span>
+                  ),
+                  children: <SerenityScreeningPanel />,
                 },
                 {
                   key: "screen",

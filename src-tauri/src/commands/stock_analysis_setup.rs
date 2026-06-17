@@ -89,6 +89,23 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         include_str!("../../agency_experts/stock-analysis/debate-convergence.md"),
     ),
     ("reflection", include_str!("../../agency_experts/stock-analysis/reflection.md")),
+    // ── Serenity 瓶颈分析 4 专家 ──
+    (
+        "trend-scanner",
+        include_str!("../../agency_experts/stock-analysis/trend-scanner.md"),
+    ),
+    (
+        "chain-decomposer",
+        include_str!("../../agency_experts/stock-analysis/chain-decomposer.md"),
+    ),
+    (
+        "chokepoint-identifier",
+        include_str!("../../agency_experts/stock-analysis/chokepoint-identifier.md"),
+    ),
+    (
+        "candidate-mapper",
+        include_str!("../../agency_experts/stock-analysis/candidate-mapper.md"),
+    ),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -116,6 +133,11 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("catalyst-analyst", "stock-analyst"),
     ("debate-convergence", "debater"),
     ("reflection", "decision-maker"),
+    // ── Serenity 瓶颈分析师 ──
+    ("trend-scanner", "stock-analyst"),
+    ("chain-decomposer", "stock-analyst"),
+    ("chokepoint-identifier", "stock-analyst"),
+    ("candidate-mapper", "stock-analyst"),
 ];
 
 struct StockRoleDef {
@@ -319,6 +341,56 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "search_stock",
         ],
     ),
+    // ── Serenity 瓶颈分析 4 专家工具映射 ──
+    // trend-scanner: 扫描宏观数据发现产业趋势，需全天候监控类工具
+    (
+        "trend-scanner",
+        &[
+            "get_hot_stocks",
+            "get_industry_ranking",
+            "get_cls_flash",
+            "get_concept_blocks",
+            "get_north_bound_flow",
+            "get_market_dragon_tiger",
+            "search_stock",
+        ],
+    ),
+    // chain-decomposer: 拆解产业链，需行业/概念/同业数据
+    (
+        "chain-decomposer",
+        &[
+            "get_concept_blocks",
+            "get_stock_peers",
+            "get_stock_news",
+            "get_industry_ranking",
+            "search_stock",
+        ],
+    ),
+    // chokepoint-identifier: 验证瓶颈假设，需财务/研报数据
+    (
+        "chokepoint-identifier",
+        &[
+            "get_stock_financials",
+            "get_research_reports",
+            "get_consensus_eps",
+            "get_stock_peers",
+            "get_stock_news",
+            "search_stock",
+        ],
+    ),
+    // candidate-mapper: 映射候选公司，需财务/估值/调研数据
+    (
+        "candidate-mapper",
+        &[
+            "get_stock_financials",
+            "get_stock_quote",
+            "compute_valuation",
+            "get_institutional_visits",
+            "get_research_reports",
+            "get_stock_news",
+            "search_stock",
+        ],
+    ),
 ];
 
 pub async fn ensure_stock_analysis_experts_seeded(
@@ -329,6 +401,7 @@ pub async fn ensure_stock_analysis_experts_seeded(
     seed_agent_profiles(db).await?;
     seed_stock_analysis_workflow_template(db).await?;
     seed_reflection_workflow_template(db).await?;
+    seed_serenity_screening_workflow_template(db).await?;
     // seed_debate_subworkflow(db).await?;  // 辩论子工作流未引用，暂不种子化
     Ok(())
 }
@@ -4161,6 +4234,11 @@ fn expert_id_to_display(id: &str) -> String {
         "trader" => "交易员".to_string(),
         "value-investor" => "价值投资者（巴菲特框架）".to_string(),
         "catalyst-analyst" => "催化剂与叙事分析师".to_string(),
+        // ── Serenity 瓶颈分析师 ──
+        "trend-scanner" => "产业趋势扫描器".to_string(),
+        "chain-decomposer" => "产业链拆解师".to_string(),
+        "chokepoint-identifier" => "瓶颈鉴定师".to_string(),
+        "candidate-mapper" => "候选公司映射器".to_string(),
         o => o.to_string(),
     }
 }
@@ -4602,5 +4680,548 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     tracing::info!(
         "[stock_analysis_setup] 反思复盘工作流模板已创建 (stock-reflection, SubWorkflowNode 嵌套)"
     );
+    Ok(())
+}
+
+/// 创建 Serenity 瓶颈筛选工作流模板（serenity-screening）。
+///
+/// ── Phase 0: 趋势扫描 ──
+///   t-hot-stocks / t-industry-rank / t-cls-flash / t-concept / t-northbound
+///   → a-trend-scanner (LLM Agent, 输出 2-3 个趋势)
+///
+/// ── Phase 1: 并行瓶颈分析（对每个趋势）──
+///   a-chain-decomposer   → 供应链图谱
+///   a-chokepoint-id      → 瓶颈验证
+///
+/// ── Phase 2: 候选映射 ──
+///   t-candidates          → 财务数据验证
+///   a-candidate-mapper    → 最终候选股清单
+///
+/// ── Phase 3: 持久化 ──
+///   StorageNode → 写入 serenity_candidate_pool 表，
+///                 供 SerenityStrategy 读取作为 seed pool
+///
+/// 输入：无（自驱动，从市场数据中发现趋势）
+/// 输出：JSON { candidates: [{stock_code, stock_name, serenity_score, ...}, ...] }
+async fn seed_serenity_screening_workflow_template(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<(), String> {
+    use axagent_core::entity::workflow_template;
+    use axagent_harness::workflow_types::{
+        AgentNode, AgentNodeConfig, EdgeType, JsonSchema, JsonSchemaProperty, OutputMode, Position,
+        RetryConfig, StorageNode, StorageNodeConfig, ToolDef, ToolNode, ToolNodeConfig,
+        TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase,
+    };
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    const TEMPLATE_ID: &str = "serenity-screening";
+    const TEMPLATE_VERSION: i32 = 1;
+
+    // 检查模板是否已存在且是最新版本
+    if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+        .one(db)
+        .await
+        .map_err(|e| format!("查询工作流模板失败: {e}"))?
+    {
+        if existing.version >= TEMPLATE_VERSION {
+            tracing::info!(
+                "[stock_analysis_setup] Serenity 模板已是最新 v{TEMPLATE_VERSION}，跳过"
+            );
+            return Ok(());
+        }
+        tracing::info!(
+            "[stock_analysis_setup] 更新 Serenity 模板 v{} → v{TEMPLATE_VERSION}",
+            existing.version
+        );
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // ── ToolDef 定义 ──
+    let td_hot = ToolDef {
+        name: "get_hot_stocks".into(),
+        description: Some("获取市场热门股".into()),
+        parameters: None,
+    };
+    let td_industry = ToolDef {
+        name: "get_industry_ranking".into(),
+        description: Some("获取行业涨跌排名".into()),
+        parameters: None,
+    };
+    let td_cls = ToolDef {
+        name: "get_cls_flash".into(),
+        description: Some("获取财联社实时快讯".into()),
+        parameters: None,
+    };
+    let td_concept = ToolDef {
+        name: "get_concept_blocks".into(),
+        description: Some("获取概念板块归属".into()),
+        parameters: None,
+    };
+    let td_north = ToolDef {
+        name: "get_north_bound_flow".into(),
+        description: Some("获取北向资金流向".into()),
+        parameters: None,
+    };
+    let td_dragon = ToolDef {
+        name: "get_market_dragon_tiger".into(),
+        description: Some("获取龙虎榜数据".into()),
+        parameters: None,
+    };
+    let td_fin = ToolDef {
+        name: "get_stock_financials".into(),
+        description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_quote = ToolDef {
+        name: "get_stock_quote".into(),
+        description: Some("获取股票实时行情".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_visits = ToolDef {
+        name: "get_institutional_visits".into(),
+        description: Some("获取机构调研数据".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+
+    let tool_defs: Vec<ToolDef> = vec![
+        td_hot,
+        td_industry,
+        td_cls,
+        td_concept,
+        td_north,
+        td_dragon,
+        td_fin,
+        td_quote,
+        td_visits,
+    ];
+    let tool_defs_json =
+        serde_json::to_string(&tool_defs).map_err(|e| format!("序列化 ToolDef 失败: {e}"))?;
+
+    // ── 快捷构建函数 ──
+    let tool_node = |id: &str,
+                     title: &str,
+                     tool_name: &str,
+                     output_var: &str,
+                     x: f64,
+                     y: f64|
+     -> WorkflowNode {
+        WorkflowNode::Tool(ToolNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: title.into(),
+                description: Some(format!("获取数据: {tool_name}")),
+                position: Position { x, y },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
+                },
+                timeout: Some(120),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: ToolNodeConfig {
+                tool_name: tool_name.into(),
+                input_mapping: std::collections::HashMap::new(),
+                output_var: output_var.into(),
+            },
+        })
+    };
+
+    let agent_node = |id: &str,
+                      title: &str,
+                      expert_id: &str,
+                      system_prompt: &str,
+                      context_sources: Vec<&str>,
+                      input_mapping: std::collections::HashMap<String, String>,
+                      x: f64,
+                      y: f64|
+     -> WorkflowNode {
+        WorkflowNode::Agent(AgentNode {
+            base: WorkflowNodeBase {
+                id: id.into(),
+                title: title.into(),
+                description: Some(format!("Serenity 分析: {expert_id}")),
+                position: Position { x, y },
+                retry: RetryConfig {
+                    enabled: true,
+                    max_retries: 2,
+                    ..Default::default()
+                },
+                timeout: Some(300),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: AgentNodeConfig {
+                system_prompt: system_prompt.into(),
+                context_sources: context_sources.into_iter().map(String::from).collect(),
+                input_mapping,
+                output_var: id.into(),
+                model: None,
+                temperature: Some(0.3),
+                max_tokens: Some(4096),
+                tools: vec![],
+                exposed_tools: vec![],
+                output_mode: OutputMode::Json,
+                agent_profile_id: Some(format!("stock-{expert_id}")),
+                max_tool_rounds: None,
+                execution_mode: None,
+                rag_source_ids: vec![],
+                model_role: None,
+                consistency_check: None,
+                hallucination_guard: None,
+            },
+        })
+    };
+
+    let edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
+        WorkflowEdge {
+            id: id.into(),
+            source: source.into(),
+            source_handle: None,
+            target: target.into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        }
+    };
+
+    // ── 构建节点 ──
+    let mut nodes: Vec<WorkflowNode> = Vec::new();
+    let mut edges: Vec<WorkflowEdge> = Vec::new();
+
+    // Trigger: 手动触发，无需参数（自驱动扫描市场）
+    nodes.push(WorkflowNode::Trigger(TriggerNode {
+        base: WorkflowNodeBase {
+            id: "trigger".into(),
+            title: "启动 Serenity 筛选".into(),
+            description: Some("自动扫描市场数据，发现产业瓶颈机会".into()),
+            position: Position { x: 340.0, y: 0.0 },
+            retry: RetryConfig::default(),
+            timeout: None,
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: TriggerConfig {
+            trigger_type: TriggerType::Manual,
+            config: serde_json::json!({
+                "description": "Serenity 瓶颈筛选: 从市场数据中识别瓶颈环节候选公司",
+                "required_params": []
+            }),
+        },
+    }));
+
+    // ── Phase 0: 数据采集工具（并行） ──
+    let t_names = [
+        ("t-hot-stocks", "市场热门股", "get_hot_stocks", "t-hot-stocks", 40.0, 80.0),
+        (
+            "t-industry-rank",
+            "行业排名",
+            "get_industry_ranking",
+            "t-industry-rank",
+            240.0,
+            80.0,
+        ),
+        ("t-cls-flash", "实时快讯", "get_cls_flash", "t-cls-flash", 440.0, 80.0),
+        ("t-concept", "概念板块", "get_concept_blocks", "t-concept", 640.0, 80.0),
+        ("t-northbound", "北向资金", "get_north_bound_flow", "t-northbound", 840.0, 80.0),
+    ];
+    let t_trend_ids: Vec<&str> = t_names.iter().map(|(id, _, _, _, _, _)| *id).collect();
+    for (id, title, tool, output, x, y) in &t_names {
+        nodes.push(tool_node(id, title, tool, output, *x, *y));
+        edges.push(edge(&format!("e-trigger-{id}"), "trigger", id));
+    }
+
+    // ── a-trend-scanner: 综合分析，输出 2-3 个趋势 ──
+    let trend_scanner_prompt = "你的任务：综合分析市场热门股、行业排名、实时快讯、概念板块、北向资金流向，\
+         识别出当前最具潜力的 2-3 个产业方向。\
+         \n\n\
+         核心原则：\n\
+         1. 排除已过度上涨的赛道（近 1 月板块涨幅 > 30%）。\n\
+         2. 只选「萌芽→加速」阶段的产业方向，不要已经充分定价的热点。\n\
+         3. 每个趋势必须给出明确的上下游因果链。\n\
+         4. 必须输出一个 bottleneck_candidate（初步判断的瓶颈环节）。\n\
+         \n\
+         输出 JSON 格式（严格遵循）：\n\
+         { \"trends\": [{ \"trend_name\": \"...\", \"confidence\": 75, \"phase\": \"accelerating\", \
+           \"core_logic\": \"...\", \"causal_chain\": \"...\", \
+           \"bottleneck_candidate\": \"...\", \"bottleneck_rationale\": \"...\" }] }\
+         \n\n\
+         重要：如果获取到的数据不足，基于你已知的公开信息和市场常识给出合理推断，\
+         不要只列 data_gaps。严禁使用'数据缺失'、'无法获取'等负面措辞。";
+    nodes.push(agent_node(
+        "a-trend-scanner",
+        "产业趋势扫描",
+        "trend-scanner",
+        trend_scanner_prompt,
+        t_trend_ids.clone(),
+        std::collections::HashMap::new(),
+        340.0,
+        180.0,
+    ));
+    for tid in &t_trend_ids {
+        edges.push(edge(&format!("e-{tid}-a-trend-scanner"), tid, "a-trend-scanner"));
+    }
+
+    // ── Phase 1: 对每个趋势拆解产业链+瓶颈鉴定 ──
+    // 使用 3 个并行的 chain-decomposer + 3 个 chokepoint-identifier
+    let trend_names = ["trend1", "trend2", "trend3"];
+    let trend_x_positions = [100.0, 340.0, 580.0];
+
+    for (i, tn) in trend_names.iter().enumerate() {
+        let decomposer_id = format!("a-chain-{tn}");
+        let decomposer_prompt = format!(
+            "你的任务：对上游 a-trend-scanner 输出的趋势 #{i} 进行产业链拆解。\
+             将产业从上到下拆解为 5-8 个关键环节，标注每个环节的供应商数量、技术壁垒、扩产周期。\
+             \n\n\
+             核心要求：\n\
+             1. 拆解到具体产品或工艺层面（如 HBM3E 环氧塑封料）。\n\
+             2. 每个环节必须标注 global_supplier_count / tech_barrier / expansion_cycle_months。\n\
+             3. 标注 bottleneck_potential（high/medium/low）及理由。\n\
+             \n\
+             输出 JSON 格式：\
+             {{ \"trend_name\": \"...\", \"chain_nodes\": [{{ \"node_name\": \"...\", \
+               \"global_supplier_count\": 3, \"tech_barrier\": \"high\", \
+               \"expansion_cycle_months\": 24, \"bottleneck_potential\": \"high\", \
+               \"bottleneck_rationale\": \"...\" }}] }}"
+        );
+        nodes.push(agent_node(
+            &decomposer_id,
+            &format!("产业链拆解 #{i}"),
+            "chain-decomposer",
+            &decomposer_prompt,
+            vec!["a-trend-scanner"],
+            std::collections::HashMap::new(),
+            trend_x_positions[i],
+            300.0,
+        ));
+        edges.push(edge(
+            &format!("e-a-trend-scanner-{decomposer_id}"),
+            "a-trend-scanner",
+            &decomposer_id,
+        ));
+
+        // chokepoint-identifier 接在 chain-decomposer 之后
+        let chokepoint_id = format!("a-chokepoint-{tn}");
+        let chokepoint_prompt = format!(
+            "你的任务：对上游产业链拆解结果（trend #{i}）进行瓶颈验证。\
+             从供给刚性、需求弹性、不可替代性三个维度量化评分。\
+             \n\n\
+             核心要求：\n\
+             1. composite_score >= 80 才是真正的瓶颈（三力评分都 >= 70）。\n\
+             2. 区分 capacity 和 technology 两类瓶颈，technology 更偏好。\n\
+             3. 给出至少 1 个 A 股候选公司（需含具体 stock_code）。\n\
+             \n\
+             输出 JSON 格式：\
+             {{ \"verified_bottleneck\": {{ \"node_name\": \"...\", \"composite_score\": 85, \
+               \"bottleneck_type\": \"technology\", \
+               \"a_share_candidates\": [{{ \"stock_code\": \"...\", \"stock_name\": \"...\", \
+                 \"relevance\": \"direct\", \"advantage\": \"...\" }}] }} }}"
+        );
+        nodes.push(agent_node(
+            &chokepoint_id,
+            &format!("瓶颈鉴定 #{i}"),
+            "chokepoint-identifier",
+            &chokepoint_prompt,
+            vec![&decomposer_id],
+            std::collections::HashMap::new(),
+            trend_x_positions[i],
+            420.0,
+        ));
+        edges.push(edge(
+            &format!("e-{decomposer_id}-{chokepoint_id}"),
+            &decomposer_id,
+            &chokepoint_id,
+        ));
+    }
+
+    // ── Phase 2: 候选公司映射 ──
+    // 先集合所有 chokepoint 输出的候选股票，拉取财务数据验证
+    nodes.push(tool_node(
+        "t-candidates-finance",
+        "候选公司财务验证",
+        "get_stock_financials",
+        "t-candidates-finance",
+        340.0,
+        540.0,
+    ));
+    edges.push(edge(
+        "e-a-chokepoint-trend1-t-candidates",
+        "a-chokepoint-trend1",
+        "t-candidates-finance",
+    ));
+    edges.push(edge(
+        "e-a-chokepoint-trend2-t-candidates",
+        "a-chokepoint-trend2",
+        "t-candidates-finance",
+    ));
+    edges.push(edge(
+        "e-a-chokepoint-trend3-t-candidates",
+        "a-chokepoint-trend3",
+        "t-candidates-finance",
+    ));
+
+    // a-candidate-mapper: 综合所有瓶颈鉴定结果，输出最终候选股清单
+    let mapper_prompt = "你的任务：综合所有瓶颈鉴定结果，对候选公司进行二次筛选和打分。\
+         \n\n\
+         核心原则：\n\
+         1. 优先选择市值 50-500 亿、机构覆盖少的公司（Serenity 偏好）。\n\
+         2. 客户质量高于一切：已进入头部客户供应链的优先级 > 有技术但无客户验证的。\n\
+         3. 排除股价已过度上涨的（近 3 月 > 100% 涨幅）。\n\
+         4. 排除高负债率（> 70%）或频繁定增的公司。\n\
+         5. 每个候选必须给出具体的 serenity_score 和风险提示。\n\
+         \n\
+         输出 JSON 格式：\
+         { \"candidates\": [{ \"stock_code\": \"6位代码\", \"stock_name\": \"公司名\", \
+           \"relevance\": \"direct\", \"serenity_score\": 75, \"confidence\": 70, \
+           \"bottleneck_product\": \"瓶颈环节产品\", \
+           \"primary_risk\": \"主要风险\" }], \"summary\": \"...\" }";
+    nodes.push(agent_node(
+        "a-candidate-mapper",
+        "候选公司筛选",
+        "candidate-mapper",
+        mapper_prompt,
+        vec![
+            "a-chokepoint-trend1",
+            "a-chokepoint-trend2",
+            "a-chokepoint-trend3",
+        ],
+        std::collections::HashMap::new(),
+        340.0,
+        660.0,
+    ));
+    for tn in &trend_names {
+        let cid = format!("a-chokepoint-{tn}");
+        edges.push(edge(&format!("e-{cid}-a-candidate-mapper"), &cid, "a-candidate-mapper"));
+    }
+
+    // ── StorageNode: 持久化候选结果 ──
+    nodes.push(WorkflowNode::Storage(StorageNode {
+        base: WorkflowNodeBase {
+            id: "s-save-candidates".into(),
+            title: "保存候选结果".into(),
+            description: Some("将 Serenity 筛选结果持久化到 serenity_candidate_pool 表".into()),
+            position: Position { x: 340.0, y: 780.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: StorageNodeConfig {
+            backend: "sqlite".into(),
+            operation: "insert".into(),
+            input_var: "a-candidate-mapper".into(),
+            collection: "serenity_candidates".into(),
+            key_var: None,
+            output_var: "s-save-candidates-result".into(),
+        },
+    }));
+    edges.push(edge("e-a-candidate-mapper-s-save", "a-candidate-mapper", "s-save-candidates"));
+
+    // ── 序列化 ──
+    let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
+    let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化边失败: {e}"))?;
+
+    // ── Variables ──
+    let variables_json = serde_json::to_string(&Vec::<Variable>::new())
+        .map_err(|e| format!("序列化变量失败: {e}"))?;
+
+    // ── Tags ──
+    let tags_json = serde_json::to_string(&["serenity", "bottleneck", "screening"])
+        .map_err(|e| format!("序列化标签失败: {e}"))?;
+
+    // ── 写入 DB ──
+    let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID)
+        .exec(db)
+        .await;
+    workflow_template::ActiveModel {
+        id: Set(TEMPLATE_ID.to_string()),
+        name: Set("Serenity 瓶颈筛选".to_string()),
+        description: Set(Some(
+            "自动扫描市场数据，识别产业瓶颈环节，输出候选股清单（Serenity 投资方法论）".to_string(),
+        )),
+        icon: Set("search".into()),
+        tags: Set(Some(tags_json)),
+        version: Set(TEMPLATE_VERSION),
+        is_preset: Set(true),
+        is_editable: Set(true),
+        is_public: Set(true),
+        trigger_config: Set(Some(
+            serde_json::to_string(&TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({
+                    "description": "Serenity 瓶颈筛选: 自动扫描市场发现产业链瓶颈机会",
+                    "required_params": []
+                }),
+            })
+            .map_err(|e| format!("序列化触发器配置失败: {e}"))?,
+        )),
+        nodes: Set(nodes_json),
+        edges: Set(edges_json),
+        input_schema: Set(None),
+        output_schema: Set(None),
+        variables: Set(Some(variables_json)),
+        error_config: Set(None),
+        composite_source: Set(None),
+        tool_defs: Set(Some(tool_defs_json)),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| format!("写入 Serenity 模板失败: {e}"))?;
+
+    tracing::info!("[stock_analysis_setup] Serenity 瓶颈筛选工作流模板已创建 (serenity-screening)");
     Ok(())
 }

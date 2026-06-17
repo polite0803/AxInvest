@@ -8228,7 +8228,8 @@
       "crossCheckTitle": "Analysten-Check (zuletzt {{updatedAt}})",
       "dataQualitySummary": "{{real}} echt + {{synthetic}} Ersatz",
       "backtestWinrate": "Gewinnrate",
-      "bannerDegraded": "Datenstile {{styles}} wurden in der Treue reduziert (as-of {{date}}). Behandeln Sie ihre Konfidenz niedriger als bei nicht-degradierten Stilen."
+      "bannerDegraded": "Datenstile {{styles}} wurden in der Treue reduziert (as-of {{date}}). Behandeln Sie ihre Konfidenz niedriger als bei nicht-degradierten Stilen.",
+      "styleSerenity": "Engpassanalyse"
     },
     "periodUltraShort": "Kurz",
     "periodShort": "Kurz",
@@ -8550,5 +8551,32 @@
     "notice": "Alle Daten, Prompts und Urteile in dieser Werkbank sind auf das gewählte Datum verankert. Die Rückkehr zum Live-Modus erfordert eine ausdrückliche Bestätigung.",
     "exitHint": "Sie sind noch im Replay-Modus. Jede anderswo gestartete Analyse wird ebenfalls Replay-verankert.",
     "exitBtn": "Zurück zu Live"
+  },
+  "serenityPanel": {
+    "desc": "Serenity Flaschenhalsmethode: Automatisches Screeining potenzieller Aktien durch Entdeckung von Flaschenhalsverbindungen in der Industriekette aus Marktdaten",
+    "run": "Serenity Screeining ausführen",
+    "running": "Screeining...",
+    "stage_loading": "Workflow-Vorlage wird geladen...",
+    "stage_scanning": "Stufe 0/4: Markttrends scannen",
+    "stage_decomposing": "Stufe 1/4: Industriekette zerlegen",
+    "stage_identifying": "Stufe 2/4: Flaschenhalsverbindungen identifizieren",
+    "stage_mapping": "Stufe 3/4: Kandidatenunternehmen zuordnen",
+    "stage_saving": "Stufe 4/4: Ergebnisse speichern",
+    "stage_done": "Screeining abgeschlossen",
+    "stage_error": "Screeining fehlgeschlagen",
+    "analyizing": "Analysiere Industriekettendaten, LLM-Inferenz benötigt 1-3 Minuten...",
+    "trendTitle": "Entdeckte Industrietrends",
+    "bottleneckLink": "Flaschenhals: ",
+    "candidateTitle": "Kandidatentitel",
+    "directBenefit": "Direkter Begünstigter",
+    "indirectBenefit": "Indirekter Begünstigter",
+    "themeRelated": "Themenbezogen",
+    "bottleneckProduct": "Flaschenhalsprodukt: ",
+    "riskPrefix": "Risiko: ",
+    "confidencePrefix": "Konfidenz ",
+    "scoreSuffix": " Punkte",
+    "emptyHint": "Klicken Sie auf die obige Schaltfläche, um die Serenity-Flaschenhals-Screeining auszuführen",
+    "errorUnknown": "Unbekannter Fehler",
+    "callFailed": "Aufruf fehlgeschlagen"
   }
 }

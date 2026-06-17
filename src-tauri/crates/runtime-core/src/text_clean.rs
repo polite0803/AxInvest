@@ -21,7 +21,7 @@ pub fn clean_output(text: &str) -> String {
     let cleaned = re_placeholder.replace_all(&cleaned, "");
 
     // 3. 剔除重复标点
-    let re_repeated_punct = Regex::new(r"([!?。，；：])\1{2,}").unwrap();
+    let re_repeated_punct = Regex::new(r"([!?。，；：])[!?。，；：]{2,}").unwrap();
     let cleaned = re_repeated_punct.replace_all(&cleaned, "$1");
 
     // 4. 行首行尾空白

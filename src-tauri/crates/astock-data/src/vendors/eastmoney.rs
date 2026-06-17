@@ -14,7 +14,7 @@ pub struct EastMoneyVendor {
 impl EastMoneyVendor {
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     async fn em_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
-        let max_retries = 3;
+        let max_retries = 1;
         let mut delay = Duration::from_secs(1);
         let mut last_err = None;
         for attempt in 0..max_retries {

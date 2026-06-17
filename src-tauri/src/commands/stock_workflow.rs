@@ -5,9 +5,9 @@
 
 use crate::AppState;
 use axagent_astock_data::as_of::{self, AsOfContext};
+use axagent_core::entity::reco_picks;
 use axagent_core::entity::stock_analyses;
 use axagent_core::entity::stock_reflections;
-use axagent_core::entity::reco_picks;
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
@@ -1405,13 +1405,7 @@ pub async fn run_serenity_screening(
     let engine = Arc::clone(&state.work_engine);
 
     // 1. 加载 serenity-screening 模板
-    let loaded = load_and_inject_template(
-        state.harness.db(),
-        "",
-        "",
-        "serenity-screening",
-    )
-    .await?;
+    let loaded = load_and_inject_template(state.harness.db(), "", "", "serenity-screening").await?;
 
     let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
 
@@ -1460,11 +1454,32 @@ pub async fn run_serenity_screening(
 
     match engine.run_workflow(&wf_id, opts).await {
         Ok(result) => {
-            let candidates = result
+            let candidates_raw = result
                 .results
                 .get("a-candidate-mapper")
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
+
+            // Agent executor 将结构化输出存在 "params" 字段中，
+            // 顶层是 { content, params, thinking, ... } 包装对象
+            let has_params = candidates_raw
+                .as_object()
+                .and_then(|obj| obj.get("params"))
+                .is_some();
+            let candidates = if has_params {
+                candidates_raw["params"].clone()
+            } else {
+                candidates_raw.clone()
+            };
+
+            tracing::info!(
+                "[serenity] a-candidate-mapper 输出类型: {}",
+                if has_params {
+                    "有 params 字段，已提取"
+                } else {
+                    "无 params 字段，直接使用原始值"
+                }
+            );
 
             // 持久化 Serenity 候选到 reco_picks 表（style="serenity"）
             {

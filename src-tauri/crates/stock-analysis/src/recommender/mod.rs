@@ -26,6 +26,7 @@ use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant};
 // `HashSet` 在 Rust 2024 edition 已加入 prelude
 
+use crate::recommender::pool::SeedItem;
 use crate::recommender::pool::{
     build_seed_pool, clear_cached_vendors, get_cached_vendors, liquidity_filter_and_truncate,
     load_enabled_vendors_from_template, set_cached_vendors,
@@ -36,6 +37,22 @@ use crate::recommender::strategies::{
     ValueStrategy, WatchlistStrategy,
 };
 use crate::recommender::strategy::PerCodeLocks;
+
+/// Serenity 工作流产出的候选股，供 SerenityStrategy 读取
+static SERENITY_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// 设置 serenity 候选种子（由 run_serenity_screening 命令写入）
+pub fn set_serenity_seed(seed: Vec<SeedItem>) {
+    tracing::info!("[serenity] 注入 {} 条候选到全局种子", seed.len());
+    if let Ok(mut guard) = SERENITY_SEED.write() {
+        *guard = seed;
+    }
+}
+
+/// 读取 serenity 候选种子
+pub fn get_serenity_seed() -> Vec<SeedItem> {
+    SERENITY_SEED.read().map(|g| g.clone()).unwrap_or_default()
+}
 
 /// 从 template_vars 中解析 "reco_strategy_weights" 权重表。
 ///
@@ -250,6 +267,17 @@ pub async fn recommend_stocks(
              Watchlist will use raw seed, main strategies skip",
             raw_seed_pool_size
         );
+    }
+
+    // 注入 Serenity 候选（由 serenity-screening workflow 发现，写入 reco_picks，
+    // 并通过 set_serenity_seed 同步到全局静态）
+    let serenity_seed = get_serenity_seed();
+    if !serenity_seed.is_empty() {
+        for item in &serenity_seed {
+            if !seed.contains(item) {
+                seed.push(item.clone());
+            }
+        }
     }
 
     // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——

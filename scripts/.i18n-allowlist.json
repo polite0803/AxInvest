@@ -1,7 +1,7 @@
 {
   "version": "1",
   "generated": "2026-06-17",
-  "total_entries": 511,
+  "total_entries": 514,
   "total_files": 477,
   "entries": [
     {
@@ -3066,6 +3066,24 @@
       "file": "src/components/stock-analysis/__tests__/trading.strategy.test.tsx",
       "lines": "9,10",
       "reason": "测试文件中的 describe/it 描述",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/SerenityScreeningPanel.tsx",
+      "lines": "*",
+      "reason": "中文注释和 JSX 注释（serenity 面板）",
+      "phase": 3
+    },
+    {
+      "file": "src/stores/feature/serenityStore.ts",
+      "lines": "*",
+      "reason": "中文注释（serenity store）",
+      "phase": 3
+    },
+    {
+      "file": "src/lib/__tests__/agentOutput.test.ts",
+      "lines": "*",
+      "reason": "测试文件中的中文 mock 数据",
       "phase": 3
     }
   ]

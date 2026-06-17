@@ -1519,6 +1519,18 @@ pub async fn run_serenity_screening(
                     .await
                     .map_err(|e| format!("写入 Serenity 候选到 reco_picks 失败: {e}"))?;
                 }
+                // 同步 Serenity 候选到全局种子，供 SerenityStrategy 读取
+                if !candidate_list.is_empty() {
+                    let serenity_seed: Vec<(String, String, Option<String>)> = candidate_list
+                        .iter()
+                        .map(|c| {
+                            let code = c["stock_code"].as_str().unwrap_or("").to_string();
+                            let name = c["stock_name"].as_str().unwrap_or("").to_string();
+                            (code, name, None)
+                        })
+                        .collect();
+                    axagent_stock_analysis::recommender::set_serenity_seed(serenity_seed);
+                }
             }
 
             let _ = app_h.emit(

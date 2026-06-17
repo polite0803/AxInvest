@@ -1470,12 +1470,19 @@ pub async fn run_serenity_screening(
 
             // Agent executor 将结构化输出存在 "params" 字段中，
             // 顶层是 { content, params, thinking, ... } 包装对象
-            let has_params = candidates_raw
-                .as_object()
-                .and_then(|obj| obj.get("params"))
+            let obj = candidates_raw.as_object();
+            let has_params = obj.and_then(|o| o.get("params")).is_some();
+            let has_content = obj
+                .and_then(|o| o.get("content").and_then(|c| c.as_str()))
                 .is_some();
             let candidates = if has_params {
                 candidates_raw["params"].clone()
+            } else if has_content {
+                // Agent 无 params 时 content 字段里是 JSON string，需解析
+                candidates_raw["content"]
+                    .as_str()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .unwrap_or(candidates_raw.clone())
             } else {
                 candidates_raw.clone()
             };
@@ -1484,6 +1491,8 @@ pub async fn run_serenity_screening(
                 "[serenity] a-candidate-mapper 输出类型: {}",
                 if has_params {
                     "有 params 字段，已提取"
+                } else if has_content {
+                    "无 params 但有 content 字段，已解析"
                 } else {
                     "无 params 字段，直接使用原始值"
                 }

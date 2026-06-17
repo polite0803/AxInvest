@@ -2486,6 +2486,8 @@ async fn seed_stock_analysis_workflow_template(
         },
     }));
     edges.push(edge("e-notify-store-result", "notify-result", "store-result"));
+    // store-result 直接从 portfolio-mgr 取决策变量，绕过 state.variables 查找
+    edges.push(edge("e-portfolio-mgr-store-result", "portfolio-mgr", "store-result"));
 
     // 构建 input_schema / output_schema / variables
     let mut input_props = std::collections::HashMap::new();

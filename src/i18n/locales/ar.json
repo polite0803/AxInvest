@@ -8696,7 +8696,11 @@
       "step3": "Step 3: Compare Results",
       "title": "What-If Parameter Backtest",
       "totalScoreLabel": "Total Score (Base Scoring)"
-    }
+    },
+    "riskHigh": "مخاطر عالية",
+    "riskMid": "مخاطر متوسطة",
+    "riskLow": "مخاطر منخفضة",
+    "riskExtreme": "مخاطر قصوى"
   },
   "trade": {
     "title": "Trading Log",

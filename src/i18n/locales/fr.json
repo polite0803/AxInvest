@@ -8399,7 +8399,11 @@
       "value": "Évaluation",
       "trade": "Plan de trading",
       "decision": "Décision finale"
-    }
+    },
+    "riskHigh": "Risque lev",
+    "riskMid": "Risque moyen",
+    "riskLow": "Risque faible",
+    "riskExtreme": "Risque extrme"
   },
   "trade": {
     "title": "Trading Log",

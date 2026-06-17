@@ -8522,7 +8522,11 @@
       "value": "價值評估",
       "trade": "交易計劃",
       "decision": "最終決策"
-    }
+    },
+    "riskHigh": "高風險",
+    "riskMid": "中風險",
+    "riskLow": "低風險",
+    "riskExtreme": "極高風險"
   },
   "trade": {
     "title": "交易日志",

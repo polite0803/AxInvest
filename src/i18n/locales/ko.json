@@ -8399,7 +8399,11 @@
       "value": "가치평가",
       "trade": "거래 계획",
       "decision": "최종 결정"
-    }
+    },
+    "riskHigh": "고위험",
+    "riskMid": "중위험",
+    "riskLow": "저위험",
+    "riskExtreme": "극고위험"
   },
   "trade": {
     "title": "Trading Log",

@@ -8399,7 +8399,11 @@
       "value": "मूल्यांकन",
       "trade": "ट्रेडिंग प्लान",
       "decision": "अंतिम निर्णय"
-    }
+    },
+    "riskHigh": "उच्च जोखिम",
+    "riskMid": "मध्यम जोखिम",
+    "riskLow": "कम जोखिम",
+    "riskExtreme": "अत्यधिक जोखिम"
   },
   "trade": {
     "title": "Trading Log",

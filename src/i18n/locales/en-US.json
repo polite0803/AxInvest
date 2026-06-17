@@ -8295,6 +8295,10 @@
     "riskLevel": "Risk Level",
     "riskScore": "Risk: {{score}}",
     "riskUnknown": "Unknown",
+    "riskHigh": "High Risk",
+    "riskMid": "Medium Risk",
+    "riskLow": "Low Risk",
+    "riskExtreme": "Extreme Risk",
     "row": {
       "confidence": "Confidence",
       "entry": "Entry Range",

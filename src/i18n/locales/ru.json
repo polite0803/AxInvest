@@ -8399,7 +8399,11 @@
       "value": "Оценка",
       "trade": "Торговый план",
       "decision": "Итоговое решение"
-    }
+    },
+    "riskHigh": "Высокий риск",
+    "riskMid": "Средний риск",
+    "riskLow": "Низкий риск",
+    "riskExtreme": "Экстремальный риск"
   },
   "trade": {
     "title": "Trading Log",

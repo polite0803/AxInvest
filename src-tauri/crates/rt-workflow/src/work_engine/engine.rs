@@ -1972,6 +1972,13 @@ impl WorkEngine {
                         }
                     },
                     Ok(Err(err)) => {
+                        tracing::error!(
+                            node_id = %nr.node_id,
+                            node_type = %super::node_executor_trait::node_type_name(&nr.node),
+                            error = %err,
+                            elapsed_ms = %nr.elapsed_ms,
+                            "节点执行失败"
+                        );
                         breakers
                             .entry(format!("{}:{}", workflow_id, nr.node_id))
                             .or_insert_with(NodeCircuitBreaker::new)

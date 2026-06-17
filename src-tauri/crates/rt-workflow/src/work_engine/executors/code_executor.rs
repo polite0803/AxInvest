@@ -104,6 +104,7 @@ fn execute_rhai_directly(
 
     // 执行脚本，期望返回一个 map
     let result: rhai::Dynamic = engine.eval_with_scope(&mut scope, code).map_err(|e| {
+        tracing::error!(error = %e, "Rhai 执行失败");
         NodeError::exec_failed(error_code::VALIDATION_FAILED, format!("Rhai execution failed: {e}"))
     })?;
 

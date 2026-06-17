@@ -1558,9 +1558,17 @@ pub async fn run_serenity_screening(
                     "result": candidates,
                 }),
             );
+            // wrap array candidates for frontend
+            let result_val = if candidates.is_array() {
+                serde_json::json!({
+                    "candidates": candidates,
+                })
+            } else {
+                candidates
+            };
             Ok(serde_json::json!({
                 "status": "completed",
-                "candidates": candidates,
+                "candidates": result_val["candidates"].clone(),
             }))
         },
         Err(e) => {

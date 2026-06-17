@@ -143,11 +143,6 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     if (myToken === reqTokenRef.current) { setLoading(false); }
   }, [period, asOfDate, i18n.language]);
 
-  useEffect(() => {
-    // Bug 4 修复: useEffect 只负责触发 load(),不再有第二套加载逻辑
-    Promise.resolve().then(() => load());
-  }, [load]);
-
   // P0-2: 加载策略回测统计（仅加载一次）
   useEffect(() => {
     let cancelled = false;

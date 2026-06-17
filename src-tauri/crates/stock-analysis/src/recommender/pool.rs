@@ -141,9 +141,12 @@ pub async fn liquidity_filter_and_truncate(
 
 async fn filter_one(client: &AStockClient, item: SeedItem) -> Option<SeedItem> {
     let (code, name, sector) = item;
-    let quote = client.get_quote(&code).await.ok()?;
-    if quote.is_st {
-        return None;
+    // 获取行情用于 ST 检查；失败时保留股票（降级，让后续策略自行决定）
+    let quote = client.get_quote(&code).await.ok();
+    if let Some(ref q) = quote {
+        if q.is_st {
+            return None;
+        }
     }
     // K 线数据不可用时（vendor 限流/超时），降级：不过流动性检查，保留该股票
     // 主策略（trend/value/capital）在 scan_one 中会自行判空后返回 None，

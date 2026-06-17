@@ -178,10 +178,10 @@ jobs:
         run: npm run test:run
 
   test-e2e:
-    name: E2E Tests (macOS)
+    name: E2E Tests
     needs: [should-run-heavy]
     if: needs.should-run-heavy.outputs.skip != 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -197,30 +197,16 @@ jobs:
         uses: actions/cache@v4
         id: playwright-cache
         with:
-          path: ~/Library/Caches/ms-playwright
+          path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        timeout-minutes: 10
         # 注意:不使用 --with-deps。
-        # 在 macOS 上 --with-deps 会调用 brew install,在 cache miss 时
-        # 会触发 brew auto-update → 永不退出 → job 卡死。
-        # GitHub macos-latest 镜像已预装 Playwright Chromium 所需系统库。
-        # cache hit 时不需要 install,cache miss 时才下载 165MB,
-        # 没有 brew 调用就不会卡死。
-        shell: bash
-        run: |
-          if ls ~/Library/Caches/ms-playwright/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium >/dev/null 2>&1; then
-            echo "Playwright Chromium 已缓存，跳过安装"
-          else
-            echo "下载 Playwright Chromium..."
-            # 直接调用本地 binary 而非 npx（npx 在 macOS 上可能触发意外网络请求挂死）
-            node_modules/.bin/playwright install chromium
-            # 清除 macOS gatekeeper quarantine，防止 .app 签名校验在 headless 环境挂死
-            xattr -cr ~/Library/Caches/ms-playwright 2>/dev/null || true
-          fi
+        # Ubuntu 24.04 镜像已预装 Playwright Chromium 所需系统库（apt）。
+        # cache hit 时不需要 install,cache miss 时下载 165MB。
+        run: npx --yes playwright install chromium
 
       - name: Run E2E tests
         run: npm run test:e2e

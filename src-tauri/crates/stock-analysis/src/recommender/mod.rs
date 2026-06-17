@@ -241,6 +241,18 @@ pub async fn recommend_stocks(
         return Ok(cached);
     }
 
+    // 快速健康检查：探测 K 线数据源是否可用
+    match client.get_klines("000001", "daily", 5).await {
+        Ok(ref k) if k.len() >= 2 => { /* K 线源正常 */ },
+        Ok(_) => {
+            tracing::warn!("[recommender] K 线数据返回不足，数据源可能异常");
+        },
+        Err(e) => {
+            tracing::warn!("[recommender] K 线数据源不可用: {e}");
+            // 不阻塞执行，让下游降级逻辑自行处理
+        },
+    }
+
     // 1. 预热 enabled-vendors 缓存（settings 页保存 vendor 时需要 invalid 这个缓存
     //    来刷新结果缓存；此处不依赖 enabled_vendors 做策略 gating）
     let _ = get_cached_vendors().unwrap_or_else(|| {

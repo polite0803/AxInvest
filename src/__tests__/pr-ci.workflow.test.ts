@@ -1,6 +1,6 @@
 // 集成测试: pr-ci.yml playwright 安装步骤
 //
-// macOS GitHub runner 已预装系统库，不需要 --with-deps。
+// Ubuntu 24.04 镜像已预装系统库（apt），不需要 --with-deps。
 // 去掉 --with-deps 可避免 cache miss 时 brew install 卡死。
 // 也不需要 HOMEBREW_NO_AUTO_UPDATE 或 timeout-minutes。
 

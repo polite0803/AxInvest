@@ -1,39 +1,16 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+import { useSerenityStore, type SerenityCandidate, type StepStage } from "@/stores/feature/serenityStore";
 import { PlayCircleOutlined, ReloadOutlined, StockOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text, Title } = Typography;
 
-interface SerenityCandidate {
-  stockCode?: string;
-  stock_name?: string;
-  stockName?: string;
-  stock_code?: string;
-  relevance?: string;
-  serenityScore?: number;
-  serenity_score?: number;
-  confidence?: number;
-  bottleneckProduct?: string;
-  bottleneck_product?: string;
-  primaryRisk?: string;
-  primary_risk?: string;
-}
-
-interface TrendInfo {
-  trendName?: string;
-  trend_name?: string;
-  bottleneck_candidate?: string;
-  confidence?: number;
-}
-
-type StepStage = "loading" | "scanning" | "decomposing" | "identifying" | "mapping" | "saving" | "done" | "error";
-
-// 从 a-trend-scanner 输出中提取趋势信息
+/** 根据节点 id 推测当前阶段 */
 function inferStage(nodeId?: string): StepStage {
   if (!nodeId) { return "loading"; }
   if (nodeId.startsWith("t-") || nodeId === "a-trend-scanner") { return "scanning"; }
@@ -46,13 +23,15 @@ function inferStage(nodeId?: string): StepStage {
 
 export function SerenityScreeningPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
-  const [running, setRunning] = useState(false);
-  const [stage, setStage] = useState<StepStage>("done");
-  const [candidates, setCandidates] = useState<SerenityCandidate[]>([]);
-  const [trends, setTrends] = useState<TrendInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    running, setRunning,
+    stage, setStage,
+    candidates, setCandidates,
+    trends, setTrends,
+    error, setError,
+  } = useSerenityStore();
   const { t } = useTranslation();
-  const getStageLabel = (s: StepStage) => t(`serenityPanel.stage_${s}` as any);
+  const getStageLabel = (s: StepStage) => t(`serenityPanel.stage_${s}` as const);
 
   // 监听工作流事件
   useEffect(() => {
@@ -73,9 +52,9 @@ export function SerenityScreeningPanel() {
         // 从 a-trend-scanner 输出中提取趋势信息
         if (event.payload.nodeId === "a-trend-scanner" && event.payload.output) {
           try {
-            const out = typeof event.payload.output === "string"
+            const out: Record<string, unknown> = typeof event.payload.output === "string"
               ? JSON.parse(event.payload.output)
-              : event.payload.output;
+              : (event.payload.output as Record<string, unknown>);
             if (out?.trends) {
               setTrends(out.trends);
             }
@@ -101,7 +80,6 @@ export function SerenityScreeningPanel() {
 
         // 兼容两种格式：result.candidates 或直接 candidates
         const raw = event.payload.result?.candidates ?? event.payload.candidates ?? [];
-        // 字段名兼容 camelCase 和 snake_case
         const rawArr = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
         const normalized: SerenityCandidate[] = rawArr.map((c) => ({
           stockCode: (c.stockCode ?? c.stock_code ?? c.stockName ?? "") as string,
@@ -121,6 +99,8 @@ export function SerenityScreeningPanel() {
       unlistenStep?.();
       unlistenDone?.();
     };
+    // 稳定引用：运行时调用的 setXxx 不会变化
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRun = useCallback(async () => {
@@ -137,7 +117,8 @@ export function SerenityScreeningPanel() {
       setStage("error");
       setError(typeof err === "string" ? err : t("serenityPanel.callFailed"));
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t]);
 
   const handleAnalyze = useCallback(
     (code: string) => {
@@ -270,7 +251,7 @@ export function SerenityScreeningPanel() {
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <Tag color="purple" className="text-xs font-bold">
-                      {t("serenityPanel.scoreSuffix", { score: c.serenityScore ?? c.serenity_score ?? 0 })}
+                      {c.serenityScore ?? c.serenity_score ?? 0}{t("serenityPanel.scoreSuffix")}
                     </Tag>
                     {c.confidence
                       ? (

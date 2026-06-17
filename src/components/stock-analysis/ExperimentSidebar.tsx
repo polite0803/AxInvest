@@ -7,8 +7,8 @@
  */
 
 import { invoke } from "@/lib/invoke";
-import { type ExperimentRecord, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { parseAction, parseRiskLevel } from "@/lib/stock-analysis-utils";
+import { type ExperimentRecord, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Button, InputNumber, Select, Slider } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

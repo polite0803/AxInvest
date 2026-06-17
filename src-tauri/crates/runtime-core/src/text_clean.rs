@@ -20,8 +20,8 @@ pub fn clean_output(text: &str) -> String {
         Regex::new(r"<\|endoftext\|>|<\|im_end\|>|<\|im_start\|>|<s>|</s>").unwrap();
     let cleaned = re_placeholder.replace_all(&cleaned, "");
 
-    // 3. 剔除重复标点
-    let re_repeated_punct = Regex::new(r"([!?。，；：])[!?。，；：]{2,}").unwrap();
+    // 3. 剔除重复标点（同时匹配 ASCII 和全角）
+    let re_repeated_punct = Regex::new(r"([!?！？。，；：])[!?！？。，；：]{2,}").unwrap();
     let cleaned = re_repeated_punct.replace_all(&cleaned, "$1");
 
     // 4. 行首行尾空白

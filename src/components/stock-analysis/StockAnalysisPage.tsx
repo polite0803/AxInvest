@@ -96,7 +96,9 @@ export function StockAnalysisPage() {
     }).catch((e) => {
       if (!cancelled) { console.warn("[StockAnalysis] get_market_status failed:", e); }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 注意：setupEventListener 改为仅在 startAnalysis 内调用。
@@ -115,7 +117,9 @@ export function StockAnalysisPage() {
         if (cancelled) { return; }
       });
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams, getStockQuote, getStockKline, klinePeriod]);
 
   useEffect(() => {
@@ -130,7 +134,9 @@ export function StockAnalysisPage() {
         getStockKline(code, kp.period, kp.limit);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [id, loadAnalysis, getStockQuote, getStockKline]);
 
   // Decision Timeline 证据芯片 → 切换主 tab（useRightPanel 派发的 timeline-jump 事件）

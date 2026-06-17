@@ -365,7 +365,7 @@ pub struct Message {
 }
 
 /// A structured content block in a message (Part-based model).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentBlock {
     #[serde(rename = "text")]

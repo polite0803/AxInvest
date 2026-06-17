@@ -235,7 +235,9 @@ function findUnreachableNodes(nodes: any[], edges: any[]): string[] {
   }
 
   // 容器节点不参与边拓扑（子节点通过 parentId 关联），跳过不可达检查
-  return nodes.filter((n) => !reachable.has(n.id) && !CONTAINER_NODE_TYPES.has(n.type || n.data?.type)).map((n) => n.id);
+  return nodes.filter((n) => !reachable.has(n.id) && !CONTAINER_NODE_TYPES.has(n.type || n.data?.type)).map((n) =>
+    n.id
+  );
 }
 
 function formatDuration(ms: number | null): string {

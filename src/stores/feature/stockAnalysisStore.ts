@@ -2,6 +2,7 @@ import i18n from "@/i18n";
 import { extractContent, extractDecision, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
+import { computeStockConsensus } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -16,7 +17,6 @@ import type {
   TimelineNode,
   TimelinePhase,
 } from "@/types/stock-analysis";
-import { computeStockConsensus } from "@/lib/stock-analysis-utils";
 import { create } from "zustand";
 
 // ── 模块级缓存 ──
@@ -1139,7 +1139,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (parsed) {
           set({ decision: parsed });
         } else {
-          console.warn("[StockAnalysis] workflow-step-done: portfolio-mgr decision parse failed, deferring to workflow-completed");
+          console.warn(
+            "[StockAnalysis] workflow-step-done: portfolio-mgr decision parse failed, deferring to workflow-completed",
+          );
         }
       } else if (nodeId === "value-investor") {
         set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
@@ -1408,22 +1410,58 @@ const NODE_CLASS_TABLE: NodeClassEntry[] = [
 
   // 阶段 2: 多空辩论
   { match: "debate-bull-bear", stage: 2, phase: null, evidence: [], exact: true },
-  { match: ["bull-researcher", "bear-researcher"], stage: 2, phase: "debate", evidence: [{ tabKey: "analyze", panelKey: "debate" }], exact: true },
+  {
+    match: ["bull-researcher", "bear-researcher"],
+    stage: 2,
+    phase: "debate",
+    evidence: [{ tabKey: "analyze", panelKey: "debate" }],
+    exact: true,
+  },
   { match: "bull-r", stage: 2, phase: "debate", evidence: [{ tabKey: "analyze", panelKey: "debate" }] },
   { match: "bear-r", stage: 2, phase: "debate", evidence: [{ tabKey: "analyze", panelKey: "debate" }] },
 
   // 阶段 3: 风险评估
-  { match: "value-investor", stage: 3, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "value" }], exact: true },
+  {
+    match: "value-investor",
+    stage: 3,
+    phase: "decide",
+    evidence: [{ tabKey: "analyze", panelKey: "value" }],
+    exact: true,
+  },
   { match: "risk-", stage: 3, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "risk" }] },
-  { match: ["research-mgr", "p-risk-assess"], stage: 3, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "risk" }], exact: true },
+  {
+    match: ["research-mgr", "p-risk-assess"],
+    stage: 3,
+    phase: "decide",
+    evidence: [{ tabKey: "analyze", panelKey: "risk" }],
+    exact: true,
+  },
   { match: "data-quality", stage: 3, phase: null, evidence: [], exact: true },
   { match: "raw-data", stage: 3, phase: null, evidence: [], exact: true },
 
   // 阶段 4: 决策 & 后处理
   { match: "trader", stage: 4, phase: "decide", evidence: [{ tabKey: "execute", panelKey: "trade" }], exact: true },
-  { match: "portfolio-mgr", stage: 4, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "decision" }], exact: true },
-  { match: "rule-check", stage: 4, phase: "decide", evidence: [{ tabKey: "analyze", panelKey: "decision" }], exact: true },
-  { match: ["agg-risk", "cls-risk-level", "v-validate", "notify-result"], stage: 4, phase: null, evidence: [], exact: true },
+  {
+    match: "portfolio-mgr",
+    stage: 4,
+    phase: "decide",
+    evidence: [{ tabKey: "analyze", panelKey: "decision" }],
+    exact: true,
+  },
+  {
+    match: "rule-check",
+    stage: 4,
+    phase: "decide",
+    evidence: [{ tabKey: "analyze", panelKey: "decision" }],
+    exact: true,
+  },
+  {
+    match: ["agg-risk", "cls-risk-level", "v-validate", "notify-result"],
+    stage: 4,
+    phase: null,
+    evidence: [],
+    exact: true,
+  },
 ];
 
 function matchNodeClass(nodeId: string): NodeClassEntry | undefined {

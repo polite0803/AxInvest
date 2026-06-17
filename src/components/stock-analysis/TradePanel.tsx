@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
-import { useStockAnalysisStore } from "@/stores";
 import { getActionColor, StockAction } from "@/lib/stock-analysis-utils";
+import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Button, Card, Input, InputNumber, message, Select, Space, Statistic, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";

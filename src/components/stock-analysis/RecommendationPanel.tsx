@@ -1,6 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { invoke } from "@/lib/invoke";
+import { parseAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -12,7 +13,6 @@ import type {
   StockConsensus,
   StyleKey,
 } from "@/types/stock-analysis";
-import { parseAction } from "@/lib/stock-analysis-utils";
 import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

@@ -33,6 +33,7 @@ export function cleanToolCallTags(text: string): string {
   cleaned = cleaned.replace(/<tool_calls>[\s\S]*?<\/tool_calls>/gi, "");
   cleaned = cleaned.replace(/<invoke[^>]*>[\s\S]*?<\/invoke>/gi, "");
   cleaned = cleaned.replace(/<invoke[^>]*\/>/gi, "");
+  cleaned = cleaned.replace(/<invoke[^>]*>/gi, "");
   cleaned = cleaned.replace(/<\/parameter>/gi, "");
   // [PROVIDER|tool_calls]...[PROVIDER|/tool_calls] 格式（如 CHAT2API）
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");

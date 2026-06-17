@@ -47,7 +47,13 @@ fn execute_rhai_directly(
     let mut engine = Engine::new();
     // Rhai 无内建 clamp，portfolio-mgr.rhai 等脚本依赖
     engine.register_fn("clamp", |value: f64, min: f64, max: f64| -> f64 {
-        if value < min { min } else if value > max { max } else { value }
+        if value < min {
+            min
+        } else if value > max {
+            max
+        } else {
+            value
+        }
     });
     let mut scope = Scope::new();
     let mut input_params_snapshot = serde_json::Map::new();
@@ -194,6 +200,12 @@ impl NodeExecutorTrait for CodeExecutor {
         // ── 直接执行模式（execute_directly=true）──
         // Rhai 脚本在 DAG 中直接执行，通过 input_mapping 消费上游结构化参数。
         if code_node.config.execute_directly && code_node.config.language == "rhai" {
+            tracing::info!(
+                "[code_executor] Rhai execution: node_type={:?}, input_mapping keys={:?}, variables keys={:?}",
+                super::node_type_name(node),
+                code_node.config.input_mapping.keys().collect::<Vec<_>>(),
+                context.variables.keys().collect::<Vec<_>>(),
+            );
             let (result, input_params) = execute_rhai_directly(
                 &code_node.config.code,
                 &code_node.config.input_mapping,

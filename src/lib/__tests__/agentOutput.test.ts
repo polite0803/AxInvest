@@ -50,29 +50,33 @@ describe("agentOutput decision parsing", () => {
 
 describe("cleanToolCallTags", () => {
   it("removes generic Hermes/Qwen-style <tool_call> blocks with <function> and <parameter>", () => {
-    const input = '<tool_call> <function=search_stock> <parameter=stock_code> 301302 </parameter> </function> </tool_call>';
+    const input =
+      "<tool_call> <function=search_stock> <parameter=stock_code> 301302 </parameter> </function> </tool_call>";
     expect(cleanToolCallTags(input)).toBe("");
   });
 
   it("preserves surrounding text when tool_call is embedded", () => {
-    const input = '分析完成。<tool_call> <function=search_stock> <parameter=stock_code> 301302 </parameter> </function> </tool_call>该股票基本面良好。';
+    const input =
+      "分析完成。<tool_call> <function=search_stock> <parameter=stock_code> 301302 </parameter> </function> </tool_call>该股票基本面良好。";
     const cleaned = cleanToolCallTags(input);
     expect(cleaned).toBe("分析完成。该股票基本面良好。");
   });
 
   it("removes multiple tool_call blocks", () => {
-    const input = '<tool_call><function=foo><parameter=x>1</parameter></function></tool_call>中间文本<tool_call><function=bar><parameter=y>2</parameter></function></tool_call>';
+    const input =
+      "<tool_call><function=foo><parameter=x>1</parameter></function></tool_call>中间文本<tool_call><function=bar><parameter=y>2</parameter></function></tool_call>";
     const cleaned = cleanToolCallTags(input);
     expect(cleaned).toBe("中间文本");
   });
 
   it("removes orphan <function> and <parameter> tags without outer tool_call", () => {
-    const input = '<function=search_stock><parameter=stock_code>301302</parameter></function>';
+    const input = "<function=search_stock><parameter=stock_code>301302</parameter></function>";
     expect(cleanToolCallTags(input)).toBe("");
   });
 
   it("removes tool_call with attributes", () => {
-    const input = '<tool_call id="tc1"><function=search_stock><parameter=stock_code>301302</parameter></function></tool_call>';
+    const input =
+      '<tool_call id="tc1"><function=search_stock><parameter=stock_code>301302</parameter></function></tool_call>';
     expect(cleanToolCallTags(input)).toBe("");
   });
 
@@ -82,7 +86,7 @@ describe("cleanToolCallTags", () => {
   });
 
   it("does not match HTML-like tags such as <figure> or <param>", () => {
-    const input = "<figure>图表说明</figure><param name=\"x\" value=\"1\">";
+    const input = '<figure>图表说明</figure><param name="x" value="1">';
     expect(cleanToolCallTags(input)).toBe(input);
   });
 });

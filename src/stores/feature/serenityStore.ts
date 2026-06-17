@@ -2,7 +2,15 @@ import { create } from "zustand";
 
 // ── 类型 ──
 
-export type StepStage = "loading" | "scanning" | "decomposing" | "identifying" | "mapping" | "saving" | "done" | "error";
+export type StepStage =
+  | "loading"
+  | "scanning"
+  | "decomposing"
+  | "identifying"
+  | "mapping"
+  | "saving"
+  | "done"
+  | "error";
 
 export interface SerenityCandidate {
   stockCode?: string;

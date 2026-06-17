@@ -1,6 +1,11 @@
 import { invoke } from "@/lib/invoke";
+import {
+  type SerenityCandidate,
+  type StepStage,
+  type TrendInfo,
+  useSerenityStore,
+} from "@/stores/feature/serenityStore";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
-import { useSerenityStore, type SerenityCandidate, type StepStage } from "@/stores/feature/serenityStore";
 import { PlayCircleOutlined, ReloadOutlined, StockOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -24,11 +29,16 @@ function inferStage(nodeId?: string): StepStage {
 export function SerenityScreeningPanel() {
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const {
-    running, setRunning,
-    stage, setStage,
-    candidates, setCandidates,
-    trends, setTrends,
-    error, setError,
+    running,
+    setRunning,
+    stage,
+    setStage,
+    candidates,
+    setCandidates,
+    trends,
+    setTrends,
+    error,
+    setError,
   } = useSerenityStore();
   const { t } = useTranslation();
   const getStageLabel = (s: StepStage) => t(`serenityPanel.stage_${s}` as const);
@@ -56,7 +66,7 @@ export function SerenityScreeningPanel() {
               ? JSON.parse(event.payload.output)
               : (event.payload.output as Record<string, unknown>);
             if (out?.trends) {
-              setTrends(out.trends);
+              setTrends(out.trends as TrendInfo[]);
             }
           } catch {
             // ignore parse errors in progress events
@@ -100,7 +110,7 @@ export function SerenityScreeningPanel() {
       unlistenDone?.();
     };
     // 稳定引用：运行时调用的 setXxx 不会变化
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRun = useCallback(async () => {
@@ -117,7 +127,7 @@ export function SerenityScreeningPanel() {
       setStage("error");
       setError(typeof err === "string" ? err : t("serenityPanel.callFailed"));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
   const handleAnalyze = useCallback(
@@ -251,7 +261,8 @@ export function SerenityScreeningPanel() {
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <Tag color="purple" className="text-xs font-bold">
-                      {c.serenityScore ?? c.serenity_score ?? 0}{t("serenityPanel.scoreSuffix")}
+                      {c.serenityScore ?? c.serenity_score ?? 0}
+                      {t("serenityPanel.scoreSuffix")}
                     </Tag>
                     {c.confidence
                       ? (

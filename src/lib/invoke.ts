@@ -14,7 +14,7 @@ declare global {
 export type UnlistenFn = () => void;
 
 /** Default timeout for Tauri invoke calls (5 minutes). Set to 0 to disable. */
-export const DEFAULT_INVOKE_TIMEOUT_MS = 5 * 60 * 1000;
+export const DEFAULT_INVOKE_TIMEOUT_MS = 10 * 60 * 1000;
 
 // ─── 指数退避重试 ───
 

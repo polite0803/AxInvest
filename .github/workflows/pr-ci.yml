@@ -182,7 +182,6 @@ jobs:
     if: false
     continue-on-error: true
     needs: [should-run-heavy]
-    if: needs.should-run-heavy.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

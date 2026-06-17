@@ -188,8 +188,6 @@ jobs:
     env:
       # 关键:不让 brew 在 CI 里 auto-update(那是 --with-deps 卡死的根因)
       HOMEBREW_NO_AUTO_UPDATE: "1"
-      # 让 Playwright 把浏览器装到 node_modules 旁,避免 macOS 路径权限问题
-      PLAYWRIGHT_BROWSERS_PATH: "0"
     steps:
       - uses: actions/checkout@v4
 

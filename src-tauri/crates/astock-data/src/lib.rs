@@ -205,6 +205,7 @@ pub struct AStockClient {
 impl AStockClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_secs(15))
             .connect_timeout(std::time::Duration::from_secs(5))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")

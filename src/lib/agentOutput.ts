@@ -35,6 +35,9 @@ export function cleanToolCallTags(text: string): string {
   cleaned = cleaned.replace(/<invoke[^>]*\/>/gi, "");
   cleaned = cleaned.replace(/<invoke[^>]*>/gi, "");
   cleaned = cleaned.replace(/<\/parameter>/gi, "");
+  // 清理 LLM 内联数据源引用：[a-research ...]、[a-market-analyst ...]、[a-catalyst ...] 等
+  cleaned = cleaned.replace(/\[a-[a-z][\w-]*\s[^\]]*\]/gi, "");
+
   // [PROVIDER|tool_calls]...[PROVIDER|/tool_calls] 格式（如 CHAT2API）
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|tool_calls\][\s\S]*?\[[A-Z0-9_]+\|\/tool_calls\]/gi, "");
   cleaned = cleaned.replace(/\[[A-Z0-9_]+\|invoke[^\]]*\][\s\S]*?\[[A-Z0-9_]+\|\/invoke\]/gi, "");

@@ -442,13 +442,14 @@ async fn seed_stock_analysis_workflow_template(
     use axagent_core::entity::workflow_template;
     use axagent_harness::workflow_types::{
         AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, CodeNode,
-        CodeNodeConfig, DebateNode, DebateNodeConfig, EdgeType, ErrorConfig, JsonSchema,
-        JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig, MergeStrategy,
-        NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode, ParallelNode,
-        ParallelNodeConfig, Position, RetryConfig, RetryPolicy, StorageNode, StorageNodeConfig,
-        SubGraph, SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig,
-        TriggerConfig, TriggerNode, TriggerType, ValidationAssertion, ValidationNode,
-        ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+        CodeNodeConfig, DebateNode, DebateNodeConfig, EdgeType, EndNode, EndNodeConfig,
+        ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig,
+        MergeStrategy, NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode,
+        ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, StorageNode,
+        StorageNodeConfig, SubGraph, SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode,
+        ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
+        ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -509,7 +510,7 @@ async fn seed_stock_analysis_workflow_template(
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
     // stock-analysis 模板版本管理从 v1 开始。v4: 重新种子化以应用 Rhai default→dflt 修复
-    const TEMPLATE_VERSION: i32 = 7;
+    const TEMPLATE_VERSION: i32 = 8;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -2489,6 +2490,28 @@ async fn seed_stock_analysis_workflow_template(
     // store-result 直接从 portfolio-mgr 取决策变量，绕过 state.variables 查找
     edges.push(edge("e-portfolio-mgr-store-result", "portfolio-mgr", "store-result"));
 
+    // EndNode: 把 portfolio-mgr 输出提升为工作流顶层输出
+    nodes.push(WorkflowNode::End(EndNode {
+        base: WorkflowNodeBase {
+            id: "end-output".into(),
+            title: "最终输出".into(),
+            description: Some("将 portfolio-mgr 决策结果提升到工作流输出".into()),
+            position: Position {
+                x: 300.0,
+                y: 5100.0,
+            },
+            retry: RetryConfig::default(),
+            timeout: None,
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+        },
+        config: EndNodeConfig {
+            output_var: Some("portfolio-mgr".into()),
+        },
+    }));
+    edges.push(edge("e-store-end", "store-result", "end-output"));
+
     // 构建 input_schema / output_schema / variables
     let mut input_props = std::collections::HashMap::new();
     input_props.insert(
@@ -2585,13 +2608,7 @@ async fn seed_stock_analysis_workflow_template(
         schema_type: "object".to_string(),
         description: Some("股票分析最终决策输出".to_string()),
         properties: Some(output_props),
-        required: Some(vec![
-            "action".to_string(),
-            "positionPct".to_string(),
-            "reasoning".to_string(),
-            "riskLevel".to_string(),
-            "confidence".to_string(),
-        ]),
+        required: None,
         items: None,
     })
     .unwrap();
@@ -4712,10 +4729,10 @@ async fn seed_serenity_screening_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_harness::workflow_types::{
-        AgentNode, AgentNodeConfig, EdgeType, JsonSchema, JsonSchemaProperty, OutputMode, Position,
-        RetryConfig, StorageNode, StorageNodeConfig, ToolDef, ToolNode, ToolNodeConfig,
-        TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge, WorkflowNode,
-        WorkflowNodeBase,
+        AgentNode, AgentNodeConfig, EdgeType, EndNode, EndNodeConfig, JsonSchema,
+        JsonSchemaProperty, OutputMode, Position, RetryConfig, StorageNode, StorageNodeConfig,
+        ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, Variable,
+        WorkflowEdge, WorkflowNode, WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 

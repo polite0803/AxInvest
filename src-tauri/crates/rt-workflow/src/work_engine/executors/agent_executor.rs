@@ -725,6 +725,24 @@ impl NodeExecutorTrait for AgentExecutor {
             for tc in tc_list {
                 let args: serde_json::Value =
                     serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null);
+                // 自动注入 stock_code：若 LLM 未传参且 context.variables 中存在，补入 args
+                let args = if let Some(args_obj) = args.as_object() {
+                    if !args_obj.contains_key("stock_code") {
+                        if let Some(sc) =
+                            context.variables.get("stock_code").and_then(|v| v.as_str())
+                        {
+                            let mut m = args_obj.clone();
+                            m.insert("stock_code".into(), serde_json::json!(sc));
+                            serde_json::Value::Object(m)
+                        } else {
+                            args.clone()
+                        }
+                    } else {
+                        args.clone()
+                    }
+                } else {
+                    args
+                };
 
                 let tool_result = if !exposed_tool_names.is_empty()
                     && !exposed_tool_names.contains(&tc.function.name)

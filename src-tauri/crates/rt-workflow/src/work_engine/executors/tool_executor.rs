@@ -84,11 +84,10 @@ impl NodeExecutorTrait for ToolExecutor {
         // 自动注入 stock_code：若 input_mapping 未映射但 context.variables 中存在
         if !resolved_args
             .as_object()
-            .map_or(true, |o| o.contains_key("stock_code"))
+            .is_none_or(|o| o.contains_key("stock_code"))
+            && let Some(sc) = context.variables.get("stock_code").and_then(|v| v.as_str())
         {
-            if let Some(sc) = context.variables.get("stock_code").and_then(|v| v.as_str()) {
-                resolved_args["stock_code"] = serde_json::json!(sc);
-            }
+            resolved_args["stock_code"] = serde_json::json!(sc);
         }
 
         let tool_name = &tool_node.config.tool_name;

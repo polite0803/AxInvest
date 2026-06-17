@@ -4737,7 +4737,7 @@ async fn seed_serenity_screening_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 2;
+    const TEMPLATE_VERSION: i32 = 3;
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -4994,7 +4994,6 @@ async fn seed_serenity_screening_workflow_template(
             80.0,
         ),
         ("t-cls-flash", "实时快讯", "get_cls_flash", "t-cls-flash", 440.0, 80.0),
-        ("t-concept", "概念板块", "get_concept_blocks", "t-concept", 640.0, 80.0),
         ("t-northbound", "北向资金", "get_north_bound_flow", "t-northbound", 840.0, 80.0),
     ];
     let t_trend_ids: Vec<&str> = t_names.iter().map(|(id, _, _, _, _, _)| *id).collect();
@@ -5004,7 +5003,7 @@ async fn seed_serenity_screening_workflow_template(
     }
 
     // ── a-trend-scanner: 综合分析，输出 2-3 个趋势 ──
-    let trend_scanner_prompt = "你的任务：综合分析市场热门股、行业排名、实时快讯、概念板块、北向资金流向，\
+    let trend_scanner_prompt = "你的任务：综合分析市场热门股、行业排名、实时快讯、北向资金流向，\
          识别出当前最具潜力的 2-3 个产业方向。\
          \n\n\
          核心原则：\n\

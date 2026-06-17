@@ -203,7 +203,7 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        timeout-minutes: 5
+        timeout-minutes: 10
         # 注意:不使用 --with-deps。
         # 在 macOS 上 --with-deps 会调用 brew install,在 cache miss 时
         # 会触发 brew auto-update → 永不退出 → job 卡死。

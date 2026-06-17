@@ -89,8 +89,8 @@ impl SerenityStrategy {
         let conf_quality = (gm / 100.0).min(1.0); // 毛利率越高越可信
         let conf_growth = (rev_growth / 50.0).min(1.0); // 增速越高，但上限 50%
                                                         // 用实际行情数据替代硬编码值
-        let liquidity = (quote.turnover_rate / 5.0).min(1.0).max(0.1); // 换手率/5 ≈ 流动性
-        let price_momentum = (quote.change_pct.abs() / 10.0).min(1.0).max(0.1); // 涨跌幅/10 ≈ 动量
+        let liquidity = (quote.turnover_rate / 5.0).clamp(0.1, 1.0); // 换手率/5 ≈ 流动性
+        let price_momentum = (quote.change_pct.abs() / 10.0).clamp(0.1, 1.0); // 涨跌幅/10 ≈ 动量
         let turnover_anomaly = 1.0; // 仍硬编码：无历史换手率做对比基准
         let conf = calc_confidence(
             conf_quality * 0.6 + conf_growth * 0.4, // consistency

@@ -13,11 +13,11 @@
 //   应对层: 反身性系数 × 预测聚合 → 最终置信度
 
 // ── 空值保护 ──
-let safe_num = |x, default| {
-    if type_of(x) == "()" { default } else { x }
+let safe_num = |x, dflt| {
+    if type_of(x) == "()" { dflt } else { x }
 };
-let safe_str = |x, default| {
-    if type_of(x) == "()" { default } else { x }
+let safe_str = |x, dflt| {
+    if type_of(x) == "()" { dflt } else { x }
 };
 
 let total_score = safe_num(totalScore, 50.0);

@@ -44,7 +44,11 @@ fn execute_rhai_directly(
 ) -> Result<(serde_json::Value, serde_json::Value), NodeError> {
     use rhai::{Engine, Scope};
 
-    let engine = Engine::new();
+    let mut engine = Engine::new();
+    // Rhai 无内建 clamp，portfolio-mgr.rhai 等脚本依赖
+    engine.register_fn("clamp", |value: f64, min: f64, max: f64| -> f64 {
+        if value < min { min } else if value > max { max } else { value }
+    });
     let mut scope = Scope::new();
     let mut input_params_snapshot = serde_json::Map::new();
 

@@ -117,15 +117,18 @@ export function SerenityScreeningPanel() {
     setRunning(true);
     setStage("loading");
     setError(null);
-    setCandidates([]);
-    setTrends([]);
 
     try {
-      await invoke<{ status: string; candidates: unknown }>("run_serenity_screening");
+      const result = await invoke<{ status: string; candidates: unknown }>("run_serenity_screening");
+      // 兜底：事件监听器没设 candidates 时用 invoke 返回值
+      if (result?.candidates && Array.isArray(result.candidates) && result.candidates.length > 0) {
+        setCandidates(result.candidates as SerenityCandidate[]);
+      }
     } catch (err) {
-      setRunning(false);
       setStage("error");
       setError(typeof err === "string" ? err : t("serenityPanel.callFailed"));
+    } finally {
+      setRunning(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);

@@ -29,6 +29,7 @@ export function ScreenerPage() {
   const screens = useBreakpoint();
   const isMobile = !screens.md;
   const [activeTab, setActiveTab] = useState<string>("reco");
+  const [activeKeys, setActiveKeys] = useState<string[]>([]);
 
   return (
     <PageErrorBoundary title="Screener">
@@ -89,6 +90,8 @@ export function ScreenerPage() {
             defaultActiveKey={[]}
             bordered={false}
             size={isMobile ? "small" : "middle"}
+            activeKey={activeKeys}
+            onChange={(keys) => setActiveKeys(keys as string[])}
             items={[
               {
                 key: "hot",
@@ -97,7 +100,7 @@ export function ScreenerPage() {
                     🔥 {t("stockAnalysis.settings.panels.hotStocks")}
                   </span>
                 ),
-                children: <HotStocksPanel bordered={false} />,
+                children: activeKeys.includes("hot") ? <HotStocksPanel bordered={false} /> : null,
               },
               {
                 key: "limitup",
@@ -106,7 +109,7 @@ export function ScreenerPage() {
                     🏆 {t("stockAnalysis.settings.panels.limitUp")}
                   </span>
                 ),
-                children: <LimitUpPanel bordered={false} />,
+                children: activeKeys.includes("limitup") ? <LimitUpPanel bordered={false} /> : null,
               },
               {
                 key: "dragontiger",
@@ -115,7 +118,7 @@ export function ScreenerPage() {
                     🐉 {t("stockAnalysis.settings.panels.dragonTiger")}
                   </span>
                 ),
-                children: <DragonTigerPanel bordered={false} />,
+                children: activeKeys.includes("dragontiger") ? <DragonTigerPanel bordered={false} /> : null,
               },
             ]}
           />

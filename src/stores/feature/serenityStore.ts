@@ -42,12 +42,16 @@ interface SerenityState {
   candidates: SerenityCandidate[];
   trends: TrendInfo[];
   error: string | null;
+  completedNodes: number;
+  totalNodes: number;
 
   setRunning: (v: boolean) => void;
   setStage: (s: StepStage) => void;
   setCandidates: (c: SerenityCandidate[]) => void;
   setTrends: (t: TrendInfo[]) => void;
   setError: (e: string | null) => void;
+  setCompletedNodes: (n: number) => void;
+  setTotalNodes: (n: number) => void;
   reset: () => void;
 }
 
@@ -57,6 +61,8 @@ const initialState = {
   candidates: [] as SerenityCandidate[],
   trends: [] as TrendInfo[],
   error: null as string | null,
+  completedNodes: 0,
+  totalNodes: 0,
 };
 
 export const useSerenityStore = create<SerenityState>((set) => ({
@@ -66,5 +72,7 @@ export const useSerenityStore = create<SerenityState>((set) => ({
   setCandidates: (c) => set({ candidates: c }),
   setTrends: (t) => set({ trends: t }),
   setError: (e) => set({ error: e }),
+  setCompletedNodes: (n) => set({ completedNodes: n }),
+  setTotalNodes: (n) => set({ totalNodes: n }),
   reset: () => set(initialState),
 }));

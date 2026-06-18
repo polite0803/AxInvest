@@ -39,6 +39,10 @@ export function SerenityScreeningPanel() {
     setTrends,
     error,
     setError,
+    completedNodes,
+    totalNodes,
+    setCompletedNodes,
+    setTotalNodes,
   } = useSerenityStore();
   const { t } = useTranslation();
   const getStageLabel = (s: StepStage) => t(`serenityPanel.stage_${s}` as const);
@@ -58,6 +62,12 @@ export function SerenityScreeningPanel() {
       }>("serenity-screening-step", (event) => {
         const st = inferStage(event.payload.nodeId);
         setStage(st);
+        if (typeof event.payload.completedNodes === "number") {
+          setCompletedNodes(event.payload.completedNodes);
+        }
+        if (typeof event.payload.totalNodes === "number") {
+          setTotalNodes(event.payload.totalNodes);
+        }
 
         // 从 a-trend-scanner 输出中提取趋势信息
         if (event.payload.nodeId === "a-trend-scanner" && event.payload.output) {
@@ -174,7 +184,10 @@ export function SerenityScreeningPanel() {
         <Alert
           type="info"
           showIcon
-          message={getStageLabel(stage)}
+          message={<>
+            {getStageLabel(stage)}
+            {totalNodes > 0 && <span className="ml-1 text-xs opacity-70">({completedNodes}/{totalNodes})</span>}
+          </>}
           description={stage !== "loading"
             ? t("serenityPanel.analyzing")
             : undefined}

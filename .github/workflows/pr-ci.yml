@@ -179,8 +179,6 @@ jobs:
 
   test-e2e:
     name: E2E Tests
-    if: false
-    continue-on-error: true
     needs: [should-run-heavy]
     runs-on: ubuntu-24.04
     steps:
@@ -198,16 +196,17 @@ jobs:
         uses: actions/cache@v4
         id: playwright-cache
         with:
-          path: ~/.cache/ms-playwright
+          path: ${{ github.workspace }}/.playwright-browsers
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        # 注意:不使用 --with-deps。
-        # Ubuntu 24.04 镜像已预装 Playwright Chromium 所需系统库（apt）。
-        # cache hit 时不需要 install,cache miss 时下载 165MB。
-        run: npx --yes playwright install chromium
+        run: |
+          npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
+          HOMEBREW_NO_AUTO_UPDATE: 1
 
       - name: Run E2E tests
         run: npm run test:e2e

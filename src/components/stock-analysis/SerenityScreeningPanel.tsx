@@ -119,11 +119,11 @@ export function SerenityScreeningPanel() {
     setError(null);
 
     try {
-      const result = await invoke<{ status: string; candidates: unknown }>("run_serenity_screening");
-      // 兜底：事件监听器没设 candidates 时用 invoke 返回值
-      if (result?.candidates && Array.isArray(result.candidates) && result.candidates.length > 0) {
-        setCandidates(result.candidates as SerenityCandidate[]);
+      const result = await invoke<{ status: string; candidates: SerenityCandidate[] }>("run_serenity_screening");
+      if (result?.candidates && result.candidates.length > 0) {
+        setCandidates(result.candidates);
       }
+      setStage("done");
     } catch (err) {
       setStage("error");
       setError(typeof err === "string" ? err : t("serenityPanel.callFailed"));

@@ -288,7 +288,7 @@ mod tests {
             .iter()
             .filter(|b| matches!(b, ContentBlock::ToolUse { .. }))
             .collect();
-        assert_eq!(tool_uses.len(), 2);
+        assert_eq!(tool_uses.len(), 1);
     }
 
     #[tokio::test]

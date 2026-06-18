@@ -99,7 +99,8 @@ export function SerenityScreeningPanel() {
         setStage("done");
 
         // 兼容两种格式：result.candidates 或直接 candidates
-        const raw = event.payload.result?.candidates ?? event.payload.candidates ?? [];
+        // result = {candidates: [...]} 或裸数组
+        const raw = event.payload.result?.candidates ?? event.payload.candidates ?? event.payload.result ?? [];
         const rawArr = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : [];
         const normalized: SerenityCandidate[] = rawArr.map((c) => ({
           stockCode: (c.stockCode ?? c.stock_code ?? c.stockName ?? "") as string,
@@ -129,9 +130,11 @@ export function SerenityScreeningPanel() {
     setError(null);
 
     try {
-      const result = await invoke<{ status: string; candidates: SerenityCandidate[] }>("run_serenity_screening");
-      if (result?.candidates && result.candidates.length > 0) {
-        setCandidates(result.candidates);
+      const r = await invoke<any>("run_serenity_screening");
+      // r = {status: "completed", result: {candidates: [...]}}
+      const arr = r?.result?.candidates ?? r?.candidates?.candidates ?? r?.candidates;
+      if (Array.isArray(arr) && arr.length > 0) {
+        setCandidates(arr as SerenityCandidate[]);
       }
       setStage("done");
     } catch (err) {

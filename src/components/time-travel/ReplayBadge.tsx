@@ -28,7 +28,7 @@ export function ReplayBadge({ style }: { style?: React.CSSProperties }) {
     : t("timeTravel.replayBadge.replay", { date: asOfDate ?? "" });
 
   return (
-    <Tooltip title={t("timeTravel.replayBadge.tooltip")}>
+    <Tooltip title={t("timeTravel.replayBadge.tooltip", { date: asOfDate ?? "" })}>
       <Tag
         color={color}
         icon={<Clock size={11} />}

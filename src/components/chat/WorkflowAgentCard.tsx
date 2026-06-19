@@ -1,4 +1,4 @@
-import { cleanToolCallTags, tryBeautifyJson } from "@/components/stock-analysis/utils";
+import { cleanToolCallTags, extractReadableFromRiskReport } from "@/components/stock-analysis/utils";
 import { getWorkflowNodeLabel } from "@/utils/workflowNodeLabel";
 import { Card, Progress, Tag } from "antd";
 import { TrendingUp } from "lucide-react";
@@ -303,9 +303,8 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
     const riskName = i18nKey
       ? t(i18nKey)
       : (riskKey.startsWith("risk-") ? riskKey.slice(5) : riskKey);
-    const riskRaw = data.riskContent ? tryBeautifyJson(data.riskContent) : "";
-    const riskBrief = riskRaw
-      ? (riskRaw.length > 300 ? riskRaw.slice(0, 300) + "..." : riskRaw)
+    const riskBrief = data.riskContent
+      ? extractReadableFromRiskReport(data.riskContent)
       : "";
     return (
       <div className="workflow-card" style={{ padding: "10px 14px" }}>

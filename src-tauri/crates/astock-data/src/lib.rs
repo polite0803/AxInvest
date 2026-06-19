@@ -44,6 +44,17 @@ use vendors::StockVendor;
 
 type VendorRef = (String, Box<dyn StockVendor>);
 
+/// 检查 HTTP 响应状态码，429 → DataError::RateLimited
+pub fn check_response_429(resp: &reqwest::Response, vendor: &str) -> Result<(), DataError> {
+    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        Err(DataError::RateLimited {
+            vendor: vendor.to_string(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
 struct VendorRouting {
     quote: Vec<String>,
     klines: Vec<String>,
@@ -53,6 +64,7 @@ struct VendorRouting {
     dragon_tiger: Vec<String>,
     lockup: Vec<String>,
     search: Vec<String>,
+    search_news: Vec<String>,
     margin: Vec<String>,
     north_bound: Vec<String>,
     sector: Vec<String>,
@@ -106,12 +118,12 @@ impl VendorRouting {
                 "eastmoney".into(),
             ],
             klines: vec![
-                "eastmoney".into(),
                 "tencent".into(),
                 "sina".into(),
-                "mootdx".into(),
                 "xueqiu".into(),
+                "mootdx".into(),
                 "baidu_stock".into(),
+                "eastmoney".into(),
             ],
             financials: vec![
                 "eastmoney".into(),
@@ -128,10 +140,11 @@ impl VendorRouting {
                 "baidu_stock".into(),
                 "akshare".into(),
             ],
-            money_flow: vec!["eastmoney".into(), "baidu_stock".into()],
+            money_flow: vec!["tencent".into(), "eastmoney".into(), "baidu_stock".into()],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
             search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],
+            search_news: vec!["eastmoney".into(), "akshare".into()],
             margin: vec!["eastmoney".into(), "baidu_stock".into()],
             north_bound: vec!["eastmoney".into(), "baidu_stock".into()],
             sector: vec![
@@ -206,11 +219,12 @@ impl AStockClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
-            .connect_timeout(std::time::Duration::from_secs(5))
+            .connect_timeout(std::time::Duration::from_secs(10))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .cookie_store(true)
-            .pool_max_idle_per_host(4)
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .pool_max_idle_per_host(32)
+            .pool_idle_timeout(std::time::Duration::from_secs(30))
+            .tcp_keepalive(std::time::Duration::from_secs(60))
             .min_tls_version(reqwest::tls::Version::TLS_1_2)
             .build()
             .expect("Failed to create HTTP client");
@@ -766,27 +780,54 @@ impl AStockClient {
             }
         }
 
-        let mut last_err = None;
-        for name in self.routing.vendors_for("quote", &self.routing.quote) {
-            if let Some(vendor) = self.find_vendor(name) {
-                let _guard = self.gate.acquire(name).await;
-                match vendor.get_quote(stock_code).await {
-                    Ok(result) => {
-                        let json = serde_json::to_string(&result).unwrap_or_default();
-                        self.cache_set(cache_key, json, 30).await;
-                        return Ok(result);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 行情失败: {}", name, e);
-                        last_err = Some(e);
-                    },
+        // 路由级重试：所有源失败后等待 2s 重试整条链一次
+        let mut retry_remaining = 1u32;
+        loop {
+            let mut last_err = None;
+            for name in self.routing.vendors_for("quote", &self.routing.quote) {
+                if let Some(vendor) = self.find_vendor(name) {
+                    let _guard = self.gate.acquire(name).await;
+                    match vendor.get_quote(stock_code).await {
+                        Ok(result) => {
+                            // 质量检查：price>0 且 name 非空（Tencent/Mootdx 可能返回空名）
+                            if result.price <= 0.0 || result.name.is_empty() {
+                                tracing::warn!(
+                                    "[降级] {} 行情数据质量不足 (price={}, name='{}')，尝试下一源",
+                                    name,
+                                    result.price,
+                                    result.name
+                                );
+                                last_err = Some(DataError::VendorError {
+                                    vendor: name.clone(),
+                                    message: format!(
+                                        "行情数据质量不足: price={}, name='{}'",
+                                        result.price, result.name
+                                    ),
+                                });
+                                continue;
+                            }
+                            let json = serde_json::to_string(&result).unwrap_or_default();
+                            self.cache_set(cache_key, json, 30).await;
+                            return Ok(result);
+                        },
+                        Err(e) => {
+                            tracing::warn!("[降级] {} 行情失败: {}", name, e);
+                            last_err = Some(e);
+                        },
+                    }
                 }
             }
+            if retry_remaining > 0 && last_err.is_some() {
+                retry_remaining -= 1;
+                tracing::warn!("[retry] {} 所有行情源失败，1s 后重试整条链", stock_code);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                vendor: "all".into(),
+                message: "所有行情数据源均不可用".into(),
+            }));
         }
-        Err(last_err.unwrap_or_else(|| DataError::VendorError {
-            vendor: "all".into(),
-            message: "所有行情数据源均不可用".into(),
-        }))
     }
 
     pub async fn get_klines(
@@ -825,46 +866,56 @@ impl AStockClient {
             }
         }
 
-        let mut last_err = None;
-        for name in &self.routing.klines {
-            if let Some(vendor) = self.find_vendor(name) {
-                let _guard = self.gate.acquire(name).await;
-                match vendor
-                    .get_klines(stock_code, period, fetch_limit, _adj_type)
-                    .await
-                {
-                    Ok(result) if !result.is_empty() => {
-                        let result = Self::truncate_klines_by_asof(result);
-                        if result.is_empty() {
-                            tracing::warn!(
-                                "{}",
-                                if crate::as_of::is_asof_active() {
-                                    format!("[asof] {} K线全部晚于截止日，尝试下一源", name)
-                                } else {
-                                    format!("[vendor] {} K线返回空，尝试下一源", name)
-                                }
-                            );
-                            continue;
-                        }
-                        let json = serde_json::to_string(&result).unwrap_or_default();
-                        self.cache_set(cache_key, json, 300).await;
-                        let start = result.len().saturating_sub(limit as usize);
-                        return Ok(result[start..].to_vec());
-                    },
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} K线返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} K线失败: {}", name, e);
-                        last_err = Some(e);
-                    },
+        // 路由级重试：所有源失败后等待 2s 重试整条链一次
+        let mut retry_remaining = 1u32;
+        loop {
+            let mut last_err = None;
+            for name in &self.routing.klines {
+                if let Some(vendor) = self.find_vendor(name) {
+                    let _guard = self.gate.acquire(name).await;
+                    match vendor
+                        .get_klines(stock_code, period, fetch_limit, _adj_type)
+                        .await
+                    {
+                        Ok(result) if !result.is_empty() => {
+                            let result = Self::truncate_klines_by_asof(result);
+                            if result.is_empty() {
+                                tracing::warn!(
+                                    "{}",
+                                    if crate::as_of::is_asof_active() {
+                                        format!("[asof] {} K线全部晚于截止日，尝试下一源", name)
+                                    } else {
+                                        format!("[vendor] {} K线返回空，尝试下一源", name)
+                                    }
+                                );
+                                continue;
+                            }
+                            let json = serde_json::to_string(&result).unwrap_or_default();
+                            self.cache_set(cache_key, json, 300).await;
+                            let start = result.len().saturating_sub(limit as usize);
+                            return Ok(result[start..].to_vec());
+                        },
+                        Ok(_) => {
+                            tracing::warn!("[降级] {} K线返回空，尝试下一源", name);
+                        },
+                        Err(e) => {
+                            tracing::warn!("[降级] {} K线失败: {}", name, e);
+                            last_err = Some(e);
+                        },
+                    }
                 }
             }
+            if retry_remaining > 0 && last_err.is_some() {
+                retry_remaining -= 1;
+                tracing::warn!("[retry] {} K线所有源失败，1s 后重试整条链", stock_code);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                vendor: "all".into(),
+                message: "所有K线数据源均不可用".into(),
+            }));
         }
-        Err(last_err.unwrap_or_else(|| DataError::VendorError {
-            vendor: "all".into(),
-            message: "所有K线数据源均不可用".into(),
-        }))
     }
 
     /// 财报披露日历 (R3-B 接口, 暂为 stub)
@@ -894,37 +945,55 @@ impl AStockClient {
                 }
             }
         }
+        // 路由级重试：所有源失败后等待 2s 重试整条链一次
+        let mut retry_remaining = 1u32;
+        #[allow(unused_assignments)]
         let mut last_err = None;
-        for name in &self.routing.financials {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_financials(stock_code).await {
-                    Ok(result) if !result.is_empty() => {
-                        let result = Self::truncate_financials_by_asof(result);
-                        if result.is_empty() {
-                            tracing::warn!(
-                                "{}",
-                                if crate::as_of::is_asof_active() {
-                                    format!("[asof] {} 财报全部晚于截止日，尝试下一源", name)
-                                } else {
-                                    format!("[vendor] {} 财报返回空，尝试下一源", name)
-                                }
-                            );
-                            continue;
-                        }
-                        let cache_key = Self::cache_key_for("financials", stock_code);
-                        let json = serde_json::to_string(&result).unwrap_or_default();
-                        self.cache_set(cache_key, json, 3600).await;
-                        return Ok(result);
-                    },
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} 财务数据返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 财务数据失败: {}", name, e);
-                        last_err = Some(e);
-                    },
+        loop {
+            last_err = None;
+            for name in &self.routing.financials {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.get_financials(stock_code).await {
+                        Ok(result) if !result.is_empty() => {
+                            let result = Self::truncate_financials_by_asof(result);
+                            // 注意: 不在此处做 has_valid_data 过滤 — 即使记录字段全空，
+                            // 也让下游 precheck 或 C-fallback 自行处理，避免误杀。
+                            if result.is_empty() {
+                                tracing::warn!(
+                                    "{}",
+                                    if crate::as_of::is_asof_active() {
+                                        format!(
+                                            "[asof] {} 财报全部晚于截止日，尝试下一源",
+                                            name
+                                        )
+                                    } else {
+                                        format!("[vendor] {} 财报返回空，尝试下一源", name)
+                                    }
+                                );
+                                continue;
+                            }
+                            let cache_key = Self::cache_key_for("financials", stock_code);
+                            let json = serde_json::to_string(&result).unwrap_or_default();
+                            self.cache_set(cache_key, json, 3600).await;
+                            return Ok(result);
+                        },
+                        Ok(_) => {
+                            tracing::warn!("[降级] {} 财务数据返回空，尝试下一源", name);
+                        },
+                        Err(e) => {
+                            tracing::warn!("[降级] {} 财务数据失败: {}", name, e);
+                            last_err = Some(e);
+                        },
+                    }
                 }
             }
+            if retry_remaining > 0 && last_err.is_some() {
+                retry_remaining -= 1;
+                tracing::warn!("[retry] {} 财务数据所有源失败 (last: {})，1s 后重试整条链", stock_code, last_err.as_ref().unwrap());
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+            break;
         }
         if let Some(e) = last_err {
             tracing::warn!("所有财务数据源均失败 (last: {e})");
@@ -1136,6 +1205,27 @@ impl AStockClient {
         for name in &self.routing.search {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.search_stock(keyword).await {
+                    return Ok(result);
+                }
+            }
+        }
+        Ok(vec![])
+    }
+
+    /// 按关键词搜索新闻（用于验证 CapEx/催化剂/行业趋势）
+    /// 只在 live 模式可用（搜索是当下语义），as-of 模式下跳过
+    pub async fn search_news(&self, keyword: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation(
+                "astock-data",
+                "search_news",
+                "as-of 模式新闻搜索不可用（搜索是当下语义）",
+            );
+            return Ok(vec![]);
+        }
+        for name in &self.routing.search_news {
+            if let Some(vendor) = self.find_vendor(name) {
+                if let Ok(result) = vendor.search_news(keyword, limit).await {
                     return Ok(result);
                 }
             }

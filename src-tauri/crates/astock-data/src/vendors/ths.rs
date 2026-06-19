@@ -52,6 +52,7 @@ impl StockVendor for ThsVendor {
             .header("Referer", format!("https://basic.10jqka.com.cn/{}/", stock_code))
             .send()
             .await?;
+        crate::check_response_429(&resp, "ths")?;
 
         let text = resp.text().await?;
         let json: Value = serde_json::from_str(&text).map_err(|e| {
@@ -157,6 +158,7 @@ impl StockVendor for ThsVendor {
             .header("Referer", "https://basic.10jqka.com.cn/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "ths")?;
 
         let text = resp.text().await?;
 
@@ -212,6 +214,7 @@ impl StockVendor for ThsVendor {
             .header("Referer", "https://basic.10jqka.com.cn/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "ths")?;
 
         let text = resp.text().await?;
 
@@ -259,6 +262,7 @@ impl StockVendor for ThsVendor {
             .header("Referer", "https://data.10jqka.com.cn/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "ths")?;
 
         let json: Value = resp.json().await?;
         let data = &json["data"];
@@ -322,6 +326,7 @@ impl StockVendor for ThsVendor {
             .header("Referer", "https://data.10jqka.com.cn/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "ths")?;
 
         let json: Value = resp.json().await?;
         let data = &json["data"];
@@ -385,6 +390,7 @@ impl StockVendor for ThsVendor {
             .header("Referer", "https://data.10jqka.com.cn/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "ths")?;
 
         let json: Value = resp.json().await?;
         let data = &json["data"];

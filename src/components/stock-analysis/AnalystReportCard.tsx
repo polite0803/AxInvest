@@ -193,7 +193,14 @@ export function AnalystReportCard({ expertId, report }: Props) {
   const themeMode = useSettingsStore((s) => s.settings.theme_mode);
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  const name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
+  let name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
+  // 安全兜底：如果 i18n key miss（比如 expertId 含 a- 前缀），剥离后重试
+  if (name === expertId && expertId.startsWith("a-")) {
+    const fallback = t(`stockAnalysis.workflow.analyst.${expertId.slice(2)}`, expertId.slice(2));
+    if (fallback !== expertId.slice(2)) {
+      name = fallback;
+    }
+  }
   const cleanedReport = cleanToolCallTags(report);
   const beautified = tryBeautifyJson(cleanedReport);
   const parsed = tryParse(beautified);

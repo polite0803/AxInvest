@@ -3841,13 +3841,6 @@
     "search": "搜索..."
   },
   "workflow": {
-    "loopBackCycleDetected": "回环边会形成闭环，请调整目标节点",
-    "cycleDetectedOnConnect": "此边会形成无 loopBack 标记的环——工作流引擎可能会拒绝它。",
-    "decorativeContainerNoEdges": "装饰性容器不能有连入或连出的边",
-    "unsavedTitle": "未保存的更改",
-    "unsavedContent": "您有未保存的更改，确定要放弃并关闭吗？",
-    "discard": "放弃",
-    "keepEditing": "继续编辑",
     "aiPanel": {
       "enterWorkflowDesc": "请输入工作流描述",
       "workflowGenerated": "工作流已生成",
@@ -5164,7 +5157,6 @@
     },
     "searchNodes": "搜索节点",
     "validationWarnings": "工作流存在 {{count}} 个警告：\n{{details}}",
-    "loopBackCycleDetected": "回环边会形成闭环，请调整目标节点",
     "nodeKind": {
       "input": "输入",
       "output": "输出",
@@ -5292,13 +5284,8 @@
     },
     "run": "运行",
     "settings": "设置",
-    "decorativeContainerNoEdges": "装饰容器无连接",
-    "discard": "放弃",
     "durationMinutes": "{{minutes}} 分钟",
-    "durationSeconds": "{{seconds}} 秒",
-    "keepEditing": "继续编辑",
-    "unsavedContent": "有未保存的更改。",
-    "unsavedTitle": "未保存的工作流"
+    "durationSeconds": "{{seconds}} 秒"
   },
   "atomicSkill": {
     "entryType": "入口类型",

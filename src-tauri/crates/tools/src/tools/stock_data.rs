@@ -453,6 +453,43 @@ impl Tool for SearchStockTool {
     }
 }
 
+// ── 10b. SearchNewsTool ──
+pub struct SearchNewsTool {
+    pub client: Arc<AStockClient>,
+}
+impl SearchNewsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for SearchNewsTool {
+    fn name(&self) -> &str {
+        "search_news"
+    }
+    fn description(&self) -> &str {
+        "按关键词搜索财经新闻，用于验证催化剂/CapEx/行业趋势"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"keyword":{"type":"string","description":"搜索关键词"},"limit":{"type":"integer","description":"返回条数"}},"required":["keyword"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let kw = input["keyword"]
+            .as_str()
+            .ok_or_else(|| te("keyword不能为空".into()))?;
+        let limit = input["limit"].as_u64().unwrap_or(10) as u32;
+        let r = self
+            .client
+            .search_news(kw, limit)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(serde_json::to_string(&r).unwrap_or_default()))
+    }
+}
+
 pub struct ComputeScoringTool {
     pub client: Arc<AStockClient>,
 }
@@ -1736,6 +1773,668 @@ impl Tool for StockSectorInfoTool {
     }
 }
 
+// ── 30. ComputeAttentionScoreTool ──
+// 方案B: 综合多信号计算个股关注度评分（0=冷门 100=过热）
+// 权重可通过 input.weights 覆盖，用于回测优化
+pub struct ComputeAttentionScoreTool {
+    pub client: Arc<AStockClient>,
+}
+impl ComputeAttentionScoreTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for ComputeAttentionScoreTool {
+    fn name(&self) -> &str {
+        "compute_attention_score"
+    }
+    fn description(&self) -> &str {
+        "计算个股关注度评分 0-100（基于新闻量/研报/机构调研/换手率），越低越冷门"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+        "stock_code":{"type":"string","description":"6位股票代码"},
+        "weights":{"type":"object","description":"可选权重覆盖，默认0.25/0.20/0.25/0.15/0.15","properties":{
+            "turnover":{"type":"number","description":"换手率权重"},
+            "news":{"type":"number","description":"新闻量权重"},
+            "report":{"type":"number","description":"研报量权重"},
+            "visit":{"type":"number","description":"机构调研权重"},
+            "mcap":{"type":"number","description":"市值权重"}
+        }}
+    },"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+
+        // 读取权重（支持覆盖，默认 = 回测初值）
+        let w = |key: &str, def: f64| -> f64 {
+            input["weights"][key]
+                .as_f64()
+                .unwrap_or(def)
+                .clamp(0.0, 1.0)
+        };
+        let w_turnover = w("turnover", 0.25);
+        let w_news = w("news", 0.20);
+        let w_report = w("report", 0.25);
+        let w_visit = w("visit", 0.15);
+        let w_mcap = w("mcap", 0.15);
+        // 归一化到总和=1.0
+        let total = w_turnover + w_news + w_report + w_visit + w_mcap;
+        let (w_turnover, w_news, w_report, w_visit, w_mcap) = if total > 0.0 {
+            (
+                w_turnover / total,
+                w_news / total,
+                w_report / total,
+                w_visit / total,
+                w_mcap / total,
+            )
+        } else {
+            (0.25, 0.20, 0.25, 0.15, 0.15)
+        };
+
+        // 1. 行情数据（换手率、市值）
+        let quote = self
+            .client
+            .get_quote(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        let turnover_rate = quote.turnover_rate;
+        let market_cap = quote.total_mv.unwrap_or(0.0);
+
+        // 2. 新闻量（近30条）
+        let news_count = self
+            .client
+            .get_news(code, 10)
+            .await
+            .map(|v| v.len() as f64)
+            .unwrap_or(0.0);
+
+        // 3. 研报量
+        let report_count = self
+            .client
+            .get_research_reports(code)
+            .await
+            .map(|v| v.len() as f64)
+            .unwrap_or(0.0);
+
+        // 4. 机构调研
+        let visit_count = self
+            .client
+            .get_institutional_visits(code)
+            .await
+            .map(|v| v.len() as f64)
+            .unwrap_or(0.0);
+
+        // 5. 计算单项分（0-100）
+        let score_turnover = (turnover_rate / 10.0 * 100.0).min(100.0);
+        let score_news = (news_count / 5.0 * 100.0).min(100.0);
+        let score_report = (report_count / 5.0 * 100.0).min(100.0);
+        let score_visit = (visit_count / 3.0 * 100.0).min(100.0);
+        let score_mcap = if market_cap > 0.0 {
+            ((market_cap / 500.0) * 100.0).min(100.0)
+        } else {
+            50.0
+        };
+
+        let attention_score = (score_turnover * w_turnover
+            + score_news * w_news
+            + score_report * w_report
+            + score_visit * w_visit
+            + score_mcap * w_mcap) as u32;
+
+        let result = serde_json::json!({
+            "stock_code": code,
+            "attention_score": attention_score.min(100),
+            "detail": {
+                "turnover_rate_pct": turnover_rate,
+                "news_count_30d": news_count,
+                "research_report_count": report_count,
+                "institutional_visit_count": visit_count,
+                "market_cap_billion": market_cap,
+                "heat_label": if attention_score <= 30 { "冷门" } else if attention_score <= 60 { "正常" } else { "热门" }
+            },
+            "weights_used": {
+                "turnover": w_turnover,
+                "news": w_news,
+                "report": w_report,
+                "visit": w_visit,
+                "mcap": w_mcap,
+                "note": "可通过 input.weights 覆盖。回测时调用方可自动调优"
+            }
+        });
+        Ok(ToolResult::success(result.to_string()))
+    }
+}
+
+// ── 31. ComputeIndustryPositionTool ──
+// 方案C: 行业竞争地位分析（同行对比 + 产能指标 + 排名）
+pub struct ComputeIndustryPositionTool {
+    pub client: Arc<AStockClient>,
+}
+impl ComputeIndustryPositionTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for ComputeIndustryPositionTool {
+    fn name(&self) -> &str {
+        "compute_industry_position"
+    }
+    fn description(&self) -> &str {
+        "行业竞争地位分析：同行对比毛利率/ROE/负债率，计算产能指标（固定资产周转率/资本开支比）和排名"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+
+        // 1. 获取行业信息
+        let sector_info = self.client.get_sector_info(code).await.ok().flatten();
+
+        // 2. 获取同行对比
+        let peers = self.client.get_peers(code).await.unwrap_or_default();
+
+        // 3. 获取财务数据
+        let financials = self.client.get_financials(code).await.ok();
+        let latest = financials.as_ref().and_then(|f| f.first());
+
+        // 4. 计算产能/竞争指标
+        let gm = latest.and_then(|f| f.gross_margin).unwrap_or(0.0);
+        let roe = latest.and_then(|f| f.roe).unwrap_or(0.0);
+        let debt_ratio = latest.and_then(|f| f.debt_ratio).unwrap_or(0.0);
+        let rnd_ratio = latest.and_then(|f| f.net_margin).unwrap_or(0.0); // net_margin 作为研发密度近似
+        let capex = latest.and_then(|f| f.capital_expenditure).unwrap_or(0.0);
+        let ocf = latest.and_then(|f| f.operating_cash_flow).unwrap_or(0.0);
+        let revenue = latest.and_then(|f| f.revenue).unwrap_or(0.0);
+
+        // 资本开支/折旧：用 operating_cash_flow 近似折旧
+        let capex_dep_ratio = if ocf > 0.0 {
+            (capex / ocf).round()
+        } else {
+            0.0
+        };
+
+        // 同行对比排名
+        let mut peer_gms: Vec<f64> = peers.iter().filter_map(|p| p.roe).collect();
+        peer_gms.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+        let gm_rank = peer_gms
+            .iter()
+            .position(|&v| v <= roe)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        let result = serde_json::json!({
+            "stock_code": code,
+            "sector": sector_info.as_ref().map(|s| s.sector_name.clone()).unwrap_or_default(),
+            "sub_sector": sector_info.as_ref().map(|s| s.sub_sector.clone()).unwrap_or_default(),
+            "competitive_position": {
+                "gross_margin_pct": gm,
+                "roe_pct": roe,
+                "debt_ratio_pct": debt_ratio,
+                "rnd_intensity": rnd_ratio,
+                "gm_rank_in_peers": gm_rank,
+                "total_peer_count": peers.len(),
+            },
+            "capacity_indicators": {
+                "capex_depreciation_ratio": capex_dep_ratio,
+                "revenue": revenue,
+                "capex": capex,
+                "signal": if capex_dep_ratio >= 3.0 {
+                    "积极扩产（资本开支/折旧 > 3）"
+                } else if capex_dep_ratio >= 1.5 {
+                    "温和扩产"
+                } else {
+                    "维持性投入"
+                }
+            },
+            "peer_summary": peers.iter().take(5).map(|p| {
+                serde_json::json!({
+                    "stock_code": p.stock_code,
+                    "stock_name": p.stock_name,
+                    "roe": p.roe,
+                    "market_cap": p.market_cap,
+                })
+            }).collect::<Vec<_>>(),
+        });
+        Ok(ToolResult::success(result.to_string()))
+    }
+}
+
+// ── 32. CheckExitSignalsTool ──
+// Phase 3: 退出信号持续监控 — 检查个股是否触发退出条件
+pub struct CheckExitSignalsTool {
+    pub client: Arc<AStockClient>,
+}
+impl CheckExitSignalsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for CheckExitSignalsTool {
+    fn name(&self) -> &str {
+        "check_exit_signals"
+    }
+    fn description(&self) -> &str {
+        "检查个股的退出信号：价格止损、技术替代新闻、产能过剩信号。返回 exit_urgency"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+        "stock_code":{"type":"string","description":"6位股票代码"},
+        "entry_price":{"type":"number","description":"买入价（用于计算止损触发）"},
+        "stop_loss_price":{"type":"number","description":"止损价"}
+    },"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let entry_price = input["entry_price"].as_f64();
+        let stop_loss_price = input["stop_loss_price"].as_f64();
+
+        // 1. 获取当前行情
+        let quote = self
+            .client
+            .get_quote(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        let price = quote.price;
+        let change_pct_1m = quote.change_pct; // 当日涨跌幅（近似）
+
+        // 2. 检查价格止损
+        let stop_loss_hit = stop_loss_price.map(|sl| price < sl).unwrap_or(false);
+
+        // 3. 搜索负面新闻
+        let disruption_news = self
+            .client
+            .search_news(&format!("{} 技术替代 产能过剩 竞争", code), 5)
+            .await
+            .unwrap_or_default();
+        let has_disruption_news = disruption_news.len() >= 2;
+
+        // 4. 获取财务趋势（负债率和毛利率变化）
+        let financials = self.client.get_financials(code).await.ok();
+        let margin_declining = financials
+            .as_ref()
+            .and_then(|f| {
+                if f.len() >= 2 {
+                    let curr = f[0].gross_margin.unwrap_or(0.0);
+                    let prev = f[1].gross_margin.unwrap_or(0.0);
+                    Some(prev > 0.0 && curr < prev * 0.85) // 毛利率下降超过15%
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false);
+
+        // 5. 综合判断退出紧迫度
+        let (urgency, reasons) = if stop_loss_hit {
+            ("exit_now", vec!["止损价已触发".to_string()])
+        } else if has_disruption_news && margin_declining {
+            ("exit_now", vec!["技术替代/竞争加剧 + 毛利率持续下降".to_string()])
+        } else if has_disruption_news {
+            ("caution", vec!["检测到技术替代或产能过剩相关新闻".to_string()])
+        } else if margin_declining {
+            ("caution", vec!["毛利率明显下降，关注竞争格局变化".to_string()])
+        } else if entry_price
+            .map(|ep| (price - ep) / ep < -0.15)
+            .unwrap_or(false)
+        {
+            (
+                "watch",
+                vec![format!(
+                    "距入场价下跌 {:.1}%，接近止损",
+                    (price / entry_price.unwrap_or(price) - 1.0) * 100.0
+                )],
+            )
+        } else {
+            ("no_urgency", vec!["退出信号未触发".to_string()])
+        };
+
+        let result = serde_json::json!({
+            "stock_code": code,
+            "current_price": price,
+            "change_pct_today": change_pct_1m,
+            "stop_loss_hit": stop_loss_hit,
+            "has_disruption_news": has_disruption_news,
+            "margin_declining": margin_declining,
+            "exit_urgency": urgency,
+            "reasons": reasons,
+            "updated_at": chrono::Utc::now().to_rfc3339()
+        });
+        Ok(ToolResult::success(result.to_string()))
+    }
+}
+
+// ── 33. ComputeSerenityPerformanceTool ──
+// 回馈闭环: 跟踪 Serenity 候选的推荐后表现
+pub struct ComputeSerenityPerformanceTool {
+    pub client: Arc<AStockClient>,
+}
+impl ComputeSerenityPerformanceTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for ComputeSerenityPerformanceTool {
+    fn name(&self) -> &str {
+        "compute_serenity_performance"
+    }
+    fn description(&self) -> &str {
+        "计算 Serenity 候选股的推荐后表现：从 entry_date 到现在的收益率、最大回撤、波动率"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+        "stock_code":{"type":"string","description":"6位股票代码"},
+        "recommend_date":{"type":"string","description":"推荐日期 YYYY-MM-DD"}
+    },"required":["stock_code","recommend_date"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let date = input["recommend_date"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("recommend_date不能为空".into()))?;
+
+        // 获取推荐日 K 线（前复权）确定入场价
+        let entry_kline = self
+            .client
+            .get_klines(code, "daily", 30)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        let entry_price = entry_kline
+            .iter()
+            .find(|k| k.date.starts_with(date))
+            .map(|k| k.close)
+            .or_else(|| entry_kline.last().map(|k| k.close))
+            .unwrap_or(0.0);
+
+        // 获取当前行情
+        let current_quote = self
+            .client
+            .get_quote(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        let current_price = current_quote.price;
+
+        // 计算收益率
+        let return_pct = if entry_price > 0.0 {
+            (current_price - entry_price) / entry_price * 100.0
+        } else {
+            0.0
+        };
+
+        // 从 K 线计算最大回撤和波动率
+        let max_drawdown: f64 = entry_kline
+            .iter()
+            .filter(|k| k.date.as_str() >= date)
+            .fold((0.0_f64, entry_price), |(max_dd, peak), k| {
+                let new_peak = peak.max(k.close);
+                let dd = (new_peak - k.close) / new_peak * 100.0;
+                (max_dd.max(dd), new_peak)
+            })
+            .0;
+        let volatility = if entry_kline.len() >= 5 {
+            let returns: Vec<f64> = entry_kline
+                .windows(2)
+                .map(|w| (w[1].close - w[0].close) / w[0].close)
+                .collect();
+            let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+            let variance =
+                returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
+            variance.sqrt() * 100.0
+        } else {
+            0.0
+        };
+
+        let result = serde_json::json!({
+            "stock_code": code,
+            "entry_price": entry_price,
+            "current_price": current_price,
+            "return_pct": (return_pct * 100.0).round() / 100.0,
+            "max_drawdown_pct": (max_drawdown * 100.0_f64).round() / 100.0,
+            "volatility_pct": (volatility * 100.0_f64).round() / 100.0,
+            "days_held": entry_kline.iter().filter(|k| k.date.as_str() >= date).count(),
+            "is_profitable": return_pct > 0.0,
+        });
+        Ok(ToolResult::success(result.to_string()))
+    }
+}
+
+// ── 34. VerifyCatalystsTool ──
+// 回馈闭环: 验证催化剂是否兑现
+pub struct VerifyCatalystsTool {
+    pub client: Arc<AStockClient>,
+}
+impl VerifyCatalystsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for VerifyCatalystsTool {
+    fn name(&self) -> &str {
+        "verify_catalysts"
+    }
+    fn description(&self) -> &str {
+        "验证 Serenity 候选的催化剂是否兑现：搜索新闻确认事件是否发生"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+        "stock_code":{"type":"string","description":"6位股票代码"},
+        "catalyst_descriptions":{"type":"array","items":{"type":"string"},"description":"催化剂描述列表"}
+    },"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let descriptions: Vec<&str> = input["catalyst_descriptions"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+
+        let mut results = Vec::new();
+        for desc in &descriptions {
+            // 用搜索关键词找催化剂相关的新闻
+            let news = self.client.search_news(desc, 5).await.unwrap_or_default();
+            let found = news.iter().any(|n| {
+                n.title.contains(*desc)
+                    || n.summary.contains(*desc)
+                    || desc
+                        .chars()
+                        .all(|c| n.title.contains(c) || n.summary.contains(c))
+            });
+            results.push(serde_json::json!({
+                "description": desc,
+                "verified": found,
+                "evidence_count": news.len(),
+                "top_match": news.first().map(|n| n.title.clone()).unwrap_or_default(),
+            }));
+        }
+
+        let result = serde_json::json!({
+            "stock_code": code,
+            "catalysts_checked": results.len(),
+            "verified_count": results.iter().filter(|r| r["verified"].as_bool().unwrap_or(false)).count(),
+            "details": results,
+        });
+        Ok(ToolResult::success(result.to_string()))
+    }
+}
+
+// ── 35. OptimizeAttentionWeightsTool ──
+// 回馈闭环: 基于历史表现调优关注度评分权重
+pub struct OptimizeAttentionWeightsTool {
+    pub client: Arc<AStockClient>,
+}
+impl OptimizeAttentionWeightsTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for OptimizeAttentionWeightsTool {
+    fn name(&self) -> &str {
+        "optimize_attention_weights"
+    }
+    fn description(&self) -> &str {
+        "基于历史候选表现调优 compute_attention_score 的权重。输入候选表现列表，输出最优权重组合"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+        "samples":{"type":"array","description":"样本列表: [{attention_score, return_pct, ...}]","items":{
+            "type":"object","properties":{
+                "attention_score":{"type":"number"},"return_pct":{"type":"number"},
+                "news_count":{"type":"number"},"report_count":{"type":"number"},
+                "visit_count":{"type":"number"},"turnover_rate":{"type":"number"},"market_cap":{"type":"number"}
+            }
+        }}
+    },"required":["samples"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let samples = input["samples"]
+            .as_array()
+            .ok_or_else(|| te("samples不能为空".into()))?;
+        if samples.is_empty() {
+            return Ok(ToolResult::success(r#"{"error":"样本为空"}"#.to_string()));
+        }
+
+        // 提取样本数据
+        let scores: Vec<f64> = samples
+            .iter()
+            .filter_map(|s| s["attention_score"].as_f64())
+            .collect();
+        let returns: Vec<f64> = samples
+            .iter()
+            .filter_map(|s| s["return_pct"].as_f64())
+            .collect();
+        if scores.len() < 5 {
+            return Ok(ToolResult::success(format!(
+                r#"{{"error":"样本不足，需要至少5个样本","samples_count":{}}}"#,
+                samples.len()
+            )));
+        }
+
+        // 简单网格搜索: 测试 5 组权重维度
+        let weight_sets: Vec<(&str, Vec<f64>)> = vec![
+            ("默认", vec![0.25, 0.20, 0.25, 0.15, 0.15]),
+            ("强趋势", vec![0.35, 0.15, 0.15, 0.10, 0.25]),
+            ("弱信号", vec![0.15, 0.25, 0.30, 0.20, 0.10]),
+            ("均衡", vec![0.20, 0.20, 0.20, 0.20, 0.20]),
+            ("极致冷门", vec![0.15, 0.30, 0.30, 0.20, 0.05]),
+        ];
+
+        // 对每个权重组合计算与收益的负相关性（低关注度→高收益是理想的）
+        let mut results: Vec<serde_json::Value> = weight_sets
+            .iter()
+            .map(|(name, ws)| {
+                let weighted_scores: Vec<f64> = samples
+                    .iter()
+                    .map(|s| {
+                        let turnover = s["turnover_rate"].as_f64().unwrap_or(0.0);
+                        let news = s["news_count"].as_f64().unwrap_or(0.0);
+                        let report = s["report_count"].as_f64().unwrap_or(0.0);
+                        let visit = s["visit_count"].as_f64().unwrap_or(0.0);
+                        let mcap = s["market_cap"].as_f64().unwrap_or(0.0);
+                        let score = turnover / 10.0 * ws[0]
+                            + news / 5.0 * ws[1]
+                            + report / 5.0 * ws[2]
+                            + visit / 3.0 * ws[3]
+                            + (mcap / 500.0).min(1.0) * ws[4];
+                        score * 100.0
+                    })
+                    .collect();
+
+                // 计算相关系数: 低分数→高收益 = 好的权重
+                let n = samples.len() as f64;
+                let mean_x = weighted_scores.iter().sum::<f64>() / n;
+                let mean_y = returns.iter().sum::<f64>() / n;
+                let (num, den_x, den_y) = weighted_scores.iter().zip(returns.iter()).fold(
+                    (0.0, 0.0, 0.0),
+                    |(n, dx, dy), (&x, &y)| {
+                        (
+                            n + (x - mean_x) * (y - mean_y),
+                            dx + (x - mean_x).powi(2),
+                            dy + (y - mean_y).powi(2),
+                        )
+                    },
+                );
+                let correlation = if den_x > 0.0 && den_y > 0.0 {
+                    num / (den_x.sqrt() * den_y.sqrt())
+                } else {
+                    0.0
+                };
+
+                // 理想的相关性是负的（低分数→高收益）
+                let effectiveness = -correlation;
+
+                serde_json::json!({
+                    "name": name,
+                    "weights": ws,
+                    "correlation": (correlation * 100.0).round() / 100.0,
+                    "effectiveness": (effectiveness * 100.0).round() / 100.0,
+                })
+            })
+            .collect();
+
+        // 按效果排序
+        results.sort_by(|a, b| {
+            b["effectiveness"]
+                .as_f64()
+                .unwrap_or(0.0)
+                .partial_cmp(&a["effectiveness"].as_f64().unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let best = results.first();
+        Ok(ToolResult::success(
+            serde_json::json!({
+                "best_weights": best.map(|b| b["weights"].clone()),
+                "best_name": best.map(|b| b["name"].clone()),
+                "best_correlation": best.map(|b| b["correlation"].clone()),
+                "results": results,
+                "samples_count": samples.len(),
+                "note": "理想权重应使 attention_score 与 return 负相关（低关注→高收益）"
+            })
+            .to_string(),
+        ))
+    }
+}
+
 // ── Registration ──
 pub fn register_stock_tools(
     registry: &mut crate::registry::ToolRegistry,
@@ -1752,6 +2451,7 @@ pub fn register_stock_tools(
         Arc::new(StockAnnouncementsTool::new(client.clone())),
         Arc::new(StockConsensusEPSTool::new(client.clone())),
         Arc::new(SearchStockTool::new(client.clone())),
+        Arc::new(SearchNewsTool::new(client.clone())),
         Arc::new(ComputeScoringTool::new(client.clone())),
         Arc::new(ComputeValuationTool::new(client.clone())),
         Arc::new(ComputeRiskTool::new(client.clone())),
@@ -1771,6 +2471,12 @@ pub fn register_stock_tools(
         Arc::new(StockNorthBoundHoldingTool::new(client.clone())),
         Arc::new(StockDragonTigerTool::new(client.clone())),
         Arc::new(StockMarginDataTool::new(client.clone())),
-        Arc::new(StockSectorInfoTool::new(client)),
+        Arc::new(StockSectorInfoTool::new(client.clone())),
+        Arc::new(ComputeAttentionScoreTool::new(client.clone())),
+        Arc::new(ComputeIndustryPositionTool::new(client.clone())),
+        Arc::new(CheckExitSignalsTool::new(client.clone())),
+        Arc::new(ComputeSerenityPerformanceTool::new(client.clone())),
+        Arc::new(VerifyCatalystsTool::new(client.clone())),
+        Arc::new(OptimizeAttentionWeightsTool::new(client)),
     ]);
 }

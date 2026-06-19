@@ -14,6 +14,18 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
             }
         }),
         json!({
+            "name": "search_news",
+            "description": "按关键词搜索财经新闻，用于验证催化剂/CapEx/行业趋势",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "keyword": { "type": "string", "description": "搜索关键词（如'英伟达 CapEx'、'HBM 产能扩张'）" },
+                    "limit": { "type": "integer", "description": "返回条数（默认10）" }
+                },
+                "required": ["keyword"]
+            }
+        }),
+        json!({
             "name": "get_stock_quote",
             "description": "获取A股实时行情（价格、涨跌幅、成交量等）",
             "inputSchema": {
@@ -344,6 +356,15 @@ pub async fn execute_mcp_tool(
             let keyword = arguments["keyword"].as_str().unwrap_or("");
             let results = client
                 .search_stock(keyword)
+                .await
+                .map_err(|e| e.to_string())?;
+            serde_json::to_string(&results).map_err(|e| e.to_string())
+        },
+        "search_news" => {
+            let keyword = arguments["keyword"].as_str().unwrap_or("");
+            let limit = arguments["limit"].as_u64().unwrap_or(10) as u32;
+            let results = client
+                .search_news(keyword, limit)
                 .await
                 .map_err(|e| e.to_string())?;
             serde_json::to_string(&results).map_err(|e| e.to_string())

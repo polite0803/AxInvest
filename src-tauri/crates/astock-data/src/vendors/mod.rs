@@ -23,6 +23,12 @@ pub trait StockVendor: Send + Sync {
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError>;
 
+    /// 按关键词搜索新闻（用于验证 CapEx/催化剂/行业趋势）
+    async fn search_news(&self, keyword: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        let (_keyword, _limit) = (keyword, limit);
+        Ok(vec![])
+    }
+
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError>;
 
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError>;

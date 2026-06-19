@@ -139,13 +139,6 @@ const builtinNavItems: NavItem[] = [
     isPlugin: false,
   },
   {
-    key: "recommend",
-    icon: <Icon icon="fluent:star-20-filled" size={17} />,
-    labelKey: "nav.recommend",
-    path: "/screener?tab=recommend",
-    isPlugin: false,
-  },
-  {
     key: "trade",
     icon: <ArrowLeftRight size={18} />,
     labelKey: "nav.trade",
@@ -457,7 +450,13 @@ export function Sidebar() {
     sections.push({
       key: "invest-discover",
       labelKey: "sidebar.sectionInvestDiscover",
-      items: builtinNavItems.filter((n) => n.key === "stock-analysis" || n.key === "screener"),
+      items: builtinNavItems.filter((n) => n.key === "screener" || n.key === "stock-analysis"),
+    });
+
+    sections.push({
+      key: "invest-monitor",
+      labelKey: "sidebar.sectionInvestMonitor",
+      items: builtinNavItems.filter((n) => n.key === "watchlist"),
     });
 
     sections.push({
@@ -470,8 +469,7 @@ export function Sidebar() {
       key: "invest-review",
       labelKey: "sidebar.sectionInvestReview",
       items: builtinNavItems.filter((n) =>
-        n.key === "watchlist" || n.key === "backtest" || n.key === "compare" || n.key === "quant"
-        || n.key === "replay-workbench"
+        n.key === "backtest" || n.key === "compare" || n.key === "replay-workbench" || n.key === "quant"
       ),
     });
 

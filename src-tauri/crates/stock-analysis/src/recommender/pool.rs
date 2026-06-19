@@ -142,7 +142,15 @@ pub async fn liquidity_filter_and_truncate(
 async fn filter_one(client: &AStockClient, item: SeedItem) -> Option<SeedItem> {
     let (code, name, sector) = item;
     // 行情数据必须可获取，否则无法交易（quote 走 tencent 路由，通常稳定）
-    let quote = client.get_quote(&code).await.ok()?;
+    // 加一次轻量重试：瞬断场景下避免大量标的被误过滤
+    let quote = match client.get_quote(&code).await {
+        Ok(q) => q,
+        Err(_) => {
+            // 短暂等待后重试一次
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            client.get_quote(&code).await.ok()?
+        },
+    };
     if quote.is_st {
         return None;
     }

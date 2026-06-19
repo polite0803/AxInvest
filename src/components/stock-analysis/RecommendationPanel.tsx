@@ -80,9 +80,47 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   const reqTokenRef = useRef(0);
 
+  // P0-2: 加载策略回测统计（仅在已有荐股结果时调用，避免空数据库时拉取）
+  // 改为手动触发：用户点击"刷新回测"按钮或首次成功 recommend_stocks 后触发
+  const backtestTriggeredRef = useRef<boolean>(false);
+  const triggerBacktest = useCallback(async () => {
+    if (backtestTriggeredRef.current) { return; }
+    backtestTriggeredRef.current = true;
+    try {
+      setStrategyStatsLoading(true);
+      const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
+      if (!result) { return; }
+      // 按 style 聚合所有 period 的统计
+      const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
+      for (const [, s] of Object.entries(result.positive.strategies)) {
+        const style = s.style;
+        if (!byStyle[style]) { byStyle[style] = { winRates: [], sharpes: [], signals: 0 }; }
+        byStyle[style].winRates.push(s.winRatePct);
+        if (s.sharpeRatio != null) { byStyle[style].sharpes.push(s.sharpeRatio); }
+        byStyle[style].signals += s.totalSignals;
+      }
+      const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
+      for (const [style, v] of Object.entries(byStyle)) {
+        const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
+        const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
+        agg[style] = {
+          winRate: Math.round(avgWr * 10) / 10,
+          sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null,
+          signalCount: v.signals,
+        };
+      }
+      setStrategyStats(agg);
+    } catch {
+      // 回测失败时静默，不打扰用户
+      backtestTriggeredRef.current = false;
+    } finally {
+      setStrategyStatsLoading(false);
+    }
+  }, []);
+
   /**
    * 统一数据加载入口。所有数据拉取都走这里,避免 useEffect 与 onClick
-   * 双轨加载造成的中间态闪烁 / 乱序写入(Bug 4 修复)。
+   * 各自发起一次重复请求,造成 RPC 浪费。
    *
    * 用 `reqTokenRef` 做请求级取消:每次调用 +1,旧请求的响应会被丢弃,
    * 不会覆盖新一次调用的结果。
@@ -112,6 +150,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           minute: "2-digit",
         }),
       );
+      // 荐股成功后异步触发策略回测统计（fire-and-forget，不阻塞 UI）
+      void triggerBacktest();
 
       // 同一 token 下串行拉"最近分析",避免与 useEffect 内联请求重复(Bug 7 修复)
       const allCodes = new Set<string>();
@@ -141,47 +181,18 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setEmptyKind("connectionFailed");
     }
     if (myToken === reqTokenRef.current) { setLoading(false); }
-  }, [period, asOfDate, i18n.language]);
+  }, [period, asOfDate, i18n.language, triggerBacktest]);
 
-  // P0-2: 加载策略回测统计（仅加载一次）
+  // Period 切换时自动重载；首次挂载（Tab 切走后 destroyOnHidden 重新渲染）
+  // 不自动请求，避免每次切回 Tab 都后台刷新（用户原话："简直就是傻逼逻辑"）。
+  const initialMountRef = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setStrategyStatsLoading(true);
-      return invoke<BacktestComparisonResponse>("backtest_reco_strategies");
-    })
-      .then((result) => {
-        if (cancelled || !result) { return; }
-        // 按 style 聚合所有 period 的统计
-        const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
-        for (const [, s] of Object.entries(result.positive.strategies)) {
-          const style = s.style;
-          if (!byStyle[style]) { byStyle[style] = { winRates: [], sharpes: [], signals: 0 }; }
-          byStyle[style].winRates.push(s.winRatePct);
-          if (s.sharpeRatio != null) { byStyle[style].sharpes.push(s.sharpeRatio); }
-          byStyle[style].signals += s.totalSignals;
-        }
-        const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
-        for (const [style, v] of Object.entries(byStyle)) {
-          const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
-          const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
-          agg[style] = {
-            winRate: Math.round(avgWr * 10) / 10,
-            sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null,
-            signalCount: v.signals,
-          };
-        }
-        setStrategyStats(agg);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) { setStrategyStatsLoading(false); }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
+      return;
+    }
+    void load();
+  }, [period]);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);

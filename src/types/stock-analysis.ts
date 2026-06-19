@@ -112,6 +112,10 @@ export interface AnalysisSummary {
   status: string;
   decisionAction: string | null;
   createdAt: number;
+  /** "live" | "replay" */
+  analysisKind: string | null;
+  /** as_of_date YYYY-MM-DD（仅 replay 模式非空） */
+  asOfDate: string | null;
 }
 
 export interface AnalysisEvent {

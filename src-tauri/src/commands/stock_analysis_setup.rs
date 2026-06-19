@@ -1146,7 +1146,7 @@ async fn seed_stock_analysis_workflow_template(
                 output_var: id.into(),
                 model: None,
                 temperature: Some(0.3),
-                max_tokens: Some(4096),
+                max_tokens: Some(8192),
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Text,
@@ -4486,10 +4486,16 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     反思深度: {{reflection_depth}}（light = 简要；deep = 详细推理链）\n\n\
                     重要原则：\n\
                     1. 必须严格基于 actual_outcome 提供的实际走势与上游分析结论做对比，识别错因。\n\
-                    2. 输出应包含：错因分析（哪个判断失误 / 哪个信号被忽略）、改进建议（下次如何避免）。\n\
-                    3. 严禁输出空结果或只列 data_gaps。\n\
-                    4. 反思深度=deep 时给出可执行的检查清单（具体指标阈值、信号确认步骤）。"
-                    .into(),
+                    2. 严禁输出空结果或只列 data_gaps。\n\
+                    3. 反思深度=deep 时给出可执行的检查清单（具体指标阈值、信号确认步骤）。\n\n\
+                    你必须输出严格 JSON 格式（不要 Markdown 代码块，不要多余文本），字段如下：\n\
+                    {\n\
+                      \"what_went_wrong\": \"哪里判断错了，简要说明\",\n\
+                      \"missed_signals\": [\"被忽略的信号1\", \"被忽略的信号2\"],\n\
+                      \"fix_for_future\": \"下次如何避免同样的错误\",\n\
+                      \"params_suggestion\": {\"参数名\": \"调整建议\"}\n\
+                    }"
+                .into(),
                 context_sources: vec!["sub-analysis".into()],
                 input_mapping: [
                     ("stock_code".to_string(), "trigger".to_string()),
@@ -4502,10 +4508,10 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 output_var: "reflection".into(),
                 model: None,
                 temperature: Some(0.3),
-                max_tokens: Some(4096),
+                max_tokens: Some(8192),
                 tools: vec![],
                 exposed_tools: vec![],
-                output_mode: OutputMode::Text,
+                output_mode: OutputMode::Json,
                 agent_profile_id: Some("stock-reflection".into()),
                 max_tool_rounds: None,
                 execution_mode: None,
@@ -4737,7 +4743,7 @@ async fn seed_serenity_screening_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 4;
+    const TEMPLATE_VERSION: i32 = 9;
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -4850,6 +4856,269 @@ async fn seed_serenity_screening_workflow_template(
             items: None,
         }),
     };
+    // 新闻 + 研报工具，供 Agent 节点动态搜索验证（催化剂/CapEx/退出信号）
+    let td_serenity_news = ToolDef {
+        name: "get_stock_news".into(),
+        description: Some("获取个股近期新闻公告，验证催化剂/退出信号".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "limit".into(),
+                    JsonSchemaProperty {
+                        schema_type: "integer".into(),
+                        description: Some("返回数量".into()),
+                        default: Some(serde_json::json!(30)),
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_serenity_research = ToolDef {
+        name: "get_research_reports".into(),
+        description: Some("获取券商研报，验证需求/壁垒/CapEx逻辑".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    // 关键词新闻搜索工具，供 Agent 验证催化剂/CapEx/行业趋势
+    let td_search_news = ToolDef {
+        name: "search_news".into(),
+        description: Some("按关键词搜索财经新闻，用于验证催化剂/CapEx/行业趋势".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "keyword".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("搜索关键词".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "limit".into(),
+                    JsonSchemaProperty {
+                        schema_type: "integer".into(),
+                        description: Some("返回条数".into()),
+                        default: Some(serde_json::json!(10)),
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["keyword".into()]),
+            items: None,
+        }),
+    };
+
+    // 关注度评分工具（方案B）
+    let td_attention = ToolDef {
+        name: "compute_attention_score".into(),
+        description: Some("计算个股关注度评分 0-100，越低越冷门，用于验证低关注度因子".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    // 行业竞争地位分析工具（方案C）
+    let td_industry_pos = ToolDef {
+        name: "compute_industry_position".into(),
+        description: Some(
+            "行业竞争地位分析：同行对比毛利率/ROE，产能指标（资本开支/折旧比）".into(),
+        ),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+
+    // 退出信号检查工具（Phase 3）
+    let td_exit = ToolDef {
+        name: "check_exit_signals".into(),
+        description: Some(
+            "检查个股退出信号：价格止损、技术替代新闻、毛利率趋势。返回 exit_urgency".into(),
+        ),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "entry_price".into(),
+                    JsonSchemaProperty {
+                        schema_type: "number".into(),
+                        description: Some("买入价（用于计算止损触发）".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "stop_loss_price".into(),
+                    JsonSchemaProperty {
+                        schema_type: "number".into(),
+                        description: Some("止损价".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+
+    // 回馈闭环工具
+    let td_perf = ToolDef {
+        name: "compute_serenity_performance".into(),
+        description: Some("计算 Serenity 候选推荐后表现".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "recommend_date".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("推荐日期 YYYY-MM-DD".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into(), "recommend_date".into()]),
+            items: None,
+        }),
+    };
+    let td_cat = ToolDef {
+        name: "verify_catalysts".into(),
+        description: Some("验证 Serenity 候选的催化剂是否兑现".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "catalyst_descriptions".into(),
+                    JsonSchemaProperty {
+                        schema_type: "array".into(),
+                        description: Some("催化剂描述列表".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_opt = ToolDef {
+        name: "optimize_attention_weights".into(),
+        description: Some("基于历史表现调优关注度评分权重".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "samples".into(),
+                JsonSchemaProperty {
+                    schema_type: "array".into(),
+                    description: Some("样本列表".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["samples".into()]),
+            items: None,
+        }),
+    };
 
     let tool_defs: Vec<ToolDef> = vec![
         td_hot,
@@ -4861,6 +5130,15 @@ async fn seed_serenity_screening_workflow_template(
         td_fin,
         td_quote,
         td_visits,
+        td_serenity_news,
+        td_serenity_research,
+        td_search_news,
+        td_attention,
+        td_industry_pos,
+        td_exit,
+        td_perf,
+        td_cat,
+        td_opt,
     ];
     let tool_defs_json =
         serde_json::to_string(&tool_defs).map_err(|e| format!("序列化 ToolDef 失败: {e}"))?;
@@ -4929,7 +5207,7 @@ async fn seed_serenity_screening_workflow_template(
                 output_var: id.into(),
                 model: None,
                 temperature: Some(0.3),
-                max_tokens: Some(4096),
+                max_tokens: Some(8192),
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Json,
@@ -5003,19 +5281,36 @@ async fn seed_serenity_screening_workflow_template(
     }
 
     // ── a-trend-scanner: 综合分析，输出 2-3 个趋势 ──
+    // 强约束输出：必须且只能输出一个 tool_json 代码块，无任何前后文。
+    // tool_json 块由项目 IR Normalizer 直接解析为 ContentBlock::ToolUse。
     let trend_scanner_prompt = "你的任务：综合分析市场热门股、行业排名、实时快讯、北向资金流向，\
          识别出当前最具潜力的 2-3 个产业方向。\
          \n\n\
          核心原则：\n\
          1. 排除已过度上涨的赛道（近 1 月板块涨幅 > 30%）。\n\
          2. 只选「萌芽→加速」阶段的产业方向，不要已经充分定价的热点。\n\
-         3. 每个趋势必须给出明确的上下游因果链。\n\
-         4. 必须输出一个 bottleneck_candidate（初步判断的瓶颈环节）。\n\
+         3. **需求确定性是前提**：每个趋势必须有可验证的 CapEx/订单/政策证据支撑。\
+         纯 LLM 推测（\"未来可能增长\"）不可接受。\n\
+         4. 每个趋势必须给出明确的上下游因果链。\n\
+         5. 必须输出一个 bottleneck_candidate（初步判断的瓶颈环节）。\n\
          \n\
-         输出 JSON 格式（严格遵循）：\n\
-         { \"trends\": [{ \"trend_name\": \"...\", \"confidence\": 75, \"phase\": \"accelerating\", \
-           \"core_logic\": \"...\", \"causal_chain\": \"...\", \
-           \"bottleneck_candidate\": \"...\", \"bottleneck_rationale\": \"...\" }] }\
+         ============== 输出格式强约束（必须严格遵守） ==============\n\
+         1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
+         2. 代码块内容为单一 JSON 对象，结构：{\"name\": \"submit_trends\", \"arguments\": <数据>}\n\
+         3. <数据> 字段即下面的趋势数据。\n\
+         4. 代码块外禁止任何文字：不要写\"以下是...\"、\"输出：\"、注释、解释、前缀、后缀。\n\
+         5. 字段值为空时用 null，不要省略字段。\n\
+         6. 数字字段（confidence 等）必须是 JSON 数字，不要加引号。\n\
+         7. 严禁在 JSON 字符串值中夹带思考文字或自述注解。\n\
+         ============================================================\n\
+         \n\
+         <数据> 结构：\n\
+         {\"trends\": [{\"trend_name\": \"...\", \"confidence\": 75, \"phase\": \"accelerating\",\
+         \"core_logic\": \"...\", \"causal_chain\": \"...\",\
+         \"bottleneck_candidate\": \"...\", \"bottleneck_rationale\": \"...\",\
+         \"demand_evidence\": {\"type\": \"capex | policy_mandate | order_backlog\",\
+         \"source\": \"具体证据来源\", \"confidence\": 75, \"detail\": \"...\"},\
+         \"downstream_giants\": [\"直接受益/推动的下游巨头名称\"]}]}\n\
          \n\n\
          重要：如果获取到的数据不足，基于你已知的公开信息和市场常识给出合理推断，\
          不要只列 data_gaps。严禁使用'数据缺失'、'无法获取'等负面措辞。";
@@ -5048,12 +5343,28 @@ async fn seed_serenity_screening_workflow_template(
              1. 拆解到具体产品或工艺层面（如 HBM3E 环氧塑封料）。\n\
              2. 每个环节必须标注 global_supplier_count / tech_barrier / expansion_cycle_months。\n\
              3. 标注 bottleneck_potential（high/medium/low）及理由。\n\
-             \n\
-             输出 JSON 格式：\
-             {{ \"trend_name\": \"...\", \"chain_nodes\": [{{ \"node_name\": \"...\", \
-               \"global_supplier_count\": 3, \"tech_barrier\": \"high\", \
-               \"expansion_cycle_months\": 24, \"bottleneck_potential\": \"high\", \
-               \"bottleneck_rationale\": \"...\" }}] }}"
+             4. **额外标注每个环节的需求验证信息**：直接下游厂商是谁、最终需求驱动方、是否有已公开的\
+             订单/合同负债/CapEx 支撑。\n\
+             \n\n\
+             ============== 输出格式强约束（必须严格遵守） ==============\n\
+             1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
+             2. 代码块内容为单一 JSON 对象，结构：{{\"name\": \"submit_chain\", \"arguments\": <数据>}}\n\
+             3. <数据> 字段即下面的产业链数据。\n\
+             4. 代码块外禁止任何文字：不要写\"以下是...\"、\"输出：\"、注释、解释、前缀、后缀。\n\
+             5. 字段值为空时用 null，不要省略字段。\n\
+             6. 数字字段（global_supplier_count、expansion_cycle_months 等）必须是 JSON 数字。\n\
+             7. 严禁在 JSON 字符串值中夹带思考文字或自述注解。\n\
+             ============================================================\n\
+             \n\n\
+             <数据> 结构：\n\
+             {{\"trend_name\": \"...\", \"chain_nodes\": [{{\"node_name\": \"...\",\
+             \"global_supplier_count\": 3, \"tech_barrier\": \"high\",\
+             \"expansion_cycle_months\": 24, \"bottleneck_potential\": \"high\",\
+             \"bottleneck_rationale\": \"...\",\
+             \"demand_validation\": {{\"direct_downstream\": \"直接下游厂商\",\
+             \"final_demand_driver\": \"最终需求驱动方\", \"demand_certainty\": \"high | medium | low\",\
+             \"evidence\": \"关键证据，如英伟达 FY2025 CapEx $80B\",\
+             \"order_visibility\": \"有已公开长协/订单 | 合同负债增长 | 产能预订 | 无公开证据\"}}}}]}}"
         );
         nodes.push(agent_node(
             &decomposer_id,
@@ -5081,12 +5392,32 @@ async fn seed_serenity_screening_workflow_template(
              1. composite_score >= 80 才是真正的瓶颈（三力评分都 >= 70）。\n\
              2. 区分 capacity 和 technology 两类瓶颈，technology 更偏好。\n\
              3. 给出至少 1 个 A 股候选公司（需含具体 stock_code）。\n\
-             \n\
-             输出 JSON 格式：\
-             {{ \"verified_bottleneck\": {{ \"node_name\": \"...\", \"composite_score\": 85, \
-               \"bottleneck_type\": \"technology\", \
-               \"a_share_candidates\": [{{ \"stock_code\": \"...\", \"stock_name\": \"...\", \
-                 \"relevance\": \"direct\", \"advantage\": \"...\" }}] }} }}"
+             4. **追加催化剂识别**：每个验证的瓶颈必须给出近期（1-6 月）的催化剂事件。\
+             催化剂类型包括：财报/客户量产/政策节点/供给冲击/产能释放。\n\
+             5. **需求确定性验证**：验证下游需求是否由\
+             巨头 CapEx 指引/政府专项/强制性法规/已签长协支撑。\
+             使用 search_news 工具主动搜索关键词如\"英伟达 CapEx\"、\"台积电 扩产\"来获取真实新闻证据。\
+             纯推测性需求不可接受。\n\
+             \n\n\
+             ============== 输出格式强约束（必须严格遵守） ==============\n\
+             1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
+             2. 代码块内容为单一 JSON 对象，结构：{{\"name\": \"submit_bottleneck\", \"arguments\": <数据>}}\n\
+             3. <数据> 字段即下面的瓶颈验证数据。\n\
+             4. 代码块外禁止任何文字：不要写\"以下是...\"、\"输出：\"、注释、解释、前缀、后缀。\n\
+             5. 字段值为空时用 null，不要省略字段。\n\
+             6. 数字字段（composite_score、scores.*）必须是 JSON 数字。\n\
+             7. 严禁在 JSON 字符串值中夹带思考文字或自述注解。\n\
+             ============================================================\n\
+             \n\n\
+             <数据> 结构：\n\
+             {{\"verified_bottleneck\": {{\"node_name\": \"...\", \"composite_score\": 85,\
+             \"bottleneck_type\": \"technology\",\
+             \"scores\": {{\"supply_rigidity\": 85, \"demand_elasticity\": 80, \"irreplaceability\": 90}},\
+             \"catalysts\": [{{\"type\": \"earnings | production_ramp | policy | supply_shock\",\
+             \"description\": \"催化剂描述\", \"expected_timeframe\": \"short_term | mid_term | long_term\",\
+             \"confidence\": 70, \"trigger_condition\": \"触发条件\"}}],\
+             \"a_share_candidates\": [{{\"stock_code\": \"...\", \"stock_name\": \"...\",\
+             \"relevance\": \"direct\", \"advantage\": \"...\"}}]}}}}"
         );
         nodes.push(agent_node(
             &chokepoint_id,
@@ -5106,21 +5437,60 @@ async fn seed_serenity_screening_workflow_template(
     }
 
     // ── Phase 2: 候选公司映射 ──
-    // a-candidate-mapper: Agent 直接调用工具筛选，无需前置 ToolNode 综合所有瓶颈鉴定结果，输出最终候选股清单
+    // a-candidate-mapper: Agent 直接调用工具筛选，无需前置 ToolNode。
+    // 综合所有瓶颈鉴定结果，输出最终候选股清单（含催化剂、退出信号、关注度评分）
     let mapper_prompt = "你的任务：综合所有瓶颈鉴定结果，对候选公司进行二次筛选和打分。\
+         \n\n\
+         ⚠️ 字段硬性要求（违反则输出无效）：\
+         \n\
+         - 每个 candidates 数组元素**必须**包含 stock_code（6位数字）和 stock_name（中文简称）。\
+         \n- 缺少这两个字段任一的候选将被系统自动丢弃，前端不会显示。\
+         \n- stock_code 必须是真实 A 股代码（如 300285、002371），不可用占位符。\
          \n\n\
          核心原则：\n\
          1. 优先选择市值 50-500 亿、机构覆盖少的公司（Serenity 偏好）。\n\
          2. 客户质量高于一切：已进入头部客户供应链的优先级 > 有技术但无客户验证的。\n\
          3. 排除股价已过度上涨的（近 3 月 > 100% 涨幅）。\n\
          4. 排除高负债率（> 70%）或频繁定增的公司。\n\
-         5. 每个候选必须给出具体的 serenity_score 和风险提示。\n\
-         \n\
-         输出 JSON 格式：\
-         { \"candidates\": [{ \"stock_code\": \"6位代码\", \"stock_name\": \"公司名\", \
-           \"relevance\": \"direct\", \"serenity_score\": 75, \"confidence\": 70, \
-           \"bottleneck_product\": \"瓶颈环节产品\", \
-           \"primary_risk\": \"主要风险\" }], \"summary\": \"...\" }";
+         5. **催化剂决定何时买入**：每个候选必须至少给出 1 个近期催化剂（财报/量产/政策/供给冲击/产能释放）。\
+         没有催化剂的候选不得输出。\n\
+         6. **退出信号决定何时卖出**：每个候选必须评估技术替代、产能过剩、新进入者、需求放缓四大退出风险。\
+         exit_now 的候选直接排除。\n\
+         7. **低关注度量化**：评估机构覆盖变化、搜索热度、相对交易量、市场预期差。\
+         关注度越低弹性越大，attention_score > 70 扣分。\n\
+         8. **需求确定性验证**：检查上级节点提供的 demand_validation/demand_evidence，\
+         确保需求由 CapEx/订单/政策硬证据支撑而非 LLM 推测。\
+         使用 search_news 工具搜索关键词验证，如搜索\"英伟达 CapEx\"确认需求真实性。无硬证据扣 20 分。\n\
+         9. 每个候选必须给出具体的 serenity_score 和风险提示。\n\
+        10. **输出数量**：输出 3-5 个最优质的候选公司，宁缺毋滥。\
+        若某个瓶颈趋势下所有公司都不符合标准，不要强行输出。\
+         \n\n\
+         ============== 输出格式强约束（必须严格遵守） ==============\n\
+         1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
+         2. 代码块内容为单一 JSON 对象，结构：{\"name\": \"submit_candidates\", \"arguments\": <数据>}\n\
+         3. <数据> 字段即下面的候选股数据。\n\
+         4. 代码块外禁止任何文字：不要写\"以下是...\"、\"输出：\"、注释、解释、前缀、后缀。\n\
+         5. 字段值为空时用 null，不要省略字段。\n\
+         6. 数字字段（serenity_score、confidence 等）必须是 JSON 数字，不要加引号。\n\
+         7. 严禁在 JSON 字符串值中夹带思考文字或自述注解。\n\
+         ============================================================\n\
+         \n\n\
+         <数据> 结构：\n\
+         {\"candidates\": [{\"stock_code\": \"300285\", \"stock_name\": \"国瓷材料\",\
+         \"relevance\": \"direct\", \"serenity_score\": 75, \"confidence\": 70,\
+         \"bottleneck_product\": \"半导体级高纯氮化铝(AlN)粉体\",\
+         \"primary_risk\": \"客户验证周期较长\",\
+         \"catalysts\": [{\"type\": \"earnings | production_ramp | policy | supply_shock\",\
+         \"description\": \"催化剂描述\", \"expected_timeframe\": \"short_term | mid_term | long_term\",\
+         \"confidence\": 70, \"trigger_condition\": \"触发条件\"}],\
+         \"exit_signals\": {\"technology_disruption_risk\": \"风险描述\",\
+         \"capacity_oversupply_risk\": \"风险描述\", \"new_entrant_risk\": \"风险描述\",\
+         \"demand_slowdown_risk\": \"风险描述\",\
+         \"overall_exit_urgency\": \"no_urgency | watch | caution | exit_now\"},\
+         \"attention_metrics\": {\"coverage_change_3m\": \"新增 N 篇 | 减少 N 篇 | 无变化\",\
+         \"search_heat\": \"冷门 | 正常 | 热门\",\
+         \"relative_volume\": \"低于均值 N% | 正常 | 高于均值 N%\",\
+         \"consensus_gap\": \"明显低估 | 合理 | 高估\", \"attention_score\": 30}}], \"summary\": \"...\"}";
     nodes.push(agent_node(
         "a-candidate-mapper",
         "候选公司筛选",

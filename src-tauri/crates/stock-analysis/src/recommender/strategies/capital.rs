@@ -138,8 +138,22 @@ impl CapitalStrategy {
         let nb = client.get_north_bound_holding(code).await.ok().flatten();
         let dt = client.get_dragon_tiger(code).await.ok();
 
+        // 检测"空壳" MoneyFlow：Tencent 等vendor 返回了对象但关键字段全为 0，
+        // 这种情况等同于数据不可用，应回退到 K 线量价检测。
+        let mf_is_effective = |m: &axagent_astock_data::MoneyFlow| -> bool {
+            m.main_net_inflow != 0.0 || m.super_large_net != 0.0 || m.large_net != 0.0
+                || m.medium_net != 0.0 || m.small_net != 0.0
+        };
+
+        // eastmoney 资金流向被反爬拦截，或 vendor 返回零值空壳数据时回退到 K 线量价检测
+        if mf.as_ref().is_none_or(|m| !mf_is_effective(m)) {
+            return self
+                .scan_from_klines(client, code, name, sector, vars)
+                .await;
+        }
+
         // 三个资金数据源在 as-of 下可能全部不可用，回退到 K 线量价检测
-        if mf.is_none() && nb.is_none() && dt.as_ref().is_none_or(|e| e.is_empty()) {
+        if nb.is_none() && dt.as_ref().is_none_or(|e| e.is_empty()) {
             return self
                 .scan_from_klines(client, code, name, sector, vars)
                 .await;

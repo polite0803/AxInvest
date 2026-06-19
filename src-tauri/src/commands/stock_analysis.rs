@@ -482,6 +482,42 @@ pub async fn get_stock_analysis(
         .ok_or_else(|| format!("分析记录不存在: {}", analysis_id))
 }
 
+/// 删除历史分析记录
+#[tauri::command]
+pub async fn delete_stock_analysis(
+    state: State<'_, AppState>,
+    analysis_id: String,
+) -> Result<(), String> {
+    stock_analyses::Entity::delete_by_id(&analysis_id)
+        .exec(state.harness.db())
+        .await
+        .map_err(|e| format!("删除分析记录失败: {e}"))?;
+    Ok(())
+}
+
+/// 重命名历史分析记录
+#[tauri::command]
+pub async fn rename_stock_analysis(
+    state: State<'_, AppState>,
+    analysis_id: String,
+    new_name: String,
+) -> Result<(), String> {
+    use sea_orm::ActiveModelTrait;
+    use sea_orm::Set;
+    let mut record: stock_analyses::ActiveModel = stock_analyses::Entity::find_by_id(&analysis_id)
+        .one(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("分析记录不存在: {analysis_id}"))?
+        .into();
+    record.stock_name = Set(new_name);
+    record
+        .update(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ── Watchlist ──
 
 /// 添加自选股

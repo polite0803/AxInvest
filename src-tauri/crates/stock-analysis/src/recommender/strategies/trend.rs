@@ -107,11 +107,14 @@ impl TrendStrategy {
                     let ma5 = indicators::sma(&cs, ma_period_1)?;
                     let ma10 = indicators::sma(&cs, ma_period_2)?;
                     let ma20 = indicators::sma(&cs, ma_period_3)?;
-                    if !(ma5 > ma10 && ma10 > ma20) {
+                    // 放宽条件：短期动量（MA5>MA10）+ 股价未远离中期均线
+                    // 原条件 MA5>MA10>MA20 三重多头在震荡市几乎无法满足
+                    let ma20_tolerance = read_f64(vars, "trend_short_ma20_tolerance", 0.985);
+                    if !(ma5 > ma10 && last >= ma20 * ma20_tolerance) {
                         return None;
                     }
                     let high_period = read_f64(vars, "trend_high_20_period", 20.0) as usize;
-                    let high_threshold = read_f64(vars, "trend_high_20_threshold", 0.99);
+                    let high_threshold = read_f64(vars, "trend_high_20_threshold", 0.97);
                     let high_20 = indicators::highest(&klines, high_period)?;
                     if last < high_20 * high_threshold {
                         return None;
@@ -120,10 +123,11 @@ impl TrendStrategy {
                     if amount_ratio < amount_ratio_min {
                         return None;
                     }
+                    let ma_align = if ma10 > ma20 { "多头排列" } else { "站上均线" };
                     let reasons = vec![
                         format!(
-                            "MA{} {:.2} > MA{} {:.2} > MA{} {:.2}",
-                            ma_period_1, ma5, ma_period_2, ma10, ma_period_3, ma20
+                            "MA{} {:.2} > MA{} {:.2}, {} MA{} {:.2}",
+                            ma_period_1, ma5, ma_period_2, ma10, ma_align, ma_period_3, ma20
                         ),
                         format!("突破 {} 日高 {:.2}", high_period, high_20),
                         format!("量比 {:.2}", amount_ratio),
@@ -143,12 +147,12 @@ impl TrendStrategy {
                     let ma_period_l = read_f64(vars, "trend_ma_mid_l", 60.0) as usize;
                     let ma20 = indicators::sma(&cs, ma_period_s)?;
                     let ma60 = indicators::sma(&cs, ma_period_l)?;
-                    let ma60_threshold = read_f64(vars, "trend_ma60_threshold", 0.995);
+                    let ma60_threshold = read_f64(vars, "trend_ma60_threshold", 0.985);
                     if ma60.is_nan() || last < ma60 * ma60_threshold {
                         return None;
                     }
                     let high_period = read_f64(vars, "trend_high_60_period", 60.0) as usize;
-                    let high_threshold = read_f64(vars, "trend_high_60_threshold", 0.98);
+                    let high_threshold = read_f64(vars, "trend_high_60_threshold", 0.94);
                     let high_60 = indicators::highest(&klines, high_period)?;
                     if last < high_60 * high_threshold {
                         return None;

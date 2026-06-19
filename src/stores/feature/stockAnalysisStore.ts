@@ -497,6 +497,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const state = useTimeAnchorStore.getState();
         return state.mode === "replay" || state.mode === "backtest_sweep" ? state.asOfDate : null;
       })();
+      console.log("[getStockQuote] timeAnchor:", { mode: useTimeAnchorStore.getState().mode, asOfDate });
       const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
       set({ quote, stockCode: code, stockName: quote.name, quoteLoading: false });
       // R3-B: 财报事件缓存 10 分钟，避免每次报价刷新都拉取
@@ -689,6 +690,20 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       }
     >("get_stock_analysis", { analysisId });
     set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName, status: "completed" });
+
+    // 如果是 replay 分析且有 asOfDate，同步设置全局时间锚点，
+    // 确保后续 getStockQuote / getStockKline 拉取的是分析时刻的数据而非当前实时数据
+    console.log("[loadAnalysis] record:", { analysisKind: record.analysisKind, asOfDate: record.asOfDate });
+    // 始终用 as_of_date 设置时间锚点（live 模式也保存了分析日期）
+    if (record.asOfDate) {
+      useTimeAnchorStore.getState().enterReplay(record.asOfDate);
+    } else {
+      useTimeAnchorStore.getState().enterLive(false);
+    }
+    console.log("[loadAnalysis] timeAnchor after:", {
+      mode: useTimeAnchorStore.getState().mode,
+      asOfDate: useTimeAnchorStore.getState().asOfDate,
+    });
     if (record.decisionJson) {
       try {
         const raw = JSON.parse(record.decisionJson);
@@ -719,21 +734,47 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         let dataQuality = "";
         for (const [key, value] of Object.entries(snap)) {
           if (key.startsWith("report.")) {
-            reports[key.slice(7)] = value;
+            reports[key.slice(7)] = String(value);
           } else if (key.startsWith("debate.bull.round_")) {
             const round = parseInt(key.slice("debate.bull.round_".length));
             const bearKey = `debate.bear.round_${round}`;
-            debates.push({ round, bull: value, bear: snap[bearKey] ?? "" });
+            debates.push({ round, bull: String(value), bear: String(snap[bearKey] ?? "") });
           } else if (key.startsWith("risk.")) {
-            risks[key.slice(5)] = value;
+            risks[key.slice(5)] = String(value);
           } else if (key.startsWith("value.")) {
-            values[key.slice(6)] = value;
+            // value.assessment → values["value-investor"]（保留原始 nodeId）
+            const vk = key.slice(6);
+            values[vk === "assessment" ? "value-investor" : vk] = String(value);
           } else if (key.startsWith("rule_check.")) {
-            ruleChecks[key.slice("rule_check.".length)] = value;
+            ruleChecks[key.slice("rule_check.".length)] = String(value);
           } else if (key === "data_quality_summary") {
-            dataQuality = value;
+            dataQuality = String(value);
           } else if (key.startsWith("raw.")) {
-            raws[key.slice(4)] = value;
+            raws[key.slice(4)] = String(value);
+          }
+          // ── 辩论子节点：bull-r1/bear-r1 等 → 构建 debate rounds ──
+          if (/^bull-r\d+$/.test(key)) {
+            const round = parseInt(key.slice("bull-r".length));
+            const bearKey = `bear-r${round}`;
+            if (!debates.find((d) => d.round === round)) {
+              debates.push({
+                round,
+                bull: String(value),
+                bear: String(snap[bearKey] ?? ""),
+              });
+            }
+          }
+          // ── 风险子节点：risk-agg / risk-con / risk-neu / agg-risk ──
+          if (/^risk-(agg|con|neu)$/.test(key) || key === "agg-risk") {
+            risks[key] = String(value);
+          }
+          // ── 投资组合经理输出 ──
+          if (key === "research-mgr" && !risks["research-mgr"]) {
+            risks["research-mgr"] = String(value);
+          }
+          // ── 原始数据聚合（兼容旧版 raw-data 未映射到 raw. 的情况）──
+          if (key === "raw-data" && !raws["combined"]) {
+            raws["combined"] = String(value);
           }
         }
         set({

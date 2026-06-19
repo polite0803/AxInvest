@@ -12,6 +12,30 @@ export type StepStage =
   | "done"
   | "error";
 
+export interface Catalyst {
+  type: string;
+  description: string;
+  expected_timeframe: string;
+  confidence: number;
+  trigger_condition?: string;
+}
+
+export interface ExitSignals {
+  technology_disruption_risk?: string;
+  capacity_oversupply_risk?: string;
+  new_entrant_risk?: string;
+  demand_slowdown_risk?: string;
+  overall_exit_urgency?: string;
+}
+
+export interface AttentionMetrics {
+  coverage_change_3m?: string;
+  search_heat?: string;
+  relative_volume?: string;
+  consensus_gap?: string;
+  attention_score?: number;
+}
+
 export interface SerenityCandidate {
   stockCode?: string;
   stock_name?: string;
@@ -25,6 +49,11 @@ export interface SerenityCandidate {
   bottleneck_product?: string;
   primaryRisk?: string;
   primary_risk?: string;
+  catalysts?: Catalyst[];
+  exit_signals?: ExitSignals;
+  exitSignals?: ExitSignals;
+  attention_metrics?: AttentionMetrics;
+  attentionMetrics?: AttentionMetrics;
 }
 
 export interface TrendInfo {
@@ -32,6 +61,18 @@ export interface TrendInfo {
   trend_name?: string;
   bottleneck_candidate?: string;
   confidence?: number;
+}
+
+/// 单个节点的执行日志
+export interface StepLog {
+  nodeId: string;
+  status: string;
+  output?: unknown;
+  error?: string;
+  elapsedMs?: number;
+  totalNodes?: number;
+  completedNodes?: number;
+  timestamp: number;
 }
 
 // ── Store ──
@@ -44,6 +85,8 @@ interface SerenityState {
   error: string | null;
   completedNodes: number;
   totalNodes: number;
+  steps: StepLog[];
+  currentNodeId: string | null;
 
   setRunning: (v: boolean) => void;
   setStage: (s: StepStage) => void;
@@ -52,6 +95,9 @@ interface SerenityState {
   setError: (e: string | null) => void;
   setCompletedNodes: (n: number) => void;
   setTotalNodes: (n: number) => void;
+  addStep: (log: StepLog) => void;
+  setCurrentNode: (id: string | null) => void;
+  clearSteps: () => void;
   reset: () => void;
 }
 
@@ -63,6 +109,8 @@ const initialState = {
   error: null as string | null,
   completedNodes: 0,
   totalNodes: 0,
+  steps: [] as StepLog[],
+  currentNodeId: null as string | null,
 };
 
 export const useSerenityStore = create<SerenityState>((set) => ({
@@ -74,5 +122,18 @@ export const useSerenityStore = create<SerenityState>((set) => ({
   setError: (e) => set({ error: e }),
   setCompletedNodes: (n) => set({ completedNodes: n }),
   setTotalNodes: (n) => set({ totalNodes: n }),
+  addStep: (log) =>
+    set((s) => {
+      const idx = s.steps.findIndex((item) => item.nodeId === log.nodeId);
+      if (idx >= 0) {
+        // upsert：同节点更新状态 + output/error/elapsedMs，不追加重复
+        const updated = [...s.steps];
+        updated[idx] = { ...updated[idx], ...log };
+        return { steps: updated };
+      }
+      return { steps: [...s.steps, log] };
+    }),
+  setCurrentNode: (id) => set({ currentNodeId: id }),
+  clearSteps: () => set({ steps: [], currentNodeId: null }),
   reset: () => set(initialState),
 }));

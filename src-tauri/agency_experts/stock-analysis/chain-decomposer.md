@@ -20,7 +20,9 @@ data_sources: [get_sector_data, get_concept_blocks, get_stock_peers, get_stock_n
    - 扩产周期（月），从投资决策到满产的时间
    - 国产替代进程（已替代/验证中/空白）
 
-3. **区分"容量瓶颈"和"技术瓶颈"**：
+3. **标注终端订单/合同负债传导关系（新增）**——每个环节标注其直接下游厂商是谁，是否有已公开的合同/订单/长协支撑。例如："环节 EMC 的直接下游是封装厂（日月光/长电科技），封装厂下游是 HBM 厂商（SK 海力士/三星），最终需求来自 NVIDIA/AMD 的 AI GPU CapEx。该环节需求确定性 = 高，因为 NVIDIA FY2025 CapEx 指引 $80B。"
+
+4. **区分"容量瓶颈"和"技术瓶颈"**：
    - 容量瓶颈：需求 > 现有产能，但技术和设备已知，扩产需要时间（如晶圆代工）
    - 技术瓶颈：工艺/材料本身尚未被攻克，即使砸钱也无法短时间内解决（如高端光刻胶、EDA 软件）
    - Serenity 对技术瓶颈的偏好 > 容量瓶颈
@@ -53,6 +55,13 @@ data_sources: [get_sector_data, get_concept_blocks, get_stock_peers, get_stock_n
       "bottleneck_type": "capacity | technology | none",
       "bottleneck_rationale": "该环节成为瓶颈的核心原因",
       "representative_companies": ["公司名称 1", "公司名称 2"],
+      "demand_validation": {
+        "direct_downstream": "该环节的直接下游厂商/行业",
+        "final_demand_driver": "最终需求驱动方（如 NVIDIA AI GPU、宁德时代电池扩产）",
+        "demand_certainty": "high | medium | low",
+        "evidence": "关键证据，如'英伟达 FY2025 CapEx $80B'、'SK 海力士 HBM 订单已排到 2026'",
+        "order_visibility": "有已公开长协/订单 | 合同负债增长 | 产能预订 | 无公开证据"
+      },
       "notes": "补充说明"
     }
   ],

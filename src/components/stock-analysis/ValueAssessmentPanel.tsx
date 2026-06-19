@@ -21,6 +21,7 @@ function looksLikeJson(text: string): boolean {
 
 interface ValueReportData {
   type?: string;
+  expert?: string;
   business_model?: string;
   moat_rating?: string;
   moat_reasoning?: string;
@@ -92,7 +93,51 @@ function extractReadableText(report: string): string {
   return trimmed;
 }
 
-/** 修复常见 LLM 输出的 JSON 格式错误（尾部逗号、多余引号等） */
+/**
+ * 尝试逐个字段正则提取（当 JSON.parse 全失败时兜底）
+ * LLM 输出的 JSON 中 risk_flags 等数组内常有未转义引号，导致整个 JSON 解析失败，
+ * 但顶层字段（business_model / moat_rating / buffett_verdict 等）的字符串值通常是完整的。
+ */
+function extractFieldsByRegex(text: string): ValueReportData | null {
+  const data: ValueReportData = {};
+  const patterns: Array<{ key: keyof ValueReportData; pattern: RegExp }> = [
+    { key: "expert", pattern: /"expert"\s*:\s*"([^"]+)"/ },
+    { key: "type", pattern: /"type"\s*:\s*"([^"]+)"/ },
+    { key: "business_model", pattern: /"business_model"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
+    { key: "moat_rating", pattern: /"moat_rating"\s*:\s*"([^"]+)"/ },
+    { key: "moat_reasoning", pattern: /"moat_reasoning"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
+    { key: "financial_health", pattern: /"financial_health"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
+    { key: "intrinsic_value_range", pattern: /"intrinsic_value_range"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
+    { key: "margin_of_safety", pattern: /"margin_of_safety"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
+    { key: "buffett_verdict", pattern: /"buffett_verdict"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
+    { key: "ideal_buy_price", pattern: /"ideal_buy_pricee?"\s*:\s*"([^"]+)"/ },
+  ];
+  for (const { key, pattern } of patterns) {
+    const m = text.match(pattern);
+    if (m) {
+      data[key] = m[1].trim();
+    }
+  }
+  // 尝试提取 risk_flags 数组
+  const rfMatch = text.match(/"risk_flags"\s*:\s*\[([\s\S]*?)\]/);
+  if (rfMatch) {
+    const flags: string[] = [];
+    const flagRegex = /"((?:(?!",\s*"|"\]|"\s*\]).)+)"/g;
+    let fm: RegExpExecArray | null;
+    while ((fm = flagRegex.exec(rfMatch[1])) !== null) {
+      const val = fm[1].trim();
+      if (val.length > 0 && !val.startsWith("\\")) {
+        flags.push(val);
+      }
+    }
+    if (flags.length > 0) {
+      data.risk_flags = flags;
+    }
+  }
+  // 字段数太少说明提取失败
+  const fieldCount = Object.keys(data).filter((k) => data[k] != null && data[k] !== "").length;
+  return fieldCount >= 3 ? data : null;
+}
 function sanitizeJsonString(raw: string): string {
   return raw
     // 移除对象/数组内的尾部逗号
@@ -190,6 +235,14 @@ function tryParseValueReport(report: string): ValueReportData | null {
       }
     }
   } catch { /* final fallthrough */ }
+
+  // 最后手段：逐个字段正则提取（容忍未转义引号等 LLM 输出问题）
+  const cleanedFull = cleanToolCallTags(report);
+  const extracted = extractFieldsByRegex(cleanedFull);
+  if (extracted) {
+    console.log("[tryParseValueReport] 解析成功（正则兜底）");
+    return extracted;
+  }
 
   return null;
 }

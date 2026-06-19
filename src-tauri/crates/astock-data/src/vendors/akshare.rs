@@ -62,7 +62,7 @@ impl StockVendor for AkshareVendor {
 
         Ok(data
             .iter()
-            .take(8)
+            .take(24)           // 取24条(6年季度)，as-of 截断后有足够历史数据
             .map(|r| {
                 let s = |key: &str| -> &str { r[key].as_str().unwrap_or("") };
                 let n = |key: &str| -> Option<f64> { r[key].as_str().and_then(|v| v.parse().ok()) };

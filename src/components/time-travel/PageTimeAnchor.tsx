@@ -25,9 +25,11 @@ export function PageTimeAnchor() {
   const degradationLog = useTimeAnchorStore((s) => s.degradationLog);
 
   const [pending, setPending] = useState<Dayjs | null>(null);
+  // 用户点击"回放"但尚未选日期时，显示 DatePicker 让用户选择
+  const [showPicker, setShowPicker] = useState(false);
 
   const isLive = mode === "live";
-  const isReplay = mode === "replay" || mode === "backtest_sweep";
+  const isReplay = mode === "replay" || mode === "backtest_sweep" || showPicker;
 
   const today = dayjs();
   const disabledDate = (d: Dayjs) => d.isSame(today) || d.isAfter(today);
@@ -37,10 +39,11 @@ export function PageTimeAnchor() {
       if (!isLive) {
         enterLive();
       }
+      setShowPicker(false);
     } else {
-      // 切到 replay:若已有 as_of_date 立即生效,否则等用户选日期
+      // 切到 replay:若已有 as_of_date 立即生效,否则显示 DatePicker 让用户选
       if (!asOfDate && !pending) {
-        // 提示用户选日期
+        setShowPicker(true);
         return;
       }
       const date = (pending?.format("YYYY-MM-DD")) ?? asOfDate;
@@ -53,8 +56,14 @@ export function PageTimeAnchor() {
   const onPickDate = (d: Dayjs | null) => {
     setPending(d);
     if (d) {
+      setShowPicker(false);
       enterReplay(d.format("YYYY-MM-DD"));
     }
+  };
+
+  const onCancelPicker = () => {
+    setPending(null);
+    setShowPicker(false);
   };
 
   return (
@@ -97,6 +106,23 @@ export function PageTimeAnchor() {
             style={{ width: 150 }}
             data-testid="page-time-anchor-date"
           />
+          {showPicker && !asOfDate && (
+            <button
+              type="button"
+              onClick={onCancelPicker}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-tertiary)",
+                fontSize: 12,
+                padding: "0 4px",
+              }}
+              title={t("common.cancel")}
+            >
+              ✕
+            </button>
+          )}
           {asOfDate && (
             <Tag color="purple" data-testid="page-time-anchor-tag">
               ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}

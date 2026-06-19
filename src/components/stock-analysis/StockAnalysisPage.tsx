@@ -20,6 +20,7 @@ import { DecisionBanner } from "./DecisionBanner";
 import { ExperimentSidebar } from "./ExperimentSidebar";
 import { ExperimentTrail } from "./ExperimentTrail";
 import "./dual-view";
+import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
@@ -138,6 +139,16 @@ export function StockAnalysisPage() {
       cancelled = true;
     };
   }, [id, loadAnalysis, getStockQuote, getStockKline]);
+
+  // 离开分析页时重置时间锚点为 live，避免影响其他页面（如选股/荐股）
+  useEffect(() => {
+    return () => {
+      const ta = useTimeAnchorStore.getState();
+      if (ta.mode !== "live") {
+        ta.enterLive(false);
+      }
+    };
+  }, []);
 
   // Decision Timeline 证据芯片 → 切换主 tab（useRightPanel 派发的 timeline-jump 事件）
   // 格式: timelineJump = "<tabKey>:<panelKey>"（tabKey 为 market/analyze/execute）
@@ -295,6 +306,9 @@ export function StockAnalysisPage() {
               : undefined}
           >
             <StockSearchBar />
+            <div style={{ margin: "4px 16px 0 16px", display: "flex", gap: 8, alignItems: "center" }}>
+              <AnalysisHistoryButton />
+            </div>
 
             {/* Decision hero (full width, at top) — outside flex row to avoid layout shift */}
             {status === "completed" && (
@@ -462,7 +476,7 @@ export function StockAnalysisPage() {
                         color: "var(--color-text-secondary)",
                       }}
                     >
-                      {t("stockAnalysis.executeTrade")} →
+                      {t("stockAnalysis.experiment.executeTrade")}
                     </div>
                   </>
                 )}

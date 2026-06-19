@@ -1280,6 +1280,17 @@ fn format_context_source(name: &str, value: &Value) -> String {
         other => other.to_string(),
     };
 
+    // 检测空结果并注入警告（空数组/空对象/空字符串）
+    let is_empty = body.trim().is_empty()
+        || body.trim() == "[]"
+        || body.trim() == "{}"
+        || body.trim() == "null"
+        || (target.is_array() && target.as_array().map_or(false, |a| a.is_empty()))
+        || (target.is_string() && target.as_str().map_or(false, |s| s.trim().is_empty()));
+    if is_empty {
+        return format!("⚠️ [{name}] 输出为空：该数据源无可用记录，请基于已有数据生成保守分析\n\n");
+    }
+
     format!("[{name}] 输出:\n{body}\n\n")
 }
 

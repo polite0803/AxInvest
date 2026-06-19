@@ -13,40 +13,73 @@ pub struct EastMoneyVendor {
 
 impl EastMoneyVendor {
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
+    /// 429 限流时使用更长等待（2s → 4s → 8s）
     async fn em_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
-        let max_retries = 1;
+        let max_retries = 3;
         let mut delay = Duration::from_secs(1);
         let mut last_err = None;
         for attempt in 0..max_retries {
-            match self
+            let result = self
                 .http
                 .get(url)
                 .header("Referer", "https://quote.eastmoney.com/")
                 .header(
                     "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
                 )
                 .header("Accept", "application/json, text/plain, */*")
                 .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
                 .send()
-                .await
-            {
-                Ok(resp) => return Ok(resp),
+                .await;
+            match result {
+                Ok(resp) => {
+                    // 检查 429 限流
+                    if let Err(e) = crate::check_response_429(&resp, "eastmoney") {
+                        if attempt + 1 < max_retries {
+                            let wait = delay * 2;
+                            tracing::warn!(
+                                "[retry] eastmoney 限流(第{}次, {wait:?}后重试)",
+                                attempt + 1
+                            );
+                            sleep(wait).await;
+                            delay *= 2;
+                            last_err = Some(e);
+                            continue;
+                        }
+                        last_err = Some(e);
+                    } else {
+                        return Ok(resp);
+                    }
+                },
                 Err(e) => {
-                    if attempt + 1 < max_retries {
+                    // IncompleteMessage = 服务器拒绝/中断连接，重试无意义
+                    // 应快速失败让路由层 fallback 到其他数据源
+                    if format!("{e:?}").contains("IncompleteMessage") {
                         tracing::warn!(
-                            "[retry] eastmoney 请求失败 (第{}次, {delay:?}后重试): {e}",
+                            "[em_get] eastmoney IncompleteMessage({url})，快速失败→路由层 fallback"
+                        );
+                        return Err(e.into());
+                    }
+                    if attempt + 1 < max_retries {
+                        // 打印完整错误链（包括 source()）
+                        tracing::warn!(
+                            "[retry] eastmoney 请求失败 (第{}次, {delay:?}后重试): {e:?}",
                             attempt + 1
                         );
                         sleep(delay).await;
                         delay *= 2;
                     } else {
-                        last_err = Some(e);
+                        // 记录最终错误的完整原因链
+                        tracing::error!(
+                            "[em_get] 最终失败: {e:?}, source: {:?}",
+                            std::error::Error::source(&e)
+                        );
+                        last_err = Some(e.into());
                     }
                 },
             }
         }
-        Err(DataError::from(last_err.unwrap()))
+        Err(last_err.unwrap())
     }
 }
 
@@ -67,7 +100,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f168,f169,f170,f171"
+            "https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f60,f116,f117,f162,f167,f168,f169,f170,f171"
         );
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
@@ -206,7 +239,7 @@ impl StockVendor for EastMoneyVendor {
 
         Ok(data
             .iter()
-            .take(8)
+            .take(24)           // 取24条(6年季度)，as-of 截断后有足够历史数据
             .map(|r| {
                 let s = |key: &str| -> &str { r[key].as_str().unwrap_or("") };
                 let n = |key: &str| -> Option<f64> { r[key].as_str().and_then(|v| v.parse().ok()) };
@@ -345,10 +378,118 @@ impl StockVendor for EastMoneyVendor {
             .collect())
     }
 
+    async fn search_news(&self, keyword: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        // 复用东方财富搜索 API，以 keyword 搜索（与 get_news 同一 endpoint）
+        let param = serde_json::json!({
+            "uid": "",
+            "keyword": keyword,
+            "type": ["cmsArticleWebOld"],
+            "client": "web",
+            "clientType": "web",
+            "clientVersion": "curr",
+            "param": {
+                "cmsArticleWebOld": {
+                    "searchScope": "default",
+                    "sort": "default",
+                    "pageIndex": 1,
+                    "pageSize": limit.min(50),
+                    "preTag": "",
+                    "postTag": ""
+                }
+            }
+        });
+
+        let url = format!(
+            "https://search-api-web.eastmoney.com/search/jsonp?cb=jQuery&param={}",
+            urlencoding::encode(&param.to_string())
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://so.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await
+            .map_err(|e| DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!("新闻搜索请求失败: {e}"),
+            })?;
+
+        let text = resp.text().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("新闻搜索响应读取失败: {e}"),
+        })?;
+
+        let trimmed = text.trim();
+        let json_str = if let Some(start) = trimmed.find('(') {
+            if let Some(end) = trimmed.rfind(')') {
+                &trimmed[start + 1..end]
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
+
+        let json: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+            DataError::ParseError(format!(
+                "eastmoney search_news jsonp parse failed: {e}, raw: {}",
+                &text[..200.min(text.len())]
+            ))
+        })?;
+
+        let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        Ok(items
+            .iter()
+            .filter_map(|item| {
+                let title = item.get("title")?.as_str()?.to_string();
+                let summary = item
+                    .get("digest")
+                    .or_else(|| item.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let source = item
+                    .get("mediaName")
+                    .or_else(|| item.get("source"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("东方财富")
+                    .to_string();
+                let article_url = item
+                    .get("articleUrl")
+                    .or_else(|| item.get("url"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let publish_time = item
+                    .get("showTime")
+                    .or_else(|| item.get("publishTime"))
+                    .or_else(|| item.get("ctime"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                Some(NewsItem {
+                    title,
+                    summary,
+                    source,
+                    url: article_url,
+                    publish_time,
+                    sentiment_score: None,
+                })
+            })
+            .collect())
+    }
+
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?secid={secid}&fields1=f1,f2,f3,f4&fields2=f51,f52,f53,f54,f55,f56&lmt=1"
+            "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55&klt=1&lmt=1"
         );
 
         let resp = self.em_get(&url).await?;
@@ -359,18 +500,22 @@ impl StockVendor for EastMoneyVendor {
             Some(arr) if !arr.is_empty() => {
                 let s = arr[0].as_str().unwrap_or("");
                 let parts: Vec<&str> = s.split(',').collect();
-                // parts[2] = f53 (主力净流入占比%), 当前 MoneyFlow 结构体不需要此字段
-                if parts.len() < 7 {
+                if parts.len() < 5 {
                     return Ok(None);
                 }
                 let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
+                let main_net = parse(parts[1]);
+                let super_large = if parts.len() > 2 { parse(parts[2]) } else { 0.0 };
+                let large = if parts.len() > 3 { parse(parts[3]) } else { 0.0 };
+                let medium = if parts.len() > 4 { parse(parts[4]) } else { 0.0 };
+                let small = if parts.len() > 5 { parse(parts[5]) } else { 0.0 };
                 Ok(Some(MoneyFlow {
                     date: parts[0].to_string(),
-                    main_net_inflow: parse(parts[1]) * 10000.0,
-                    super_large_net: parse(parts[3]) * 10000.0,
-                    large_net: parse(parts[4]) * 10000.0,
-                    medium_net: parse(parts[5]) * 10000.0,
-                    small_net: parse(parts[6]) * 10000.0,
+                    main_net_inflow: main_net,
+                    super_large_net: super_large,
+                    large_net: large,
+                    medium_net: medium,
+                    small_net: small,
                 }))
             },
             _ => Ok(None),
@@ -512,7 +657,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f158,f159,f160,f127"
+            "https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f158,f159,f160,f127"
         );
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
@@ -532,7 +677,7 @@ impl StockVendor for EastMoneyVendor {
 
         let (avg_pe, avg_pb) = if !board_code.is_empty() {
             let board_url = format!(
-                "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{board_code}&fields=f162,f167"
+                "https://push2his.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{board_code}&fields=f162,f167"
             );
             match self.em_get(&board_url).await {
                 Ok(resp) => {
@@ -553,7 +698,7 @@ impl StockVendor for EastMoneyVendor {
             }
         } else if !sector_name.is_empty() {
             let board_url = format!(
-                "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{sector_name}&fields=f162,f167"
+                "https://push2his.eastmoney.com/api/qt/clist/get?pn=1&pz=1&fs=b:{sector_name}&fields=f162,f167"
             );
             match self.em_get(&board_url).await {
                 Ok(resp) => {
@@ -964,7 +1109,7 @@ impl StockVendor for EastMoneyVendor {
         let mut results = Vec::with_capacity(indices.len());
         for (secid, name) in &indices {
             let url = format!(
-                "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f170"
+                "https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f170"
             );
             match self.em_get(&url).await {
                 Ok(resp) => {
@@ -993,7 +1138,7 @@ impl StockVendor for EastMoneyVendor {
     async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
         let secid = to_em_secid(stock_code);
         let board_url =
-            format!("https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f127");
+            format!("https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f127");
         let resp = self.em_get(&board_url).await?;
         let json: Value = resp.json().await.unwrap_or(Value::Null);
         let board_code = json["data"]["f127"].as_str().unwrap_or("").to_string();
@@ -1002,7 +1147,7 @@ impl StockVendor for EastMoneyVendor {
         }
 
         let peer_url = format!(
-            "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=10&fs=b:{board_code}&fields=f12,f14,f162,f167,f127,f2,f116,f170"
+            "https://push2his.eastmoney.com/api/qt/clist/get?pn=1&pz=10&fs=b:{board_code}&fields=f12,f14,f162,f167,f127,f2,f116,f170"
         );
         let resp = self.em_get(&peer_url).await?;
         let json: Value = resp.json().await.unwrap_or(Value::Null);
@@ -1037,7 +1182,7 @@ impl StockVendor for EastMoneyVendor {
             format!("0.{stock_code}")
         };
         let url = format!(
-            "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=50&fs=option_{underlying}&fields=f12,f14,f164,f165,f166,f167"
+            "https://push2his.eastmoney.com/api/qt/clist/get?pn=1&pz=50&fs=option_{underlying}&fields=f12,f14,f164,f165,f166,f167"
         );
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await.unwrap_or(Value::Null);
@@ -1091,7 +1236,7 @@ impl StockVendor for EastMoneyVendor {
     /// 行业/板块排名 — 东方财富板块 API
     async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
         // m:90 = 行业板块, t:2 = 概念板块；fid=f3 按涨跌幅排序
-        let url = "https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=50&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f204,f205,f124";
+        let url = "https://push2his.eastmoney.com/api/qt/clist/get?pn=1&pz=50&po=1&np=1&fltt=2&invt=2&fid=f3&fs=m:90+t:2&fields=f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87,f204,f205,f124";
         let resp = self.em_get(url).await?;
         let json: Value = resp.json().await?;
 
@@ -1121,7 +1266,7 @@ impl StockVendor for EastMoneyVendor {
 
     /// 北向资金（沪深港通）— 东方财富 API
     async fn get_north_bound_flow(&self) -> Result<Option<NorthBoundFlow>, DataError> {
-        let url = "https://push2.eastmoney.com/api/qt/stock/fflow/kline/get?lmt=0&klt=1&secid=1.000001&secid2=0.399001&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63";
+        let url = "https://push2his.eastmoney.com/api/qt/stock/fflow/kline/get?lmt=0&klt=1&secid=1.000001&secid2=0.399001&fields1=f1,f2,f3,f7&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63";
         let resp = self.em_get(url).await?;
         let json: Value = resp.json().await?;
 

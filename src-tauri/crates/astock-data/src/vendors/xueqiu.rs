@@ -24,10 +24,11 @@ impl XueqiuVendor {
         !self.token.read().await.is_empty()
     }
 
-    /// 带 Cookie 的 GET 请求
+    /// 带 Cookie 的 GET 请求，自动检测 429 限流
     async fn xq_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
         let token = self.token.read().await.clone();
-        self.http
+        let resp = self
+            .http
             .get(url)
             .header("Cookie", format!("xq_a_token={}", token))
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -36,7 +37,9 @@ impl XueqiuVendor {
             .header("Accept-Language", "zh-CN,zh;q=0.9")
             .send()
             .await
-            .map_err(DataError::from)
+            .map_err(DataError::from)?;
+        crate::check_response_429(&resp, "xueqiu")?;
+        Ok(resp)
     }
 }
 
@@ -167,7 +170,7 @@ impl StockVendor for XueqiuVendor {
         }
         let symbol = to_xq_symbol(stock_code);
         let url = format!(
-            "https://stock.xueqiu.com/v5/stock/finance/cn/indicator.json?symbol={symbol}&type=all&is_detail=true&count=4"
+            "https://stock.xueqiu.com/v5/stock/finance/cn/indicator.json?symbol={symbol}&type=all&is_detail=true&count=12"
         );
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;

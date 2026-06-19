@@ -127,6 +127,21 @@ pub struct FinancialReport {
 }
 
 impl FinancialReport {
+    /// 检查该记录是否包含有效的核心财务数据
+    /// 过滤掉供应商返回的字段全空记录（有日期占位但所有指标为 null）
+    pub fn has_valid_data(&self) -> bool {
+        self.revenue.is_some()
+            || self.net_profit.is_some()
+            || self.eps.is_some()
+            || self.bps.is_some()
+            || self.roe.is_some()
+            || self.debt_ratio.is_some()
+            || self.gross_margin.is_some()
+            || self.net_margin.is_some()
+            || self.revenue_yoy.is_some()
+            || self.profit_yoy.is_some()
+    }
+
     /// 创建行业均值估算的财务报告（所有 API 数据源均失败时的 fallback）
     pub fn estimated(stock_code: &str) -> Self {
         let today = Local::now().format("%Y-%m-%d").to_string();

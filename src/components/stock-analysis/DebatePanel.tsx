@@ -129,6 +129,7 @@ function extractReadableDebateText(text: string): string {
     .replace(/\{\s*["']?[a-zA-Z_]+["']?\s*:/g, "")
     .replace(/["']?[a-zA-Z_]+["']?\s*:\s*["']?/g, "")
     .replace(/[{}[\]",]/g, " ")
+    .replace(/\{\{[^}]+\}\}/g, "[未解析变量]")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned.length > 20 ? cleaned : text;

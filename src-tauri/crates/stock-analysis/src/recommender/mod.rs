@@ -54,6 +54,34 @@ pub fn get_serenity_seed() -> Vec<SeedItem> {
     SERENITY_SEED.read().map(|g| g.clone()).unwrap_or_default()
 }
 
+/// Serenity 候选全量数据缓存（serenity_score / catalysts / exit_signals / attention_metrics），
+/// 从 workflow 输出传递到 SerenityStrategy::scan_one，使策略能感知上下文。
+static SERENITY_CANDIDATE_CACHE: LazyLock<RwLock<HashMap<String, serde_json::Value>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// 设置全量候选数据缓存（由 run_serenity_screening 写入）
+pub fn set_serenity_candidate_cache(cache: HashMap<String, serde_json::Value>) {
+    tracing::info!("[serenity] 注入 {} 条候选全量数据到缓存", cache.len());
+    if let Ok(mut guard) = SERENITY_CANDIDATE_CACHE.write() {
+        *guard = cache;
+    }
+}
+
+/// 读取单个候选的全量数据
+pub fn get_serenity_candidate_detail(code: &str) -> Option<serde_json::Value> {
+    SERENITY_CANDIDATE_CACHE
+        .read()
+        .ok()
+        .and_then(|g| g.get(code).cloned())
+}
+
+/// 清空候选全量数据缓存
+pub fn clear_serenity_candidate_cache() {
+    if let Ok(mut guard) = SERENITY_CANDIDATE_CACHE.write() {
+        guard.clear();
+    }
+}
+
 /// 从 template_vars 中解析 "reco_strategy_weights" 权重表。
 ///
 /// 这是复盘 → 进化（R1）的注入点：recommend_stocks 会按 (style, period)
@@ -549,21 +577,46 @@ mod tests {
     use super::*;
     use crate::recommender::types::{Period, Style};
 
+    /// 构造一个带 dummy pick 的 RecoResponse（避免 cache_put 跳过空结果）
+    fn dummy_resp(period: Period, generated_at: i64, mode: &str) -> RecoResponse {
+        let pick = RecoPick {
+            stock_code: "000001".into(),
+            stock_name: "平安银行".into(),
+            sector: None,
+            style: Style::Trend,
+            period,
+            price: 10.0,
+            entry_low: 9.5,
+            entry_high: 10.5,
+            stop_loss: 9.0,
+            target_price: 12.0,
+            position_pct: 10.0,
+            holding_days: 5,
+            confidence: 70,
+            reasons: vec!["测试".into()],
+            risk_notes: vec![],
+            secondary_styles: vec![],
+            synthetic: false,
+        };
+        let mut picks = std::collections::HashMap::new();
+        picks.insert(Style::Trend, vec![pick]);
+        RecoResponse {
+            period,
+            picks,
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at,
+            raw_seed_pool_size: 1,
+            as_of_date: None,
+            mode: mode.to_string(),
+        }
+    }
+
     #[test]
     fn cache_invalidate_works() {
         invalidate_cache();
-        // 重建缓存
-        let resp = RecoResponse {
-            period: Period::Short,
-            picks: std::collections::HashMap::new(),
-            disabled_styles: vec![Style::Capital],
-            degraded_styles: vec![],
-            degraded_reasons: std::collections::HashMap::new(),
-            generated_at: 0,
-            raw_seed_pool_size: 0,
-            as_of_date: None,
-            mode: "live".to_string(),
-        };
+        let resp = dummy_resp(Period::Short, 0, "live");
         cache_put(Period::Short, resp);
         assert!(cache_get(Period::Short).is_some());
         invalidate_cache();
@@ -577,17 +630,7 @@ mod tests {
         invalidate_cache();
 
         // 1) live scope 写入
-        let live_resp = RecoResponse {
-            period: Period::Short,
-            picks: std::collections::HashMap::new(),
-            disabled_styles: vec![],
-            degraded_styles: vec![],
-            degraded_reasons: std::collections::HashMap::new(),
-            generated_at: 1,
-            raw_seed_pool_size: 0,
-            as_of_date: None,
-            mode: "live".to_string(),
-        };
+        let live_resp = dummy_resp(Period::Short, 1, "live");
         cache_put(Period::Short, live_resp);
 
         // 2) live 读命中 (generated_at == 1)
@@ -606,17 +649,8 @@ mod tests {
         );
 
         // 4) replay scope 内写入 → 退出 scope 后 live 仍然 miss，但 replay 自己命中
-        let replay_resp = RecoResponse {
-            period: Period::Short,
-            picks: std::collections::HashMap::new(),
-            disabled_styles: vec![],
-            degraded_styles: vec![],
-            degraded_reasons: std::collections::HashMap::new(),
-            generated_at: 2,
-            raw_seed_pool_size: 0,
-            as_of_date: Some("2026-06-01".into()),
-            mode: "user_replay".to_string(),
-        };
+        let mut replay_resp = dummy_resp(Period::Short, 2, "user_replay");
+        replay_resp.as_of_date = Some("2026-06-01".into());
         let replay_cached = as_of::AS_OF
             .scope(Some(ctx), async {
                 cache_put(Period::Short, replay_resp);

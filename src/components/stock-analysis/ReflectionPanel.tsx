@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Checkbox, Empty, Input, message, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,6 +53,14 @@ export function ReflectionPanel() {
   const [manualOutcome, setManualOutcome] = useState("");
   const [manualDepth, setManualDepth] = useState("light");
   const [running, setRunning] = useState(false);
+
+  // 个股分析页内自动取当前股票代码
+  const stockCodeFromStore = useStockAnalysisStore((s) => s.stockCode);
+  useEffect(() => {
+    if (!manualCode && stockCodeFromStore) {
+      setManualCode(stockCodeFromStore);
+    }
+  }, [stockCodeFromStore, manualCode]);
 
   // Bug 4 修复: 统一请求级取消令牌,避免 useEffect 与 onClick 双轨加载
   // 各自维护一份 cancelled 标记造成的乱序写入。

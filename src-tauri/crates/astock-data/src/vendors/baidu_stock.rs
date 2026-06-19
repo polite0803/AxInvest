@@ -41,6 +41,7 @@ impl BaiduStockVendor {
             .header("Referer", "https://gushitong.baidu.com/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "baidu_stock")?;
         let json: Value = resp.json().await?;
         Ok(json)
     }

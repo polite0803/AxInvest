@@ -30,7 +30,6 @@ pub fn build_blackboard_snapshot(
 ) -> HashMap<String, Value> {
     let mut bb: HashMap<String, Value> = HashMap::new();
     for (node_id, raw_output) in results {
-        let text = extract_node_text(raw_output);
         let key = match node_id.as_str() {
             // 9 个分析师 + value-investor：归到 report.* 前缀
             id if id.starts_with("a-") => format!("report.{id}"),
@@ -49,7 +48,25 @@ pub fn build_blackboard_snapshot(
             // 其余按 nodeId 直接存
             _ => node_id.clone(),
         };
-        bb.insert(key, Value::String(text));
+
+        // 辩论/风险/研究经理/投资组合经理等结构化节点：保留原始 JSON
+        // 前端 loadAnalysis 根据 key 前缀做结构化还原。这些节点的输出含有嵌套
+        // 结构（如 { content, params, rounds }），flatten 成纯文本会丢失信息。
+        let is_structured = node_id.starts_with("bull-r")
+            || node_id.starts_with("bear-r")
+            || node_id.starts_with("risk-")
+            || *node_id == "agg-risk"
+            || *node_id == "debate-bull-bear"
+            || *node_id == "debate-convergence"
+            || *node_id == "value-investor"
+            || *node_id == "research-mgr"
+            || *node_id == "portfolio-mgr";
+        if is_structured {
+            bb.insert(key, raw_output.clone());
+        } else {
+            let text = extract_node_text(raw_output);
+            bb.insert(key, Value::String(text));
+        }
 
         // ── 结构化参数专用存储（结构化参数方案 Phase 4）──
         // 保存每个节点的 .params（Agent 节点）或 .result（CodeNode），

@@ -8,6 +8,15 @@ pub struct TencentVendor {
     pub http: reqwest::Client,
 }
 
+impl TencentVendor {
+    /// 带 429 检测的 GET 请求
+    async fn tencent_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
+        let resp = self.http.get(url).send().await?;
+        crate::check_response_429(&resp, "tencent")?;
+        Ok(resp)
+    }
+}
+
 /// 将 AxInvest 股票代码转为腾讯财经格式
 /// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750
 fn to_tencent_code(stock_code: &str) -> String {
@@ -192,8 +201,10 @@ impl StockVendor for TencentVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let tc_code = to_tencent_code(stock_code);
         let url = format!("https://qt.gtimg.cn/q={tc_code}");
-        let resp = self.http.get(&url).send().await?;
-        let text = resp.text().await?;
+        let resp = self.tencent_get(&url).await?;
+        let bytes = resp.bytes().await?;
+        // 腾讯财经 API 使用 GBK 编码，需手动转 UTF-8
+        let text = encoding_rs::GBK.decode(&bytes).0;
         parse_quote(&text)
     }
 
@@ -214,9 +225,16 @@ impl StockVendor for TencentVendor {
         let url = format!(
             "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={tc_code},{period_code},,,{limit},qfq"
         );
-        let resp = self.http.get(&url).send().await?;
-        let body = resp.text().await?;
-        parse_klines(&body, stock_code)
+        let resp = self.http.get(&url).send().await;
+        // 手动处理 Error 以检查 429
+        match resp {
+            Ok(r) => {
+                crate::check_response_429(&r, "tencent")?;
+                let body = r.text().await?;
+                parse_klines(&body, stock_code)
+            },
+            Err(e) => Err(DataError::from(e)),
+        }
     }
 
     async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
@@ -229,7 +247,28 @@ impl StockVendor for TencentVendor {
         Ok(vec![])
     }
 
-    async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
+    async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
+        let symbol = to_tencent_code(stock_code);
+        let url = format!("https://qt.gtimg.cn/q=ff_{symbol}");
+        let resp = self.tencent_get(&url).await?;
+        let bytes = resp.bytes().await?;
+        let text = encoding_rs::GBK.decode(&bytes).0;
+        // 格式: v_ff_sz000858="code~main_in~main_out~main_net~main_ratio~retail_in~retail_out~retail_net~retail_ratio~total~?~?~name~date";
+        if let Some(line) = text.lines().next() {
+            let raw = line.trim().trim_start_matches(|c: char| c != '"').trim_matches('"');
+            let parts: Vec<&str> = raw.split('~').collect();
+            if parts.len() >= 14 && !parts[3].is_empty() {
+                let parse = |i: usize| parts.get(i).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                return Ok(Some(MoneyFlow {
+                    date: parts[13].to_string(),
+                    main_net_inflow: parse(3),
+                    super_large_net: 0.0,
+                    large_net: 0.0,
+                    medium_net: 0.0,
+                    small_net: parse(7), // 散户净流入
+                }));
+            }
+        }
         Ok(None)
     }
 
@@ -253,8 +292,10 @@ impl StockVendor for TencentVendor {
             .collect::<Vec<_>>()
             .join(",");
         let url = format!("https://qt.gtimg.cn/q={}", codes);
-        let resp = self.http.get(&url).send().await?;
-        let text = resp.text().await?;
+        let resp = self.tencent_get(&url).await?;
+        let bytes = resp.bytes().await?;
+        // 腾讯财经 API 使用 GBK 编码
+        let text = encoding_rs::GBK.decode(&bytes).0;
 
         // 用 HashMap 按股票代码匹配，避免依赖返回行顺序
         use std::collections::HashMap;

@@ -3,7 +3,7 @@ role: stock-analyst
 stage: identify
 analyst_id: chokepoint-identifier
 title: 瓶颈鉴定师
-data_sources: [get_sector_data, get_stock_financials, get_research_reports, get_consensus_eps]
+data_sources: [get_sector_data, get_stock_financials, get_research_reports, get_consensus_eps, search_news]
 ---
 
 # 瓶颈鉴定师（Chokepoint Identifier）
@@ -19,6 +19,17 @@ data_sources: [get_sector_data, get_stock_financials, get_research_reports, get_
 3. **技术瓶颈的核心验证**——看研发费用率是否显著高于同行、毛利率是否持续 > 50%（说明技术溢价）、研发人员占比 > 30%。
 
 4. **客户锁定的核心验证**——看前 5 大客户是否含头部企业（苹果/英伟达/特斯拉/宁德时代等）、合同负债是否增长、客户验证周期（通常 2-3 年意味着替代成本极高）。
+
+5. **催化剂识别（新增）**——任何瓶颈最终需要"事件"来触发市场重定价。必须识别每个瓶颈环节的潜在催化剂：
+   - **财报催化剂**：即将发布的季报/年报，市场预期差大的节点
+   - **客户量产催化剂**：头部客户新产品量产/爬坡时间表（如苹果新 iPhone 发布前 3 个月供应链锁定）
+   - **政策催化剂**：具体的政策/法规截止日期（如国产化率考核时点）
+   - **供给冲击催化剂**：竞争对手事故/制裁/不可抗力事件
+   - **产能释放催化剂**：新产线试产/投产/满产的时间节点
+
+6. **需求确定性验证（新增）**——每个瓶颈假设必须回答：下游需求是否真实且不可逆？验证来源包括：巨头 CapEx 指引、政府专项拨款、强制性法规、已签长协订单。纯推测性需求（如"未来可能增长"）不能作为确定需求。
+   - **使用 search_news 工具主动搜索验证**：搜索关键词如"英伟达 CapEx 2025"、"台积电 产能扩张"、"AI 数据中心 投资"来获取真实新闻报道，避免 LLM 凭空编造需求证据。
+   - **催化剂也需 search_news 验证**：对每个识别的催化剂，调用 search_news 搜索确认其真实性和时间线。
 
 ## 工作流程
 
@@ -53,6 +64,15 @@ data_sources: [get_sector_data, get_stock_financials, get_research_reports, get_
     },
     "composite_score": 85,
     "bottleneck_type": "capacity | technology",
+    "catalysts": [
+      {
+        "type": "earnings | production_ramp | policy | supply_shock | capacity_release | contract_award",
+        "description": "催化剂描述，如'英伟达 GTC 大会发布下一代 GPU 架构，供应链锁定前 3 个月是窗口期'",
+        "expected_timeframe": "short_term(1-3月) | mid_term(3-6月) | long_term(6月+)",
+        "confidence": 70,
+        "trigger_condition": "触发条件，如'新品发布 -> 供应商资格确认 -> 订单量放大'"
+      }
+    ],
     "a_share_candidates": [
       {
         "stock_name": "公司名",

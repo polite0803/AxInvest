@@ -8,6 +8,20 @@ pub struct SinaVendor {
     pub http: reqwest::Client,
 }
 
+impl SinaVendor {
+    /// 带 429 检测的 GET 请求
+    async fn sina_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
+        let resp = self
+            .http
+            .get(url)
+            .header("Referer", "https://finance.sina.com.cn/")
+            .send()
+            .await?;
+        crate::check_response_429(&resp, "sina")?;
+        Ok(resp)
+    }
+}
+
 #[async_trait]
 impl StockVendor for SinaVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
@@ -19,13 +33,10 @@ impl StockVendor for SinaVendor {
             "sz"
         };
         let url = format!("https://hq.sinajs.cn/list={prefix}{stock_code}");
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://finance.sina.com.cn/")
-            .send()
-            .await?;
-        let body = resp.text().await?;
+        let resp = self.sina_get(&url).await?;
+        let bytes = resp.bytes().await?;
+        // 新浪财经 API 使用 GBK 编码
+        let body = encoding_rs::GBK.decode(&bytes).0;
         // 格式: var hq_str_sz000001="平安银行,12.50,12.30,12.60,12.80,..."
         let start = body
             .find('"')
@@ -88,6 +99,7 @@ impl StockVendor for SinaVendor {
             .header("Referer", "https://money.163.com/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "sina")?;
         let body = resp.text().await?;
         let mut klines = Vec::new();
         for line in body.lines().skip(1) {
@@ -133,6 +145,7 @@ impl StockVendor for SinaVendor {
             .header("Referer", "https://money.163.com/")
             .send()
             .await?;
+        crate::check_response_429(&resp, "sina")?;
         let body = resp.text().await?;
         let mut reports = Vec::new();
         for line in body.lines().skip(2) {
@@ -174,13 +187,7 @@ impl StockVendor for SinaVendor {
             "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{stock_code}.json?page=1&num={}",
             limit.min(50)
         );
-
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://finance.sina.com.cn/")
-            .send()
-            .await?;
+        let resp = self.sina_get(&url).await?;
 
         let items: Vec<serde_json::Value> = resp.json().await?;
 

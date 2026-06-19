@@ -194,7 +194,7 @@ export function AnalysisHistoryButton() {
                   : <span style={{ color: "var(--sa-green, #22c55e)", fontSize: 10, marginRight: 4 }}>✓</span>}
                 {/* 重命名按钮 */}
                 <span
-                  title={t("stockAnalysis.rename") ?? "重命名"}
+                  title={t("stockAnalysis.rename")}
                   onClick={(e) => startRename(e, r)}
                   style={{
                     padding: "2px 4px",

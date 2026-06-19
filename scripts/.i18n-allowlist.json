@@ -2254,7 +2254,7 @@
     },
     {
       "file": "src/components/stock-analysis/utils.ts",
-      "lines": "1,2,3,4,5,6,7",
+      "lines": "1,2,3,4,5,6,7,33,37,41,45,58,59,60,61,62,104,105,114",
       "reason": "硬编码中文字符串（AxInvest）",
       "phase": 3
     },

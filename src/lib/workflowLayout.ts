@@ -392,26 +392,44 @@ export function validate_workflow(
 
   // ── 4. 端口未连 ──────────────────────────────────────────
   for (const n of nodes) {
-    if (nodeTypeOf(n) !== "condition") { continue; }
-    const outgoing = edges.filter((e) => e.source === n.id);
-    const hasTrue = outgoing.some((e) => e.sourceHandle === "true");
-    const hasFalse = outgoing.some((e) => e.sourceHandle === "false");
+    const tType = nodeTypeOf(n);
+    if (tType === "condition") {
+      const outgoing = edges.filter((e) => e.source === n.id);
+      const hasTrue = outgoing.some((e) => e.sourceHandle === "true");
+      const hasFalse = outgoing.some((e) => e.sourceHandle === "false");
 
-    const missing: string[] = [];
-    if (!hasTrue) { missing.push("true"); }
-    if (!hasFalse) { missing.push("false"); }
-    if (missing.length > 0) {
-      const key = "workflow.layout.validate.unconnected_port";
-      const params = { nodeId: n.id, missing: missing.join("/") };
-      issues.push({
-        rule: "unconnected_port",
-        severity: "warning",
-        message: t(key, params),
-        messageKey: key,
-        messageParams: params,
-        nodeIds: [n.id],
-        edgeIds: [],
-      });
+      const missing: string[] = [];
+      if (!hasTrue) { missing.push("true"); }
+      if (!hasFalse) { missing.push("false"); }
+      if (missing.length > 0) {
+        const key = "workflow.layout.validate.unconnected_port";
+        const params = { nodeId: n.id, missing: missing.join("/") };
+        issues.push({
+          rule: "unconnected_port",
+          severity: "warning",
+          message: t(key, params),
+          messageKey: key,
+          messageParams: params,
+          nodeIds: [n.id],
+          edgeIds: [],
+        });
+      }
+    } else if (tType === "switch") {
+      const outgoing = edges.filter((e) => e.source === n.id);
+      const hasBranch = outgoing.some((e) => e.sourceHandle?.startsWith("branch-"));
+      if (!hasBranch) {
+        const key = "workflow.layout.validate.unconnected_port";
+        const params = { nodeId: n.id, missing: "branch" };
+        issues.push({
+          rule: "unconnected_port",
+          severity: "warning",
+          message: t(key, params),
+          messageKey: key,
+          messageParams: params,
+          nodeIds: [n.id],
+          edgeIds: [],
+        });
+      }
     }
   }
 
@@ -615,6 +633,54 @@ const DEFAULT_SIZE = { width: 140, height: 36 };
 /** 获取节点类型的尺寸估算（用于 hit-test / 布局） */
 export function getNodeSize(type: string): { width: number; height: number } {
   return NODE_SIZE[type] || DEFAULT_SIZE;
+}
+
+// ── 坐标转换工具 ─────────────────────────────────────────────
+
+export interface PositionLike {
+  x: number;
+  y: number;
+}
+
+export interface NodePositionLike {
+  id: string;
+  position: PositionLike;
+}
+
+/**
+ * 绝对坐标 → 相对坐标（相对于父容器）。
+ * Store 存绝对坐标，ReactFlow 子节点需要相对坐标。
+ * 若节点无父容器（pid 为空），直接返回原坐标。
+ */
+export function toRelativePosition(
+  nodeId: string,
+  absPos: PositionLike,
+  parentRefs: Record<string, string>,
+  nodes: NodePositionLike[],
+): PositionLike {
+  const pid = parentRefs[nodeId];
+  if (!pid) { return absPos; }
+  const parent = nodes.find((n) => n.id === pid);
+  if (!parent) { return absPos; }
+  return { x: absPos.x - parent.position.x, y: absPos.y - parent.position.y };
+}
+
+/**
+ * 相对坐标 → 绝对坐标（相对于画布原点）。
+ * ReactFlow 子节点返回相对坐标，Store 需要绝对坐标。
+ * 若节点无父容器（pid 为空），直接返回原坐标。
+ */
+export function toAbsolutePosition(
+  nodeId: string,
+  relPos: PositionLike,
+  parentRefs: Record<string, string>,
+  nodes: NodePositionLike[],
+): PositionLike {
+  const pid = parentRefs[nodeId];
+  if (!pid) { return relPos; }
+  const parent = nodes.find((n) => n.id === pid);
+  if (!parent) { return relPos; }
+  return { x: relPos.x + parent.position.x, y: relPos.y + parent.position.y };
 }
 
 // ── Grid 吸附与碰撞避免 ─────────────────────────────────────
@@ -866,7 +932,16 @@ export function resolveOverlaps(nodes: Node[], parentRefs: Record<string, string
   let iteration = 0;
 
   // Group nodes by their parent (same coordinate space)
-  const groupOf = (id: string): string => parentRefs[id] ?? "__top__";
+  // 对嵌套容器，用顶层祖先作为分组 key，使不同嵌套深度的节点也能检测重叠
+  const groupOf = (id: string): string => {
+    let current = id;
+    let parent = parentRefs[current];
+    while (parent) {
+      current = parent;
+      parent = parentRefs[current];
+    }
+    return current;
+  };
 
   while (iteration < maxIterations) {
     iteration++;
@@ -970,7 +1045,7 @@ export function autoLayoutWorkflow(
   const MIN_H = CONTAINER_MIN_H;
 
   const containerSizes: Record<string, { width: number; height: number }> = {};
-  const containers = layoutNodes.filter((n) => CONTAINER_NODE_TYPES.has(n.type || "") && !childOf[n.id]);
+  const containers = layoutNodes.filter((n) => CONTAINER_NODE_TYPES.has(n.type || ""));
 
   for (const c of containers) {
     const childIds = Object.keys(childOf).filter((cid) => childOf[cid] === c.id);
@@ -1098,8 +1173,13 @@ export function clampChildrenIntoContainers(
     if (!parentId) { return n; }
     const size = containerSizes[parentId];
     if (!size) { return n; }
-    const childW = (n.width as number | undefined) ?? getNodeSize(n.type || "").width;
-    const childH = (n.height as number | undefined) ?? getNodeSize(n.type || "").height;
+    const measured = (n as unknown as { measured?: { width?: number; height?: number } }).measured;
+    const childW = measured?.width
+      ?? (n.width as number | undefined)
+      ?? getNodeSize(n.type || "").width;
+    const childH = measured?.height
+      ?? (n.height as number | undefined)
+      ?? getNodeSize(n.type || "").height;
     let { x, y } = n.position;
     const minX = padding;
     const minY = padding;
@@ -1256,7 +1336,7 @@ export function forceLayout(
   const childOf = parentRefs;
 
   const containers = nodes.filter(
-    (n) => CONTAINER_NODE_TYPES.has(n.type || layoutNodeType(n)) && !childOf[n.id],
+    (n) => CONTAINER_NODE_TYPES.has(n.type || layoutNodeType(n)),
   );
 
   const childPositions: Record<string, { x: number; y: number }> = {};
@@ -1399,10 +1479,14 @@ export function forceLayout(
     target: e.target,
   }));
 
+  // 根据节点数量动态计算中心点，避免硬编码导致少节点偏右下、多节点超出视口
+  const centerX = Math.max(400, Math.sqrt(topLevel.length) * 200);
+  const centerY = Math.max(300, Math.sqrt(topLevel.length) * 150);
+
   const simulation = d3.forceSimulation<ForceNode, ForceLink>(forceNodes)
     .force("link", d3.forceLink<ForceNode, ForceLink>(forceLinks).id((d) => d.id).distance(150).strength(0.8))
     .force("charge", d3.forceManyBody().strength(-800))
-    .force("center", d3.forceCenter(800, 600))
+    .force("center", d3.forceCenter(centerX, centerY))
     .force("collide", d3.forceCollide<ForceNode>((d) => Math.max(d.width, d.height) / 2 + 20))
     .force("y", d3.forceY<ForceNode>((d) => d.y).strength(0.5))
     .stop();

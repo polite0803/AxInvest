@@ -575,7 +575,7 @@ pub async fn recommend_stocks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recommender::types::{Period, Style};
+    use crate::recommender::types::{Period, RecoPick, Style};
 
     /// 构造一个带 dummy pick 的 RecoResponse（避免 cache_put 跳过空结果）
     fn dummy_resp(period: Period, generated_at: i64, mode: &str) -> RecoResponse {

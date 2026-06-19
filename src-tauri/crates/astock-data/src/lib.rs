@@ -962,10 +962,7 @@ impl AStockClient {
                                 tracing::warn!(
                                     "{}",
                                     if crate::as_of::is_asof_active() {
-                                        format!(
-                                            "[asof] {} 财报全部晚于截止日，尝试下一源",
-                                            name
-                                        )
+                                        format!("[asof] {} 财报全部晚于截止日，尝试下一源", name)
                                     } else {
                                         format!("[vendor] {} 财报返回空，尝试下一源", name)
                                     }
@@ -989,7 +986,11 @@ impl AStockClient {
             }
             if retry_remaining > 0 && last_err.is_some() {
                 retry_remaining -= 1;
-                tracing::warn!("[retry] {} 财务数据所有源失败 (last: {})，1s 后重试整条链", stock_code, last_err.as_ref().unwrap());
+                tracing::warn!(
+                    "[retry] {} 财务数据所有源失败 (last: {})，1s 后重试整条链",
+                    stock_code,
+                    last_err.as_ref().unwrap()
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 continue;
             }

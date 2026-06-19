@@ -388,20 +388,12 @@ export function SerenityScreeningPanel() {
           );
           // 优先使用事件 payload 中直接的 candidates 数组
           // 如果 candidates 为空数组但 result 有数据，回退到从 result 提取
-          let list: SerenityCandidate[] = [];
           const directCandidates = Array.isArray(p.candidates)
             ? (p.candidates.filter((c: unknown) => c != null) as SerenityCandidate[])
             : null;
-          if (directCandidates && directCandidates.length > 0) {
-            list = directCandidates;
-          } else {
-            // 回退：从 result 中提取（可能被包装在 {candidates: [...]} 或其他格式中）
-            console.log(
-              "[Serenity] candidates 数组为空或不存在，尝试从 result 提取:",
-              JSON.stringify(p.result)?.slice(0, 300),
-            );
-            list = extractCandidatesList(p.result);
-          }
+          const list = directCandidates && directCandidates.length > 0
+            ? directCandidates
+            : extractCandidatesList(p.result);
           if (list.length > 0) {
             setCandidates(list);
           } else {

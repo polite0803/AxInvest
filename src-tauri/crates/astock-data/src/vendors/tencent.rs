@@ -255,10 +255,18 @@ impl StockVendor for TencentVendor {
         let text = encoding_rs::GBK.decode(&bytes).0;
         // 格式: v_ff_sz000858="code~main_in~main_out~main_net~main_ratio~retail_in~retail_out~retail_net~retail_ratio~total~?~?~name~date";
         if let Some(line) = text.lines().next() {
-            let raw = line.trim().trim_start_matches(|c: char| c != '"').trim_matches('"');
+            let raw = line
+                .trim()
+                .trim_start_matches(|c: char| c != '"')
+                .trim_matches('"');
             let parts: Vec<&str> = raw.split('~').collect();
             if parts.len() >= 14 && !parts[3].is_empty() {
-                let parse = |i: usize| parts.get(i).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                let parse = |i: usize| {
+                    parts
+                        .get(i)
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0)
+                };
                 return Ok(Some(MoneyFlow {
                     date: parts[13].to_string(),
                     main_net_inflow: parse(3),

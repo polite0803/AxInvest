@@ -192,7 +192,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       return;
     }
     void load();
-  }, [period]);
+  }, [period, load]);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);

@@ -144,11 +144,13 @@ export function AnalysisHistoryButton() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Input
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         ref={inputRef as any}
                         size="small"
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
                         onKeyDown={(e) => {
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
                           if (e.key === "Enter") { confirmRename(e as any, r.id); }
                           if (e.key === "Escape") { setEditingId(null); }
                         }}

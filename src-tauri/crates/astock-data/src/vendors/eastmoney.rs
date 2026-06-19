@@ -505,10 +505,26 @@ impl StockVendor for EastMoneyVendor {
                 }
                 let parse = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
                 let main_net = parse(parts[1]);
-                let super_large = if parts.len() > 2 { parse(parts[2]) } else { 0.0 };
-                let large = if parts.len() > 3 { parse(parts[3]) } else { 0.0 };
-                let medium = if parts.len() > 4 { parse(parts[4]) } else { 0.0 };
-                let small = if parts.len() > 5 { parse(parts[5]) } else { 0.0 };
+                let super_large = if parts.len() > 2 {
+                    parse(parts[2])
+                } else {
+                    0.0
+                };
+                let large = if parts.len() > 3 {
+                    parse(parts[3])
+                } else {
+                    0.0
+                };
+                let medium = if parts.len() > 4 {
+                    parse(parts[4])
+                } else {
+                    0.0
+                };
+                let small = if parts.len() > 5 {
+                    parse(parts[5])
+                } else {
+                    0.0
+                };
                 Ok(Some(MoneyFlow {
                     date: parts[0].to_string(),
                     main_net_inflow: main_net,

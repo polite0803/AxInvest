@@ -1889,7 +1889,10 @@ fn find_candidates_deep(value: &serde_json::Value) -> Vec<serde_json::Value> {
             // 检查数组元素是否像候选对象（有 stock_code）
             for item in arr {
                 if item.get("stock_code").is_some()
-                    && item.get("stock_code").and_then(|v| v.as_str()).map_or(false, |s| !s.is_empty())
+                    && item
+                        .get("stock_code")
+                        .and_then(|v| v.as_str())
+                        .map_or(false, |s| !s.is_empty())
                 {
                     results.push(item.clone());
                 } else if item.is_object() || item.is_array() {
@@ -1897,7 +1900,7 @@ fn find_candidates_deep(value: &serde_json::Value) -> Vec<serde_json::Value> {
                     results.extend(find_candidates_deep(item));
                 }
             }
-        }
+        },
         serde_json::Value::Object(map) => {
             // 优先找 candidates/stocks 等容器字段
             for key in ["candidates", "stocks", "list", "data", "items"] {
@@ -1917,8 +1920,8 @@ fn find_candidates_deep(value: &serde_json::Value) -> Vec<serde_json::Value> {
                     results.extend(find_candidates_deep(v));
                 }
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
     results
 }
@@ -1937,14 +1940,27 @@ fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>
             let mut end = arr_start_abs;
             for i in arr_start_abs..text.len() {
                 let ch = text.as_bytes()[i];
-                if escaped { escaped = false; continue; }
-                if ch == b'\\' && in_str { escaped = true; continue; }
-                if ch == b'"' { in_str = !in_str; continue; }
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if ch == b'\\' && in_str {
+                    escaped = true;
+                    continue;
+                }
+                if ch == b'"' {
+                    in_str = !in_str;
+                    continue;
+                }
                 if !in_str {
-                    if ch == b'[' { depth += 1; }
-                    else if ch == b']' {
+                    if ch == b'[' {
+                        depth += 1;
+                    } else if ch == b']' {
                         depth -= 1;
-                        if depth == 0 { end = i + 1; break; }
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
                     }
                 }
             }
@@ -2002,10 +2018,71 @@ fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>
         search_start = abs_pos + 13; // 跳过已搜索部分
     }
 
-    if found.is_empty() {
-        None
-    } else {
-        Some(found)
+    if found.is_empty() { None } else { Some(found) }
+}
+
+/// 从节点原始输出中直接提取 candidates 数组
+/// 与通用 extract_agent_output 不同，此函数直接导航已知 JSON 路径：
+///   {"content": "...```json\n{\"name\": \"...\", \"arguments\": {\"candidates\": [...]}\n```..."}
+/// 返回 {"candidates": [...]} 或 null
+fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
+    let content = match raw.get("content").and_then(|c| c.as_str()) {
+        Some(c) => c,
+        None => {
+            tracing::warn!("[serenity] 节点输出无 content 字段");
+            return serde_json::Value::Null;
+        },
+    };
+    let extracted = axagent_core::extract_json_from_llm_response(content);
+    let parsed: serde_json::Value = match serde_json::from_str(extracted) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("[serenity] JSON 解析失败: {e}, 尝试兜底提取");
+            // 尝试从 content 中裸搜索 candidates 数组
+            if let Some(found) = try_extract_candidates_from_text(content) {
+                return serde_json::json!({"candidates": found});
+            }
+            return serde_json::Value::Null;
+        },
+    };
+    // 导航到 arguments/input → candidates
+    let args = parsed
+        .as_object()
+        .and_then(|o| o.get("arguments"))
+        .or_else(|| parsed.as_object().and_then(|o| o.get("input")));
+    let candidates = match args {
+        Some(a) => a.get("candidates"),
+        None => parsed.as_object().and_then(|o| o.get("candidates")),
+    };
+    match candidates {
+        Some(arr) if arr.is_array() => {
+            let count = arr.as_array().map(|a| a.len()).unwrap_or(0);
+            tracing::info!("[serenity] 直接提取成功，找到 {} 个候选", count);
+            serde_json::json!({"candidates": arr})
+        },
+        Some(_) => {
+            tracing::warn!(
+                "[serenity] candidates 不是数组，keys={:?}",
+                candidates
+                    .and_then(|c| c.as_object())
+                    .map(|o| o.keys().cloned().collect::<Vec<_>>())
+            );
+            serde_json::Value::Null
+        },
+        None => {
+            // 最后的兜底：parsed 本身可能是裸候选对象
+            if parsed.get("stock_code").is_some() {
+                serde_json::json!({"candidates": [parsed]})
+            } else {
+                tracing::warn!(
+                    "[serenity] 无法找到 candidates 字段, parsed keys={:?}",
+                    parsed
+                        .as_object()
+                        .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                );
+                serde_json::Value::Null
+            }
+        },
     }
 }
 
@@ -2097,23 +2174,30 @@ pub async fn run_serenity_screening(
                     .unwrap_or_default();
                 tracing::info!("[serenity] a-candidate-mapper 原始输出 (前500字符): {}", preview);
             }
-            // 保留原始副本供兜底提取使用（extract_agent_output 会 move）
+            // 使用专属提取函数直接从已知 JSON 路径 (content → arguments.candidates) 提取，
+            // 绕过 extract_agent_output 的复杂 fallback 逻辑（该函数在 tool_json 格式下可能返回首条候选而非完整数组）
             let candidates_raw_fallback = candidates_raw.clone();
-            let candidates = extract_agent_output(candidates_raw).await;
-            // 诊断：extract_agent_output 的实际返回值
+            let candidates = serenity_extract_from_node(&candidates_raw);
+            // 诊断：serenity_extract_from_node 的返回值
             {
                 let preview = serde_json::to_string(&candidates)
                     .map(|s| s.chars().take(400).collect::<String>())
                     .unwrap_or_default();
                 tracing::info!(
-                    "[serenity] extract_agent_output 返回类型={}  前400字符: {}",
-                    if candidates.is_array() { "数组".to_string() }
-                    else if candidates.is_object() {
-                        let keys = candidates.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+                    "[serenity] serenity_extract 返回类型={}  前400字符: {}",
+                    if candidates.is_array() {
+                        "数组".to_string()
+                    } else if candidates.is_object() {
+                        let keys = candidates
+                            .as_object()
+                            .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                            .unwrap_or_default();
                         format!("对象 keys=[{}]", keys.join(","))
-                    }
-                    else if candidates.is_null() { "null".to_string() }
-                    else { "其他".to_string() },
+                    } else if candidates.is_null() {
+                        "null".to_string()
+                    } else {
+                        "其他".to_string()
+                    },
                     preview,
                 );
             }
@@ -2144,7 +2228,10 @@ pub async fn run_serenity_screening(
             let mut dropped_count = 0;
             if let Some(arr) = raw_candidate_array.as_array() {
                 for c in arr {
-                    let has_code = c.get("stock_code").and_then(|v| v.as_str()).map_or(false, |s| !s.is_empty());
+                    let has_code = c
+                        .get("stock_code")
+                        .and_then(|v| v.as_str())
+                        .map_or(false, |s| !s.is_empty());
                     if has_code {
                         candidate_array.push(c.clone());
                     } else {
@@ -2175,8 +2262,18 @@ pub async fn run_serenity_screening(
             if candidate_array.as_array().map_or(true, |a| a.is_empty()) {
                 tracing::warn!(
                     "[serenity] ⚠️ 候选数组为空，尝试兜底提取... candidates类型={} keys={:?}",
-                    if candidates.is_array() { "array" } else if candidates.is_object() { "object" } else if candidates.is_null() { "null" } else { "other" },
-                    candidates.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()),
+                    if candidates.is_array() {
+                        "array"
+                    } else if candidates.is_object() {
+                        "object"
+                    } else if candidates.is_null() {
+                        "null"
+                    } else {
+                        "other"
+                    },
+                    candidates
+                        .as_object()
+                        .map(|o| o.keys().cloned().collect::<Vec<_>>()),
                 );
                 // 兜底策略1: 从 candidates 对象的任意嵌套层搜索含 stock_code 的数组
                 let fallback = find_candidates_deep(&candidates);
@@ -2186,9 +2283,15 @@ pub async fn run_serenity_screening(
                 }
                 // 兜底策略2: 从原始节点输出的 content 字段中提取
                 if candidate_array.as_array().map_or(true, |a| a.is_empty()) {
-                    if let Some(content) = candidates_raw_fallback.get("content").and_then(|c| c.as_str()) {
+                    if let Some(content) = candidates_raw_fallback
+                        .get("content")
+                        .and_then(|c| c.as_str())
+                    {
                         if let Some(extracted) = try_extract_candidates_from_text(content) {
-                            tracing::info!("[serenity] 文本兜底提取成功，找到 {} 个候选", extracted.len());
+                            tracing::info!(
+                                "[serenity] 文本兜底提取成功，找到 {} 个候选",
+                                extracted.len()
+                            );
                             candidate_array = serde_json::json!(extracted);
                         }
                     }
@@ -2484,7 +2587,7 @@ pub async fn refresh_serenity_feedback(
 
 async fn do_feedback_loop(state: &State<'_, AppState>) -> Result<serde_json::Value, String> {
     use axagent_core::entity::reco_picks;
-    use sea_orm::{EntityTrait, QueryOrder, QuerySelect};
+    use sea_orm::{EntityTrait, QueryOrder};
 
     let db = state.harness.db();
     // 固定取过去 30 天的 Serenity 候选，避免新工作流产出的记录不断顶替旧样本
@@ -2569,7 +2672,11 @@ async fn do_feedback_loop(state: &State<'_, AppState>) -> Result<serde_json::Val
                 pick.stock_code,
                 entry_price,
                 rec_date,
-                if used_fallback { " [参考值:推荐日K线未收盘，取前一日]" } else { "" },
+                if used_fallback {
+                    " [参考值:推荐日K线未收盘，取前一日]"
+                } else {
+                    ""
+                },
             );
         }
 

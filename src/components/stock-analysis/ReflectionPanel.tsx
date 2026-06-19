@@ -47,17 +47,19 @@ export function ReflectionPanel() {
   const [depth, setDepth] = useState("light");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // 手动触发参数
-  const [manualCode, setManualCode] = useState("");
   const [manualAsOf, setManualAsOf] = useState("");
   const [manualOutcome, setManualOutcome] = useState("");
   const [manualDepth, setManualDepth] = useState("light");
   const [running, setRunning] = useState(false);
 
-  // 个股分析页内自动取当前股票代码
+  // 个股分析页内自动取当前股票代码（首次加载时填入）
   const stockCodeFromStore = useStockAnalysisStore((s) => s.stockCode);
+  const [manualCode, setManualCode] = useState(stockCodeFromStore ?? "");
+  // 当 store 股票代码变化但 manualCode 为空时自动填充
+  const prevCodeRef = useRef(stockCodeFromStore);
   useEffect(() => {
-    if (!manualCode && stockCodeFromStore) {
+    if (!manualCode && stockCodeFromStore && stockCodeFromStore !== prevCodeRef.current) {
+      prevCodeRef.current = stockCodeFromStore;
       setManualCode(stockCodeFromStore);
     }
   }, [stockCodeFromStore, manualCode]);

@@ -123,7 +123,11 @@ impl TrendStrategy {
                     if amount_ratio < amount_ratio_min {
                         return None;
                     }
-                    let ma_align = if ma10 > ma20 { "多头排列" } else { "站上均线" };
+                    let ma_align = if ma10 > ma20 {
+                        "多头排列"
+                    } else {
+                        "站上均线"
+                    };
                     let reasons = vec![
                         format!(
                             "MA{} {:.2} > MA{} {:.2}, {} MA{} {:.2}",

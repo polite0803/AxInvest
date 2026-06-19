@@ -670,17 +670,7 @@ mod tests {
         );
 
         // 6) live scope 再次写入 → 覆盖
-        let live_resp2 = RecoResponse {
-            period: Period::Short,
-            picks: std::collections::HashMap::new(),
-            disabled_styles: vec![],
-            degraded_styles: vec![],
-            degraded_reasons: std::collections::HashMap::new(),
-            generated_at: 11,
-            raw_seed_pool_size: 0,
-            as_of_date: None,
-            mode: "live".to_string(),
-        };
+        let live_resp2 = dummy_resp(Period::Short, 11, "live");
         cache_put(Period::Short, live_resp2);
         assert_eq!(cache_get(Period::Short).unwrap().generated_at, 11);
 

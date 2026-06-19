@@ -509,8 +509,9 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // stock-analysis 模板版本管理从 v1 开始。v4: 重新种子化以应用 Rhai default→dflt 修复
-    const TEMPLATE_VERSION: i32 = 8;
+    // stock-analysis 模板版本管理从 v1 开始。v8: 工作流结构重整，移除 code_node.type。
+    // v9: max_concurrent=12→5, agent_timeout_secs=300→120, AgentExecutor 加 60s stream 超时
+    const TEMPLATE_VERSION: i32 = 9;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -2635,9 +2636,10 @@ async fn seed_stock_analysis_workflow_template(
         Variable {
             name: "max_concurrent".into(),
             var_type: "number".into(),
-            // 修复 Defect #6: 与 stock-analyst 角色 max_concurrent=12 对齐，
-            // 留 1 槽位余量；旧值 9 不足以同时调度 9 个分析师 + value-investor + data-quality。
-            value: serde_json::json!(12),
+            // v8.1: 从 12 降至 5，避免 10 个 Agent 同批次打满 LLM provider 并发限流。
+            // 之前 12 导致 001313 等小盘股分析卡死（所有新闻源全空 → LLM 响应极慢
+            // → stream.next() 无内部超时 → JoinSet 阻塞整个引擎 5 分钟）。
+            value: serde_json::json!(5),
             description: Some("并行分析的 Agent 数量上限".into()),
             is_secret: false,
         },
@@ -2681,8 +2683,10 @@ async fn seed_stock_analysis_workflow_template(
         Variable {
             name: "agent_timeout_secs".into(),
             var_type: "number".into(),
-            value: serde_json::json!(300),
-            description: Some("每个 Agent 节点执行超时秒数".into()),
+            // v8.1: 从 300s 降至 120s，配合 max_concurrent=5，单 Agent 最多等 2 分钟。
+            // 之前 300s 在 10 个 Agent 同批次场景下，任一挂起即阻塞引擎 5 分钟。
+            value: serde_json::json!(120),
+            description: Some("每个 Agent 节点执行超时秒数 (v8.1: 120s)".into()),
             is_secret: false,
         },
         Variable {

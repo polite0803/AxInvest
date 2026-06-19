@@ -984,15 +984,17 @@ impl AStockClient {
                     }
                 }
             }
-            if retry_remaining > 0 && last_err.is_some() {
-                retry_remaining -= 1;
-                tracing::warn!(
-                    "[retry] {} 财务数据所有源失败 (last: {})，1s 后重试整条链",
-                    stock_code,
-                    last_err.as_ref().unwrap()
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
+            if let Some(ref e) = last_err {
+                if retry_remaining > 0 {
+                    retry_remaining -= 1;
+                    tracing::warn!(
+                        "[retry] {} 财务数据所有源失败 (last: {})，1s 后重试整条链",
+                        stock_code,
+                        e
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    continue;
+                }
             }
             break;
         }

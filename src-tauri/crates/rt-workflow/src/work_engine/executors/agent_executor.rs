@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, PoisonError};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use axagent_core::workflow_types::WorkflowNode;
@@ -619,7 +620,25 @@ impl NodeExecutorTrait for AgentExecutor {
             let mut stream_tool_calls: Option<Vec<axagent_harness::types::ToolCall>> = None;
             let mut stream_usage = (0u32, 0u32);
 
-            while let Some(chunk) = stream.next().await {
+            // v8.1: 60s per-chunk 超时，防止 LLM provider 挂起导致 engine 永久阻塞。
+            // 外层还有 node_timeout（默认 120s）兜底，但每次 stream.next() 阻塞太久
+            // 会让整个 JoinSet 卡住，其他已完成 Agent 的结果无法推进引擎。
+            while let Some(chunk) = tokio::time::timeout(
+                Duration::from_secs(60),
+                stream.next(),
+            )
+            .await
+            .map_err(|_| {
+                NodeError::exec_failed(
+                    error_code::TIMEOUT,
+                    format!(
+                        "Agent LLM stream chunk timeout after 60s (round {}/{}), node={}",
+                        round + 1,
+                        max_rounds,
+                        node.base_id(),
+                    ),
+                )
+            })? {
                 let chunk = chunk.map_err(|e| {
                     NodeError::exec_failed(
                         error_code::UNSUPPORTED_PROVIDER,

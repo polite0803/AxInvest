@@ -94,7 +94,7 @@ export function AnalysisHistoryButton() {
       open={open}
       onOpenChange={setOpen}
       trigger={["click"]}
-      dropdownRender={() => (
+      popupRender={() => (
         <div
           style={{
             width: 440,

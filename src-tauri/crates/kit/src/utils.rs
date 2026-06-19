@@ -140,8 +140,7 @@ fn trim_after_json(s: &str) -> &str {
     let mut escaped = false;
     let mut last_complete_end = 0; // 最后一个 depth 回到 0 的位置
 
-    for i in 0..len {
-        let b = bytes[i];
+    for (i, &b) in bytes.iter().enumerate().take(len) {
         if escaped {
             escaped = false;
             continue;

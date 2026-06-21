@@ -8549,6 +8549,7 @@
       "aiApplyFailed": "適用失敗: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI 提案された変更（下の適用をクリック）",
       "aiRawOutputTitle": "AI 生の出力",
+      "rolledBack": "（自動ロールバック済み）",
       "scheduleTitle": "定时验证",
       "scheduleDesc": "自动验证 30 天前的分析结果，亏损时触发反思",
       "depthLight": "轻度",

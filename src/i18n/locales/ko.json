@@ -8459,6 +8459,7 @@
       "aiApplyFailed": "적용 실패: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI 제안된 변경 사항 (아래 적용 클릭)",
       "aiRawOutputTitle": "AI 원본 출력",
+      "rolledBack": " (자동 롤백됨)",
       "manualTitle": "手动反思",
       "startReflection": "开始反思",
       "placeholderCode": "股票代码",

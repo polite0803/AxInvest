@@ -8586,6 +8586,7 @@
       "aiApplyFailed": "套用失敗: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI 建議的修改（點擊下方套用）",
       "aiRawOutputTitle": "AI 原始輸出",
+      "rolledBack": "（已自動回滾）",
       "manualTitle": "手动反思",
       "startReflection": "开始反思",
       "placeholderCode": "股票代码",

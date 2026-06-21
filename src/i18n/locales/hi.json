@@ -8459,6 +8459,7 @@
       "aiApplyFailed": "विफल: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI द्वारा सुझाए गए परिवर्तन (नीचे लागू करें पर क्लिक करें)",
       "aiRawOutputTitle": "AI कच्चा आउटपुट",
+      "rolledBack": " (स्वचालित रूप से रोलबैक)",
       "manualTitle": "手动反思",
       "startReflection": "开始反思",
       "placeholderCode": "股票代码",

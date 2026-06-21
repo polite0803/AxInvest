@@ -8459,6 +8459,7 @@
       "aiApplyFailed": "Fehler: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "KI-vorgeschlagene Änderungen (unten anwenden klicken)",
       "aiRawOutputTitle": "KI-Rohausgabe",
+      "rolledBack": " (automatisch zurückgerollt)",
       "manualTitle": "手动反思",
       "startReflection": "开始反思",
       "placeholderCode": "股票代码",

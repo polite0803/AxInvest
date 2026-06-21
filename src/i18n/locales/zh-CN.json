@@ -8592,7 +8592,8 @@
       "aiApplySuccess": "已应用 {{count}} 个修改，工作流模板已更新",
       "aiApplyFailed": "应用失败: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI 建议的修改（点击下方应用）",
-      "aiRawOutputTitle": "AI 原始输出"
+      "aiRawOutputTitle": "AI 原始输出",
+      "rolledBack": "（已自动回滚）"
     },
     "portfolioMonitor": {
       "title": "组合监控",

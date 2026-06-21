@@ -8349,7 +8349,8 @@
       "aiApplySuccess": "Applied {{count}} change(s); workflow template updated",
       "aiApplyFailed": "Apply failed: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI suggested changes (click apply below)",
-      "aiRawOutputTitle": "AI raw output"
+      "aiRawOutputTitle": "AI raw output",
+      "rolledBack": " (auto-rolled back)"
     },
     "refreshing": "Refreshing",
     "regions": "Regional Blocks",

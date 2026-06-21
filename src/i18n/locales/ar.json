@@ -8560,7 +8560,8 @@
       "aiApplySuccess": "تم تطبيق {{count}} تعديل(ات)، تم تحديث قالب سير العمل",
       "aiApplyFailed": "فشل: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "التعديلات المقترحة من الذكاء الاصطناعي (انقر تطبيق أدناه)",
-      "aiRawOutputTitle": "إخراج الذكاء الاصطناعي الخام"
+      "aiRawOutputTitle": "إخراج الذكاء الاصطناعي الخام",
+      "rolledBack": " (تم التراجع تلقائياً)"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

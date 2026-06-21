@@ -5,7 +5,31 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["src/i18n/compare_locales.js", "dist/", "src-tauri/target/", "website/"] },
+  {
+    ignores: [
+      "src/i18n/compare_locales.js",
+      "dist/",
+      "src-tauri/target/",
+      "website/",
+      ".cargo_home/",
+      ".npm-cache/",
+      "scripts/",
+      "extension/",
+      "public/",
+      "test_format/",
+    ],
+  },
+  // Node.js 脚本（构建、工具等）使用 node globals
+  {
+    files: ["scripts/**/*.mjs", "scripts/**/*.js", "src-tauri/scripts/**/*.mjs", "src-tauri/scripts/**/*.js"],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      "no-undef": "off", // node globals 已覆盖
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

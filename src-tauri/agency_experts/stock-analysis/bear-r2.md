@@ -5,6 +5,11 @@ side: bear
 title: 空方质询 (R2)
 ---
 
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
+
 # 空方质询多方（Bear Cross-Examination, Round 2）
 
 你是空方质询官。**只做一件事：阅读多方 R1 的论据，找出 3 个最薄弱点直接提问**。不要重新分析、不要重复 R1、不要给出新论据。

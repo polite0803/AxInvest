@@ -582,7 +582,7 @@ impl AStockClient {
             .find(|k| k.date.as_str() <= effective.as_str())?;
         Some(StockQuote {
             code: stock_code.to_string(),
-            name: String::new(),
+            name: stock_code.to_string(),
             price: last.close,
             pre_close: 0.0,
             open: last.open,
@@ -749,28 +749,75 @@ impl AStockClient {
     }
 
     pub async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
-        // As-Of 降级：用最后一条 <= as_of_date 的 K 线收盘价合成 quote
+        // As-Of 模式：K线最后一行合成行情。K线合成失败时返回 Error，绝不回退到
+        // vendor.get_quote（返回今日实时数据，时间泄露）。
         if crate::as_of::is_asof_active() {
-            match self.get_klines(stock_code, "daily", 5).await {
-                Ok(ks) => {
-                    if let Some(mut q) = Self::quote_from_klines(stock_code, &ks) {
-                        // as-of 下从最新财报推导 PE/PB（K 线合成不包含估值字段）
-                        if let Ok(fins) = self.get_financials(stock_code).await {
-                            if let Some(latest) = fins.into_iter().next() {
-                                if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
-                                    q.pe = Some(q.price / eps);
+            // 遍历 vendors_for("klines") ，NativeDateParam vendor 调 _with_asof
+            let kline_names: Vec<String> = self
+                .routing
+                .vendors_for("klines", &self.routing.klines)
+                .clone();
+            let mut last_err: Option<DataError> = None;
+            for name in &kline_names {
+                if let Some(vendor) = self.find_vendor(name) {
+                    let cap = self.vendor_asof_capability(name, "get_klines");
+                    let ks_result = match cap {
+                        AsOfCapability::NativeDateParam => {
+                            vendor
+                                .get_klines_with_asof(stock_code, "daily", 5, None)
+                                .await
+                        },
+                        _ => vendor.get_klines(stock_code, "daily", 5, None).await,
+                    };
+                    match ks_result {
+                        Ok(ks) if !ks.is_empty() => {
+                            if let Some(mut q) = Self::quote_from_klines(stock_code, &ks) {
+                                if let Ok(fins) = self.get_financials(stock_code).await {
+                                    if let Some(latest) = fins.into_iter().next() {
+                                        if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
+                                            q.pe = Some(q.price / eps);
+                                        }
+                                        if let Some(bps) = latest.bps.filter(|&v| v > 0.0) {
+                                            q.pb = Some(q.price / bps);
+                                        }
+                                    }
                                 }
-                                if let Some(bps) = latest.bps.filter(|&v| v > 0.0) {
-                                    q.pb = Some(q.price / bps);
-                                }
+                                return Ok(q);
                             }
-                        }
-                        return Ok(q);
+                            tracing::warn!(
+                                "[asof] {} {} K线无法合成quote，尝试下一源",
+                                name,
+                                stock_code
+                            );
+                            last_err = Some(DataError::VendorError {
+                                vendor: name.clone(),
+                                message: "K线全部晚于as_of_date".into(),
+                            });
+                        },
+                        Ok(_) => {
+                            tracing::warn!("[asof] {} {} K线返回空，尝试下一源", name, stock_code);
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "[asof] {} {} K线失败: {}，尝试下一源",
+                                name,
+                                stock_code,
+                                e
+                            );
+                            last_err = Some(e);
+                        },
                     }
-                    tracing::warn!("[asof] {stock_code} K线为空，无法合成 quote");
-                },
-                Err(e) => tracing::warn!("[asof] {stock_code} K线拉取失败: {e}"),
+                }
             }
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_quote",
+                &format!("as-of 模式所有K线源均无法合成 {stock_code} 行情，已阻止回退到今日数据"),
+            );
+            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                vendor: "all".into(),
+                message: format!("as-of 模式下 {stock_code} 行情合成失败（所有K线源不可用）"),
+            }));
         }
 
         let cache_key = Self::cache_key_for("quote", stock_code);
@@ -866,17 +913,27 @@ impl AStockClient {
             }
         }
 
-        // 路由级重试：所有源失败后等待 2s 重试整条链一次
+        // 路由级重试：所有源失败后等待 2s 重试整条链一次。
+        // as-of 模式下使用 vendors_for("klines") 按 per-mode 顺序路由，
+        // 并对 NativeDateParam vendor 调 _with_asof 精确传 end=YYYYMMDD。
+        let kline_names: Vec<String> = self
+            .routing
+            .vendors_for("klines", &self.routing.klines)
+            .clone();
         let mut retry_remaining = 1u32;
         loop {
             let mut last_err = None;
-            for name in &self.routing.klines {
+            for name in &kline_names {
                 if let Some(vendor) = self.find_vendor(name) {
                     let _guard = self.gate.acquire(name).await;
-                    match vendor
-                        .get_klines(stock_code, period, fetch_limit, _adj_type)
-                        .await
-                    {
+                    let cap = self.vendor_asof_capability(name, "get_klines");
+                    let kline_fut = match cap {
+                        AsOfCapability::NativeDateParam if crate::as_of::is_asof_active() => {
+                            vendor.get_klines_with_asof(stock_code, period, fetch_limit, _adj_type)
+                        },
+                        _ => vendor.get_klines(stock_code, period, fetch_limit, _adj_type),
+                    };
+                    match kline_fut.await {
                         Ok(result) if !result.is_empty() => {
                             let result = Self::truncate_klines_by_asof(result);
                             if result.is_empty() {
@@ -948,7 +1005,7 @@ impl AStockClient {
         // 路由级重试：所有源失败后等待 2s 重试整条链一次
         let mut retry_remaining = 1u32;
         #[allow(unused_assignments)]
-        let mut last_err = None;
+        let mut last_err: Option<DataError> = None;
         loop {
             last_err = None;
             for name in &self.routing.financials {
@@ -1016,7 +1073,8 @@ impl AStockClient {
             }
         }
         let mut last_err = None;
-        for name in &self.routing.news {
+        let news_names: Vec<String> = self.routing.vendors_for("news", &self.routing.news).clone();
+        for name in &news_names {
             if let Some(vendor) = self.find_vendor(name) {
                 match vendor.get_news(stock_code, limit).await {
                     Ok(result) if !result.is_empty() => {
@@ -1622,12 +1680,35 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<Announcement>, DataError> {
-        for name in &self.routing.announcements {
+        let announce_names: Vec<String> = self
+            .routing
+            .vendors_for("announcements", &self.routing.announcements)
+            .clone();
+        for name in &announce_names {
             if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_announcements(stock_code).await {
+                let cap = self.vendor_asof_capability(name, "get_announcements");
+                let announce_fut = match cap {
+                    AsOfCapability::NativeDateParam if crate::as_of::is_asof_active() => {
+                        vendor.get_announcements_with_asof(stock_code)
+                    },
+                    _ => vendor.get_announcements(stock_code),
+                };
+                match announce_fut.await {
                     Ok(result) => {
                         if !result.is_empty() {
-                            let result = Self::truncate_announcements_by_asof(result);
+                            // NativeDateParam vendor 的 _with_asof 已按日期过滤，无需再截断；
+                            // Fallthrough vendor 仍需要截断
+                            let result = match cap {
+                                AsOfCapability::NativeDateParam
+                                    if crate::as_of::is_asof_active() =>
+                                {
+                                    result
+                                },
+                                _ => Self::truncate_announcements_by_asof(result),
+                            };
+                            if result.is_empty() {
+                                continue;
+                            }
                             let cache_key = Self::cache_key_for("announcements", stock_code);
                             let json = serde_json::to_string(&result).unwrap_or_default();
                             self.cache_set(cache_key, json, 3600).await;

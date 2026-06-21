@@ -23,6 +23,13 @@ import { create } from "zustand";
 // Bug #P0-3: 模块级变量在 reset() 后不清空，
 // 改为 store 内 state 字段管理生命周期。
 const EARNINGS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟
+
+/**
+ * parseWorkflowResults 同款策略:从后端 blackboard snapshot 还原各分类字段。
+ * snapshot 里 debate/risk/value 节点是 AgentResult 包装({content, model, role, ...}),
+ * 真正的 LLM 输出在 content 字段。loadAnalysis 用 extractContent 解包,
+ * 与 live 模式 routeNodeOutput / parseWorkflowResults 行为保持一致。
+ */
 function parseWorkflowResults(results: Record<string, unknown>) {
   const analystReports: Record<string, string> = {};
   const debateRounds: Array<{ round: number; bull: string; bear: string }> = [];
@@ -499,7 +506,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       })();
       console.log("[getStockQuote] timeAnchor:", { mode: useTimeAnchorStore.getState().mode, asOfDate });
       const quote = await invoke<StockQuote>("get_stock_quote", { stockCode: code, asOfDate });
-      set({ quote, stockCode: code, stockName: quote.name, quoteLoading: false });
+      // 后端在 as-of 模式(回放历史分析)下,K线合成 quote 时
+      // name 字段会 fallback 为 stock_code(见 astock-data/src/lib.rs quote_from_klines),
+      // 此时应该保留 store 里已存在的 stockName(一般是 loadAnalysis 时从
+      // 历史记录写入的中文名,如 "华如科技"),而不是被 "301302" 覆盖。
+      const fallbackName = get().stockName && get().stockName !== code
+        ? get().stockName
+        : "";
+      const resolvedName = (quote.name && quote.name !== code)
+        ? quote.name
+        : (fallbackName || code);
+      set({ quote, stockCode: code, stockName: resolvedName, quoteLoading: false });
       // R3-B: 财报事件缓存 10 分钟，避免每次报价刷新都拉取
       const now = Date.now();
       const lastFetch = get()._lastEarningsFetch;
@@ -625,18 +642,33 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         asOfDate,
         mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",
       });
-      const result = await invoke<{
-        analysisId: string;
-        workflowId: string;
-        stockCode: string;
-        stockName: string;
-      }>("run_stock_workflow", { stockCode, dryRun, asOfDate });
+      const result = await invoke<Record<string, unknown>>("run_stock_workflow", { stockCode, dryRun, asOfDate });
+
+      // P0-4 修复: 检查数据质量预检跳过
+      // serde_json::Value 返回 snake_case 键
+      if (result.status === "skipped") {
+        const reason = (result.reason as string) || "数据质量不足";
+        set({
+          status: "error",
+          error: `数据不足，跳过分析: ${reason}`,
+          errorCode: "DATA_QUALITY_INSUFFICIENT",
+          analysisId: result.analysis_id as string,
+          stockCode: result.stock_code as string || stockCode,
+          stockName: result.stock_name as string || "",
+        });
+        return;
+      }
+
+      const analysisId = result.analysis_id as string;
+      const wfId = result.workflow_id as string;
+      const sc = result.stock_code as string;
+      const sn = result.stock_name as string;
 
       set({
-        analysisId: result.analysisId,
-        workflowId: result.workflowId,
-        stockCode: result.stockCode,
-        stockName: result.stockName,
+        analysisId,
+        workflowId: wfId,
+        stockCode: sc,
+        stockName: sn,
         status: "running",
         progressMessage: i18n.t("stockAnalysis.progress.started"),
         progressPct: 5,
@@ -645,12 +677,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // 异步拉取报价和 K 线
       // 如果用户已通过 StockSearchBar 选中了同一股票，数据已就绪，跳过重复请求
       const preloadedQuote = get().quote;
-      if (!preloadedQuote || preloadedQuote.code !== result.stockCode) {
-        get().getStockQuote(result.stockCode);
+      if (!preloadedQuote || preloadedQuote.code !== sc) {
+        get().getStockQuote(sc);
       }
       const preloadedKline = get().klineData;
       if (preloadedKline.length === 0) {
-        get().getStockKline(result.stockCode, "daily", 120);
+        get().getStockKline(sc, "daily", 120);
       }
     } catch (e) {
       console.error("[StockAnalysis] Failed to start workflow:", e);
@@ -689,7 +721,33 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         blackboardSnapshot: string | null;
       }
     >("get_stock_analysis", { analysisId });
-    set({ analysisId: record.id, stockCode: record.stockCode, stockName: record.stockName, status: "completed" });
+
+    // 历史数据兼容：旧版在 as-of 模式写入 stock_analyses 时,stock_name 取自
+    // quote.name,但 K线合成 quote 时 name 退化为 stock_code(见
+    // astock-data/src/lib.rs quote_from_klines),导致历史 stock_name = stock_code。
+    // 股票名称是静态的,这里用 search_stock 实时查一次 vendor 拿真实名称覆盖退化值。
+    let resolvedName = record.stockName;
+    if (!resolvedName || resolvedName === record.stockCode) {
+      try {
+        const hits = await invoke<Array<{ code: string; name: string; market: string }>>(
+          "search_stock",
+          { keyword: record.stockCode },
+        );
+        const exact = hits.find((h) => h.code === record.stockCode);
+        if (exact?.name) {
+          resolvedName = exact.name;
+          console.log("[loadAnalysis] 已用 search_stock 覆盖退化的 stock_name:", {
+            code: record.stockCode,
+            oldName: record.stockName,
+            newName: resolvedName,
+          });
+        }
+      } catch (e) {
+        console.warn("[loadAnalysis] search_stock 失败,保留原 stock_name:", e);
+      }
+    }
+
+    set({ analysisId: record.id, stockCode: record.stockCode, stockName: resolvedName, status: "completed" });
 
     // 如果是 replay 分析且有 asOfDate，同步设置全局时间锚点，
     // 确保后续 getStockQuote / getStockKline 拉取的是分析时刻的数据而非当前实时数据
@@ -738,13 +796,22 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           } else if (key.startsWith("debate.bull.round_")) {
             const round = parseInt(key.slice("debate.bull.round_".length));
             const bearKey = `debate.bear.round_${round}`;
-            debates.push({ round, bull: String(value), bear: String(snap[bearKey] ?? "") });
+            debates.push({
+              round,
+              bull: extractContent(value),
+              bear: extractContent(snap[bearKey]),
+            });
           } else if (key.startsWith("risk.")) {
-            risks[key.slice(5)] = String(value);
+            // 后端 blackboard.rs 对 risk-* / agg-risk / research-mgr 走 is_structured 分支,
+            // snapshot value 是 AgentResult 包装({content, model, role, node_id, params}),
+            // 真正的 LLM 输出在 content 字段里。extractContent 会优先取 content 字段并清理。
+            // 与 live 模式 routeNodeOutput / parseWorkflowResults 行为一致。
+            risks[key.slice(5)] = extractContent(value);
           } else if (key.startsWith("value.")) {
-            // value.assessment → values["value-investor"]（保留原始 nodeId）
+            // value.assessment 同理：AgentResult 包装,真正的价值评估 JSON 在 content 字段里。
+            // extractContent 取 content 后,ValueAssessmentPanel.tryParseValueReport 才能正确解析。
             const vk = key.slice(6);
-            values[vk === "assessment" ? "value-investor" : vk] = String(value);
+            values[vk === "assessment" ? "value-investor" : vk] = extractContent(value);
           } else if (key.startsWith("rule_check.")) {
             ruleChecks[key.slice("rule_check.".length)] = String(value);
           } else if (key === "data_quality_summary") {
@@ -757,26 +824,54 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             const round = parseInt(key.slice("bull-r".length));
             const bearKey = `bear-r${round}`;
             if (!debates.find((d) => d.round === round)) {
+              // 后端 blackboard.rs 对 bull-r* 走 is_structured 分支,
+              // value 是 AgentResult 包装,extractContent 取 content 字段。
               debates.push({
                 round,
-                bull: String(value),
-                bear: String(snap[bearKey] ?? ""),
+                bull: extractContent(value),
+                bear: extractContent(snap[bearKey]),
               });
             }
           }
-          // ── 风险子节点：risk-agg / risk-con / risk-neu / agg-risk ──
-          if (/^risk-(agg|con|neu)$/.test(key) || key === "agg-risk") {
-            risks[key] = String(value);
+          // ── 汇总节点 agg-risk：result 是数组,每个子元素是独立 AgentResult 包装
+          //   ({content, model, role, node_id, ...}),对应 risk-agg / risk-con / risk-neu。
+          //   这里把它们展开成 3 个独立 entry,与 live 模式 parseWorkflowResults 行为一致
+          //   (live 模式只存 4 个子节点 risk-agg/risk-con/risk-neu/research-mgr,不存 agg-risk)。
+          //   子节点的 content 可能是 "json\n{...}" 格式,extractContent + tryBeautifyJson 会处理。
+          if (key === "agg-risk") {
+            const result = value && typeof value === "object"
+              ? (value as Record<string, unknown>).result
+              : null;
+            if (Array.isArray(result)) {
+              for (const sub of result) {
+                if (sub && typeof sub === "object") {
+                  const subNodeId = (sub as Record<string, unknown>).node_id;
+                  if (typeof subNodeId === "string" && subNodeId.startsWith("risk-")) {
+                    risks[subNodeId] = extractContent(sub);
+                  }
+                }
+              }
+            }
+            // 不再保留 agg-risk 本身,避免重复渲染
+            continue;
+          }
+          // ── 风险子节点：risk-agg / risk-con / risk-neu ──
+          if (/^risk-(agg|con|neu)$/.test(key)) {
+            risks[key] = extractContent(value);
           }
           // ── 投资组合经理输出 ──
           if (key === "research-mgr" && !risks["research-mgr"]) {
-            risks["research-mgr"] = String(value);
+            risks["research-mgr"] = extractContent(value);
           }
           // ── 原始数据聚合（兼容旧版 raw-data 未映射到 raw. 的情况）──
           if (key === "raw-data" && !raws["combined"]) {
             raws["combined"] = String(value);
           }
         }
+        // 后端 snapshot 由 HashMap 序列化,键的迭代顺序是 hash 顺序而非插入顺序,
+        // bull-r1/bull-r2/bull-r3 三个键在 JSON 字符串里可能是 3/1/2 这种乱序。
+        // 这里强制按 round 数字升序排序,保证前端 DebatePanel 按 1→2→3 顺序渲染。
+        debates.sort((a, b) => a.round - b.round);
         set({
           analystReports: reports,
           debateRounds: debates,

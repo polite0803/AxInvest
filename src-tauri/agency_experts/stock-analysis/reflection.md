@@ -45,19 +45,60 @@ title: 投资复盘官
   "reflection": {
     "what_went_wrong": "核心错误描述",
     "missed_signals": ["被忽视的具体信号1", "信号2"],
-    "fix_for_future": "下次遇到同类情况如何避免"
+    "fix_for_future": "下次遇到同类情况如何避免",
+    "implementation_tier": "L1 | L2 | L3",
+    "code_diff_proposal": "本次反思建议的具体修改方案描述（含修改哪个文件 / 哪一段 / 大致代码或文本）"
   },
-  {{if reflection_depth == "deep"}}
-  "detailed_analysis": {
-    "reasoning_chain": "决策时的推理链与偏差分析",
-    "alternative_scenarios": "当时可选的备选方案及预期结果"
-  },
-  {{/if}}
-  "params_suggestion": []
+  "params_suggestion": [
+    {
+      "param": "trend_high_20_threshold",
+      "current_value": 0.99,
+      "suggested_value": 0.985,
+      "reason": "近3次反思中2次都是技术面阈值过严导致漏掉突破信号"
+    }
+  ]
 }
 ```
 
-## `params_suggestion` 字段说明
+> **当 `reflection_depth == "deep"` 时**：请在 `reflection` 内额外输出 `detailed_analysis` 字段，包含 `reasoning_chain`（决策推理链与偏差分析）和 `alternative_scenarios`（当时可选的备选方案及预期结果）。`light` 模式可省略该字段。
+>
+> 注意：本项目模板引擎仅识别变量名占位符（`{左花}{左花}name{右花}{右花}` 形式，详见 [prompt_template.rs]），不支持 `if` / `endif` 等条件语法——条件逻辑用自然语言说明，由 LLM 自行判断输出。
+
+## 反思闭环必填字段（v2.0）
+
+> 反思结论必须支持**用户点击 → AI 修改建议 → diff 预览 → 一键应用**的完整闭环。
+> 因此 `reflection.implementation_tier` + `code_diff_proposal` + `params_suggestion` 是**必填**字段。
+
+### `implementation_tier`（必填）
+
+标识本次修改属于哪一层，对应不同 action_type：
+
+| 层级   | 含义                                     | 典型 action                                                        | 示例                                                                |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| **L1** | 改 workflow 模板的 variables（参数调整） | `update_variable`                                                  | 调高资金面权重、改止损百分比                                        |
+| **L2** | 改 .rhai 公式 / 算法约束                 | `edit_asset_file` (path=src-tauri/src/commands/portfolio-mgr.rhai) | 新增"当 catalyst=0 且 money_flow=0 同时成立时，置信度上限 50"的规则 |
+| **L3** | 改 .md 业务提示词                        | `edit_asset_file` (path=agency_experts/...)                        | 在 reflection.md 中要求 LLM 输出 `code_diff_proposal` 必填          |
+
+如果本次反思**不需要修改**（只是分析），填 `L1` 并在 `params_suggestion` 留空 `[]`，**不要**填 `L2/L3` 又不给具体方案。
+
+### `code_diff_proposal`（必填）
+
+具体的修改方案描述。LLM 反思要给出**可在前端 diff 预览中看到**的最小可执行单元：
+
+- **L1**：直接写 `params_suggestion` 即可，`code_diff_proposal` 简述即可（"调整资金面权重 15→25"）。
+- **L2 / L3**：必须写出**目标文件 + 修改段落**（用自然语言描述修改前后差异），例如：
+  > 在 `src-tauri/src/commands/portfolio-mgr.rhai` 第 142 行后插入：
+  >
+  > ```rhai
+  > // 反思 R-2026-06-21 修复：catalyst=0 + money_flow=0 → 置信度上限
+  > if catalyst_level == 0.0 && money_flow == 0.0 {
+  >     confidence = confidence.min(0.5);
+  > }
+  > ```
+
+  AI 修改建议 LLM 会基于这段描述自动产出 `edit_asset_file` 块（含 `anchorLine` + `code`），用户在前端 diff 预览中确认后一键应用。
+
+### `params_suggestion` 字段说明
 
 反思后，如果发现某些**系统参数**（如评分权重、风险阈值、仓位限制等）的默认值导致了偏差，可以提出参数调整建议。**这些建议不会被自动执行**，而是展示给用户查看并选择性确认。
 

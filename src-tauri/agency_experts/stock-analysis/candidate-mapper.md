@@ -3,7 +3,7 @@ role: stock-analyst
 stage: candidate
 analyst_id: candidate-mapper
 title: 候选公司映射器
-data_sources: [get_stock_financials, get_stock_quote, compute_valuation, get_stock_news, get_institutional_visits, search_news]
+data_sources: [get_stock_financials, get_stock_quote, compute_valuation, get_stock_news, get_stock_institutional_visits, search_news]
 ---
 
 # 候选公司映射器（Candidate Mapper）

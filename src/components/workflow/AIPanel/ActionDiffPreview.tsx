@@ -406,6 +406,89 @@ function useActionVisual(
         afterRender: <Text style={{ fontSize: 11 }}>{action.data.optimized_prompt}</Text>,
       };
     }
+    // === v2.0：反思闭环基础设施（上游 LLM system_prompt 提示词定义）===
+    case "update_variable": {
+      return {
+        label,
+        color: "#722ed1", // 紫色：参数调整
+        beforeRender: (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {action.data.name} = ?
+          </Text>
+        ),
+        afterRender: (
+          <Text code style={{ fontSize: 11 }}>
+            {action.data.name} = {JSON.stringify(action.data.value)}
+            {action.data.reason ? ` (${action.data.reason})` : ""}
+          </Text>
+        ),
+      };
+    }
+    case "rollback_to_version": {
+      return {
+        label,
+        color: "#fa8c16", // 橙色：回滚
+        beforeRender: (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {t("workflow.aiPanel.diffPreview.currentVersion", {
+              templateId: action.data.templateId,
+            })}
+          </Text>
+        ),
+        afterRender: (
+          <Text style={{ fontSize: 11, color: "#fa8c16", fontWeight: 600 }}>
+            {t("workflow.aiPanel.diffPreview.rollbackTo", { version: action.data.targetVersion })}
+          </Text>
+        ),
+      };
+    }
+    case "update_input_mapping": {
+      const mappings = action.data.mappings;
+      return {
+        label,
+        color: "#13c2c2", // 青色：连线调整
+        beforeRender: <Text type="secondary" style={{ fontSize: 11 }}>{action.data.nodeId}</Text>,
+        afterRender: (
+          <Text code style={{ fontSize: 11 }}>
+            {mappings.map(m => `${m.target} ← ${m.source}`).join(", ")}
+          </Text>
+        ),
+      };
+    }
+    case "edit_asset_file": {
+      return {
+        label,
+        color: "#eb2f96", // 粉色：硬编码资产调整
+        beforeRender: <Text type="secondary" style={{ fontSize: 11 }}>{action.data.path}</Text>,
+        afterRender: (
+          <Text style={{ fontSize: 11 }}>
+            [{action.data.operation}] 第 {action.data.anchorLine} 行
+            {action.data.description ? ` — ${action.data.description}` : ""}
+          </Text>
+        ),
+      };
+    }
+    case "apply_diff_with_validation": {
+      const innerActions = action.data.actions;
+      return {
+        label,
+        color: "#52c41a", // 绿色：聚合 + 验证
+        beforeRender: (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {t("workflow.aiPanel.diffPreview.applyDiffBefore", { count: innerActions.length })}
+          </Text>
+        ),
+        afterRender: (
+          <Text style={{ fontSize: 11 }}>
+            {t("workflow.aiPanel.diffPreview.applyDiffAfter", {
+              count: innerActions.length,
+              validationType: action.data.validation?.type ?? "none",
+              rollback: action.data.rollbackOnFailure !== false ? t("common.yes") : t("common.no"),
+            })}
+          </Text>
+        ),
+      };
+    }
   }
 }
 

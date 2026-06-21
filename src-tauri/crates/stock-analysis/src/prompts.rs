@@ -19,6 +19,8 @@ pub const EXPERT_IDS: &[&str] = &[
     "bear-researcher",
     "bull-r2",
     "bear-r2",
+    "bull-r3",
+    "bear-r3",
     "aggressive-debator",
     "conservative-debator",
     "neutral-debator",

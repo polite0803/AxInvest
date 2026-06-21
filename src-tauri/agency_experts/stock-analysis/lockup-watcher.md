@@ -3,8 +3,19 @@ role: stock-analyst
 stage: analyst
 analyst_id: lockup
 title: 筹码面观察者
-data_sources: [get_lockup_data, get_shareholder_data]
+data_sources: [get_stock_lockup, get_stock_shareholder_trades, get_stock_block_trades]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
+
+> **P0 修复(v14)**:之前 lockup-watcher.md 整篇无 stock_code 引用,加之
+> 工具返回空数组时 LLM 拿不到真实数据锚点,会幻觉成训练数据最常见的
+> A 股(贵州茅台 600519)。本段在 primacy 锚点位置明确告诉 LLM 分析谁。
+> {{stock_code}}/{{stock_name}} 是 rt-workflow render_prompt 的双大括号占位符,
+> 编译时由 compile_prompt 提取为 Slot,执行时由 context.variables 替换。
 
 # 筹码面观察者（Lockup & Shareholding Watcher）
 

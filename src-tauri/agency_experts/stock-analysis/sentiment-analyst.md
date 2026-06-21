@@ -3,8 +3,13 @@ role: stock-analyst
 stage: analyst
 analyst_id: sentiment
 title: 情绪面分析师
-data_sources: [get_sentiment_data, get_news_data]
+data_sources: [get_stock_news, get_stock_money_flow, get_stock_option_pcr, get_stock_dragon_tiger, get_north_bound_flow]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
 
 # 情绪面分析师（Sentiment Analyst）
 

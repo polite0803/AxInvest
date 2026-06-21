@@ -3398,7 +3398,7 @@
     "search": "Поиск"
   },
   "workflow": {
-    "loopBackCycleDetected": "Обратная петля сформирует цикл, пожалуйста, скорректируйте целевой узел",
+    "loopBackCycleDetected": "Loop-back edge would form a cycle, please adjust the target node",
     "cycleDetectedOnConnect": "Это ребро создаёт цикл без маркера loopBack — движок рабочего процесса может отклонить его.",
     "decorativeContainerNoEdges": "Декоративные контейнеры не могут иметь входящие или исходящие рёбра",
     "unsavedTitle": "Несохранённые изменения",
@@ -4667,7 +4667,6 @@
     },
     "searchNodes": "Поиск узлов",
     "validationWarnings": "Workflow has {{count}} warning(s):\n{{details}}",
-    "loopBackCycleDetected": "Loop-back edge would form a cycle, please adjust the target node",
     "nodeKind": {
       "input": "Input",
       "output": "Output",
@@ -8338,7 +8337,7 @@
       "depthLight": "Light",
       "depthDeep": "Deep",
       "confidence": "Min Confidence",
-      "deleteBtn": "Delete Task",
+      "deleteBtn": "Удалить",
       "historyTitle": "Reflection History",
       "refreshBtn": "Refresh",
       "empty": "No reflection records",
@@ -8351,16 +8350,22 @@
       "colName": "Name",
       "colAsOf": "Date",
       "colResult": "Outcome",
+      "colStatus": "Статус рефлексии",
       "colCause": "Cause",
       "colTime": "Time",
-      "scheduleDescFull": "Schedule: {schedule} | Status: {status}",
+      "scheduleDescFull": "Schedule: {{schedule}} | Status: {{status}}",
       "running": "Running",
       "paused": "Paused",
       "daily0600": "Daily 6:00",
       "daily1200": "Daily 12:00",
       "daily1800": "Daily 18:00",
       "weekday0600": "Weekdays 6:00",
-      "asOfLabel": "as-of: {asOf} → hindsight: {hindsight}"
+      "asOfLabel": "as-of: {{asOf}} → hindsight: {{hindsight}}",
+      "colAction": "Действие",
+      "deleteConfirm": "Удалить эту запись рефлексии?",
+      "deleteSuccess": "Запись рефлексии удалена",
+      "deleteFailed": "Ошибка удаления: {{error}}",
+      "rawOutputTitle": "Посмотреть необработанный вывод LLM"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

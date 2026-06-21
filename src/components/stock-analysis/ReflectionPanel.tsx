@@ -1,6 +1,25 @@
-import { invoke } from "@/lib/invoke";
+import type { AiChatAction } from "@/components/workflow/types/workflow.types";
+import { invoke, listen } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Card, Checkbox, Empty, Input, message, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import {
+  Button,
+  Card,
+  Checkbox,
+  DatePicker,
+  Empty,
+  Input,
+  message,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
+import type { Dayjs } from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -21,6 +40,7 @@ interface ReflectionRow {
   status: string;
   createdAt: number;
   decisionJson?: string;
+  blackboardSnapshot?: string;
 }
 
 interface CronJobResponse {
@@ -47,7 +67,7 @@ export function ReflectionPanel() {
   const [depth, setDepth] = useState("light");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const [manualAsOf, setManualAsOf] = useState("");
+  const [manualAsOf, setManualAsOf] = useState<Dayjs | null>(null);
   const [manualOutcome, setManualOutcome] = useState("");
   const [manualDepth, setManualDepth] = useState("light");
   const [running, setRunning] = useState(false);
@@ -115,8 +135,18 @@ export function ReflectionPanel() {
     } catch { /* ignore */ }
   };
 
+  const deleteReflection = async (id: string) => {
+    try {
+      await invoke("delete_reflection", { reflectionId: id });
+      message.success(t("stockAnalysis.reflection.deleteSuccess"));
+      await load();
+    } catch (e) {
+      message.error(t("stockAnalysis.reflection.deleteFailed", { error: String(e) }));
+    }
+  };
+
   const handleManualReflection = async () => {
-    if (!manualCode.trim() || !manualAsOf.trim() || !manualOutcome.trim()) {
+    if (!manualCode.trim() || !manualAsOf || !manualAsOf.isValid() || !manualOutcome.trim()) {
       message.warning(t("stockAnalysis.reflection.fillRequired"));
       return;
     }
@@ -125,7 +155,7 @@ export function ReflectionPanel() {
       await invoke("run_reflection_now", {
         stockCode: manualCode.trim(),
         stockName: "",
-        asOfDate: manualAsOf.trim(),
+        asOfDate: manualAsOf.format("YYYY-MM-DD"),
         actualOutcome: manualOutcome.trim(),
         reflectionDepth: manualDepth,
       });
@@ -154,11 +184,13 @@ export function ReflectionPanel() {
               onChange={(e) => setManualCode(e.target.value)}
               style={{ width: 120 }}
             />
-            <Input
+            <DatePicker
               placeholder={t("stockAnalysis.reflection.placeholderDate")}
               value={manualAsOf}
-              onChange={(e) => setManualAsOf(e.target.value)}
-              style={{ width: 140 }}
+              onChange={(d) => setManualAsOf(d)}
+              format="YYYY-MM-DD"
+              allowClear
+              style={{ width: 160 }}
             />
             <Input
               placeholder={t("stockAnalysis.reflection.placeholderOutcome")}
@@ -277,6 +309,15 @@ export function ReflectionPanel() {
                 render={(v: string) => <Text type="danger">{v}</Text>}
               />
               <Table.Column
+                title={t("stockAnalysis.reflection.colStatus")}
+                dataIndex="status"
+                width={140}
+                render={(v: string) => {
+                  const color = v === "completed" ? "green" : v.startsWith("failed:") ? "red" : "orange";
+                  return <Tag color={color}>{v || "running"}</Tag>;
+                }}
+              />
+              <Table.Column
                 title={t("stockAnalysis.reflection.colCause")}
                 dataIndex="whatWentWrong"
                 ellipsis
@@ -287,6 +328,23 @@ export function ReflectionPanel() {
                 dataIndex="createdAt"
                 width={150}
                 render={(v: number) => new Date(v).toLocaleDateString("zh-CN")}
+              />
+              <Table.Column
+                title={t("stockAnalysis.reflection.colAction")}
+                width={90}
+                fixed="right"
+                render={(_: unknown, r: ReflectionRow) => (
+                  <Popconfirm
+                    title={t("stockAnalysis.reflection.deleteConfirm")}
+                    okText={t("common.confirm")}
+                    cancelText={t("common.cancel")}
+                    onConfirm={() => deleteReflection(r.id)}
+                  >
+                    <Button danger size="small">
+                      {t("stockAnalysis.reflection.deleteBtn")}
+                    </Button>
+                  </Popconfirm>
+                )}
               />
             </Table>
           )}
@@ -331,10 +389,77 @@ function parseParamsSuggestion(row: ReflectionRow): ParamSuggestion[] {
   }
 }
 
+function renderPrettyJson(label: string, raw: string, maxHeight: number) {
+  let body = raw;
+  try {
+    body = JSON.stringify(JSON.parse(raw), null, 2);
+  } catch { /* keep raw */ }
+  return (
+    <>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>{label}</div>
+      <pre
+        style={{
+          fontSize: 11,
+          background: "var(--bg-elevated)",
+          padding: 8,
+          borderRadius: 4,
+          maxHeight,
+          overflow: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+        }}
+      >
+        {body}
+      </pre>
+    </>
+  );
+}
+
+function renderBlackboardSnapshot(raw: string) {
+  let body = raw;
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object" && obj.reflection !== undefined) {
+      body = JSON.stringify({ reflection: obj.reflection }, null, 2);
+    } else {
+      body = JSON.stringify(obj, null, 2);
+    }
+  } catch { /* keep raw */ }
+  return (
+    <>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
+        blackboardSnapshot (工作流原始结果):
+      </div>
+      <pre
+        style={{
+          fontSize: 11,
+          background: "var(--bg-elevated)",
+          padding: 8,
+          borderRadius: 4,
+          maxHeight: 400,
+          overflow: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+        }}
+      >
+        {body}
+      </pre>
+    </>
+  );
+}
+
 function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string, opts?: object) => string }) {
   const suggestions = parseParamsSuggestion(row);
   const [checkedParams, setCheckedParams] = useState<string[]>([]);
   const [applying, setApplying] = useState(false);
+
+  // AI 修改建议状态
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiContent, setAiContent] = useState("");
+  const [aiActions, setAiActions] = useState<AiChatAction[]>([]);
+  const [aiApplying, setAiApplying] = useState(false);
+  const aiUnlistensRef = useRef<Array<() => void>>([]);
 
   const handleApply = async () => {
     const selected = suggestions.filter((s) => checkedParams.includes(s.param));
@@ -351,6 +476,122 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
     } finally {
       setApplying(false);
     }
+  };
+
+  /**
+   * 调 workflow_ai_chat_stream（直接走后端命令，不依赖 workflowEditorStore），
+   * 把反思内容作为 user message 注入，让 AI LLM 基于上游纯净 system_prompt
+   * 输出 5 种 v2.0 :::action 块，由前端解析后在弹窗内展示 diff preview。
+   * 这条路径让 ReflectionPanel 单独完成"反思 → 修改闭环"，不依赖 workflow 页面。
+   */
+  const handleAiAssist = async () => {
+    setAiModalOpen(true);
+    setAiStreaming(true);
+    setAiContent("");
+    setAiActions([]);
+    // 清理旧的 listener
+    aiUnlistensRef.current.forEach((fn) => fn());
+    aiUnlistensRef.current = [];
+
+    const sessionId = `reflection-${row.id}-${Date.now()}`;
+    const userMessage = buildAiAssistPrompt(row);
+
+    let accumulated = "";
+    try {
+      const chunkUnlisten = await listen<{
+        conversation_id: string;
+        message_id: string;
+        chunk: { content: string | null; done: boolean };
+      }>("workflow-ai-chat-chunk", (event) => {
+        if (event.payload.conversation_id !== sessionId) { return; }
+        const c = event.payload.chunk;
+        if (c.content) { accumulated += c.content; }
+        if (c.done) {
+          setAiContent(accumulated);
+          setAiActions(parseActionsFromAccumulated(accumulated));
+          setAiStreaming(false);
+        } else {
+          setAiContent(accumulated + "▍");
+        }
+      });
+      const errorUnlisten = await listen<{ conversation_id: string; error: string }>(
+        "workflow-ai-chat-error",
+        (event) => {
+          if (event.payload.conversation_id !== sessionId) { return; }
+          setAiContent((prev) => prev + `\n\n❌ ${event.payload.error}`);
+          setAiStreaming(false);
+        },
+      );
+      aiUnlistensRef.current = [chunkUnlisten, errorUnlisten];
+
+      await invoke("workflow_ai_chat_stream", {
+        message: userMessage,
+        history: [],
+        currentNodes: undefined,
+        currentEdges: undefined,
+        sessionId,
+      });
+    } catch (e) {
+      setAiContent((prev) => prev + `\n\n❌ ${String(e)}`);
+      setAiStreaming(false);
+    }
+  };
+
+  /**
+   * 用户确认后调 apply_workflow_diff_with_validation 聚合器：
+   * - 多个 action 自动打包
+   * - 后端按顺序 apply + 跑 backtest（可选）+ 失败回滚
+   * - 一次命令完成整个闭环
+   */
+  const handleApplyAiActions = async () => {
+    if (aiActions.length === 0) { return; }
+    setAiApplying(true);
+    try {
+      // 把 AiChatAction 转成聚合器期望的格式
+      const wrapped = aiActions.length === 1
+        ? { actionType: aiActions[0].action_type, data: aiActions[0].data as Record<string, unknown> }
+        : null;
+      const input = wrapped
+        ? {
+          actions: [wrapped],
+          validation: { type: "noop", params: {} },
+          rollbackOnFailure: true,
+          note: `反思 ${row.id} 触发`,
+        }
+        : {
+          actions: aiActions.map((a) => ({ actionType: a.action_type, data: a.data as Record<string, unknown> })),
+          validation: { type: "noop", params: {} },
+          rollbackOnFailure: true,
+          note: `反思 ${row.id} 触发（${aiActions.length} 个 action）`,
+        };
+      const result = await invoke<{
+        success: boolean;
+        appliedCount: number;
+        error: string | null;
+        rolledBackToVersion: number | null;
+      }>("apply_workflow_diff_with_validation", { input });
+      if (result.success) {
+        message.success(t("stockAnalysis.reflection.aiApplySuccess", { count: result.appliedCount }));
+        setAiModalOpen(false);
+      } else {
+        message.error(
+          t("stockAnalysis.reflection.aiApplyFailed", {
+            error: result.error ?? "未知",
+            rollback: result.rolledBackToVersion !== null ? `（已回滚到 v${result.rolledBackToVersion}）` : "",
+          }),
+        );
+      }
+    } catch (e) {
+      message.error(t("stockAnalysis.reflection.aiApplyFailed", { error: String(e), rollback: "" }));
+    } finally {
+      setAiApplying(false);
+    }
+  };
+
+  const handleAiModalClose = () => {
+    setAiModalOpen(false);
+    aiUnlistensRef.current.forEach((fn) => fn());
+    aiUnlistensRef.current = [];
   };
 
   return (
@@ -382,6 +623,15 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
           <Text strong>{t("stockAnalysis.reflection.improveLabel")}</Text>
           <Text>{row.fixForFuture || "-"}</Text>
         </div>
+        {(row.decisionJson || row.blackboardSnapshot) && (
+          <details style={{ marginTop: 4 }} open={!row.whatWentWrong && !row.fixForFuture}>
+            <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: 12 }}>
+              {t("stockAnalysis.reflection.rawOutputTitle")}
+            </summary>
+            {row.decisionJson && renderPrettyJson("decisionJson (LLM 提取后):", row.decisionJson, 200)}
+            {row.blackboardSnapshot && renderBlackboardSnapshot(row.blackboardSnapshot)}
+          </details>
+        )}
         {suggestions.length > 0 && (
           <div>
             <Text strong style={{ fontSize: 13 }}>
@@ -437,20 +687,262 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
                   ))}
                 </tbody>
               </table>
-              <Button
-                type="primary"
-                size="small"
-                style={{ marginTop: 8 }}
-                loading={applying}
-                disabled={checkedParams.length === 0}
-                onClick={handleApply}
-              >
-                {t("stockAnalysis.reflection.applyParamsBtn", { count: checkedParams.length })}
-              </Button>
+              <Space style={{ marginTop: 8 }}>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={applying}
+                  disabled={checkedParams.length === 0}
+                  onClick={handleApply}
+                >
+                  {t("stockAnalysis.reflection.applyParamsBtn", { count: checkedParams.length })}
+                </Button>
+                <Button
+                  size="small"
+                  onClick={handleAiAssist}
+                  disabled={aiStreaming}
+                >
+                  {aiStreaming
+                    ? (
+                      <>
+                        <Spin size="small" /> {t("stockAnalysis.reflection.aiAssistLoading")}
+                      </>
+                    )
+                    : t("stockAnalysis.reflection.aiAssistBtn")}
+                </Button>
+              </Space>
             </div>
           </div>
         )}
+        {suggestions.length === 0 && (
+          <div style={{ marginTop: 4 }}>
+            <Button
+              size="small"
+              onClick={handleAiAssist}
+              disabled={aiStreaming}
+            >
+              {aiStreaming
+                ? (
+                  <>
+                    <Spin size="small" /> {t("stockAnalysis.reflection.aiAssistLoading")}
+                  </>
+                )
+                : t("stockAnalysis.reflection.aiAssistBtn")}
+            </Button>
+          </div>
+        )}
       </Space>
+
+      {/* AI 修改建议弹窗：流式响应 + diff preview + 一键应用 */}
+      <Modal
+        title={t("stockAnalysis.reflection.aiAssistModalTitle")}
+        open={aiModalOpen}
+        onCancel={handleAiModalClose}
+        width={760}
+        footer={[
+          <Button key="cancel" onClick={handleAiModalClose}>
+            {t("common.cancel")}
+          </Button>,
+          <Button
+            key="apply"
+            type="primary"
+            loading={aiApplying}
+            disabled={aiActions.length === 0 || aiStreaming}
+            onClick={handleApplyAiActions}
+          >
+            {t("stockAnalysis.reflection.aiApplyBtn", { count: aiActions.length })}
+          </Button>,
+        ]}
+      >
+        {aiStreaming && aiActions.length === 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <Spin /> <Text type="secondary">{t("stockAnalysis.reflection.aiAssistThinking")}</Text>
+          </div>
+        )}
+        {aiActions.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 13 }}>
+              {t("stockAnalysis.reflection.aiDiffPreviewTitle", { count: aiActions.length })}
+            </Text>
+            <div style={{ marginTop: 8 }}>
+              {aiActions.map((a, i) => (
+                <div
+                  key={i}
+                  style={{
+                    border: "1px solid var(--border-color, #d9d9d9)",
+                    borderRadius: 4,
+                    padding: 8,
+                    marginBottom: 6,
+                    fontSize: 12,
+                  }}
+                >
+                  <div style={{ marginBottom: 4 }}>
+                    <Tag color={ACTION_COLOR[a.action_type] ?? "default"}>
+                      {a.action_type}
+                    </Tag>
+                  </div>
+                  <pre
+                    style={{
+                      fontSize: 11,
+                      background: "var(--bg-elevated, #fafafa)",
+                      padding: 6,
+                      borderRadius: 3,
+                      margin: 0,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                      maxHeight: 180,
+                      overflow: "auto",
+                    }}
+                  >
+                    {JSON.stringify(a.data, null, 2)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {aiContent && (
+          <details>
+            <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: 12 }}>
+              {t("stockAnalysis.reflection.aiRawOutputTitle")}
+            </summary>
+            <pre
+              style={{
+                fontSize: 11,
+                background: "var(--bg-elevated, #fafafa)",
+                padding: 8,
+                borderRadius: 4,
+                marginTop: 4,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+                maxHeight: 200,
+                overflow: "auto",
+              }}
+            >
+              {aiContent}
+            </pre>
+          </details>
+        )}
+      </Modal>
     </div>
   );
+}
+
+// =========================================================================
+// AI 修改建议辅助函数
+// 把反思上下文打包成 user message，调后端 workflow_ai_chat_stream。
+// 让上游 LLM（基于纯净 system_prompt）输出 5 种 v2.0 :::action 块。
+// =========================================================================
+
+const REFLECTION_TEMPLATE_ID = "stock-analysis";
+
+const ACTION_COLOR: Record<string, string> = {
+  update_variable: "purple",
+  rollback_to_version: "orange",
+  update_input_mapping: "cyan",
+  edit_asset_file: "magenta",
+  apply_diff_with_validation: "green",
+};
+
+function buildAiAssistPrompt(row: ReflectionRow): string {
+  // 解析 decisionJson 里的 params_suggestion / implementation_tier / code_diff_proposal
+  let paramsText = "(无)";
+  let tierText = "L1";
+  let diffText = "(无)";
+  try {
+    const parsed = row.decisionJson ? JSON.parse(row.decisionJson) : null;
+    const ref = parsed?.reflection ?? parsed;
+    if (Array.isArray(ref?.params_suggestion) && ref.params_suggestion.length > 0) {
+      paramsText = ref.params_suggestion
+        .map((p: { param: string; suggested_value: unknown; reason: string }) =>
+          `  - ${p.param} = ${JSON.stringify(p.suggested_value)}（${p.reason ?? ""}）`
+        )
+        .join("\n");
+    }
+    if (ref?.implementation_tier) {
+      tierText = String(ref.implementation_tier);
+    }
+    if (ref?.code_diff_proposal) {
+      diffText = String(ref.code_diff_proposal);
+    }
+  } catch {
+    // 忽略解析错误，使用默认占位
+  }
+
+  return `你是工作流修改助手。请基于以下反思结论，输出 1-3 个 :::action 块，
+让前端用户可以预览 + 一键应用。
+
+**重要：templateId 固定为 "${REFLECTION_TEMPLATE_ID}"，所有 update_variable / rollback_to_version 都必须使用这个 templateId。**
+
+【反思上下文】
+- 股票：${row.stockCode} ${row.stockName}
+- as-of: ${row.asOfDate} → hindsight: ${row.hindsightDate}
+- 实际结果：${row.actualOutcome}
+- 反思深度：${row.reflectionDepth}
+
+【根因】${row.whatWentWrong || "(空)"}
+
+【遗漏信号】${row.missedSignals || "(空)"}
+
+【改进】${row.fixForFuture || "(空)"}
+
+【业务层参数建议（params_suggestion）】
+${paramsText}
+
+【实现层级（implementation_tier）】${tierText}
+（说明：L1 = 改 workflow_template.variables；L2 = 改 .rhai 公式 / 算法约束；L3 = 改 .md 提示词）
+
+【业务层代码 diff 提案（code_diff_proposal）】
+${diffText}
+
+【输出格式】
+按以下 schema 输出 1-3 个 :::action 块（用 \`\`\`json 包裹也接受）：
+
+1. 如果是 L1（参数调整）：
+   :::action
+   {"action_type":"update_variable","data":{"templateId":"${REFLECTION_TEMPLATE_ID}","name":"<变量名>","value":<new_value>,"reason":"<理由>"}}
+   :::
+
+2. 如果是 L2（改 .rhai 公式）：
+   :::action
+   {"action_type":"edit_asset_file","data":{"path":"src-tauri/src/commands/portfolio-mgr.rhai","operation":"insert_after|replace|delete","anchorLine":<int>,"code":"<新代码段>","description":"<理由>"}}
+   :::
+
+3. 如果是 L3（改 .md 提示词）：
+   :::action
+   {"action_type":"edit_asset_file","data":{"path":"<md path>","operation":"insert_after|replace|delete","anchorLine":<int>,"code":"<新提示词段>","description":"<理由>"}}
+   :::
+
+4. 如果有 ≥2 个动作（涉及同一模板），用聚合器：
+   :::action
+   {"action_type":"apply_diff_with_validation","data":{"actions":[{"actionType":"update_variable","data":{...}}],"validation":{"type":"noop","params":{}},"rollbackOnFailure":true,"note":"<理由>"}}
+   :::
+
+不要输出除 :::action 块以外的其他内容（除简短中文解释外）。`;
+}
+
+function parseActionsFromAccumulated(content: string): AiChatAction[] {
+  const regex = /:::action\s*\n([\s\S]*?)\n:::/g;
+  const out: AiChatAction[] = [];
+  let match;
+  const known = new Set<AiChatAction["action_type"]>([
+    "update_variable",
+    "rollback_to_version",
+    "update_input_mapping",
+    "edit_asset_file",
+    "apply_diff_with_validation",
+  ]);
+  while ((match = regex.exec(content)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      const actionType = parsed.action_type;
+      const data = parsed.data ?? {};
+      if (known.has(actionType as AiChatAction["action_type"])) {
+        out.push({ action_type: actionType, data } as AiChatAction);
+      }
+    } catch {
+      // skip invalid JSON
+    }
+  }
+  return out;
 }

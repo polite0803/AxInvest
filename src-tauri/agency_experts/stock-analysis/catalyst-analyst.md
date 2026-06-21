@@ -3,8 +3,13 @@ role: stock-analyst
 stage: analyst
 analyst_id: catalyst
 title: 催化剂与叙事分析师
-data_sources: [get_news_data, get_announcement_data, get_sector_data]
+data_sources: [get_stock_news, get_stock_announcements, get_stock_sector_info, get_stock_concept_blocks]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
 
 # 催化剂与叙事分析师（Catalyst & Narrative Analyst）
 

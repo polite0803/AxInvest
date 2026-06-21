@@ -51,6 +51,8 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     ),
     ("bull-r2", include_str!("../../agency_experts/stock-analysis/bull-r2.md")),
     ("bear-r2", include_str!("../../agency_experts/stock-analysis/bear-r2.md")),
+    ("bull-r3", include_str!("../../agency_experts/stock-analysis/bull-r3.md")),
+    ("bear-r3", include_str!("../../agency_experts/stock-analysis/bear-r3.md")),
     (
         "aggressive-debator",
         include_str!("../../agency_experts/stock-analysis/aggressive-debator.md"),
@@ -122,6 +124,8 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("bear-researcher", "debater"),
     ("bull-r2", "debater"),
     ("bear-r2", "debater"),
+    ("bull-r3", "debater"),
+    ("bear-r3", "debater"),
     ("aggressive-debator", "risk-evaluator"),
     ("conservative-debator", "risk-evaluator"),
     ("neutral-debator", "risk-evaluator"),
@@ -212,8 +216,9 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
         &[
             "get_stock_news",
             "get_stock_money_flow",
-            "get_hot_stocks",
             "get_stock_option_pcr",
+            "get_stock_dragon_tiger",
+            "get_north_bound_flow",
             "search_stock",
         ],
     ),
@@ -221,7 +226,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
         "news-analyst",
         &[
             "get_stock_news",
-            "get_announcements",
+            "get_stock_announcements",
             "get_cls_flash",
             "get_stock_option_pcr",
             "search_stock",
@@ -232,21 +237,28 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
         &[
             "get_stock_financials",
             "compute_valuation",
-            "get_consensus_eps",
-            "get_institutional_visits",
+            "get_stock_consensus_eps",
+            "get_stock_institutional_visits",
             "get_stock_peers",
             "search_stock",
         ],
     ),
-    ("policy-analyst", &["get_stock_news", "get_announcements", "search_stock"]),
+    (
+        "policy-analyst",
+        &[
+            "search_news",
+            "get_stock_news",
+            "get_cls_flash",
+            "search_stock",
+        ],
+    ),
     (
         "hot-money-tracker",
         &[
             "get_stock_money_flow",
-            "get_hot_stocks",
+            "get_stock_dragon_tiger",
             "get_north_bound_flow",
-            "get_market_dragon_tiger",
-            "get_block_trades",
+            "get_stock_institutional_visits",
             "search_stock",
         ],
     ),
@@ -256,19 +268,19 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_stock_lockup",
             "get_stock_shareholder_trades",
             "get_stock_margin_data",
-            "get_announcements",
-            "get_block_trades",
+            "get_stock_announcements",
+            "get_stock_block_trades",
             "search_stock",
         ],
     ),
     (
         "research-analyst",
         &[
-            "get_consensus_eps",
+            "get_stock_consensus_eps",
             "get_stock_financials",
             "get_stock_news",
-            "get_research_reports",
-            "get_institutional_visits",
+            "get_stock_research_reports",
+            "get_stock_institutional_visits",
             "search_stock",
         ],
     ),
@@ -278,7 +290,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_industry_ranking",
             "get_hot_stocks",
             "get_stock_quote",
-            "get_concept_blocks",
+            "get_stock_concept_blocks",
             "get_stock_peers",
             "search_stock",
         ],
@@ -289,6 +301,10 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     // 技术评分与估值结论，否则质询问题缺乏数据支撑，容易产出空泛内容。
     ("bull-r2", &["compute_scoring", "compute_valuation", "search_stock"]),
     ("bear-r2", &["compute_scoring", "compute_valuation", "search_stock"]),
+    // R3 最终反驳型辩手同样需要 compute_scoring / compute_valuation 来核实对方 R2 质询
+    // 背后的技术指标与估值假设，否则"逐条回应"会沦为文本辩论。
+    ("bull-r3", &["compute_scoring", "compute_valuation", "search_stock"]),
+    ("bear-r3", &["compute_scoring", "compute_valuation", "search_stock"]),
     ("aggressive-debator", &["compute_portfolio_risk", "search_stock"]),
     ("conservative-debator", &["compute_portfolio_risk", "search_stock"]),
     ("neutral-debator", &["compute_portfolio_risk", "search_stock"]),
@@ -307,8 +323,8 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
         &[
             "get_stock_financials",
             "compute_valuation",
-            "get_consensus_eps",
-            "get_institutional_visits",
+            "get_stock_consensus_eps",
+            "get_stock_institutional_visits",
             "get_stock_peers",
             "search_stock",
         ],
@@ -333,8 +349,8 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
         "catalyst-analyst",
         &[
             "get_stock_news",
-            "get_announcements",
-            "get_concept_blocks",
+            "get_stock_announcements",
+            "get_stock_concept_blocks",
             "get_stock_peers",
             "get_stock_kline",
             "get_stock_quote",
@@ -349,7 +365,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_hot_stocks",
             "get_industry_ranking",
             "get_cls_flash",
-            "get_concept_blocks",
+            "get_stock_concept_blocks",
             "get_north_bound_flow",
             "get_market_dragon_tiger",
             "search_stock",
@@ -359,7 +375,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     (
         "chain-decomposer",
         &[
-            "get_concept_blocks",
+            "get_stock_concept_blocks",
             "get_stock_peers",
             "get_stock_news",
             "get_industry_ranking",
@@ -371,8 +387,8 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
         "chokepoint-identifier",
         &[
             "get_stock_financials",
-            "get_research_reports",
-            "get_consensus_eps",
+            "get_stock_research_reports",
+            "get_stock_consensus_eps",
             "get_stock_peers",
             "get_stock_news",
             "search_stock",
@@ -385,8 +401,8 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_stock_financials",
             "get_stock_quote",
             "compute_valuation",
-            "get_institutional_visits",
-            "get_research_reports",
+            "get_stock_institutional_visits",
+            "get_stock_research_reports",
             "get_stock_news",
             "search_stock",
         ],
@@ -459,15 +475,36 @@ async fn seed_stock_analysis_workflow_template(
     //   LLM 看不到上游 9 个分析师报告和辩论结果，没有分析素材，
     //   因此不会主动调用工具，输出空泛结论。
     //   现在注入所有分析师报告、辩论结果、技术指标，让风险评估有依据。
-    // v14: 进一步加强 system_prompt：
-    //   - 明确告知 LLM 工具返回空数组/空对象是正常情况（数据源暂无记录）
-    //   - 严禁使用 '数据缺失'/'无法获取'/'does not exist'/'error' 等负面措辞
-    //   - 研报分析师即使没有机构覆盖数据，也要基于公开信息给出独立分析
+    // v16: 三处关键修复 —— 解决 v15 引入的 "a-* 节点全部 '暂无数据'" 灾难。
+    //   1) inline prefix 回退:line 1201 删掉 {{stock_code}}/{{stock_name}} Slot,
+    //      仅保留任务标题和 5 条重要原则。stock_code/stock_name 改由 expert .md
+    //      prompt 头部 {{stock_code}} / {{stock_name}} primacy 锚点注入。
+    //   2) R1/R2/R3 多空辩手统一用 bull_tools(基础数据工具集)—— 之前 R2/R3
+    //      走 PROFILE_TOOLS(compute_scoring/valuation 计算工具),没有上游数据
+    //      节点,LLM 工具调用返回空,导致 R2/R3 输出空。
+    //   3) seed UPSERT 已存在覆盖 DB agency_experts.system_prompt—— v16 重新
+    //      种子化会用 .md 新内容覆盖 v15 写的有问题 prompt。
+    // v15: 批量给所有 9 个 stock-analyst + 6 个 debater + 3 个 risk-debator +
+    //   1 个 convergence 头部补 {{stock_code}}/{{stock_name}} primacy 锚点
+    //   (前次 v14 只补 lockup-watcher.md,其他 18 个 prompt 仍有同根因风险:
+    //   LLM 在数据稀疏节点(工具返回空)幻觉/编造"信息缺失")。
+    //   用户已报 research-analyst 复现 lockup-watcher 茅台 bug,本次一次性修完。
+    //   注:v15 同时在 inline prefix 加了 {{stock_code}}/{{stock_name}} Slot,
+    //   但这条改动导致 a-* 节点 render_prompt 失败、所有 Agent 节点 "暂无数据",
+    //   v16 已回退 inline prefix 部分,只保留 .md 头部 stock_code 段。
+    // v14: 修复 Agent inline system_prompt 中 {{stock_code}}/{{stock_name}} 占位符
+    //   被 Rust format! 字符串字面量二次转义为单大括号 {stock_code} 的 bug——
+    //   compile_prompt 只识别 {{...}} 双大括号,单大括号被当静态文本。
+    //   LLM 在 lockup-watcher 等数据稀疏节点(工具返回空)因此会幻觉成训练数据
+    //   最常见的 A 股(贵州茅台 600519)。修复:把字符串字面量写成 {{{{...}}}}
+    //   (4 个大括号),format! 后实际产出 {{...}} 双大括号被 render_prompt 识别替换。
+    //   同时给 lockup-watcher.md 头部补 {{stock_code}}/{{stock_name}} primacy 锚点。
     // v13: 修复 tool_def_map 缺失 7 个筹码面/基本面工具定义
     //   （get_stock_lockup/get_stock_shareholder_trades/get_stock_margin_data 等），
     //   导致 LLM 看不到这些工具。同时更新 lockup-watcher 的 PROFILE_TOOLS
     //   和 t-lockup-data 前置工具，让筹码面分析师能获取真正的解禁/增减持数据。
     //   修改 system_prompt 禁止 LLM 使用"工具调用失败"等负面措辞。
+    //   注:此条注释是前人预留,实际 v13 并未 bump 生效,见 v14。
     // v12: 修改 Agent system_prompt 使用 {{stock_code}}/{{stock_name}} 模板语法，
     //   让 LLM 在 system_prompt 中直接看到目标股票代码，减少工具调用时遗漏参数。
     //   同时修复 tool_def_map 中缺失 get_stock_peers/get_research_reports 等
@@ -509,9 +546,42 @@ async fn seed_stock_analysis_workflow_template(
     //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
     //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
     //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
+    // v23: 修复 seed 系列"已存在则跳过"的静默跳过 bug。
+    //   原逻辑: 启动时如果 DB 里已有同名 record,所有 seed 函数直接 continue / return,
+    //   导致 .md 文件改动 / PROFILE_TOOLS 改动 / 新增 expert (bull-r3/bear-r3)
+    //   全部不写库,前端看到的还是上一次启动的旧内容。
+    //   现改为 UPSERT + 工作流模板 bump 版本号,确保每次启动同步代码 → DB。
     // stock-analysis 模板版本管理从 v1 开始。v8: 工作流结构重整，移除 code_node.type。
     // v9: max_concurrent=12→5, agent_timeout_secs=300→120, AgentExecutor 加 60s stream 超时
-    const TEMPLATE_VERSION: i32 = 9;
+    // v24: bump → v10。修改:
+    //   - 辩论循环 round_num==3 改用 bull-r3/bear-r3 专家 (专属最终反驳型 prompt)
+    //   - R1/R3 节点 output_mode: Text → Json (与 R2 对齐,前端能 parse)
+    //   - t-research-data 调 get_stock_research_reports, t-catalyst-data 调 get_stock_announcements
+    //     (修 MCP 工具名错配)
+    //   - PROFILE_TOOLS / tool_def_map 修 6 处工具名前缀 (add get_stock_ 前缀)
+    //   - a-sentiment / a-policy / a-hot-money / a-catalyst 工具补全覆盖 data_sources
+    //   - debate-convergence.md 区分 R1/R2/R3 轮次性质与读取优先级
+    // 历史版本演进:
+    //   v1-v9: 初始辩论/R1-R3 prompt 加载
+    //   v10:   R1/R3 节点 output_mode: Text → Json + t-research/t-catalyst MCP 工具名修复
+    //   v11:   尝试 bump,因前端 R3 字段未配 + String(plainObject) → "[object Object]" bug
+    //          仍未落地,实际未生效
+    //   v12:   P0 关键修复:
+    //          - R1/R2/R3 多方/空方统一走 PROFILE_TOOLS 路径(消除 R1 bear_tools
+    //            全是计算类工具需要上游数据的"工具集错配"陷阱)
+    //          - 之前 R1 bear-an 漏 OutputMode::Json(对称多方 R1)
+    //          - 前端 String(plainObject) → "[object Object]" → JSON.stringify 修复
+    //          - DebatePanel R3 字段 hasContent 判断 + R3View 组件
+    //          - lib.rs get_news code→name 翻译层(东方财富 keyword 期待中文名)
+    // v14 实际修复:
+    //   - Agent inline system_prompt 的 {{stock_code}}/{{stock_name}} 占位符
+    //     Rust format! 二次转义 bug 修复 (line 1180 改 {{{{stock_code}}}} 等)
+    //   - lockup-watcher.md 头部补 {{stock_code}}/{{stock_name}} primacy 锚点
+    //     (防止数据稀疏节点 LLM 幻觉成贵州茅台等训练数据常见 A 股)
+    // v15: 注释预留,实际从未 bump 生效,跳过避免版本号空转
+    // 之前所有节点配置改动后,DB 里 workflow_template 仍是旧版,新代码不生效,
+    // 必须 bump 版本号强制重新种子化。
+    const TEMPLATE_VERSION: i32 = 16;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -794,22 +864,22 @@ async fn seed_stock_analysis_workflow_template(
     };
     // ── 新增 9 个数据 API ToolDef ──
     let td_research = ToolDef {
-        name: "get_research_reports".into(),
+        name: "get_stock_research_reports".into(),
         description: Some("获取券商研报".into()),
         parameters: stock_code_params(),
     };
     let td_consensus = ToolDef {
-        name: "get_consensus_eps".into(),
+        name: "get_stock_consensus_eps".into(),
         description: Some("获取一致性预期EPS".into()),
         parameters: stock_code_params(),
     };
     let td_concepts = ToolDef {
-        name: "get_concept_blocks".into(),
+        name: "get_stock_concept_blocks".into(),
         description: Some("获取概念板块归属".into()),
         parameters: stock_code_params(),
     };
     let td_announce = ToolDef {
-        name: "get_announcements".into(),
+        name: "get_stock_announcements".into(),
         description: Some("获取公司公告".into()),
         parameters: stock_code_params(),
     };
@@ -990,12 +1060,12 @@ async fn seed_stock_analysis_workflow_template(
         }),
     };
     let td_block = ToolDef {
-        name: "get_block_trades".into(),
+        name: "get_stock_block_trades".into(),
         description: Some("获取大宗交易记录：成交价、成交量、买卖方营业部、折价率".into()),
         parameters: stock_code_params(),
     };
     let td_visit = ToolDef {
-        name: "get_institutional_visits".into(),
+        name: "get_stock_institutional_visits".into(),
         description: Some("获取机构调研记录：调研日期、机构数量、调研内容".into()),
         parameters: stock_code_params(),
     };
@@ -1070,17 +1140,17 @@ async fn seed_stock_analysis_workflow_template(
         ),
         ("get_hot_stocks", td_hot.clone()),
         ("get_industry_ranking", td_industry.clone()),
-        ("get_announcements", td_announce.clone()),
-        ("get_consensus_eps", td_consensus.clone()),
+        ("get_stock_announcements", td_announce.clone()),
+        ("get_stock_consensus_eps", td_consensus.clone()),
         ("compute_kdj", td_kdj.clone()),
         ("compute_obv", td_obv.clone()),
         ("get_cls_flash", td_cls.clone()),
         ("get_north_bound_flow", td_north.clone()),
         ("get_market_dragon_tiger", td_dragon.clone()),
-        ("get_research_reports", td_research.clone()),
-        ("get_concept_blocks", td_concepts.clone()),
-        ("get_block_trades", td_block.clone()),
-        ("get_institutional_visits", td_visit.clone()),
+        ("get_stock_research_reports", td_research.clone()),
+        ("get_stock_concept_blocks", td_concepts.clone()),
+        ("get_stock_block_trades", td_block.clone()),
+        ("get_stock_institutional_visits", td_visit.clone()),
         ("get_index_quotes", td_idx.clone()),
         ("get_stock_peers", td_peers.clone()),
         ("get_stock_option_pcr", td_pcr.clone()),
@@ -1122,10 +1192,10 @@ async fn seed_stock_analysis_workflow_template(
                 position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
-                    max_retries: 2,
+                    max_retries: 0,
                     ..Default::default()
                 },
-                timeout: Some(300),
+                timeout: Some(120),
                 enabled: true,
                 parent_id: parent_id.map(String::from),
                 compensation: None,
@@ -1133,8 +1203,15 @@ async fn seed_stock_analysis_workflow_template(
             config: AgentNodeConfig {
                 // inline system_prompt 只放任务指令，专家 prompt 由 agent_profile 自动加载，
                 // 行情数据通过 context_sources 由上游 Tool 节点输出自动注入
+                // P0 回退(v16):inline prefix 回退到 v14 之前的形式 —— 不在
+                //   inline prefix 中用 {{stock_code}}/{{stock_name}} Slot。
+                //   原因:v14/v15 改动在 inline prefix 引入 Slot 后,某些
+                //   context.variables 注入路径下 render_prompt 失败,导致所有
+                //   Agent 节点返回 "暂无数据"。stock_code/stock_name 改为通过
+                //   expert .md prompt 头部 "{{stock_code}} / {{stock_name}}"
+                //   primacy 锚点注入,避开 inline prefix 的风险。
                 system_prompt: format!(
-                    "你的任务: {title}\n目标股票代码: {{stock_code}}，股票名称: {{stock_name}}\n\n重要原则：\n1. 如果上游数据节点返回为空，请主动调用可用工具获取补充数据。\n2. 如果确实无法获取某些数据，基于你已知的公开信息和通用分析框架给出尽可能有价值的分析，不要只列 data_gaps。\n3. 始终针对目标股票给出明确的观点（看多/看空/中性）和论据，不要输出空结果。\n4. 调用任何需要 stock_code 参数的工具时，必须始终传递 stock_code={{stock_code}}。\n5. 分析输出中严禁出现'工具调用失败'、'在当前环境中不可用'、'上游数据获取为空'、'数据缺失'、'无法获取'、'does not exist'、'error'等负面措辞。工具返回空数组[]或空对象{{}}是正常情况（表示该数据源暂无记录），请直接基于已有信息给出分析结论。\n6. 如果你是研报分析师，目标是从券商研报、一致预期EPS、机构调研等维度给出观点。如果这些数据源返回空，说明该股票暂无机构覆盖，你可以基于公司基本面、行业地位、新闻公告等公开信息给出独立分析，不要强调'无券商研报'。",
+                    "你的任务: {title}\n\n重要原则：\n1. 如果上游数据节点返回为空，请主动调用可用工具获取补充数据。\n2. 如果确实无法获取某些数据，基于你已知的公开信息和通用分析框架给出尽可能有价值的分析，不要只列 data_gaps。\n3. 始终针对目标股票给出明确的观点（看多/看空/中性）和论据，不要输出空结果。\n4. 分析输出中严禁使用 '工具调用失败'、'在当前环境中不可用'、'上游数据获取为空'、'数据缺失'、'无法获取'、'does not exist'、'error' 等负面措辞。工具返回空数组或空对象是正常情况（表示该数据源暂无记录），请直接基于已有信息给出分析结论。\n5. 如果你是研报分析师，目标是从券商研报、一致预期EPS、机构调研等维度给出观点。如果这些数据源返回空，说明该股票暂无机构覆盖，你可以基于公司基本面、行业地位、新闻公告等公开信息给出独立分析，不要强调'无券商研报'。",
                 ),
                 context_sources: vec![],
                 // 通过 input_mapping 自动注入股票代码/名称到 system_prompt
@@ -1261,9 +1338,9 @@ async fn seed_stock_analysis_workflow_template(
         // F-8 重排: a-lockup 前置改为解禁质押工具
         ("t-lockup-data", "获取解禁质押", "get_stock_lockup", "stock_code"),
         // F-8 重排: a-research 前置改为研报工具
-        ("t-research-data", "获取研报+新闻", "get_research_reports", "stock_code"),
+        ("t-research-data", "获取研报+新闻", "get_stock_research_reports", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
-        ("t-catalyst-data", "获取公司公告", "get_announcements", "stock_code"),
+        ("t-catalyst-data", "获取公司公告", "get_stock_announcements", "stock_code"),
     ];
 
     // ── Phase 1: ParallelNode 作为视觉分组，包裹 9 组 Tool + Agent ──
@@ -1487,6 +1564,12 @@ async fn seed_stock_analysis_workflow_template(
     // DebateNode 的子节点：按轮次展开多方辩手和空方辩手
     // parentId 指向容器节点，前端将它们渲染在 DebateNode 内部
     // 位置：容器内 20px 左偏移，按轮次纵向排列（绝对坐标 = 容器坐标 + 偏移）
+    // v16 修复:R1/R2/R3 多空双方统一用 bull_tools(基础数据工具集),让 R2/R3
+    // LMM 能拿到 stock_quote/kline/financials/news 等基础数据,避免工具调用
+    // 全部返回空导致 R2/R3 输出 "暂无数据"。R2/R3 的"质询型"角色由
+    // bull-r2.md / bear-r2.md / bull-r3.md / bear-r3.md prompt 控制,与工具集无关。
+    // v17+ 可考虑给空方注入估值/风险类特色工具(td_var / td_maxdd / td_pledge / td_corr),
+    // 当前 v16 简化统一工具集优先修复 R2/R3 没数据问题。
     let bull_tools = vec![
         td_quote.clone(),
         td_kline.clone(),
@@ -1496,32 +1579,23 @@ async fn seed_stock_analysis_workflow_template(
         td_earnings.clone(),
         td_ma_cross.clone(),
     ];
-    let bear_tools = vec![
-        td_quote.clone(),
-        td_kline.clone(),
-        td_fin.clone(),
-        td_news.clone(),
-        td_var.clone(),
-        td_maxdd.clone(),
-        td_pledge.clone(),
-        td_corr.clone(),
-    ];
 
     for round in 0..debate_max_rounds {
         let round_num = round + 1;
         let bull_id = format!("bull-r{round_num}");
         let bear_id = format!("bear-r{round_num}");
-        // 修复 Defect #4: 第 2 轮用 bull-r2/bear-r2（质询型 prompt），第 1/3 轮
-        // 继续用 bull-researcher/bear-researcher（初始论据 / 最终反驳）。
-        let bull_expert = if round_num == 2 {
-            "bull-r2"
-        } else {
-            "bull-researcher"
+        // R1 走 bull-researcher / bear-researcher（初始论证型），R2 走 bull-r2 / bear-r2
+        // （质询型），R3 走 bull-r3 / bear-r3（最终反驳型）。R2/R3 工具集一致：
+        // 都需要 compute_scoring / compute_valuation 核实对方论据中的技术/估值假设。
+        let bull_expert = match round_num {
+            2 => "bull-r2",
+            3 => "bull-r3",
+            _ => "bull-researcher",
         };
-        let bear_expert = if round_num == 2 {
-            "bear-r2"
-        } else {
-            "bear-researcher"
+        let bear_expert = match round_num {
+            2 => "bear-r2",
+            3 => "bear-r3",
+            _ => "bear-researcher",
         };
         let bull_title = format!("多方研究员·第{round_num}轮");
         let bear_title = format!("空方研究员·第{round_num}轮");
@@ -1535,29 +1609,22 @@ async fn seed_stock_analysis_workflow_template(
         let mut bull_an =
             agent(&bull_id, &bull_title, bull_expert, Some("debate-bull-bear"), bull_x, bull_y);
         if let WorkflowNode::Agent(ref mut a) = bull_an {
-            // v16: R2 质询型辩手强制 JSON 输出，工具轮次提升到 2
-            if round_num == 2 {
-                if let Some(names) = PROFILE_TOOLS
-                    .iter()
-                    .find(|(k, _)| *k == bull_expert)
-                    .map(|(_, v)| *v)
-                {
-                    a.config.tools = names
-                        .iter()
-                        .filter_map(|&tn| tool_def_map.get(tn).cloned())
-                        .collect();
-                    a.config.exposed_tools = names.iter().map(|&tn| tn.to_string()).collect();
-                    a.config.system_prompt =
-                        format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
-                }
-                a.config.max_tool_rounds = Some(2);
-                a.config.output_mode = OutputMode::Json;
-            } else {
-                a.config.tools = bull_tools.clone();
-                a.config.max_tool_rounds = Some(2);
-                a.config.system_prompt =
-                    format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
-            }
+            // R1 用 bull_tools 工具集(含 get_stock_quote/kline/financials/news 等基础数据工具,
+            //   LLM 能直接调通拿数据,产出论据)。
+            // R2/R3 走 PROFILE_TOOLS 路径(质询/反驳需技术评分+估值工具)。
+            // 修复(v16):R1/R2/R3 多空辩手统一用 bull_tools(基础数据工具集)。
+            //   之前 R2/R3 走 PROFILE_TOOLS(只有 compute_scoring / compute_valuation
+            //   计算工具)—— R2/R3 没有上游数据节点,LLM 拿不到 stock_quote / kline
+            //   / financials / news 等基础数据,工具调用全部返回空,导致 R2/R3
+            //   输出 "暂无数据"。
+            //   R2 质询 / R3 反驳的角色由 bull-r2.md / bear-r2.md / bull-r3.md /
+            //   bear-r3.md prompt 控制,与工具集无关。
+            a.config.tools = bull_tools.clone();
+            a.config.exposed_tools = bull_tools.iter().map(|t| t.name.clone()).collect();
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
+            a.config.max_tool_rounds = Some(2);
+            a.config.output_mode = OutputMode::Json;
             a.config.model_role = Some("debater".into());
             // 注入前序轮次辩论输出 + 所有分析师报告作为上下文
             let mut ctx: Vec<String> = Vec::new();
@@ -1579,29 +1646,13 @@ async fn seed_stock_analysis_workflow_template(
         let mut bear_an =
             agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), bear_x, bear_y);
         if let WorkflowNode::Agent(ref mut a) = bear_an {
-            // v16: R2 质询型辩手强制 JSON 输出，工具轮次提升到 2
-            if round_num == 2 {
-                if let Some(names) = PROFILE_TOOLS
-                    .iter()
-                    .find(|(k, _)| *k == bear_expert)
-                    .map(|(_, v)| *v)
-                {
-                    a.config.tools = names
-                        .iter()
-                        .filter_map(|&tn| tool_def_map.get(tn).cloned())
-                        .collect();
-                    a.config.exposed_tools = names.iter().map(|&tn| tn.to_string()).collect();
-                    a.config.system_prompt =
-                        format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
-                }
-                a.config.max_tool_rounds = Some(2);
-                a.config.output_mode = OutputMode::Json;
-            } else {
-                a.config.tools = bear_tools.clone();
-                a.config.max_tool_rounds = Some(2);
-                a.config.system_prompt =
-                    format!("{}{}", a.config.system_prompt, tool_prompt(&bear_tools));
-            }
+            // 同 bull_an:R1/R2/R3 空方统一用 bull_tools。
+            a.config.tools = bull_tools.clone();
+            a.config.exposed_tools = bull_tools.iter().map(|t| t.name.clone()).collect();
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
+            a.config.max_tool_rounds = Some(2);
+            a.config.output_mode = OutputMode::Json;
             a.config.model_role = Some("debater".into());
             // 注入前序轮次 + 本轮多方输出 + 所有分析师报告作为上下文
             let mut ctx: Vec<String> = Vec::new();
@@ -4087,16 +4138,8 @@ async fn seed_agency_experts(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     for &(expert_id, content) in EMBEDDED_PROMPTS {
         let (name, desc, body, color) = parse_expert_md(content, expert_id);
         let agency_id = format!("agency-stock-analysis-{expert_id}");
-        if agency_experts::Entity::find_by_id(&agency_id)
-            .one(db)
-            .await
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            continue;
-        }
         let now = chrono::Utc::now().timestamp();
-        let model = agency_experts::ActiveModel {
+        let active = agency_experts::ActiveModel {
             id: Set(agency_id.clone()),
             name: Set(name),
             description: Set(if desc.is_empty() { None } else { Some(desc) }),
@@ -4109,23 +4152,30 @@ async fn seed_agency_experts(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             recommended_workflows: Set(None),
             recommended_tools: Set(None),
         };
-        model.insert(db).await.map_err(|e| e.to_string())?;
+        // v24: 改为 UPSERT — 已存在则 update，确保 .md 改动和新增的 R3 专家能同步到 DB
+        // 历史版本: 已存在则 continue 跳过,导致 .md 改动 / 新增 .md 文件 (bull-r3/bear-r3) 不写库,
+        // 前端看到的是旧版 prompt,输出与代码不同步。
+        if agency_experts::Entity::find_by_id(&agency_id)
+            .one(db)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            active.update(db).await.map_err(|e| e.to_string())?;
+        } else {
+            active.insert(db).await.map_err(|e| e.to_string())?;
+        }
         count += 1;
     }
-    tracing::info!("[stock_analysis_setup] 已种子化 {count} 个 agency_experts");
+    tracing::info!("[stock_analysis_setup] 已种子化/更新 {count} 个 agency_experts");
     Ok(())
 }
 
 async fn seed_agent_roles(db: &sea_orm::DatabaseConnection) -> Result<(), String> {
     let mut count = 0u32;
+    // v24: 去掉"已存在则跳过"短路 — 无条件调 upsert_agent_role,确保 STOCK_ROLES 改动
+    // (尤其是新增的 role) 能同步到 DB。
     for role in STOCK_ROLES {
-        if repo::agent_role::get_agent_role(db, role.id)
-            .await
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            continue;
-        }
         repo::agent_role::upsert_agent_role(
             db,
             role.id,
@@ -4141,7 +4191,7 @@ async fn seed_agent_roles(db: &sea_orm::DatabaseConnection) -> Result<(), String
         .map_err(|e| e.to_string())?;
         count += 1;
     }
-    tracing::info!("[stock_analysis_setup] 已种子化 {count} 个 agent_roles");
+    tracing::info!("[stock_analysis_setup] 已种子化/更新 {count} 个 agent_roles");
     Ok(())
 }
 
@@ -4157,20 +4207,11 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
     for &(expert_id, role_id) in EXPERT_ROLE_MAP {
         let profile_id = format!("stock-{expert_id}");
 
-        if agent_profiles::Entity::find_by_id(&profile_id)
-            .one(db)
-            .await
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
-            continue;
-        }
-
         let tools_json = profile_tools
             .get(expert_id)
             .map(|tools| serde_json::to_string(tools).unwrap_or_default());
         let now = chrono::Utc::now().timestamp_millis();
-        let model = agent_profiles::ActiveModel {
+        let active = agent_profiles::ActiveModel {
             id: Set(profile_id.clone()),
             name: Set(format!("📈 {}", expert_id_to_display(expert_id))),
             description: Set(Some(format!("股票分析专家 — {}", role_id_to_display(role_id)))),
@@ -4194,7 +4235,17 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
             created_at: Set(now),
             updated_at: Set(now),
         };
-        model.insert(db).await.map_err(|e| e.to_string())?;
+        // v24: 改为 UPSERT — 已存在则 update,确保 PROFILE_TOOLS 改动和新增 expert (bull-r3/bear-r3) 同步到 DB
+        if agent_profiles::Entity::find_by_id(&profile_id)
+            .one(db)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            active.update(db).await.map_err(|e| e.to_string())?;
+        } else {
+            active.insert(db).await.map_err(|e| e.to_string())?;
+        }
         count += 1;
     }
     tracing::info!("[stock_analysis_setup] 已种子化/更新 {count} 个 agent_profiles");
@@ -4455,9 +4506,17 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             },
             config: SubWorkflowNodeConfig {
                 sub_workflow_id: "stock-analysis".into(),
+                // [BUGFIX] 原配置 source="trigger" 是节点 ID,会被 map_inputs 当变量名查
+                // context.variables["trigger"],返回的是 trigger 节点完整输出对象
+                // ({status, trigger_type, config, timestamp, node_id}),而不是 string 类型的
+                // stock_code,导致子工作流所有 tool 节点报 "参数 stock_code 应为 string 类型"
+                // 以及 agent 节点报 "VARIABLE_NOT_FOUND: stock_name"(stock_name 根本不在
+                // trigger 输出里)。改用变量名后,父工作流 state.variables 里的 string 类型
+                // 变量才能正确传递到子工作流的 input。
                 input_mapping: [
-                    ("stock_code".to_string(), "trigger".to_string()),
-                    ("as_of_date".to_string(), "trigger".to_string()),
+                    ("stock_code".to_string(), "stock_code".to_string()),
+                    ("stock_name".to_string(), "stock_name".to_string()),
+                    ("as_of_date".to_string(), "as_of_date".to_string()),
                 ]
                 .into_iter()
                 .collect(),
@@ -4786,7 +4845,7 @@ async fn seed_serenity_screening_workflow_template(
         parameters: None,
     };
     let td_concept = ToolDef {
-        name: "get_concept_blocks".into(),
+        name: "get_stock_concept_blocks".into(),
         description: Some("获取概念板块归属".into()),
         parameters: None,
     };
@@ -4841,7 +4900,7 @@ async fn seed_serenity_screening_workflow_template(
         }),
     };
     let td_visits = ToolDef {
-        name: "get_institutional_visits".into(),
+        name: "get_stock_institutional_visits".into(),
         description: Some("获取机构调研数据".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
@@ -4894,7 +4953,7 @@ async fn seed_serenity_screening_workflow_template(
         }),
     };
     let td_serenity_research = ToolDef {
-        name: "get_research_reports".into(),
+        name: "get_stock_research_reports".into(),
         description: Some("获取券商研报，验证需求/壁垒/CapEx逻辑".into()),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),

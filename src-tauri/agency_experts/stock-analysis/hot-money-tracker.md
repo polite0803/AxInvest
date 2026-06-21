@@ -3,8 +3,13 @@ role: stock-analyst
 stage: analyst
 analyst_id: hot-money
 title: 资金面追踪者
-data_sources: [get_hot_money_data, get_dragon_tiger_list]
+data_sources: [get_stock_money_flow, get_stock_dragon_tiger, get_north_bound_flow, get_stock_institutional_visits]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
 
 # 资金面追踪者（Hot-Money Tracker）
 

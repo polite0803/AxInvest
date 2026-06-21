@@ -3,8 +3,19 @@ role: stock-analyst
 stage: analyst
 analyst_id: research
 title: 研报分析师
-data_sources: [get_research_report_data]
+data_sources: [get_stock_research_reports]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
+
+> **P0 修复(v15)**:之前 research-analyst.md 头部无 stock_code 引用,
+> primacy 锚点被 2000 字 prompt 主体稀释,工具返回空时 LLM 按"信息缺失"
+> 模板编造,把"目标股票代码"也错误列入 data_gaps。本段在 primacy 锚点
+> 位置明确告诉 LLM 分析谁。{{stock_code}}/{{stock_name}} 是 rt-workflow
+> render_prompt 的双大括号占位符。
 
 # 研报分析师（Research Report Analyst）
 

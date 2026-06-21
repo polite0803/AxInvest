@@ -99,15 +99,15 @@ async fn data_quality_precheck(
         Err(e) => SourceCheck::Partial(format!("获取失败: {e}")),
     };
 
-    // P1-3 新增: 3. klines (取 60 日, 验证历史数据可拉到)
-    // AStockClient::get_klines 是 3 参 wrapper (内部默认 None 复权)
-    let kline_check = match client.get_klines(stock_code, "daily", 60).await {
+    // P0-2 修复: 请求 500 匹配内部 fetch_limit，最大限度保留截断后数据
+    // Err 改为 Partial (vendor 临时限流/降级不应阻塞整个分析)
+    let kline_check = match client.get_klines(stock_code, "daily", 500).await {
         Ok(klines) if klines.len() >= 15 => SourceCheck::Ok,
         Ok(klines) if !klines.is_empty() => {
             SourceCheck::Partial(format!("仅 {} 行, 不足 15 日", klines.len()))
         },
         Ok(_) => SourceCheck::Failed("K 线为空".into()),
-        Err(e) => SourceCheck::Failed(format!("K 线获取失败: {e}")),
+        Err(e) => SourceCheck::Partial(format!("K 线获取受阻（可重试）: {e}")),
     };
 
     // P1-3 新增: 4. news (取最近 10 条)
@@ -537,6 +537,9 @@ async fn run_stock_workflow_inner(
                 "status": "skipped",
                 "reason": reason,
                 "analysis_id": analysis_id,
+                "stock_code": stock_code,
+                "stock_name": quote.name,
+                "data_quality_precheck": "insufficient",
             }));
         },
         QualityPrecheckResult::Pass => {
@@ -596,6 +599,9 @@ async fn run_stock_workflow_inner(
         let app = progress_app.clone();
         let wf_id = progress_wf_id.clone();
         Box::pin(async move {
+            // 提取值避免所有权移动（两次 emit 都需要）
+            let output_clone = event.output.clone();
+            let error_clone = event.error.clone();
             // 根据步骤状态分发到对应的前端事件（与 executionStore 监听器匹配）
             let (event_name, payload) = match event.status.as_str() {
                 "running" => (
@@ -613,7 +619,7 @@ async fn run_stock_workflow_inner(
                         "conversationId": format!("wf-{}", wf_id),
                         "stepId": event.node_id,
                         "stepGoal": event.node_id,
-                        "result": event.output.and_then(|v| {
+                        "result": output_clone.and_then(|v| {
                             if v.is_string() { v.as_str().map(String::from) }
                             else { Some(serde_json::to_string(&v).unwrap_or_default()) }
                         }),
@@ -624,12 +630,28 @@ async fn run_stock_workflow_inner(
                     serde_json::json!({
                         "conversationId": format!("wf-{}", wf_id),
                         "stepId": event.node_id,
-                        "error": event.error.unwrap_or_else(|| format!("Step {}", event.status)),
+                        "error": error_clone.unwrap_or_else(|| format!("Step {}", event.status)),
                     }),
                 ),
                 _ => return, // 未知状态，忽略
             };
             let _ = app.emit(event_name, payload);
+            // 向后兼容：同时发送旧事件 workflow-step-done（前端 stockAnalysisStore /
+            // stockWorkflowChatBridge / tests 仍监听此事件）
+            let _ = app.emit(
+                "workflow-step-done",
+                serde_json::json!({
+                    "workflowId": wf_id,
+                    "nodeId": event.node_id,
+                    "status": event.status,
+                    "totalNodes": event.total_nodes,
+                    "completedNodes": event.completed_nodes,
+                    "executionId": event.execution_id,
+                    "output": event.output,
+                    "error": event.error,
+                    "elapsedMs": event.elapsed_ms,
+                }),
+            );
         })
     });
 
@@ -669,7 +691,12 @@ async fn run_stock_workflow_inner(
                 "description": r.description,
             }))
         });
+    // 在 spawn 前捕获 as-of 上下文（tokio::task_local 不跨 tokio::spawn 传播）
+    let captured_asof = as_of::current_as_of();
     tokio::spawn(async move {
+        // P3 修复: 在 spawn 内恢复 AS_OF + DEGRADATION_LOG 作用域
+        as_of::with_optional_asof(captured_asof, async {
+            as_of::with_degradation_log(async {
         let mut opts = RunOptions {
             max_concurrent,
             step_timeout,
@@ -993,7 +1020,8 @@ async fn run_stock_workflow_inner(
                     tracing::error!("[DB] run_workflow Err 状态更新失败: {db_e}");
                 }
             },
-        }
+        }}).await  // with_degradation_log
+    }).await // with_optional_asof
     });
 
     Ok(serde_json::json!({
@@ -1318,9 +1346,12 @@ pub async fn run_reflection_workflow(
     let wf_id = workflow.id.clone();
 
     // 4. 加载原始决策的时间维度信息
-    // 手动触发时 original_analysis_id="" —— 不注入这俩变量,让工作流模板
-    // 自己决定怎么处理"无原始分析上下文"的情况。盲目注入 "unknown" / 0
-    // 会污染反思推理的前提(持仓期对齐、时间维度匹配)。
+    // 手动触发时 original_analysis_id="" → original_ctx=None。
+    // 但反思 prompt 模板 (reflection.md:17-18) hard-code 引用
+    // {{original_time_horizon}} / {{original_holding_days}},所以必须注入占位值
+    // (否则 work_engine 报 VARIABLE_NOT_FOUND,reflection-agent 节点 Failed,
+    // 数据库 what_went_wrong 等字段全 null)。
+    // 之前的注释说"让工作流模板自己决定怎么处理"——实际模板没有兜底处理。
     let original_ctx: Option<(String, i64)> = if original_analysis_id.is_empty() {
         None
     } else {
@@ -1344,6 +1375,25 @@ pub async fn run_reflection_workflow(
 
     // 5. 注入变量
     let mut variables = vec![
+        // 内联 system_prompt (stock_analysis_setup.rs:4538-4552) 引用了
+        // {{stock_code}} / {{stock_name}} —— 必须在 variables 顶层,
+        // input_mapping 的 source="trigger" 不会把它们提到顶层 (只会追加到
+        // system_prompt 尾部的 "--- 输入上下文 ---" 块)。
+        // 不注入会触发 reflection-agent 节点的 VARIABLE_NOT_FOUND。
+        axagent_harness::workflow_types::Variable {
+            name: "stock_code".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(stock_code.to_string()),
+            description: Some("当前反思的股票代码".into()),
+            is_secret: false,
+        },
+        axagent_harness::workflow_types::Variable {
+            name: "stock_name".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(stock_name.to_string()),
+            description: Some("当前反思的股票名称".into()),
+            is_secret: false,
+        },
         axagent_harness::workflow_types::Variable {
             name: "actual_outcome".into(),
             var_type: "string".into(),
@@ -1356,6 +1406,20 @@ pub async fn run_reflection_workflow(
             var_type: "string".into(),
             value: serde_json::Value::String(reflection_depth.to_string()),
             description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
+            is_secret: false,
+        },
+        // 反思 prompt 模板里引用了 {{stock_lessons}},必须显式注入,
+        // 否则 work_engine 报 VARIABLE_NOT_FOUND 导致反思节点 Failed。
+        // 数据源: 该股最近 3 个月的反思记录(去重排除当前正在创建的记录)。
+        axagent_harness::workflow_types::Variable {
+            name: "stock_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(
+                fetch_stock_lessons(stock_code, db)
+                    .await
+                    .unwrap_or_else(|| "（暂无历史反思）".to_string()),
+            ),
+            description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
             is_secret: false,
         },
     ];
@@ -1377,17 +1441,40 @@ pub async fn run_reflection_workflow(
             is_secret: false,
         });
     } else {
+        // 手动反思场景:无原始分析上下文,但 prompt 模板必须能渲染。
+        // 注入占位值(让 LLM 知道这是手动触发的独立反思,无持仓期对齐数据)。
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "original_time_horizon".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String("manual".into()),
+            description: Some("原始决策的时间维度(手动反思场景无原始分析,固定为 'manual')".into()),
+            is_secret: false,
+        });
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "original_holding_days".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0),
+            description: Some("原始决策期望持有天数(手动反思场景无原始分析,固定为 0)".into()),
+            is_secret: false,
+        });
         tracing::info!(
-            "[reflection] {}: 无原始分析上下文(original_analysis_id={:?}),跳过 original_* 变量注入",
-            stock_code,
-            original_analysis_id
+            "[reflection] {}: 手动反思场景,注入占位 original_time_horizon='manual' / original_holding_days=0",
+            stock_code
         );
     }
     let opts = axagent_rt_workflow::work_engine::RunOptions {
         max_concurrent,
         step_timeout,
         progress_callback: None,
-        input: Some(json!({"stock_code": stock_code})),
+        // [BUGFIX] 之前只传 stock_code,缺 stock_name / as_of_date。
+        // 反思工作流内的 sub-analysis 节点 (嵌套 stock-analysis 子工作流) 的
+        // input_mapping 把这 3 个变量映射到子工作流的 input,缺任何一个都会
+        // 导致子工作流报 "参数 X 应为 string 类型" 或 "VARIABLE_NOT_FOUND: X"。
+        input: Some(json!({
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "as_of_date": as_of_date,
+        })),
         input_schema: loaded.input_schema,
         output_schema: loaded.output_schema,
         dry_run: false,
@@ -1411,24 +1498,63 @@ pub async fn run_reflection_workflow(
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
             let reflection_json = extract_agent_output(reflection_raw).await;
-            let reflection_obj = reflection_json.as_object();
+            // 兜底: extract_agent_output 在某些 wrapper 格式下可能返回 JSON 字符串
+            // (例如 LLM 输出被包成 `{output: "{...}"}` 时走 line 1552 分支直接 return 字符串),
+            // 这时 as_object() 会得到 None,导致整个字段提取跳到 unwrap_or 兜底,
+            // 数据库里 what_went_wrong / missed_signals / fix_for_future 全部为 null。
+            // 二次解析: 把它当字符串再 parse 一次,还原成对象。
+            let reflection_obj: Option<serde_json::Map<String, serde_json::Value>> =
+                if let Some(obj) = reflection_json.as_object() {
+                    Some(obj.clone())
+                } else if let Some(s) = reflection_json.as_str() {
+                    serde_json::from_str::<serde_json::Value>(s)
+                        .ok()
+                        .and_then(|v| v.as_object().cloned())
+                } else {
+                    None
+                };
 
+            // 兼容两种输出结构:
+            //   A) 直接: {what_went_wrong, missed_signals, fix_for_future, params_suggestion}
+            //   B) 嵌套: {reflection: {what_went_wrong, missed_signals, fix_for_future}, params_suggestion}
+            // 内联 system_prompt 要求 A 格式,reflection.md 外部 expert prompt 要求 B 格式,
+            // 实际 LLM 可能按任一格式输出,后端必须容错。
             let (what_went_wrong, missed_signals, fix_for_future, params_suggestion_json) =
                 reflection_obj
                     .map(|obj| {
-                        let w = obj
-                            .get("what_went_wrong")
+                        // 优先看嵌套 reflection 子对象,找不到再退到顶层
+                        let inner = obj.get("reflection").and_then(|v| v.as_object());
+                        let lookup = |key: &str| -> Option<&serde_json::Value> {
+                            inner.and_then(|i| i.get(key)).or_else(|| obj.get(key))
+                        };
+                        let w = lookup("what_went_wrong")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
-                        let m = obj.get("missed_signals").map(|v| v.to_string());
-                        let f = obj
-                            .get("fix_for_future")
+                        let m = lookup("missed_signals").map(|v| v.to_string());
+                        let f = lookup("fix_for_future")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
                         let p = obj.get("params_suggestion").map(|v| v.to_string());
                         (w, m, f, p)
                     })
                     .unwrap_or((None, None, None, None));
+
+            // 诊断: 检查反思节点是否成功,如果不成功,把状态/错误信息附到 status 字段
+            // (Failed 节点 result 是 None,work_engine 不会写入 results,所以
+            // wf.results 不等于完整执行轨迹 —— 之前只能看到"completed"但实际反思节点没跑)。
+            use axagent_rt_workflow::workflow_engine::NodeStatus;
+            let reflection_node_state = wf.node_states.get("reflection-agent");
+            let status_text = match reflection_node_state {
+                Some(s) if s.status == NodeStatus::Completed => "completed".to_string(),
+                Some(s) if s.status == NodeStatus::Failed => {
+                    let err = s.error.clone().unwrap_or_else(|| "未知错误".to_string());
+                    format!("failed: reflection-agent: {err}")
+                },
+                Some(s) if s.status == NodeStatus::Skipped => {
+                    "skipped: reflection-agent".to_string()
+                },
+                _ => "completed: reflection-agent 未在 node_states 中".to_string(),
+            };
 
             let bb_text = serde_json::to_string(&wf.results).unwrap_or_default();
             let dj_text = if reflection_json.is_null() {
@@ -1438,7 +1564,7 @@ pub async fn run_reflection_workflow(
             };
 
             let _ = stock_reflections::Entity::update_many()
-                .col_expr(stock_reflections::Column::Status, Expr::value("completed".to_string()))
+                .col_expr(stock_reflections::Column::Status, Expr::value(status_text))
                 .col_expr(stock_reflections::Column::DecisionJson, Expr::value(dj_text))
                 .col_expr(
                     stock_reflections::Column::WhatWentWrong,
@@ -1826,8 +1952,8 @@ fn extract_outer_json(text: &str) -> Option<serde_json::Value> {
         let mut found = false;
         let mut end = 0;
 
-        for i in start..len {
-            let b = bytes[i];
+        for (idx, &b) in bytes[start..len].iter().enumerate() {
+            let i = start + idx;
             if escaped {
                 escaped = false;
                 continue;
@@ -1892,7 +2018,7 @@ fn find_candidates_deep(value: &serde_json::Value) -> Vec<serde_json::Value> {
                     && item
                         .get("stock_code")
                         .and_then(|v| v.as_str())
-                        .map_or(false, |s| !s.is_empty())
+                        .is_some_and(|s| !s.is_empty())
                 {
                     results.push(item.clone());
                 } else if item.is_object() || item.is_array() {
@@ -2206,7 +2332,7 @@ pub async fn run_serenity_screening(
             let candidates = if candidates.is_object()
                 && !candidates
                     .as_object()
-                    .map_or(false, |o| o.contains_key("candidates"))
+                    .is_some_and(|o| o.contains_key("candidates"))
                 && candidates.get("stock_code").is_some()
             {
                 serde_json::json!({"candidates": [candidates]})
@@ -2231,7 +2357,7 @@ pub async fn run_serenity_screening(
                     let has_code = c
                         .get("stock_code")
                         .and_then(|v| v.as_str())
-                        .map_or(false, |s| !s.is_empty());
+                        .is_some_and(|s| !s.is_empty());
                     if has_code {
                         candidate_array.push(c.clone());
                     } else {
@@ -2259,7 +2385,7 @@ pub async fn run_serenity_screening(
             let mut candidate_array = serde_json::Value::Array(candidate_array);
 
             // 兜底：如果正常提取路径得到空数组，尝试从 candidates（extract_agent_output 结果）中深度搜索
-            if candidate_array.as_array().map_or(true, |a| a.is_empty()) {
+            if candidate_array.as_array().is_none_or(|a| a.is_empty()) {
                 tracing::warn!(
                     "[serenity] ⚠️ 候选数组为空，尝试兜底提取... candidates类型={} keys={:?}",
                     if candidates.is_array() {
@@ -2282,7 +2408,7 @@ pub async fn run_serenity_screening(
                     candidate_array = serde_json::json!(fallback);
                 }
                 // 兜底策略2: 从原始节点输出的 content 字段中提取
-                if candidate_array.as_array().map_or(true, |a| a.is_empty()) {
+                if candidate_array.as_array().is_none_or(|a| a.is_empty()) {
                     if let Some(content) = candidates_raw_fallback
                         .get("content")
                         .and_then(|c| c.as_str())
@@ -2308,9 +2434,7 @@ pub async fn run_serenity_screening(
             // 规范化：如果返回裸 trend 对象（有 trend_name 但无 trends 包装键），
             // 包装成 {"trends": [obj]}
             let trends = if trends.is_object()
-                && !trends
-                    .as_object()
-                    .map_or(false, |o| o.contains_key("trends"))
+                && !trends.as_object().is_some_and(|o| o.contains_key("trends"))
                 && trends.get("trend_name").is_some()
             {
                 serde_json::json!({"trends": [trends]})
@@ -2536,13 +2660,9 @@ async fn do_refresh_exit_signals(state: &State<'_, AppState>) -> Result<serde_js
 
         // 判断退出紧迫度
         let stop_loss_hit = stop_loss.map(|sl| price < sl).unwrap_or(false);
-        let urgency = if stop_loss_hit {
+        let urgency = if stop_loss_hit || (has_disruption_news && margin_declining) {
             "exit_now"
-        } else if has_disruption_news && margin_declining {
-            "exit_now"
-        } else if has_disruption_news {
-            "caution"
-        } else if margin_declining {
+        } else if has_disruption_news || margin_declining {
             "caution"
         } else {
             "no_urgency"

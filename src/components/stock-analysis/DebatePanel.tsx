@@ -49,7 +49,28 @@ interface R2DebateJson {
   summary_for_convergence?: string;
 }
 
-type DebateJson = R1DebateJson & R2DebateJson;
+/** R3 最终反驳输出格式 */
+interface R3DebateJson {
+  final_position?: string;
+  claim?: string;
+  confidence?: number;
+  r2_cross_examination_response?: Array<{
+    r2_question_ref?: string;
+    weakness_type_accepted?: string;
+    verdict?: string;
+    response?: string;
+    concession?: string | null;
+  }>;
+  strengthened_arguments?: Array<{
+    claim_ref?: string;
+    r2_challenge_summary?: string;
+    additional_evidence?: string | null;
+    final_strength?: number;
+  }>;
+  data_gaps?: string[];
+}
+
+type DebateJson = R1DebateJson & R2DebateJson & R3DebateJson;
 
 /* ─── 解析工具 ─── */
 
@@ -149,6 +170,12 @@ function processDebateInput(raw: string): DebateContent {
     || (Array.isArray(parsed.resonance_points) && parsed.resonance_points.length > 0)
     || (Array.isArray(parsed.preempted_counter_attacks) && parsed.preempted_counter_attacks.length > 0)
     || (typeof parsed.summary_for_convergence === "string" && parsed.summary_for_convergence.length > 10)
+    // R3 最终反驳字段：r2_cross_examination_response / strengthened_arguments 数组任一非空,
+    // 或 final_position / claim 字符串非空,均视为有内容。
+    || (Array.isArray(parsed.r2_cross_examination_response) && parsed.r2_cross_examination_response.length > 0)
+    || (Array.isArray(parsed.strengthened_arguments) && parsed.strengthened_arguments.length > 0)
+    || (typeof parsed.final_position === "string" && parsed.final_position.length > 0)
+    || (typeof parsed.claim === "string" && parsed.claim.length > 0)
   );
   return {
     text: unwrapped,
@@ -301,6 +328,133 @@ function R2View({ data, isDark }: { data: R2DebateJson; isDark: boolean }) {
   );
 }
 
+/** R3 最终立场标签映射 */
+const R3_POSITION_LABEL: Record<string, { text: string; color: string }> = {
+  strong_bull: { text: "强烈看多", color: "red" },
+  bull: { text: "看多", color: "red" },
+  weak_bull: { text: "弱看多", color: "orange" },
+  strong_bear: { text: "强烈看空", color: "green" },
+  bear: { text: "看空", color: "green" },
+  weak_bear: { text: "弱看空", color: "lime" },
+};
+
+/** R3 verdict 标签映射 */
+const R3_VERDICT_LABEL: Record<string, { text: string; color: string }> = {
+  rejected: { text: "反驳", color: "red" },
+  partially_accepted: { text: "部分接受", color: "orange" },
+  accepted: { text: "接受", color: "green" },
+};
+
+function R3View({ data, isDark }: { data: R3DebateJson; isDark: boolean }) {
+  const posInfo = data.final_position ? R3_POSITION_LABEL[data.final_position] : null;
+  return (
+    <div className="space-y-3">
+      {/* 最终立场声明 */}
+      {posInfo && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Tag color={posInfo.color}>{posInfo.text}</Tag>
+          {typeof data.confidence === "number" && (
+            <span className="text-xs" style={{ color: "var(--muted)" }}>
+              置信度 {data.confidence}
+            </span>
+          )}
+        </div>
+      )}
+
+      {data.claim && (
+        <div
+          className="p-2 rounded text-xs"
+          style={{
+            background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+            borderLeft: posInfo?.color === "green" || data.final_position?.includes("bear")
+              ? "2px solid var(--sa-green)"
+              : "2px solid var(--sa-red)",
+          }}
+        >
+          <span className="font-medium">最终立场:</span> {data.claim}
+        </div>
+      )}
+
+      {/* R2 质询逐条回应 */}
+      {data.r2_cross_examination_response && data.r2_cross_examination_response.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold mb-1" style={{ color: "var(--muted)" }}>逐条回应 R2 质询</div>
+          <div className="space-y-2">
+            {data.r2_cross_examination_response.map((resp, i) => {
+              const vInfo = resp.verdict ? R3_VERDICT_LABEL[resp.verdict] : null;
+              return (
+                <div
+                  key={i}
+                  className="p-2 rounded text-xs"
+                  style={{
+                    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                    borderLeft: "2px solid var(--primary)",
+                  }}
+                >
+                  <div className="flex items-center gap-1 flex-wrap mb-0.5">
+                    <span className="font-medium">质询 {i + 1}</span>
+                    {resp.verdict && (
+                      <Tag className="text-xs" color={vInfo?.color ?? "default"}>
+                        {vInfo?.text ?? resp.verdict}
+                      </Tag>
+                    )}
+                    {resp.weakness_type_accepted && <Tag className="text-xs">{resp.weakness_type_accepted}</Tag>}
+                  </div>
+                  {resp.r2_question_ref && (
+                    <div className="text-xs mb-0.5" style={{ color: "var(--muted)" }}>
+                      针对: {resp.r2_question_ref}
+                    </div>
+                  )}
+                  {resp.response && <div className="text-xs">{resp.response}</div>}
+                  {resp.concession && (
+                    <div className="text-xs mt-0.5" style={{ color: "var(--sa-amber)" }}>
+                      <span className="font-medium">修正:</span> {resp.concession}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 强化保留论据 */}
+      {data.strengthened_arguments && data.strengthened_arguments.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold mb-1" style={{ color: "var(--muted)" }}>强化保留论据</div>
+          <ul className="list-disc pl-4 space-y-1">
+            {data.strengthened_arguments.map((sa, i) => (
+              <li key={i} className="text-xs">
+                <span className="font-medium">{sa.claim_ref || `论据 ${i + 1}`}</span>
+                {sa.r2_challenge_summary && (
+                  <span className="ml-1" style={{ color: "var(--muted)" }}>
+                    (R2: {sa.r2_challenge_summary})
+                  </span>
+                )}
+                {typeof sa.final_strength === "number" && (
+                  <span className="ml-1" style={{ color: "var(--sa-red)" }}>最终强度:{sa.final_strength}</span>
+                )}
+                {sa.additional_evidence && (
+                  <div className="text-xs mt-0.5" style={{ color: "var(--muted)" }}>
+                    补充证据: {sa.additional_evidence}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 数据缺口 */}
+      {data.data_gaps && data.data_gaps.length > 0 && (
+        <div className="text-xs" style={{ color: "var(--muted)" }}>
+          仍未解决的数据缺口: {data.data_gaps.join("；")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DebateContentView({ content, isDark }: { content: DebateContent; isDark: boolean }) {
   if (content.empty) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />;
@@ -309,7 +463,14 @@ function DebateContentView({ content, isDark }: { content: DebateContent; isDark
   // 结构化数据优先
   if (content.parsed) {
     const isR2 = Array.isArray(content.parsed.cross_examination) && content.parsed.cross_examination.length > 0;
-    const isR1 = !isR2 && (
+    // R3 优先识别:r2_cross_examination_response 或 strengthened_arguments 或 final_position 任一存在
+    // 视为 R3 节点(避免 R3 的 r2_cross_examination_response 字段被误判为 R2 的 cross_examination)
+    const isR3 = !isR2 && (
+      Array.isArray(content.parsed.r2_cross_examination_response)
+      || Array.isArray(content.parsed.strengthened_arguments)
+      || typeof content.parsed.final_position === "string"
+    );
+    const isR1 = !isR2 && !isR3 && (
       Array.isArray(content.parsed.core_arguments)
       || Array.isArray(content.parsed.preempted_counter_attacks)
       || Array.isArray(content.parsed.resonance_points)
@@ -320,6 +481,9 @@ function DebateContentView({ content, isDark }: { content: DebateContent; isDark
     }
     if (isR2) {
       return <R2View data={content.parsed} isDark={isDark} />;
+    }
+    if (isR3) {
+      return <R3View data={content.parsed} isDark={isDark} />;
     }
   }
 

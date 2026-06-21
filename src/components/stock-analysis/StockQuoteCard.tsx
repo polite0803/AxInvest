@@ -33,14 +33,17 @@ export function StockQuoteCard() {
 
   if (!quote) { return null; }
 
-  const isUp = quote.changePct >= 0;
-  const color = isUp ? "var(--sa-red)" : "var(--sa-green)";
-  const changeAmount = quote.price - quote.open;
+  // 严格 > 0 才算"涨",0% 视为平盘不带"+"号(中国股市惯例)
+  const isUp = quote.changePct > 0;
+  const isDown = quote.changePct < 0;
+  const color = isUp ? "var(--sa-red)" : isDown ? "var(--sa-green)" : "var(--muted)";
+  // 涨跌额 = 当前价 - 昨收价(中国股市惯例),不是 price - open
+  const changeAmount = quote.price - quote.preClose;
 
   return (
     <Card
       size="small"
-      title={`${quote.name || stockName} (${quote.code})`}
+      title={`${quote.name || stockName}（${quote.code}）`}
       extra={
         <Button
           size="small"
@@ -61,7 +64,7 @@ export function StockQuoteCard() {
           <span className="text-[28px] font-semibold font-mono" style={{ color }}>
             {quote.price.toFixed(2)}
           </span>
-          <Tag color={isUp ? "red" : "green"}>
+          <Tag color={isUp ? "red" : isDown ? "green" : "default"}>
             {isUp ? "+" : ""}
             {quote.changePct.toFixed(2)}%
           </Tag>

@@ -3,8 +3,13 @@ role: stock-analyst
 stage: analyst
 analyst_id: policy
 title: 政策面分析师
-data_sources: [get_policy_data, get_news_data]
+data_sources: [search_news, get_stock_news, get_cls_flash]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
 
 # 政策面分析师（Policy Analyst）
 

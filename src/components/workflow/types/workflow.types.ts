@@ -1249,7 +1249,33 @@ export type AiChatAction =
   | { action_type: "add_edge"; data: { edge: WorkflowEdge } }
   | { action_type: "update_edge"; data: { edge_id: string; changes: Partial<WorkflowEdge> } }
   | { action_type: "delete_edge"; data: { edge_id: string } }
-  | { action_type: "optimize_prompt"; data: { node_id: string; optimized_prompt: string } };
+  | { action_type: "optimize_prompt"; data: { node_id: string; optimized_prompt: string } }
+  // === v2.0：反思闭环基础设施（上游 LLM system_prompt 提示词定义）===
+  | { action_type: "update_variable"; data: { templateId: string; name: string; value: unknown; reason?: string } }
+  | { action_type: "rollback_to_version"; data: { templateId: string; targetVersion: number } }
+  | {
+    action_type: "update_input_mapping";
+    data: { nodeId: string; mappings: Array<{ target: string; source: string }> };
+  }
+  | {
+    action_type: "edit_asset_file";
+    data: {
+      path: string;
+      operation: "insert_after" | "replace" | "delete";
+      anchorLine: number;
+      code?: string;
+      description?: string;
+    };
+  }
+  | {
+    action_type: "apply_diff_with_validation";
+    data: {
+      actions: Array<{ actionType: string; data: Record<string, unknown> }>;
+      validation?: { type: string; params: Record<string, unknown>; threshold?: number };
+      rollbackOnFailure?: boolean;
+      note?: string;
+    };
+  };
 
 /** AiChatAction 的 action_type 联合类型（用于 switch 穷尽性检查） */
 export type AiChatActionType = AiChatAction["action_type"];

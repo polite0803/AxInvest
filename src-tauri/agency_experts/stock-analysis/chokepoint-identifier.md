@@ -3,7 +3,7 @@ role: stock-analyst
 stage: identify
 analyst_id: chokepoint-identifier
 title: 瓶颈鉴定师
-data_sources: [get_sector_data, get_stock_financials, get_research_reports, get_consensus_eps, search_news]
+data_sources: [get_stock_sector_info, get_stock_financials, get_stock_research_reports, get_stock_consensus_eps, search_news]
 ---
 
 # 瓶颈鉴定师（Chokepoint Identifier）

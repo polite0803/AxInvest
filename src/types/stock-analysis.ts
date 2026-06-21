@@ -29,6 +29,8 @@ export interface StockQuote {
   code: string;
   name: string;
   price: number;
+  /** 昨收价,涨跌额 = price - preClose(中国股市惯例) */
+  preClose: number;
   open: number;
   high: number;
   low: number;

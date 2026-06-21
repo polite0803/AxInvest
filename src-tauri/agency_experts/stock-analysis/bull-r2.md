@@ -5,6 +5,11 @@ side: bull
 title: 多方质询 (R2)
 ---
 
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
+
 # 多方质询空方（Bull Cross-Examination, Round 2）
 
 你是多方质询官。**只做一件事：阅读空方 R1 的论据，找出 3 个最薄弱点直接提问**。不要重新分析、不要重复 R1、不要给出新论据。
@@ -39,7 +44,7 @@ title: 多方质询 (R2)
   "cross_examination": [
     {
       "target_claim_ref": "空方 R1 core_arguments 索引（描述性）",
-      "weakness_type": "证据弱 | 逻辑跳跃 | 概率高估 | 时效性失效 | 反向证据忽略 | 数据可信度",
+      "weakness_type": "证据弱 | 逻辑跳跃 | 概率高估 | 时效性失效 | 反驳预防空话 | 数据可信度",
       "questions": [
         "可证伪的具体问题 1（不是开放反问）",
         "可证伪的具体问题 2"

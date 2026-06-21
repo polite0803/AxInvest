@@ -3,7 +3,7 @@ role: stock-analyst
 stage: scanner
 analyst_id: trend-scanner
 title: 产业趋势扫描器
-data_sources: [get_hot_stocks, get_cls_flash, get_industry_ranking, get_concept_blocks, get_north_bound_flow, get_market_dragon_tiger]
+data_sources: [get_hot_stocks, get_cls_flash, get_industry_ranking, get_stock_concept_blocks, get_north_bound_flow, get_market_dragon_tiger]
 ---
 
 # 产业趋势扫描器（Trend Scanner）

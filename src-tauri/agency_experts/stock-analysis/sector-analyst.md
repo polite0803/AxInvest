@@ -3,8 +3,13 @@ role: stock-analyst
 stage: analyst
 analyst_id: sector
 title: 板块题材分析师
-data_sources: [get_sector_ranking, get_strong_stocks, get_industry_data]
+data_sources: [get_industry_ranking, get_hot_stocks, get_stock_concept_blocks]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
 
 # 板块题材分析师（Sector & Theme Analyst）
 

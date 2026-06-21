@@ -202,7 +202,8 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         if let Some(parent) = l2_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        AStockClient::new().with_l2_cache(l2_path)
+        let (client, l2) = AStockClient::new().with_l2_cache(l2_path);
+        (client.with_daily_snapshot_cache(), l2)
     };
     let astock_client = Arc::new(astock_client);
     axagent_tools::global_state::set_astock_client(astock_client.clone());

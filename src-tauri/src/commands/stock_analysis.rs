@@ -2931,12 +2931,28 @@ pub async fn list_reflections(
                 "missedSignals": r.missed_signals,
                 "fixForFuture": r.fix_for_future,
                 "decisionJson": r.decision_json,
+                "blackboardSnapshot": r.blackboard_snapshot,
                 "status": r.status,
                 "createdAt": r.created_at,
             })
         })
         .collect();
     Ok(result)
+}
+
+/// 删除单条反思记录
+#[tauri::command]
+pub async fn delete_reflection(
+    state: State<'_, AppState>,
+    reflection_id: String,
+) -> Result<(), String> {
+    use axagent_core::entity::stock_reflections;
+    use sea_orm::EntityTrait;
+    stock_reflections::Entity::delete_by_id(&reflection_id)
+        .exec(state.harness.db())
+        .await
+        .map_err(|e| format!("删除反思记录失败: {e}"))?;
+    Ok(())
 }
 
 /// 手动触发反思复盘工作流（在前端复盘 tab 点击"开始反思"时调用）

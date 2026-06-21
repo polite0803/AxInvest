@@ -21,6 +21,7 @@ import type {
 } from "@/components/workflow/types";
 import { NODE_TYPE_MAP } from "@/components/workflow/types";
 import { auto_layout } from "@/lib/workflowLayout";
+import { message } from "antd";
 
 export interface ExpandedSubWorkflowData {
   /** 子工作流内部节点（ID 已 prefixed 避免冲突） */
@@ -270,7 +271,7 @@ interface WorkflowEditorState {
   aiChatSend: (message: string) => Promise<void>;
   aiChatCancel: () => void;
   aiChatClear: () => void;
-  applyAiChatAction: (action: AiChatAction) => void;
+  applyAiChatAction: (action: AiChatAction) => Promise<void>;
   /**
    * 事务性 AI action 批处理：一组 actions 要么全部应用、要么一键回滚。
    * - beginAiActionTransaction  拍快照（保存当前 nodes/edges 副本）
@@ -426,6 +427,12 @@ function parseActionsFromContent(content: string): AiChatAction[] {
         "update_edge",
         "delete_edge",
         "optimize_prompt",
+        // v2.0：反思闭环基础设施
+        "update_variable",
+        "rollback_to_version",
+        "update_input_mapping",
+        "edit_asset_file",
+        "apply_diff_with_validation",
       ];
       if (known.includes(actionType)) {
         actions.push({ action_type: actionType, data } as AiChatAction);
@@ -2020,7 +2027,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
     },
 
-    applyAiChatAction: (action: AiChatAction) => {
+    applyAiChatAction: async (action: AiChatAction) => {
       const { nodes, edges } = get();
       switch (action.action_type) {
         case "generate_workflow": {
@@ -2182,6 +2189,88 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           const { node_id, optimized_prompt } = action.data;
           if (node_id && optimized_prompt) {
             get().applyOptimizedPromptToNode(node_id, optimized_prompt);
+          }
+          break;
+        }
+        // === v2.0：反思闭环基础设施（上游 LLM system_prompt 提示词定义）===
+        // 这 5 个 action_type 的共同特点：调用后端命令，影响工作流模板（变量 / 资产 / 版本）
+        // 而不仅仅是当前画布的 nodes/edges。所以走 invoke 而不是本地 store mutation。
+        case "update_variable": {
+          const { templateId, name, value, reason } = action.data;
+          try {
+            await invoke("update_workflow_template_variable", {
+              input: { templateId, name, value, reason },
+            });
+            message.success(`已更新变量 ${name}`);
+          } catch (e) {
+            message.error(`更新变量 ${name} 失败: ${String(e)}`);
+          }
+          break;
+        }
+        case "rollback_to_version": {
+          const { templateId, targetVersion } = action.data;
+          try {
+            const result = await invoke<{ newVersion: number }>(
+              "rollback_workflow_template_to_version",
+              { templateId, targetVersion },
+            );
+            message.success(`已回滚到版本 ${targetVersion}（新版本 v${result.newVersion}）`);
+            // 回滚后需要重载当前画布（因为模板的 nodes/edges/variables 全部回滚了）
+            await get().loadTemplate(templateId);
+          } catch (e) {
+            message.error(`回滚失败: ${String(e)}`);
+          }
+          break;
+        }
+        case "update_input_mapping": {
+          const { nodeId, mappings } = action.data;
+          try {
+            await invoke("update_workflow_node_input_mapping", {
+              input: { nodeId, mappings },
+            });
+            message.success(`已更新节点 ${nodeId} 的 input_mapping (${mappings.length} 条)`);
+          } catch (e) {
+            message.error(`更新 input_mapping 失败: ${String(e)}`);
+          }
+          break;
+        }
+        case "edit_asset_file": {
+          const { path, operation, anchorLine, code, description } = action.data;
+          try {
+            const result = await invoke<{ backupPath: string }>("edit_workflow_asset_file", {
+              input: { path, operation, anchorLine, code, description },
+            });
+            message.success(`已 ${operation} ${path} 第 ${anchorLine} 行（备份: ${result.backupPath}）`);
+          } catch (e) {
+            message.error(`编辑资产文件失败: ${String(e)}`);
+          }
+          break;
+        }
+        case "apply_diff_with_validation": {
+          // 聚合器：调后端按顺序 apply + 跑 backtest + 失败回滚
+          try {
+            const result = await invoke<{
+              success: boolean;
+              appliedCount: number;
+              validation: { type: string; passed: boolean; metrics: unknown } | null;
+              rolledBackToVersion: number | null;
+              error: string | null;
+            }>("apply_workflow_diff_with_validation", { input: action.data });
+            if (result.success) {
+              message.success(
+                `已应用 ${result.appliedCount} 个动作${
+                  result.validation ? `（验证 ${result.validation.type} 通过）` : ""
+                }`,
+              );
+            } else {
+              message.error(
+                `应用失败: ${result.error ?? "未知"}${
+                  result.rolledBackToVersion !== null ? `（已回滚到 v${result.rolledBackToVersion}）` : ""
+                }`,
+              );
+            }
+          } catch (e) {
+            message.error(`apply_diff_with_validation 失败: ${String(e)}`);
           }
           break;
         }

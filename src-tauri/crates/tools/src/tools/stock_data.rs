@@ -357,7 +357,7 @@ impl StockAnnouncementsTool {
 #[async_trait]
 impl Tool for StockAnnouncementsTool {
     fn name(&self) -> &str {
-        "get_announcements"
+        "get_stock_announcements"
     }
     fn description(&self) -> &str {
         "获取A股公司公告/披露文件"
@@ -1285,6 +1285,14 @@ impl Tool for StockResearchReportsTool {
     fn name(&self) -> &str {
         "get_research_reports"
     }
+    // [BUGFIX] 工作流 t-research-data 节点 (stock_analysis_setup.rs:1341) 引用
+    // 工具名 "get_stock_research_reports",而本工具主名是 "get_research_reports" ——
+    // 不加 alias 会导致 tool_registry.find() 报 "工具未找到"。加 alias 后两个名字
+    // 都能找到工具,MCP 层 (astock-data/src/mcp_tools.rs) 也用 "get_stock_research_reports"
+    // 保持一致。
+    fn aliases(&self) -> &[&str] {
+        &["get_stock_research_reports"]
+    }
     fn description(&self) -> &str {
         "获取券商研报列表（机构、评级、目标价、EPS预测）"
     }
@@ -1320,7 +1328,7 @@ impl StockConceptBlocksTool {
 #[async_trait]
 impl Tool for StockConceptBlocksTool {
     fn name(&self) -> &str {
-        "get_concept_blocks"
+        "get_stock_concept_blocks"
     }
     fn description(&self) -> &str {
         "获取概念板块三维归属（行业/概念/地域）"

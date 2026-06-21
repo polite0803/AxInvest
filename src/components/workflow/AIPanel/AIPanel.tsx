@@ -349,6 +349,17 @@ export const AIPanel: React.FC<AIPanelProps> = ({
         return t("workflow.aiPanel.actionDeleteEdge");
       case "optimize_prompt":
         return t("workflow.aiPanel.actionOptimizePrompt");
+      // v2.0：反思闭环基础设施
+      case "update_variable":
+        return t("workflow.aiPanel.actionUpdateVariable");
+      case "rollback_to_version":
+        return t("workflow.aiPanel.actionRollbackToVersion");
+      case "update_input_mapping":
+        return t("workflow.aiPanel.actionUpdateInputMapping");
+      case "edit_asset_file":
+        return t("workflow.aiPanel.actionEditAssetFile");
+      case "apply_diff_with_validation":
+        return t("workflow.aiPanel.actionApplyDiffWithValidation");
       default:
         return t("workflow.aiPanel.actionApply");
     }

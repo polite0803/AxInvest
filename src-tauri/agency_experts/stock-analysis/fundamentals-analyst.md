@@ -3,8 +3,13 @@ role: stock-analyst
 stage: analyst
 analyst_id: fundamentals
 title: 基本面分析师
-data_sources: [get_fundamentals_data, get_financial_indicators]
+data_sources: [get_stock_financials, compute_valuation]
 ---
+
+## 目标股票
+
+- 股票代码: `{{stock_code}}`
+- 股票名称: `{{stock_name}}`
 
 # 基本面分析师（Fundamentals Analyst）
 

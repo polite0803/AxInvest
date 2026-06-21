@@ -97,4 +97,5 @@ pub mod wiki;
 pub mod work_engine;
 pub mod workflow_ai;
 pub mod workflow_ai_diagnose;
+pub mod workflow_apply;
 pub mod workflow_template;

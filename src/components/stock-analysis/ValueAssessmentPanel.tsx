@@ -57,7 +57,11 @@ function extractReadableText(report: string): string {
     if (Array.isArray(parsed.risk_flags) && parsed.risk_flags.length > 0) {
       parts.push(`## 风险标志\n\n${parsed.risk_flags.join("、")}`);
     }
-    return parts.filter(Boolean).join("\n\n");
+    const knownFieldsText = parts.filter(Boolean).join("\n\n");
+    // 已知字段有内容:直接返回
+    if (knownFieldsText) { return knownFieldsText; }
+    // 已知字段全空(as-of 模式可能产出非标准 schema,或 schema 字段名变了):
+    // 不要 return,继续走下面的递归提取 + 原始 JSON 兜底,避免卡片完全空白
   }
 
   // 解析失败：去掉 ```json ``` 代码块标记，保留解释文字

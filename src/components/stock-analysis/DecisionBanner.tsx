@@ -20,6 +20,8 @@ export function DecisionBanner() {
   const decision = useStockAnalysisStore((s) => s.decision);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
+  const analysisId = useStockAnalysisStore((s) => s.analysisId);
+  const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
   const quote = useStockAnalysisStore((s) => s.quote);
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
@@ -135,15 +137,74 @@ export function DecisionBanner() {
     });
   }, [decision, stockCode, stockName, decisionContext, navigate, t]);
 
-  // ── 空决策检查：全 0 / 无目标价 / 无理由 时不渲染 ──
-  if (!decision) { return null; }
+  // ── 无决策占位：从未分析过 / 分析失败 / 空壳 normalize 后为 null ──
+  if (!decision) {
+    return (
+      <Card
+        id="decision-banner-top"
+        size="small"
+        title={
+          <div className="flex items-center gap-2">
+            <span>{t("stockAnalysis.finalDecision")}</span>
+            <Tag color="default">
+              {t("stockAnalysis.decisionMissing")}
+            </Tag>
+          </div>
+        }
+        styles={{ body: { padding: "12px 16px" } }}
+        style={{
+          borderLeft: "4px solid var(--sa-amber)",
+          ...(highlightedPanel === "decision"
+            ? { boxShadow: "0 0 0 3px var(--accent)", transition: "box-shadow 0.4s" }
+            : {}),
+        }}
+      >
+        <div className="text-xs mb-2" style={{ color: "var(--muted)" }}>
+          {t("stockAnalysis.decisionMissingHint")}
+        </div>
+        {stockCode
+          ? (
+            <div className="mt-2 flex items-center gap-2">
+              <Button
+                size="small"
+                type="primary"
+                onClick={() =>
+                  useStockAnalysisStore.getState().startAnalysis(
+                    stockCode,
+                    analysisId ? { replaceAnalysisId: analysisId } : undefined,
+                  )}
+              >
+                🔄 {t("stockAnalysis.reAnalyze")}
+              </Button>
+              <span className="text-xs" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.willOverwrite")}
+              </span>
+            </div>
+          )
+          : (
+            <div className="mt-2 flex items-center gap-2">
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  const search = document.querySelector<HTMLInputElement>(
+                    "[data-testid='stock-analysis-search-input']",
+                  );
+                  search?.focus();
+                  message.info(t("stockAnalysis.reAnalyzeNeedCode"));
+                }}
+              >
+                🔍 {t("stockAnalysis.searchStock")}
+              </Button>
+              <span className="text-xs" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.reAnalyzeNeedCodeHint")}
+              </span>
+            </div>
+          )}
+      </Card>
+    );
+  }
   // TypeScript 在此之后已将 decision 收窄为 StockDecision (non-null)
-  const emptyDecision = decision.confidence === 0
-    && decision.positionPct === 0
-    && decision.targetPrice == null
-    && decision.stopLoss == null
-    && (!decision.reasoning || decision.reasoning.trim() === "");
-  if (emptyDecision) { return null; }
 
   // ── 决策 vs 分析师共识矛盾检测 ──
   const isContradictory = (() => {
@@ -173,6 +234,7 @@ export function DecisionBanner() {
   return (
     <>
       <Card
+        id="decision-banner-top"
         size="small"
         title={
           <div className="flex items-center gap-2">
@@ -214,7 +276,12 @@ export function DecisionBanner() {
           />
         }
         styles={{ body: { padding: "12px 16px" } }}
-        style={{ borderLeft: "4px solid var(--accent)" }}
+        style={{
+          borderLeft: "4px solid var(--accent)",
+          ...(highlightedPanel === "decision"
+            ? { boxShadow: "0 0 0 3px var(--accent)", transition: "box-shadow 0.4s" }
+            : {}),
+        }}
       >
         <div className="mb-3">
           <div className="flex justify-between text-xs mb-1">
@@ -398,6 +465,18 @@ export function DecisionBanner() {
           {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
           {stockCode && (
             <>
+              <Button
+                size="small"
+                icon={<span>🔄</span>}
+                title={t("stockAnalysis.willOverwrite")}
+                onClick={() =>
+                  useStockAnalysisStore.getState().startAnalysis(
+                    stockCode,
+                    analysisId ? { replaceAnalysisId: analysisId } : undefined,
+                  )}
+              >
+                {t("stockAnalysis.reAnalyze")}
+              </Button>
               <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
                 {t("stockAnalysis.askAI")}
               </Button>

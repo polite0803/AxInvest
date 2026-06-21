@@ -314,7 +314,10 @@ interface StockAnalysisState {
     limit: number,
     adj?: "auto" | "none" | "forward" | "backward",
   ) => Promise<void>;
-  startAnalysis: (stockCode: string) => Promise<void>;
+  startAnalysis: (
+    stockCode: string,
+    options?: { replaceAnalysisId?: string },
+  ) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
   getDryRun: () => Promise<boolean>;
   fetchHistory: (limit?: number, offset?: number) => Promise<void>;
@@ -581,7 +584,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  startAnalysis: async (stockCode: string) => {
+  startAnalysis: async (
+    stockCode: string,
+    options?: { replaceAnalysisId?: string },
+  ) => {
     const { status } = get();
     if (status === "loading" || status === "running") {
       console.warn("[StockAnalysis] Analysis already in progress, ignoring duplicate start");
@@ -642,7 +648,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         asOfDate,
         mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",
       });
-      const result = await invoke<Record<string, unknown>>("run_stock_workflow", { stockCode, dryRun, asOfDate });
+      const result = await invoke<Record<string, unknown>>("run_stock_workflow", {
+        stockCode,
+        dryRun,
+        asOfDate,
+        // 重跑分析场景：传 replaceAnalysisId 让后端先 DELETE 同 id 旧行再 INSERT,
+        // 保留 id 稳定,前端 store 引用不会断（= 覆盖原记录）。
+        analysisId: options?.replaceAnalysisId ?? null,
+      });
 
       // P0-4 修复: 检查数据质量预检跳过
       // serde_json::Value 返回 snake_case 键

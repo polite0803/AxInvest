@@ -7604,6 +7604,7 @@
     "reAnalyzeNeedCode": "請先在搜尋欄輸入股票代碼",
     "reAnalyzeNeedCodeHint": "當前未選定股票，需在頂部搜尋欄選擇後再啟動分析",
     "searchStock": "搜尋股票",
+    "willOverwrite": "將覆蓋原記錄（保留相同 analysisId）",
     "position": "仓位",
     "targetPrice": "目标价",
     "stopLoss": "止损",

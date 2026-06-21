@@ -425,6 +425,11 @@ mod tests {
     }
 }
 
+/// 启动股票分析工作流（DAG 模式）。
+///
+/// - 默认：生成新 UUID 并 INSERT 新 `stock_analyses` 行（fresh start）。
+/// - 重跑分析场景：传入 `analysis_id` 让后端先 DELETE 同 id 旧行再 INSERT,
+///   保留 id 稳定,前端 store 引用不会断,等价于"覆盖原记录"。
 #[tauri::command]
 pub async fn run_stock_workflow(
     app: tauri::AppHandle,
@@ -432,6 +437,9 @@ pub async fn run_stock_workflow(
     stock_code: String,
     dry_run: Option<bool>,
     as_of_date: Option<String>,
+    // 可选: 传入已存在的 analysisId 即可"覆盖"该记录（用于重跑分析场景）。
+    // 不传则生成新 UUID 并 INSERT 新行（fresh start）。
+    analysis_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // 解析 as_of_date；非法或未来日期直接 4xx-style 错误
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
@@ -439,11 +447,12 @@ pub async fn run_stock_workflow(
     if let Some(ctx) = as_of_ctx {
         as_of::AS_OF
             .scope(Some(ctx), async {
-                run_stock_workflow_inner(app, state, stock_code, dry_run, as_of_date).await
+                run_stock_workflow_inner(app, state, stock_code, dry_run, as_of_date, analysis_id)
+                    .await
             })
             .await
     } else {
-        run_stock_workflow_inner(app, state, stock_code, dry_run, None).await
+        run_stock_workflow_inner(app, state, stock_code, dry_run, None, analysis_id).await
     }
 }
 
@@ -453,6 +462,9 @@ async fn run_stock_workflow_inner(
     stock_code: String,
     dry_run: Option<bool>,
     as_of_date: Option<String>,
+    // 可选: 重跑分析时由外层传入已存在的 analysis_id。
+    // 实现"覆盖原记录": DELETE 同 id 旧行 + INSERT 新行,id 保持稳定。
+    analysis_id_override: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let quote = state
         .astock_client
@@ -460,7 +472,43 @@ async fn run_stock_workflow_inner(
         .await
         .map_err(|e| format!("行情获取失败: {e}"))?;
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let analysis_id = uuid::Uuid::new_v4().to_string();
+
+    // 决定本次分析的 id：
+    // 1) 调用方显式提供（重跑分析场景）→ 复用该 id（先 DELETE 同 id 旧行,失败降级为新建 id）
+    // 2) 未提供 → 生成新 UUID
+    let analysis_id = match analysis_id_override.as_ref() {
+        Some(provided) => {
+            match stock_analyses::Entity::delete_by_id(provided.as_str())
+                .exec(state.harness.db())
+                .await
+            {
+                Ok(deleted) => {
+                    if deleted.rows_affected > 0 {
+                        tracing::info!(
+                            "[run_stock_workflow] 覆盖模式: 已删除旧 analysis id={}, affected={}",
+                            provided,
+                            deleted.rows_affected
+                        );
+                    } else {
+                        tracing::info!(
+                            "[run_stock_workflow] 覆盖模式: id={} 不存在,直接 INSERT 新行",
+                            provided
+                        );
+                    }
+                    provided.clone()
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "[run_stock_workflow] 删除旧 analysis 失败,降级为新建 id: provided={}, err={}",
+                        provided,
+                        e
+                    );
+                    uuid::Uuid::new_v4().to_string()
+                },
+            }
+        },
+        None => uuid::Uuid::new_v4().to_string(),
+    };
 
     stock_analyses::ActiveModel {
         id: Set(analysis_id.clone()),

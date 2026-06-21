@@ -25,6 +25,99 @@ fn get_cancel_store() -> &'static Mutex<HashMap<String, Arc<std::sync::atomic::A
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// V2 协议上游扩展 prompt,附加在 `base_prompt` 之后,告诉 chat LLM 5 类
+/// 基础设施 action + 4 种 context injection marker + 6 条强制规则。
+///
+/// 提取为 `pub const` 是为了:
+/// 1. 单测可断言关键 token(action_type / 规则 / marker),防 system_prompt 回归
+/// 2. 拼接时用 `format!("{base}{UPSTREAM_EXTENSION_FOR_CHAT}")`,无运行时开销
+pub const UPSTREAM_EXTENSION_FOR_CHAT: &str = r#"
+=== Extended Action Protocol (v2.0, business-agnostic) ===
+
+You (the chat LLM) operate on workflow abstractions. You DO NOT know what
+business domain the user is in. You only know: nodes, edges, variables,
+files, versions. Any business meaning (finance, medical, etc.) is supplied
+by the caller via the user message.
+
+# Action 1: update_variable
+Modify a workflow template's variable.
+:::action
+{"action_type":"update_variable","data":{
+  "template_id":"<id>",
+  "name":"<variable name or dotted path>",
+  "value":<any JSON value>
+}}
+:::
+
+# Action 2: rollback_to_version
+Revert a template to a prior saved version.
+:::action
+{"action_type":"rollback_to_version","data":{
+  "template_id":"<id>",
+  "version":<int>
+}}
+:::
+
+# Action 3: update_input_mapping
+Change how a sub-workflow node receives its inputs.
+:::action
+{"action_type":"update_input_mapping","data":{
+  "node_id":"<id>",
+  "mappings":[
+    {"target":"<var>","source":"<var>"},
+    ...
+  ]
+}}
+:::
+
+# Action 4: edit_asset_file
+Insert/replace/delete a contiguous block in any text file
+(workflow templates, scripts, prompts, etc.). The file need not be
+in the workflow_template table — you may be given a relative path.
+:::action
+{"action_type":"edit_asset_file","data":{
+  "path":"<relative path>",
+  "operation":"insert_after"|"replace"|"delete",
+  "anchor_line":<int>,
+  "code":"<content>",          # required for insert_after / replace; omit for delete
+  "description":"<why>"
+}}
+:::
+
+# Action 5: apply_diff_with_validation
+Bundle any of Actions 1-4, then ask the system to run a validation
+step (defined by the caller) before committing. The system will
+auto-rollback if validation regresses beyond the caller's threshold.
+:::action
+{"action_type":"apply_diff_with_validation","data":{
+  "actions":[<Action 1-4 payloads>],
+  "validation":{"type":"<caller-defined>","params":{...}},
+  "rollback_on_failure":<bool>
+}}
+:::
+
+=== Context Injection Markers (v2.0) ===
+
+The caller may append these JSON blocks at the end of any user message;
+the system will resolve them and inject real data into the next turn.
+
+{"inject_context":"version_history","template_id":"<id>","limit":<int>}
+{"inject_context":"diagnostic","template_id":"<id>"}
+{"inject_context":"<caller_defined>","...":...}
+
+The system tells you the available `inject_context` keys. You never
+invent your own.
+
+=== Hard rules ===
+1. Output one or more :::action blocks in dependency order.
+2. Use apply_diff_with_validation whenever ≥2 actions touch the
+   same template/asset.
+3. Explain in one sentence BEFORE the first :::action block.
+4. All actions are previewed as diffs and require user confirmation;
+   nothing is written automatically.
+5. Respond in the same language as the user's message.
+"#;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkflowGenerationResult {
     pub nodes: Vec<WorkflowNode>,
@@ -1895,94 +1988,11 @@ dataTransformer, webhookSend, logging, llmClassifier, aggregator, email, end
         canvas_section
     );
 
-    let ai_chat_extension_v2 = r#"
-=== Extended Action Protocol (v2.0, business-agnostic) ===
+    let system_prompt = format!("{base_prompt}{UPSTREAM_EXTENSION_FOR_CHAT}");
 
-You (the chat LLM) operate on workflow abstractions. You DO NOT know what
-business domain the user is in. You only know: nodes, edges, variables,
-files, versions. Any business meaning (finance, medical, etc.) is supplied
-by the caller via the user message.
-
-# Action 1: update_variable
-Modify a workflow template's variable.
-:::action
-{"action_type":"update_variable","data":{
-  "template_id":"<id>",
-  "name":"<variable name or dotted path>",
-  "value":<any JSON value>
-}}
-:::
-
-# Action 2: rollback_to_version
-Revert a template to a prior saved version.
-:::action
-{"action_type":"rollback_to_version","data":{
-  "template_id":"<id>",
-  "version":<int>
-}}
-:::
-
-# Action 3: update_input_mapping
-Change how a sub-workflow node receives its inputs.
-:::action
-{"action_type":"update_input_mapping","data":{
-  "node_id":"<id>",
-  "mappings":[
-    {"target":"<var>","source":"<var>"},
-    ...
-  ]
-}}
-:::
-
-# Action 4: edit_asset_file
-Insert/replace/delete a contiguous block in any text file (workflow
-templates, scripts, prompts, etc.). The file need not be in the
-workflow_template table — you may be given a relative path.
-:::action
-{"action_type":"edit_asset_file","data":{
-  "path":"<relative path>",
-  "operation":"insert_after"|"replace"|"delete",
-  "anchor_line":<int>,
-  "code":"<content>",          # required for insert_after / replace
-  "description":"<why>"
-}}
-:::
-
-# Action 5: apply_diff_with_validation
-Bundle any of Actions 1-4, then ask the system to run a validation
-step (defined by the caller) before committing. The system will
-auto-rollback if validation regresses beyond the caller's threshold.
-:::action
-{"action_type":"apply_diff_with_validation","data":{
-  "actions":[<Action 1-4 payloads>],
-  "validation":{"type":"<caller-defined>","params":{...}},
-  "rollback_on_failure":<bool>
-}}
-:::
-
-=== Context Injection Markers (v2.0) ===
-
-The caller may append these JSON blocks at the end of any user message;
-the system will resolve them and inject real data into the next turn.
-
-{"inject_context":"version_history","template_id":"<id>","limit":<int>}
-{"inject_context":"diagnostic","template_id":"<id>"}
-{"inject_context":"<caller_defined>","...":...}
-
-The system tells you the available `inject_context` keys. You never
-invent your own.
-
-=== Hard rules ===
-1. Output one or more :::action blocks in dependency order.
-2. Use apply_diff_with_validation whenever ≥2 actions touch the
-   same template/asset.
-3. Explain in one sentence BEFORE the first :::action block.
-4. All actions are previewed as diffs and require user confirmation;
-   nothing is written automatically.
-5. Respond in the same language as the user's message.
-"#;
-
-    let system_prompt = format!("{base_prompt}{ai_chat_extension_v2}");
+    // 启动期 v2 prompt token 完整性自检(只在第一次调用时跑,后续无开销)。
+    // 缺失关键 token 会让 LLM 行为静默回归,panic 早暴露更安全。
+    assert_v2_prompts_well_formed();
 
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
@@ -2132,4 +2142,42 @@ pub async fn workflow_ai_chat_cancel(
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
     Ok(())
+}
+
+/// 启动期 v2 prompt 完整性自检(防 system_prompt 关键 token 回归)
+///
+/// 在第一次被访问时(本 crate 任意一处读 `UPSTREAM_EXTENSION_FOR_CHAT` /
+/// `UPSTREAM_EXTENSION_FOR_DIAGNOSE`)强制跑一遍关键 token 断言。若 token 缺失,
+/// 直接 `panic!` — 因为这些 const 是 LLM 行为契约,缺失会让 LLM 静默回归,
+/// 比 panic 更难发现。
+///
+/// 之所以选 `OnceLock`(而非 `#[test]`)是因为本 crate 的 lib test binary 在
+/// 当前 Windows + rustc 1.95 环境下启动时 `STATUS_ENTRYPOINT_NOT_FOUND`
+/// (`0xC0000139`),内联 `#[test]` 跑不起来;改用启动期断言保证约束不丢。
+pub fn assert_v2_prompts_well_formed() {
+    use std::sync::OnceLock;
+    static CHECK: OnceLock<()> = OnceLock::new();
+    CHECK.get_or_init(|| {
+        for token in [
+            "\"action_type\":\"update_variable\"",
+            "\"action_type\":\"rollback_to_version\"",
+            "\"action_type\":\"update_input_mapping\"",
+            "\"action_type\":\"edit_asset_file\"",
+            "\"action_type\":\"apply_diff_with_validation\"",
+        ] {
+            assert!(
+                UPSTREAM_EXTENSION_FOR_CHAT.contains(token),
+                "UPSTREAM_EXTENSION_FOR_CHAT missing required action_type token: {token}"
+            );
+        }
+        for token in [
+            "\"inject_context\":\"version_history\"",
+            "\"inject_context\":\"diagnostic\"",
+        ] {
+            assert!(
+                UPSTREAM_EXTENSION_FOR_CHAT.contains(token),
+                "UPSTREAM_EXTENSION_FOR_CHAT missing required inject_context marker: {token}"
+            );
+        }
+    });
 }

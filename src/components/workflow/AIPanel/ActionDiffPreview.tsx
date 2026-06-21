@@ -65,7 +65,7 @@ export const ActionDiffPreview: React.FC<ActionDiffPreviewProps> = ({
     }
   };
 
-  const handleApplyAll = () => {
+  const handleApplyAll = async () => {
     try {
       // 事务性批量应用：拍快照 → 逐个应用 → 提交。
       // 后续任一时刻可通过 "撤销整批" 按钮一键回滚。
@@ -73,7 +73,7 @@ export const ActionDiffPreview: React.FC<ActionDiffPreviewProps> = ({
       setBatchTxId(txId);
       if (actions) {
         for (const action of actions) {
-          applyInTx(txId, action);
+          await applyInTx(txId, action);
         }
         commitTx(txId);
       }
@@ -406,89 +406,41 @@ function useActionVisual(
         afterRender: <Text style={{ fontSize: 11 }}>{action.data.optimized_prompt}</Text>,
       };
     }
-    // === v2.0：反思闭环基础设施（上游 LLM system_prompt 提示词定义）===
-    case "update_variable": {
-      return {
-        label,
-        color: "#722ed1", // 紫色：参数调整
-        beforeRender: (
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {action.data.name} = ?
-          </Text>
-        ),
-        afterRender: (
-          <Text code style={{ fontSize: 11 }}>
-            {action.data.name} = {JSON.stringify(action.data.value)}
-            {action.data.reason ? ` (${action.data.reason})` : ""}
-          </Text>
-        ),
-      };
-    }
-    case "rollback_to_version": {
-      return {
-        label,
-        color: "#fa8c16", // 橙色：回滚
-        beforeRender: (
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {t("workflow.aiPanel.diffPreview.currentVersion", {
-              templateId: action.data.templateId,
-            })}
-          </Text>
-        ),
-        afterRender: (
-          <Text style={{ fontSize: 11, color: "#fa8c16", fontWeight: 600 }}>
-            {t("workflow.aiPanel.diffPreview.rollbackTo", { version: action.data.targetVersion })}
-          </Text>
-        ),
-      };
-    }
-    case "update_input_mapping": {
-      const mappings = action.data.mappings;
-      return {
-        label,
-        color: "#13c2c2", // 青色：连线调整
-        beforeRender: <Text type="secondary" style={{ fontSize: 11 }}>{action.data.nodeId}</Text>,
-        afterRender: (
-          <Text code style={{ fontSize: 11 }}>
-            {mappings.map(m => `${m.target} ← ${m.source}`).join(", ")}
-          </Text>
-        ),
-      };
-    }
-    case "edit_asset_file": {
-      return {
-        label,
-        color: "#eb2f96", // 粉色：硬编码资产调整
-        beforeRender: <Text type="secondary" style={{ fontSize: 11 }}>{action.data.path}</Text>,
-        afterRender: (
-          <Text style={{ fontSize: 11 }}>
-            [{action.data.operation}] 第 {action.data.anchorLine} 行
-            {action.data.description ? ` — ${action.data.description}` : ""}
-          </Text>
-        ),
-      };
-    }
+    // ── v2.0 基础设施类 action:共用 JSON 渲染,详细 diff 等 P0 #1 后端命令实现后接入 ──
+    case "update_variable":
+    case "rollback_to_version":
+    case "update_input_mapping":
+    case "edit_asset_file":
     case "apply_diff_with_validation": {
-      const innerActions = action.data.actions;
+      const summary = summarizeV2Action(action);
       return {
         label,
-        color: "#52c41a", // 绿色：聚合 + 验证
-        beforeRender: (
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {t("workflow.aiPanel.diffPreview.applyDiffBefore", { count: innerActions.length })}
-          </Text>
-        ),
-        afterRender: (
-          <Text style={{ fontSize: 11 }}>
-            {t("workflow.aiPanel.diffPreview.applyDiffAfter", {
-              count: innerActions.length,
-              validationType: action.data.validation?.type ?? "none",
-              rollback: action.data.rollbackOnFailure !== false ? t("common.yes") : t("common.no"),
-            })}
-          </Text>
-        ),
+        color: NODE_OP_COLOR.modify_node,
+        beforeRender: <Text type="secondary">—</Text>,
+        afterRender: <Text style={{ fontSize: 11 }}>{summary}</Text>,
       };
     }
+  }
+}
+
+/** v2 action 的人类可读摘要,用于 diff 渲染(P0 #1 后端命令实现后可替换为更详细版本) */
+function summarizeV2Action(action: AiChatAction): string {
+  switch (action.action_type) {
+    case "update_variable":
+      return `${action.data.template_id} · ${action.data.name} = ${JSON.stringify(action.data.value)}`;
+    case "rollback_to_version":
+      return `${action.data.template_id} → v${action.data.version}`;
+    case "update_input_mapping":
+      return `${action.data.node_id} · ${action.data.mappings.length} mapping(s)`;
+    case "edit_asset_file":
+      return `${action.data.path}:${action.data.anchor_line} · ${action.data.operation}${
+        action.data.code ? ` (${action.data.code.length} chars)` : ""
+      }`;
+    case "apply_diff_with_validation":
+      return `${action.data.actions.length} action(s) · validation=${action.data.validation.type}`;
+    default:
+      // 非 v2 action 不会调用本函数(由 call site 保证),兜底返回 action_type
+      return action.action_type;
   }
 }
 

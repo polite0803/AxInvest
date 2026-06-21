@@ -7602,6 +7602,7 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
     "stopLoss": "Stop Loss",

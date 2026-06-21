@@ -2,9 +2,12 @@
 
 import type {
   AiChatAction,
+  ApplyDiagnosticFixesResult,
+  ApplyDiffValidationResult,
   DiagnosticFix,
   DiagnosticIssue,
   DiagnosticReport,
+  EditAssetFileResult,
   ErrorConfig,
   JsonSchema,
   NodeSkillMatch,
@@ -89,6 +92,9 @@ interface WorkflowEditorState {
   isDirty: boolean;
   validationResult: ValidationResult | null;
   diagnoseReport: DiagnosticReport | null;
+  /** V2 协议顶层 fixes[] 数组 — LLM 报告里 dedup 后的批应用入口 */
+  diagnoseRawFixes: DiagnosticFix[] | null;
+  diagnoseAutoApply: boolean;
   diagnoseLoading: boolean;
   diagnoseApplying: boolean;
   diagnoseDrawerVisible: boolean;
@@ -220,7 +226,7 @@ interface WorkflowEditorState {
     nodes: WorkflowNode[],
     workflowName: string,
     description?: string,
-  ) => Promise<unknown>;
+  ) => Promise<LlmDiagnoseV2 | null>;
 
   generateWorkflowFromPrompt: (
     prompt: string,
@@ -261,6 +267,17 @@ interface WorkflowEditorState {
   clearDiagnoseReport: () => void;
   setDiagnoseDrawerVisible: (visible: boolean) => void;
   applyDiagnoseFix: (issueId: string) => boolean;
+  /**
+   * 批量应用 V2 协议顶层 fixes[] 数组(由 LLM 报告的 `fixes` 字段透传)
+   * - 调用后端 `apply_diagnostic_fixes` 命令
+   * - 新 4 种(基础设施类)由后端调度器落地
+   * - 原 6 种(节点级 UI)被后端忽略,前端走 `applyDiagnoseFix(issueId)` 路径
+   * - 返回后端调度结果摘要,失败时回填 error
+   */
+  applyDiagnosticFixes: (
+    fixes: DiagnosticFix[],
+    autoApply?: boolean,
+  ) => Promise<ApplyDiagnosticFixesResult | null>;
 
   aiChatMessages: AiChatMessage[];
   aiChatSessionId: string;
@@ -287,7 +304,7 @@ interface WorkflowEditorState {
     beforeEdges: WorkflowEdge[];
   }>;
   beginAiActionTransaction: () => string;
-  applyAiChatActionInTransaction: (txId: string, action: AiChatAction) => void;
+  applyAiChatActionInTransaction: (txId: string, action: AiChatAction) => Promise<void>;
   commitAiActionTransaction: (txId: string) => void;
   rollbackAiActionTransaction: (txId: string) => void;
   rollbackLastAiActionTransaction: () => void;
@@ -405,6 +422,24 @@ function rebuildParentRefsFromNodes(nodes: WorkflowNode[]): Record<string, strin
   return refs;
 }
 
+/**
+ * 把后端 apply_* 命令返回的最新 WorkflowTemplateResponse 同步到 store 内的
+ * currentTemplate / nodes / edges。保持 history(past/future)不变 — 后端持久化
+ * 后的版本历史是数据库的 workflow_template_versions,与前端 history 解耦。
+ */
+function applyRefreshedTemplate(
+  set: (fn: (state: WorkflowEditorState) => void) => void,
+  refreshed: WorkflowTemplateResponse,
+): void {
+  set((state) => {
+    state.currentTemplate = refreshed;
+    state.nodes = refreshed.nodes;
+    state.edges = refreshed.edges;
+    state.parentRefs = rebuildParentRefsFromNodes(refreshed.nodes);
+    state.isDirty = false;
+  });
+}
+
 function parseActionsFromContent(content: string): AiChatAction[] {
   const actions: AiChatAction[] = [];
   const regex = /:::action\s*\n([\s\S]*?)\n:::/g;
@@ -427,7 +462,7 @@ function parseActionsFromContent(content: string): AiChatAction[] {
         "update_edge",
         "delete_edge",
         "optimize_prompt",
-        // v2.0：反思闭环基础设施
+        // ── v2.0 基础设施类 action(后端 P0 #1 命令实现后,本 switch 在 applyAiChatAction 处加 stub)──
         "update_variable",
         "rollback_to_version",
         "update_input_mapping",
@@ -484,7 +519,11 @@ function mergeReports(ruleReport: DiagnosticReport, llmReport: DiagnosticReport)
   };
 }
 
-interface LlmDiagnoseRaw {
+/**
+ * V2 协议 LLM diagnose 报告原始 schema(后端 `llm_diagnose_workflow` 返回):
+ * 4 档 severity + 顶层 fixes[] + auto_apply 标志
+ */
+interface LlmDiagnoseV2 {
   summary: string;
   issues: Array<{
     severity: string;
@@ -493,26 +532,67 @@ interface LlmDiagnoseRaw {
     title: string;
     detail: string;
     suggestion: string;
+    fix?: DiagnosticFix;
   }>;
   suggestions: string[];
+  fixes?: DiagnosticFix[];
+  auto_apply?: boolean;
 }
 
-function transformLlmResult(raw: LlmDiagnoseRaw): DiagnosticReport {
-  const validSeverities = new Set(["error", "warning", "info"]);
+/**
+ * 把 LLM 返回的 severity 字符串映射到前端 `DiagnosticSeverity` 3 档。
+ *
+ * V2 协议引入 4 档业务无关 severity(critical / high / medium / low),与
+ * 旧版 3 档 UI 分桶(error / warning / info)兼容:
+ *   - critical / high / error            → error
+ *   - medium          / warning          → warning
+ *   - low             / info             → info
+ *   - 未知值                            → info(兜底)
+ *
+ * 详见后端 `workflow_ai_protocol.rs::DiagnosticSeverity`。
+ */
+function normalizeSeverity(raw: string): DiagnosticIssue["severity"] {
+  switch (raw) {
+    case "critical":
+    case "high":
+    case "error":
+      return "error";
+    case "medium":
+    case "warning":
+      return "warning";
+    case "low":
+    case "info":
+      return "info";
+    default:
+      return "info";
+  }
+}
+
+/**
+ * 把 V2 协议 LLM 报告转换成前端 `DiagnosticReport`(供 `mergeReports` 合并)。
+ *
+ * - issues: 协议层 4 档 severity 经 `normalizeSeverity` 映射到前端 3 档
+ * - 顶层 fixes[] 不进 `DiagnosticReport`(后者要被 `runDiagnosticRules` 复用),
+ *   而是在 `runWorkflowDiagnose` 单独存到 `diagnoseRawFixes`
+ */
+function transformLlmResult(raw: LlmDiagnoseV2): DiagnosticReport {
   const issues: DiagnosticIssue[] = (raw.issues ?? []).map((iss, idx) => ({
     id: `llm_${idx}_${iss.category}`,
-    severity: (validSeverities.has(iss.severity) ? iss.severity : "info") as DiagnosticIssue["severity"],
+    severity: normalizeSeverity(iss.severity),
     category: iss.category as DiagnosticIssue["category"],
     title_key: "",
     message_key: "",
     node_ids: iss.node_id ? [iss.node_id] : [],
-    auto_fixable: false,
+    auto_fixable: !!iss.fix,
+    fix: iss.fix,
     title_override: iss.title,
     detail_override: iss.detail,
     suggestion_override: iss.suggestion,
   }));
   const summary = { error: 0, warning: 0, info: 0 };
-  for (const iss of issues) { summary[iss.severity]++; }
+  for (const iss of issues) {
+    summary[iss.severity]++;
+  }
   return {
     issues,
     summary,
@@ -532,6 +612,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     isDirty: false,
     validationResult: null,
     diagnoseReport: null,
+    diagnoseRawFixes: null,
+    diagnoseAutoApply: false,
     diagnoseLoading: false,
     diagnoseApplying: false,
     diagnoseDrawerVisible: false,
@@ -1549,7 +1631,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
 
     llmDiagnoseWorkflow: async (nodes: WorkflowNode[], workflowName: string, description?: string) => {
       try {
-        return await invoke("llm_diagnose_workflow", {
+        return await invoke<LlmDiagnoseV2>("llm_diagnose_workflow", {
           request: { nodes, workflow_name: workflowName, workflow_description: description || null },
         });
       } catch {
@@ -1730,6 +1812,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             generated_at: Date.now(),
             duration_ms: 0,
           };
+          s.diagnoseRawFixes = null;
+          s.diagnoseAutoApply = false;
           s.diagnoseLoading = false;
         });
         return null;
@@ -1746,18 +1830,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
 
       try {
         const workflowName = get().currentTemplate?.name ?? "Untitled";
-        const llmRaw = await invoke<{
-          summary: string;
-          issues: Array<{
-            severity: string;
-            category: string;
-            node_id: string | null;
-            title: string;
-            detail: string;
-            suggestion: string;
-          }>;
-          suggestions: string[];
-        }>("llm_diagnose_workflow", {
+        const llmRaw = await invoke<LlmDiagnoseV2>("llm_diagnose_workflow", {
           request: {
             nodes,
             workflow_name: workflowName,
@@ -1768,12 +1841,16 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         const merged = mergeReports(ruleReport, llmReport);
         set((s) => {
           s.diagnoseReport = merged;
+          s.diagnoseRawFixes = llmRaw.fixes ?? null;
+          s.diagnoseAutoApply = llmRaw.auto_apply ?? false;
           s.diagnoseLoading = false;
         });
         return merged;
       } catch {
         set((s) => {
           s.diagnoseReport = ruleReport;
+          s.diagnoseRawFixes = null;
+          s.diagnoseAutoApply = false;
           s.diagnoseLoading = false;
         });
         return ruleReport;
@@ -1783,6 +1860,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     clearDiagnoseReport: () => {
       set((s) => {
         s.diagnoseReport = null;
+        s.diagnoseRawFixes = null;
+        s.diagnoseAutoApply = false;
         s.diagnoseDrawerVisible = false;
       });
     },
@@ -1878,6 +1957,51 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         });
       }
       return success;
+    },
+
+    /**
+     * 批量应用 V2 协议顶层 fixes[] — 调用后端 `apply_diagnostic_fixes`。
+     * - 新 4 种(基础设施类)由后端调度器自动落地
+     * - 原 6 种(节点级 UI)被后端忽略,前端拿到结果后可主动调 `applyDiagnoseFix`
+     * - 调用结束后清空 `diagnoseRawFixes`,避免重复应用
+     */
+    applyDiagnosticFixes: async (
+      fixes: DiagnosticFix[],
+      autoApply?: boolean,
+    ) => {
+      if (fixes.length === 0) {
+        return null;
+      }
+      const { diagnoseAutoApply } = get();
+      const useAutoApply = autoApply ?? diagnoseAutoApply;
+      set((s) => {
+        s.diagnoseApplying = true;
+      });
+      try {
+        const result = await invoke<ApplyDiagnosticFixesResult>(
+          "apply_diagnostic_fixes",
+          {
+            request: {
+              fixes,
+              auto_apply: useAutoApply,
+            },
+          },
+        );
+        set((s) => {
+          s.diagnoseRawFixes = null;
+        });
+        return result;
+      } catch (error) {
+        set((state) => {
+          state.error = String(error);
+        });
+        logIpcError("[diagnose] apply_diagnostic_fixes failed")(error);
+        return null;
+      } finally {
+        set((s) => {
+          s.diagnoseApplying = false;
+        });
+      }
     },
 
     aiChatSend: async (message: string) => {
@@ -2192,85 +2316,94 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           }
           break;
         }
-        // === v2.0：反思闭环基础设施（上游 LLM system_prompt 提示词定义）===
-        // 这 5 个 action_type 的共同特点：调用后端命令，影响工作流模板（变量 / 资产 / 版本）
-        // 而不仅仅是当前画布的 nodes/edges。所以走 invoke 而不是本地 store mutation。
-        case "update_variable": {
-          const { templateId, name, value, reason } = action.data;
-          try {
-            await invoke("update_workflow_template_variable", {
-              input: { templateId, name, value, reason },
-            });
-            message.success(`已更新变量 ${name}`);
-          } catch (e) {
-            message.error(`更新变量 ${name} 失败: ${String(e)}`);
-          }
-          break;
-        }
-        case "rollback_to_version": {
-          const { templateId, targetVersion } = action.data;
-          try {
-            const result = await invoke<{ newVersion: number }>(
-              "rollback_workflow_template_to_version",
-              { templateId, targetVersion },
-            );
-            message.success(`已回滚到版本 ${targetVersion}（新版本 v${result.newVersion}）`);
-            // 回滚后需要重载当前画布（因为模板的 nodes/edges/variables 全部回滚了）
-            await get().loadTemplate(templateId);
-          } catch (e) {
-            message.error(`回滚失败: ${String(e)}`);
-          }
-          break;
-        }
-        case "update_input_mapping": {
-          const { nodeId, mappings } = action.data;
-          try {
-            await invoke("update_workflow_node_input_mapping", {
-              input: { nodeId, mappings },
-            });
-            message.success(`已更新节点 ${nodeId} 的 input_mapping (${mappings.length} 条)`);
-          } catch (e) {
-            message.error(`更新 input_mapping 失败: ${String(e)}`);
-          }
-          break;
-        }
-        case "edit_asset_file": {
-          const { path, operation, anchorLine, code, description } = action.data;
-          try {
-            const result = await invoke<{ backupPath: string }>("edit_workflow_asset_file", {
-              input: { path, operation, anchorLine, code, description },
-            });
-            message.success(`已 ${operation} ${path} 第 ${anchorLine} 行（备份: ${result.backupPath}）`);
-          } catch (e) {
-            message.error(`编辑资产文件失败: ${String(e)}`);
-          }
-          break;
-        }
+
+        // ── v2.0 基础设施类 action(经后端 apply 命令落地)──
+        // 这些 action 改的是数据库/workflow 引擎层,不是本地 store 内的 nodes/edges。
+        // 调后端命令后,若返回最新的 WorkflowTemplateResponse 则用其刷新 currentTemplate
+        // (update_variable / rollback_to_version / update_input_mapping);
+        // edit_asset_file 改的是外部文本文件,只返回 EditAssetFileResult 给前端展示;
+        // apply_diff_with_validation 由后端调度器递归处理内嵌 actions,只返回结果摘要。
+        case "update_variable":
+        case "rollback_to_version":
+        case "update_input_mapping":
+        case "edit_asset_file":
         case "apply_diff_with_validation": {
-          // 聚合器：调后端按顺序 apply + 跑 backtest + 失败回滚
           try {
-            const result = await invoke<{
-              success: boolean;
-              appliedCount: number;
-              validation: { type: string; passed: boolean; metrics: unknown } | null;
-              rolledBackToVersion: number | null;
-              error: string | null;
-            }>("apply_workflow_diff_with_validation", { input: action.data });
-            if (result.success) {
-              message.success(
-                `已应用 ${result.appliedCount} 个动作${
-                  result.validation ? `（验证 ${result.validation.type} 通过）` : ""
-                }`,
-              );
-            } else {
-              message.error(
-                `应用失败: ${result.error ?? "未知"}${
-                  result.rolledBackToVersion !== null ? `（已回滚到 v${result.rolledBackToVersion}）` : ""
-                }`,
-              );
+            switch (action.action_type) {
+              case "update_variable": {
+                const refreshed = await invoke<WorkflowTemplateResponse>(
+                  "apply_update_variable",
+                  {
+                    templateId: action.data.template_id,
+                    name: action.data.name,
+                    value: action.data.value,
+                  },
+                );
+                applyRefreshedTemplate(set, refreshed);
+                break;
+              }
+              case "rollback_to_version": {
+                const refreshed = await invoke<WorkflowTemplateResponse>(
+                  "apply_rollback_to_version",
+                  {
+                    templateId: action.data.template_id,
+                    version: action.data.version,
+                  },
+                );
+                applyRefreshedTemplate(set, refreshed);
+                break;
+              }
+              case "update_input_mapping": {
+                const refreshed = await invoke<WorkflowTemplateResponse>(
+                  "apply_update_input_mapping",
+                  {
+                    nodeId: action.data.node_id,
+                    mappings: action.data.mappings,
+                  },
+                );
+                applyRefreshedTemplate(set, refreshed);
+                break;
+              }
+              case "edit_asset_file": {
+                // 仅返回 diff/行号,前端用 useActionVisual 展示,
+                // 真实文件已由后端落盘,无需刷 store。
+                const _result = await invoke<EditAssetFileResult>(
+                  "apply_edit_asset_file",
+                  {
+                    path: action.data.path,
+                    operation: action.data.operation,
+                    anchorLine: action.data.anchor_line,
+                    code: action.data.code,
+                    description: action.data.description,
+                  },
+                );
+                void _result;
+                break;
+              }
+              case "apply_diff_with_validation": {
+                // 调度器在后端跑(逐个 apply + validation hook + 可选回滚),
+                // 前端只展示结果摘要;若内嵌 action 改了 template,后端命令返回
+                // 的 WorkflowTemplateResponse 包含在 validation_metrics 里(下轮接入)。
+                const _result = await invoke<ApplyDiffValidationResult>(
+                  "apply_diff_with_validation",
+                  {
+                    actions: action.data.actions,
+                    validation: action.data.validation,
+                    rollbackOnFailure: action.data.rollback_on_failure,
+                  },
+                );
+                void _result;
+                break;
+              }
             }
-          } catch (e) {
-            message.error(`apply_diff_with_validation 失败: ${String(e)}`);
+          } catch (error) {
+            const errMsg = String(error);
+            set((state) => {
+              state.error = errMsg;
+            });
+            logIpcError(`[aiChat] ${action.action_type} failed`)(error);
+            throw error;
+            r;
           }
           break;
         }
@@ -2311,13 +2444,12 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       return txId;
     },
 
-    applyAiChatActionInTransaction: (txId: string, action: AiChatAction) => {
+    applyAiChatActionInTransaction: async (txId: string, action: AiChatAction) => {
+      await get().applyAiChatAction(action);
       const tx = get().aiActionTransactions.find((t) => t.id === txId);
       if (!tx) {
-        get().applyAiChatAction(action);
         return;
       }
-      get().applyAiChatAction(action);
       set((state) => {
         state.aiActionTransactions = state.aiActionTransactions.map((t) =>
           t.id === txId ? { ...t, appliedCount: t.appliedCount + 1 } : t

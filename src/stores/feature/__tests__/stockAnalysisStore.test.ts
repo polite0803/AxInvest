@@ -266,6 +266,25 @@ describe("stockAnalysisStore - feature coverage", () => {
       await useStockAnalysisStore.getState().loadAnalysis("an-1");
       expect(useStockAnalysisStore.getState().decision?.targetPrice).toBe(1500);
     });
+
+    // 全零空壳：loadAnalysis 不应把全零对象塞进 store
+    it("空对象 decisionJson {} → decision 保持 null（不污染 store）", async () => {
+      setupLoadAnalysisMock({});
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      expect(useStockAnalysisStore.getState().decision).toBeNull();
+    });
+
+    it("只有空字段 { action: null } → decision 保持 null", async () => {
+      setupLoadAnalysisMock({ action: null, confidence: 0, positionPct: 0 });
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      expect(useStockAnalysisStore.getState().decision).toBeNull();
+    });
+
+    it("HOLD 是合法决策 → 保留", async () => {
+      setupLoadAnalysisMock({ action: "HOLD" });
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      expect(useStockAnalysisStore.getState().decision?.action).toBe("HOLD");
+    });
   });
 
   // ────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import { DebatePanel } from "./DebatePanel";
 import { DecisionBanner } from "./DecisionBanner";
 import { ExperimentSidebar } from "./ExperimentSidebar";
 import { ExperimentTrail } from "./ExperimentTrail";
+import { resolveTimelineJump } from "./timelineJump";
 import "./dual-view";
 import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
 import { EventCalendarPanel } from "./EventCalendarPanel";
@@ -150,34 +151,35 @@ export function StockAnalysisPage() {
     };
   }, []);
 
-  // Decision Timeline 证据芯片 → 切换主 tab（useRightPanel 派发的 timeline-jump 事件）
-  // 格式: timelineJump = "<tabKey>:<panelKey>"（tabKey 为 market/analyze/execute）
-  // 映射:analyze 的子 panelKey 决定具体 tab(execute 默认落到 decision)
+  // Decision Timeline 证据芯片 → 切换主 tab / 打开 sheet panel / 滚到决策 banner
+  // (useRightPanel 派发的 timeline-jump 事件)
+  // 格式: timelineJump = "<tabKey>:<panelKey>"
+  //   tabKey  = "market" | "analyze" | "execute"   (抽象层，由 evidence 表定义)
+  //   panelKey = evidence 指向的"具体面板"，可能落在：
+  //     - 主区 tab（market/analysts/debate/value/risk/reflection/evolution）
+  //     - 侧栏 sheet panel（concepts/announcements/...）
+  //     - 决策 hero（decision，顶部 DecisionBanner）
+  //     - 交易页（trade，跳转路由）
   useEffect(() => {
     const handle = () => {
       const raw = searchParams.get("timelineJump");
       if (!raw) { return; }
       const [tabKey, panelKey] = raw.split(":");
-      let next: string | null = null;
-      if (tabKey === "market") {
-        next = "market";
-      } else if (tabKey === "execute") {
-        next = "decision";
-      } else if (tabKey === "analyze") {
-        if (
-          panelKey === "analysts" || panelKey === "debate" || panelKey === "value"
-          || panelKey === "risk" || panelKey === "decision"
-        ) {
-          next = panelKey;
-        } else {
-          next = "decision";
-        }
+      const plan = resolveTimelineJump(tabKey, panelKey);
+      if (plan.activeTab) { setActiveTab(plan.activeTab); }
+      if (plan.sheetTab) {
+        setSheetTab(plan.sheetTab);
+        if (!sheetOpen) { setSheetOpen(true); }
       }
-      if (next) { setActiveTab(next); }
+      if (plan.navigateTo) { navigate(plan.navigateTo); }
+      if (plan.scrollTo) {
+        const el = document.getElementById(plan.scrollTo);
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     };
     window.addEventListener("timeline-jump", handle);
     return () => window.removeEventListener("timeline-jump", handle);
-  }, [searchParams]);
+  }, [searchParams, navigate, sheetOpen]);
 
   const tabs = [
     {

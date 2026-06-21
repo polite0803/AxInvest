@@ -160,8 +160,13 @@ export function extractContent(value: unknown): string {
 
 /**
  * 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护
+ *
+ * 返回 null 表示"空壳决策"：raw 完全没有可解析的有意义字段
+ * （例如 LLM 只输出 `{}` 或 `{"action": null}`）。调用方应将 null 与
+ * 解析失败/缺失决策统一对待，避免把全零假决策塞进 store 导致
+ * DecisionBanner 静默不渲染。
  */
-export function normalizeDecision(raw: Record<string, unknown>): StockDecision {
+export function normalizeDecision(raw: Record<string, unknown>): StockDecision | null {
   // CodeNode 输出兼容：若顶层字段是 CodeNode 包装（status/result/params/node_id），
   // 从 result 或 params 中提取
   const source: Record<string, unknown> = (!("action" in raw) && !("confidence" in raw) && !raw.result && !raw.params)
@@ -171,6 +176,46 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision {
     : (!("action" in raw) && !("confidence" in raw) && typeof raw.params === "object" && raw.params !== null)
     ? (raw.params as Record<string, unknown>)
     : raw;
+
+  // ── "全零空壳"检测：所有有意义的字段都缺失/为默认值 ──
+  // 判定"有意义"的字段：action / confidence / positionPct / targetPrice /
+  // stopLoss / reasoning / riskLevel / timeHorizon / expectedHoldingDays /
+  // targetTimeframe（兼容 snake_case）。
+  //
+  // 默认值定义：
+  //   - 数值类(confidence/positionPct/expectedHoldingDays)：缺失/0
+  //   - 价格类(targetPrice/stopLoss)：缺失/null（0 视作有效）
+  //   - 字符串类(action/reasoning/riskLevel/timeHorizon/targetTimeframe)：
+  //     缺失/null/空字符串/纯空白。HOLD/MID 虽然是 parseAction/parseRiskLevel
+  //     的兜底值，但作为投资决策（观望/中风险）也是合法表达，保留。
+  const actionVal = source.action ?? source["action"];
+  const hasAction = actionVal != null && String(actionVal).trim() !== "";
+  const confVal = source.confidence;
+  const hasConfidence = confVal != null && confVal !== "" && Number(confVal) > 0;
+  const ppVal = source.positionPct ?? source.position_pct;
+  const hasPositionPct = ppVal != null && ppVal !== "" && Number(ppVal) > 0;
+  const tpVal = source.targetPrice ?? source.target_price;
+  const hasTargetPrice = tpVal != null && tpVal !== "" && !isNaN(Number(tpVal));
+  const slVal = source.stopLoss ?? source.stop_loss;
+  const hasStopLoss = slVal != null && slVal !== "" && !isNaN(Number(slVal));
+  const hasReasoning = source.reasoning != null && String(source.reasoning).trim() !== "";
+  const rlVal = source.riskLevel ?? source.risk_level;
+  const hasRiskLevel = rlVal != null && String(rlVal).trim() !== "";
+  const thVal = source.timeHorizon ?? source.time_horizon;
+  const hasTimeHorizon = thVal != null && String(thVal).trim() !== "";
+  const ehdVal = source.expectedHoldingDays ?? source.expected_holding_days;
+  const hasExpectedHoldingDays = ehdVal != null && ehdVal !== "" && Number(ehdVal) > 0;
+  const tfVal = source.targetTimeframe ?? source.target_timeframe;
+  const hasTargetTimeframe = tfVal != null && String(tfVal).trim() !== "";
+
+  if (
+    !hasAction && !hasConfidence && !hasPositionPct && !hasTargetPrice && !hasStopLoss
+    && !hasReasoning && !hasRiskLevel && !hasTimeHorizon && !hasExpectedHoldingDays
+    && !hasTargetTimeframe
+  ) {
+    return null;
+  }
+
   const action = parseAction(source.action ?? source["action"]);
   const positionPct = Number(source.positionPct ?? source.position_pct ?? 0);
   const targetPrice = source.targetPrice != null

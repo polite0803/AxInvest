@@ -20,14 +20,16 @@ export function DecisionBanner() {
   const decision = useStockAnalysisStore((s) => s.decision);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
+  // 重跑分析: 透传当前 analysisId 让后端"覆盖"同 id 旧记录(而非新建一条)
   const analysisId = useStockAnalysisStore((s) => s.analysisId);
-  const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
   const quote = useStockAnalysisStore((s) => s.quote);
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
+  // timeline-jump 高亮：被 evidence 指向时短暂加 ring 样式
+  const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
   // 时间旅行: 当前决策所基于的 as-of 锚点 (live 时为 null)
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const [adding, setAdding] = useState(false);
@@ -137,73 +139,80 @@ export function DecisionBanner() {
     });
   }, [decision, stockCode, stockName, decisionContext, navigate, t]);
 
-  // ── 无决策占位：从未分析过 / 分析失败 / 空壳 normalize 后为 null ──
+  // ── 决策缺失占位 ──
+  // normalizeDecision 入口已保证非空对象，所以这里的 !decision 意味着：
+  //   1) LLM 输出无法解析出 decision（portfolio-mgr 节点结果残缺/被截断）
+  //   2) 决策 JSON 是全零空壳（loadAnalysis 已主动跳过 set）
+  // 此时不再 return null，而是渲染"决策缺失"占位卡，让用户知道工作流
+  // 已完成但决策信息不完整，并提供"重跑"入口。
   if (!decision) {
     return (
       <Card
         id="decision-banner-top"
         size="small"
-        title={
-          <div className="flex items-center gap-2">
-            <span>{t("stockAnalysis.finalDecision")}</span>
-            <Tag color="default">
-              {t("stockAnalysis.decisionMissing")}
-            </Tag>
-          </div>
-        }
         styles={{ body: { padding: "12px 16px" } }}
         style={{
-          borderLeft: "4px solid var(--sa-amber)",
+          borderLeft: "4px solid var(--sa-amber, #f59e0b)",
           ...(highlightedPanel === "decision"
             ? { boxShadow: "0 0 0 3px var(--accent)", transition: "box-shadow 0.4s" }
             : {}),
         }}
+        data-testid="decision-banner-missing"
       >
-        <div className="text-xs mb-2" style={{ color: "var(--muted)" }}>
-          {t("stockAnalysis.decisionMissingHint")}
+        <div className="flex items-start gap-2">
+          <span style={{ fontSize: 18, lineHeight: 1 }}>⚠️</span>
+          <div className="flex-1">
+            <div className="text-sm font-semibold mb-1">
+              {t("stockAnalysis.decisionMissing")}
+            </div>
+            <div className="text-xs" style={{ color: "var(--muted)" }}>
+              {t("stockAnalysis.decisionMissingHint")}
+            </div>
+            {stockCode
+              ? (
+                <div className="mt-2">
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() =>
+                      useStockAnalysisStore.getState().startAnalysis(
+                        stockCode,
+                        // 重跑覆盖原 analysisId 对应记录(不传则后端新建 UUID)。
+                        // 从决策缺失占位卡点出时 store.analysisId 必然是已点开的历史记录 id。
+                        analysisId ? { replaceAnalysisId: analysisId } : undefined,
+                      )}
+                  >
+                    {t("stockAnalysis.reAnalyze")}
+                  </Button>
+                </div>
+              )
+              : (
+                <div className="mt-2 flex items-center gap-2">
+                  <Button
+                    size="small"
+                    type="primary"
+                    onClick={() => {
+                      // 占位阶段 stockCode 还没就绪：聚焦顶部搜索栏让用户输入。
+                      const search = document.querySelector<HTMLInputElement>(
+                        "[data-testid='stock-analysis-search-input']",
+                      );
+                      search?.focus();
+                      message.info(t("stockAnalysis.reAnalyzeNeedCode"));
+                    }}
+                  >
+                    {t("stockAnalysis.searchStock")}
+                  </Button>
+                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                    {t("stockAnalysis.reAnalyzeNeedCodeHint")}
+                  </span>
+                </div>
+              )}
+          </div>
         </div>
-        {stockCode
-          ? (
-            <div className="mt-2 flex items-center gap-2">
-              <Button
-                size="small"
-                type="primary"
-                onClick={() =>
-                  useStockAnalysisStore.getState().startAnalysis(
-                    stockCode,
-                    analysisId ? { replaceAnalysisId: analysisId } : undefined,
-                  )}
-              >
-                🔄 {t("stockAnalysis.reAnalyze")}
-              </Button>
-              <span className="text-xs" style={{ color: "var(--muted)" }}>
-                {t("stockAnalysis.willOverwrite")}
-              </span>
-            </div>
-          )
-          : (
-            <div className="mt-2 flex items-center gap-2">
-              <Button
-                size="small"
-                type="primary"
-                onClick={() => {
-                  const search = document.querySelector<HTMLInputElement>(
-                    "[data-testid='stock-analysis-search-input']",
-                  );
-                  search?.focus();
-                  message.info(t("stockAnalysis.reAnalyzeNeedCode"));
-                }}
-              >
-                🔍 {t("stockAnalysis.searchStock")}
-              </Button>
-              <span className="text-xs" style={{ color: "var(--muted)" }}>
-                {t("stockAnalysis.reAnalyzeNeedCodeHint")}
-              </span>
-            </div>
-          )}
       </Card>
     );
   }
+
   // TypeScript 在此之后已将 decision 收窄为 StockDecision (non-null)
 
   // ── 决策 vs 分析师共识矛盾检测 ──
@@ -465,18 +474,6 @@ export function DecisionBanner() {
           {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
           {stockCode && (
             <>
-              <Button
-                size="small"
-                icon={<span>🔄</span>}
-                title={t("stockAnalysis.willOverwrite")}
-                onClick={() =>
-                  useStockAnalysisStore.getState().startAnalysis(
-                    stockCode,
-                    analysisId ? { replaceAnalysisId: analysisId } : undefined,
-                  )}
-              >
-                {t("stockAnalysis.reAnalyze")}
-              </Button>
               <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
                 {t("stockAnalysis.askAI")}
               </Button>

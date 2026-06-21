@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { cleanToolCallTags, extractDecision, tryParseDecision } from "@/lib/agentOutput";
+import { cleanToolCallTags, extractDecision, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
 import type { StockDecision } from "@/types/stock-analysis";
 
 describe("agentOutput decision parsing", () => {
@@ -45,6 +45,46 @@ describe("agentOutput decision parsing", () => {
   it("extractDecision returns null for array object values", () => {
     const parsed = extractDecision([{ action: "BUY" }] as unknown);
     expect(parsed).toBeNull();
+  });
+});
+
+describe("normalizeDecision - 全零空壳检测", () => {
+  it("空对象 {} → null (没有可解析字段)", () => {
+    expect(normalizeDecision({})).toBeNull();
+  });
+
+  it("空字段对象 { action: null } → null", () => {
+    expect(normalizeDecision({ action: null })).toBeNull();
+  });
+
+  it("空字符串字段对象 → null", () => {
+    expect(normalizeDecision({ action: "", confidence: "", reasoning: "  " })).toBeNull();
+  });
+
+  it("HOLD 是合法决策（即便置信度为 0）→ 保留", () => {
+    const parsed = normalizeDecision({ action: "HOLD" });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.action).toBe("HOLD");
+  });
+
+  it("只含 reasoning 字段 → 保留", () => {
+    const parsed = normalizeDecision({ reasoning: "基本面恶化，建议观望" });
+    expect(parsed).not.toBeNull();
+    expect(parsed?.reasoning).toBe("基本面恶化，建议观望");
+  });
+
+  it("snake_case 全零空壳 { position_pct: 0 } → null", () => {
+    expect(normalizeDecision({ position_pct: 0 })).toBeNull();
+  });
+
+  it("CodeNode 包装但 params 是空对象 → null", () => {
+    expect(normalizeDecision({ status: "ok", params: {} })).toBeNull();
+  });
+
+  it("CodeNode 包装 + 内部含有效 action → 保留", () => {
+    const parsed = normalizeDecision({ status: "ok", params: { action: "BUY", confidence: 80 } });
+    expect(parsed?.action).toBe("BUY");
+    expect(parsed?.confidence).toBe(80);
   });
 });
 

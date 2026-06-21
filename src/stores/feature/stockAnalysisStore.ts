@@ -584,10 +584,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  startAnalysis: async (
-    stockCode: string,
-    options?: { replaceAnalysisId?: string },
-  ) => {
+  startAnalysis: async (stockCode: string, options?: { replaceAnalysisId?: string }) => {
     const { status } = get();
     if (status === "loading" || status === "running") {
       console.warn("[StockAnalysis] Analysis already in progress, ignoring duplicate start");
@@ -648,14 +645,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         asOfDate,
         mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",
       });
-      const result = await invoke<Record<string, unknown>>("run_stock_workflow", {
-        stockCode,
-        dryRun,
-        asOfDate,
-        // 重跑分析场景：传 replaceAnalysisId 让后端先 DELETE 同 id 旧行再 INSERT,
-        // 保留 id 稳定,前端 store 引用不会断（= 覆盖原记录）。
-        analysisId: options?.replaceAnalysisId ?? null,
-      });
+      const result = await invoke<Record<string, unknown>>(
+        "run_stock_workflow",
+        {
+          stockCode,
+          dryRun,
+          asOfDate,
+          // 重跑分析：透传已存在 id 让后端 DELETE 同 id 旧行再 INSERT,实现"覆盖"。
+          // 不传则是 fresh start,后端生成新 UUID。
+          analysisId: options?.replaceAnalysisId ?? null,
+        },
+      );
 
       // P0-4 修复: 检查数据质量预检跳过
       // serde_json::Value 返回 snake_case 键
@@ -778,7 +778,18 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     if (record.decisionJson) {
       try {
         const raw = JSON.parse(record.decisionJson);
-        set({ decision: normalizeDecision(raw) });
+        // normalizeDecision 可能返回 null：raw 是全零空壳（LLM 输出过短/解析残缺）。
+        // null 不写入 store，让上层走 !decision 分支并在 UI 渲染"决策缺失"占位，
+        // 避免 DecisionBanner 拿到全零对象静默不渲染。
+        const normalized = normalizeDecision(raw);
+        if (normalized) {
+          set({ decision: normalized });
+        } else {
+          console.warn(
+            "[StockAnalysis] loadAnalysis decisionJson 全零空壳，跳过 set:",
+            { analysisId: record.id, keys: Object.keys(raw) },
+          );
+        }
       } catch (e) {
         console.error("[StockAnalysis] Failed to parse decision JSON:", e);
       }

@@ -1,11 +1,11 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { DecisionBanner } from "../DecisionBanner";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (key: string, fallback?: string) => fallback ?? key,
   }),
 }));
 
@@ -20,6 +20,9 @@ const storeState = {
     targetPrice?: number;
     stopLoss?: number;
   } | null,
+  stockCode: "600519" as string | null,
+  stockName: "茅台",
+  startAnalysis: vi.fn(),
 };
 
 vi.mock("@/stores", () => ({
@@ -29,14 +32,44 @@ vi.mock("@/stores", () => ({
 }));
 
 describe("DecisionBanner", () => {
-  it("renders nothing when no decision", () => {
+  it("decision 为 null 时渲染'决策缺失'占位卡（不再 firstChild === null）", () => {
     storeState.decision = null;
+    storeState.stockCode = "600519";
     const { container } = render(
       <MemoryRouter>
         <DecisionBanner />
       </MemoryRouter>,
     );
-    expect(container.firstChild).toBeNull();
+    expect(container.firstChild).not.toBeNull();
+    expect(screen.getByTestId("decision-banner-missing")).toBeTruthy();
+    expect(container.textContent).toContain("stockAnalysis.decisionMissing");
+    expect(container.textContent).toContain("stockAnalysis.decisionMissingHint");
+  });
+
+  it("占位卡有 stockCode 时显示'重跑分析'按钮", () => {
+    storeState.decision = null;
+    storeState.stockCode = "600519";
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("decision-banner-missing")).toBeTruthy();
+    expect(container.textContent).toContain("stockAnalysis.reAnalyze");
+  });
+
+  it("占位卡无 stockCode 时显示'搜索股票'按钮(永远有入口)", () => {
+    storeState.decision = null;
+    storeState.stockCode = null;
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("decision-banner-missing")).toBeTruthy();
+    // 永远有按钮（不重跑就跳到搜索栏），不出现 dead-end
+    expect(container.textContent).toContain("stockAnalysis.searchStock");
+    expect(container.textContent).toContain("stockAnalysis.reAnalyzeNeedCodeHint");
   });
 
   it("renders decision info when decision exists", () => {
@@ -49,6 +82,7 @@ describe("DecisionBanner", () => {
       targetPrice: 1850.0,
       stopLoss: 1580.0,
     };
+    storeState.stockCode = "600519";
     const { container } = render(
       <MemoryRouter>
         <DecisionBanner />

@@ -35,6 +35,7 @@ export function StockSearchBar() {
       <div className="flex gap-2 items-center">
         <Input.Search
           className="stock-search-input"
+          data-testid="stock-analysis-search-input"
           placeholder={`${t("stockAnalysis.searchPlaceholder")} (Ctrl+K)`}
           value={searchKeyword}
           onChange={(e) => searchStock(e.target.value)}

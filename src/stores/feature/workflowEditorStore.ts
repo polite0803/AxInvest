@@ -24,7 +24,6 @@ import type {
 } from "@/components/workflow/types";
 import { NODE_TYPE_MAP } from "@/components/workflow/types";
 import { auto_layout } from "@/lib/workflowLayout";
-import { message } from "antd";
 
 export interface ExpandedSubWorkflowData {
   /** 子工作流内部节点（ID 已 prefixed 避免冲突） */
@@ -2403,7 +2402,6 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             });
             logIpcError(`[aiChat] ${action.action_type} failed`)(error);
             throw error;
-            r;
           }
           break;
         }

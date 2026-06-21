@@ -34,6 +34,7 @@ const zhCN = {
   startAnalysis: "开始分析",
   analyzing: "分析中...",
   starting: "正在启动分析引擎...",
+  loading: "加载中...",
   price: "最新价",
   open: "开",
   high: "高",
@@ -545,6 +546,44 @@ const zhCN = {
   backtest: {
     sectionTitle: "回测",
   },
+  whatIfBacktest: {
+    applyToBackend: "应用配置到后端重算",
+    calculating: "计算中...",
+    catalystLevelLabel: "catalystLevel（催化剂级别）",
+    catalystLevels: {
+      none: "无催化剂",
+      l1: "L1普通消息",
+      l2: "L2业绩拐点级",
+      l3: "L3估值体系级",
+    },
+    configOverridesDesc: "勾选后下次回测时将自动应用到后端计算节点（不会修改原始记录）",
+    configOverridesTitle: "⚙️ 参数覆写",
+    consensusScoreLabel: "consensusScore（共识分数）",
+    dqiScoreLabel: "dqiScore（数据质量指数）",
+    institutionalTraceLabel: "institutionalTrace（机构痕迹）",
+    institutionalTraces: {
+      none: "无异常",
+      suspectedBuilding: "疑似建仓",
+      building: "有建仓痕迹",
+      escaping: "资金出逃",
+    },
+    modified: "已修改",
+    noOriginalDecision: "未找到原始决策数据（该分析可能未完成或无 portfolio-mgr 输出）",
+    overallRiskLabel: "overallRisk（风险等级）",
+    riskLevels: {
+      low: "低",
+      medium: "中",
+      high: "高",
+      veryHigh: "极高",
+    },
+    selectEmpty: "请选择一条历史分析记录开始 What-If 回测",
+    selectHint: "选择一条分析记录...",
+    step1: "Step 1: 选择历史分析",
+    step2: "Step 2: 调整参数",
+    step3: "Step 3: 对比结果",
+    title: "What-If 参数回测",
+    totalScoreLabel: "totalScore（基础评分）",
+  },
   scheduledAnalysis: {
     description: "基于上游 CronJobStore 持久化 — 按 Cron 表达式周期性对指定股票执行完整分析流程",
     watchlistScan: "自选股自动扫描",
@@ -610,6 +649,7 @@ const enUS = {
   startAnalysis: "Start Analysis",
   analyzing: "Analyzing...",
   starting: "Starting analysis engine...",
+  loading: "Loading...",
   price: "Price",
   open: "Open",
   high: "High",
@@ -913,6 +953,44 @@ const enUS = {
   backtest: {
     sectionTitle: "Backtest",
   },
+  whatIfBacktest: {
+    applyToBackend: "Apply to backend",
+    calculating: "Calculating...",
+    catalystLevelLabel: "Catalyst Level",
+    catalystLevels: {
+      none: "None",
+      l1: "L1 Normal News",
+      l2: "L2 Earnings Inflection",
+      l3: "L3 Valuation System Shift",
+    },
+    configOverridesDesc: "Config overrides applied (auto-merged)",
+    configOverridesTitle: "Config Overrides",
+    consensusScoreLabel: "Consensus Score",
+    dqiScoreLabel: "Data Quality Score",
+    institutionalTraceLabel: "Institutional Trace",
+    institutionalTraces: {
+      none: "Normal",
+      suspectedBuilding: "Suspected Building",
+      building: "Building",
+      escaping: "Escaping",
+    },
+    modified: "Modified",
+    noOriginalDecision: "No original decision data found",
+    overallRiskLabel: "Risk Level",
+    riskLevels: {
+      low: "Low",
+      medium: "Medium",
+      high: "High",
+      veryHigh: "Very High",
+    },
+    selectEmpty: "Select a historical analysis to start What-If backtest",
+    selectHint: "Select a record...",
+    step1: "Step 1: Select History",
+    step2: "Step 2: Adjust Params",
+    step3: "Step 3: Compare Results",
+    title: "What-If Backtest",
+    totalScoreLabel: "Total Score",
+  },
   scheduledAnalysis: {
     description: "Persisted via CronJobStore — run full analysis periodically for specified stocks",
     watchlistScan: "Watchlist Auto Scan",
@@ -1032,6 +1110,7 @@ const tradeCN = {
   recorded: "已记录",
   fillRequired: "请填写必要信息",
   toggleFailed: "切换失败",
+  limitsBlocked: "Position limits blocked this order",
   "agentRole.coordinator": "协调者",
   "agentRole.researcher": "研究员",
   "agentRole.planner": "规划者",
@@ -1057,6 +1136,7 @@ const tradeEN = {
   recorded: "Recorded",
   fillRequired: "Fill required fields",
   toggleFailed: "Toggle failed",
+  limitsBlocked: "Position limits blocked",
   "agentRole.coordinator": "Coordinator",
   "agentRole.researcher": "Researcher",
   "agentRole.planner": "Planner",
@@ -1068,8 +1148,8 @@ const tradeEN = {
 };
 
 // nav
-const navCN = { stockAnalysis: "股票分析" };
-const navEN = { stockAnalysis: "Stock Analysis" };
+const navCN = { stockAnalysis: "股票分析", trade: "交易" };
+const navEN = { stockAnalysis: "Stock Analysis", trade: "Trade" };
 
 // ── Apply to all 11 locales ────────────────────────────────────────────
 

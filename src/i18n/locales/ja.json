@@ -24,7 +24,15 @@
     "devTools": "開発ツール",
     "wiki": "Wiki",
     "app": "アプリ",
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "trade": "Trade",
+    "watchlist": "自选",
+    "screener": "选股",
+    "recommend": "推荐",
+    "backtest": "回测",
+    "compare": "对比",
+    "quant": "量化",
+    "replayWorkbench": "回放工作台"
   },
   "sidebar": {
     "sectionWork": "ワーク",
@@ -8307,7 +8315,8 @@
       "styleCapital": "资金流向",
       "styleReversion": "均值回归",
       "styleWatchlist": "自选股",
-      "styleSerenity": "ボトルネック発掘"
+      "styleSerenity": "ボトルネック発掘",
+      "title": "推荐结果"
     },
     "periodShort": "Short Term",
     "periodMid": "Mid Term",
@@ -8406,41 +8415,41 @@
       "trail": "实验轨迹"
     },
     "whatIfBacktest": {
-      "title": "株式分析",
-      "step1": "Step 1: 选择历史分析",
-      "step2": "Step 2: 调整参数",
-      "step3": "Step 3: 对比结果",
-      "selectHint": "选择一条分析记录...",
-      "selectEmpty": "请选择一条历史分析记录开始 What-If 回测",
-      "totalScoreLabel": "totalScore（基础评分）",
-      "dqiScoreLabel": "dqiScore（数据质量）",
-      "overallRiskLabel": "overallRisk（风险等级）",
-      "catalystLevelLabel": "catalystLevel（催化剂级别）",
-      "institutionalTraceLabel": "institutionalTrace（机构痕迹）",
-      "consensusScoreLabel": "consensusScore（辩论收敛）",
-      "configOverridesTitle": "配置参数覆盖（评分权重/估值/风控）",
-      "configOverridesDesc": "修改这些参数会通过后端重新计算工具链（scoring + valuation + risk），进而影响 totalScore 和最终决策。",
-      "calculating": "计算中...",
-      "applyToBackend": "应用配置到后端重算",
-      "modified": "已修改",
-      "noOriginalDecision": "未找到原始决策数据（该分析可能未完成或无 portfolio-mgr 输出）",
+      "title": "What-If Backtest",
+      "step1": "Step 1: Select History",
+      "step2": "Step 2: Adjust Params",
+      "step3": "Step 3: Compare Results",
+      "selectHint": "Select a record...",
+      "selectEmpty": "Select a historical analysis to start What-If backtest",
+      "totalScoreLabel": "Total Score",
+      "dqiScoreLabel": "Data Quality Score",
+      "overallRiskLabel": "Risk Level",
+      "catalystLevelLabel": "Catalyst Level",
+      "institutionalTraceLabel": "Institutional Trace",
+      "consensusScoreLabel": "Consensus Score",
+      "configOverridesTitle": "Config Overrides",
+      "configOverridesDesc": "Config overrides applied (auto-merged)",
+      "calculating": "Calculating...",
+      "applyToBackend": "Apply to backend",
+      "modified": "Modified",
+      "noOriginalDecision": "No original decision data found",
       "riskLevels": {
-        "low": "安値",
-        "medium": "中",
-        "high": "高値",
-        "veryHigh": "极高"
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "veryHigh": "Very High"
       },
       "catalystLevels": {
-        "none": "无催化剂",
-        "l1": "L1 普通消息",
-        "l2": "L2 业绩拐点级",
-        "l3": "L3 估值体系级"
+        "none": "None",
+        "l1": "L1 Normal News",
+        "l2": "L2 Earnings Inflection",
+        "l3": "L3 Valuation System Shift"
       },
       "institutionalTraces": {
-        "none": "无异常",
-        "suspectedBuilding": "疑似建仓",
-        "building": "有建仓痕迹",
-        "escaping": "资金出逃"
+        "none": "Normal",
+        "suspectedBuilding": "Suspected Building",
+        "building": "Building",
+        "escaping": "Escaping"
       }
     },
     "analystConsensus": "Analyst Consensus",
@@ -8781,7 +8790,16 @@
     "riskHigh": "高リスク",
     "riskMid": "中リスク",
     "riskLow": "低リスク",
-    "riskExtreme": "極高リスク"
+    "riskExtreme": "極高リスク",
+    "periodUltraShort": "超短线",
+    "generatedAt": "生成于",
+    "noHistory": "暂无历史分析",
+    "deleteAnalysis": "删除",
+    "deleteSuccess": "已删除",
+    "deleteFailed": "删除失败",
+    "rename": "重命名",
+    "renameSuccess": "已重命名",
+    "renameFailed": "重命名失败"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",
@@ -8832,6 +8850,8 @@
     "agentRole.reviewer": "Reviewer",
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
-    "agentRole.executor": "Executor"
+    "agentRole.executor": "Executor",
+    "limitsBlocked": "Position limits blocked",
+    "placeholder": "执行与回放交易"
   }
 }

@@ -8731,29 +8731,29 @@
       "calculating": "计算中...",
       "catalystLevelLabel": "catalystLevel（催化剂级别）",
       "catalystLevels": {
-        "l1": "L1 普通消息",
-        "l2": "L2 业绩拐点级",
-        "l3": "L3 估值体系级",
-        "none": "无催化剂"
+        "none": "无催化剂",
+        "l1": "L1普通消息",
+        "l2": "L2业绩拐点级",
+        "l3": "L3估值体系级"
       },
-      "configOverridesDesc": "修改这些参数会通过后端重新计算工具链（scoring + valuation + risk），进而影响 totalScore 和最终决策。",
-      "configOverridesTitle": "配置参数覆盖（评分权重/估值/风控）",
-      "consensusScoreLabel": "consensusScore（辩论收敛）",
-      "dqiScoreLabel": "dqiScore（数据质量）",
+      "configOverridesDesc": "勾选后下次回测时将自动应用到后端计算节点（不会修改原始记录）",
+      "configOverridesTitle": "⚙️ 参数覆写",
+      "consensusScoreLabel": "consensusScore（共识分数）",
+      "dqiScoreLabel": "dqiScore（数据质量指数）",
       "institutionalTraceLabel": "institutionalTrace（机构痕迹）",
       "institutionalTraces": {
-        "building": "有建仓痕迹",
-        "escaping": "资金出逃",
         "none": "无异常",
-        "suspectedBuilding": "疑似建仓"
+        "suspectedBuilding": "疑似建仓",
+        "building": "有建仓痕迹",
+        "escaping": "资金出逃"
       },
       "modified": "已修改",
       "noOriginalDecision": "未找到原始决策数据（该分析可能未完成或无 portfolio-mgr 输出）",
       "overallRiskLabel": "overallRisk（风险等级）",
       "riskLevels": {
-        "high": "高",
         "low": "低",
         "medium": "中",
+        "high": "高",
         "veryHigh": "极高"
       },
       "selectEmpty": "请选择一条历史分析记录开始 What-If 回测",

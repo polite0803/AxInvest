@@ -136,5 +136,7 @@ pub enum SandboxExecutorField {
 pub enum BrowserClientField {
     #[cfg(not(target_os = "android"))]
     Real(Arc<tokio::sync::Mutex<Option<axagent_core::browser_automation::PlaywrightClient>>>),
+    #[cfg(target_os = "android")]
+    Real(Arc<tokio::sync::Mutex<Option<serde_json::Value>>>),
     Dummy,
 }

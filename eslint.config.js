@@ -5,7 +5,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["src/i18n/compare_locales.js"] },
+  { ignores: ["src/i18n/compare_locales.js", "dist/", "src-tauri/target/", "website/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

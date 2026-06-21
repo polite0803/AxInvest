@@ -2408,7 +2408,8 @@ pub async fn update_workflow_template_variable(
         });
     }
 
-    let variables_json = serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;
+    let variables_json =
+        serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;
     let new_version = row.version + 1;
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -2422,7 +2423,10 @@ pub async fn update_workflow_template_variable(
         "[template] {} 变量 {} 已更新 ({} → {}), 新版本 {}",
         input.template_id,
         input.name,
-        old_value.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+        old_value
+            .as_ref()
+            .map(|v| v.to_string())
+            .unwrap_or_default(),
         input.value,
         new_version
     );
@@ -2450,8 +2454,12 @@ fn infer_var_type(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Bool(_) => "boolean".into(),
         serde_json::Value::Number(n) => {
-            if n.is_f64() { "number".into() } else { "integer".into() }
-        }
+            if n.is_f64() {
+                "number".into()
+            } else {
+                "integer".into()
+            }
+        },
         serde_json::Value::String(_) => "string".into(),
         serde_json::Value::Array(_) => "array".into(),
         serde_json::Value::Object(_) => "object".into(),
@@ -2472,9 +2480,10 @@ pub async fn rollback_workflow_template_to_version(
     use axagent_core::entity::{workflow_template, workflow_template_version};
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    let snapshot = workflow_template_version::Entity::find_by_id(
-        format!("{}_v{}", template_id, target_version),
-    )
+    let snapshot = workflow_template_version::Entity::find_by_id(format!(
+        "{}_v{}",
+        template_id, target_version
+    ))
     .one(db)
     .await
     .map_err(|e| e.to_string())?
@@ -2516,7 +2525,10 @@ pub async fn rollback_workflow_template_to_version(
         .map_err(|e| e.to_string())?
         .is_some();
     if !cur_exists {
-        current_snapshot.insert(db).await.map_err(|e| e.to_string())?;
+        current_snapshot
+            .insert(db)
+            .await
+            .map_err(|e| e.to_string())?;
     }
 
     // 用快照覆盖当前 active 行
@@ -2570,7 +2582,7 @@ pub struct UpdateInputMappingInput {
     pub mappings: Vec<InputMappingEntry>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputMappingEntry {
     /// 本节点的 input 名
@@ -2614,10 +2626,7 @@ pub async fn update_workflow_node_input_mapping(
             if let Some(config) = json.get_mut("config").and_then(|c| c.as_object_mut()) {
                 config.insert("input_mapping".into(), new_mappings);
             } else {
-                json.insert(
-                    "config".into(),
-                    serde_json::json!({ "input_mapping": new_mappings }),
-                );
+                json.insert("config".into(), serde_json::json!({ "input_mapping": new_mappings }));
             }
             *node = serde_json::from_value(serde_json::Value::Object(json))
                 .map_err(|e| format!("反序列化失败: {e}"))?;
@@ -2695,11 +2704,9 @@ pub struct EditAssetFileInput {
 
 #[tauri::command]
 pub async fn edit_workflow_asset_file(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     input: EditAssetFileInput,
 ) -> Result<EditAssetFileResult, String> {
-    use std::path::Path;
-
     // 安全：拒绝路径穿越
     if input.path.contains("..") {
         return Err("路径中不允许出现 '..'".into());
@@ -2708,19 +2715,14 @@ pub async fn edit_workflow_asset_file(
         return Err(format!("不支持的操作: {}", input.operation));
     }
 
-    let workspace_root = state
-        .harness
-        .config
-        .workspace_dir
-        .clone()
-        .ok_or_else(|| "未配置 workspace_dir".to_string())?;
-    let full_path = Path::new(&workspace_root).join(&input.path);
+    let workspace_root =
+        std::env::current_dir().map_err(|e| format!("无法获取 current_dir: {e}"))?;
+    let full_path = workspace_root.join(&input.path);
 
     if !full_path.exists() {
         return Err(format!("资产文件不存在: {}", full_path.display()));
     }
-    let original = std::fs::read_to_string(&full_path)
-        .map_err(|e| format!("读取文件失败: {e}"))?;
+    let original = std::fs::read_to_string(&full_path).map_err(|e| format!("读取文件失败: {e}"))?;
     let original_lines: Vec<&str> = original.lines().collect();
 
     let new_content = match input.operation.as_str() {
@@ -2731,7 +2733,11 @@ pub async fn edit_workflow_asset_file(
                 .ok_or_else(|| "insert_after 必须提供 code".to_string())?;
             let anchor = (input.anchor_line as usize).saturating_sub(1);
             if anchor > original_lines.len() {
-                return Err(format!("anchor_line {} 超出文件总行数 {}", input.anchor_line, original_lines.len()));
+                return Err(format!(
+                    "anchor_line {} 超出文件总行数 {}",
+                    input.anchor_line,
+                    original_lines.len()
+                ));
             }
             let mut out: Vec<String> = original_lines.iter().map(|s| s.to_string()).collect();
             for (i, line) in code.lines().enumerate() {
@@ -2739,7 +2745,7 @@ pub async fn edit_workflow_asset_file(
             }
             out.push(String::new()); // 保证末尾换行
             out.join("\n")
-        }
+        },
         "replace" => {
             let code = input
                 .code
@@ -2747,11 +2753,19 @@ pub async fn edit_workflow_asset_file(
                 .ok_or_else(|| "replace 必须提供 code".to_string())?;
             let anchor = (input.anchor_line as usize).saturating_sub(1);
             if anchor >= original_lines.len() {
-                return Err(format!("anchor_line {} 超出文件总行数 {}", input.anchor_line, original_lines.len()));
+                return Err(format!(
+                    "anchor_line {} 超出文件总行数 {}",
+                    input.anchor_line,
+                    original_lines.len()
+                ));
             }
             // 替换以 anchor 开头的连续 code 段（按 code 行数算）；如果 code 行数为 0，则视为删除 anchor 单行
             let code_lines: Vec<&str> = code.lines().collect();
-            let replace_count = if code_lines.is_empty() { 1 } else { code_lines.len() };
+            let replace_count = if code_lines.is_empty() {
+                1
+            } else {
+                code_lines.len()
+            };
             let mut out: Vec<String> = original_lines.iter().map(|s| s.to_string()).collect();
             for (i, line) in code_lines.iter().enumerate() {
                 if anchor + i < out.len() {
@@ -2765,17 +2779,21 @@ pub async fn edit_workflow_asset_file(
             }
             out.push(String::new());
             out.join("\n")
-        }
+        },
         "delete" => {
             let anchor = (input.anchor_line as usize).saturating_sub(1);
             if anchor >= original_lines.len() {
-                return Err(format!("anchor_line {} 超出文件总行数 {}", input.anchor_line, original_lines.len()));
+                return Err(format!(
+                    "anchor_line {} 超出文件总行数 {}",
+                    input.anchor_line,
+                    original_lines.len()
+                ));
             }
             let mut out: Vec<String> = original_lines.iter().map(|s| s.to_string()).collect();
             out.remove(anchor);
             out.push(String::new());
             out.join("\n")
-        }
+        },
         _ => unreachable!(),
     };
 

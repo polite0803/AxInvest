@@ -8365,7 +8365,16 @@
       "deleteConfirm": "Diesen Reflexionseintrag löschen?",
       "deleteSuccess": "Reflexionseintrag gelöscht",
       "deleteFailed": "Löschen fehlgeschlagen: {{error}}",
-      "rawOutputTitle": "LLM-Rohausgabe anzeigen"
+      "rawOutputTitle": "LLM-Rohausgabe anzeigen",
+      "aiAssistBtn": "KI-Änderungsvorschlag",
+      "aiAssistLoading": "KI denkt nach...",
+      "aiAssistModalTitle": "KI-Änderungsvorschlag (aus Reflexion)",
+      "aiAssistThinking": "KI analysiert die Reflexion und erstellt einen Vorschlag...",
+      "aiApplyBtn": "{{count}} Änderung(en) anwenden",
+      "aiApplySuccess": "{{count}} Änderung(en) angewendet, Workflow-Vorlage aktualisiert",
+      "aiApplyFailed": "Fehler: {{error}}{{rollback}}",
+      "aiDiffPreviewTitle": "KI-vorgeschlagene Änderungen (unten anwenden klicken)",
+      "aiRawOutputTitle": "KI-Rohausgabe"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

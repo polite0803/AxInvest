@@ -8365,7 +8365,16 @@
       "deleteConfirm": "Удалить эту запись рефлексии?",
       "deleteSuccess": "Запись рефлексии удалена",
       "deleteFailed": "Ошибка удаления: {{error}}",
-      "rawOutputTitle": "Посмотреть необработанный вывод LLM"
+      "rawOutputTitle": "Посмотреть необработанный вывод LLM",
+      "aiAssistBtn": "Предложение ИИ",
+      "aiAssistLoading": "ИИ думает...",
+      "aiAssistModalTitle": "Предложение изменения ИИ (на основе рефлексии)",
+      "aiAssistThinking": "ИИ анализирует рефлексию и генерирует предложение...",
+      "aiApplyBtn": "Применить {{count}} изменение(й)",
+      "aiApplySuccess": "Применено {{count}} изменение(й), шаблон обновлён",
+      "aiApplyFailed": "Ошибка: {{error}}{{rollback}}",
+      "aiDiffPreviewTitle": "Предложенные ИИ изменения (нажмите применить ниже)",
+      "aiRawOutputTitle": "Исходный вывод ИИ"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

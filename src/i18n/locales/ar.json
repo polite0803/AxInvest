@@ -8525,7 +8525,16 @@
       "deleteConfirm": "هل تريد حذف سجل الانعكاس هذا؟",
       "deleteSuccess": "تم حذف سجل الانعكاس",
       "deleteFailed": "فشل الحذف: {{error}}",
-      "rawOutputTitle": "عرض إخراج LLM الخام"
+      "rawOutputTitle": "عرض إخراج LLM الخام",
+      "aiAssistBtn": "اقتراح تعديل بالذكاء الاصطناعي",
+      "aiAssistLoading": "الذكاء الاصطناعي يفكر...",
+      "aiAssistModalTitle": "اقتراح تعديل بالذكاء الاصطناعي (من التأمل)",
+      "aiAssistThinking": "الذكاء الاصطناعي يحلل التأمل ويقترح تعديلاً...",
+      "aiApplyBtn": "تطبيق {{count}} تعديل(ات)",
+      "aiApplySuccess": "تم تطبيق {{count}} تعديل(ات)، تم تحديث قالب سير العمل",
+      "aiApplyFailed": "فشل: {{error}}{{rollback}}",
+      "aiDiffPreviewTitle": "التعديلات المقترحة من الذكاء الاصطناعي (انقر تطبيق أدناه)",
+      "aiRawOutputTitle": "إخراج الذكاء الاصطناعي الخام"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

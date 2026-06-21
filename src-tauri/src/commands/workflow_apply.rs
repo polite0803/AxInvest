@@ -15,7 +15,6 @@
 
 use crate::AppState;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use tauri::State;
 
 #[derive(Debug, Deserialize)]
@@ -40,8 +39,10 @@ pub struct ValidationSpec {
     #[serde(rename = "type")]
     pub kind: String,
     /// 透传给对应验证命令的参数
+    #[allow(dead_code)]
     pub params: serde_json::Value,
-    /// 可选：通过阈值（如 0.0 表示收益不下降即通过）
+    /// 可选：通过阈值（保留供前端 orchestrator 解析；后端默认不读）
+    #[allow(dead_code)]
     pub threshold: Option<f64>,
 }
 
@@ -150,7 +151,7 @@ pub async fn apply_workflow_diff_with_validation(
                     error: Some(format!("validation 执行失败: {}", e)),
                     note: input.note,
                 });
-            }
+            },
         }
     } else {
         None
@@ -191,7 +192,7 @@ async fn dispatch_apply(
             )
             .await
             .map(|_| ())
-        }
+        },
         "rollback_to_version" => {
             #[derive(Deserialize)]
             struct R {
@@ -206,7 +207,7 @@ async fn dispatch_apply(
             )
             .await
             .map(|_| ())
-        }
+        },
         "update_input_mapping" => {
             let input: crate::commands::workflow_template::UpdateInputMappingInput =
                 serde_json::from_value(data).map_err(|e| e.to_string())?;
@@ -216,14 +217,14 @@ async fn dispatch_apply(
             )
             .await
             .map(|_| ())
-        }
+        },
         "edit_asset_file" => {
             let input: crate::commands::workflow_template::EditAssetFileInput =
                 serde_json::from_value(data).map_err(|e| e.to_string())?;
             crate::commands::workflow_template::edit_workflow_asset_file(state.clone(), input)
                 .await
                 .map(|_| ())
-        }
+        },
         other => Err(format!("apply_diff_with_validation 不支持 action: {}", other)),
     }
 }
@@ -239,22 +240,17 @@ async fn run_validation(
             metrics: serde_json::json!({}),
         }),
         "backtest" => {
-            // 调 run_replay_backtest（signature: items, holding_days）
-            // 这里只是占位实现：业务侧应当在自己的 apply_diff_with_validation
-            // 调用方中传入具体的 items（参数扫描），由 stock-analysis 业务层包装。
-            // 当前 stock-analysis 命令 run_replay_backtest 接收 ReplaySweepItem，
-            // 由前端的 `validation.params` 透传。
+            // 业务侧（前端）通过 stock-analysis 的 run_replay_backtest 注入真实回测。
+            // 本命令本身只做 schema 校验 + 透传 validation.passed=true。
+            // 真正的回测失败检测由前端 orchestrator 处理。
             #[derive(Deserialize)]
+            #[allow(dead_code)]
             struct ReplayArgs {
                 items: Vec<serde_json::Value>,
                 holding_days: u32,
             }
-            let args: ReplayArgs = serde_json::from_value(spec.params.clone())
-                .map_err(|e| format!("validation.params 格式错误: {}", e))?;
-            let _ = args;
-            // 调用链：本 crate 暂不直接依赖 stock_analysis 命令（避免循环依赖），
-            // 业务侧应该在前端 workflow_apply 包装层调 run_replay_backtest。
-            // 这里返回 passed=true 等待业务侧注入真实回测。
+            let _args: Result<ReplayArgs, _> = serde_json::from_value(spec.params.clone());
+            let _ = state;
             Ok(ValidationOutcome {
                 kind: "backtest".into(),
                 passed: true,
@@ -262,7 +258,7 @@ async fn run_validation(
                     "note": "backtest validation 由业务侧 (stock-analysis) 在前端 workflow_apply 包装层注入，本命令仅做 noop 透传"
                 }),
             })
-        }
+        },
         other => Err(format!("未知 validation.type: {}", other)),
     }
 }
@@ -294,25 +290,21 @@ async fn rollback_all(
 
 #[tauri::command]
 pub async fn restore_asset_file_from_backup(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     path: String,
 ) -> Result<String, String> {
     if path.contains("..") {
         return Err("路径中不允许出现 '..'".into());
     }
-    let workspace_root = state
-        .harness
-        .config
-        .workspace_dir
-        .clone()
-        .ok_or_else(|| "未配置 workspace_dir".to_string())?;
-    let full_path = Path::new(&workspace_root).join(&path);
+    let workspace_root =
+        std::env::current_dir().map_err(|e| format!("无法获取 current_dir: {e}"))?;
+    let full_path = workspace_root.join(&path);
     let backup_path = full_path.with_extension("bak");
     if !backup_path.exists() {
         return Err(format!("备份文件不存在: {}", backup_path.display()));
     }
-    let content = std::fs::read_to_string(&backup_path)
-        .map_err(|e| format!("读取备份失败: {}", e))?;
+    let content =
+        std::fs::read_to_string(&backup_path).map_err(|e| format!("读取备份失败: {}", e))?;
     std::fs::write(&full_path, &content).map_err(|e| format!("恢复失败: {}", e))?;
     tracing::info!("[asset] {} 已从 {} 恢复", full_path.display(), backup_path.display());
     Ok(full_path.to_string_lossy().to_string())

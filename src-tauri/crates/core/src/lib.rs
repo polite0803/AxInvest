@@ -94,8 +94,10 @@ pub use axagent_search::vector_store;
 pub use axagent_storage::storage_inventory;
 pub use axagent_storage::storage_migration;
 pub use axagent_storage::storage_paths;
-// workflow_types 由 axagent-harness 定义，core 做 re-export 以保证上游 rt-workflow/agent 的引用路径兼容
-pub use axagent_harness::workflow_types;
+// workflow_types 由 axagent-harness 提供定义，core 模块文件做 re-export + 扩展
+// (harness 是 contract layer,不应依赖 entities 的 Model;core 这里负责加
+// `From<workflow_template::Model>` impl,因此需要同名 Response 覆盖 harness 的版本)
+pub mod workflow_types;
 #[cfg(not(target_os = "android"))]
 pub use axagent_kit::workflow_version;
 #[cfg(target_os = "android")]

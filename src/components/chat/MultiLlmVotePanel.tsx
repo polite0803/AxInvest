@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+/* eslint-disable react-refresh/only-export-components */
 
 /**
  * MultiLlmVotePanel.tsx — 多 LLM 决策投票/集成面板

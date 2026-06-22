@@ -759,7 +759,6 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
 
   // ── 实时滴答:每 1s 触发一次 setRealtimeTick,使 running 节点 elapsed time 滚动 ──
   // 仅当存在 running 节点或工作流未处于终态时启用,避免无谓渲染。
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const hasRunning = workflow
       ? Object.values(workflow.node_states).some(
@@ -774,7 +773,6 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
     }, REALTIME_TICK_MS);
     return () => clearInterval(timer);
   }, [workflow]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Step toggle ---
   const toggleStep = useCallback((stepId: string) => {

@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "Échec du chargement de l'historique d'analyse",
-    "retry": "Réessayer",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "Relancer le débat",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "Échec du chargement: {{error}}",
+      "toggleCronFailed": "Échec de basculement: {{error}}",
+      "deleteCronFailed": "Échec de suppression: {{error}}",
+      "rerunSuccess": "Réexécution déclenchée",
+      "rerunFailed": "Échec de réexécution: {{error}}",
+      "rerunConfirm": "Réexécuter cette réflexion ?",
+      "rerunBtn": "Réexécuter",
+      "deleteCronConfirm": "Supprimer la planification ({{schedule}}) ?"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

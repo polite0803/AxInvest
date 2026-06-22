@@ -97,7 +97,10 @@ export function ReflectionPanel() {
       if (myToken !== loadTokenRef.current) { return; }
       if (Array.isArray(r)) { setReflections(r); }
       if (Array.isArray(c)) { setCronJobs(c); }
-    } catch { /* ignore */ }
+    } catch (e) {
+      // P0-2 修复: 加载失败必须显式告知用户,否则后端挂掉时用户无感知
+      message.error(t("stockAnalysis.reflection.loadFailed", { error: String(e) }));
+    }
   };
 
   useEffect(() => {
@@ -124,7 +127,10 @@ export function ReflectionPanel() {
         await invoke("toggle_validate_decisions_cron", { id: activeCron.id, enabled: enable });
       }
       await load();
-    } catch { /* ignore */ }
+    } catch (e) {
+      // P0-2 修复: 切换 cron 失败必须显式告知用户
+      message.error(t("stockAnalysis.reflection.toggleCronFailed", { error: String(e) }));
+    }
   };
 
   const deleteCron = async () => {
@@ -132,7 +138,28 @@ export function ReflectionPanel() {
     try {
       await invoke("delete_validate_decisions_cron", { id: activeCron.id });
       await load();
-    } catch { /* ignore */ }
+    } catch (e) {
+      // P0-2 修复: 删除 cron 失败必须显式告知用户
+      message.error(t("stockAnalysis.reflection.deleteCronFailed", { error: String(e) }));
+    }
+  };
+
+  // P0-3 修复: 重跑反思 — 后端无 rerun_reflection 命令,复用 run_reflection_now
+  // 语义: 重新跑一次反思,生成新记录,旧失败记录保留(用户可手动删除)
+  const rerunReflection = async (r: ReflectionRow) => {
+    try {
+      await invoke("run_reflection_now", {
+        stockCode: r.stockCode,
+        stockName: r.stockName,
+        asOfDate: r.asOfDate,
+        actualOutcome: r.actualOutcome,
+        reflectionDepth: r.reflectionDepth,
+      });
+      message.success(t("stockAnalysis.reflection.rerunSuccess"));
+      await load();
+    } catch (e) {
+      message.error(t("stockAnalysis.reflection.rerunFailed", { error: String(e) }));
+    }
   };
 
   const deleteReflection = async (id: string) => {
@@ -258,9 +285,18 @@ export function ReflectionPanel() {
               addonAfter={t("stockAnalysis.reflection.confidence")}
             />
             {activeCron && (
-              <Button danger size="small" onClick={deleteCron}>
-                {t("stockAnalysis.reflection.deleteBtn")}
-              </Button>
+              // P0-1 修复: 删除 cron 是高危操作(永久丢失调度),必须 Popconfirm 二次确认,
+              // 与 deleteReflection (line 340) 的 UX 保持一致。
+              <Popconfirm
+                title={t("stockAnalysis.reflection.deleteCronConfirm", { schedule: activeCron.schedule })}
+                okText={t("common.confirm")}
+                cancelText={t("common.cancel")}
+                onConfirm={deleteCron}
+              >
+                <Button danger size="small">
+                  {t("stockAnalysis.reflection.deleteBtn")}
+                </Button>
+              </Popconfirm>
             )}
           </Space>
           {activeCron && (
@@ -331,19 +367,38 @@ export function ReflectionPanel() {
               />
               <Table.Column
                 title={t("stockAnalysis.reflection.colAction")}
-                width={90}
+                width={150}
                 fixed="right"
                 render={(_: unknown, r: ReflectionRow) => (
-                  <Popconfirm
-                    title={t("stockAnalysis.reflection.deleteConfirm")}
-                    okText={t("common.confirm")}
-                    cancelText={t("common.cancel")}
-                    onConfirm={() => deleteReflection(r.id)}
-                  >
-                    <Button danger size="small">
-                      {t("stockAnalysis.reflection.deleteBtn")}
-                    </Button>
-                  </Popconfirm>
+                  <Space size="small">
+                    {
+                      /* P0-3 修复: 失败的反思可一键重跑(复用 run_reflection_now),
+                    成功后生成新记录,旧失败记录保留(可手动删除)。
+                    仅 failed:* 状态显示,避免误操作正在 running/completed 的记录。 */
+                    }
+                    {typeof r.status === "string" && r.status.startsWith("failed:") && (
+                      <Popconfirm
+                        title={t("stockAnalysis.reflection.rerunConfirm")}
+                        okText={t("common.confirm")}
+                        cancelText={t("common.cancel")}
+                        onConfirm={() => rerunReflection(r)}
+                      >
+                        <Button size="small">
+                          {t("stockAnalysis.reflection.rerunBtn")}
+                        </Button>
+                      </Popconfirm>
+                    )}
+                    <Popconfirm
+                      title={t("stockAnalysis.reflection.deleteConfirm")}
+                      okText={t("common.confirm")}
+                      cancelText={t("common.cancel")}
+                      onConfirm={() => deleteReflection(r.id)}
+                    >
+                      <Button danger size="small">
+                        {t("stockAnalysis.reflection.deleteBtn")}
+                      </Button>
+                    </Popconfirm>
+                  </Space>
                 )}
               />
             </Table>
@@ -446,7 +501,13 @@ function renderBlackboardSnapshot(raw: string, label: string) {
   );
 }
 
-function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string, opts?: object) => string }) {
+function ExpandedReflectionRow(
+  { row, t, onRefresh }: {
+    row: ReflectionRow;
+    t: (key: string, opts?: object) => string;
+    onRefresh?: () => Promise<void> | void;
+  },
+) {
   const suggestions = parseParamsSuggestion(row);
   const [checkedParams, setCheckedParams] = useState<string[]>([]);
   const [applying, setApplying] = useState(false);
@@ -562,6 +623,10 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
           t("stockAnalysis.reflection.aiApplySuccess", { count: result.applied_count }),
         );
         setAiModalOpen(false);
+        // P0-4 修复: 应用成功后刷新反思列表,避免用户看到陈旧数据,
+        // 同时关闭弹窗后用户能立即看到新生成的反思行(如果后端触发了重跑)
+        // load 是父组件作用域,通过 onRefresh prop 传入
+        await onRefresh?.();
       } else {
         message.error(
           t("stockAnalysis.reflection.aiApplyFailed", {

@@ -7675,7 +7675,7 @@
     "addedToWatchlist": "Added",
     "inWatchlist": "Watching",
     "addFailed": "Add Failed",
-    "retry": "पुनः प्रयास करें",
+    "retry": "पुनः प्रयास",
     "completed": "Completed",
     "viewDetails": "View Details",
     "error": "Error",
@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "विश्लेषण इतिहास लोड करने में विफल",
-    "retry": "पुनः प्रयास",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "डिबेट फिर से चलाएँ",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "लोड विफल: {{error}}",
+      "toggleCronFailed": "शेड्यूल टॉगल विफल: {{error}}",
+      "deleteCronFailed": "शेड्यूल हटाना विफल: {{error}}",
+      "rerunSuccess": "पुनःचालन ट्रिगर",
+      "rerunFailed": "पुनःचालन विफल: {{error}}",
+      "rerunConfirm": "इस चिंतन को पुनः चलाएं?",
+      "rerunBtn": "पुनः चलाएं",
+      "deleteCronConfirm": "शेड्यूल ({{schedule}}) हटाएं?"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "فشل تحميل سجل التحليل",
-    "retry": "إعادة المحاولة",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "rolledBack": " (تم التراجع تلقائياً)",
       "rerunDebate": "إعادة تشغيل المناظرة",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "فشل التحميل: {{error}}",
+      "toggleCronFailed": "فشل تبديل الجدول: {{error}}",
+      "deleteCronFailed": "فشل حذف الجدول: {{error}}",
+      "rerunSuccess": "تم تشغيل إعادة التنفيذ",
+      "rerunFailed": "فشل إعادة التشغيل: {{error}}",
+      "rerunConfirm": "إعادة تشغيل هذا التفكير؟",
+      "rerunBtn": "إعادة تشغيل",
+      "deleteCronConfirm": "حذف الجدول ({{schedule}})؟"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

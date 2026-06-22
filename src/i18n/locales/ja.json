@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "履歴分析の読み込みに失敗しました",
-    "retry": "再試行",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8710,7 +8709,15 @@
       "asOfLabel": "as-of: {{asOf}} → hindsight: {{hindsight}}",
       "rerunDebate": "討論を再実行",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "読み込み失敗: {{error}}",
+      "toggleCronFailed": "スケジュール切替失敗: {{error}}",
+      "deleteCronFailed": "スケジュール削除失敗: {{error}}",
+      "rerunSuccess": "再実行をトリガーしました",
+      "rerunFailed": "再実行失敗: {{error}}",
+      "rerunConfirm": "この振り返りを再実行しますか？",
+      "rerunBtn": "再実行",
+      "deleteCronConfirm": "スケジュール ({{schedule}}) を削除しますか？"
     },
     "portfolioMonitor": {
       "title": "株式分析",

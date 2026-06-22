@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "Не удалось загрузить историю анализа",
-    "retry": "Повторить",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "Перезапустить дебаты",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "Ошибка загрузки: {{error}}",
+      "toggleCronFailed": "Ошибка переключения: {{error}}",
+      "deleteCronFailed": "Ошибка удаления: {{error}}",
+      "rerunSuccess": "Перезапуск запущен",
+      "rerunFailed": "Ошибка перезапуска: {{error}}",
+      "rerunConfirm": "Перезапустить это размышление?",
+      "rerunBtn": "Перезапустить",
+      "deleteCronConfirm": "Удалить расписание ({{schedule}})?"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

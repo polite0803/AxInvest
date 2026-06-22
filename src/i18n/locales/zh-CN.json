@@ -7696,7 +7696,6 @@
     "reAnalyzeNeedCodeHint": "当前未选定股票，需在顶部搜索栏选择后再启动分析",
     "searchStock": "搜索股票",
     "loadAnalysisFailed": "加载历史分析失败",
-    "retry": "重试",
     "willOverwrite": "将覆盖原记录（保留相同 analysisId）",
     "position": "仓位",
     "targetPrice": "目标价",
@@ -8604,7 +8603,15 @@
       "aiRawOutputTitle": "AI 原始输出",
       "rolledBack": "（已自动回滚）",
       "decisionJsonLabel": "decisionJson (LLM 提取后):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (工作流原始结果):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (工作流原始结果):",
+      "loadFailed": "加载失败: {{error}}",
+      "toggleCronFailed": "切换定时失败: {{error}}",
+      "deleteCronFailed": "删除定时失败: {{error}}",
+      "rerunSuccess": "重跑反思已触发",
+      "rerunFailed": "重跑失败: {{error}}",
+      "rerunConfirm": "确认对当前反思重新触发？",
+      "rerunBtn": "重跑",
+      "deleteCronConfirm": "确认删除定时 ({{schedule}})？"
     },
     "portfolioMonitor": {
       "title": "组合监控",

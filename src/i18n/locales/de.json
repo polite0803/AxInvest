@@ -7675,7 +7675,7 @@
     "addedToWatchlist": "Added",
     "inWatchlist": "Watching",
     "addFailed": "Add Failed",
-    "retry": "Wiederholen",
+    "retry": "Erneut versuchen",
     "completed": "Completed",
     "viewDetails": "View Details",
     "error": "Error",
@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "Analyseverlauf konnte nicht geladen werden",
-    "retry": "Erneut versuchen",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "Debatte neu starten",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "Ladefehler: {{error}}",
+      "toggleCronFailed": "Zeitplan-Umschaltung fehlgeschlagen: {{error}}",
+      "deleteCronFailed": "Zeitplan-Löschung fehlgeschlagen: {{error}}",
+      "rerunSuccess": "Wiederholung ausgelöst",
+      "rerunFailed": "Wiederholung fehlgeschlagen: {{error}}",
+      "rerunConfirm": "Diese Reflexion wiederholen?",
+      "rerunBtn": "Wiederholen",
+      "deleteCronConfirm": "Zeitplan ({{schedule}}) löschen?"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

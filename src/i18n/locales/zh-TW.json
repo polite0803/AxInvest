@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "當前未選定股票，需在頂部搜尋欄選擇後再啟動分析",
     "searchStock": "搜尋股票",
     "loadAnalysisFailed": "載入歷史分析失敗",
-    "retry": "重試",
     "willOverwrite": "將覆蓋原記錄（保留相同 analysisId）",
     "position": "仓位",
     "targetPrice": "目标价",
@@ -8747,7 +8746,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "重跑辯論",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "載入失敗: {{error}}",
+      "toggleCronFailed": "切換定時失敗: {{error}}",
+      "deleteCronFailed": "刪除定時失敗: {{error}}",
+      "rerunSuccess": "重跑反思已觸發",
+      "rerunFailed": "重跑失敗: {{error}}",
+      "rerunConfirm": "確認對當前反思重新觸發？",
+      "rerunBtn": "重跑",
+      "deleteCronConfirm": "確認刪除定時 ({{schedule}})？"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

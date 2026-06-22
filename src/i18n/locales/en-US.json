@@ -8362,7 +8362,15 @@
       "rolledBack": " (auto-rolled back)",
       "rerunDebate": "Rerun Debate",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "Failed to load: {{error}}",
+      "toggleCronFailed": "Failed to toggle schedule: {{error}}",
+      "deleteCronFailed": "Failed to delete schedule: {{error}}",
+      "rerunSuccess": "Reflection rerun triggered",
+      "rerunFailed": "Rerun failed: {{error}}",
+      "rerunConfirm": "Rerun this reflection?",
+      "rerunBtn": "Rerun",
+      "deleteCronConfirm": "Delete schedule ({{schedule}})?"
     },
     "refreshing": "Refreshing",
     "regions": "Regional Blocks",

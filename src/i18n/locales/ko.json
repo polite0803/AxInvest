@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "기록 분석 불러오기 실패",
-    "retry": "재시도",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "토론 다시 실행",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "로드 실패: {{error}}",
+      "toggleCronFailed": "일정 토글 실패: {{error}}",
+      "deleteCronFailed": "일정 삭제 실패: {{error}}",
+      "rerunSuccess": "재실행 트리거됨",
+      "rerunFailed": "재실행 실패: {{error}}",
+      "rerunConfirm": "이 성찰을 재실행하시겠습니까?",
+      "rerunBtn": "재실행",
+      "deleteCronConfirm": "일정 ({{schedule}})을 삭제하시겠습니까?"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

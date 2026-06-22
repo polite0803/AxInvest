@@ -7706,7 +7706,6 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "Error al cargar el historial de análisis",
-    "retry": "Reintentar",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8619,7 +8618,15 @@
       "applyFailed": "参数应用失败: {{error}}",
       "rerunDebate": "Volver a ejecutar el debate",
       "decisionJsonLabel": "decisionJson (after LLM extraction):",
-      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):",
+      "loadFailed": "Error al cargar: {{error}}",
+      "toggleCronFailed": "Error al alternar: {{error}}",
+      "deleteCronFailed": "Error al eliminar: {{error}}",
+      "rerunSuccess": "Reejecución activada",
+      "rerunFailed": "Reejecución fallida: {{error}}",
+      "rerunConfirm": "¿Reejecutar esta reflexión?",
+      "rerunBtn": "Reejecutar",
+      "deleteCronConfirm": "¿Eliminar programación ({{schedule}})?"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

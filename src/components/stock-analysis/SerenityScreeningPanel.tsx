@@ -22,7 +22,7 @@ import {
   StockOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { Button, Card, Empty, Progress, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Progress, Space, Spin, Tag, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -33,6 +33,12 @@ interface SerenityResult {
   status?: string;
   candidates?: unknown;
   trends?: TrendInfo[];
+  /**
+   * 后端从 a-candidate-mapper 的 arguments.summary 透传出来的"为什么没有候选"。
+   * 当上游三个瓶颈节点均返回 data_gaps=true 时，模型反幻觉拒绝编造并在此
+   * 字段说明原因；前端在 candidates 为空时把它展示给用户。
+   */
+  emptyReason?: string | null;
 }
 
 /// 从多种可能的 candidates 结构中提取候选数组。
@@ -265,6 +271,8 @@ export function SerenityScreeningPanel() {
     currentNodeId,
     setCurrentNode,
     clearSteps,
+    emptyReason,
+    setEmptyReason,
   } = useSerenityStore();
   const { t } = useTranslation();
 
@@ -320,6 +328,7 @@ export function SerenityScreeningPanel() {
     setCandidates([]);
     setTrends([]);
     setError(null);
+    setEmptyReason(null);
     setStage("loading");
     setCompletedNodes(0);
     setTotalNodes(0);
@@ -365,6 +374,7 @@ export function SerenityScreeningPanel() {
         candidates?: unknown[];
         trends?: TrendInfo[];
         error?: string;
+        emptyReason?: string | null;
       }>("serenity-screening-completed", (event) => {
         const p = event.payload;
         eventHandledRef.current = true;
@@ -407,6 +417,11 @@ export function SerenityScreeningPanel() {
           if (Array.isArray(p.trends)) {
             setTrends(p.trends);
           }
+          // 接收后端透传的"为什么没有候选"原因（来自 a-candidate-mapper
+          // 的 arguments.summary），在 candidates 为空时展示
+          if (typeof p.emptyReason === "string" && p.emptyReason.trim().length > 0) {
+            setEmptyReason(p.emptyReason.trim());
+          }
           setStage("done");
           setRunning(false);
           setCurrentNode(null);
@@ -436,6 +451,9 @@ export function SerenityScreeningPanel() {
         if (Array.isArray(r?.trends) && r.trends.length > 0) {
           setTrends(r.trends);
         }
+        if (typeof r?.emptyReason === "string" && r.emptyReason.trim().length > 0) {
+          setEmptyReason(r.emptyReason.trim());
+        }
         setStage("done");
       }
     } catch (err: unknown) {
@@ -452,6 +470,7 @@ export function SerenityScreeningPanel() {
     addStep,
     clearSteps,
     setCandidates,
+    setEmptyReason,
     setError,
     setRunning,
     setStage,
@@ -913,11 +932,32 @@ export function SerenityScreeningPanel() {
         </div>
       )}
 
-      {/* 空状态 */}
+      {/* 空状态 / 解释无候选原因 */}
       {!running && !error && candidates.length === 0 && trends.length === 0 && (
-        <Empty
-          image={<StockOutlined style={{ fontSize: 48, opacity: 0.3 }} />}
-          description={t("serenityPanel.emptyHint")}
+        emptyReason
+          ? (
+            <Alert
+              type="info"
+              showIcon
+              message={t("serenityPanel.noCandidateTitle")}
+              description={emptyReason}
+              className="w-full"
+            />
+          )
+          : (
+            <Empty
+              image={<StockOutlined style={{ fontSize: 48, opacity: 0.3 }} />}
+              description={t("serenityPanel.emptyHint")}
+            />
+          )
+      )}
+      {!running && !error && candidates.length === 0 && trends.length > 0 && emptyReason && (
+        <Alert
+          type="info"
+          showIcon
+          message={t("serenityPanel.noCandidateTitle")}
+          description={emptyReason}
+          className="w-full"
         />
       )}
 

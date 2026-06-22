@@ -87,6 +87,13 @@ interface SerenityState {
   totalNodes: number;
   steps: StepLog[];
   currentNodeId: string | null;
+  /**
+   * 工作流结束时，a-candidate-mapper 节点返回的"为什么没有候选"原因。
+   * 当上游三个瓶颈节点均返回 data_gaps=true 时，模型会在 arguments.summary
+   * 给出反幻觉说明；此字段在 candidates 为空时供前端展示，避免用户看到
+   * 一个无解释的 Empty 占位。
+   */
+  emptyReason: string | null;
 
   setRunning: (v: boolean) => void;
   setStage: (s: StepStage) => void;
@@ -97,6 +104,7 @@ interface SerenityState {
   setTotalNodes: (n: number) => void;
   addStep: (log: StepLog) => void;
   setCurrentNode: (id: string | null) => void;
+  setEmptyReason: (r: string | null) => void;
   clearSteps: () => void;
   reset: () => void;
 }
@@ -111,6 +119,7 @@ const initialState = {
   totalNodes: 0,
   steps: [] as StepLog[],
   currentNodeId: null as string | null,
+  emptyReason: null as string | null,
 };
 
 export const useSerenityStore = create<SerenityState>((set) => ({
@@ -134,6 +143,7 @@ export const useSerenityStore = create<SerenityState>((set) => ({
       return { steps: [...s.steps, log] };
     }),
   setCurrentNode: (id) => set({ currentNodeId: id }),
+  setEmptyReason: (r) => set({ emptyReason: r }),
   clearSteps: () => set({ steps: [], currentNodeId: null }),
   reset: () => set(initialState),
 }));

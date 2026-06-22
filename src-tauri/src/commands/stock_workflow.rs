@@ -2182,7 +2182,9 @@ fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>
 /// 从节点原始输出中直接提取 candidates 数组
 /// 与通用 extract_agent_output 不同，此函数直接导航已知 JSON 路径：
 ///   {"content": "...```json\n{\"name\": \"...\", \"arguments\": {\"candidates\": [...]}\n```..."}
-/// 返回 {"candidates": [...]} 或 null
+/// 返回 {"candidates": [...], "summary": "..."} 或 null。
+/// `summary` 取自 arguments.summary（当上游趋势/瓶颈数据缺失时，LLM 通常会
+/// 在此字段给出"为什么没有候选"的解释，前端需要在空候选时把它展示给用户）。
 fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
     let content = match raw.get("content").and_then(|c| c.as_str()) {
         Some(c) => c,
@@ -2212,11 +2214,28 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
         Some(a) => a.get("candidates"),
         None => parsed.as_object().and_then(|o| o.get("candidates")),
     };
+    // summary 同样在 arguments.summary（或顶层 summary），用来在 candidates 为空时
+    // 告知前端"为什么没有候选"（如：上游 data_gaps=true、模型反幻觉拒绝编造等）
+    let summary = args
+        .and_then(|a| a.get("summary"))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            parsed
+                .as_object()
+                .and_then(|o| o.get("summary"))
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string())
+        });
     match candidates {
         Some(arr) if arr.is_array() => {
             let count = arr.as_array().map(|a| a.len()).unwrap_or(0);
             tracing::info!("[serenity] 直接提取成功，找到 {} 个候选", count);
-            serde_json::json!({"candidates": arr})
+            if let Some(s) = summary {
+                serde_json::json!({"candidates": arr, "summary": s})
+            } else {
+                serde_json::json!({"candidates": arr})
+            }
         },
         Some(_) => {
             tracing::warn!(
@@ -2225,12 +2244,26 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
                     .and_then(|c| c.as_object())
                     .map(|o| o.keys().cloned().collect::<Vec<_>>())
             );
-            serde_json::Value::Null
+            // 即使 candidates 字段格式异常，summary 仍可能有用
+            if let Some(s) = summary {
+                serde_json::json!({"candidates": [], "summary": s})
+            } else {
+                serde_json::Value::Null
+            }
         },
         None => {
             // 最后的兜底：parsed 本身可能是裸候选对象
             if parsed.get("stock_code").is_some() {
-                serde_json::json!({"candidates": [parsed]})
+                let mut out = serde_json::json!({"candidates": [parsed]});
+                if let Some(s) = summary {
+                    out.as_object_mut()
+                        .map(|o| o.insert("summary".to_string(), serde_json::Value::String(s)));
+                }
+                out
+            } else if let Some(s) = summary {
+                // 找不到 candidates 字段但有 summary：典型场景是 LLM 拒绝编造
+                tracing::info!("[serenity] 未找到 candidates 字段但有 summary，空候选 + 原因");
+                serde_json::json!({"candidates": [], "summary": s})
             } else {
                 tracing::warn!(
                     "[serenity] 无法找到 candidates 字段, parsed keys={:?}",
@@ -2505,6 +2538,16 @@ pub async fn run_serenity_screening(
                 },
             );
 
+            // 提取"为什么没有候选"的原因：a-candidate-mapper 的 arguments.summary
+            // 当上游三个瓶颈节点均返回 data_gaps=true 时，LLM 会拒绝编造候选
+            // 并在 summary 字段说明原因；前端在 candidates 为空时展示给用户。
+            let empty_reason = candidates
+                .as_object()
+                .and_then(|o| o.get("summary"))
+                .and_then(|s| s.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+
             // 先 emit completed 事件，确保持久化失败不会阻断前端通知
             let _ = app_h.emit(
                 "serenity-screening-completed",
@@ -2514,6 +2557,7 @@ pub async fn run_serenity_screening(
                     "result": candidates,
                     "candidates": candidate_array,
                     "trends": trends_list,
+                    "emptyReason": empty_reason,
                 }),
             );
 
@@ -2603,6 +2647,7 @@ pub async fn run_serenity_screening(
                 "status": "completed",
                 "candidates": result_val["candidates"].clone(),
                 "trends": trends_list,
+                "emptyReason": empty_reason,
             }))
         },
         Err(e) => {

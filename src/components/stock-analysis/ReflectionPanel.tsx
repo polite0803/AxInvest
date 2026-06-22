@@ -916,7 +916,7 @@ edit_asset_file 的 description 必填（≤ 200 字）。
 
 4. 如果是回滚：
    :::action
-   {"action_type":"rollback_to_version","data":{"template_id":"${REFLECTION_TEMPLATE_ID}","target_version":<int>}}
+   {"action_type":"rollback_to_version","data":{"template_id":"${REFLECTION_TEMPLATE_ID}","version":<int>}}
    :::
 
 5. 如果是改 sub-workflow input_mapping：

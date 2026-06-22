@@ -2714,6 +2714,7 @@
     "permissionAcceptEdits": "편집 허용",
     "permissionFullAccess": "전체 액세스",
     "selectDirectory": "디렉터리 선택",
+    "unknown": "알 수 없음",
     "workingDirectory": "작업 디렉터리",
     "permissionRequired": "권한 필요",
     "toolInput": "도구 입력",

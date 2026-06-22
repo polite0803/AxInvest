@@ -1,10 +1,8 @@
-// 集成测试: pr-ci.yml playwright 安装步骤
+// 集成测试: pr-ci.yml E2E 配置检查
 //
-// macOS runner 上 playwright 需要 --with-deps 来安装系统依赖（brew）。
-// 当 cache miss 时 brew install 可能卡死（brew update 慢），
-// 但这是上游设定的正确配置，保持与上游一致。
-// 缓存命中时 brew install 跳过，速度正常。
-// cache key 包含 package-lock.json hash，lock 不变时走 cache。
+// macOS runner 上使用系统 Chrome 而非下载 Playwright 专用 Chromium，
+// 因为 cdn.playwright.dev 在 macOS CI runner 上下载 165MB 后卡在解压阶段。
+// 用 system Chrome (channel: chrome) 跳过下载，依赖 macOS runner 预装的 Chrome。
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -16,14 +14,17 @@ function loadPrCi(): string {
   return readFileSync(ymlPath, "utf8");
 }
 
-describe(".github/workflows/pr-ci.yml — Playwright 安装步骤", () => {
-  it("playwright install 应仅在有缓存 miss 时执行", () => {
+describe(".github/workflows/pr-ci.yml — Playwright 配置", () => {
+  it("E2E job 使用 system Chrome（无 playwright install 步骤）", () => {
     const yml = loadPrCi();
-    const installLines = [...yml.matchAll(/run:\s*npx[^\n]*playwright\s+install[^\n]*/g)];
-    expect(installLines.length).toBeGreaterThan(0);
+    // 不应有 playwright install 命令（使用系统 Chrome）
+    const installLines = [...yml.matchAll(/playwright\s+install/g)];
+    expect(installLines.length).toBe(0);
+    // 应有 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD 环境变量
+    expect(yml).toContain("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD");
   });
 
-  it("E2E job 应与上游一致（macOS + 无 HOMEBREW_NO_AUTO_UPDATE，无 timeout-minutes）", () => {
+  it("E2E job 运行在 macOS，无 timeout-minutes", () => {
     const yml = loadPrCi();
     const jobIdx = yml.indexOf("test-e2e:");
     expect(jobIdx).toBeGreaterThan(0);

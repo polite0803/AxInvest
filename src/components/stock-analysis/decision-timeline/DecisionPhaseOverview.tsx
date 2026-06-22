@@ -89,7 +89,7 @@ export const DecisionPhaseOverview = React.memo(function DecisionPhaseOverview()
           className="text-[10px] font-semibold uppercase tracking-wide"
           style={{ color: token.colorTextTertiary }}
         >
-          {t("stockAnalysis.timeline.overviewTitle", "Decision Chain")}
+          {t("stockAnalysis.timeline.overviewTitle")}
         </span>
         <span
           className="text-[10px] tabular-nums"

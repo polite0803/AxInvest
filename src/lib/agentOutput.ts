@@ -136,6 +136,7 @@ export function tryBeautifyJson(text: string): string {
  */
 export function extractContent(value: unknown): string {
   let text: string;
+  let isEmptyContent = false;
   if (typeof value === "string") {
     text = value;
   } else if (value && typeof value === "object") {
@@ -146,6 +147,7 @@ export function extractContent(value: unknown): string {
       text = JSON.stringify(r.content, null, 2);
     } else if (typeof r.content === "string" && r.content.length === 0) {
       // content 为空字符串：说明 LLM 未产生实质输出，不返回 AgentResult 包装 JSON
+      isEmptyContent = true;
       text = "";
     } else {
       text = JSON.stringify(value, null, 2);
@@ -155,7 +157,12 @@ export function extractContent(value: unknown): string {
   }
   // 调用统一的清理 + beautify 函数
   text = cleanToolCallTags(text);
-  return tryBeautifyJson(text);
+  text = tryBeautifyJson(text);
+  // 阶段 2 埋点：开发模式下告警 LLM 空输出（辩论/反思等场景诊断用）
+  if (import.meta.env.DEV && isEmptyContent) {
+    console.warn("[agentOutput] LLM returned empty content", { value });
+  }
+  return text;
 }
 
 /**

@@ -7985,6 +7985,10 @@
     "debateHistory": "Debate History",
     "debateRound": "Round {{round}}",
     "debateRounds": "{{current}}/{{total}} rounds",
+    "debateRoundsFailed": "Debate rounds {{rounds}} failed",
+    "debateRoundsFailedDesc": "LLM output is empty or timed out. Click ↻ at the top-right to rerun the entire analysis.",
+    "debateRoundsDegraded": "Debate rounds {{rounds}} degraded",
+    "debateRoundsDegradedDesc": "R1/R2 context was missing; the LLM inferred arguments from upstream data, so the result has lower confidence.",
     "debtRatio": "Debt Ratio",
     "decision": {
       "action": "Suggested Action",
@@ -8353,7 +8357,8 @@
       "aiApplyFailed": "Apply failed: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI suggested changes (click apply below)",
       "aiRawOutputTitle": "AI raw output",
-      "rolledBack": " (auto-rolled back)"
+      "rolledBack": " (auto-rolled back)",
+      "rerunDebate": "Rerun Debate"
     },
     "refreshing": "Refreshing",
     "regions": "Regional Blocks",

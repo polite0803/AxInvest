@@ -29,6 +29,18 @@ title: 多方最终反驳 (R3)
 4. 综合定调 `final_position`。
 5. 输出 JSON。
 
+## 降级策略（R1 / R2 缺失时）
+
+如果 R1 我方输出**或** R2 对方质询为空字符串 / 缺失 / 无法解析，**不要返回空**。按以下降级路径继续：
+
+1. **仅 R1 缺失、R2 在场**：`r2_cross_examination_response` 仍为 3 条（针对 R2 真实质询），但 `strengthened_arguments` 改为基于 `a-*` 报告 + 工具实时数据挑选的 2-3 个我方隐含论据（不是从 R1 `core_arguments` 挑）。`final_position` 仍可给出，但 `confidence` 必须在 40-60 区间。
+2. **仅 R2 缺失、R1 在场**：`r2_cross_examination_response` 用 `[DEGRADED]` 标记每条 `r2_question_ref` 为"对方 R2 质询缺失"，`verdict` 全部填 `null`（不判 accept/reject），`response` 写"对方 R2 缺失，我方基于 R1 论据维持立场"。`strengthened_arguments` 正常从 R1 挑选。
+3. **R1 + R2 都缺失**：`final_position` 基于 `a-*` 报告 + 工具实时数据独立判断（强/中/弱看多）；`r2_cross_examination_response` 用 `[DEGRADED] 对方 R2 缺失` 标记；`claim` 必须明确写"基于上游 a-* 报告 + 工具实时数据，无 R1/R2 上下文"；`confidence` ≤ 50。
+4. **降级模式 `claim` 必带前缀**：`"[DEGRADED]"` 开头标识。
+5. **`data_gaps` 必填**：必须列出"因 R1/R2 缺失导致无法核实的所有维度"。
+
+降级模式的存在意义：避免辩论链因单点失败而输出"暂无数据"，**始终给 portfolio-mgr 一个可用的多空立场信号**。
+
 ## 输出 JSON Schema（严格遵循，不要新增字段）
 
 ```json

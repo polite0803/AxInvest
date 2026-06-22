@@ -1,7 +1,7 @@
 import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
-import { ExpandOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
+import { ExpandOutlined, ReloadOutlined, WarningOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Collapse, Empty, Modal, Tag } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
@@ -507,6 +507,8 @@ export function DebatePanel() {
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
+  // 阶段 6: 重跑辩论:在 early-return 之前声明 hook,保持 hooks 调用顺序一致
+  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [expanded, setExpanded] = useState(false);
 
   const [sentimentRatio, bullCount, bearCount] = useMemo(() => {
@@ -542,20 +544,65 @@ export function DebatePanel() {
     bear: processDebateInput(r.bear),
   }));
 
+  // 阶段 7: 检测失败轮次 + 降级轮次
+  // 期望 3 轮辩论,缺失的 round = 失败(LLM 输出空/超时导致整链雪崩,被 stage 1 过滤掉)
+  // 降级轮次 = 内容含 [DEGRADED] 前缀(R1/R2 缺失时 LLM 走降级策略)
+  const EXPECTED_ROUNDS = [1, 2, 3] as const;
+  const presentRounds = new Set(processedRounds.map((r) => r.round));
+  const failedRounds = EXPECTED_ROUNDS.filter((r) => !presentRounds.has(r));
+  const degradedRounds = processedRounds.filter(
+    (r) => r.bull.text.includes("[DEGRADED]") || r.bear.text.includes("[DEGRADED]"),
+  );
+  const showWarning = failedRounds.length > 0 || degradedRounds.length > 0;
+
+  // 阶段 6: 重跑辩论 — 直接触发一次 stock-analysis workflow
+  // (用 stockAnalysisStore 的 startAnalysis;不引入新后端命令)
+  // startAnalysis hook 已在组件顶部声明
+  const handleRerun = () => {
+    const { stockCode } = useStockAnalysisStore.getState();
+    if (!stockCode) { return; }
+    void startAnalysis(stockCode);
+  };
+
   return (
     <>
       <Card
         size="small"
         title={t("stockAnalysis.debate")}
         extra={
-          <Button
-            type="text"
-            size="small"
-            icon={<ExpandOutlined />}
-            onClick={() => setExpanded(true)}
-          />
+          <div className="flex items-center gap-1">
+            {showWarning && (
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={handleRerun}
+                title={t("stockAnalysis.reflection.rerunDebate")}
+              />
+            )}
+            <Button
+              type="text"
+              size="small"
+              icon={<ExpandOutlined />}
+              onClick={() => setExpanded(true)}
+            />
+          </div>
         }
       >
+        {showWarning && (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<WarningOutlined />}
+            className="mb-2"
+            message={failedRounds.length > 0
+              ? t("stockAnalysis.debateRoundsFailed", { rounds: failedRounds.join(", ") })
+              : t("stockAnalysis.debateRoundsDegraded", { rounds: degradedRounds.map((r) => r.round).join(", ") })}
+            description={failedRounds.length > 0
+              ? t("stockAnalysis.debateRoundsFailedDesc")
+              : t("stockAnalysis.debateRoundsDegradedDesc")}
+          />
+        )}
         <div className="mb-3">
           <div className="flex justify-between text-xs mb-1">
             <span style={{ color: "var(--sa-green)" }}>{t("stockAnalysis.bear")}</span>

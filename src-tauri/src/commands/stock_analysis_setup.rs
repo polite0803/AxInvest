@@ -581,7 +581,10 @@ async fn seed_stock_analysis_workflow_template(
     // v15: 注释预留,实际从未 bump 生效,跳过避免版本号空转
     // 之前所有节点配置改动后,DB 里 workflow_template 仍是旧版,新代码不生效,
     // 必须 bump 版本号强制重新种子化。
-    const TEMPLATE_VERSION: i32 = 16;
+    // v17: 辩论子节点 (bull-r1..r3 / bear-r1..r3) 加 1 次重试 + 180s 超时。
+    //   修复辩论链雪崩:LLM 偶发超时/429 时 max_retries=0 会让整链死,bear-r1
+    //   拿不到 bull-r1 上下文则 R2/R3 全部"暂无数据"。
+    const TEMPLATE_VERSION: i32 = 17;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -1619,6 +1622,16 @@ async fn seed_stock_analysis_workflow_template(
             //   输出 "暂无数据"。
             //   R2 质询 / R3 反驳的角色由 bull-r2.md / bear-r2.md / bull-r3.md /
             //   bear-r3.md prompt 控制,与工具集无关。
+            // 修复(阶段 4):辩论子节点加 1 次重试 + 180s 超时。LLM 偶发超时/429
+            //   是单点失败主因,max_retries=0 导致整链雪崩(bear-r1 拿不到 bull-r1
+            //   上下文则 R2/R3 全部"暂无数据")。1 次重试覆盖 ~95% 瞬时失败,不会
+            //   把工作流时长翻倍(30s 退避)。
+            a.base.retry = RetryConfig {
+                enabled: true,
+                max_retries: 1,
+                ..Default::default()
+            };
+            a.base.timeout = Some(180);
             a.config.tools = bull_tools.clone();
             a.config.exposed_tools = bull_tools.iter().map(|t| t.name.clone()).collect();
             a.config.system_prompt =
@@ -1647,6 +1660,14 @@ async fn seed_stock_analysis_workflow_template(
             agent(&bear_id, &bear_title, bear_expert, Some("debate-bull-bear"), bear_x, bear_y);
         if let WorkflowNode::Agent(ref mut a) = bear_an {
             // 同 bull_an:R1/R2/R3 空方统一用 bull_tools。
+            // 修复(阶段 4):同 bull_an,加 1 次重试 + 180s 超时,避免 LLM 瞬时失败
+            //   导致辩论链雪崩(详见 bull_an 注释)。
+            a.base.retry = RetryConfig {
+                enabled: true,
+                max_retries: 1,
+                ..Default::default()
+            };
+            a.base.timeout = Some(180);
             a.config.tools = bull_tools.clone();
             a.config.exposed_tools = bull_tools.iter().map(|t| t.name.clone()).collect();
             a.config.system_prompt =

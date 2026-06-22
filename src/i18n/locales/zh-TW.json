@@ -7593,6 +7593,10 @@
     "debateRound": "第{{round}}轮",
     "bull": "多方",
     "bear": "空方",
+    "debateRoundsFailed": "第 {{rounds}} 輪辯論失敗",
+    "debateRoundsFailedDesc": "LLM 輸出為空或超時,可在右上角點擊 ↻ 重跑整個分析",
+    "debateRoundsDegraded": "第 {{rounds}} 輪辯論已降級",
+    "debateRoundsDegradedDesc": "R1/R2 上下文缺失,LLM 基於上游數據反推,結果置信度較低",
     "riskAssessment": "風險評估",
     "risk.aggressive": "激进",
     "risk.conservative": "保守",
@@ -8605,7 +8609,8 @@
       "paramReason": "理由",
       "applyParamsBtn": "应用选中的 {{count}} 项参数",
       "applySuccess": "参数已应用到 stock-analysis 模板",
-      "applyFailed": "参数应用失败: {{error}}"
+      "applyFailed": "参数应用失败: {{error}}",
+      "rerunDebate": "重跑辯論"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

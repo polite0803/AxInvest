@@ -7591,6 +7591,10 @@
     "debateRound": "Round {{round}}",
     "bull": "Bull",
     "bear": "Bear",
+    "debateRoundsFailed": "ラウンド{{rounds}}の討論に失敗しました",
+    "debateRoundsFailedDesc": "LLM 出力が空またはタイムアウトです。右上の ↻ をクリックして分析全体を再実行してください。",
+    "debateRoundsDegraded": "ラウンド{{rounds}}の討論は劣化モードで実行されました",
+    "debateRoundsDegradedDesc": "R1/R2 のコンテキストが欠落しているため、LLM は上流データから推測しました。信頼度は低くなります。",
     "riskAssessment": "Risk Assessment",
     "risk.aggressive": "Aggressive",
     "risk.conservative": "Conservative",
@@ -8579,7 +8583,8 @@
       "daily1200": "每日 12:00",
       "daily1800": "每日 18:00",
       "weekday0600": "工作日 6:00",
-      "asOfLabel": "as-of: {{asOf}} → hindsight: {{hindsight}}"
+      "asOfLabel": "as-of: {{asOf}} → hindsight: {{hindsight}}",
+      "rerunDebate": "討論を再実行"
     },
     "portfolioMonitor": {
       "title": "株式分析",

@@ -7666,6 +7666,10 @@
     "debateRound": "Round {{round}}",
     "bull": "Bull",
     "bear": "Bear",
+    "debateRoundsFailed": "فشل في جولات المناظرة {{rounds}}",
+    "debateRoundsFailedDesc": "إخراج النموذج فارغ أو انتهت المهلة. انقر ↻ في أعلى اليمين لإعادة تشغيل التحليل بالكامل.",
+    "debateRoundsDegraded": "جولات المناظرة {{rounds}} في وضع منخفض",
+    "debateRoundsDegradedDesc": "كان سياق R1/R2 مفقوداً؛ استنتج النموذج من البيانات الأولية، وتكون الثقة في النتيجة أقل.",
     "riskAssessment": "Risk Assessment",
     "risk.aggressive": "Aggressive",
     "risk.conservative": "Conservative",
@@ -8563,7 +8567,8 @@
       "aiApplyFailed": "فشل: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "التعديلات المقترحة من الذكاء الاصطناعي (انقر تطبيق أدناه)",
       "aiRawOutputTitle": "إخراج الذكاء الاصطناعي الخام",
-      "rolledBack": " (تم التراجع تلقائياً)"
+      "rolledBack": " (تم التراجع تلقائياً)",
+      "rerunDebate": "إعادة تشغيل المناظرة"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

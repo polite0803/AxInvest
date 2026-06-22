@@ -7593,6 +7593,10 @@
     "debateRound": "Round {{round}}",
     "bull": "Bull",
     "bear": "Bear",
+    "debateRoundsFailed": "Rondas de debate {{rounds}} fallaron",
+    "debateRoundsFailedDesc": "La salida del LLM está vacía o agotó el tiempo. Haz clic en ↻ arriba a la derecha para volver a ejecutar todo el análisis.",
+    "debateRoundsDegraded": "Rondas de debate {{rounds}} en modo degradado",
+    "debateRoundsDegradedDesc": "Faltaba el contexto R1/R2; el LLM infirió de datos previos, el resultado tiene menor confianza.",
     "riskAssessment": "Risk Assessment",
     "risk.aggressive": "Aggressive",
     "risk.conservative": "Conservative",
@@ -8478,7 +8482,8 @@
       "paramReason": "理由",
       "applyParamsBtn": "应用选中的 {{count}} 项参数",
       "applySuccess": "参数已应用到 stock-analysis 模板",
-      "applyFailed": "参数应用失败: {{error}}"
+      "applyFailed": "参数应用失败: {{error}}",
+      "rerunDebate": "Volver a ejecutar el debate"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

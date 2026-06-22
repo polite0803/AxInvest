@@ -7593,6 +7593,10 @@
     "debateRound": "Round {{round}}",
     "bull": "Bull",
     "bear": "Bear",
+    "debateRoundsFailed": "Раунды дебатов {{rounds}} не выполнены",
+    "debateRoundsFailedDesc": "Вывод LLM пуст или превышено время ожидания. Нажмите ↻ в правом верхнем углу, чтобы перезапустить весь анализ.",
+    "debateRoundsDegraded": "Раунды дебатов {{rounds}} в режиме пониженной точности",
+    "debateRoundsDegradedDesc": "Контекст R1/R2 отсутствовал; LLM выводил из вышестоящих данных, доверие к результату ниже.",
     "riskAssessment": "Risk Assessment",
     "risk.aggressive": "Aggressive",
     "risk.conservative": "Conservative",
@@ -8478,7 +8482,8 @@
       "paramReason": "理由",
       "applyParamsBtn": "应用选中的 {{count}} 项参数",
       "applySuccess": "参数已应用到 stock-analysis 模板",
-      "applyFailed": "参数应用失败: {{error}}"
+      "applyFailed": "参数应用失败: {{error}}",
+      "rerunDebate": "Перезапустить дебаты"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

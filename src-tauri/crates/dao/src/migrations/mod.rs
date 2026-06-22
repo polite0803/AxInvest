@@ -24,9 +24,10 @@ use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
 pub mod v001_initial;
 pub mod v002_indices;
 pub mod v003_drop_dead_tables;
+pub mod v004_news_archive;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 3;
+pub const CURRENT_VERSION: i32 = 4;
 
 /// 迁移函数签名：所有 `up()` 都遵循这个接口。
 ///

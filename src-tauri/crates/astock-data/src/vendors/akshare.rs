@@ -138,7 +138,7 @@ impl StockVendor for AkshareVendor {
         let json: Value = serde_json::from_str(json_str)
             .map_err(|e| DataError::ParseError(format!("jsonp parse failed: {e}")))?;
 
-        let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {
+        let items = match json["result"]["cmsArticleWebOld"].as_array() {
             Some(arr) => arr,
             None => return Ok(vec![]),
         };
@@ -169,6 +169,7 @@ impl StockVendor for AkshareVendor {
                     .get("showTime")
                     .or_else(|| item.get("publishTime"))
                     .or_else(|| item.get("ctime"))
+                    .or_else(|| item.get("date"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();

@@ -25,6 +25,8 @@ pub mod market_data_history;
 pub mod mcp_server;
 pub mod memory;
 pub mod message;
+// P6: 本地新闻语料库(as-of search_news 兜底)
+pub mod news_archive;
 pub mod platform_config;
 pub mod program_policy;
 pub mod prompt_template;

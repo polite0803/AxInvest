@@ -4,7 +4,7 @@ import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { ExpandOutlined } from "@ant-design/icons";
-import { Button, Card, message, Modal, Tag } from "antd";
+import { Button, Card, Modal, Tag, App } from "antd";
 import NodeRenderer from "markstream-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { cleanToolCallTags } from "./utils";
 
 export function DecisionBanner() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const themeMode = useSettingsStore((s) => s.settings.theme_mode);

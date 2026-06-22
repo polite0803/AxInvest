@@ -14,10 +14,219 @@ use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::{CacheConfig, SemanticCache};
 use crate::state::{BrowserClientField, SandboxExecutorField};
 use axagent_astock_data::AStockClient;
+use axagent_astock_data::NewsArchiveSink;
+use axagent_astock_data::types::NewsItem;
 use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
+use axagent_dao::repo::news_archive::{
+    upsert_batch as dao_upsert_news, ArchivedNews, NewsArchiveEntry,
+};
+use axagent_entities::news_archive as news_archive_entity;
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
+use sea_orm::ColumnTrait;
+use sea_orm::EntityTrait;
+use sea_orm::QueryFilter;
+use sea_orm::Set;
 use tokio_util::sync::CancellationToken;
+
+/// P6:`NewsArchiveSink` 的具体实现
+///
+/// 桥接 astock-data trait 调用与 dao/entities 操作:
+/// - upsert:把 NewsItem 列表转成 NewsArchiveEntry,批量入库
+/// - search_asof:走 dao 层的 search_asof 查询
+struct NewsArchiveDaoSink {
+    db: sea_orm::DatabaseConnection,
+}
+
+impl NewsArchiveDaoSink {
+    fn new(db: sea_orm::DatabaseConnection) -> Self {
+        Self { db }
+    }
+}
+
+#[async_trait::async_trait]
+impl NewsArchiveSink for NewsArchiveDaoSink {
+    async fn upsert(
+        &self,
+        source: &str,
+        stock_code: Option<&str>,
+        keyword: Option<&str>,
+        items: &[NewsItem],
+    ) {
+        if items.is_empty() {
+            return;
+        }
+        let entries: Vec<NewsArchiveEntry> = items
+            .iter()
+            .filter_map(|n| {
+                let publish_time_ms = parse_publish_time_ms(&n.publish_time)?;
+                let article_code = derive_article_code(source, n);
+                Some(NewsArchiveEntry {
+                    source: source.to_string(),
+                    article_code,
+                    title: n.title.clone(),
+                    summary: if n.summary.is_empty() { None } else { Some(n.summary.clone()) },
+                    url: if n.url.is_empty() { None } else { Some(n.url.clone()) },
+                    media_name: None, // NewsItem 暂无 media_name 字段
+                    publish_time_ms,
+                    stock_code: stock_code.map(str::to_string),
+                    keyword: keyword.map(str::to_string),
+                    sentiment_score: n.sentiment_score,
+                })
+            })
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        match dao_upsert_news(&self.db, &entries).await {
+            Ok(n) => tracing::debug!(
+                "[news_archive] upsert 完成: source={}, stock_code={:?}, keyword={:?}, \
+                 入库={} 条",
+                source,
+                stock_code,
+                keyword,
+                n
+            ),
+            Err(e) => tracing::warn!("[news_archive] upsert 失败: {}", e),
+        }
+    }
+
+    async fn search_asof(
+        &self,
+        keyword: &str,
+        stock_code: Option<&str>,
+        as_of_ts_ms: i64,
+        limit: u32,
+    ) -> Vec<NewsItem> {
+        match axagent_dao::repo::news_archive::search_asof(
+            &self.db,
+            keyword,
+            stock_code,
+            as_of_ts_ms,
+            limit,
+        )
+        .await
+        {
+            Ok(rows) => rows.into_iter().map(archived_to_news_item).collect(),
+            Err(e) => {
+                tracing::warn!("[news_archive] search_asof 失败: {}", e);
+                vec![]
+            },
+        }
+    }
+}
+
+/// 从 NewsItem 提取 article_code(去重关键)
+/// 东方财富返回 `url` 中带 article id 字段(如 ".../202606213777040165.html"),
+/// 兜底用 url 的 hash(去重粒度:同一 source + 同一 url 视为同一条)
+fn derive_article_code(source: &str, n: &NewsItem) -> Option<String> {
+    if !n.url.is_empty() {
+        // 优先尝试从 url 末尾 `.html` 前抓数字(东方财富风格)
+        if let Some(idx) = n.url.rfind('/') {
+            let tail = &n.url[idx + 1..];
+            if let Some(stripped) = tail.strip_suffix(".html") {
+                if stripped.chars().all(|c| c.is_ascii_digit()) {
+                    return Some(stripped.to_string());
+                }
+            }
+        }
+        // fallback:url 的 SHA1 短哈希
+        let h = stable_short_hash(&n.url);
+        return Some(format!("{source}:{h}"));
+    }
+    None
+}
+
+/// 简单稳定的字符串哈希(避免引入 sha1 依赖)。FNV-1a 32-bit。
+fn stable_short_hash(s: &str) -> String {
+    let mut h: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    format!("{h:08x}")
+}
+
+fn parse_publish_time_ms(s: &str) -> Option<i64> {
+    use chrono::NaiveDateTime;
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return dt.and_utc().timestamp_millis().into();
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return d.and_hms_opt(0, 0, 0)?.and_utc().timestamp_millis().into();
+    }
+    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        return dt.and_utc().timestamp_millis().into();
+    }
+    None
+}
+
+fn archived_to_news_item(a: ArchivedNews) -> NewsItem {
+    NewsItem {
+        title: a.title,
+        summary: a.summary.unwrap_or_default(),
+        source: a.source,
+        url: a.url.unwrap_or_default(),
+        publish_time: a.publish_time,
+        sentiment_score: a.sentiment_score,
+    }
+}
+
+/// P6 后台 sweep:遍历自选股,逐只调 `get_news` 触发入库
+///
+/// 不需要新加业务逻辑 —— `get_news` 内部已经有 upsert 钩子,这里只是给每个
+/// 自选股各调一次,触发 sink 的批量入库。
+async fn sweep_news_archive_for_watchlist(
+    astock: &AStockClient,
+    db: &sea_orm::DatabaseConnection,
+) {
+    let watchlist_codes: Vec<String> = match axagent_core::entity::watchlist_items::Entity::find()
+        .all(db)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|w| w.stock_code).collect(),
+        Err(e) => {
+            tracing::warn!("[news_archive] sweep 读取自选股失败: {}", e);
+            return;
+        },
+    };
+    if watchlist_codes.is_empty() {
+        tracing::info!("[news_archive] sweep 跳过:自选股为空");
+        return;
+    }
+    let total = watchlist_codes.len();
+    tracing::info!("[news_archive] sweep 开始:{} 只自选股", total);
+    let mut ok = 0u32;
+    let mut fail = 0u32;
+    for (i, code) in watchlist_codes.iter().enumerate() {
+        match astock.get_news(code, 20).await {
+            Ok(items) if !items.is_empty() => {
+                ok += 1;
+                tracing::debug!(
+                    "[news_archive] {}/{} {} 抓到 {} 条",
+                    i + 1,
+                    total,
+                    code,
+                    items.len()
+                );
+            },
+            Ok(_) => {
+                tracing::debug!("[news_archive] {}/{} {} 无新闻", i + 1, total, code);
+            },
+            Err(e) => {
+                fail += 1;
+                tracing::warn!("[news_archive] {}/{} {} 失败: {}", i + 1, total, code, e);
+            },
+        }
+        // 限速:每个请求间隔 200ms,避免触发 vendor 限流
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    tracing::info!("[news_archive] sweep 完成:成功 {} / 失败 {} / 总 {} 只", ok, fail, total);
+}
 
 /// 构造 AppState。
 ///
@@ -194,6 +403,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
 
     // 共享 AStockClient：astock_client 和 stock_monitor 共用同一实例（共享缓存）
     // 缺陷 D 修复: 注入 L2 磁盘缓存(持久化跨进程) + 启动后台 flush 任务。
+    // P6: 注入 news_archive sink,让 get_news / search_news 自动入库
     let (astock_client, l2_handle) = {
         let l2_path: PathBuf = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -202,8 +412,13 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         if let Some(parent) = l2_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let (client, l2) = AStockClient::new().with_l2_cache(l2_path);
-        (client.with_daily_snapshot_cache(), l2)
+        let sink: Arc<dyn NewsArchiveSink> =
+            Arc::new(NewsArchiveDaoSink::new(sea_db.clone()));
+        let (client_with_l2, l2) = AStockClient::new().with_l2_cache(l2_path);
+        let client = client_with_l2
+            .with_daily_snapshot_cache()
+            .with_news_archive_sink(sink);
+        (client, l2)
     };
     let astock_client = Arc::new(astock_client);
     axagent_tools::global_state::set_astock_client(astock_client.clone());
@@ -212,6 +427,42 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
     axagent_astock_data::disk_cache::spawn_flush_loop(l2_handle);
     drop(_guard);
     tracing::info!("[l2] 磁盘缓存已注入,后台 flush 任务已启动");
+    tracing::info!("[news_archive] 本地新闻语料库 sink 已注入");
+
+    // P6:启动 news_archive 后台 sweep
+    // - 启动时跑一次(给当天数据先入库,避免 as-of 模式"今天的回放"miss)
+    // - 每天 16:00(A 股收盘后)再跑一次,保证数据时效
+    {
+        let astock_for_archive = astock_client.clone();
+        let db_for_archive = sea_db.clone();
+        rt.spawn(async move {
+            // 第一次立即跑,延迟 10s 让主流程先起来
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            sweep_news_archive_for_watchlist(&astock_for_archive, &db_for_archive).await;
+            // 之后每天 16:00 跑一次
+            loop {
+                let now = chrono::Local::now();
+                let next_run = now
+                    .date_naive()
+                    .and_hms_opt(16, 0, 0)
+                    .and_then(|dt| dt.and_local_timezone(chrono::Local).single())
+                    .unwrap_or_else(chrono::Local::now);
+                let next_run = if next_run <= now {
+                    next_run + chrono::Duration::days(1)
+                } else {
+                    next_run
+                };
+                let dur = (next_run - now).to_std().unwrap_or(std::time::Duration::from_secs(3600));
+                tracing::info!(
+                    "[news_archive] 下次 sweep 在 {} ({:?} 后)",
+                    next_run.format("%Y-%m-%d %H:%M:%S"),
+                    dur
+                );
+                tokio::time::sleep(dur).await;
+                sweep_news_archive_for_watchlist(&astock_for_archive, &db_for_archive).await;
+            }
+        });
+    }
 
     // 缺陷 A 修复:启动后异步拉一次 A 股交易日历,填充 calendar.rs 远程节假日缓存。
     // fire-and-forget,失败也不影响主流程(会 fallback 到硬编码 2025-2026)。

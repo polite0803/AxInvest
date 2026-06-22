@@ -115,6 +115,9 @@ pub mod portfolio_metrics_daily;
 pub mod earnings_events;
 pub mod financial_snapshots;
 
+// P6: 本地新闻语料库(as-of 模式 search_news 兜底)
+pub mod news_archive;
+
 // Quant: 量化交易 + 量化回测（4 张核心表）
 pub mod quant_paper_trades;
 pub mod quant_runs;

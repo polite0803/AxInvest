@@ -48,6 +48,63 @@ use vendors::ths::ThsVendor;
 use vendors::xueqiu::XueqiuVendor;
 use vendors::StockVendor;
 
+/// P6: 新闻入库 sink 抽象。
+///
+/// astock-data 不直接依赖 dao/entities,所以用 trait 抽象把"入库"延迟到
+/// main crate 实现并通过 `with_news_archive_sink` 注入。这样:
+/// - 保持 astock-data 轻量(避免引入 sea-orm 等大依赖)
+/// - 实现可替换(测试时可换 in-memory mock)
+/// - 即使 sink 未注入也能正常工作(降级为不写库)
+#[async_trait::async_trait]
+pub trait NewsArchiveSink: Send + Sync {
+    /// 批量 upsert NewsItem。失败仅记录日志,不影响主流程。
+    async fn upsert(
+        &self,
+        source: &str,
+        stock_code: Option<&str>,
+        keyword: Option<&str>,
+        items: &[NewsItem],
+    );
+
+    /// as-of 模式查询:`publish_time_ms <= as_of_ts` 的最新 limit 条,
+    /// 关键词匹配 title/summary 子串,stock_code 给定时额外过滤。
+    /// 返回空 vec 表示无数据(由调用方决定是否降级)。
+    async fn search_asof(
+        &self,
+        keyword: &str,
+        stock_code: Option<&str>,
+        as_of_ts_ms: i64,
+        limit: u32,
+    ) -> Vec<NewsItem>;
+}
+
+/// 把 NewsItem.publish_time(String) 解析为 unix 毫秒。
+///
+/// 支持格式:
+/// - "YYYY-MM-DD HH:MM:SS"
+/// - "YYYY-MM-DD"
+/// - "" / 不可解析 → None
+fn parse_news_publish_time_ms(s: &str) -> Option<i64> {
+    use chrono::NaiveDateTime;
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // 优先尝试完整 datetime
+    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return dt.and_utc().timestamp_millis().into();
+    }
+    // fallback 到纯日期
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return d.and_hms_opt(0, 0, 0)?.and_utc().timestamp_millis().into();
+    }
+    // 兼容 ISO 8601 "YYYY-MM-DDTHH:MM:SS"
+    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        return dt.and_utc().timestamp_millis().into();
+    }
+    None
+}
+
 type VendorRef = (String, Box<dyn StockVendor>);
 
 /// 检查 HTTP 响应状态码，429 → DataError::RateLimited
@@ -219,6 +276,9 @@ pub struct AStockClient {
     pub iwencai_key: RwLock<String>,
     /// 雪球 token 共享引用（前端设置页写入，vendor 自动读取）
     pub xq_token: Option<Arc<RwLock<String>>>,
+    /// P6:本地新闻语料库 sink(None 表示不写库,as-of 模式 search_news 降级)
+    /// 通过 with_news_archive_sink() 注入。
+    news_archive_sink: Option<Arc<dyn NewsArchiveSink>>,
 }
 
 impl AStockClient {
@@ -245,6 +305,7 @@ impl AStockClient {
             daily_snapshot: None, // P5:默认不开启,调用方通过 with_daily_snapshot_cache 注入
             iwencai_key: RwLock::new(String::new()),
             xq_token: None,
+            news_archive_sink: None, // P6:默认不写入,调用方通过 with_news_archive_sink 注入
         };
 
         client.register_vendor("tencent", Box::new(TencentVendor { http: http.clone() }));
@@ -294,6 +355,14 @@ impl AStockClient {
         if let Some(l2) = self.l2.clone() {
             self.daily_snapshot = Some(daily_snapshot::DailySnapshotCache::from_disk(l2));
         }
+        self
+    }
+
+    /// P6:注入本地新闻语料库 sink。
+    /// 注入后 `get_news` / `search_news` 会自动 upsert 结果;as-of 模式
+    /// `search_news` 会优先查 sink 而不是直接降级。
+    pub fn with_news_archive_sink(mut self, sink: Arc<dyn NewsArchiveSink>) -> Self {
+        self.news_archive_sink = Some(sink);
         self
     }
 
@@ -1140,6 +1209,18 @@ impl AStockClient {
                             Self::cache_key_for("news", &format!("{stock_code}:{limit}"));
                         let json = serde_json::to_string(&result).unwrap_or_default();
                         self.cache_set(cache_key, json, 300).await;
+                        // P6:自动 upsert 到 news_archive(无关缓存命中/降级,
+                        // 任何 vendor 返回的非空结果都入本地语料库)
+                        if let Some(sink) = &self.news_archive_sink {
+                            let filtered: Vec<NewsItem> = result
+                                .iter()
+                                .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
+                                .cloned()
+                                .collect();
+                            if !filtered.is_empty() {
+                                sink.upsert(name, Some(stock_code), None, &filtered).await;
+                            }
+                        }
                         return Ok(result);
                     },
                     Ok(_) => {
@@ -1322,18 +1403,75 @@ impl AStockClient {
     /// 按关键词搜索新闻（用于验证 CapEx/催化剂/行业趋势）
     /// 只在 live 模式可用（搜索是当下语义），as-of 模式下跳过
     pub async fn search_news(&self, keyword: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        if crate::as_of::is_asof_active() {
+        // P6:as-of 模式查 news_archive 本地语料库
+        // 截止时间为 as_of_date 当天 23:59:59.999(毫秒)
+        if let Some(ctx) = crate::as_of::current_as_of() {
+            if let Some(sink) = &self.news_archive_sink {
+                let as_of_ts_ms = ctx
+                    .as_of_date
+                    .and_hms_opt(23, 59, 59)
+                    .and_then(|dt| dt.and_local_timezone(chrono::Local).single())
+                    .map(|dt| dt.timestamp_millis())
+                    .unwrap_or_else(|| {
+                        // fallback:用 UTC 23:59:59.999
+                        ctx.as_of_date
+                            .and_hms_opt(23, 59, 59)
+                            .and_then(|dt| dt.and_utc().timestamp_millis().into())
+                            .unwrap_or(0)
+                    });
+                let archived = sink.search_asof(keyword, None, as_of_ts_ms, limit).await;
+                if !archived.is_empty() {
+                    tracing::info!(
+                        "[news_archive] search_asof 命中 {} 条 (keyword={}, as_of={})",
+                        archived.len(),
+                        keyword,
+                        ctx.as_of_date
+                    );
+                    return Ok(archived);
+                }
+                // sink 空 → 记录降级 + 返回空（保持"当下语义"语义,避免混用 live）
+                crate::as_of::record_degradation(
+                    "astock-data",
+                    "search_news",
+                    "as-of 模式 news_archive 无数据(本地未积累该日期之前的新闻)",
+                );
+                return Ok(vec![]);
+            }
+            // sink 未注入:走原有降级路径
             crate::as_of::record_degradation(
                 "astock-data",
                 "search_news",
-                "as-of 模式新闻搜索不可用（搜索是当下语义）",
+                "as-of 模式新闻搜索不可用（搜索是当下语义，且未配置 news_archive sink）",
             );
             return Ok(vec![]);
         }
+        // live 模式:走 vendor + 自动 upsert
         for name in &self.routing.search_news {
             if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.search_news(keyword, limit).await {
-                    return Ok(result);
+                match vendor.search_news(keyword, limit).await {
+                    Ok(result) if !result.is_empty() => {
+                        if let Some(sink) = &self.news_archive_sink {
+                            // 只 upsert 能解析出 publish_time 的项,避免把"未知时间"
+                            // 的噪声数据灌入语料库(as-of 模式需要可靠的时间截断)
+                            let filtered: Vec<NewsItem> = result
+                                .iter()
+                                .filter(|n| {
+                                    parse_news_publish_time_ms(&n.publish_time).is_some()
+                                })
+                                .cloned()
+                                .collect();
+                            if !filtered.is_empty() {
+                                sink.upsert(name, None, Some(keyword), &filtered).await;
+                            }
+                        }
+                        return Ok(result);
+                    },
+                    Ok(_) => {
+                        tracing::warn!("[降级] {} search_news 返回空,尝试下一源", name);
+                    },
+                    Err(e) => {
+                        tracing::warn!("[降级] {} search_news 失败: {}", name, e);
+                    },
                 }
             }
         }

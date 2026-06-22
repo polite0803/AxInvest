@@ -331,7 +331,7 @@ impl StockVendor for EastMoneyVendor {
             ))
         })?;
 
-        let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {
+        let items = match json["result"]["cmsArticleWebOld"].as_array() {
             Some(arr) => arr,
             None => return Ok(vec![]),
         };
@@ -362,6 +362,7 @@ impl StockVendor for EastMoneyVendor {
                     .get("showTime")
                     .or_else(|| item.get("publishTime"))
                     .or_else(|| item.get("ctime"))
+                    .or_else(|| item.get("date"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
@@ -439,7 +440,7 @@ impl StockVendor for EastMoneyVendor {
             ))
         })?;
 
-        let items = match json["result"]["cmsArticleWebOld"]["list"].as_array() {
+        let items = match json["result"]["cmsArticleWebOld"].as_array() {
             Some(arr) => arr,
             None => return Ok(vec![]),
         };
@@ -470,6 +471,7 @@ impl StockVendor for EastMoneyVendor {
                     .get("showTime")
                     .or_else(|| item.get("publishTime"))
                     .or_else(|| item.get("ctime"))
+                    .or_else(|| item.get("date"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();

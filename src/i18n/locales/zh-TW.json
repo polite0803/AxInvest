@@ -7347,7 +7347,16 @@
     "active": "緩存已激活。{{hits}} 次命中，~{{tokens}} tokens 已節省。"
   },
   "artifactPanel": {
-    "fullscreen": "全屏"
+    "fullscreen": "全屏",
+    "noArtifactSelected": "未選擇任何產品",
+    "previewNotAvailable": "不支援此格式的預覽",
+    "untitled": "未命名",
+    "copyCode": "複製程式碼",
+    "download": "下載",
+    "segmentedCode": "程式碼",
+    "segmentedSplit": "分割畫面",
+    "segmentedPreview": "預覽",
+    "copied": "已複製"
   },
   "cronManager": {
     "deleteConfirm": "確定刪除此定時任務？",

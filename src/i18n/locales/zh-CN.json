@@ -6811,6 +6811,299 @@
     "generateBtn": "生成工具",
     "readyLabel": "{{name}} 已就绪"
   },
+  "settingsPage": {
+    "refreshPage": "刷新页面"
+  },
+  "createTeam": {
+    "createTeam": "创建团队",
+    "cancel": "取消",
+    "teamName": "团队名称",
+    "memberList": "队友列表",
+    "teamNamePlaceholder": "例如：前端开发组、数据分析组",
+    "memberNamePlaceholder": "队友名称",
+    "backendTypePlaceholder": "后端类型",
+    "teamNameRequired": "请输入团队名称",
+    "memberNameRequired": "请输入队友名称",
+    "backendTypeRequired": "请选择后端类型",
+    "inProcess": "进程内",
+    "subProcess": "子进程",
+    "addTeammate": "添加队友"
+  },
+  "toolManager": {
+    "destructive": "破坏性",
+    "destructiveTooltip": "破坏性操作——执行后不可逆",
+    "readOnly": "只读",
+    "noTools": "暂无工具数据",
+    "clickToDisable": "点击禁用此工具",
+    "clickToEnable": "点击启用此工具",
+    "groupDisabled": "分类已禁用，无法单独控制",
+    "enabled": "已启用",
+    "enabledCount": "{{enabledCount}}/{{totalCount}} 已启用",
+    "disableGroup": "禁用整个分类",
+    "enableGroup": "启用整个分类"
+  },
+  "dreamStatus": {
+    "running": "Dream 巩固运行中...",
+    "consolidating": "Dream 巩固中...",
+    "memoriesCount": "{{count}} 条记忆",
+    "patternsCount": "{{count}} 个模式",
+    "errorLabel": "错误: {{error}}",
+    "separator": "，",
+    "completed": "巩固完成",
+    "completedTitle": "Dream 完成 ({{secs}}s)",
+    "totalConsolidations": "累计 {{count}} 次巩固",
+    "statsSummary": "{{memories}} 记忆 · {{patterns}} 模式"
+  },
+  "expertBadge": {
+    "generalAssistant": "通用助手",
+    "selectExpert": "选择专家角色"
+  },
+  "permissionModal": {
+    "title": "权限审批",
+    "deny": "拒绝",
+    "allow": "允许",
+    "alwaysAllow": "始终允许",
+    "unknownTool": "未知工具",
+    "pendingCount": "待审批 {{count}} 项 (当前第 {{current}} 项)",
+    "pendingOne": "待审批 1 项",
+    "expandDetails": "展开参数详情",
+    "collapseDetails": "收起参数详情",
+    "noParams": "(无参数)",
+    "riskExecute": " — 此操作可能修改系统状态，请谨慎审批",
+    "riskWrite": " — 此操作将创建或修改文件",
+    "riskRead": " — 此操作仅读取数据，不会修改任何内容",
+    "riskLevel": "风险等级：{{level}}",
+    "approveError": "审批失败",
+    "toolDesc": {
+      "readFilePath": "读取 {{path}}",
+      "readFile": "读取文件 {{file}}",
+      "readFileGeneric": "读取文件或目录内容",
+      "writeFile": "写入文件 {{path}}",
+      "writeFileGeneric": "创建或修改文件",
+      "execCommand": "执行命令: {{cmd}}",
+      "execShell": "执行 Shell 命令",
+      "deletePath": "删除 {{path}}",
+      "deleteGeneric": "删除文件或目录",
+      "webSearch": "搜索网络获取信息",
+      "mcpTool": "执行 MCP 工具",
+      "execTool": "执行 {{toolName}}"
+    }
+  },
+  "teammatePanel": {
+    "memberCount": "{{count}} 名队友",
+    "statusIdle": "空闲",
+    "statusBusy": "工作中",
+    "statusOffline": "离线",
+    "statusError": "异常",
+    "defaultTeam": "默认团队",
+    "idle": "空闲中",
+    "duration": "耗时 {{seconds}}s",
+    "title": "Swarm 队友",
+    "createTeam": "创建团队",
+    "newTeam": "新团队",
+    "waitingForTask": "等待分配任务",
+    "teamCreated": "团队 \"{{name}}\" 已创建，共 {{count}} 名队友"
+  },
+  "chatPage": {
+    "loading": "加载中…"
+  },
+  "sshConfig": {
+    "title": "SSH 配置",
+    "connect": "连接",
+    "host": "主机",
+    "port": "端口",
+    "username": "用户名"
+  },
+  "dockerConfig": {
+    "title": "Docker 配置",
+    "connect": "连接",
+    "socketPath": "Docker Socket 路径"
+  },
+  "datasetManager": {
+    "title": "微调数据集管理器",
+    "name": "名称",
+    "description": "描述",
+    "samples": "样本数",
+    "created": "创建时间",
+    "action": "操作",
+    "deleteConfirm": "确定删除此数据集？",
+    "yes": "是",
+    "no": "否",
+    "cancel": "取消",
+    "createNew": "创建新数据集",
+    "createdSuccess": "数据集创建成功",
+    "deletedSuccess": "数据集已删除",
+    "sampleAdded": "样本添加成功"
+  },
+  "loraConfig": {
+    "trainingSetup": "训练设置",
+    "dataset": "数据集",
+    "baseModel": "基础模型",
+    "rank": "秩",
+    "alpha": "Alpha",
+    "learningRate": "学习率",
+    "batchSize": "批次大小",
+    "epochs": "轮次",
+    "reset": "重置"
+  },
+  "trainingJob": {
+    "title": "训练任务",
+    "totalJobs": "总任务",
+    "running": "运行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "id": "ID",
+    "status": "状态",
+    "baseModel": "基础模型",
+    "datasetId": "数据集 ID",
+    "progress": "进度",
+    "loss": "损失",
+    "loraOutput": "LoRA 输出",
+    "action": "操作",
+    "ready": "就绪"
+  },
+  "errorRecovery": {
+    "noError": "当前无错误需要恢复",
+    "title": "错误恢复",
+    "attempts": "恢复尝试",
+    "status": "状态",
+    "attemptsLabel": "尝试次数",
+    "time": "时间"
+  },
+  "cronResult": {
+    "success": "成功",
+    "failed": "失败",
+    "schedule": "调度",
+    "scheduleDescription": "描述",
+    "platform": "平台",
+    "time": "时间",
+    "loading": "正在加载定时任务结果…",
+    "prefix": "定时任务: {{jobName}}",
+    "emptyResult": "无执行结果"
+  },
+  "errorBoundary": {
+    "title": "出了点问题",
+    "retryLoad": "重试加载此模块",
+    "panelLoadFailed": "⚠️ 面板 \"{{tabKey}}\" 加载失败",
+    "unknownError": "未知错误",
+    "copied": "已复制",
+    "copyError": "复制错误",
+    "errorDetails": "错误详情",
+    "moduleError": "模块错误",
+    "pageError": "页面错误",
+    "refreshPage": "刷新页面",
+    "retry": "重试",
+    "somethingWentWrong": "出错了",
+    "tryAgain": "再试一次",
+    "unexpectedError": "意外错误"
+  },
+  "appInit": {
+    "idle": "准备启动...",
+    "healthCheck": "正在检查系统连接...",
+    "loadSettings": "正在加载设置...",
+    "applyConfig": "正在应用配置...",
+    "startServices": "正在启动服务...",
+    "ready": "就绪",
+    "failedTitle": "启动失败",
+    "failedSubtitle": "应用初始化过程中发生错误，请重试。",
+    "retry": "重新启动"
+  },
+  "errorNotification": {
+    "retry": "重试"
+  },
+  "backendStatus": {
+    "done": "完成",
+    "failed": "失败"
+  },
+  "cacheIndicator": {
+    "notEstablished": "Prompt 缓存未建立。会话首轮。",
+    "pendingChanges": "检测到待生效变更。变更将在下次会话生效。使用 --now 强制生效。",
+    "active": "缓存已激活。{{hits}} 次命中，~{{tokens}} tokens 已节省。",
+    "fresh": "新会话",
+    "pending": "待生效",
+    "cached": "已缓存"
+  },
+  "artifactPanel": {
+    "fullscreen": "全屏",
+    "noArtifactSelected": "未选择制品",
+    "previewNotAvailable": "暂不支持此格式的预览",
+    "untitled": "未命名",
+    "copyCode": "复制代码",
+    "download": "下载",
+    "segmentedCode": "代码",
+    "segmentedSplit": "分屏",
+    "segmentedPreview": "预览",
+    "copied": "已复制"
+  },
+  "cronManager": {
+    "deleteConfirm": "确定删除此定时任务？",
+    "title": "定时任务",
+    "addJob": "添加任务",
+    "delete": "删除",
+    "cancel": "取消",
+    "name": "名称",
+    "prompt": "提示词",
+    "never": "从未"
+  },
+  "cacheConfig": {
+    "title": "Prompt 缓存",
+    "enableBreakpoints": "启用缓存断点"
+  },
+  "reflection": {
+    "noReflection": "暂无反思结果",
+    "title": "反思",
+    "qualityScore": "质量评分",
+    "excellent": "优秀",
+    "good": "良好",
+    "needsImprovement": "需要改进",
+    "startReflection": "开始反思",
+    "reflecting": "反思中...",
+    "analyzing": "正在分析任务执行...",
+    "qualityAnalysis": "质量分析",
+    "efficiencyAnalysis": "效率分析",
+    "errorPatterns": "错误模式",
+    "reusablePatterns": "可复用模式",
+    "knowledgeSuggestions": "知识建议",
+    "improvementSuggestions": "改进建议",
+    "generatedInsights": "生成的洞察",
+    "usageCount": "使用次数",
+    "summary": "摘要",
+    "qualityMetrics": "质量指标",
+    "taskSuccessScore": "任务成功率",
+    "toolEfficiencyScore": "工具效率",
+    "iterationEfficiencyScore": "迭代效率",
+    "timeEfficiencyScore": "时间效率",
+    "errorRecoveryScore": "错误恢复",
+    "goalCompletionScore": "目标完成度",
+    "reflectError": "反思失败",
+    "retry": "重试"
+  },
+  "subAgentCard": {
+    "viewConversation": "查看子会话",
+    "fork": "分叉"
+  },
+  "modelParam": {
+    "topP": "Top P"
+  },
+  "insight": {
+    "placeholder": "例如：用户偏好深色模式..."
+  },
+  "fineTune": {
+    "stats": {
+      "completed": "完成",
+      "failed": "失败",
+      "running": "运行中",
+      "total": "总任务"
+    },
+    "tab": {
+      "dataset": "数据集",
+      "loraConfig": "LoRA 配置",
+      "training": "训练任务"
+    },
+    "title": "模型微调",
+    "trainingJobCreated": "训练任务创建成功",
+    "trainingJobFailed": "训练任务创建失败"
+  },
   "agentMode": {
     "requiresTauri": "Agent 模式需要 Tauri 桌面端环境，请在终端执行 npm run tauri dev 启动",
     "requiresTauriDetail": "Agent 模式需要 Tauri 桌面端环境才能运行。请使用 `npm run tauri dev` 启动应用。",

@@ -7354,7 +7354,16 @@
     "active": "キャッシュ有効。{{hits}}ヒット、約{{tokens}}トークン節約。"
   },
   "artifactPanel": {
-    "fullscreen": "フルスクリーン"
+    "fullscreen": "フルスクリーン",
+    "noArtifactSelected": "アーティファクトが選択されていません",
+    "previewNotAvailable": "この形式のプレビューは利用できません",
+    "untitled": "無題",
+    "copyCode": "コードをコピー",
+    "download": "ダウンロード",
+    "segmentedCode": "コード",
+    "segmentedSplit": "分割",
+    "segmentedPreview": "プレビュー",
+    "copied": "コピーしました"
   },
   "cronManager": {
     "deleteConfirm": "このCronジョブを削除しますか？",

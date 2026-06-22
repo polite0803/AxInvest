@@ -7354,7 +7354,16 @@
     "active": "Кэш активен. {{hits}} попаданий, ~{{tokens}} токенов сэкономлено."
   },
   "artifactPanel": {
-    "fullscreen": "Полный экран"
+    "fullscreen": "Полный экран",
+    "noArtifactSelected": "Артифакт не выбран",
+    "previewNotAvailable": "Просмотр для этого формата недоступен",
+    "untitled": "Без названия",
+    "copyCode": "Копировать код",
+    "download": "Скачать",
+    "segmentedCode": "Код",
+    "segmentedSplit": "Разделить",
+    "segmentedPreview": "Предпросмотр",
+    "copied": "Скопировано"
   },
   "cronManager": {
     "deleteConfirm": "Удалить эту задачу cron?",

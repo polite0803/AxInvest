@@ -7354,7 +7354,16 @@
     "active": "Cache aktiv. {{hits}} Treffer, ~{{tokens}} Token gespart."
   },
   "artifactPanel": {
-    "fullscreen": "Vollbild"
+    "fullscreen": "Vollbild",
+    "noArtifactSelected": "Kein Artefakt ausgewählt",
+    "previewNotAvailable": "Vorschau für dieses Format nicht verfügbar",
+    "untitled": "Ohne Titel",
+    "copyCode": "Code kopieren",
+    "download": "Herunterladen",
+    "segmentedCode": "Code",
+    "segmentedSplit": "Teilen",
+    "segmentedPreview": "Vorschau",
+    "copied": "Kopiert"
   },
   "cronManager": {
     "deleteConfirm": "Diesen Cron-Job löschen?",

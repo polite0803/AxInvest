@@ -7354,7 +7354,16 @@
     "active": "캐시 활성. {{hits}} 적중, ~{{tokens}} 토큰 절약."
   },
   "artifactPanel": {
-    "fullscreen": "전체 화면"
+    "fullscreen": "전체 화면",
+    "noArtifactSelected": "아티팩트가 선택되지 않았습니다",
+    "previewNotAvailable": "이 형식은 미리보기를 지원하지 않습니다",
+    "untitled": "제목 없음",
+    "copyCode": "코드 복사",
+    "download": "다운로드",
+    "segmentedCode": "코드",
+    "segmentedSplit": "분할",
+    "segmentedPreview": "미리보기",
+    "copied": "복사됨"
   },
   "cronManager": {
     "deleteConfirm": "이 Cron 작업을 삭제하시겠습니까?",

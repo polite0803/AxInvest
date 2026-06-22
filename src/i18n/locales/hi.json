@@ -7347,7 +7347,16 @@
     "active": "कैश सक्रिय। {{hits}} हिट, ~{{tokens}} टोकन बचाए गए।"
   },
   "artifactPanel": {
-    "fullscreen": "पूर्ण स्क्रीन"
+    "fullscreen": "पूर्ण स्क्रीन",
+    "noArtifactSelected": "कोई आर्टिफैक्ट चयनित नहीं",
+    "previewNotAvailable": "इस प्रारूप के लिए पूर्वावलोकन उपलब्ध नहीं है",
+    "untitled": "शीर्षकहीन",
+    "copyCode": "कोड कॉपी करें",
+    "download": "डाउनलोड",
+    "segmentedCode": "कोड",
+    "segmentedSplit": "विभाजित",
+    "segmentedPreview": "पूर्वावलोकन",
+    "copied": "कॉपी हो गया"
   },
   "cronManager": {
     "deleteConfirm": "यह cron कार्य हटाएँ?",

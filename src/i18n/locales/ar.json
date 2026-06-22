@@ -7354,7 +7354,16 @@
     "active": "ذاكرة التخزين المؤقت نشطة. {{hits}} إصابات، ~{{tokens}} رمز محفوظ."
   },
   "artifactPanel": {
-    "fullscreen": "ملء الشاشة"
+    "fullscreen": "ملء الشاشة",
+    "noArtifactSelected": "لم يتم اختيار أي منتج",
+    "previewNotAvailable": "المعاينة غير متوفرة لهذه التنسيق",
+    "untitled": "بدون عنوان",
+    "copyCode": "نسخ الكود",
+    "download": "تحميل",
+    "segmentedCode": "الكود",
+    "segmentedSplit": "تقسيم",
+    "segmentedPreview": "معاينة",
+    "copied": "تم النسخ"
   },
   "cronManager": {
     "deleteConfirm": "حذف مهمة cron هذه؟",

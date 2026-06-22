@@ -174,6 +174,44 @@ export function extractContent(value: unknown): string {
  * DecisionBanner 静默不渲染。
  */
 export function normalizeDecision(raw: Record<string, unknown>): StockDecision | null {
+  // ── 兜底：识别 "workflow results map" 格式 ──
+  // 老数据中 decisionJson 实际是整个 workflow results map 而非 portfolio-mgr
+  // 决策对象（后端 stock-analysis 工作流的 output_schema 未用 $source 标记
+  // 字段来源节点 → filter_by_schema fallback 到 serde_json::json!(results)）。
+  // 症状：DecisionBanner 误报"决策信息缺失"。前端先识别这种结构，递归从
+  // results["portfolio-mgr"]["result"] 提取真实决策，让老数据也能正常渲染。
+  // 检测特征：顶层有 stock-analysis 已知节点 ID 之一，且无 action/confidence
+  // 业务字段（避免误判：业务决策对象也有可能恰好包含同名 key，但概率极低）。
+  const WORKFLOW_NODE_KEYS = [
+    "portfolio-mgr",
+    "trigger",
+    "end-output",
+    "research-mgr",
+    "trader",
+    "value-investor",
+    "debate-convergence",
+    "raw-data",
+    "t-quote",
+    "t-kline",
+  ];
+  const looksLikeResultsMap = !("action" in raw) && !("confidence" in raw)
+    && WORKFLOW_NODE_KEYS.some((k) => {
+      const v = raw[k];
+      return v != null && typeof v === "object" && !Array.isArray(v);
+    });
+  if (looksLikeResultsMap) {
+    const pm = raw["portfolio-mgr"];
+    if (pm && typeof pm === "object" && !Array.isArray(pm)) {
+      const pmObj = pm as Record<string, unknown>;
+      if (pmObj.result && typeof pmObj.result === "object" && !Array.isArray(pmObj.result)) {
+        return normalizeDecision(pmObj.result as Record<string, unknown>);
+      }
+      // portfolio-mgr 是 CodeNode 包装但 .result 缺失（异常路径），
+      // 降级用 portfolio-mgr 本身，让后续 CodeNode 检测继续尝试。
+      return normalizeDecision(pmObj);
+    }
+  }
+
   // CodeNode 输出兼容：若顶层字段是 CodeNode 包装（status/result/params/node_id），
   // 从 result 或 params 中提取
   const source: Record<string, unknown> = (!("action" in raw) && !("confidence" in raw) && !raw.result && !raw.params)

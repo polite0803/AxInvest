@@ -130,3 +130,87 @@ describe("cleanToolCallTags", () => {
     expect(cleanToolCallTags(input)).toBe(input);
   });
 });
+
+describe("normalizeDecision - workflow results map 兜底（修复'决策信息缺失'误报）", () => {
+  it("识别 workflow results map 并从 portfolio-mgr.result 提取决策", () => {
+    // 模拟后端 stock-analysis 工作流 output_schema 未用 $source 标记,
+    // filter_by_schema fallback 到整个 results map 写入 decisionJson
+    // 的老数据格式(修复前的 bug 表现)。
+    const resultsMap = {
+      trigger: { status: "executed", node_id: "trigger" },
+      "t-quote": { status: "ok", result: { price: 12.5 } },
+      research: { status: "ok", result: { risk: "中" } },
+      "portfolio-mgr": {
+        status: "executed",
+        language: "rhai",
+        result: {
+          action: "买入",
+          positionPct: 50,
+          confidence: 75,
+          riskLevel: "中",
+          reasoning: "技术面强势",
+          timeHorizon: "mid",
+          expectedHoldingDays: 28,
+          targetTimeframe: "1m",
+        },
+        input_params: { totalScore: 70 },
+        node_id: "portfolio-mgr",
+        params: { action: "买入" },
+      },
+      "end-output": { status: "ok" },
+    };
+    const parsed = normalizeDecision(resultsMap);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.action).toBe("BUY"); // 买入 → BUY
+    expect(parsed?.positionPct).toBe(50);
+    expect(parsed?.confidence).toBe(75);
+    expect(parsed?.riskLevel).toBe("MID"); // 中 → MID
+    expect(parsed?.reasoning).toBe("技术面强势");
+    expect(parsed?.timeHorizon).toBe("mid");
+    expect(parsed?.expectedHoldingDays).toBe(28);
+  });
+
+  it("portfolio-mgr 是 CodeNode 包装但 .result 缺失时降级用 portfolio-mgr 本身", () => {
+    // 模拟异常路径:portfolio-mgr 包装存在但 .result 字段缺失
+    const resultsMap = {
+      "portfolio-mgr": {
+        status: "executed",
+        language: "rhai",
+        // result 字段缺失
+        input_params: {},
+        node_id: "portfolio-mgr",
+        params: { action: "HOLD", confidence: 30, riskLevel: "HIGH" },
+      },
+    };
+    const parsed = normalizeDecision(resultsMap);
+    // 兜底逻辑会从 portfolio-mgr 本身提取,原 CodeNode 检测会从 .params 拿
+    expect(parsed).not.toBeNull();
+    expect(parsed?.action).toBe("HOLD");
+    expect(parsed?.confidence).toBe(30);
+    expect(parsed?.riskLevel).toBe("HIGH");
+  });
+
+  it("results map 内 portfolio-mgr 也不存在时仍返回 null（避免误报）", () => {
+    // 类似 results map 结构但缺 portfolio-mgr 节点（异常工作流）
+    const resultsMap = {
+      trigger: { status: "ok" },
+      research: { status: "ok" },
+    };
+    const parsed = normalizeDecision(resultsMap);
+    // 没有 portfolio-mgr 节点,无法提取决策 → 保持 null
+    expect(parsed).toBeNull();
+  });
+
+  it("业务决策对象含 action 字段时不被识别为 results map（不递归）", () => {
+    // 即使业务决策对象恰好有一个键叫 "research"（罕见但可能）,
+    // 因为它已经有 action 字段,不应被误判为 results map。
+    const businessDecision = {
+      action: "BUY",
+      confidence: 80,
+      research: "n/a", // 字符串而非对象,也不会触发检测
+    };
+    const parsed = normalizeDecision(businessDecision);
+    expect(parsed?.action).toBe("BUY");
+    expect(parsed?.confidence).toBe(80);
+  });
+});

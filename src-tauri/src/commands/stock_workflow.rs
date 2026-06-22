@@ -11,6 +11,7 @@ use axagent_core::entity::stock_reflections;
 use axagent_harness::response_normalizer::ResponseNormalizer;
 use axagent_harness::types::{ChatResponse, ContentBlock};
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
+use axagent_rt_workflow::Workflow;
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_runtime_core::DefaultResponseNormalizer;
 use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
@@ -309,6 +310,39 @@ fn extract_decision_fields(
     (action, position_pct, reasoning, time_horizon, expected_holding_days)
 }
 
+/// 从 Workflow 结果中提取 portfolio-mgr 节点的决策 JSON 字符串。
+///
+/// 优先取 `results["portfolio-mgr"]["result"]`（CodeNode 包装内 Rhai 脚本的
+/// 实际输出，例如 `{ action, positionPct, confidence, ... }`），回退到
+/// `results["portfolio-mgr"]` 本身（兼容非 CodeNode 包装的旧版 portfolio-mgr），
+/// 最后回退到 workflow 顶层 `output`（兼容无 portfolio-mgr 节点的工作流）。
+///
+/// 修复"决策信息缺失"误报：之前直接用 `wf.output` 写入 decisionJson，
+/// 但 stock-analysis 工作流配置了 output_schema（且未用 $source 标记字段
+/// 来源节点），导致 `filter_by_schema` 退化为整个 results map。前端
+/// normalizeDecision 拿到 results map 后会判定为"全零空壳"返回 null，
+/// store.decision 保持空 → DecisionBanner 显示"决策信息缺失"误报。
+fn extract_decision_json(wf: &Workflow) -> Option<String> {
+    if let Some(pm) = wf.results.get("portfolio-mgr") {
+        // CodeNode 包装: { status, result, input_params, node_id, params }
+        // 实际决策在 .result 字段;若 .result 缺失(旧版/异常路径)则降级用
+        // 整个 pm 值,让 extract_decision_fields 至少能拿到 action 等字段。
+        let actual = match pm {
+            serde_json::Value::Object(obj) => {
+                obj.get("result").cloned().unwrap_or_else(|| pm.clone())
+            },
+            _ => pm.clone(),
+        };
+        if let Ok(s) = serde_json::to_string(&actual) {
+            return Some(s);
+        }
+    }
+    // 回退: workflow 顶层 output(无 output_schema 或非 stock-analysis 工作流)
+    wf.output
+        .as_ref()
+        .and_then(|v| serde_json::to_string(v).ok())
+}
+
 /// 解析 as_of_date 入参：None/空串 → None（live），Some(s) → 解析为 AsOfContext
 /// 抽出供单测：未来日期 / 错误格式必须 4xx-style 错误
 pub(crate) fn parse_asof_param(s: Option<String>) -> Result<Option<AsOfContext>, String> {
@@ -422,6 +456,116 @@ mod tests {
         }];
         let (mc, _) = resolve_runtime_options(Some(&vars));
         assert_eq!(mc, DEFAULT_MAX_CONCURRENT);
+    }
+
+    // ── extract_decision_json(修复"决策信息缺失"误报)──
+
+    /// 优先取 results["portfolio-mgr"]["result"](CodeNode 包装内 Rhai 实际输出)
+    #[test]
+    fn extract_decision_json_prefers_portfolio_mgr_result() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({
+                "status": "executed",
+                "language": "rhai",
+                "result": {
+                    "action": "买入",
+                    "positionPct": 50.0,
+                    "confidence": 75.0,
+                    "riskLevel": "中",
+                    "reasoning": "技术面强势",
+                    "timeHorizon": "mid",
+                    "expectedHoldingDays": 28,
+                },
+                "input_params": { "totalScore": 70.0 },
+                "node_id": "portfolio-mgr",
+                "params": { "action": "买入" },
+            }),
+        );
+        // 即使 wf.output 存在且被 output_schema 污染成整个 results map,
+        // 优先从 portfolio-mgr 节点本身提取。
+        results.insert("trigger".to_string(), json!({ "status": "ok" }));
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: Some(json!({
+                "trigger": { "status": "ok" },
+                "portfolio-mgr": { "status": "executed", "result": { "action": "买入" } },
+                "end-output": { "status": "ok" },
+            })),
+        };
+        let dj = extract_decision_json(&wf).expect("必须返回决策 JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        // 关键:从 portfolio-mgr.result 提取,action 是 "买入" 而非被 output 污染
+        assert_eq!(parsed["action"], "买入");
+        assert_eq!(parsed["confidence"], 75.0);
+        assert_eq!(parsed["positionPct"], 50.0);
+        assert_eq!(parsed["riskLevel"], "中");
+    }
+
+    /// portfolio-mgr 是 CodeNode 包装但 .result 字段缺失(异常路径)→ 降级用包装本身
+    #[test]
+    fn extract_decision_json_falls_back_to_pm_wrapper_when_result_missing() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({
+                "status": "executed",
+                "language": "rhai",
+                // 故意无 .result 字段(异常路径)
+                "params": { "action": "HOLD", "confidence": 30.0 },
+                "node_id": "portfolio-mgr",
+            }),
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: None,
+        };
+        let dj = extract_decision_json(&wf).expect("必须返回决策 JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        // 降级用 portfolio-mgr 本身(CodeNode 包装),有 params.action
+        assert_eq!(parsed["params"]["action"], "HOLD");
+    }
+
+    /// portfolio-mgr 节点不存在时回退到 wf.output(兼容无 portfolio-mgr 工作流)
+    #[test]
+    fn extract_decision_json_falls_back_to_workflow_output() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert("trigger".to_string(), json!({ "status": "ok" }));
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: Some(json!({ "action": "BUY", "confidence": 60.0 })),
+        };
+        let dj = extract_decision_json(&wf).expect("必须返回决策 JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(parsed["action"], "BUY");
     }
 }
 
@@ -844,15 +988,9 @@ async fn run_stock_workflow_inner(
                             tracing::warn!("[emit] workflow-completed 发送失败: {e}");
                         }
                         // 即使有节点失败，仍然保存已有结果
-                        let decision_json = result
-                            .output
-                            .and_then(|v| serde_json::to_string(&v).ok())
-                            .or_else(|| {
-                                result
-                                    .results
-                                    .get("portfolio-mgr")
-                                    .and_then(|v| serde_json::to_string(v).ok())
-                            });
+                        // 修复"决策信息缺失"误报:优先从 portfolio-mgr 节点本身
+                        // 提取决策(见 extract_decision_json 注释),回退到 wf.output。
+                        let decision_json = extract_decision_json(&result);
                         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
                             extract_decision_fields(&decision_json);
                         let degradation_report = as_of::take_asof_degradation_report();
@@ -912,15 +1050,9 @@ async fn run_stock_workflow_inner(
                         ) {
                             tracing::warn!("[emit] workflow-completed 发送失败: {e}");
                         }
-                        let decision_json = result
-                            .output
-                            .and_then(|v| serde_json::to_string(&v).ok())
-                            .or_else(|| {
-                                result
-                                    .results
-                                    .get("portfolio-mgr")
-                                    .and_then(|v| serde_json::to_string(v).ok())
-                            });
+                        // 修复"决策信息缺失"误报:优先从 portfolio-mgr 节点本身
+                        // 提取决策(见 extract_decision_json 注释),回退到 wf.output。
+                        let decision_json = extract_decision_json(&result);
                         let (
                             mut action,
                             position_pct,
@@ -1187,10 +1319,12 @@ pub async fn run_single_stock_analysis(
     match result {
         Ok(wf) => {
             // 更新为完成状态
-            let decision_output = wf
-                .results
-                .get("portfolio-mgr")
-                .and_then(|v| serde_json::from_value::<serde_json::Value>(v.clone()).ok());
+            // 修复"决策信息缺失"误报:用 extract_decision_json 从 portfolio-mgr
+            // 节点 .result 提取决策(而非 CodeNode 包装顶层,后者无 action 字段)。
+            let decision_json_str = extract_decision_json(&wf);
+            let decision_output = decision_json_str
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
 
             let decision_action = decision_output.as_ref().and_then(|d| {
                 d.get("action")
@@ -1201,7 +1335,7 @@ pub async fn run_single_stock_analysis(
                 id: Set(analysis_id.clone()),
                 status: Set("completed".into()),
                 decision_action: Set(decision_action),
-                decision_json: Set(decision_output.map(|d| d.to_string())),
+                decision_json: Set(decision_json_str),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
                 ..Default::default()
             })

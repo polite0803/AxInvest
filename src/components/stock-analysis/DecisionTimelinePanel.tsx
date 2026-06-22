@@ -1,6 +1,7 @@
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Empty } from "antd";
 import { useTranslation } from "react-i18next";
+import { DecisionPhaseOverview } from "./decision-timeline/DecisionPhaseOverview";
 import { TimelineBody } from "./decision-timeline/TimelineBody";
 
 /**
@@ -26,6 +27,8 @@ export function DecisionTimelinePanel() {
 
   return (
     <div className="p-2">
+      {/* 4 Phase 横向概览条(借鉴 TradingAgents-CN 决策链路可视化) */}
+      <DecisionPhaseOverview />
       {timeline.length === 0
         ? (
           <div className="text-xs italic px-2 py-3" style={{ color: "var(--muted)" }}>

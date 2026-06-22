@@ -34,7 +34,7 @@ pub trait StockVendor: Send + Sync {
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError>;
 
     async fn get_lockup_schedule(&self, stock_code: &str)
-        -> Result<Vec<LockupSchedule>, DataError>;
+    -> Result<Vec<LockupSchedule>, DataError>;
 
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError>;
 

@@ -1650,6 +1650,29 @@ pub async fn run_reflection_workflow(
 
     // 5. as-of 范围执行
     let ctx = AsOfContext::parse(as_of_date).map_err(|e| format!("as_of 解析失败: {e}"))?;
+
+    // 注册内建变量提供器(Phase 1 混合 as-of),让 prompt 模板中 {{data_freshness}} /
+    // {{as_of_date}} / {{is_replay}} / {{data_scope}} 等跨领域通用状态由引擎自动注入。
+    // 闭包在 as_of::scope 内执行,可拿到当前 task_local AS_OF。
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    let provider: axagent_rt_workflow::work_engine::prompt_template::BuiltinVarsProvider =
+        Arc::new(|| {
+            let mut m: HashMap<String, String> = HashMap::new();
+            m.insert(
+                "data_freshness".to_string(),
+                axagent_astock_data::as_of::data_freshness_description(),
+            );
+            m.insert("is_replay".to_string(), "true".to_string());
+            if let Some(ctx) = axagent_astock_data::as_of::current_as_of() {
+                m.insert("as_of_date".to_string(), ctx.as_of_date.format("%Y-%m-%d").to_string());
+                m.insert("as_of_source".to_string(), format!("{:?}", ctx.source).to_lowercase());
+                m.insert("data_scope".to_string(), format!("{:?}", ctx.data_scope).to_lowercase());
+            }
+            m
+        });
+    engine.set_builtin_vars_provider(provider).await;
+
     let result = as_of::AS_OF
         .scope(Some(ctx), async move { engine.run_workflow(&wf_id, opts).await })
         .await;

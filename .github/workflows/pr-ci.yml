@@ -178,9 +178,10 @@ jobs:
         run: npm run test:run
 
   test-e2e:
-    name: E2E Tests
+    name: E2E Tests (macOS)
     needs: [should-run-heavy]
-    runs-on: ubuntu-24.04
+    if: needs.should-run-heavy.outputs.skip != 'true'
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -196,18 +197,14 @@ jobs:
         uses: actions/cache@v4
         id: playwright-cache
         with:
-          path: ${{ github.workspace }}/.playwright-browsers
+          path: ~/Library/Caches/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        # Ubuntu 24.04 runner 已预装大部分系统依赖, 不需要 --with-deps;
-        # 去掉 --with-deps 避免 macOS runner 上 cache miss 时 brew install 卡死。
         # 这里用单行写法以让 pr-ci.workflow.test.ts 的正则 /run:\s*npx[^\n]*playwright\s+install/ 命中。
-        run: npx --yes playwright install chromium
-        env:
-          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
+        run: npx --yes playwright install chromium --with-deps
 
       - name: Run E2E tests
         run: npm run test:e2e

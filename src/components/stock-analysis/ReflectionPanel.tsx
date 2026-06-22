@@ -20,6 +20,7 @@ import {
   Tooltip,
   Typography,
 } from "antd";
+import type { RangePickerProps } from "antd/es/date-picker";
 import type { Dayjs } from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -56,8 +57,7 @@ interface CronJobResponse {
 
 export function ReflectionPanel() {
   const { t } = useTranslation();
-  const { Text } = Typography;
-  const { RangePicker } = DatePicker;
+  const stockCodeFromStore = useStockAnalysisStore((s) => s.stockCode);
 
   const CRON_PRESETS = [
     { label: t("stockAnalysis.reflection.daily0600"), value: "0 6 * * *" },
@@ -86,7 +86,6 @@ export function ReflectionPanel() {
   const [running, setRunning] = useState(false);
 
   // 个股分析页内自动取当前股票代码（首次加载时填入）
-  const stockCodeFromStore = useStockAnalysisStore((s) => s.stockCode);
   const [manualCode, setManualCode] = useState(stockCodeFromStore ?? "");
   // 当 store 股票代码变化但 manualCode 为空时自动填充
   const prevCodeRef = useRef(stockCodeFromStore);
@@ -122,6 +121,7 @@ export function ReflectionPanel() {
   useEffect(() => {
     // Bug 4 修复: 走统一入口
     Promise.resolve().then(() => load());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // P1-6 修复: 自动刷新 — 30s 轮询 + 标签页可见性恢复时立即拉一次
@@ -140,6 +140,7 @@ export function ReflectionPanel() {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVis);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 后端 CronJobStatus 用 #[serde(rename_all = "snake_case")] 序列化,
@@ -528,9 +529,9 @@ export function ReflectionPanel() {
             ]}
             style={{ width: 120 }}
           />
-          <RangePicker
+          <DatePicker.RangePicker
             value={filterDateRange}
-            onChange={(d) => setFilterDateRange(d as [Dayjs | null, Dayjs | null] | null)}
+            onChange={(d: RangePickerProps["value"]) => setFilterDateRange(d as [Dayjs | null, Dayjs | null] | null)}
             allowClear
             format="YYYY-MM-DD"
           />

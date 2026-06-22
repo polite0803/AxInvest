@@ -319,6 +319,11 @@ pub struct WorkEngine {
     ///   无需 async 锁；后续 `domain_constraints()` getter 在 agent 节点执行
     ///   时取 Arc clone，持有时间极短。
     domain_constraints: Arc<std::sync::Mutex<Option<DomainConstraintsFn>>>,
+    /// 内建变量提供器（可选）。prompt 模板中写 `{{data_freshness}}` 等
+    /// 跨领域通用状态时，由本字段提供；None 时不注入任何内建变量。
+    /// 字段类型与 `domain_constraints` 对齐：`Arc<Mutex<Option<Arc<dyn Fn() -> ...>>>>`。
+    builtin_vars_provider:
+        Arc<std::sync::Mutex<Option<crate::work_engine::prompt_template::BuiltinVarsProvider>>>,
     /// 业务规则引擎（可选，None = 不执行任何业务规则检查）。
     /// 硬约束，在执行层直接拦截违规操作。
     /// 通过 `set_business_rule_engine` 注入。
@@ -552,6 +557,33 @@ impl WorkEngine {
             .expect("domain_constraints mutex poisoned") = Some(f);
     }
 
+    /// 注册内建变量提供器（用于 prompt 模板中 `{{data_freshness}}` 等
+    /// 跨领域通用状态的内联替换）。
+    ///
+    /// 由主 binary 在 as-of 模式时调用，提供从 `axagent_astock_data::as_of`
+    /// 拉取实时状态的闭包。`None` 表示不注入任何内建变量。
+    ///
+    /// 多次调用：后者覆盖前者（与 set_domain_constraints 一致）。
+    pub async fn set_builtin_vars_provider(
+        &self,
+        f: crate::work_engine::prompt_template::BuiltinVarsProvider,
+    ) {
+        *self
+            .builtin_vars_provider
+            .lock()
+            .expect("builtin_vars_provider mutex poisoned") = Some(f);
+    }
+
+    /// 取出当前注册的内建变量提供器（用于在执行 agent 节点时转发给 `AgentExecutor`）。
+    pub(crate) fn builtin_vars_provider(
+        &self,
+    ) -> Option<crate::work_engine::prompt_template::BuiltinVarsProvider> {
+        self.builtin_vars_provider
+            .lock()
+            .expect("builtin_vars_provider mutex poisoned")
+            .clone()
+    }
+
     /// 取出当前注册的领域约束（用于在执行 agent 节点时转发给 `AgentExecutor`）。
     ///
     /// 内部 clone 出 Arc，避免锁长时间持有。仅暴露给 crate 内部消费
@@ -657,6 +689,7 @@ impl WorkEngine {
             tool_resolver: Arc::new(Mutex::new(None)),
             rag_callback: Arc::new(Mutex::new(None)),
             domain_constraints: Arc::new(std::sync::Mutex::new(None)),
+            builtin_vars_provider: Arc::new(std::sync::Mutex::new(None)),
             business_rule_engine: Arc::new(std::sync::Mutex::new(None)),
             agent_provider_cache,
             agent_profile_cache,
@@ -1238,6 +1271,15 @@ impl WorkEngine {
         {
             let dc = self.domain_constraints();
             self.agent_executor.set_domain_constraints_option(dc);
+        }
+
+        // 同步 BuiltinVarsProvider 到共享 AgentExecutor 槽
+        // (跨领域通用状态,如 data_freshness / as_of_date,在每次 run 开始时刷新)
+        {
+            let provider = self.builtin_vars_provider();
+            if let Some(p) = provider {
+                self.agent_executor.set_builtin_vars_provider(p);
+            }
         }
 
         // 自动扫描工作流节点中的工具定义，按需注册（模板级工具自动注册）

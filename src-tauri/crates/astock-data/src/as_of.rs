@@ -45,10 +45,42 @@ impl std::fmt::Display for AsOfSource {
 }
 
 /// 时间锚点：在该任务执行期间，所有 vendor 调用应被视为"截至 as_of_date"
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AsOfContext {
     pub as_of_date: NaiveDate,
     pub source: AsOfSource,
+    /// 数据截止范围(混合 as-of 模式)。默认 All 兼容旧行为。
+    ///
+    /// - `All`:所有数据源(价格/技术/财务 + 新闻/公告)统一按 as_of 截止
+    /// - `Structured`:仅"结构化数据"按 as_of 截止;新闻/公告/研报
+    ///   保持实时(参考 TradingAgents-CN 的"价格截止 + 社交新闻实时")
+    #[serde(default)]
+    pub data_scope: AsOfDataScope,
+}
+
+/// 数据截止范围(混合 as-of 模式核心枚举)
+///
+/// 用户在 UI 可选择:全截止(回放) / 仅结构化截止(日常分析推荐)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AsOfDataScope {
+    /// 所有数据按 as_of 截止(旧行为,默认)
+    #[default]
+    All,
+    /// 仅"结构化数据"按 as_of 截止;新闻/公告/研报/排行 保持实时
+    Structured,
+}
+
+/// 数据源种类(用于 AsOfDataScope 决策)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AsOfDataKind {
+    /// 结构化数据:价格/K线/技术指标/财务三张表/资金流/龙虎榜/股东
+    /// /融资融券/北向/解禁/分红/一致预期
+    Structured,
+    /// 非结构化数据:新闻/公告/研报/社媒(StockTwits/Reddit)
+    Unstructured,
+    /// 排行榜/分类/指数:热门股/行业排名/概念板块/搜索新闻
+    Rank,
 }
 
 impl AsOfContext {
@@ -64,7 +96,14 @@ impl AsOfContext {
         Ok(Self {
             as_of_date: date,
             source,
+            data_scope: AsOfDataScope::All,
         })
+    }
+
+    /// 创建带数据范围的 AsOfContext
+    pub fn with_data_scope(mut self, scope: AsOfDataScope) -> Self {
+        self.data_scope = scope;
+        self
     }
 
     /// 解析 'YYYY-MM-DD' 字符串；空字符串视为非法
@@ -206,6 +245,65 @@ pub fn is_asof_active() -> bool {
     current_as_of().is_some()
 }
 
+/// 判断"指定数据种类"是否受当前 as-of 影响
+///
+/// 决策矩阵(借鉴 TradingAgents-CN README 202 行):
+/// | scope         | Structured 工具 | Unstructured 工具 | Rank 工具 |
+/// |---------------|----------------|-------------------|-----------|
+/// | All           | ✅ 受影响       | ✅ 受影响          | ✅ 受影响  |
+/// | Structured    | ✅ 受影响       | ❌ 实时(穿透)     | ❌ 实时   |
+/// | 无 as-of(live) | ❌ 实时       | ❌ 实时            | ❌ 实时   |
+///
+/// 用法(供 vendor 调用处判断):
+/// ```ignore
+/// if as_of::is_asof_active_for(AsOfDataKind::Structured) {
+///     let adjusted = current_as_of().unwrap();
+///     vendor.fetch_as_of(adjusted.as_of_date);
+/// } else {
+///     vendor.fetch_live();
+/// }
+/// ```
+pub fn is_asof_active_for(kind: AsOfDataKind) -> bool {
+    match current_as_of() {
+        None => false,
+        Some(ctx) => match ctx.data_scope {
+            AsOfDataScope::All => true,
+            AsOfDataScope::Structured => matches!(kind, AsOfDataKind::Structured),
+        },
+    }
+}
+
+/// 在指定 scope 内运行闭包，并提供降级日志的 task_local 容器
+pub async fn with_degradation_log<F, T>(f: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    DEGRADATION_LOG
+        .scope(std::cell::RefCell::new(Vec::new()), f)
+        .await
+}
+
+/// 当前数据新鲜度描述(供工作流 prompt `{{data_freshness}}` 变量注入)
+///
+/// 返回中文短语,如:
+/// - live 模式 → "实时数据(无时间锚定)"
+/// - Structured + as_of=X → "价格/技术/财务 截至 X,新闻/公告 实时"
+/// - All + as_of=X       → "全数据截至 X(回放模式)"
+pub fn data_freshness_description() -> String {
+    match current_as_of() {
+        None => "实时数据(无时间锚定)".to_string(),
+        Some(ctx) => {
+            let date = ctx.as_string();
+            match ctx.data_scope {
+                AsOfDataScope::All => format!("全数据截至 {date}(回放模式)"),
+                AsOfDataScope::Structured => {
+                    format!("价格/技术/财务 截至 {date},新闻/公告 实时")
+                },
+            }
+        },
+    }
+}
+
 /// 生成当前 AsOf 的 cache key 后缀（live 模式返回 "live"）
 pub fn cache_suffix() -> String {
     current_as_of()
@@ -260,16 +358,6 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
         g.push_back(entry);
         GLOBAL_DEGRADATION_TOTAL.fetch_add(1, Ordering::Relaxed);
     }
-}
-
-/// 在指定 scope 内运行闭包，并提供降级日志的 task_local 容器
-pub async fn with_degradation_log<F, T>(f: F) -> T
-where
-    F: std::future::Future<Output = T>,
-{
-    DEGRADATION_LOG
-        .scope(std::cell::RefCell::new(Vec::new()), f)
-        .await
 }
 
 /// 在可选 AsOfContext 包裹下运行闭包。
@@ -329,8 +417,10 @@ pub fn reset_global_degradation_log() {
 mod tests {
     use super::*;
     use chrono::Duration;
+    use serial_test::serial;
 
     #[tokio::test]
+    #[serial(asof)]
     async fn current_as_of_returns_none_outside_scope() {
         // 清理全局，确保测试隔离
         let _ = clear_global_asof();
@@ -368,6 +458,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn today_is_accepted() {
         let today = Local::now().date_naive();
         let ctx = AsOfContext::new(today, AsOfSource::UserReplay).unwrap();
@@ -405,6 +496,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(asof)]
     fn parse_optional_future_date_rejected() {
         let future = Local::now().date_naive() + Duration::days(7);
         let s = future.format("%Y-%m-%d").to_string();
@@ -427,6 +519,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn cache_suffix_includes_date_inside_scope() {
         let _ = clear_global_asof();
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
@@ -436,6 +529,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn nested_scope_uses_inner_value() {
         let _ = clear_global_asof();
         let outer_date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
@@ -497,6 +591,7 @@ mod tests {
 
     /// task_local 优先级：在两层都设值时，task_local 胜出
     #[tokio::test]
+    #[serial(asof)]
     async fn current_asof_prefers_task_local() {
         let _ = clear_global_asof();
         let task_date = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
@@ -513,6 +608,7 @@ mod tests {
     }
 
     /// 跨 spawn 边界全局回退：spawn 出去的 future 应当读到全局值
+    #[serial(asof)]
     #[tokio::test]
     async fn global_fallback_survives_tokio_spawn() {
         let _ = clear_global_asof();
@@ -529,6 +625,7 @@ mod tests {
     }
 
     /// 没有 task_local 也没有全局时，current_as_of 返回 None
+    #[serial(asof)]
     #[tokio::test]
     async fn current_asof_falls_back_to_global_outside_scope() {
         let _ = clear_global_asof();
@@ -571,6 +668,7 @@ mod tests {
 
     /// 嵌套守卫：内层 drop 后必须 LIFO 恢复到外层值
     #[tokio::test]
+    #[serial(asof)]
     async fn nested_guards_restore_lifo() {
         let _ = clear_global_asof();
         let outer_date = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
@@ -591,5 +689,177 @@ mod tests {
         // 回到 outer
         assert_eq!(current_as_of().unwrap().as_of_date, outer_date, "内层 drop 后必须恢复 outer");
         let _ = clear_global_asof();
+    }
+
+    // ── 混合 as-of 模式(Phase 1:数据范围分离) ──────────────────
+    // 设计动机：参考 TradingAgents-CN README 的"价格截止 + 社交/新闻实时"。
+    // 用户回放个股时，价格/技术/财务按 as_of 截止，但想看当时的新闻/公告
+    // 是否还有后效（如事件影响持续到回放日期之后）。本组测试覆盖该模式。
+
+    /// 默认行为兼容：未设置 data_scope 时等同于 All（保持旧语义）
+    #[test]
+    fn data_scope_default_is_all_compatible() {
+        assert_eq!(AsOfDataScope::default(), AsOfDataScope::All);
+        let today = Local::now().date_naive();
+        let ctx = AsOfContext::new(today, AsOfSource::UserReplay).unwrap();
+        assert_eq!(ctx.data_scope, AsOfDataScope::All);
+    }
+
+    /// with_data_scope 是消费式 API，链式调用应保留日期/来源不变
+    #[test]
+    fn with_data_scope_chains_correctly() {
+        let today = Local::now().date_naive();
+        let ctx = AsOfContext::new(today, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(AsOfDataScope::Structured);
+        assert_eq!(ctx.data_scope, AsOfDataScope::Structured);
+        assert_eq!(ctx.source, AsOfSource::UserReplay);
+        assert_eq!(ctx.as_of_date, today);
+    }
+
+    /// data_scope=All 时，所有 kind 都被 as-of 拦截
+    #[tokio::test]
+    #[serial(asof)]
+    async fn data_scope_all_blocks_all_kinds() {
+        let _ = clear_global_asof();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let result = AS_OF
+            .scope(Some(ctx), async {
+                let structured = is_asof_active_for(AsOfDataKind::Structured);
+                let unstructured = is_asof_active_for(AsOfDataKind::Unstructured);
+                let rank = is_asof_active_for(AsOfDataKind::Rank);
+                (structured, unstructured, rank)
+            })
+            .await;
+        assert_eq!(result, (true, true, true), "All 模式必须拦截所有 kind");
+    }
+
+    /// data_scope=Structured 时，仅结构化数据被拦截，新闻/公告/排行保持实时
+    #[tokio::test]
+    #[serial(asof)]
+    async fn data_scope_structured_blocks_only_structured() {
+        let _ = clear_global_asof();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(AsOfDataScope::Structured);
+        let result = AS_OF
+            .scope(Some(ctx), async {
+                let structured = is_asof_active_for(AsOfDataKind::Structured);
+                let unstructured = is_asof_active_for(AsOfDataKind::Unstructured);
+                let rank = is_asof_active_for(AsOfDataKind::Rank);
+                (structured, unstructured, rank)
+            })
+            .await;
+        assert_eq!(
+            result,
+            (true, false, false),
+            "Structured 模式：仅结构化数据走 as-of，新闻/排行放行"
+        );
+    }
+
+    /// live 模式（无 as_of）下，is_asof_active_for 对所有 kind 都返回 false
+    #[tokio::test]
+    #[serial(asof)]
+    async fn live_mode_blocks_nothing() {
+        let _ = clear_global_asof();
+        let result = AS_OF
+            .scope(None, async {
+                (
+                    is_asof_active_for(AsOfDataKind::Structured),
+                    is_asof_active_for(AsOfDataKind::Unstructured),
+                    is_asof_active_for(AsOfDataKind::Rank),
+                )
+            })
+            .await;
+        assert_eq!(result, (false, false, false));
+    }
+
+    /// is_asof_active_for 必须能跨越 spawn 边界（依赖全局回退）
+    #[serial(asof)]
+    #[tokio::test]
+    async fn is_asof_active_for_works_across_spawn_boundary() {
+        let _ = clear_global_asof();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 8).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(AsOfDataScope::Structured);
+        set_global_asof(Some(ctx));
+
+        // spawn 出去的新任务无 task_local scope，必须能通过全局回退读到 kind 决策
+        let (structured, unstructured) = tokio::spawn(async move {
+            (
+                is_asof_active_for(AsOfDataKind::Structured),
+                is_asof_active_for(AsOfDataKind::Unstructured),
+            )
+        })
+        .await
+        .unwrap();
+        assert!(structured, "spawn 后 Structured 仍走 as-of");
+        assert!(!unstructured, "spawn 后 Unstructured 不应被 as-of 拦截");
+        let _ = clear_global_asof();
+    }
+
+    /// data_freshness_description 应当分别覆盖 live / All / Structured 三种文案
+    #[tokio::test]
+    #[serial(asof)]
+    async fn data_freshness_description_live() {
+        let _ = clear_global_asof();
+        let s = data_freshness_description();
+        assert!(s.contains("实时"), "live 文案必须含『实时』: {s}");
+    }
+
+    #[tokio::test]
+    #[serial(asof)]
+    async fn data_freshness_description_all() {
+        let _ = clear_global_asof();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let s = AS_OF
+            .scope(Some(ctx), async { data_freshness_description() })
+            .await;
+        assert!(s.contains("2026-06-01"), "All 文案必须含日期: {s}");
+        assert!(s.contains("全数据"), "All 文案必须含『全数据』: {s}");
+    }
+
+    #[tokio::test]
+    #[serial(asof)]
+    async fn data_freshness_description_structured() {
+        let _ = clear_global_asof();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(AsOfDataScope::Structured);
+        let s = AS_OF
+            .scope(Some(ctx), async { data_freshness_description() })
+            .await;
+        assert!(s.contains("2026-06-01"));
+        assert!(s.contains("新闻"), "Structured 文案必须说明新闻是实时的: {s}");
+    }
+
+    /// serde 向后兼容：旧的 JSON 文本没有 data_scope 字段时，解析结果为 All
+    #[test]
+    fn asof_ctx_backward_compatible_serde() {
+        // 旧版本序列化格式（只有两个字段）
+        let legacy = r#"{"as_of_date":"2026-06-01","source":"user_replay"}"#;
+        let ctx: AsOfContext = serde_json::from_str(legacy).unwrap();
+        assert_eq!(ctx.as_of_date.to_string(), "2026-06-01");
+        assert_eq!(ctx.source, AsOfSource::UserReplay);
+        // data_scope 走 serde default -> All
+        assert_eq!(ctx.data_scope, AsOfDataScope::All);
+    }
+
+    /// serde 正向：新格式带 snake_case 枚举字符串
+    #[test]
+    fn asof_ctx_serde_with_data_scope() {
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(AsOfDataScope::Structured);
+        let s = serde_json::to_string(&ctx).unwrap();
+        assert!(s.contains("\"data_scope\":\"structured\""), "序列化必须小写枚举名: {s}");
+        let back: AsOfContext = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, ctx);
     }
 }

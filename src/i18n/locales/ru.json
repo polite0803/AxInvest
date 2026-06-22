@@ -714,7 +714,9 @@
       "noSteps": "Нет шагов",
       "chart": {
         "renderError": "Ошибка отрисовки диаграммы"
-      }
+      },
+      "elapsedHint": "Node runtime, auto-refreshes every 1s",
+      "lastUpdatedHint": "Last workflow status fetch time"
     },
     "modelRoutingConfig": {
       "title": "Конфигурация маршрутизации моделей",
@@ -1148,6 +1150,23 @@
       "ask": "Вопрос",
       "plan": "План",
       "title": "Переключить режим"
+    },
+    "multiModelVote": {
+      "button": "Aggregate Vote",
+      "title": "Multi-Model Decision Vote",
+      "strategy": "Aggregation Strategy",
+      "strategyMajority": "Majority Vote",
+      "strategyWeighted": "Confidence-Weighted",
+      "strategyConsensus": "Unanimous Consensus",
+      "modelCount": "Models Participated",
+      "validCount": "Valid Decisions",
+      "finalAction": "Final Action",
+      "winnerModel": "Winner Model",
+      "avgConfidence": "Avg. Confidence",
+      "voteBreakdown": "Vote Breakdown",
+      "allAgree": "All models agree",
+      "disagreement": "Disagreement detected",
+      "noDecision": "No decision to aggregate"
     }
   },
   "gateway": {
@@ -8386,7 +8405,8 @@
         "decide": "Decision",
         "diagnose": "Diagnosis",
         "scan": "Scan"
-      }
+      },
+      "overviewTitle": "Decision Chain"
     },
     "alert.date": "Date",
     "recommendation": {

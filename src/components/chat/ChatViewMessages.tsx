@@ -118,6 +118,7 @@ import { getStreamingLoadingState, shouldRenderAssistantMarkdownFromContent } fr
 import { DeleteLastVersionPopover } from "./DeleteLastVersionPopover";
 import { ModelSelector } from "./ModelSelector";
 import { ModelTags } from "./ModelTags";
+import { MultiLlmVotePanel } from "./MultiLlmVotePanel";
 import { LayoutSwitcher, MultiModelDisplay, type MultiModelDisplayMode } from "./MultiModelDisplay";
 import { PermissionCard } from "./PermissionCard";
 import { ToolCallCard } from "./ToolCallCard";
@@ -1377,6 +1378,7 @@ export function useChatViewMessages({
             return (
               <>
                 {msgMarker}
+                <MultiLlmVotePanel versions={allVersions} />
                 <MultiModelDisplay
                   versions={allVersions}
                   activeMessageId={msg!.id}

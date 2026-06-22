@@ -122,7 +122,8 @@ impl StockVendor for XueqiuVendor {
         // begin=0 表示从最早开始
         let url = format!(
             "https://stock.xueqiu.com/v5/stock/chart/kline.json?symbol={symbol}&begin=0&period={}&type=before&count=-{}&indicator=kline,pe,pb",
-            period_map(period), limit
+            period_map(period),
+            limit
         );
         let resp = self.xq_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;

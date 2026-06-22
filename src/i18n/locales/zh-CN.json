@@ -282,6 +282,23 @@
       "selectTitle": "选择同时回答的模型",
       "selectedCount": "已选 {{count}} 个模型"
     },
+    "multiModelVote": {
+      "button": "聚合投票",
+      "title": "多模型决策投票",
+      "strategy": "聚合策略",
+      "strategyMajority": "多数票",
+      "strategyWeighted": "按置信度加权",
+      "strategyConsensus": "全员一致",
+      "modelCount": "参与模型数",
+      "validCount": "有效决策数",
+      "finalAction": "最终决策",
+      "winnerModel": "采用模型",
+      "avgConfidence": "平均置信度",
+      "voteBreakdown": "票数明细",
+      "allAgree": "所有模型一致",
+      "disagreement": "存在分歧",
+      "noDecision": "暂无可聚合的决策"
+    },
     "multiModelUseAsContext": "用作上下文",
     "pinnedModels": "置顶模型",
     "scrollToBottom": "回到底部",
@@ -357,6 +374,8 @@
       "result": "结果",
       "error": "错误",
       "attempts": "尝试次数",
+      "elapsedHint": "节点已运行时间,每 1 秒自动刷新",
+      "lastUpdatedHint": "最近一次拉取工作流状态的时间",
       "performance": {
         "name": "性能优化",
         "description": "分析和优化代码性能瓶颈"
@@ -7730,7 +7749,8 @@
       "empty": "该階段暂无节点",
       "idleHint": "开始分析后,這裡会展示完整的决策时间线",
       "emptyHint": "等待工作流推送节点…",
-      "sendToChat": "发送到对话"
+      "sendToChat": "发送到对话",
+      "overviewTitle": "决策链路"
     },
     "settings": {
       "title": "股票分析设置",

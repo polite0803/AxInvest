@@ -188,22 +188,57 @@ fn merge_adjacent_statics(segments: Vec<TemplateSegment>) -> Vec<TemplateSegment
 // ── 阶段二：渲染 ──
 
 /// 用变量表填充编译后的模板，返回最终 prompt 字符串。
+///
+/// `builtin_vars` 是"工作流引擎自带的内建变量表"，与主 `variables` 走同样的
+/// 查找路径但在它查不到时回退查找。这样模板里写 `{{data_freshness}}` 之类的
+/// 内建变量不必由调用方显式复制到 `variables` 里。
+///
+/// 内建变量主要用于"跨领域通用"的状态注入（as-of 数据新鲜度、当前日期等），
+/// 调用方自行决定是否传入；传 None 时行为与历史完全一致。
 pub fn render_prompt(
     compiled: &CompiledPrompt,
     variables: &HashMap<String, Value>,
+    builtin_vars: Option<&HashMap<String, String>>,
 ) -> Result<String, TemplateRenderError> {
+    // 把 builtin_vars 提前转成 Value map,避免闭包里再分配。
+    let builtin_value_map: HashMap<String, Value> = builtin_vars
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                .collect()
+        })
+        .unwrap_or_default();
     let mut result = String::new();
     for segment in &compiled.segments {
         match segment {
             TemplateSegment::Static(s) => result.push_str(s),
             TemplateSegment::Slot(path) => {
-                let value = resolve_dot_path(path, variables)?;
+                let value = resolve_dot_path(path, variables).or_else(|err| {
+                    // 仅 VariableNotFound 才回退到 builtin_vars;PathTraversalError 严格上报
+                    if matches!(err, TemplateRenderError::VariableNotFound { .. }) {
+                        if let Some(v) = builtin_value_map.get(path) {
+                            return Ok(v);
+                        }
+                    }
+                    Err(err)
+                })?;
                 result.push_str(&value_to_string(value));
             },
         }
     }
     Ok(result)
 }
+
+/// 内建变量提供器：返回当前时刻的内建变量表。
+///
+/// 用闭包形式以便在调用时拉取最新的运行时上下文（如 as-of task_local `AS_OF`
+/// 在不同时刻可能变化）。返回的 HashMap 在 prompt 渲染期间被消费，不持有跨调用。
+///
+/// 调用方负责把 `data_freshness` / `as_of_date` / `is_replay` / `data_scope`
+/// 等跨领域通用状态塞入返回的 map。`render_prompt` 在主 variables 找不到时
+/// 会回退到本表查找。
+pub type BuiltinVarsProvider =
+    Arc<dyn Fn() -> std::collections::HashMap<String, String> + Send + Sync>;
 
 /// 按点号路径从变量表中查找值。
 ///
@@ -531,14 +566,14 @@ mod tests {
     fn render_simple_substitution() {
         let c = compile_prompt("Hello {{name}}!");
         let v = vars(&[("name", "World")]);
-        assert_eq!(render_prompt(&c, &v).unwrap(), "Hello World!");
+        assert_eq!(render_prompt(&c, &v, None).unwrap(), "Hello World!");
     }
 
     #[test]
     fn render_missing_variable() {
         let c = compile_prompt("{{missing}}");
         let v = vars(&[]);
-        let err = render_prompt(&c, &v).unwrap_err();
+        let err = render_prompt(&c, &v, None).unwrap_err();
         assert!(matches!(err, TemplateRenderError::VariableNotFound { .. }));
     }
 
@@ -547,7 +582,7 @@ mod tests {
         let c = compile_prompt("{{n.output.text}}");
         let mut v = HashMap::new();
         v.insert("n".to_string(), serde_json::json!({"output": {"text": "hello"}}));
-        assert_eq!(render_prompt(&c, &v).unwrap(), "hello");
+        assert_eq!(render_prompt(&c, &v, None).unwrap(), "hello");
     }
 
     #[test]
@@ -555,7 +590,7 @@ mod tests {
         let c = compile_prompt("{{n.output.zzz}}");
         let mut v = HashMap::new();
         v.insert("n".to_string(), serde_json::json!({"output": {"text": "hello"}}));
-        let err = render_prompt(&c, &v).unwrap_err();
+        let err = render_prompt(&c, &v, None).unwrap_err();
         assert!(matches!(err, TemplateRenderError::VariableNotFound { .. }));
     }
 
@@ -564,7 +599,7 @@ mod tests {
         let c = compile_prompt("{{n.output}}");
         let mut v = HashMap::new();
         v.insert("n".to_string(), Value::String("not_an_object".to_string()));
-        let err = render_prompt(&c, &v).unwrap_err();
+        let err = render_prompt(&c, &v, None).unwrap_err();
         assert!(matches!(err, TemplateRenderError::PathTraversalError { .. }));
     }
 
@@ -574,7 +609,7 @@ mod tests {
         let mut v = HashMap::new();
         v.insert("num".to_string(), serde_json::json!(42));
         v.insert("flag".to_string(), Value::Bool(true));
-        assert_eq!(render_prompt(&c, &v).unwrap(), "n=42, b=true");
+        assert_eq!(render_prompt(&c, &v, None).unwrap(), "n=42, b=true");
     }
 
     #[test]
@@ -582,7 +617,7 @@ mod tests {
         let c = compile_prompt("{{x}}");
         let mut v = HashMap::new();
         v.insert("x".to_string(), Value::Null);
-        assert_eq!(render_prompt(&c, &v).unwrap(), "");
+        assert_eq!(render_prompt(&c, &v, None).unwrap(), "");
     }
 
     #[test]
@@ -590,7 +625,7 @@ mod tests {
         let input = "你是研究员。\n请分析数据并给出结论。";
         let c = compile_prompt(input);
         let v = HashMap::new();
-        assert_eq!(render_prompt(&c, &v).unwrap(), input);
+        assert_eq!(render_prompt(&c, &v, None).unwrap(), input);
     }
 
     #[test]
@@ -605,7 +640,7 @@ mod tests {
             serde_json::json!({"content": "市场调研结果：Q2增长15%"}),
         );
         v.insert("focus".to_string(), Value::String("成本控制".to_string()));
-        let result = render_prompt(&c, &v).unwrap();
+        let result = render_prompt(&c, &v, None).unwrap();
         assert_eq!(
             result,
             "你是 分析师。\n请根据 市场调研结果：Q2增长15% 撰写报告。\n重点关注：成本控制"
@@ -617,7 +652,7 @@ mod tests {
         let c = compile_prompt("{{arr}}");
         let mut v = HashMap::new();
         v.insert("arr".to_string(), serde_json::json!([1, 2, 3]));
-        assert_eq!(render_prompt(&c, &v).unwrap(), "[1,2,3]");
+        assert_eq!(render_prompt(&c, &v, None).unwrap(), "[1,2,3]");
     }
 
     #[test]
@@ -631,6 +666,57 @@ mod tests {
                 TemplateSegment::Static("}".to_string()),
             ]
         );
+    }
+
+    // ── 内建变量 builtin_vars 行为测试 ──
+    // 用途：Phase 1 混合 as-of 模式让 prompt 模板写 {{data_freshness}} 等
+    // 跨领域通用状态时由引擎自动注入,不必由调用方复制到 variables。
+
+    /// 缺失 key 时回退到 builtin_vars
+    #[test]
+    fn builtin_vars_fallback_when_main_vars_missing() {
+        let c = compile_prompt("数据状态: {{data_freshness}}");
+        let mut v = HashMap::new();
+        v.insert("stock".to_string(), Value::String("600519".to_string()));
+        let mut builtins = HashMap::new();
+        builtins
+            .insert("data_freshness".to_string(), "全数据截至 2026-06-01(回放模式)".to_string());
+        let rendered = render_prompt(&c, &v, Some(&builtins)).unwrap();
+        assert!(rendered.contains("全数据截至 2026-06-01"));
+        assert!(rendered.contains("{{data_freshness}}") == false);
+    }
+
+    /// main variables 优先于 builtin_vars
+    #[test]
+    fn main_vars_take_precedence_over_builtin_vars() {
+        let c = compile_prompt("{{as_of_date}}");
+        let mut v = HashMap::new();
+        v.insert("as_of_date".to_string(), Value::String("2026-06-15(用户覆盖)".to_string()));
+        let mut builtins = HashMap::new();
+        builtins.insert("as_of_date".to_string(), "2026-06-01(引擎)".to_string());
+        let rendered = render_prompt(&c, &v, Some(&builtins)).unwrap();
+        // 用户注入的 06-15 优先;引擎的 06-01 被覆盖
+        assert!(rendered.contains("2026-06-15"));
+        assert!(!rendered.contains("2026-06-01(引擎)"));
+    }
+
+    /// builtin_vars 也没找到时,仍按原行为报 VariableNotFound
+    #[test]
+    fn missing_in_both_still_returns_error() {
+        let c = compile_prompt("{{nope}}");
+        let v: HashMap<String, Value> = HashMap::new();
+        let builtins: HashMap<String, String> = HashMap::new();
+        let err = render_prompt(&c, &v, Some(&builtins)).unwrap_err();
+        assert!(matches!(err, TemplateRenderError::VariableNotFound { .. }));
+    }
+
+    /// builtin_vars = None 时行为与历史完全一致(任何缺失都报错)
+    #[test]
+    fn builtin_vars_none_keeps_legacy_behavior() {
+        let c = compile_prompt("{{nope}}");
+        let v: HashMap<String, Value> = HashMap::new();
+        let err = render_prompt(&c, &v, None).unwrap_err();
+        assert!(matches!(err, TemplateRenderError::VariableNotFound { .. }));
     }
 
     // ── 通用模板拼装 API 测试 ──
@@ -686,7 +772,7 @@ mod tests {
         assert!(compiled.segments[1].to_string().contains("soft override"));
         assert!(compiled.segments[2].to_string().contains("具体指令"));
         // 渲染后应能看到 marker 紧跟 inline 内容
-        let rendered = render_prompt(&compiled, &HashMap::new()).unwrap();
+        let rendered = render_prompt(&compiled, &HashMap::new(), None).unwrap();
         let marker_pos = rendered.find("soft override").expect("marker 存在");
         let inline_pos = rendered.find("具体指令").expect("inline 存在");
         assert!(marker_pos < inline_pos, "marker 必须在 inline 内容之前");

@@ -102,6 +102,10 @@ interface StepLike {
   attempts: number;
   max_retries: number;
   on_failure: "abort" | "skip";
+  /** 节点开始时间戳(秒)。仅 running/completed/failed 状态有值 */
+  started_at: number | null;
+  /** 节点完成时间戳(秒)。仅 completed/failed/skipped 状态有值 */
+  completed_at: number | null;
 }
 
 function toStepLike(
@@ -124,6 +128,8 @@ function toStepLike(
       attempts: state?.attempts ?? 0,
       max_retries: 2,
       on_failure: "abort",
+      started_at: state?.started_at ?? null,
+      completed_at: state?.completed_at ?? null,
     };
   });
 }
@@ -143,7 +149,8 @@ const TERMINAL_STATUSES = new Set<WorkflowData["status"]>([
   "cancelled",
 ]);
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 800;
+const REALTIME_TICK_MS = 1000;
 
 const NODE_WIDTH = 160;
 const NODE_HEIGHT = 56;
@@ -178,6 +185,25 @@ function truncate(str: string | null, maxLen: number): string {
     return str;
   }
   return str.slice(0, maxLen) + "...";
+}
+
+/** 把毫秒时间戳格式化为 "5s 前" / "2m 前" / "1h 前" 形式 */
+function formatRelativeTime(ts: number): string {
+  const diff = Math.max(0, Date.now() - ts);
+  if (diff < 1000) { return "now"; }
+  if (diff < 60_000) { return `${Math.floor(diff / 1000)}s ago`; }
+  if (diff < 3_600_000) { return `${Math.floor(diff / 60_000)}m ago`; }
+  return `${Math.floor(diff / 3_600_000)}h ago`;
+}
+
+/** 把秒级 elapsed 格式化为 "0:01" / "1:23" / "12:34" 形式 */
+function formatElapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) { return `${m}:${r.toString().padStart(2, "0")}`; }
+  const h = Math.floor(m / 60);
+  return `${h}:${(m % 60).toString().padStart(2, "0")}:${r.toString().padStart(2, "0")}`;
 }
 
 function getStorageKey(conversationId: string): string {
@@ -529,6 +555,20 @@ const StepRow = memo(function StepRow({
             <span style={{ color }}>
               {t(`chat.workflow.status.${step.status}`)}
             </span>
+            {/* 实时 elapsed time:running 节点显示已运行时长,已完成显示总耗时 */}
+            {step.status === "running" && step.started_at && (
+              <span
+                className="text-zinc-500 tabular-nums"
+                title={t("chat.workflow.elapsedHint")}
+              >
+                · {formatElapsed(Math.max(0, Math.floor(Date.now() / 1000) - step.started_at))}
+              </span>
+            )}
+            {isDone(step.status) && step.started_at && step.completed_at && (
+              <span className="text-zinc-500 tabular-nums">
+                · {formatElapsed(Math.max(0, step.completed_at - step.started_at))}
+              </span>
+            )}
           </div>
           {step.needs.length > 0 && (
             <div className="flex gap-4">
@@ -585,6 +625,10 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
   const [dagCollapsed, setDagCollapsed] = useState(false);
 
   const [workflowId, setWorkflowId] = useState<string | null>(() => getWorkflowIdFromStorage(conversationId));
+  /** ISO 时间戳:最近一次拉取 workflow 状态成功的时刻(用于"最近更新"标签) */
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+  /** 自增 tick:每秒+1,触发 running 节点 elapsed time 实时刷新 */
+  const [, setRealtimeTick] = useState(0);
 
   const fetchIdRef = useRef(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -672,6 +716,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
           return;
         }
         setWorkflow(data);
+        setLastUpdated(Date.now());
         setError(null);
 
         if (TERMINAL_STATUSES.has(data.status)) {
@@ -709,6 +754,25 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
       }
     };
   }, [workflowId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // ── 实时滴答:每 1s 触发一次 setRealtimeTick,使 running 节点 elapsed time 滚动 ──
+  // 仅当存在 running 节点或工作流未处于终态时启用,避免无谓渲染。
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const hasRunning = workflow
+      ? Object.values(workflow.node_states).some(
+        (s) => s.status === "running" || s.status === "ready",
+      ) || !TERMINAL_STATUSES.has(workflow.status)
+      : false;
+    if (!hasRunning) {
+      return;
+    }
+    const timer = setInterval(() => {
+      setRealtimeTick((n) => n + 1);
+    }, REALTIME_TICK_MS);
+    return () => clearInterval(timer);
+  }, [workflow]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Step toggle ---
@@ -814,6 +878,16 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
 
         {/* Polling indicator */}
         {loading && <Spin size="small" />}
+
+        {/* 最近更新时间(实时刷新) */}
+        {lastUpdated > 0 && (
+          <span
+            className="text-[10px] text-zinc-400 dark:text-zinc-500 tabular-nums shrink-0"
+            title={new Date(lastUpdated).toLocaleString()}
+          >
+            · {formatRelativeTime(lastUpdated)}
+          </span>
+        )}
 
         <Button
           type="text"

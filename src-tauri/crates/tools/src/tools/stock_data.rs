@@ -2485,13 +2485,85 @@ impl Tool for StockFundamentalsReportTool {
             .get_financials(code)
             .await
             .map_err(|e| te(format!("get_financials 失败: {e}")))?;
-        // 3. 生成报告 + markdown (Phase 2 迁移后 FundamentalsAnalyzer 位于 astock-data)
+        // 3. 生成报告 (Phase 2 迁移后 FundamentalsAnalyzer 位于 astock-data)
         let report = axagent_astock_data::fundamentals_report::FundamentalsAnalyzer::generate(
             code,
             &quote,
             &financials,
         );
-        Ok(ToolResult::success(report.to_markdown()))
+        // 4. Phase 3: 同步附加市场 Regime (避免单独增加 tool_node 破坏 9 节点网格)
+        //    工作流引擎在 t-fundamentals-data 节点执行时,一并拉取 K 线 + 检测 regime,
+        //    让 a-fundamentals 启动时直接消费完整的"基本面 + Regime"上下文。
+        let regime_section = match self.client.get_klines(code, "daily", 120).await {
+            Ok(klines) => {
+                let regime = axagent_astock_data::regime::RegimeDetector::detect(&klines);
+                let rules = regime
+                    .triggered_rules
+                    .iter()
+                    .map(|r| format!("- {}", r))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!(
+                    "\n---\n\n## 当前市场 Regime (Phase 3)\n\n{} **{}**\n\n- 信心度: {}/100\n- Prompt 偏向: **{}**\n\n触发规则:\n{}\n\nexpert 在该 regime 下应据此切换分析 bias。\n",
+                    regime.regime.emoji(),
+                    regime.regime.label(),
+                    regime.confidence,
+                    regime.regime.prompt_bias(),
+                    rules,
+                )
+            },
+            Err(e) => {
+                tracing::warn!(stock_code = %code, error = %e, "regime K 线拉取失败,跳过");
+                String::new()
+            },
+        };
+        Ok(ToolResult::success(format!("{}{}", report.to_markdown(), regime_section)))
+    }
+}
+
+// ── 4. StockRegimeDetectTool (Phase 3) ──
+// 借鉴 TradingAgents-CN "市场 regime 自适应 prompt" 机制:
+// 此工具由 expert 主动调用,根据 20/60 日均线/布林带/波动率
+// 判断市场状态(Bull/Bear/Sideways/Volatile),供 a-* expert 切换 prompt bias。
+// 注:实际工作流预拉在 StockFundamentalsReportTool::call 中一并完成,
+// 此工具供 expert 在其他分析场景中按需调用。
+pub struct StockRegimeDetectTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockRegimeDetectTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockRegimeDetectTool {
+    fn name(&self) -> &str {
+        "get_market_regime"
+    }
+    fn description(&self) -> &str {
+        "市场 Regime 识别:综合 20/60 日均线/布林带/波动率/连涨连跌,判定当前市场状态 \
+         (Bull/Bear/Sideways/Volatile),并给出 prompt_bias 建议"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let klines = self
+            .client
+            .get_klines(code, "daily", 120)
+            .await
+            .map_err(|e| te(format!("get_klines 失败: {e}")))?;
+        let report = axagent_astock_data::regime::RegimeDetector::detect(&klines);
+        Ok(ToolResult::success(
+            serde_json::to_string_pretty(&report).unwrap_or_else(|_| format!("{:?}", report)),
+        ))
     }
 }
 
@@ -2506,6 +2578,8 @@ pub fn register_stock_tools(
         Arc::new(StockFinancialsTool::new(client.clone())),
         // Phase 2: 基本面报告工具,被 t-fundamentals-data 工作流节点调用
         Arc::new(StockFundamentalsReportTool::new(client.clone())),
+        // Phase 3: Regime 识别工具,被 t-regime-detect 工作流节点调用
+        Arc::new(StockRegimeDetectTool::new(client.clone())),
         Arc::new(StockNewsTool::new(client.clone())),
         Arc::new(StockMoneyFlowTool::new(client.clone())),
         Arc::new(StockHotStocksTool::new(client.clone())),

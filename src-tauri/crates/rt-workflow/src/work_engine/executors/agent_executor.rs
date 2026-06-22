@@ -46,7 +46,8 @@ use crate::work_engine::node_executor_trait::{
     NodeError, NodeExecutorTrait, NodeOutput, error_code,
 };
 use crate::work_engine::prompt_template::{
-    CompiledPrompt, DomainConstraintsFn, TemplateSegment, compile_prompt, render_prompt,
+    BuiltinVarsProvider, CompiledPrompt, DomainConstraintsFn, TemplateSegment, compile_prompt,
+    render_prompt,
 };
 
 // 缓存类型（pub(crate) 供 WorkEngine 引用）
@@ -155,6 +156,13 @@ pub struct AgentExecutor {
     /// 由 WorkEngine 在每次 run_workflow 开始时通过 set_rag_callback 模式
     /// 同步转发当前注册的 DomainConstraintsFn。
     domain_constraints: Arc<std::sync::Mutex<Option<DomainConstraintsFn>>>,
+    /// 内建变量提供器（可选，None 时不注入任何内建变量，行为与现状完全一致）。
+    ///
+    /// 返回的 HashMap 中每个 key 对应 `{{key}}` 模板占位符。主 crate 在
+    /// `as_of` 模式时通过 WorkEngine.set_builtin_vars_provider 注入
+    /// `data_freshness` / `as_of_date` / `is_replay` / `data_scope` 等
+    /// 跨领域通用状态。
+    builtin_vars_provider: Arc<std::sync::Mutex<Option<BuiltinVarsProvider>>>,
 }
 
 impl AgentExecutor {
@@ -175,6 +183,17 @@ impl AgentExecutor {
             profile_cache: Arc::new(Mutex::new(HashMap::new())),
             provider_registry: None,
             domain_constraints: Arc::new(std::sync::Mutex::new(None)),
+            builtin_vars_provider: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// 设置内建变量提供器（线程安全，可重复设置）。
+    ///
+    /// 主 crate 在 as-of 模式下调用此方法，传入从 `axagent_astock_data::as_of`
+    /// 拉取 `data_freshness` 等跨领域通用状态的闭包。
+    pub fn set_builtin_vars_provider(&self, provider: BuiltinVarsProvider) {
+        if let Ok(mut slot) = self.builtin_vars_provider.lock() {
+            *slot = Some(provider);
         }
     }
 
@@ -474,12 +493,19 @@ impl NodeExecutorTrait for AgentExecutor {
             variable_refs: Vec::new(),
         };
 
-        let system_prompt = render_prompt(&compiled, &context.variables).map_err(|e| {
-            NodeError::exec_failed(
-                error_code::VARIABLE_NOT_FOUND,
-                format!("Prompt rendering failed: {e}"),
-            )
-        })?;
+        // 拉取内建变量(可选)。由主 crate 在 as-of 模式下注入 data_freshness / as_of_date 等
+        // 跨领域通用状态;None 时行为与历史完全一致。
+        let builtin_vars: Option<std::collections::HashMap<String, String>> =
+            lock_or_recover(self.builtin_vars_provider.lock())
+                .as_ref()
+                .map(|provider| provider());
+        let system_prompt = render_prompt(&compiled, &context.variables, builtin_vars.as_ref())
+            .map_err(|e| {
+                NodeError::exec_failed(
+                    error_code::VARIABLE_NOT_FOUND,
+                    format!("Prompt rendering failed: {e}"),
+                )
+            })?;
 
         // 5. 构建 user_prompt：仅包含 context_sources 的变量（更精准，减少噪声）
         let user_prompt = if an.config.context_sources.is_empty() {

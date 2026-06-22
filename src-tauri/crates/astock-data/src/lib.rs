@@ -17,6 +17,7 @@ pub mod fundamentals_report;
 pub mod gate;
 pub mod indicators;
 pub mod mcp_tools;
+pub mod regime;
 pub mod two_tier_cache;
 pub mod types;
 pub mod validation;
@@ -35,6 +36,7 @@ pub use error::DataError;
 pub use types::*;
 // R3: 估值带（暴露在 crate 根，方便 commands 端直接 `axagent_astock_data::ValuationBand`）
 pub use valuation_band::{FinancialSnapshotLike, MetricBand, ValuationBand};
+use vendors::StockVendor;
 use vendors::akshare::AkshareVendor;
 use vendors::baidu_stock::BaiduStockVendor;
 use vendors::cninfo::CninfoVendor;
@@ -45,7 +47,6 @@ use vendors::sina::SinaVendor;
 use vendors::tencent::TencentVendor;
 use vendors::ths::ThsVendor;
 use vendors::xueqiu::XueqiuVendor;
-use vendors::StockVendor;
 
 type VendorRef = (String, Box<dyn StockVendor>);
 
@@ -400,10 +401,15 @@ impl AStockClient {
 
     /// 按当前 AsOfContext 截断 K 线：保留 date <= as_of_date 的行；live 模式原样返回。
     /// 截断必须在 cache_set 之前执行，确保每个模式各自缓存自己的过滤结果。
+    /// **Phase 1 混合 as-of**：仅当 `is_asof_active_for(Structured)` 为真（即 as-of 模式
+    /// 且 data_scope ∈ {All, Structured}）时截断；data_scope=Structured 时保持原行为，
+    /// data_scope=Unstructured 不适用本函数（K线属于结构化数据）。
     fn truncate_klines_by_asof(klines: Vec<KLine>) -> Vec<KLine> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return klines;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         klines
             .into_iter()
@@ -411,11 +417,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 News：保留 publish_time 日期 <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 News：保留 publish_time 日期 <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：当 data_scope=Structured 时放行（用户回放仍想看实时新闻）。
     fn truncate_news_by_asof(news: Vec<NewsItem>) -> Vec<NewsItem> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Unstructured) {
             return news;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Unstructured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         news.into_iter()
             .filter(|n| {
@@ -427,11 +436,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 FinancialReport：保留 report_date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 FinancialReport：保留 report_date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_financials_by_asof(reports: Vec<FinancialReport>) -> Vec<FinancialReport> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return reports;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         reports
             .into_iter()
@@ -439,11 +451,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 DragonTigerEntry：保留 date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 DragonTigerEntry：保留 date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_dragon_tiger_by_asof(entries: Vec<DragonTigerEntry>) -> Vec<DragonTigerEntry> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return entries;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         entries
             .into_iter()
@@ -451,11 +466,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 Announcement：保留 announce_date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 Announcement：保留 announce_date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：当 data_scope=Structured 时放行（公告属于非结构化）。
     fn truncate_announcements_by_asof(items: Vec<Announcement>) -> Vec<Announcement> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Unstructured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Unstructured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -463,11 +481,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 ResearchReport：保留 publish_date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 ResearchReport：保留 publish_date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：研报属于非结构化，data_scope=Structured 时放行。
     fn truncate_research_reports_by_asof(items: Vec<ResearchReport>) -> Vec<ResearchReport> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Unstructured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Unstructured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -476,11 +497,14 @@ impl AStockClient {
     }
 
     /// 按当前 AsOfContext 截断 LockupSchedule：保留 unlock_date <= as_of_date 的项
-    /// (as_of 之后才解禁的"未来"事件过滤掉)；live 模式原样返回。
+    /// (as_of 之后才解禁的"未来"事件过滤掉)。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_lockup_by_asof(items: Vec<LockupSchedule>) -> Vec<LockupSchedule> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -489,11 +513,14 @@ impl AStockClient {
     }
 
     #[expect(dead_code)]
-    /// 按当前 AsOfContext 截断 DividendRecord：保留 ex_date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 DividendRecord：保留 ex_date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_dividend_by_asof(items: Vec<DividendRecord>) -> Vec<DividendRecord> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -501,11 +528,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 ShareholderTrade：保留 date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 ShareholderTrade：保留 date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_shareholder_trades_by_asof(items: Vec<ShareholderTrade>) -> Vec<ShareholderTrade> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -513,11 +543,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 BlockTrade：保留 trade_date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 BlockTrade：保留 trade_date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_block_trades_by_asof(items: Vec<BlockTrade>) -> Vec<BlockTrade> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -525,13 +558,16 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 InstitutionalVisit：保留 visit_date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 InstitutionalVisit：保留 visit_date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_institutional_visits_by_asof(
         items: Vec<InstitutionalVisit>,
     ) -> Vec<InstitutionalVisit> {
-        let Some(ctx) = crate::as_of::current_as_of() else {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return items;
-        };
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
             .into_iter()
@@ -539,9 +575,14 @@ impl AStockClient {
             .collect()
     }
 
-    /// 按当前 AsOfContext 截断 NorthBoundFlow：保留 date <= as_of_date 的项；live 模式原样返回。
+    /// 按当前 AsOfContext 截断 NorthBoundFlow：保留 date <= as_of_date 的项。
+    /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_north_bound_flow_by_asof(item: Option<NorthBoundFlow>) -> Option<NorthBoundFlow> {
-        let ctx = crate::as_of::current_as_of()?;
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
+            return item;
+        }
+        let ctx = crate::as_of::current_as_of()
+            .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let item = item?;
         if !item.date.is_empty()
             && item.date.as_str() <= ctx.as_of_date.format("%Y-%m-%d").to_string().as_str()
@@ -2417,14 +2458,17 @@ mod cache_key_tests {
     use super::*;
     use crate::as_of::{AsOfContext, AsOfSource};
     use chrono::NaiveDate;
+    use serial_test::serial;
 
     #[test]
+    #[serial(asof)]
     fn cache_key_for_live_mode() {
         let key = AStockClient::cache_key_for("quote", "000001");
         assert_eq!(key, "quote:000001::live");
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn cache_key_for_asof_mode() {
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
@@ -2435,6 +2479,7 @@ mod cache_key_tests {
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn different_asof_yields_different_keys() {
         use crate::as_of::AS_OF;
         let d1 = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
@@ -2458,6 +2503,7 @@ mod asof_truncate_tests {
     use super::*;
     use crate::as_of::{AsOfContext, AsOfSource};
     use chrono::NaiveDate;
+    use serial_test::serial;
 
     fn kline(date: &str) -> KLine {
         KLine {
@@ -2520,6 +2566,7 @@ mod asof_truncate_tests {
     }
 
     #[test]
+    #[serial(asof)]
     fn truncate_klines_live_passthrough() {
         let ks = vec![
             kline("2026-05-30"),
@@ -2599,6 +2646,112 @@ mod asof_truncate_tests {
         assert_eq!(out.len(), 2);
     }
 
+    // ── 混合 as-of 模式(Phase 1)集成测试 ──────────────────────
+    // 验证：当用户在 UI 选 `data_scope=Structured` 时，
+    // - 结构化数据（K线/财务/龙虎榜）按 as_of 截止（与默认 All 一致）
+    // - 非结构化数据（新闻/公告/研报）保持实时放行
+
+    /// K 线属于结构化数据，Structured 模式下仍按 as_of 截断
+    #[tokio::test]
+    #[serial(asof)]
+    async fn truncate_klines_structured_scope_still_truncates() {
+        use crate::as_of::AS_OF;
+        let _ = crate::as_of::clear_global_asof();
+        let ks = vec![
+            kline("2026-05-30"),
+            kline("2026-06-01"),
+            kline("2026-06-05"),
+        ];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(crate::as_of::AsOfDataScope::Structured);
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_klines_by_asof(ks) })
+            .await;
+        assert_eq!(out.len(), 2, "Structured 模式下 K 线仍应截断到 2026-06-01");
+        let _ = crate::as_of::clear_global_asof();
+    }
+
+    /// 新闻属于非结构化数据，Structured 模式下放行（保留全部新闻）
+    #[tokio::test]
+    #[serial(asof)]
+    async fn truncate_news_structured_scope_passes_through() {
+        use crate::as_of::AS_OF;
+        let _ = crate::as_of::clear_global_asof();
+        let items = vec![
+            news("2026-05-30 09:00:00"),
+            news("2026-06-01 10:00:00"),
+            news("2026-06-02 08:00:00"), // 未来日期
+        ];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(crate::as_of::AsOfDataScope::Structured);
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_news_by_asof(items) })
+            .await;
+        assert_eq!(out.len(), 3, "Structured 模式下新闻应放行,保留全部 3 条(含未来日期)");
+        let _ = crate::as_of::clear_global_asof();
+    }
+
+    /// 默认 data_scope=All 时,新闻仍然按 as_of 截断（兼容旧行为）
+    #[tokio::test]
+    #[serial(asof)]
+    async fn truncate_news_all_scope_keeps_truncating() {
+        use crate::as_of::AS_OF;
+        let _ = crate::as_of::clear_global_asof();
+        let items = vec![
+            news("2026-05-30 09:00:00"),
+            news("2026-06-01 10:00:00"),
+            news("2026-06-02 08:00:00"),
+        ];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        // 默认 All 行为,无须 with_data_scope
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_news_by_asof(items) })
+            .await;
+        assert_eq!(out.len(), 2, "All 模式下新闻仍应按 as_of 截断,与历史行为一致");
+        let _ = crate::as_of::clear_global_asof();
+    }
+
+    /// 财务报告属于结构化数据，Structured 模式下仍按 as_of 截断
+    #[tokio::test]
+    #[serial(asof)]
+    async fn truncate_financials_structured_scope_still_truncates() {
+        use crate::as_of::AS_OF;
+        let _ = crate::as_of::clear_global_asof();
+        let rs = vec![fin("2025-12-31"), fin("2026-03-31"), fin("2026-06-30")];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(crate::as_of::AsOfDataScope::Structured);
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_financials_by_asof(rs) })
+            .await;
+        assert_eq!(out.len(), 2, "Structured 模式下财报仍截断");
+        let _ = crate::as_of::clear_global_asof();
+    }
+
+    /// 龙虎榜属于结构化数据，Structured 模式下仍按 as_of 截断
+    #[tokio::test]
+    #[serial(asof)]
+    async fn truncate_dragon_tiger_structured_scope_still_truncates() {
+        use crate::as_of::AS_OF;
+        let _ = crate::as_of::clear_global_asof();
+        let es = vec![dt("2026-05-20"), dt("2026-05-30"), dt("2026-06-05")];
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay)
+            .unwrap()
+            .with_data_scope(crate::as_of::AsOfDataScope::Structured);
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_dragon_tiger_by_asof(es) })
+            .await;
+        assert_eq!(out.len(), 2, "Structured 模式下龙虎榜仍截断");
+        let _ = crate::as_of::clear_global_asof();
+    }
+
     #[test]
     fn news_date_key_extracts_ymd_prefix() {
         assert_eq!(news_date_key("2026-06-01 10:00:00"), "2026-06-01");
@@ -2613,6 +2766,7 @@ mod asof_realtime_degrade_tests {
     use super::*;
     use crate::as_of::{AsOfContext, AsOfSource};
     use chrono::NaiveDate;
+    use serial_test::serial;
 
     fn kline(date: &str, close: f64) -> KLine {
         KLine {
@@ -2679,10 +2833,14 @@ mod asof_realtime_degrade_tests {
     // 同一 as_of_date (周末),effective_cutoff 落到上一交易日,
     // key 必须区分"as_of 周末" vs "as_of 上一交易日"以避免缓存污染。
 
-    #[test]
-    fn kline_cache_key_live_no_effective_suffix() {
-        // live 模式:不带 eff= 后缀
-        let key = AStockClient::kline_cache_key("000001", "daily", None);
+    #[serial(asof)]
+    #[tokio::test]
+    async fn kline_cache_key_live_no_effective_suffix() {
+        use crate::as_of::AS_OF;
+        // 显式声明 live 模式(None),确保不受其他测试全局污染
+        let key = AS_OF
+            .scope(None, async { AStockClient::kline_cache_key("000001", "daily", None) })
+            .await;
         assert!(!key.contains("eff="), "live 模式不应有 eff= 后缀: {key}");
     }
 
@@ -2717,6 +2875,7 @@ mod asof_realtime_degrade_tests {
     // replay 模式有 override → 用 override 顺序(否则 fallback 默认)。
 
     #[test]
+    #[serial(asof)]
     fn vendors_for_live_returns_default() {
         let routing = VendorRouting::default_routing();
         let default = vec!["eastmoney".into()];
@@ -2789,6 +2948,7 @@ mod asof_realtime_degrade_tests {
 
     // P2-4: live 模式不受 replay 覆盖影响, 仍走 default
     #[test]
+    #[serial(asof)]
     fn vendors_for_live_unaffected_by_replay_overrides() {
         let routing = VendorRouting::default_routing();
         let default = vec!["eastmoney".into()];
@@ -2797,6 +2957,7 @@ mod asof_realtime_degrade_tests {
     }
 
     #[test]
+    #[serial(asof)]
     fn is_asof_active_false_in_live() {
         assert!(!crate::as_of::is_asof_active());
     }
@@ -2874,6 +3035,7 @@ mod asof_realtime_degrade_tests {
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn should_use_asof_live_is_false() {
         let client = AStockClient::new();
         assert!(!client.should_use_asof(), "live 模式 should_use_asof = false");
@@ -2903,6 +3065,7 @@ mod asof_realtime_degrade_tests {
     }
 
     #[tokio::test]
+    #[serial(asof)]
     async fn try_vendor_with_asof_live_returns_none() {
         let client = AStockClient::new();
         // live 模式: helper 不该被调用,但兜底返回 None
@@ -2941,7 +3104,7 @@ mod asof_realtime_degrade_tests {
     //       网络失败会进 record_degradation,最终 live 路径兜底返回空
     #[tokio::test]
     async fn d_bug_fix_market_dragon_tiger_uses_capability() {
-        use crate::as_of::{peek_global_degradation_report, AS_OF};
+        use crate::as_of::{AS_OF, peek_global_degradation_report};
         let client = AStockClient::new();
         let date = NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();

@@ -185,14 +185,17 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   // Period 切换时自动重载；首次挂载（Tab 切走后 destroyOnHidden 重新渲染）
   // 不自动请求，避免每次切回 Tab 都后台刷新（用户原话："简直就是傻逼逻辑"）。
+  // 但 mount 时仍触发一次策略回测统计 (triggerBacktest 内部用 backtestTriggeredRef
+  // 去重,不会与 load 内部的调用重复),保证面板 mount 后立即有历史回测数据可见。
   const initialMountRef = useRef(true);
   useEffect(() => {
     if (initialMountRef.current) {
       initialMountRef.current = false;
+      void triggerBacktest();
       return;
     }
     void load();
-  }, [period, load]);
+  }, [period, load, triggerBacktest]);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);

@@ -202,11 +202,12 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        run: |
-          npx playwright install --with-deps chromium
+        # Ubuntu 24.04 runner 已预装大部分系统依赖, 不需要 --with-deps;
+        # 去掉 --with-deps 避免 macOS runner 上 cache miss 时 brew install 卡死。
+        # 这里用单行写法以让 pr-ci.workflow.test.ts 的正则 /run:\s*npx[^\n]*playwright\s+install/ 命中。
+        run: npx playwright install chromium
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
-          HOMEBREW_NO_AUTO_UPDATE: 1
 
       - name: Run E2E tests
         run: npm run test:e2e

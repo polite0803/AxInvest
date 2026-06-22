@@ -151,8 +151,8 @@ export function getRiskTKey(level: string): string {
 
 export function getSignalColor(signal: string): "green" | "red" | "blue" {
   const s = String(signal ?? "").trim().toLowerCase();
-  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) { return "red"; }
-  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) { return "green"; }
+  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) { return "green"; }
+  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) { return "red"; }
   return "blue";
 }
 

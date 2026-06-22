@@ -28,7 +28,7 @@ export function ScreenerPage() {
   const { t } = useTranslation();
   const screens = useBreakpoint();
   const isMobile = !screens.md;
-  const [activeTab, setActiveTab] = useState<string>("serenity");
+  const [activeTab, setActiveTab] = useState<string>("reco");
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
 
   return (

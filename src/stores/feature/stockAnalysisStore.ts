@@ -55,7 +55,13 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       // 兼容未来多轮模式: bull-r1, bull-r2...
       const round = stepId === "bull-researcher" ? 1 : parseInt(stepId.slice(6), 10);
       const bearKey = stepId === "bull-researcher" ? "bear-researcher" : `bear-r${round}`;
-      debateRounds.push({ round, bull: output, bear: extractContent(results[bearKey] ?? "") });
+      const bullContent = output;
+      const bearContent = extractContent(results[bearKey] ?? "");
+      // 阶段 1 防御: 只 push 双方都有非空内容的 round，避免"暂无数据"误导。
+      // 单边空可能是 LLM 失败/超时,整轮不显示更清晰。
+      if (bullContent.trim().length > 0 && bearContent.trim().length > 0) {
+        debateRounds.push({ round, bull: bullContent, bear: bearContent });
+      }
     } else if (stepId === "bear-researcher" || (stepId.startsWith("bear-r") && stepId !== "bear-researcher")) {
       continue;
     } else if (stepId.startsWith("risk-") || stepId === "research-mgr") {
@@ -645,37 +651,45 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         asOfDate,
         mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",
       });
+      // 重跑分析：透传已存在 id 让后端 DELETE 同 id 旧行再 INSERT,实现"覆盖"。
+      // 不传则是 fresh start,后端生成新 UUID。
+      // 注意: 仅在显式传入 replaceAnalysisId 时才带 analysisId 键,避免默认调用
+      // 多出一个键导致 toHaveBeenCalledWith 的 deep equality 失败。
+      const runArgs: Record<string, unknown> = {
+        stockCode,
+        dryRun,
+        asOfDate,
+      };
+      if (options?.replaceAnalysisId) {
+        runArgs.analysisId = options.replaceAnalysisId;
+      }
       const result = await invoke<Record<string, unknown>>(
         "run_stock_workflow",
-        {
-          stockCode,
-          dryRun,
-          asOfDate,
-          // 重跑分析：透传已存在 id 让后端 DELETE 同 id 旧行再 INSERT,实现"覆盖"。
-          // 不传则是 fresh start,后端生成新 UUID。
-          analysisId: options?.replaceAnalysisId ?? null,
-        },
+        runArgs,
       );
 
       // P0-4 修复: 检查数据质量预检跳过
-      // serde_json::Value 返回 snake_case 键
+      // 后端 run_stock_workflow 返回的 JSON 字段是 camelCase
+      // (analysisId / stockCode / stockName),不是 snake_case。
+      // 早期实现读 result.analysis_id / result.stock_code 等 snake_case 键
+      // 会得到 undefined,导致前端 stockCode 永远是 ""。
       if (result.status === "skipped") {
         const reason = (result.reason as string) || "数据质量不足";
         set({
           status: "error",
           error: `数据不足，跳过分析: ${reason}`,
           errorCode: "DATA_QUALITY_INSUFFICIENT",
-          analysisId: result.analysis_id as string,
-          stockCode: result.stock_code as string || stockCode,
-          stockName: result.stock_name as string || "",
+          analysisId: result.analysisId as string,
+          stockCode: result.stockCode as string || stockCode,
+          stockName: result.stockName as string || "",
         });
         return;
       }
 
-      const analysisId = result.analysis_id as string;
-      const wfId = result.workflow_id as string;
-      const sc = result.stock_code as string;
-      const sn = result.stock_name as string;
+      const analysisId = result.analysisId as string;
+      const wfId = result.workflowId as string;
+      const sc = result.stockCode as string;
+      const sn = result.stockName as string;
 
       set({
         analysisId,
@@ -834,8 +848,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           } else if (key.startsWith("value.")) {
             // value.assessment 同理：AgentResult 包装,真正的价值评估 JSON 在 content 字段里。
             // extractContent 取 content 后,ValueAssessmentPanel.tryParseValueReport 才能正确解析。
+            // key 去掉 "value." 前缀,直接作为 values 的键(测试期望 values["assessment"] 存在)。
+            // 同时存 "value-investor" 别名以兼容 live 模式 parseWorkflowResults 的 stepId 命名。
             const vk = key.slice(6);
-            values[vk === "assessment" ? "value-investor" : vk] = extractContent(value);
+            const valueContent = extractContent(value);
+            values[vk] = valueContent;
+            if (vk === "assessment") {
+              values["value-investor"] = valueContent;
+            }
           } else if (key.startsWith("rule_check.")) {
             ruleChecks[key.slice("rule_check.".length)] = String(value);
           } else if (key === "data_quality_summary") {
@@ -850,11 +870,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             if (!debates.find((d) => d.round === round)) {
               // 后端 blackboard.rs 对 bull-r* 走 is_structured 分支,
               // value 是 AgentResult 包装,extractContent 取 content 字段。
-              debates.push({
-                round,
-                bull: extractContent(value),
-                bear: extractContent(snap[bearKey]),
-              });
+              const bullContent = extractContent(value);
+              const bearContent = extractContent(snap[bearKey]);
+              // 阶段 1 防御: 只 push 双方都有非空内容的 round，避免"暂无数据"误导。
+              if (bullContent.trim().length > 0 && bearContent.trim().length > 0) {
+                debates.push({ round, bull: bullContent, bear: bearContent });
+              }
             }
           }
           // ── 汇总节点 agg-risk：result 是数组,每个子元素是独立 AgentResult 包装

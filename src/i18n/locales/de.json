@@ -41,7 +41,11 @@
     "sectionInfrastructure": "Infrastruktur",
     "sectionPlugins": "Plugins",
     "expand": "Seitenleiste erweitern",
-    "collapse": "Seitenleiste einklappen"
+    "collapse": "Seitenleiste einklappen",
+    "sectionInvestDiscover": "Discover",
+    "sectionInvestMonitor": "Monitor",
+    "sectionInvestExecute": "Execute",
+    "sectionInvestReview": "Review"
   },
   "chat": {
     "newConversation": "Neues Gespräch",
@@ -2568,7 +2572,8 @@
     "provider": {
       "deepseekBalance": "DeepSeek-Guthaben",
       "noValidKey": "Kein gültiger Schlüssel"
-    }
+    },
+    "stockAnalysis": "Stock Analysis"
   },
   "backup": {
     "title": "Sicherungscenter",
@@ -2778,7 +2783,11 @@
     "key": "",
     "value": "",
     "hide": "Ausblenden",
-    "searchPlaceholder": "Suchen..."
+    "searchPlaceholder": "Suchen...",
+    "exportMarkdown": "Export Markdown",
+    "saveFailed": "Save failed",
+    "saved": "Saved",
+    "unknownError": "Unknown error"
   },
   "multiAgent": {
     "title": "Multi-Agent-Status",
@@ -3071,7 +3080,8 @@
     "dismiss": "Verwerfen",
     "atomic": "Atomar",
     "extractAtomic": "Atomare Fähigkeiten extrahieren",
-    "stats": "Statistiken"
+    "stats": "Statistiken",
+    "atomicSkills": "Atomic Skills"
   },
   "agent": {
     "askUserPlaceholder": "Geben Sie Ihre Antwort ein...",
@@ -3986,7 +3996,10 @@
       "axagentFolderHint": "Wählen Sie einen Ordner mit AxAgent-Format-JSON-Dateien. Alle Workflow-Vorlagen werden automatisch gescannt und importiert.",
       "n8nFolderHint": "Wählen Sie einen Ordner mit n8n-Format-JSON-Dateien. Alle n8n-Workflows werden automatisch konvertiert und importiert.",
       "importStructuralErrors": "Imported workflow has {{count}} structural error(s):\n{{details}}",
-      "importValidationWarnings": "Imported workflow has {{count}} warning(s):\n{{details}}"
+      "importValidationWarnings": "Imported workflow has {{count}} warning(s):\n{{details}}",
+      "fileTooLarge": "File too large",
+      "invalidJsonFile": "Invalid JSON file",
+      "jsonTooDeep": "JSON nesting too deep"
     },
     "preview": "Vorschau",
     "publish": "Veröffentlichen",
@@ -4039,7 +4052,12 @@
       "diffNodeTypeChanged": "Node type changed",
       "diffNodeConfigChanged": "Node config changed",
       "diffEdgeAdded": "Edge added ({{type}})",
-      "diffEdgeRemoved": "Edge removed ({{type}})"
+      "diffEdgeRemoved": "Edge removed ({{type}})",
+      "latest": "Latest",
+      "rollback": "Rollback to This Version",
+      "rollbackConfirm": "Confirm rollback?",
+      "rollbackTo": "Rollback to {{version}}",
+      "rolledBack": "Rolled back"
     },
     "versionHistoryLoadFailed": "Versionsverlauf konnte nicht geladen werden",
     "versionLoaded": "Version{{version}} loaded",
@@ -4355,7 +4373,19 @@
       "switchValuePlaceholder": "value",
       "to": "An",
       "urlPlaceholder": "https://api.example.com/data",
-      "webhookUrlPlaceholder": "https://hook.example.com/..."
+      "webhookUrlPlaceholder": "https://hook.example.com/...",
+      "inputVariablePlaceholder": "e.g. data.result",
+      "backend": "Storage Backend",
+      "vectorDb": "Vector Database",
+      "fileSystem": "File System",
+      "operation": "Operation",
+      "insert": "Insert",
+      "upsert": "Upsert",
+      "append": "Append",
+      "collection": "Collection/Table",
+      "collectionPlaceholder": "e.g. records",
+      "keyVariable": "Key Variable",
+      "keyVariablePlaceholder": "e.g. record.id"
     },
     "debug": {
       "totalDuration": "Gesamtdauer",
@@ -4722,7 +4752,12 @@
       "manual": "Manuell",
       "schedule": "Zeitplan",
       "event": "Ereignis",
-      "title": "Auslöser"
+      "title": "Auslöser",
+      "configure": "Configure Trigger",
+      "configureHint": "Configure trigger conditions and parameters",
+      "statusActive": "Running",
+      "statusDisabled": "Disabled",
+      "statusUnconfigured": "Unconfigured"
     },
     "documentParserNode": {
       "notSet": "Nicht festgelegt",
@@ -4768,7 +4803,12 @@
     "node": {
       "tickMode": "Tick-Modus",
       "breakpoint": "Haltepunkt",
-      "retryEnabled": "Wiederholung aktiviert"
+      "retryEnabled": "Wiederholung aktiviert",
+      "clickToCollapsePorts": "Click to collapse ports",
+      "clickToExpandPorts": "Click to expand ports",
+      "inputs": "Inputs",
+      "outputs": "Outputs",
+      "type": "Type"
     },
     "code": {
       "rhaiDynamicTool": "🦀 Rhai (Dynamisches Tool)",
@@ -5212,7 +5252,10 @@
     },
     "swarmNode": {
       "agents": "Agents",
-      "rounds": "rounds"
+      "rounds": "rounds",
+      "newAgent": "Agent",
+      "noAgentsHint": "Add Agent nodes inside this container",
+      "addAgent": "Add Agent"
     },
     "groupNode": {
       "untitled": "Group",
@@ -5245,7 +5288,15 @@
       "placeholder": "Search nodes..."
     },
     "run": "Run",
-    "settings": "Settings"
+    "settings": "Settings",
+    "workflowRef": {
+      "targetWorkflow": "Target Workflow",
+      "contextMode": "Context Mode",
+      "inherit": "Inherit",
+      "isolated": "Isolated"
+    },
+    "durationMinutes": "{{minutes}} min",
+    "durationSeconds": "{{seconds}} sec"
   },
   "atomicSkill": {
     "entryType": "Eintragstyp",
@@ -7326,7 +7377,50 @@
     "errorRecoveryScore": "Fehlerbehebung",
     "goalCompletionScore": "Zielerreichung",
     "reflectError": "Reflexion fehlgeschlagen",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "autoTrigger": "Auto-Triggered",
+    "delete": {
+      "confirm": "Delete this insight?",
+      "failed": "Failed to delete insight",
+      "success": "Insight deleted"
+    },
+    "deleteInsight": "Delete Insight",
+    "feedback": {
+      "failed": "Feedback submission failed",
+      "notFound": "Insight not found",
+      "thanksNotUseful": "Thanks! Marked as not useful",
+      "thanksUseful": "Thanks! Marked as useful"
+    },
+    "notUseful": "Not Useful",
+    "settings": {
+      "cancel": "Cancel",
+      "core": "Core Settings",
+      "decayDays": "Decay Days",
+      "maxHistory": "Max History",
+      "maxInsights": "Max Insights",
+      "qualityThreshold": "Quality Threshold",
+      "reset": "Reset",
+      "save": "Save",
+      "saved": "Settings saved",
+      "title": "Reflection Settings",
+      "decayDaysHint": "Insights automatically decay in weight after N days",
+      "enabled": "Enable Auto-Reflection",
+      "enabledHint": "Auto-trigger reflection after task execution",
+      "errorSection": "Error Analysis",
+      "insightSection": "Insight Settings",
+      "maxHistoryHint": "Keep the most recent N reflection history entries",
+      "maxInsightsHint": "Keep at most N insight records",
+      "qualitySection": "Quality Threshold",
+      "qualityThresholdHint": "Insights below this threshold will be filtered out",
+      "saveFailed": "Save failed",
+      "storageSection": "Storage Settings",
+      "storeInsights": "Persist Insights",
+      "storeInsightsHint": "Insights will be saved locally and available across sessions",
+      "subtitle": "Configure auto-reflection and insight management",
+      "useErrorClassifier": "Enable Error Classifier",
+      "useErrorClassifierHint": "Auto-classify error patterns for analysis"
+    },
+    "useful": "Useful"
   },
   "subAgentCard": {
     "viewConversation": "Unterhaltung anzeigen",
@@ -7414,7 +7508,9 @@
     "steerInput": "Steuern",
     "showExtras": "Mehr",
     "hideExtras": "Weniger",
-    "close": "Schließen"
+    "close": "Schließen",
+    "collapse": "Collapse Panel",
+    "expand": "Expand Panel"
   },
   "knowledgeSettings": {
     "title": "Wissen"
@@ -7578,7 +7674,7 @@
     "addedToWatchlist": "Added",
     "inWatchlist": "Watching",
     "addFailed": "Add Failed",
-    "retry": "Retry",
+    "retry": "Wiederholen",
     "completed": "Completed",
     "viewDetails": "View Details",
     "error": "Error",
@@ -7609,7 +7705,7 @@
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
     "loadAnalysisFailed": "Analyseverlauf konnte nicht geladen werden",
-    "retry": "Wiederholen",
+    "retry": "Erneut versuchen",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -7895,7 +7991,28 @@
         "hot-money-tracker": "Kapitalfluss-Tracker",
         "lockup-watcher": "Sperrfrist-Beobachter",
         "research-analyst": "Research-Analyst",
-        "sector-analyst": "Sektoranalyst"
+        "sector-analyst": "Sektoranalyst",
+        "catalyst": "Catalyst & Narrative Analyst",
+        "catalyst-analyst": "Catalyst & Narrative Analyst",
+        "fundamentals": "Fundamentals Analyst",
+        "hot-money": "Capital Flow Analyst",
+        "lockup": "Lockup Monitor",
+        "news": "News Analyst",
+        "policy": "Policy Analyst",
+        "research": "Research Analyst",
+        "sector": "Sector Analyst",
+        "sentiment": "Sentiment Analyst",
+        "investment-plan": "Investment Plan",
+        "a-news": "News Analyst",
+        "a-research": "Research Analyst",
+        "a-sentiment": "Sentiment Analyst",
+        "a-fundamentals": "Fundamentals Analyst",
+        "a-catalyst": "Catalyst & Narrative Analyst",
+        "a-hot-money": "Capital Flow Analyst",
+        "a-market-analyst": "Technical Analyst",
+        "a-sector": "Sector Analyst",
+        "a-lockup": "Lockup Monitor",
+        "a-policy": "Policy Analyst"
       },
       "analystComplete": "Analyse abgeschlossen",
       "decisionTitle": "Endgültige Entscheidung",
@@ -7941,7 +8058,8 @@
         "t-quality": "Qualitätsprüfung",
         "research-mgr": "Research-Synthese",
         "trader": "Handelsplan",
-        "portfolio-mgr": "Endgültige Entscheidung"
+        "portfolio-mgr": "Endgültige Entscheidung",
+        "rule-check": "Rule Check"
       },
       "failedStepsWithCount": "Failed Steps ({{count}})",
       "fetchFailed": "Datenabruf fehlgeschlagen",
@@ -8023,7 +8141,9 @@
       "price": "price",
       "title": "title",
       "triggered": "triggered",
-      "date": "Date"
+      "date": "Date",
+      "above": "Break Above",
+      "below": "Break Below"
     },
     "askAi": {
       "decision": "decision",
@@ -8117,7 +8237,14 @@
       "started": "started",
       "stepDone": "stepDone",
       "stepRetrying": "stepRetrying",
-      "stepRunning": "stepRunning"
+      "stepRunning": "stepRunning",
+      "analystProgress": "[{{name}}] {{status}}",
+      "dataLoaded": "Data loaded: {{kline}} K-lines, {{news}} news",
+      "debateRound": "Debate round {{round}}/{{total}} done",
+      "error": "❌ Analysis error: {{msg}}",
+      "investmentPlan": "Trade execution plan ready, generating final decision...",
+      "reportReady": "✅ {{name}}: Report ready",
+      "riskDone": "✅ {{name}}: Risk assessment done"
     },
     "search": "search",
     "summary": {
@@ -8253,7 +8380,13 @@
       "empty": "Keine Knoten in dieser Phase",
       "idleHint": "Sobald Sie eine Analyse starten, erscheint hier die vollständige Entscheidungszeitleiste",
       "emptyHint": "Warte auf Workflow-Knoten…",
-      "sendToChat": "An Chat senden"
+      "sendToChat": "An Chat senden",
+      "phase": {
+        "debate": "Debate",
+        "decide": "Decision",
+        "diagnose": "Diagnosis",
+        "scan": "Scan"
+      }
     },
     "alert.date": "Date",
     "recommendation": {
@@ -8483,7 +8616,9 @@
       "applyParamsBtn": "应用选中的 {{count}} 项参数",
       "applySuccess": "参数已应用到 stock-analysis 模板",
       "applyFailed": "参数应用失败: {{error}}",
-      "rerunDebate": "Debatte neu starten"
+      "rerunDebate": "Debatte neu starten",
+      "decisionJsonLabel": "decisionJson (after LLM extraction):",
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -8669,7 +8804,13 @@
       "30m": "30分钟",
       "5m": "5分钟",
       "60m": "60分钟",
-      "zoomHint": "框选缩放"
+      "zoomHint": "框选缩放",
+      "1m": "1 Month",
+      "1y": "1 Year",
+      "3m": "3 Months",
+      "6m": "6 Months",
+      "monthly": "Monthly",
+      "weekly": "Weekly"
     },
     "profitGrowth": "利润增速",
     "revenueGrowth": "营收增速",
@@ -8804,7 +8945,14 @@
     "valueAssessment.buffettLabel": "巴菲特",
     "valueAssessment.expand": "展开",
     "backtest.alpha": "超额收益",
-    "backtest.avgConfidence": "平均置信度"
+    "backtest.avgConfidence": "平均置信度",
+    "stage": {
+      "analysis": "Multi-Dimension Analysis",
+      "dataLoading": "Data Loading",
+      "debate": "Bull-Bear Debate",
+      "decision": "Investment Decision",
+      "risk": "Risk Assessment"
+    }
   },
   "trade": {
     "title": "Trading Log",
@@ -8830,7 +8978,17 @@
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor",
-    "placeholder": "Trades ausführen und prüfen"
+    "placeholder": "Trades ausführen und prüfen",
+    "agentRole": {
+      "browser": "Browser",
+      "coordinator": "Coordinator",
+      "developer": "Developer",
+      "executor": "Executor",
+      "planner": "Planner",
+      "researcher": "Researcher",
+      "reviewer": "Reviewer",
+      "synthesizer": "Synthesizer"
+    }
   },
   "watchlist": {
     "title": "Watchlist",
@@ -8841,7 +8999,8 @@
     "placeholder": "Aktien nach Kriterien filtern",
     "tab": {
       "smartReco": "Smarte Tipps",
-      "myFilter": "Mein Filter"
+      "myFilter": "Mein Filter",
+      "serenity": "Bottleneck Hunt"
     }
   },
   "backtest": {
@@ -8887,7 +9046,9 @@
     },
     "replayBadge": {
       "label": "Replay · {{date}}",
-      "tooltip": "Alle Daten, Prompts und Urteile in dieser Ansicht sind auf {{date}} verankert. Nicht für den Live-Handel verwenden."
+      "tooltip": "Alle Daten, Prompts und Urteile in dieser Ansicht sind auf {{date}} verankert. Nicht für den Live-Handel verwenden.",
+      "replay": "Replay {{date}}",
+      "sweep": "Batch Scan"
     },
     "replayWatermark": {
       "label": "Stand {{date}}"
@@ -8983,6 +9144,139 @@
     "emptyHint": "Klicken Sie auf die obige Schaltfläche, um die Serenity-Flaschenhals-Screening auszuführen",
     "noCandidateTitle": "Keine Kandidatenaktien generiert",
     "errorUnknown": "Unbekannter Fehler",
-    "callFailed": "Aufruf fehlgeschlagen"
+    "callFailed": "Aufruf fehlgeschlagen",
+    "stepLogTitle": "Execution Log",
+    "nodeTitles": {
+      "trigger": "Start Screening",
+      "t-hot-stocks": "Hot Stocks",
+      "t-industry-rank": "Industry Ranking",
+      "t-cls-flash": "Real-time Flash",
+      "t-northbound": "Northbound Capital",
+      "a-trend-scanner": "Trend Scanner",
+      "a-chain-trend1": "Chain Decomposer #1",
+      "a-chain-trend2": "Chain Decomposer #2",
+      "a-chain-trend3": "Chain Decomposer #3",
+      "a-chokepoint-trend1": "Chokepoint ID #1",
+      "a-chokepoint-trend2": "Chokepoint ID #2",
+      "a-chokepoint-trend3": "Chokepoint ID #3",
+      "a-candidate-mapper": "Candidate Mapper",
+      "s-save-candidates": "Save Candidates"
+    },
+    "catalystEarnings": "Earnings",
+    "catalystProdRamp": "Ramp Up",
+    "catalystPolicy": "Policy",
+    "catalystSupplyShock": "Supply Shock",
+    "catalystCapacityRelease": "Capacity Release",
+    "catalystContractAward": "Contract",
+    "timeframeShort": "1-3M",
+    "timeframeMid": "3-6M",
+    "timeframeLong": "6M+",
+    "exitNow": "Now",
+    "exitCaution": "Caution",
+    "exitWatch": "Watch",
+    "exitNone": "None",
+    "catalystLabelPrefix": "Catalyst: ",
+    "exitLabelPrefix": "Exit: ",
+    "attentionLabelPrefix": "Attention: ",
+    "heatLabelPrefix": "Heat: ",
+    "feedbackTitle": "Feedback ({{count}} candidates)",
+    "feedbackWinRate": "Win Rate",
+    "feedbackAvgReturn": "Avg Return",
+    "feedbackProfitable": "Profitable/Total",
+    "feedbackButton": "History Feedback",
+    "refreshExitButton": "Refresh Exit Signals",
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+  },
+  "quant": {
+    "backtest": {
+      "code": "Stock Code",
+      "codePlaceholder": "Enter stock code (e.g., 600519)",
+      "endDate": "End Date",
+      "errorRunning": "Backtest execution error",
+      "initialCash": "Initial Capital",
+      "noResult": "No backtest results",
+      "overfitWarning": "Overfitting Warning",
+      "result": "Backtest Result",
+      "run": "Run Backtest",
+      "running": "Backtesting...",
+      "selectStrategy": "Select Strategy",
+      "stabilityScore": "Stability Score",
+      "startDate": "Start Date",
+      "title": "Strategy Backtest",
+      "walkForward": "Walk-Forward",
+      "walkForwardForceOff": "Disable Walk-Forward",
+      "walkForwardTitle": "Walk-Forward Backtest"
+    },
+    "common": {
+      "empty": "No data"
+    },
+    "compare": {
+      "compare": "Start Compare",
+      "comparing": "Comparing...",
+      "selectRuns": "Select backtest runs",
+      "title": "Strategy Comparison"
+    },
+    "metrics": {
+      "annualizedReturn": "Annualized Return",
+      "bestBy": "Best Parameters",
+      "maxDrawdownPct": "Max Drawdown",
+      "sharpe": "Sharpe Ratio",
+      "totalReturn": "Total Return",
+      "totalTrades": "Total Trades",
+      "winRate": "Win Rate"
+    },
+    "rhai": {
+      "compileError": "Compile Error",
+      "hint": "Write trading strategy logic in Rhai language",
+      "name": "Script Name",
+      "save": "Save",
+      "saved": "Saved",
+      "source": "Source Code",
+      "title": "Rhai Script Editor",
+      "version": "Version"
+    },
+    "strategy": {
+      "builtin": "Built-in Strategy",
+      "description": "Strategy Description",
+      "lastUpdated": "Last Updated",
+      "name": "Strategy Name",
+      "params": "Strategy Parameters",
+      "rhai": "Rhai Script Strategy",
+      "type": "Strategy Type",
+      "version": "Version"
+    },
+    "subtitle": "Strategy Backtest · Parameter Optimization · Signal Evaluation",
+    "tabs": {
+      "backtest": "Backtest",
+      "compare": "Compare",
+      "rhai": "Rhai Script",
+      "strategies": "Strategies"
+    },
+    "title": "Quant Lab",
+    "trades": {
+      "amount": "Amount",
+      "code": "Code",
+      "empty": "No trade records",
+      "fee": "Fee",
+      "filterAll": "All",
+      "flat": "Close",
+      "flatCount": "Closed Trades",
+      "long": "Long",
+      "longCount": "Long Trades",
+      "price": "Price",
+      "quantity": "Qty",
+      "realizedPnl": "Realized P&L",
+      "reason": "Reason",
+      "searchPlaceholder": "Search trade records",
+      "short": "Short",
+      "shortCount": "Short Trades",
+      "side": "Side",
+      "time": "Time",
+      "totalAmount": "Total Amount",
+      "totalCount": "Total Trades",
+      "totalFee": "Total Fee",
+      "totalPnl": "Total P&L",
+      "totalRows": "{{count}} records"
+    }
   }
 }

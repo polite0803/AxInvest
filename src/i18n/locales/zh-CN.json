@@ -3047,7 +3047,8 @@
     "proposals": "提案",
     "save": "保存",
     "sort": "排序",
-    "stats": "统计"
+    "stats": "统计",
+    "atomicSkills": "原子技能"
   },
   "agent": {
     "askUserPlaceholder": "输入您的回答...",
@@ -8600,7 +8601,9 @@
       "aiApplyFailed": "应用失败: {{error}}{{rollback}}",
       "aiDiffPreviewTitle": "AI 建议的修改（点击下方应用）",
       "aiRawOutputTitle": "AI 原始输出",
-      "rolledBack": "（已自动回滚）"
+      "rolledBack": "（已自动回滚）",
+      "decisionJsonLabel": "decisionJson (LLM 提取后):",
+      "blackboardSnapshotLabel": "blackboardSnapshot (工作流原始结果):"
     },
     "portfolioMonitor": {
       "title": "组合监控",

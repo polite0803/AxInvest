@@ -41,7 +41,11 @@
     "sectionInfrastructure": "인프라",
     "sectionPlugins": "플러그인",
     "expand": "사이드바 펼치기",
-    "collapse": "사이드바 접기"
+    "collapse": "사이드바 접기",
+    "sectionInvestDiscover": "Discover",
+    "sectionInvestMonitor": "Monitor",
+    "sectionInvestExecute": "Execute",
+    "sectionInvestReview": "Review"
   },
   "chat": {
     "newConversation": "새 대화",
@@ -2568,7 +2572,8 @@
     "provider": {
       "deepseekBalance": "DeepSeek 잔액",
       "noValidKey": "유효한 키 없음"
-    }
+    },
+    "stockAnalysis": "Stock Analysis"
   },
   "backup": {
     "title": "백업 센터",
@@ -2778,7 +2783,11 @@
     "key": "",
     "value": "",
     "hide": "숨기기",
-    "searchPlaceholder": "검색..."
+    "searchPlaceholder": "검색...",
+    "exportMarkdown": "Export Markdown",
+    "saveFailed": "Save failed",
+    "saved": "Saved",
+    "unknownError": "Unknown error"
   },
   "multiAgent": {
     "title": "멀티 에이전트 상태",
@@ -3071,7 +3080,8 @@
     "proposals": "Vorschläge",
     "save": "Speichern",
     "sort": "Sortieren",
-    "stats": "통계"
+    "stats": "통계",
+    "atomicSkills": "Atomic Skills"
   },
   "agent": {
     "askUserPlaceholder": "답변을 입력하세요...",
@@ -3555,7 +3565,10 @@
       "axagentFolderHint": "AxAgent 형식 JSON 파일이 포함된 폴더를 선택하세요. 모든 워크플로 템플릿이 자동으로 스캔되어 가져와집니다.",
       "n8nFolderHint": "n8n 형식 JSON 파일이 포함된 폴더를 선택하세요. 모든 n8n 워크플로가 자동으로 변환되어 가져와집니다.",
       "importStructuralErrors": "Imported workflow has {{count}} structural error(s):\n{{details}}",
-      "importValidationWarnings": "Imported workflow has {{count}} warning(s):\n{{details}}"
+      "importValidationWarnings": "Imported workflow has {{count}} warning(s):\n{{details}}",
+      "fileTooLarge": "File too large",
+      "invalidJsonFile": "Invalid JSON file",
+      "jsonTooDeep": "JSON nesting too deep"
     },
     "preview": "미리보기",
     "publish": "게시",
@@ -3608,7 +3621,12 @@
       "diffNodeTypeChanged": "Node type changed",
       "diffNodeConfigChanged": "Node config changed",
       "diffEdgeAdded": "Edge added ({{type}})",
-      "diffEdgeRemoved": "Edge removed ({{type}})"
+      "diffEdgeRemoved": "Edge removed ({{type}})",
+      "latest": "Latest",
+      "rollback": "Rollback to This Version",
+      "rollbackConfirm": "Confirm rollback?",
+      "rollbackTo": "Rollback to {{version}}",
+      "rolledBack": "Rolled back"
     },
     "versionHistoryLoadFailed": "버전 기록을 불러오지 못했습니다",
     "versionLoaded": "버전{{version}} loaded",
@@ -3924,7 +3942,19 @@
       "switchValuePlaceholder": "value",
       "to": "수신자",
       "urlPlaceholder": "https://api.example.com/data",
-      "webhookUrlPlaceholder": "https://hook.example.com/..."
+      "webhookUrlPlaceholder": "https://hook.example.com/...",
+      "inputVariablePlaceholder": "e.g. data.result",
+      "backend": "Storage Backend",
+      "vectorDb": "Vector Database",
+      "fileSystem": "File System",
+      "operation": "Operation",
+      "insert": "Insert",
+      "upsert": "Upsert",
+      "append": "Append",
+      "collection": "Collection/Table",
+      "collectionPlaceholder": "e.g. records",
+      "keyVariable": "Key Variable",
+      "keyVariablePlaceholder": "e.g. record.id"
     },
     "debug": {
       "totalDuration": "총 소요 시간",
@@ -4291,7 +4321,12 @@
       "manual": "수동",
       "schedule": "예약",
       "event": "이벤트",
-      "title": "트리거"
+      "title": "트리거",
+      "configure": "Configure Trigger",
+      "configureHint": "Configure trigger conditions and parameters",
+      "statusActive": "Running",
+      "statusDisabled": "Disabled",
+      "statusUnconfigured": "Unconfigured"
     },
     "documentParserNode": {
       "notSet": "설정 안 됨",
@@ -4337,7 +4372,12 @@
     "node": {
       "tickMode": "Tick 모드",
       "breakpoint": "중단점",
-      "retryEnabled": "재시도 활성화"
+      "retryEnabled": "재시도 활성화",
+      "clickToCollapsePorts": "Click to collapse ports",
+      "clickToExpandPorts": "Click to expand ports",
+      "inputs": "Inputs",
+      "outputs": "Outputs",
+      "type": "Type"
     },
     "code": {
       "rhaiDynamicTool": "🦀 Rhai (동적 도구)",
@@ -4781,7 +4821,10 @@
     },
     "swarmNode": {
       "agents": "Agents",
-      "rounds": "rounds"
+      "rounds": "rounds",
+      "newAgent": "Agent",
+      "noAgentsHint": "Add Agent nodes inside this container",
+      "addAgent": "Add Agent"
     },
     "groupNode": {
       "untitled": "Group",
@@ -4814,7 +4857,15 @@
       "placeholder": "Search nodes..."
     },
     "run": "Run",
-    "settings": "Settings"
+    "settings": "Settings",
+    "workflowRef": {
+      "targetWorkflow": "Target Workflow",
+      "contextMode": "Context Mode",
+      "inherit": "Inherit",
+      "isolated": "Isolated"
+    },
+    "durationMinutes": "{{minutes}} min",
+    "durationSeconds": "{{seconds}} sec"
   },
   "atomicSkill": {
     "entryType": "항목 유형",
@@ -7326,7 +7377,50 @@
     "errorRecoveryScore": "오류 복구",
     "goalCompletionScore": "목표 달성",
     "reflectError": "리플렉션 실패",
-    "retry": "재시도"
+    "retry": "재시도",
+    "autoTrigger": "Auto-Triggered",
+    "delete": {
+      "confirm": "Delete this insight?",
+      "failed": "Failed to delete insight",
+      "success": "Insight deleted"
+    },
+    "deleteInsight": "Delete Insight",
+    "feedback": {
+      "failed": "Feedback submission failed",
+      "notFound": "Insight not found",
+      "thanksNotUseful": "Thanks! Marked as not useful",
+      "thanksUseful": "Thanks! Marked as useful"
+    },
+    "notUseful": "Not Useful",
+    "settings": {
+      "cancel": "Cancel",
+      "core": "Core Settings",
+      "decayDays": "Decay Days",
+      "maxHistory": "Max History",
+      "maxInsights": "Max Insights",
+      "qualityThreshold": "Quality Threshold",
+      "reset": "Reset",
+      "save": "Save",
+      "saved": "Settings saved",
+      "title": "Reflection Settings",
+      "decayDaysHint": "Insights automatically decay in weight after N days",
+      "enabled": "Enable Auto-Reflection",
+      "enabledHint": "Auto-trigger reflection after task execution",
+      "errorSection": "Error Analysis",
+      "insightSection": "Insight Settings",
+      "maxHistoryHint": "Keep the most recent N reflection history entries",
+      "maxInsightsHint": "Keep at most N insight records",
+      "qualitySection": "Quality Threshold",
+      "qualityThresholdHint": "Insights below this threshold will be filtered out",
+      "saveFailed": "Save failed",
+      "storageSection": "Storage Settings",
+      "storeInsights": "Persist Insights",
+      "storeInsightsHint": "Insights will be saved locally and available across sessions",
+      "subtitle": "Configure auto-reflection and insight management",
+      "useErrorClassifier": "Enable Error Classifier",
+      "useErrorClassifierHint": "Auto-classify error patterns for analysis"
+    },
+    "useful": "Useful"
   },
   "subAgentCard": {
     "viewConversation": "하위 대화 보기",
@@ -7414,7 +7508,9 @@
     "steerInput": "조종",
     "showExtras": "더보기",
     "hideExtras": "숨기기",
-    "close": "닫기"
+    "close": "닫기",
+    "collapse": "Collapse Panel",
+    "expand": "Expand Panel"
   },
   "knowledgeSettings": {
     "title": "지식"
@@ -7578,7 +7674,7 @@
     "addedToWatchlist": "Added",
     "inWatchlist": "Watching",
     "addFailed": "Add Failed",
-    "retry": "Retry",
+    "retry": "재시도",
     "completed": "Completed",
     "viewDetails": "View Details",
     "error": "Error",
@@ -7895,7 +7991,28 @@
         "hot-money-tracker": "자금 흐름 추적자",
         "lockup-watcher": "락업 감시자",
         "research-analyst": "리서치 분석가",
-        "sector-analyst": "섹터 분석가"
+        "sector-analyst": "섹터 분석가",
+        "catalyst": "Catalyst & Narrative Analyst",
+        "catalyst-analyst": "Catalyst & Narrative Analyst",
+        "fundamentals": "Fundamentals Analyst",
+        "hot-money": "Capital Flow Analyst",
+        "lockup": "Lockup Monitor",
+        "news": "News Analyst",
+        "policy": "Policy Analyst",
+        "research": "Research Analyst",
+        "sector": "Sector Analyst",
+        "sentiment": "Sentiment Analyst",
+        "investment-plan": "Investment Plan",
+        "a-news": "News Analyst",
+        "a-research": "Research Analyst",
+        "a-sentiment": "Sentiment Analyst",
+        "a-fundamentals": "Fundamentals Analyst",
+        "a-catalyst": "Catalyst & Narrative Analyst",
+        "a-hot-money": "Capital Flow Analyst",
+        "a-market-analyst": "Technical Analyst",
+        "a-sector": "Sector Analyst",
+        "a-lockup": "Lockup Monitor",
+        "a-policy": "Policy Analyst"
       },
       "analystComplete": "분석 완료, 분석 페이지에서 확인",
       "decisionTitle": "최종 결정",
@@ -7941,7 +8058,8 @@
         "t-quality": "품질 게이트",
         "research-mgr": "리서치 종합",
         "trader": "거래 계획",
-        "portfolio-mgr": "최종 의사 결정"
+        "portfolio-mgr": "최종 의사 결정",
+        "rule-check": "Rule Check"
       },
       "failedStepsWithCount": "Failed Steps ({{count}})",
       "fetchFailed": "데이터 가져오기 실패",
@@ -8023,7 +8141,9 @@
       "price": "price",
       "title": "title",
       "triggered": "triggered",
-      "date": "Date"
+      "date": "Date",
+      "above": "Break Above",
+      "below": "Break Below"
     },
     "askAi": {
       "decision": "decision",
@@ -8117,7 +8237,14 @@
       "started": "started",
       "stepDone": "stepDone",
       "stepRetrying": "stepRetrying",
-      "stepRunning": "stepRunning"
+      "stepRunning": "stepRunning",
+      "analystProgress": "[{{name}}] {{status}}",
+      "dataLoaded": "Data loaded: {{kline}} K-lines, {{news}} news",
+      "debateRound": "Debate round {{round}}/{{total}} done",
+      "error": "❌ Analysis error: {{msg}}",
+      "investmentPlan": "Trade execution plan ready, generating final decision...",
+      "reportReady": "✅ {{name}}: Report ready",
+      "riskDone": "✅ {{name}}: Risk assessment done"
     },
     "search": "search",
     "summary": {
@@ -8253,7 +8380,13 @@
       "empty": "이 단계에 노드 없음",
       "idleHint": "분석을 시작하면 전체 결정 타임라인이 여기에 표시됩니다",
       "emptyHint": "워크플로 노드 대기 중…",
-      "sendToChat": "채팅으로 보내기"
+      "sendToChat": "채팅으로 보내기",
+      "phase": {
+        "debate": "Debate",
+        "decide": "Decision",
+        "diagnose": "Diagnosis",
+        "scan": "Scan"
+      }
     },
     "alert.date": "Date",
     "recommendation": {
@@ -8483,7 +8616,9 @@
       "applyParamsBtn": "应用选中的 {{count}} 项参数",
       "applySuccess": "参数已应用到 stock-analysis 模板",
       "applyFailed": "参数应用失败: {{error}}",
-      "rerunDebate": "토론 다시 실행"
+      "rerunDebate": "토론 다시 실행",
+      "decisionJsonLabel": "decisionJson (after LLM extraction):",
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -8669,7 +8804,13 @@
       "30m": "30分钟",
       "5m": "5分钟",
       "60m": "60分钟",
-      "zoomHint": "框选缩放"
+      "zoomHint": "框选缩放",
+      "1m": "1 Month",
+      "1y": "1 Year",
+      "3m": "3 Months",
+      "6m": "6 Months",
+      "monthly": "Monthly",
+      "weekly": "Weekly"
     },
     "profitGrowth": "利润增速",
     "revenueGrowth": "营收增速",
@@ -8804,7 +8945,14 @@
     "valueAssessment.buffettLabel": "巴菲特",
     "valueAssessment.expand": "展开",
     "backtest.alpha": "超额收益",
-    "backtest.avgConfidence": "平均置信度"
+    "backtest.avgConfidence": "平均置信度",
+    "stage": {
+      "analysis": "Multi-Dimension Analysis",
+      "dataLoading": "Data Loading",
+      "debate": "Bull-Bear Debate",
+      "decision": "Investment Decision",
+      "risk": "Risk Assessment"
+    }
   },
   "trade": {
     "title": "Trading Log",
@@ -8830,7 +8978,17 @@
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor",
-    "placeholder": "거래 실행과 리플레이"
+    "placeholder": "거래 실행과 리플레이",
+    "agentRole": {
+      "browser": "Browser",
+      "coordinator": "Coordinator",
+      "developer": "Developer",
+      "executor": "Executor",
+      "planner": "Planner",
+      "researcher": "Researcher",
+      "reviewer": "Reviewer",
+      "synthesizer": "Synthesizer"
+    }
   },
   "watchlist": {
     "title": "관심종목",
@@ -8841,7 +8999,8 @@
     "placeholder": "조건으로 종목을 검색",
     "tab": {
       "smartReco": "스마트 추천",
-      "myFilter": "내 필터"
+      "myFilter": "내 필터",
+      "serenity": "Bottleneck Hunt"
     }
   },
   "backtest": {
@@ -8887,7 +9046,9 @@
     },
     "replayBadge": {
       "label": "리플레이 · {{date}}",
-      "tooltip": "이 뷰의 모든 데이터, 프롬프트 및 결론은 {{date}}을 기준으로 합니다. 실전 거래에 사용하지 마세요."
+      "tooltip": "이 뷰의 모든 데이터, 프롬프트 및 결론은 {{date}}을 기준으로 합니다. 실전 거래에 사용하지 마세요.",
+      "replay": "Replay {{date}}",
+      "sweep": "Batch Scan"
     },
     "replayWatermark": {
       "label": "{{date}} 기준"
@@ -8983,6 +9144,139 @@
     "emptyHint": "위 버튼을 클릭하여 Serenity 병목 스크리닝 실행",
     "noCandidateTitle": "이번 실행에서 후보 종목이 생성되지 않았습니다",
     "errorUnknown": "알 수 없는 오류",
-    "callFailed": "호출 실패"
+    "callFailed": "호출 실패",
+    "stepLogTitle": "Execution Log",
+    "nodeTitles": {
+      "trigger": "Start Screening",
+      "t-hot-stocks": "Hot Stocks",
+      "t-industry-rank": "Industry Ranking",
+      "t-cls-flash": "Real-time Flash",
+      "t-northbound": "Northbound Capital",
+      "a-trend-scanner": "Trend Scanner",
+      "a-chain-trend1": "Chain Decomposer #1",
+      "a-chain-trend2": "Chain Decomposer #2",
+      "a-chain-trend3": "Chain Decomposer #3",
+      "a-chokepoint-trend1": "Chokepoint ID #1",
+      "a-chokepoint-trend2": "Chokepoint ID #2",
+      "a-chokepoint-trend3": "Chokepoint ID #3",
+      "a-candidate-mapper": "Candidate Mapper",
+      "s-save-candidates": "Save Candidates"
+    },
+    "catalystEarnings": "Earnings",
+    "catalystProdRamp": "Ramp Up",
+    "catalystPolicy": "Policy",
+    "catalystSupplyShock": "Supply Shock",
+    "catalystCapacityRelease": "Capacity Release",
+    "catalystContractAward": "Contract",
+    "timeframeShort": "1-3M",
+    "timeframeMid": "3-6M",
+    "timeframeLong": "6M+",
+    "exitNow": "Now",
+    "exitCaution": "Caution",
+    "exitWatch": "Watch",
+    "exitNone": "None",
+    "catalystLabelPrefix": "Catalyst: ",
+    "exitLabelPrefix": "Exit: ",
+    "attentionLabelPrefix": "Attention: ",
+    "heatLabelPrefix": "Heat: ",
+    "feedbackTitle": "Feedback ({{count}} candidates)",
+    "feedbackWinRate": "Win Rate",
+    "feedbackAvgReturn": "Avg Return",
+    "feedbackProfitable": "Profitable/Total",
+    "feedbackButton": "History Feedback",
+    "refreshExitButton": "Refresh Exit Signals",
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+  },
+  "quant": {
+    "backtest": {
+      "code": "Stock Code",
+      "codePlaceholder": "Enter stock code (e.g., 600519)",
+      "endDate": "End Date",
+      "errorRunning": "Backtest execution error",
+      "initialCash": "Initial Capital",
+      "noResult": "No backtest results",
+      "overfitWarning": "Overfitting Warning",
+      "result": "Backtest Result",
+      "run": "Run Backtest",
+      "running": "Backtesting...",
+      "selectStrategy": "Select Strategy",
+      "stabilityScore": "Stability Score",
+      "startDate": "Start Date",
+      "title": "Strategy Backtest",
+      "walkForward": "Walk-Forward",
+      "walkForwardForceOff": "Disable Walk-Forward",
+      "walkForwardTitle": "Walk-Forward Backtest"
+    },
+    "common": {
+      "empty": "No data"
+    },
+    "compare": {
+      "compare": "Start Compare",
+      "comparing": "Comparing...",
+      "selectRuns": "Select backtest runs",
+      "title": "Strategy Comparison"
+    },
+    "metrics": {
+      "annualizedReturn": "Annualized Return",
+      "bestBy": "Best Parameters",
+      "maxDrawdownPct": "Max Drawdown",
+      "sharpe": "Sharpe Ratio",
+      "totalReturn": "Total Return",
+      "totalTrades": "Total Trades",
+      "winRate": "Win Rate"
+    },
+    "rhai": {
+      "compileError": "Compile Error",
+      "hint": "Write trading strategy logic in Rhai language",
+      "name": "Script Name",
+      "save": "Save",
+      "saved": "Saved",
+      "source": "Source Code",
+      "title": "Rhai Script Editor",
+      "version": "Version"
+    },
+    "strategy": {
+      "builtin": "Built-in Strategy",
+      "description": "Strategy Description",
+      "lastUpdated": "Last Updated",
+      "name": "Strategy Name",
+      "params": "Strategy Parameters",
+      "rhai": "Rhai Script Strategy",
+      "type": "Strategy Type",
+      "version": "Version"
+    },
+    "subtitle": "Strategy Backtest · Parameter Optimization · Signal Evaluation",
+    "tabs": {
+      "backtest": "Backtest",
+      "compare": "Compare",
+      "rhai": "Rhai Script",
+      "strategies": "Strategies"
+    },
+    "title": "Quant Lab",
+    "trades": {
+      "amount": "Amount",
+      "code": "Code",
+      "empty": "No trade records",
+      "fee": "Fee",
+      "filterAll": "All",
+      "flat": "Close",
+      "flatCount": "Closed Trades",
+      "long": "Long",
+      "longCount": "Long Trades",
+      "price": "Price",
+      "quantity": "Qty",
+      "realizedPnl": "Realized P&L",
+      "reason": "Reason",
+      "searchPlaceholder": "Search trade records",
+      "short": "Short",
+      "shortCount": "Short Trades",
+      "side": "Side",
+      "time": "Time",
+      "totalAmount": "Total Amount",
+      "totalCount": "Total Trades",
+      "totalFee": "Total Fee",
+      "totalPnl": "Total P&L",
+      "totalRows": "{{count}} records"
+    }
   }
 }

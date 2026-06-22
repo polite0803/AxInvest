@@ -3352,7 +3352,8 @@
     "proposals": "Proposals",
     "save": "Save",
     "sort": "Sort",
-    "stats": "Stats"
+    "stats": "Stats",
+    "atomicSkills": "Atomic Skills"
   },
   "agent": {
     "askUserPlaceholder": "Type your answer...",
@@ -8120,7 +8121,7 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
-    "loadAnalysisFailed": "Failed to load history analysis",
+    "loadAnalysisFailed": "Failed to load historical analysis",
     "retry": "Retry",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "financialMetrics": "Financial Metrics",
@@ -8358,11 +8359,12 @@
       "aiDiffPreviewTitle": "AI suggested changes (click apply below)",
       "aiRawOutputTitle": "AI raw output",
       "rolledBack": " (auto-rolled back)",
-      "rerunDebate": "Rerun Debate"
+      "rerunDebate": "Rerun Debate",
+      "decisionJsonLabel": "decisionJson (after LLM extraction):",
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
     },
     "refreshing": "Refreshing",
     "regions": "Regional Blocks",
-    "retry": "Retry",
     "revenueGrowth": "Revenue Growth",
     "risk": {
       "aggressive": "Aggressive",

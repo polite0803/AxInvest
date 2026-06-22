@@ -44,7 +44,8 @@
     "collapse": "طي الشريط الجانبي",
     "sectionInvestDiscover": "Discover",
     "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review"
+    "sectionInvestReview": "Review",
+    "sectionInvestMonitor": "Monitor"
   },
   "chat": {
     "newConversation": "محادثة جديدة",
@@ -3046,7 +3047,8 @@
     "proposals": "Vorschläge",
     "save": "Speichern",
     "sort": "Sortieren",
-    "stats": "إحصائيات"
+    "stats": "إحصائيات",
+    "atomicSkills": "Atomic Skills"
   },
   "agent": {
     "askUserPlaceholder": "اكتب إجابتك...",
@@ -4371,7 +4373,19 @@
       "switchValuePlaceholder": "value",
       "to": "إلى",
       "urlPlaceholder": "https://api.example.com/data",
-      "webhookUrlPlaceholder": "https://hook.example.com/..."
+      "webhookUrlPlaceholder": "https://hook.example.com/...",
+      "inputVariablePlaceholder": "e.g. data.result",
+      "backend": "Storage Backend",
+      "vectorDb": "Vector Database",
+      "fileSystem": "File System",
+      "operation": "Operation",
+      "insert": "Insert",
+      "upsert": "Upsert",
+      "append": "Append",
+      "collection": "Collection/Table",
+      "collectionPlaceholder": "e.g. records",
+      "keyVariable": "Key Variable",
+      "keyVariablePlaceholder": "e.g. record.id"
     },
     "debug": {
       "totalDuration": "المدة الإجمالية",
@@ -5238,7 +5252,10 @@
     },
     "swarmNode": {
       "agents": "Agents",
-      "rounds": "rounds"
+      "rounds": "rounds",
+      "newAgent": "Agent",
+      "noAgentsHint": "Add Agent nodes inside this container",
+      "addAgent": "Add Agent"
     },
     "groupNode": {
       "untitled": "Group",
@@ -5273,7 +5290,13 @@
     "run": "Run",
     "settings": "Settings",
     "durationMinutes": "{{minutes}} min",
-    "durationSeconds": "{{seconds}} sec"
+    "durationSeconds": "{{seconds}} sec",
+    "workflowRef": {
+      "targetWorkflow": "Target Workflow",
+      "contextMode": "Context Mode",
+      "inherit": "Inherit",
+      "isolated": "Isolated"
+    }
   },
   "atomicSkill": {
     "entryType": "نوع الإدخال",
@@ -7651,7 +7674,7 @@
     "addedToWatchlist": "Added",
     "inWatchlist": "Watching",
     "addFailed": "Add Failed",
-    "retry": "Retry",
+    "retry": "إعادة المحاولة",
     "completed": "Completed",
     "viewDetails": "View Details",
     "error": "Error",
@@ -7979,7 +8002,17 @@
         "research": "Research Analyst",
         "sector": "Sector Analyst",
         "sentiment": "Sentiment Analyst",
-        "investment-plan": "Investment Plan"
+        "investment-plan": "Investment Plan",
+        "a-news": "News Analyst",
+        "a-research": "Research Analyst",
+        "a-sentiment": "Sentiment Analyst",
+        "a-fundamentals": "Fundamentals Analyst",
+        "a-catalyst": "Catalyst & Narrative Analyst",
+        "a-hot-money": "Capital Flow Analyst",
+        "a-market-analyst": "Technical Analyst",
+        "a-sector": "Sector Analyst",
+        "a-lockup": "Lockup Monitor",
+        "a-policy": "Policy Analyst"
       },
       "analystComplete": "اكتمل التحليل",
       "decisionTitle": "القرار النهائي",
@@ -8108,7 +8141,9 @@
       "price": "price",
       "title": "title",
       "triggered": "triggered",
-      "date": "Date"
+      "date": "Date",
+      "above": "Break Above",
+      "below": "Break Below"
     },
     "askAi": {
       "decision": "decision",
@@ -8202,7 +8237,14 @@
       "started": "started",
       "stepDone": "stepDone",
       "stepRetrying": "stepRetrying",
-      "stepRunning": "stepRunning"
+      "stepRunning": "stepRunning",
+      "analystProgress": "[{{name}}] {{status}}",
+      "dataLoaded": "Data loaded: {{kline}} K-lines, {{news}} news",
+      "debateRound": "Debate round {{round}}/{{total}} done",
+      "error": "❌ Analysis error: {{msg}}",
+      "investmentPlan": "Trade execution plan ready, generating final decision...",
+      "reportReady": "✅ {{name}}: Report ready",
+      "riskDone": "✅ {{name}}: Risk assessment done"
     },
     "search": "search",
     "summary": {
@@ -8338,7 +8380,13 @@
       "empty": "لا توجد عقد في هذه المرحلة",
       "idleHint": "بعد بدء التحليل، سيظهر الجدول الزمني الكامل هنا",
       "emptyHint": "في انتظار عقد سير العمل…",
-      "sendToChat": "إرسال إلى الدردشة"
+      "sendToChat": "إرسال إلى الدردشة",
+      "phase": {
+        "debate": "Debate",
+        "decide": "Decision",
+        "diagnose": "Diagnosis",
+        "scan": "Scan"
+      }
     },
     "alert.date": "Date",
     "recommendation": {
@@ -8568,7 +8616,9 @@
       "aiDiffPreviewTitle": "التعديلات المقترحة من الذكاء الاصطناعي (انقر تطبيق أدناه)",
       "aiRawOutputTitle": "إخراج الذكاء الاصطناعي الخام",
       "rolledBack": " (تم التراجع تلقائياً)",
-      "rerunDebate": "إعادة تشغيل المناظرة"
+      "rerunDebate": "إعادة تشغيل المناظرة",
+      "decisionJsonLabel": "decisionJson (after LLM extraction):",
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -8705,7 +8755,13 @@
       "30m": "30m",
       "5m": "5m",
       "60m": "60m",
-      "zoomHint": "Drag to zoom"
+      "zoomHint": "Drag to zoom",
+      "1m": "1 Month",
+      "1y": "1 Year",
+      "3m": "3 Months",
+      "6m": "6 Months",
+      "monthly": "Monthly",
+      "weekly": "Weekly"
     },
     "profitGrowth": "Profit Growth",
     "revenueGrowth": "Revenue Growth",
@@ -8889,7 +8945,14 @@
     "valueAssessment.buffettLabel": "巴菲特",
     "valueAssessment.expand": "展开",
     "backtest.alpha": "超额收益",
-    "backtest.avgConfidence": "平均置信度"
+    "backtest.avgConfidence": "平均置信度",
+    "stage": {
+      "analysis": "Multi-Dimension Analysis",
+      "dataLoading": "Data Loading",
+      "debate": "Bull-Bear Debate",
+      "decision": "Investment Decision",
+      "risk": "Risk Assessment"
+    }
   },
   "trade": {
     "title": "Trading Log",
@@ -8915,7 +8978,17 @@
     "agentRole.browser": "Browser",
     "agentRole.synthesizer": "Synthesizer",
     "agentRole.executor": "Executor",
-    "placeholder": "تنفيذ ومراجعة الصفقات"
+    "placeholder": "تنفيذ ومراجعة الصفقات",
+    "agentRole": {
+      "browser": "Browser",
+      "coordinator": "Coordinator",
+      "developer": "Developer",
+      "executor": "Executor",
+      "planner": "Planner",
+      "researcher": "Researcher",
+      "reviewer": "Reviewer",
+      "synthesizer": "Synthesizer"
+    }
   },
   "watchlist": {
     "title": "قائمة المراقبة",
@@ -8926,7 +8999,8 @@
     "placeholder": "ابحث عن الأسهم حسب المعايير",
     "tab": {
       "smartReco": "توصيات ذكية",
-      "myFilter": "تصفيتي"
+      "myFilter": "تصفيتي",
+      "serenity": "Bottleneck Hunt"
     }
   },
   "backtest": {
@@ -9162,6 +9236,47 @@
     "emptyHint": "انقر على الزر أعلاه لتشغيل فحص اختناقات Serenity",
     "noCandidateTitle": "لم يتم إنشاء أي أسهم مرشحة",
     "errorUnknown": "خطأ غير معروف",
-    "callFailed": "فشل الاتصال"
+    "callFailed": "فشل الاتصال",
+    "stepLogTitle": "Execution Log",
+    "nodeTitles": {
+      "trigger": "Start Screening",
+      "t-hot-stocks": "Hot Stocks",
+      "t-industry-rank": "Industry Ranking",
+      "t-cls-flash": "Real-time Flash",
+      "t-northbound": "Northbound Capital",
+      "a-trend-scanner": "Trend Scanner",
+      "a-chain-trend1": "Chain Decomposer #1",
+      "a-chain-trend2": "Chain Decomposer #2",
+      "a-chain-trend3": "Chain Decomposer #3",
+      "a-chokepoint-trend1": "Chokepoint ID #1",
+      "a-chokepoint-trend2": "Chokepoint ID #2",
+      "a-chokepoint-trend3": "Chokepoint ID #3",
+      "a-candidate-mapper": "Candidate Mapper",
+      "s-save-candidates": "Save Candidates"
+    },
+    "catalystEarnings": "Earnings",
+    "catalystProdRamp": "Ramp Up",
+    "catalystPolicy": "Policy",
+    "catalystSupplyShock": "Supply Shock",
+    "catalystCapacityRelease": "Capacity Release",
+    "catalystContractAward": "Contract",
+    "timeframeShort": "1-3M",
+    "timeframeMid": "3-6M",
+    "timeframeLong": "6M+",
+    "exitNow": "Now",
+    "exitCaution": "Caution",
+    "exitWatch": "Watch",
+    "exitNone": "None",
+    "catalystLabelPrefix": "Catalyst: ",
+    "exitLabelPrefix": "Exit: ",
+    "attentionLabelPrefix": "Attention: ",
+    "heatLabelPrefix": "Heat: ",
+    "feedbackTitle": "Feedback ({{count}} candidates)",
+    "feedbackWinRate": "Win Rate",
+    "feedbackAvgReturn": "Avg Return",
+    "feedbackProfitable": "Profitable/Total",
+    "feedbackButton": "History Feedback",
+    "refreshExitButton": "Refresh Exit Signals",
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
   }
 }

@@ -415,7 +415,7 @@ function renderPrettyJson(label: string, raw: string, maxHeight: number) {
   );
 }
 
-function renderBlackboardSnapshot(raw: string) {
+function renderBlackboardSnapshot(raw: string, label: string) {
   let body = raw;
   try {
     const obj = JSON.parse(raw);
@@ -427,9 +427,7 @@ function renderBlackboardSnapshot(raw: string) {
   } catch { /* keep raw */ }
   return (
     <>
-      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
-        blackboardSnapshot (工作流原始结果):
-      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>{label}</div>
       <pre
         style={{
           fontSize: 11,
@@ -567,7 +565,7 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
       } else {
         message.error(
           t("stockAnalysis.reflection.aiApplyFailed", {
-            error: result.error ?? "未知",
+            error: result.error ?? t("common.unknown"),
             rollback: result.rolled_back ? t("stockAnalysis.reflection.rolledBack") : "",
           }),
         );
@@ -619,8 +617,17 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
             <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: 12 }}>
               {t("stockAnalysis.reflection.rawOutputTitle")}
             </summary>
-            {row.decisionJson && renderPrettyJson("decisionJson (LLM 提取后):", row.decisionJson, 200)}
-            {row.blackboardSnapshot && renderBlackboardSnapshot(row.blackboardSnapshot)}
+            {row.decisionJson
+              && renderPrettyJson(
+                t("stockAnalysis.reflection.decisionJsonLabel"),
+                row.decisionJson,
+                200,
+              )}
+            {row.blackboardSnapshot
+              && renderBlackboardSnapshot(
+                row.blackboardSnapshot,
+                t("stockAnalysis.reflection.blackboardSnapshotLabel"),
+              )}
           </details>
         )}
         {suggestions.length > 0 && (

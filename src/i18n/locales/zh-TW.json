@@ -41,7 +41,11 @@
     "sectionInfrastructure": "基礎設施",
     "sectionPlugins": "插件",
     "expand": "展開側邊欄",
-    "collapse": "收起側邊欄"
+    "collapse": "收起側邊欄",
+    "sectionInvestDiscover": "Discover",
+    "sectionInvestMonitor": "Monitor",
+    "sectionInvestExecute": "Execute",
+    "sectionInvestReview": "Review"
   },
   "chat": {
     "newConversation": "新建對話",
@@ -2568,7 +2572,8 @@
     "provider": {
       "deepseekBalance": "DeepSeek 餘額",
       "noValidKey": "無可用金鑰"
-    }
+    },
+    "stockAnalysis": "Stock Analysis"
   },
   "backup": {
     "title": "備份中心",
@@ -2778,7 +2783,11 @@
     "key": "",
     "value": "",
     "hide": "隱藏",
-    "searchPlaceholder": "搜索..."
+    "searchPlaceholder": "搜索...",
+    "exportMarkdown": "Export Markdown",
+    "saveFailed": "Save failed",
+    "saved": "Saved",
+    "unknownError": "Unknown error"
   },
   "multiAgent": {
     "title": "多智能體狀態",
@@ -3071,7 +3080,8 @@
     "proposals": "提案",
     "save": "保存",
     "sort": "排序",
-    "stats": "統計"
+    "stats": "統計",
+    "atomicSkills": "Atomic Skills"
   },
   "agent": {
     "askUserPlaceholder": "輸入您的回答...",
@@ -3555,7 +3565,10 @@
       "axagentFolderHint": "選擇包含 AxAgent 格式 JSON 文件的文件夾，將自動掃描並導入所有工作流模板。",
       "n8nFolderHint": "選擇包含 n8n 格式 JSON 文件的文件夾，將自動轉換並導入所有 n8n 工作流。",
       "importStructuralErrors": "匯入的工作流存在 {{count}} 個結構錯誤：\n{{details}}",
-      "importValidationWarnings": "匯入的工作流存在 {{count}} 個警告：\n{{details}}"
+      "importValidationWarnings": "匯入的工作流存在 {{count}} 個警告：\n{{details}}",
+      "fileTooLarge": "File too large",
+      "invalidJsonFile": "Invalid JSON file",
+      "jsonTooDeep": "JSON nesting too deep"
     },
     "preview": "預覽",
     "publish": "發布",
@@ -3608,7 +3621,12 @@
       "diffNodeTypeChanged": "節點類型變更",
       "diffNodeConfigChanged": "節點配置變更",
       "diffEdgeAdded": "新增邊 ({{type}})",
-      "diffEdgeRemoved": "刪除邊 ({{type}})"
+      "diffEdgeRemoved": "刪除邊 ({{type}})",
+      "latest": "Latest",
+      "rollback": "Rollback to This Version",
+      "rollbackConfirm": "Confirm rollback?",
+      "rollbackTo": "Rollback to {{version}}",
+      "rolledBack": "Rolled back"
     },
     "versionHistoryLoadFailed": "版本歷史載入失敗",
     "versionLoaded": "版本已載入",
@@ -3924,7 +3942,19 @@
       "switchValuePlaceholder": "value",
       "to": "收件者",
       "urlPlaceholder": "https://api.example.com/data",
-      "webhookUrlPlaceholder": "https://hook.example.com/..."
+      "webhookUrlPlaceholder": "https://hook.example.com/...",
+      "inputVariablePlaceholder": "e.g. data.result",
+      "backend": "Storage Backend",
+      "vectorDb": "Vector Database",
+      "fileSystem": "File System",
+      "operation": "Operation",
+      "insert": "Insert",
+      "upsert": "Upsert",
+      "append": "Append",
+      "collection": "Collection/Table",
+      "collectionPlaceholder": "e.g. records",
+      "keyVariable": "Key Variable",
+      "keyVariablePlaceholder": "e.g. record.id"
     },
     "debug": {
       "totalDuration": "總耗時",
@@ -4291,7 +4321,12 @@
       "manual": "手動",
       "schedule": "定時",
       "event": "事件",
-      "title": "觸發器"
+      "title": "觸發器",
+      "configure": "Configure Trigger",
+      "configureHint": "Configure trigger conditions and parameters",
+      "statusActive": "Running",
+      "statusDisabled": "Disabled",
+      "statusUnconfigured": "Unconfigured"
     },
     "documentParserNode": {
       "notSet": "未設置",
@@ -4337,7 +4372,12 @@
     "node": {
       "tickMode": "Tick 模式",
       "breakpoint": "斷點",
-      "retryEnabled": "重試已啟用"
+      "retryEnabled": "重試已啟用",
+      "clickToCollapsePorts": "Click to collapse ports",
+      "clickToExpandPorts": "Click to expand ports",
+      "inputs": "Inputs",
+      "outputs": "Outputs",
+      "type": "Type"
     },
     "code": {
       "rhaiDynamicTool": "🦀 Rhai (動態工具)",
@@ -4781,7 +4821,10 @@
     },
     "swarmNode": {
       "agents": "Agents",
-      "rounds": "rounds"
+      "rounds": "rounds",
+      "newAgent": "Agent",
+      "noAgentsHint": "Add Agent nodes inside this container",
+      "addAgent": "Add Agent"
     },
     "groupNode": {
       "untitled": "Group",
@@ -4814,7 +4857,15 @@
       "placeholder": "Search nodes..."
     },
     "run": "Run",
-    "settings": "Settings"
+    "settings": "Settings",
+    "workflowRef": {
+      "targetWorkflow": "Target Workflow",
+      "contextMode": "Context Mode",
+      "inherit": "Inherit",
+      "isolated": "Isolated"
+    },
+    "durationMinutes": "{{minutes}} min",
+    "durationSeconds": "{{seconds}} sec"
   },
   "atomicSkill": {
     "entryType": "入口類型",
@@ -7319,7 +7370,50 @@
     "errorRecoveryScore": "錯誤恢復",
     "goalCompletionScore": "目標完成度",
     "reflectError": "反思失敗",
-    "retry": "重試"
+    "retry": "重試",
+    "autoTrigger": "Auto-Triggered",
+    "delete": {
+      "confirm": "Delete this insight?",
+      "failed": "Failed to delete insight",
+      "success": "Insight deleted"
+    },
+    "deleteInsight": "Delete Insight",
+    "feedback": {
+      "failed": "Feedback submission failed",
+      "notFound": "Insight not found",
+      "thanksNotUseful": "Thanks! Marked as not useful",
+      "thanksUseful": "Thanks! Marked as useful"
+    },
+    "notUseful": "Not Useful",
+    "settings": {
+      "cancel": "Cancel",
+      "core": "Core Settings",
+      "decayDays": "Decay Days",
+      "maxHistory": "Max History",
+      "maxInsights": "Max Insights",
+      "qualityThreshold": "Quality Threshold",
+      "reset": "Reset",
+      "save": "Save",
+      "saved": "Settings saved",
+      "title": "Reflection Settings",
+      "decayDaysHint": "Insights automatically decay in weight after N days",
+      "enabled": "Enable Auto-Reflection",
+      "enabledHint": "Auto-trigger reflection after task execution",
+      "errorSection": "Error Analysis",
+      "insightSection": "Insight Settings",
+      "maxHistoryHint": "Keep the most recent N reflection history entries",
+      "maxInsightsHint": "Keep at most N insight records",
+      "qualitySection": "Quality Threshold",
+      "qualityThresholdHint": "Insights below this threshold will be filtered out",
+      "saveFailed": "Save failed",
+      "storageSection": "Storage Settings",
+      "storeInsights": "Persist Insights",
+      "storeInsightsHint": "Insights will be saved locally and available across sessions",
+      "subtitle": "Configure auto-reflection and insight management",
+      "useErrorClassifier": "Enable Error Classifier",
+      "useErrorClassifierHint": "Auto-classify error patterns for analysis"
+    },
+    "useful": "Useful"
   },
   "subAgentCard": {
     "viewConversation": "查看子會話",
@@ -7407,7 +7501,9 @@
     "steerInput": "引導",
     "showExtras": "更多面板",
     "hideExtras": "收起",
-    "close": "關閉"
+    "close": "關閉",
+    "collapse": "Collapse Panel",
+    "expand": "Expand Panel"
   },
   "knowledgeSettings": {
     "title": "知識庫"
@@ -7703,7 +7799,8 @@
         "goToRoles": "跳转到角色编辑",
         "colFixedTools": "固定工具",
         "colExposedTools": "暴露工具",
-        "noPrompt": "（未加载到 prompt 数据）"
+        "noPrompt": "（未加载到 prompt 数据）",
+        "colTools": "Tools"
       },
       "vendors": {
         "summary": "9 个数据源 + 6 个数据工具 + 3 个本地计算",
@@ -7894,7 +7991,28 @@
         "hot-money-tracker": "資金面追蹤師",
         "lockup-watcher": "限售觀察師",
         "research-analyst": "研報分析師",
-        "sector-analyst": "板塊分析師"
+        "sector-analyst": "板塊分析師",
+        "catalyst": "Catalyst & Narrative Analyst",
+        "catalyst-analyst": "Catalyst & Narrative Analyst",
+        "fundamentals": "Fundamentals Analyst",
+        "hot-money": "Capital Flow Analyst",
+        "lockup": "Lockup Monitor",
+        "news": "News Analyst",
+        "policy": "Policy Analyst",
+        "research": "Research Analyst",
+        "sector": "Sector Analyst",
+        "sentiment": "Sentiment Analyst",
+        "investment-plan": "Investment Plan",
+        "a-news": "News Analyst",
+        "a-research": "Research Analyst",
+        "a-sentiment": "Sentiment Analyst",
+        "a-fundamentals": "Fundamentals Analyst",
+        "a-catalyst": "Catalyst & Narrative Analyst",
+        "a-hot-money": "Capital Flow Analyst",
+        "a-market-analyst": "Technical Analyst",
+        "a-sector": "Sector Analyst",
+        "a-lockup": "Lockup Monitor",
+        "a-policy": "Policy Analyst"
       },
       "analystComplete": "分析完畢，請在分析頁查看詳細報告",
       "decisionTitle": "最終決策",
@@ -7940,7 +8058,8 @@
         "t-quality": "質量門控",
         "research-mgr": "研究經理綜合",
         "trader": "交易方案制定",
-        "portfolio-mgr": "最終決策生成"
+        "portfolio-mgr": "最終決策生成",
+        "rule-check": "Rule Check"
       },
       "failedStepsWithCount": "失敗步驟（{{count}} 步）",
       "fetchFailed": "數據獲取失敗",
@@ -8022,7 +8141,9 @@
       "price": "price",
       "title": "title",
       "triggered": "triggered",
-      "date": "日期"
+      "date": "日期",
+      "above": "Break Above",
+      "below": "Break Below"
     },
     "askAi": {
       "decision": "decision",
@@ -8116,7 +8237,14 @@
       "started": "started",
       "stepDone": "stepDone",
       "stepRetrying": "stepRetrying",
-      "stepRunning": "stepRunning"
+      "stepRunning": "stepRunning",
+      "analystProgress": "[{{name}}] {{status}}",
+      "dataLoaded": "Data loaded: {{kline}} K-lines, {{news}} news",
+      "debateRound": "Debate round {{round}}/{{total}} done",
+      "error": "❌ Analysis error: {{msg}}",
+      "investmentPlan": "Trade execution plan ready, generating final decision...",
+      "reportReady": "✅ {{name}}: Report ready",
+      "riskDone": "✅ {{name}}: Risk assessment done"
     },
     "search": "search",
     "summary": {
@@ -8377,7 +8505,13 @@
       "empty": "該階段暫無節點",
       "idleHint": "開始分析後,這裡會展示完整的決策時間線",
       "emptyHint": "等待工作流推送節點…",
-      "sendToChat": "發送到對話"
+      "sendToChat": "發送到對話",
+      "phase": {
+        "debate": "Debate",
+        "decide": "Decision",
+        "diagnose": "Diagnosis",
+        "scan": "Scan"
+      }
     },
     "alert.date": "日期",
     "recommendation": {
@@ -8610,7 +8744,9 @@
       "applyParamsBtn": "应用选中的 {{count}} 项参数",
       "applySuccess": "参数已应用到 stock-analysis 模板",
       "applyFailed": "参数应用失败: {{error}}",
-      "rerunDebate": "重跑辯論"
+      "rerunDebate": "重跑辯論",
+      "decisionJsonLabel": "decisionJson (after LLM extraction):",
+      "blackboardSnapshotLabel": "blackboardSnapshot (raw workflow result):"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",
@@ -8792,7 +8928,13 @@
       "30m": "30分钟",
       "5m": "5分钟",
       "60m": "60分钟",
-      "zoomHint": "框选缩放"
+      "zoomHint": "框选缩放",
+      "1m": "1 Month",
+      "1y": "1 Year",
+      "3m": "3 Months",
+      "6m": "6 Months",
+      "monthly": "Monthly",
+      "weekly": "Weekly"
     },
     "profitGrowth": "利润增速",
     "revenueGrowth": "营收增速",
@@ -8803,7 +8945,14 @@
     "period.60m": "60分",
     "period.1d": "日",
     "period.1w": "周",
-    "period.1M": "月"
+    "period.1M": "月",
+    "stage": {
+      "analysis": "Multi-Dimension Analysis",
+      "dataLoading": "Data Loading",
+      "debate": "Bull-Bear Debate",
+      "decision": "Investment Decision",
+      "risk": "Risk Assessment"
+    }
   },
   "trade": {
     "title": "交易日志",
@@ -8829,7 +8978,17 @@
     "agentRole.browser": "浏览器",
     "agentRole.synthesizer": "综合者",
     "agentRole.executor": "执行者",
-    "placeholder": "執行與回放交易"
+    "placeholder": "執行與回放交易",
+    "agentRole": {
+      "browser": "Browser",
+      "coordinator": "Coordinator",
+      "developer": "Developer",
+      "executor": "Executor",
+      "planner": "Planner",
+      "researcher": "Researcher",
+      "reviewer": "Reviewer",
+      "synthesizer": "Synthesizer"
+    }
   },
   "watchlist": {
     "title": "自選股",
@@ -8840,7 +8999,8 @@
     "placeholder": "依條件篩選股票",
     "tab": {
       "smartReco": "智能薦股",
-      "myFilter": "我的篩選"
+      "myFilter": "我的篩選",
+      "serenity": "Bottleneck Hunt"
     }
   },
   "backtest": {
@@ -8886,7 +9046,9 @@
     },
     "replayBadge": {
       "label": "回放 · {{date}}",
-      "tooltip": "此視圖中的所有資料、提示詞與結論都以 {{date}} 為錨點。不可用於實盤交易。"
+      "tooltip": "此視圖中的所有資料、提示詞與結論都以 {{date}} 為錨點。不可用於實盤交易。",
+      "replay": "Replay {{date}}",
+      "sweep": "Batch Scan"
     },
     "replayWatermark": {
       "label": "截至 {{date}}"
@@ -8982,6 +9144,139 @@
     "emptyHint": "點擊上方按鈕運行 Serenity 瓶頸篩選",
     "noCandidateTitle": "本次未產出候選標的",
     "errorUnknown": "未知錯誤",
-    "callFailed": "呼叫失敗"
+    "callFailed": "呼叫失敗",
+    "stepLogTitle": "Execution Log",
+    "nodeTitles": {
+      "trigger": "Start Screening",
+      "t-hot-stocks": "Hot Stocks",
+      "t-industry-rank": "Industry Ranking",
+      "t-cls-flash": "Real-time Flash",
+      "t-northbound": "Northbound Capital",
+      "a-trend-scanner": "Trend Scanner",
+      "a-chain-trend1": "Chain Decomposer #1",
+      "a-chain-trend2": "Chain Decomposer #2",
+      "a-chain-trend3": "Chain Decomposer #3",
+      "a-chokepoint-trend1": "Chokepoint ID #1",
+      "a-chokepoint-trend2": "Chokepoint ID #2",
+      "a-chokepoint-trend3": "Chokepoint ID #3",
+      "a-candidate-mapper": "Candidate Mapper",
+      "s-save-candidates": "Save Candidates"
+    },
+    "catalystEarnings": "Earnings",
+    "catalystProdRamp": "Ramp Up",
+    "catalystPolicy": "Policy",
+    "catalystSupplyShock": "Supply Shock",
+    "catalystCapacityRelease": "Capacity Release",
+    "catalystContractAward": "Contract",
+    "timeframeShort": "1-3M",
+    "timeframeMid": "3-6M",
+    "timeframeLong": "6M+",
+    "exitNow": "Now",
+    "exitCaution": "Caution",
+    "exitWatch": "Watch",
+    "exitNone": "None",
+    "catalystLabelPrefix": "Catalyst: ",
+    "exitLabelPrefix": "Exit: ",
+    "attentionLabelPrefix": "Attention: ",
+    "heatLabelPrefix": "Heat: ",
+    "feedbackTitle": "Feedback ({{count}} candidates)",
+    "feedbackWinRate": "Win Rate",
+    "feedbackAvgReturn": "Avg Return",
+    "feedbackProfitable": "Profitable/Total",
+    "feedbackButton": "History Feedback",
+    "refreshExitButton": "Refresh Exit Signals",
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+  },
+  "quant": {
+    "backtest": {
+      "code": "Stock Code",
+      "codePlaceholder": "Enter stock code (e.g., 600519)",
+      "endDate": "End Date",
+      "errorRunning": "Backtest execution error",
+      "initialCash": "Initial Capital",
+      "noResult": "No backtest results",
+      "overfitWarning": "Overfitting Warning",
+      "result": "Backtest Result",
+      "run": "Run Backtest",
+      "running": "Backtesting...",
+      "selectStrategy": "Select Strategy",
+      "stabilityScore": "Stability Score",
+      "startDate": "Start Date",
+      "title": "Strategy Backtest",
+      "walkForward": "Walk-Forward",
+      "walkForwardForceOff": "Disable Walk-Forward",
+      "walkForwardTitle": "Walk-Forward Backtest"
+    },
+    "common": {
+      "empty": "No data"
+    },
+    "compare": {
+      "compare": "Start Compare",
+      "comparing": "Comparing...",
+      "selectRuns": "Select backtest runs",
+      "title": "Strategy Comparison"
+    },
+    "metrics": {
+      "annualizedReturn": "Annualized Return",
+      "bestBy": "Best Parameters",
+      "maxDrawdownPct": "Max Drawdown",
+      "sharpe": "Sharpe Ratio",
+      "totalReturn": "Total Return",
+      "totalTrades": "Total Trades",
+      "winRate": "Win Rate"
+    },
+    "rhai": {
+      "compileError": "Compile Error",
+      "hint": "Write trading strategy logic in Rhai language",
+      "name": "Script Name",
+      "save": "Save",
+      "saved": "Saved",
+      "source": "Source Code",
+      "title": "Rhai Script Editor",
+      "version": "Version"
+    },
+    "strategy": {
+      "builtin": "Built-in Strategy",
+      "description": "Strategy Description",
+      "lastUpdated": "Last Updated",
+      "name": "Strategy Name",
+      "params": "Strategy Parameters",
+      "rhai": "Rhai Script Strategy",
+      "type": "Strategy Type",
+      "version": "Version"
+    },
+    "subtitle": "Strategy Backtest · Parameter Optimization · Signal Evaluation",
+    "tabs": {
+      "backtest": "Backtest",
+      "compare": "Compare",
+      "rhai": "Rhai Script",
+      "strategies": "Strategies"
+    },
+    "title": "Quant Lab",
+    "trades": {
+      "amount": "Amount",
+      "code": "Code",
+      "empty": "No trade records",
+      "fee": "Fee",
+      "filterAll": "All",
+      "flat": "Close",
+      "flatCount": "Closed Trades",
+      "long": "Long",
+      "longCount": "Long Trades",
+      "price": "Price",
+      "quantity": "Qty",
+      "realizedPnl": "Realized P&L",
+      "reason": "Reason",
+      "searchPlaceholder": "Search trade records",
+      "short": "Short",
+      "shortCount": "Short Trades",
+      "side": "Side",
+      "time": "Time",
+      "totalAmount": "Total Amount",
+      "totalCount": "Total Trades",
+      "totalFee": "Total Fee",
+      "totalPnl": "Total P&L",
+      "totalRows": "{{count}} records"
+    }
   }
 }

@@ -658,8 +658,8 @@
         "AGENT_STATUS_INITIALIZING": "Initializing...",
         "AGENT_STATUS_CALLING_MODEL": "Calling model...",
         "AGENT_STATUS_STEER_APPLIED": "Applied {count} steer instruction(s)",
-        "THINKING_BLOCK_START": "",
-        "THINKING_BLOCK_END": "",
+        "THINKING_BLOCK_START": "Start",
+        "THINKING_BLOCK_END": "End",
         "TITLE_NO_MESSAGES": "No messages found to generate title from",
         "SESSION_NO_MESSAGES_TO_COMPRESS": "No messages to compress",
         "STEER_INSTRUCTION_TOO_LONG": "Instruction too long (max 10KB)",
@@ -8701,7 +8701,7 @@
         "analystReports": "Analyst Reports"
       }
     },
-    "sharesUnit": "",
+    "sharesUnit": "shares",
     "stage": {
       "analysis": "Multi-Dimension Analysis",
       "dataLoading": "Data Loading",

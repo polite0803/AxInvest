@@ -5,8 +5,8 @@
     "description": "Asistente de Trabajo Impulsado por IA"
   },
   "artifact": {
-    "copiedToClipboard": "",
-    "copyFailed": ""
+    "copiedToClipboard": "Copied to clipboard",
+    "copyFailed": "Copy failed"
   },
   "nav": {
     "chat": "Chat",
@@ -556,8 +556,8 @@
         "AGENT_STATUS_INITIALIZING": "Inicializando...",
         "AGENT_STATUS_CALLING_MODEL": "Llamando al modelo...",
         "AGENT_STATUS_STEER_APPLIED": "{count} instrucción(es) de dirección aplicada(s)",
-        "THINKING_BLOCK_START": "",
-        "THINKING_BLOCK_END": "",
+        "THINKING_BLOCK_START": "Start",
+        "THINKING_BLOCK_END": "End",
         "TITLE_NO_MESSAGES": "No se encontraron mensajes para generar título",
         "SESSION_NO_MESSAGES_TO_COMPRESS": "No hay mensajes para comprimir",
         "STEER_INSTRUCTION_TOO_LONG": "Instrucción demasiado larga (máx 10KB)",
@@ -2520,9 +2520,9 @@
     "workflow": {
       "title": "Configuración del flujo de trabajo",
       "description": "Gestionar plantillas de flujo de trabajo y configuración del editor",
-      "createdSuccess": "",
-      "deletedSuccess": "",
-      "sampleAdded": "",
+      "createdSuccess": "Created successfully",
+      "deletedSuccess": "Deleted successfully",
+      "sampleAdded": "Sample added",
       "createNew": "Crear nueva plantilla",
       "visualEditor": "Editor visual",
       "visualEditorDesc": "Crear y editar flujos de trabajo con el editor DAG de arrastrar y soltar",
@@ -2800,8 +2800,8 @@
     "retry": "Reintentar",
     "default": "Predeterminado",
     "operationFailed": "Operación fallida",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "Ocultar",
     "searchPlaceholder": "Buscar...",
     "exportMarkdown": "Export Markdown",
@@ -2874,8 +2874,8 @@
   },
   "tray": {
     "show": "Mostrar",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "Ocultar",
     "quit": "Salir"
   },
@@ -4310,15 +4310,15 @@
       "defaultCodePythonComment": "# Input: input\n# El valor de retorno se guarda en output_var",
       "codeInputParams": "Parámetros de entrada: input",
       "codeReturnHint": "El valor de retorno se almacenará en output_var",
-      "roleCoordinator": "",
-      "roleBrowser": "",
-      "selectRole": "",
-      "roleTag": "",
-      "bindRole": "",
-      "expertNotFound": "",
-      "profileMatched": "",
-      "profileCreated": "",
-      "profileCreateFailed": "",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser",
+      "selectRole": "Select role",
+      "roleTag": "Role: {{role}}",
+      "bindRole": "Bind role",
+      "expertNotFound": "Expert not found",
+      "profileMatched": "Matched to existing profile",
+      "profileCreated": "Profile created",
+      "profileCreateFailed": "Profile create failed: {{error}}",
       "executionMode": "Modo de ejecución",
       "executionReact": "Reactivo",
       "executionPlan": "Planificado",
@@ -4693,9 +4693,9 @@
       "roleReviewer": "Revisor",
       "roleSynthesizer": "Sintetizador",
       "roleExecutor": "Ejecutor",
-      "agent": "",
-      "roleCoordinator": "",
-      "roleBrowser": ""
+      "agent": "Agent",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser"
     },
     "conditionNode": {
       "title": "Condición",
@@ -7034,14 +7034,14 @@
     }
   },
   "agentRole": {
-    "coordinator": "",
-    "researcher": "",
-    "planner": "",
-    "developer": "",
-    "reviewer": "",
-    "browser": "",
-    "synthesizer": "",
-    "executor": ""
+    "coordinator": "Coordinator",
+    "researcher": "Researcher",
+    "planner": "Planner",
+    "developer": "Developer",
+    "reviewer": "Reviewer",
+    "browser": "Browser",
+    "synthesizer": "Synthesizer",
+    "executor": "Executor"
   },
   "stream": {
     "timeout": "⚠️ Tiempo de espera agotado (5 min sin actualización), detenido automáticamente"
@@ -7260,9 +7260,9 @@
     "yes": "Sí",
     "no": "No",
     "cancel": "Cancelar",
-    "createdSuccess": "",
-    "deletedSuccess": "",
-    "sampleAdded": "",
+    "createdSuccess": "Dataset created",
+    "deletedSuccess": "Dataset deleted",
+    "sampleAdded": "Sample added",
     "createNew": "Crear nuevo dataset"
   },
   "loraConfig": {
@@ -7616,7 +7616,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "",
+    "sharesUnit": "shares",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",

@@ -5,8 +5,8 @@
     "description": "مساعد عمل يعمل بالذكاء الاصطناعي"
   },
   "artifact": {
-    "copiedToClipboard": "",
-    "copyFailed": ""
+    "copiedToClipboard": "Copied to clipboard",
+    "copyFailed": "Copy failed"
   },
   "nav": {
     "chat": "المحادثة",
@@ -555,8 +555,8 @@
         "AGENT_STATUS_INITIALIZING": "جارٍ التهيئة...",
         "AGENT_STATUS_CALLING_MODEL": "جارٍ استدعاء النموذج...",
         "AGENT_STATUS_STEER_APPLIED": "تم تطبيق {count} تعليمات توجيه",
-        "THINKING_BLOCK_START": "",
-        "THINKING_BLOCK_END": "",
+        "THINKING_BLOCK_START": "Start",
+        "THINKING_BLOCK_END": "End",
         "TITLE_NO_MESSAGES": "لا توجد رسائل لإنشاء عنوان",
         "SESSION_NO_MESSAGES_TO_COMPRESS": "لا توجد رسائل للضغط",
         "STEER_INSTRUCTION_TOO_LONG": "التعليمات طويلة جداً (الحد الأقصى 10KB)",
@@ -2518,9 +2518,9 @@
     "workflow": {
       "title": "إعدادات سير العمل",
       "description": "إدارة قوالب سير العمل وإعدادات المحرر",
-      "createdSuccess": "",
-      "deletedSuccess": "",
-      "sampleAdded": "",
+      "createdSuccess": "Created successfully",
+      "deletedSuccess": "Deleted successfully",
+      "sampleAdded": "Sample added",
       "createNew": "إنشاء قالب جديد",
       "visualEditor": "محرر مرئي",
       "visualEditorDesc": "إنشاء وتحرير سير العمل باستخدام محرر DAG بالسحب والإفلات",
@@ -2800,8 +2800,8 @@
     },
     "default": "افتراضي",
     "operationFailed": "فشلت العملية",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "إخفاء",
     "searchPlaceholder": "بحث...",
     "exportMarkdown": "Export Markdown",
@@ -2841,8 +2841,8 @@
   },
   "tray": {
     "show": "إظهار",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "إخفاء",
     "quit": "إنهاء"
   },
@@ -4310,15 +4310,15 @@
       "defaultCodePythonComment": "# Input: input\n# يتم تخزين القيمة المُعادة في output_var",
       "codeInputParams": "معلمات الإدخال: input",
       "codeReturnHint": "سيتم تخزين القيمة المرجعة في output_var",
-      "roleCoordinator": "",
-      "roleBrowser": "",
-      "selectRole": "",
-      "roleTag": "",
-      "bindRole": "",
-      "expertNotFound": "",
-      "profileMatched": "",
-      "profileCreated": "",
-      "profileCreateFailed": "",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser",
+      "selectRole": "Select role",
+      "roleTag": "Role: {{role}}",
+      "bindRole": "Bind role",
+      "expertNotFound": "Expert not found",
+      "profileMatched": "Matched to existing profile",
+      "profileCreated": "Profile created",
+      "profileCreateFailed": "Profile create failed: {{error}}",
       "executionMode": "وضع التنفيذ",
       "executionReact": "تفاعلي",
       "executionPlan": "مخطط",
@@ -4693,9 +4693,9 @@
       "roleReviewer": "مراجع",
       "roleSynthesizer": "مُركّب",
       "roleExecutor": "منفذ",
-      "agent": "",
-      "roleCoordinator": "",
-      "roleBrowser": ""
+      "agent": "Agent",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser"
     },
     "conditionNode": {
       "title": "شرط",
@@ -7034,14 +7034,14 @@
     }
   },
   "agentRole": {
-    "coordinator": "",
-    "researcher": "",
-    "planner": "",
-    "developer": "",
-    "reviewer": "",
-    "browser": "",
-    "synthesizer": "",
-    "executor": ""
+    "coordinator": "Coordinator",
+    "researcher": "Researcher",
+    "planner": "Planner",
+    "developer": "Developer",
+    "reviewer": "Reviewer",
+    "browser": "Browser",
+    "synthesizer": "Synthesizer",
+    "executor": "Executor"
   },
   "stream": {
     "timeout": "⚠️ انتهت مهلة التدفق (لا تحديثات لمدة 5 دقائق)، تم الإيقاف تلقائيًا"
@@ -7260,9 +7260,9 @@
     "yes": "نعم",
     "no": "No",
     "cancel": "إلغاء",
-    "createdSuccess": "",
-    "deletedSuccess": "",
-    "sampleAdded": "",
+    "createdSuccess": "Dataset created",
+    "deletedSuccess": "Dataset deleted",
+    "sampleAdded": "Sample added",
     "createNew": "إنشاء مجموعة بيانات جديدة"
   },
   "loraConfig": {
@@ -7616,7 +7616,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "",
+    "sharesUnit": "shares",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",

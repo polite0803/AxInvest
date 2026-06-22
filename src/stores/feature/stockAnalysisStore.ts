@@ -1445,10 +1445,23 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
         // 修复 #5: 三层回退全失败时记录警告，避免静默丢失决策
         if (!decision) {
+          const pmDump = pmRaw
+            ? {
+              keys: Object.keys(pmRaw as object),
+              hasResult: !!(pmRaw as Record<string, unknown>).result,
+              type: typeof pmRaw,
+            }
+            : null;
+          const outputDump = output !== undefined
+            ? { type: typeof output, keys: typeof output === "object" ? Object.keys(output as object) : null }
+            : null;
           console.warn(
             "[StockAnalysis] workflow-completed 三层回退均未能解析决策",
-            { hasPortfolioMgr: !!pmRaw, hasOutput: output !== undefined },
+            { hasPortfolioMgr: !!pmRaw, pmDump, hasOutput: output !== undefined, outputDump },
           );
+          if (pmRaw && typeof pmRaw === "object") {
+            console.log("[StockAnalysis] pmRaw 完整内容:", JSON.stringify(pmRaw, null, 2).slice(0, 2000));
+          }
         }
 
         // 增量合并 workflow-step-done 已填充的数据，避免覆盖实时进度

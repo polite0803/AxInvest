@@ -5,8 +5,8 @@
     "description": "Рабочий ассистент на основе ИИ"
   },
   "artifact": {
-    "copiedToClipboard": "",
-    "copyFailed": ""
+    "copiedToClipboard": "Copied to clipboard",
+    "copyFailed": "Copy failed"
   },
   "nav": {
     "chat": "Чат",
@@ -555,8 +555,8 @@
         "AGENT_STATUS_INITIALIZING": "Инициализация...",
         "AGENT_STATUS_CALLING_MODEL": "Вызов модели...",
         "AGENT_STATUS_STEER_APPLIED": "Применено {count} инструкция(й) управления",
-        "THINKING_BLOCK_START": "",
-        "THINKING_BLOCK_END": "",
+        "THINKING_BLOCK_START": "Start",
+        "THINKING_BLOCK_END": "End",
         "TITLE_NO_MESSAGES": "Нет сообщений для генерации заголовка",
         "SESSION_NO_MESSAGES_TO_COMPRESS": "Нет сообщений для сжатия",
         "STEER_INSTRUCTION_TOO_LONG": "Инструкция слишком длинная (макс 10КБ)",
@@ -2518,9 +2518,9 @@
     "workflow": {
       "title": "Настройки рабочего процесса",
       "description": "Управление шаблонами рабочих процессов и настройками редактора",
-      "createdSuccess": "",
-      "deletedSuccess": "",
-      "sampleAdded": "",
+      "createdSuccess": "Created successfully",
+      "deletedSuccess": "Deleted successfully",
+      "sampleAdded": "Sample added",
       "createNew": "Создать новый шаблон",
       "visualEditor": "Визуальный редактор",
       "visualEditorDesc": "Создание и редактирование рабочих процессов с помощью DAG-редактора",
@@ -2800,8 +2800,8 @@
     },
     "default": "По умолчанию",
     "operationFailed": "Операция не удалась",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "Скрыть",
     "searchPlaceholder": "Поиск...",
     "exportMarkdown": "Export Markdown",
@@ -2841,8 +2841,8 @@
   },
   "tray": {
     "show": "Показать",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "Скрыть",
     "quit": "Выход"
   },
@@ -3879,15 +3879,15 @@
       "defaultCodePythonComment": "# Input: input\n# Возвращаемое значение сохраняется в output_var",
       "codeInputParams": "Входные параметры: input",
       "codeReturnHint": "Возвращаемое значение будет сохранено в output_var",
-      "roleCoordinator": "",
-      "roleBrowser": "",
-      "selectRole": "",
-      "roleTag": "",
-      "bindRole": "",
-      "expertNotFound": "",
-      "profileMatched": "",
-      "profileCreated": "",
-      "profileCreateFailed": "",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser",
+      "selectRole": "Select role",
+      "roleTag": "Role: {{role}}",
+      "bindRole": "Bind role",
+      "expertNotFound": "Expert not found",
+      "profileMatched": "Matched to existing profile",
+      "profileCreated": "Profile created",
+      "profileCreateFailed": "Profile create failed: {{error}}",
       "executionMode": "Режим выполнения",
       "executionReact": "Реактивный",
       "executionPlan": "Плановый",
@@ -4262,9 +4262,9 @@
       "roleReviewer": "Рецензент",
       "roleSynthesizer": "Синтезатор",
       "roleExecutor": "Исполнитель",
-      "agent": "",
-      "roleCoordinator": "",
-      "roleBrowser": ""
+      "agent": "Agent",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser"
     },
     "conditionNode": {
       "title": "Условие",
@@ -7034,14 +7034,14 @@
     }
   },
   "agentRole": {
-    "coordinator": "",
-    "researcher": "",
-    "planner": "",
-    "developer": "",
-    "reviewer": "",
-    "browser": "",
-    "synthesizer": "",
-    "executor": ""
+    "coordinator": "Coordinator",
+    "researcher": "Researcher",
+    "planner": "Planner",
+    "developer": "Developer",
+    "reviewer": "Reviewer",
+    "browser": "Browser",
+    "synthesizer": "Synthesizer",
+    "executor": "Executor"
   },
   "stream": {
     "timeout": "⚠️ Тайм-аут потока (нет обновлений 5 мин), автоматически остановлен"
@@ -7260,9 +7260,9 @@
     "yes": "Да",
     "no": "No",
     "cancel": "Отмена",
-    "createdSuccess": "",
-    "deletedSuccess": "",
-    "sampleAdded": "",
+    "createdSuccess": "Dataset created",
+    "deletedSuccess": "Dataset deleted",
+    "sampleAdded": "Sample added",
     "createNew": "Создать новый датасет"
   },
   "loraConfig": {
@@ -7616,7 +7616,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "",
+    "sharesUnit": "shares",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",

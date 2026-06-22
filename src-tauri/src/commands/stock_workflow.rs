@@ -926,16 +926,65 @@ async fn run_stock_workflow_inner(
                 is_secret: false,
             });
         }
-        // 注入市场状态（沪深300判断牛/熊/震荡）
-        if let Some(ref regime) = market_regime_json {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "market_regime".into(),
-                var_type: "object".into(),
-                value: regime.clone(),
-                description: Some("当前市场状态(bull/bear/sideways)+波动率+描述".into()),
-                is_secret: false,
-            });
-        }
+        // 注入市场状态（沪深300判断牛/熊/震荡），兜底防止模板变量缺失
+        let regime_value = market_regime_json.unwrap_or_else(|| {
+            serde_json::json!({
+                "regime": "unknown",
+                "confidence": null,
+                "volatility": null,
+                "description": "⚠️ 市场状态数据暂不可用（沪深300 K线拉取失败），请勿据此做多空判断，基于个股自身数据完成分析"
+            })
+        });
+        merged_vars.push(axagent_harness::workflow_types::Variable {
+            name: "market_regime".into(),
+            var_type: "object".into(),
+            value: regime_value.clone(),
+            description: Some("当前市场状态(bull/bear/sideways)+波动率+描述".into()),
+            is_secret: false,
+        });
+        // 从 market_regime 派生 prompt 偏向 + 触发规则
+        let regime_str = regime_value["regime"].as_str().unwrap_or("unknown");
+        let vol_str = regime_value["volatility"].as_str().unwrap_or("low");
+        let (regime_prompt_bias, regime_triggered_rules) = match (regime_str, vol_str) {
+            ("bull", "high") => (
+                "顺势偏多但高波动环境：关注业绩超预期+资金流入，同时警惕短期大幅回撤",
+                "1. 侧重成长性指标（营收增速、ROE趋势）；2. 估值容忍度可适当放宽；3. 关注大单资金流向；4. 高波动环境需关注最大回撤",
+            ),
+            ("bull", _) => (
+                "顺势偏多：关注业绩超预期+资金流入，警惕追高",
+                "1. 侧重成长性指标（营收增速、ROE趋势）；2. 估值容忍度可适当放宽；3. 关注大单资金流向",
+            ),
+            ("bear", "high") => (
+                "防御为主+高波动环境：严格关注低估值+稳健现金流，警惕杀估值+踩踏风险",
+                "1. 侧重防御性指标（现金流、负债率）；2. 估值要求更严格；3. 关注避险资金流向；4. 高波动环境建议降低仓位",
+            ),
+            ("bear", _) => (
+                "防御为主：关注低估值+稳健现金流，警惕杀估值",
+                "1. 侧重防御性指标（现金流、负债率）；2. 估值要求更严格；3. 关注避险资金流向",
+            ),
+            ("sideways", _) => (
+                "精选个股：关注催化剂+预期差，警惕无主线行情",
+                "1. 侧重个股α；2. 关注催化剂事件；3. 估值锚定历史中枢",
+            ),
+            _ => (
+                "市场状态未知，不预设多空偏向，仅基于个股自身基本面完成分析",
+                "无触发规则，全维度中性分析",
+            ),
+        };
+        merged_vars.push(axagent_harness::workflow_types::Variable {
+            name: "regime_prompt_bias".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(regime_prompt_bias.to_string()),
+            description: Some("按当前市场状态(regime)匹配的分析偏向指令".into()),
+            is_secret: false,
+        });
+        merged_vars.push(axagent_harness::workflow_types::Variable {
+            name: "regime_triggered_rules".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(regime_triggered_rules.to_string()),
+            description: Some("当前市场状态触发的分析规则清单".into()),
+            is_secret: false,
+        });
         // 注入历史反思教训（从 stock_reflections 表取最近的结构化反思结果）
         let lessons_str = fetch_stock_lessons(&stock_code, &db).await;
         if let Some(ref lessons) = lessons_str {

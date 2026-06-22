@@ -5,8 +5,8 @@
     "description": "AI-संचालित वर्क असिस्टेंट"
   },
   "artifact": {
-    "copiedToClipboard": "",
-    "copyFailed": ""
+    "copiedToClipboard": "Copied to clipboard",
+    "copyFailed": "Copy failed"
   },
   "nav": {
     "chat": "चैट",
@@ -555,8 +555,8 @@
         "AGENT_STATUS_INITIALIZING": "प्रारंभ हो रहा है...",
         "AGENT_STATUS_CALLING_MODEL": "मॉडल को कॉल कर रहा है...",
         "AGENT_STATUS_STEER_APPLIED": "{count} निर्देश लागू किए गए",
-        "THINKING_BLOCK_START": "",
-        "THINKING_BLOCK_END": "",
+        "THINKING_BLOCK_START": "Start",
+        "THINKING_BLOCK_END": "End",
         "TITLE_NO_MESSAGES": "शीर्षक बनाने के लिए कोई संदेश नहीं मिला",
         "SESSION_NO_MESSAGES_TO_COMPRESS": "संपीड़ित करने के लिए कोई संदेश नहीं",
         "STEER_INSTRUCTION_TOO_LONG": "निर्देश बहुत लंबा है (अधिकतम 10KB)",
@@ -2325,9 +2325,9 @@
     "workflow": {
       "title": "वर्कफ़्लो सेटिंग्स",
       "description": "वर्कफ़्लो टेम्पलेट और संपादक सेटिंग्स प्रबंधित करें",
-      "createdSuccess": "",
-      "deletedSuccess": "",
-      "sampleAdded": "",
+      "createdSuccess": "Created successfully",
+      "deletedSuccess": "Deleted successfully",
+      "sampleAdded": "Sample added",
       "createNew": "नया टेम्पलेट बनाएं",
       "visualEditor": "विज़ुअल संपादक",
       "visualEditorDesc": "ड्रैग-एंड-ड्रॉप DAG संपादक से वर्कफ़्लो बनाएं",
@@ -2800,8 +2800,8 @@
     },
     "default": "डिफ़ॉल्ट",
     "operationFailed": "ऑपरेशन विफल",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "छिपाएँ",
     "searchPlaceholder": "खोजें...",
     "exportMarkdown": "Export Markdown",
@@ -2841,8 +2841,8 @@
   },
   "tray": {
     "show": "दिखाएँ",
-    "key": "",
-    "value": "",
+    "key": "Key",
+    "value": "Value",
     "hide": "छुपाएँ",
     "quit": "बाहर निकलें"
   },
@@ -4310,15 +4310,15 @@
       "defaultCodePythonComment": "# Input: input\n# रिटर्न मान output_var में सहेजा जाता है",
       "codeInputParams": "इनपुट पैरामीटर: input",
       "codeReturnHint": "वापसी मान output_var में संग्रहीत किया जाएगा",
-      "roleCoordinator": "",
-      "roleBrowser": "",
-      "selectRole": "",
-      "roleTag": "",
-      "bindRole": "",
-      "expertNotFound": "",
-      "profileMatched": "",
-      "profileCreated": "",
-      "profileCreateFailed": "",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser",
+      "selectRole": "Select role",
+      "roleTag": "Role: {{role}}",
+      "bindRole": "Bind role",
+      "expertNotFound": "Expert not found",
+      "profileMatched": "Matched to existing profile",
+      "profileCreated": "Profile created",
+      "profileCreateFailed": "Profile create failed: {{error}}",
       "executionMode": "निष्पादन मोड",
       "executionReact": "रिएक्टिव",
       "executionPlan": "नियोजित",
@@ -4693,9 +4693,9 @@
       "roleReviewer": "समीक्षक",
       "roleSynthesizer": "सिंथेसाइज़र",
       "roleExecutor": "निष्पादक",
-      "agent": "",
-      "roleCoordinator": "",
-      "roleBrowser": ""
+      "agent": "Agent",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser"
     },
     "conditionNode": {
       "title": "शर्त",
@@ -7034,14 +7034,14 @@
     }
   },
   "agentRole": {
-    "coordinator": "",
-    "researcher": "",
-    "planner": "",
-    "developer": "",
-    "reviewer": "",
-    "browser": "",
-    "synthesizer": "",
-    "executor": ""
+    "coordinator": "Coordinator",
+    "researcher": "Researcher",
+    "planner": "Planner",
+    "developer": "Developer",
+    "reviewer": "Reviewer",
+    "browser": "Browser",
+    "synthesizer": "Synthesizer",
+    "executor": "Executor"
   },
   "stream": {
     "timeout": "⚠️ स्ट्रीम टाइमआउट (5 मिनट से कोई अपडेट नहीं), स्वचालित रूप से रोका गया"
@@ -7260,9 +7260,9 @@
     "yes": "हाँ",
     "no": "No",
     "cancel": "रद्द करें",
-    "createdSuccess": "",
-    "deletedSuccess": "",
-    "sampleAdded": "",
+    "createdSuccess": "Dataset created",
+    "deletedSuccess": "Dataset deleted",
+    "sampleAdded": "Sample added",
     "createNew": "नया डेटासेट बनाएं"
   },
   "loraConfig": {
@@ -7616,7 +7616,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "",
+    "sharesUnit": "shares",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",

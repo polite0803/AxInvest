@@ -5,8 +5,8 @@
     "description": "AI 기반 워크 어시스턴트"
   },
   "artifact": {
-    "copiedToClipboard": "",
-    "copyFailed": ""
+    "copiedToClipboard": "Copied to clipboard",
+    "copyFailed": "Copy failed"
   },
   "nav": {
     "chat": "채팅",
@@ -555,8 +555,8 @@
         "AGENT_STATUS_INITIALIZING": "초기화 중...",
         "AGENT_STATUS_CALLING_MODEL": "모델 호출 중...",
         "AGENT_STATUS_STEER_APPLIED": "{count}개의 스티어 지침을 적용했습니다",
-        "THINKING_BLOCK_START": "",
-        "THINKING_BLOCK_END": "",
+        "THINKING_BLOCK_START": "Start",
+        "THINKING_BLOCK_END": "End",
         "TITLE_NO_MESSAGES": "제목을 생성할 메시지가 없습니다",
         "SESSION_NO_MESSAGES_TO_COMPRESS": "압축할 메시지가 없습니다",
         "STEER_INSTRUCTION_TOO_LONG": "지시어가 너무 깁니다 (최대 10KB)",
@@ -2555,9 +2555,9 @@
     "workflow": {
       "title": "워크플로우 설정",
       "description": "워크플로우 템플릿 및 에디터 설정 관리",
-      "createdSuccess": "",
-      "deletedSuccess": "",
-      "sampleAdded": "",
+      "createdSuccess": "Created successfully",
+      "deletedSuccess": "Deleted successfully",
+      "sampleAdded": "Sample added",
       "createNew": "새 템플릿 만들기",
       "visualEditor": "비주얼 에디터",
       "visualEditorDesc": "드래그 앤 드롭 DAG 에디터로 워크플로우 만들기 및 편집",
@@ -2800,8 +2800,8 @@
     "retry": "재시도",
     "default": "기본값",
     "operationFailed": "작업 실패",
-    "key": "",
-    "value": "",
+    "key": "키",
+    "value": "값",
     "hide": "숨기기",
     "searchPlaceholder": "검색...",
     "exportMarkdown": "Export Markdown",
@@ -2874,8 +2874,8 @@
   },
   "tray": {
     "show": "표시",
-    "key": "",
-    "value": "",
+    "key": "키",
+    "value": "값",
     "hide": "숨기기",
     "quit": "종료"
   },
@@ -3879,15 +3879,15 @@
       "defaultCodePythonComment": "# Input: input\n# 반환 값은 output_var에 저장됩니다",
       "codeInputParams": "입력 매개변수: input",
       "codeReturnHint": "반환값은 output_var에 저장됩니다",
-      "roleCoordinator": "",
-      "roleBrowser": "",
-      "selectRole": "",
-      "roleTag": "",
-      "bindRole": "",
-      "expertNotFound": "",
-      "profileMatched": "",
-      "profileCreated": "",
-      "profileCreateFailed": "",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser",
+      "selectRole": "Select role",
+      "roleTag": "Role: {{role}}",
+      "bindRole": "Bind role",
+      "expertNotFound": "Expert not found",
+      "profileMatched": "Matched to existing profile",
+      "profileCreated": "Profile created",
+      "profileCreateFailed": "Profile create failed: {{error}}",
       "executionMode": "실행 모드",
       "executionReact": "반응형",
       "executionPlan": "계획형",
@@ -4262,9 +4262,9 @@
       "roleReviewer": "리뷰어",
       "roleSynthesizer": "신디사이저",
       "roleExecutor": "실행자",
-      "agent": "",
-      "roleCoordinator": "",
-      "roleBrowser": ""
+      "agent": "Agent",
+      "roleCoordinator": "Coordinator",
+      "roleBrowser": "Browser"
     },
     "conditionNode": {
       "title": "조건 판단",
@@ -7034,14 +7034,14 @@
     }
   },
   "agentRole": {
-    "coordinator": "",
-    "researcher": "",
-    "planner": "",
-    "developer": "",
-    "reviewer": "",
-    "browser": "",
-    "synthesizer": "",
-    "executor": ""
+    "coordinator": "Coordinator",
+    "researcher": "Researcher",
+    "planner": "Planner",
+    "developer": "Developer",
+    "reviewer": "Reviewer",
+    "browser": "Browser",
+    "synthesizer": "Synthesizer",
+    "executor": "Executor"
   },
   "stream": {
     "timeout": "⚠️ 스트림 시간 초과 (5분간 업데이트 없음), 자동 중지됨"
@@ -7260,9 +7260,9 @@
     "yes": "예",
     "no": "No",
     "cancel": "취소",
-    "createdSuccess": "",
-    "deletedSuccess": "",
-    "sampleAdded": "",
+    "createdSuccess": "Dataset created",
+    "deletedSuccess": "Dataset deleted",
+    "sampleAdded": "Sample added",
     "createNew": "새 데이터셋 만들기"
   },
   "loraConfig": {
@@ -7616,7 +7616,7 @@
     "unrealizedPnl": "Unrealized P&L",
     "concentration": "Concentration",
     "holdings": "Holdings",
-    "sharesUnit": "",
+    "sharesUnit": "주",
     "wanUnit": "0k",
     "analystCount": "{{current}}/{{total}} analysts",
     "debateRounds": "{{current}}/{{total}} rounds",

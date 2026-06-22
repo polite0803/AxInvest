@@ -8647,7 +8647,9 @@
       "aiDiscardOk": "삭제",
       "aiSelectAllBtn": "모두 선택",
       "aiSelectNoneBtn": "모두 해제",
-      "rollbackWarning": "버전 {{target}}로 롤백합니다"
+      "rollbackWarning": "버전 {{target}}로 롤백합니다",
+      "jumpToAnalysisBtn": "원본 분석으로 이동",
+      "jumpToAnalysisTooltip": "이 회고에 해당하는 원본 분석 기록 보기"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

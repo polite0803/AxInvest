@@ -8647,7 +8647,9 @@
       "aiDiscardOk": "Отменить",
       "aiSelectAllBtn": "Выбрать все",
       "aiSelectNoneBtn": "Снять выделение",
-      "rollbackWarning": "Откат к версии {{target}}"
+      "rollbackWarning": "Откат к версии {{target}}",
+      "jumpToAnalysisBtn": "Перейти к анализу",
+      "jumpToAnalysisTooltip": "Просмотреть исходную запись анализа для этого размышления"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

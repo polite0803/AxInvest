@@ -8775,7 +8775,9 @@
       "aiDiscardOk": "丟棄",
       "aiSelectAllBtn": "全選",
       "aiSelectNoneBtn": "全不選",
-      "rollbackWarning": "將回滾到版本 {{target}}"
+      "rollbackWarning": "將回滾到版本 {{target}}",
+      "jumpToAnalysisBtn": "跳轉到原 analysis",
+      "jumpToAnalysisTooltip": "查看此次反思對應的原始 analysis 記錄"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

@@ -17,11 +17,13 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import type { Dayjs } from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 const { Text } = Typography;
 
@@ -29,6 +31,8 @@ interface ReflectionRow {
   id: string;
   stockCode: string;
   stockName: string;
+  /** 关联的原始 analysis 记录 ID (手动反思时为空字符串) */
+  originalAnalysisId?: string;
   asOfDate: string;
   hindsightDate: string;
   actualOutcome: string;
@@ -737,6 +741,7 @@ function ExpandedReflectionRow(
     onRefresh?: () => Promise<void> | void;
   },
 ) {
+  const navigate = useNavigate();
   const suggestions = parseParamsSuggestion(row);
   const [checkedParams, setCheckedParams] = useState<string[]>([]);
   const [applying, setApplying] = useState(false);
@@ -902,7 +907,7 @@ function ExpandedReflectionRow(
   return (
     <div style={{ padding: "8px 0" }}>
       <Space direction="vertical" style={{ width: "100%" }}>
-        <Space>
+        <Space wrap>
           <Tag color="red">{row.actualOutcome}</Tag>
           <Tag>
             {row.reflectionDepth === "deep"
@@ -915,6 +920,23 @@ function ExpandedReflectionRow(
               hindsight: row.hindsightDate,
             })}
           </Text>
+          {
+            /* P2-12 修复: 跳转到原 analysis 记录 — 仅当 originalAnalysisId 非空时显示
+              (手动反思时为空字符串,此时原 analysis 不存在,按钮隐藏) */
+          }
+          {row.originalAnalysisId && row.originalAnalysisId.trim() !== "" && (
+            <Tooltip title={t("stockAnalysis.reflection.jumpToAnalysisTooltip")}>
+              <Button
+                size="small"
+                type="link"
+                onClick={() =>
+                  navigate(`/stock-analysis/${row.originalAnalysisId}`)}
+                style={{ padding: 0 }}
+              >
+                {t("stockAnalysis.reflection.jumpToAnalysisBtn")}
+              </Button>
+            </Tooltip>
+          )}
         </Space>
         <div>
           <Text strong>{t("stockAnalysis.reflection.causeLabel")}</Text>

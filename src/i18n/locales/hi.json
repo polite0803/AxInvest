@@ -8647,7 +8647,9 @@
       "aiDiscardOk": "छोड़ें",
       "aiSelectAllBtn": "सभी चुनें",
       "aiSelectNoneBtn": "सभी अचयनित करें",
-      "rollbackWarning": "संस्करण {{target}} पर रोलबैक होगा"
+      "rollbackWarning": "संस्करण {{target}} पर रोलबैक होगा",
+      "jumpToAnalysisBtn": "विश्लेषण पर जाएँ",
+      "jumpToAnalysisTooltip": "इस चिंतनशील के लिए मूल विश्लेषण रिकॉर्ड देखें"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

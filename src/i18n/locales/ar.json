@@ -8647,7 +8647,9 @@
       "aiDiscardOk": "تجاهل",
       "aiSelectAllBtn": "تحديد الكل",
       "aiSelectNoneBtn": "إلغاء تحديد الكل",
-      "rollbackWarning": "سيتم التراجع إلى الإصدار {{target}}"
+      "rollbackWarning": "سيتم التراجع إلى الإصدار {{target}}",
+      "jumpToAnalysisBtn": "الانتقال إلى التحليل",
+      "jumpToAnalysisTooltip": "عرض سجل التحليل الأصلي لهذا التأمل"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

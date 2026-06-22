@@ -8738,7 +8738,9 @@
       "aiDiscardOk": "破棄",
       "aiSelectAllBtn": "すべて選択",
       "aiSelectNoneBtn": "すべて解除",
-      "rollbackWarning": "バージョン {{target}} にロールバックします"
+      "rollbackWarning": "バージョン {{target}} にロールバックします",
+      "jumpToAnalysisBtn": "元の分析にジャンプ",
+      "jumpToAnalysisTooltip": "この振り返りに対応する元の分析記録を表示"
     },
     "portfolioMonitor": {
       "title": "株式分析",

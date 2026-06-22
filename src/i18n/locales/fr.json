@@ -8647,7 +8647,9 @@
       "aiDiscardOk": "Abandonner",
       "aiSelectAllBtn": "Tout sélectionner",
       "aiSelectNoneBtn": "Tout désélectionner",
-      "rollbackWarning": "Restauration à la version {{target}}"
+      "rollbackWarning": "Restauration à la version {{target}}",
+      "jumpToAnalysisBtn": "Aller à l'analyse",
+      "jumpToAnalysisTooltip": "Voir l'enregistrement d'analyse original pour cette réflexion"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

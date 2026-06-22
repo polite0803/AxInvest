@@ -8391,7 +8391,9 @@
       "aiDiscardOk": "Discard",
       "aiSelectAllBtn": "Select all",
       "aiSelectNoneBtn": "Deselect all",
-      "rollbackWarning": "Will rollback to version {{target}}"
+      "rollbackWarning": "Will rollback to version {{target}}",
+      "jumpToAnalysisBtn": "Jump to analysis",
+      "jumpToAnalysisTooltip": "View the original analysis record for this reflection"
     },
     "refreshing": "Refreshing",
     "regions": "Regional Blocks",

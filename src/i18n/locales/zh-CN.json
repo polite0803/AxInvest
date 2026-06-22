@@ -8632,7 +8632,9 @@
       "aiDiscardOk": "丢弃",
       "aiSelectAllBtn": "全选",
       "aiSelectNoneBtn": "全不选",
-      "rollbackWarning": "将回滚到版本 {{target}}"
+      "rollbackWarning": "将回滚到版本 {{target}}",
+      "jumpToAnalysisBtn": "跳转到原 analysis",
+      "jumpToAnalysisTooltip": "查看此次反思对应的原始 analysis 记录"
     },
     "portfolioMonitor": {
       "title": "组合监控",

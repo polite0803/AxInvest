@@ -8647,7 +8647,9 @@
       "aiDiscardOk": "Verwerfen",
       "aiSelectAllBtn": "Alle auswählen",
       "aiSelectNoneBtn": "Alle abwählen",
-      "rollbackWarning": "Rollback auf Version {{target}}"
+      "rollbackWarning": "Rollback auf Version {{target}}",
+      "jumpToAnalysisBtn": "Zur Analyse springen",
+      "jumpToAnalysisTooltip": "Originalanalyseaufzeichnung für diese Reflexion anzeigen"
     },
     "portfolioMonitor": {
       "title": "Portfolio Monitor",

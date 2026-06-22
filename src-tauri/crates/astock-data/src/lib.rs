@@ -36,7 +36,6 @@ pub use error::DataError;
 pub use types::*;
 // R3: 估值带（暴露在 crate 根，方便 commands 端直接 `axagent_astock_data::ValuationBand`）
 pub use valuation_band::{FinancialSnapshotLike, MetricBand, ValuationBand};
-use vendors::StockVendor;
 use vendors::akshare::AkshareVendor;
 use vendors::baidu_stock::BaiduStockVendor;
 use vendors::cninfo::CninfoVendor;
@@ -47,6 +46,7 @@ use vendors::sina::SinaVendor;
 use vendors::tencent::TencentVendor;
 use vendors::ths::ThsVendor;
 use vendors::xueqiu::XueqiuVendor;
+use vendors::StockVendor;
 
 type VendorRef = (String, Box<dyn StockVendor>);
 
@@ -3104,7 +3104,7 @@ mod asof_realtime_degrade_tests {
     //       网络失败会进 record_degradation,最终 live 路径兜底返回空
     #[tokio::test]
     async fn d_bug_fix_market_dragon_tiger_uses_capability() {
-        use crate::as_of::{AS_OF, peek_global_degradation_report};
+        use crate::as_of::{peek_global_degradation_report, AS_OF};
         let client = AStockClient::new();
         let date = NaiveDate::from_ymd_opt(2024, 3, 15).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();

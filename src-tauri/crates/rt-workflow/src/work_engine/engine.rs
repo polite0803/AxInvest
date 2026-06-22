@@ -1783,68 +1783,130 @@ impl WorkEngine {
                                 let child_eid_for_result = child_execution_id.clone();
 
                                 let (tx, rx) = tokio::sync::oneshot::channel();
-                                let rt = tokio::runtime::Handle::current();
-                                std::thread::spawn(move || {
-                                    let result = rt.block_on(async {
-                                        use axagent_core::repo::workflow_template;
+                                // 修复: 用独立 OS 线程 + 8MB 栈跑 sub-workflow。
+                                // 原因:
+                                //   1) 原 std::thread::spawn 默认 2MB 栈,放不下 run_workflow
+                                //      异步状态机(嵌套 await + 大 JSON 序列化)
+                                //      → STATUS_STACK_OVERFLOW
+                                //   2) 试过 tokio::task::block_in_place,但 Tauri v2 default
+                                //      runtime 是在 OS 主线程(1MB 栈)上创建 worker,
+                                //      block_in_place 跑在 1MB 栈的 worker 上,问题依旧
+                                // 唯一稳妥方案: 独立 OS 线程,显式 8MB 栈(等同 tokio
+                                // default worker),不跨 tokio::spawn 的 Send 约束。
+                                // 必须先在 Tauri runtime context 中捕获 Handle,move 到
+                                // std::thread 内,通过 rt_handle.block_on(async { ... })
+                                // 在外层 tokio runtime 中同步驱动 future 消费。
+                                let engine_for_sub = engine.clone();
+                                let sub_workflow_id_for_sub = sub_workflow_id.clone();
+                                let parent_execution_id_for_sub = parent_execution_id.clone();
+                                let input_vars_for_sub = input_vars.clone();
+                                let child_execution_id_for_sub = child_execution_id.clone();
+                                let child_eid_for_result_clone = child_eid_for_result.clone();
+                                // 在当前 tokio runtime 内取 handle
+                                let rt_handle = match tokio::runtime::Handle::try_current() {
+                                    Ok(h) => h,
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "sub-workflow: no tokio runtime handle in caller: {}",
+                                            e
+                                        );
+                                        let _ = tx.send(Err(format!(
+                                            "no tokio runtime in caller: {}",
+                                            e
+                                        )));
+                                        return Box::pin(async move {
+                                            rx.await.map_err(|_| {
+                                                "Sub-workflow task dropped".to_string()
+                                            })?
+                                        });
+                                    },
+                                };
+                                let thread_builder = std::thread::Builder::new()
+                                    .name("sub-workflow-runner".into())
+                                    .stack_size(8 * 1024 * 1024);
+                                // 8MB 独立 OS 线程跑 sub-workflow。spawn 失败(资源不足)
+                                // 会通过 std::io::Error 传播,此处不特殊处理 — 在普通
+                                // desktop 环境下不会发生;若真发生,thread 内部会立刻
+                                // 析构, rx 收到 Drop 后返回 "channel closed"。
+                                thread_builder
+                                    .spawn(move || {
+                                        let result: Result<(String, serde_json::Value), String> =
+                                            rt_handle.block_on(async {
+                                                use axagent_core::repo::workflow_template;
+                                                let engine = engine_for_sub;
+                                                let template =
+                                                    workflow_template::get_workflow_template(
+                                                        &engine.db,
+                                                        &sub_workflow_id_for_sub,
+                                                    )
+                                                    .await
+                                                    .map_err(|e| e.to_string())?
+                                                    .ok_or_else(|| {
+                                                        format!(
+                                                            "Template {} not found",
+                                                            sub_workflow_id_for_sub
+                                                        )
+                                                    })?;
 
-                                        let db = &engine.db;
-                                        let template = workflow_template::get_workflow_template(
-                                            db,
-                                            &sub_workflow_id,
-                                        )
-                                        .await
-                                        .map_err(|e| e.to_string())?
-                                        .ok_or_else(|| {
-                                            format!("Template {} not found", sub_workflow_id)
-                                        })?;
+                                                let nodes: Vec<WorkflowNode> =
+                                                    serde_json::from_str(&template.nodes).map_err(
+                                                        |e| format!("节点解析失败: {}", e),
+                                                    )?;
+                                                let edges: Vec<WorkflowEdge> =
+                                                    serde_json::from_str(&template.edges).map_err(
+                                                        |e| format!("边解析失败: {}", e),
+                                                    )?;
 
-                                        let nodes: Vec<WorkflowNode> =
-                                            serde_json::from_str(&template.nodes)
-                                                .map_err(|e| format!("节点解析失败: {}", e))?;
-                                        let edges: Vec<WorkflowEdge> =
-                                            serde_json::from_str(&template.edges)
-                                                .map_err(|e| format!("边解析失败: {}", e))?;
+                                                let workflow = engine
+                                                    .create_workflow(&template.name, nodes, edges)
+                                                    .await
+                                                    .map_err(|e| e.to_string())?;
+                                                let wid = workflow.id.clone();
 
-                                        let workflow = engine
-                                            .create_workflow(&template.name, nodes, edges)
-                                            .await
-                                            .map_err(|e| e.to_string())?;
-                                        let wid = workflow.id.clone();
+                                                let input_value =
+                                                    serde_json::to_value(&input_vars_for_sub)
+                                                        .unwrap_or(serde_json::json!({}));
 
-                                        let input_value = serde_json::to_value(&input_vars)
-                                            .unwrap_or(serde_json::json!({}));
+                                                let mut opts = RunOptions {
+                                                    execution_id: Some(child_execution_id_for_sub),
+                                                    input: Some(input_value),
+                                                    dry_run,
+                                                    parent_execution_id: Some(
+                                                        parent_execution_id_for_sub,
+                                                    ),
+                                                    model_id: model_id.clone(),
+                                                    provider_id: provider_id.clone(),
+                                                    step_timeout: sub_step_timeout,
+                                                    parent_cancel_token: Some(cancel_token.clone()),
+                                                    ..Default::default()
+                                                };
+                                                if let Some(cb) = progress_cb.clone() {
+                                                    opts = opts.with_progress_callback(cb);
+                                                }
 
-                                        let mut opts = RunOptions {
-                                            execution_id: Some(child_execution_id),
-                                            input: Some(input_value),
-                                            dry_run,
-                                            parent_execution_id: Some(parent_execution_id),
-                                            model_id,
-                                            provider_id,
-                                            step_timeout: sub_step_timeout,
-                                            parent_cancel_token: Some(cancel_token),
-                                            ..Default::default()
-                                        };
-                                        if let Some(cb) = progress_cb {
-                                            opts = opts.with_progress_callback(cb);
-                                        }
+                                                let result = engine
+                                                    .run_workflow(&wid, opts)
+                                                    .await
+                                                    .map_err(|e| e.to_string())?;
 
-                                        let result = engine
-                                            .run_workflow(&wid, opts)
-                                            .await
-                                            .map_err(|e| e.to_string())?;
+                                                let output = result
+                                                    .output
+                                                    .unwrap_or_else(|| serde_json::json!({}));
 
-                                        let output =
-                                            result.output.unwrap_or_else(|| serde_json::json!({}));
-
-                                        Ok::<(String, serde_json::Value), String>((
-                                            child_eid_for_result,
-                                            output,
-                                        ))
-                                    });
-                                    let _ = tx.send(result);
-                                });
+                                                Ok::<(String, serde_json::Value), String>((
+                                                    child_eid_for_result_clone,
+                                                    output,
+                                                ))
+                                            });
+                                        let _ = tx.send(result);
+                                    })
+                                    .map_err(|e| {
+                                        tracing::error!(
+                                            "Failed to spawn sub-workflow thread: {}",
+                                            e
+                                        );
+                                    })
+                                    .ok();
                                 Box::pin(async move {
                                     rx.await
                                         .map_err(|_| "Sub-workflow task dropped".to_string())?

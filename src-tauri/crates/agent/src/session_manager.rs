@@ -775,8 +775,14 @@ impl SessionManager {
 
     /// 同步版本：在无法使用 .await 的上下文中获取进度
     pub fn get_progress_sync(&self, conversation_id: &str) -> Option<Arc<AgentExecutionProgress>> {
-        let trackers = self.progress_trackers.blocking_read();
-        trackers.get(conversation_id).cloned()
+        // 使用 try_read 避免在 Tokio runtime 上下文中 panic,若锁被持有则返回 None
+        match self.progress_trackers.try_read() {
+            Ok(trackers) => trackers.get(conversation_id).cloned(),
+            Err(e) => {
+                tracing::warn!("[session_manager] get_progress_sync try_read 失败: {e}");
+                None
+            },
+        }
     }
 }
 

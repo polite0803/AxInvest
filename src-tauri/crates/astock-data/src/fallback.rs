@@ -206,11 +206,10 @@ mod tests {
     #[test]
     fn chain_financials_uses_fill_step() {
         let c = FallbackChain::a_share_financials();
-        assert!(
-            c.steps
-                .iter()
-                .any(|s| matches!(s, FallbackStep::FillFinancials { .. }))
-        );
+        assert!(c
+            .steps
+            .iter()
+            .any(|s| matches!(s, FallbackStep::FillFinancials { .. })));
     }
 
     #[test]

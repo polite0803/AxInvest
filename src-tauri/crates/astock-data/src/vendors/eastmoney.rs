@@ -700,9 +700,13 @@ impl StockVendor for EastMoneyVendor {
                     let board_json: Value = resp.json().await.unwrap_or(Value::Null);
                     let diff = &board_json["data"]["diff"];
                     let f = |key: &str| {
-                        diff.get(0)
-                            .and_then(|row| row[key].as_f64())
-                            .and_then(|v| if v > 0.0 { Some(v / 100.0) } else { None })
+                        diff.get(0).and_then(|row| row[key].as_f64()).and_then(|v| {
+                            if v > 0.0 {
+                                Some(v / 100.0)
+                            } else {
+                                None
+                            }
+                        })
                     };
                     (f("f162"), f("f167"))
                 },
@@ -717,9 +721,13 @@ impl StockVendor for EastMoneyVendor {
                     let board_json: Value = resp.json().await.unwrap_or(Value::Null);
                     let diff = &board_json["data"]["diff"];
                     let f = |key: &str| {
-                        diff.get(0)
-                            .and_then(|row| row[key].as_f64())
-                            .and_then(|v| if v > 0.0 { Some(v / 100.0) } else { None })
+                        diff.get(0).and_then(|row| row[key].as_f64()).and_then(|v| {
+                            if v > 0.0 {
+                                Some(v / 100.0)
+                            } else {
+                                None
+                            }
+                        })
                     };
                     (f("f162"), f("f167"))
                 },

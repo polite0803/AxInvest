@@ -561,6 +561,7 @@ const StepRow = memo(function StepRow({
                 className="text-zinc-500 tabular-nums"
                 title={t("chat.workflow.elapsedHint")}
               >
+                {/* eslint-disable-next-line react-hooks/purity */}
                 · {formatElapsed(Math.max(0, Math.floor(Date.now() / 1000) - step.started_at))}
               </span>
             )}

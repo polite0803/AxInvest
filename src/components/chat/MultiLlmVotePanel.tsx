@@ -130,18 +130,15 @@ export function aggregateVotes(
   const allAgree = Object.keys(breakdown).length <= 1;
 
   let finalAction: string | null = null;
-  let winner: ModelVote | null = null;
 
   if (strategy === "consensus") {
     // 全员一致:必须 Object.keys(breakdown).length === 1
     if (allAgree) {
       finalAction = Object.keys(breakdown)[0] ?? null;
-      winner = votes[0] ?? null;
     } else {
       // 无共识:回退到 weighted
       const sorted = Object.entries(weightedBreakdown).sort((a, b) => b[1] - a[1]);
       finalAction = sorted[0]?.[0] ?? null;
-      winner = votes.find((v) => v.action === finalAction) ?? null;
     }
   } else if (strategy === "majority") {
     // 多数票:取票数最多的 action;并列时取 confidence 加权更高者
@@ -157,13 +154,13 @@ export function aggregateVotes(
         .sort((x, y) => y.w - x.w);
       finalAction = tiedWeighted[0]?.a ?? null;
     }
-    winner = votes.find((v) => v.action === finalAction) ?? null;
   } else {
     // weighted:按 confidence 加权
     const sorted = Object.entries(weightedBreakdown).sort((a, b) => b[1] - a[1]);
     finalAction = sorted[0]?.[0] ?? null;
-    winner = votes.find((v) => v.action === finalAction) ?? null;
   }
+
+  const winner = votes.find((v) => v.action === finalAction) ?? null;
 
   return {
     strategy,

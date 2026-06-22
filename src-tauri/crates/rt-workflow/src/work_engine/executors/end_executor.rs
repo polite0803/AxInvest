@@ -58,7 +58,9 @@ impl NodeExecutorTrait for EndExecutor {
 
         Ok(NodeOutput {
             output,
-            output_var: end_node.config.output_var.clone(),
+            // 使用节点自身 ID 作为 output_var，避免覆盖被包装源节点(如 portfolio-mgr)的
+            // 原始输出。config.output_var 仅用于指定"读取哪个变量"，不应同时作为存储 key。
+            output_var: Some(node.base_id().to_string()),
         })
     }
 }

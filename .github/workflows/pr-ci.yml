@@ -203,8 +203,8 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright browsers
-        # 这里用单行写法以让 pr-ci.workflow.test.ts 的正则 /run:\s*npx[^\n]*playwright\s+install/ 命中。
-        run: npx --yes playwright install chromium --with-deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium
 
       - name: Run E2E tests
         run: npm run test:e2e

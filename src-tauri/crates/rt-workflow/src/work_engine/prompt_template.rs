@@ -215,10 +215,10 @@ pub fn render_prompt(
             TemplateSegment::Slot(path) => {
                 let value = resolve_dot_path(path, variables).or_else(|err| {
                     // 仅 VariableNotFound 才回退到 builtin_vars;PathTraversalError 严格上报
-                    if matches!(err, TemplateRenderError::VariableNotFound { .. }) {
-                        if let Some(v) = builtin_value_map.get(path) {
-                            return Ok(v);
-                        }
+                    if matches!(err, TemplateRenderError::VariableNotFound { .. })
+                        && let Some(v) = builtin_value_map.get(path)
+                    {
+                        return Ok(v);
                     }
                     Err(err)
                 })?;

@@ -776,6 +776,18 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
         parameters: stock_code_params(),
     };
+    // Phase 2: 预聚合的基本面分析报告（markdown 格式）。
+    // 由 a-fundamentals 节点通过 t-fundamentals-data 预拉,作为冷启动 context 输入,
+    // 避免 LLM 在大量原始财报上重复计算同比/环比/健康度等基础比率。
+    let td_fundamentals_report = ToolDef {
+        name: "get_fundamentals_report_markdown".into(),
+        description: Some(
+            "获取基本面分析报告(预聚合 markdown):含 PE/PB/ROE/同比环比/估值带/0-100 健康度评分 \
+             与质量等级。返回字符串,直接消费"
+                .into(),
+        ),
+        parameters: stock_code_params(),
+    };
     let mut news_props = std::collections::HashMap::new();
     news_props.insert("stock_code".into(), sc_prop("6位股票代码"));
     news_props.insert("limit".into(), int_prop("新闻数量", Some(30)));
@@ -1128,6 +1140,8 @@ async fn seed_stock_analysis_workflow_template(
         ("get_stock_quote", td_quote.clone()),
         ("get_stock_kline", td_kline.clone()),
         ("get_stock_financials", td_fin.clone()),
+        // Phase 2: 基本面报告(markdown)由 t-fundamentals-data 节点调用
+        ("get_fundamentals_report_markdown", td_fundamentals_report.clone()),
         ("get_stock_news", td_news.clone()),
         ("get_stock_money_flow", td_mf.clone()),
         ("compute_scoring", td_score.clone()),
@@ -1324,7 +1338,19 @@ async fn seed_stock_analysis_workflow_template(
         // 修复 P1: 基本面分析师前置数据改用 get_stock_financials（财报）而非
         // get_consensus_eps（一致预期），让 a-fundamentals 启动时就能拿到
         // 营收/利润/资产负债等核心财务数据。
-        ("t-fundamentals-data", "获取财务数据", "get_stock_financials", "stock_code"),
+        //
+        // Phase 2: 升级为 get_fundamentals_report_markdown —— 工作流引擎在 a-fundamentals
+        // 启动前预拉"预聚合 markdown 报告"(健康度评分/估值带/同比环比/质量等级)。
+        // LLM 启动时直接消费 markdown,引用 system_pre_computed 字段
+        // (health_score / valuation_state / safety_margin_pct / yoy_*),
+        // 避免在大量原始财报上重复计算基础比率。
+        // 注意: PROFILE_TOOLS 中仍保留 get_stock_financials,LLM 需要做更细颗粒分析时可主动调用。
+        (
+            "t-fundamentals-data",
+            "获取基本面报告(markdown)",
+            "get_fundamentals_report_markdown",
+            "stock_code",
+        ),
         // 修复 P1: 政策分析师前置数据改用 get_stock_news（新闻）而非
         // get_announcements（公告）。新闻覆盖宏观/产业政策动态更广，
         // 与 a-news 的公告视角形成互补。

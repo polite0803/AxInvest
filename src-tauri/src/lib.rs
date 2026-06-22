@@ -1078,6 +1078,13 @@ pub fn run() {
             commands::stock_analysis::get_stock_option_pcr,
             commands::stock_analysis::check_vendor_health,
             commands::stock_analysis::sweep_daily_snapshots,
+            // Phase 2: TradingAgents-CN 优势借鉴 — 批量查询 + 基本面报告 + 缓存统计
+            commands::stock_analysis::batch_get_quotes,
+            commands::stock_analysis::batch_get_klines,
+            commands::stock_analysis::batch_get_financials,
+            commands::stock_analysis::generate_fundamentals_report,
+            commands::stock_analysis::get_fundamentals_report_markdown,
+            commands::stock_analysis::get_cache_stats,
             // 缺陷 E 修复: as-of 降级实时计数
             commands::stock_analysis::get_asof_degradation_count,
             commands::stock_analysis::get_asof_degradation_log,

@@ -51,6 +51,8 @@ hex = "0.4"
 image = { version = "0.25", features = ["png"] }
 lazy_static = "1"
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+moka = { version = "0.12", features = ["future"] }
+redb = "2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls", "http2", "gzip", "system-proxy"] }
 sea-orm = { version = "2.0.0-rc.40", features = ["sqlx-sqlite", "runtime-tokio-native-tls", "macros"] }
 serde = { version = "1", features = ["derive"] }

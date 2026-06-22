@@ -2434,12 +2434,64 @@ impl Tool for OptimizeAttentionWeightsTool {
                 "best_weights": best.map(|b| b["weights"].clone()),
                 "best_name": best.map(|b| b["name"].clone()),
                 "best_correlation": best.map(|b| b["correlation"].clone()),
-                "results": results,
-                "samples_count": samples.len(),
+                "samples": results.len(),
                 "note": "理想权重应使 attention_score 与 return 负相关（低关注→高收益）"
             })
             .to_string(),
         ))
+    }
+}
+
+// ── 3b. StockFundamentalsReportTool (Phase 2) ──
+// 工作流 t-fundamentals-data 节点调用此工具,生成预聚合的 markdown 基本面报告
+// (含 health_score / valuation_state / 同比环比 / 估值带),供 a-fundamentals agent
+// 启动时直接消费。避免 LLM 在大量原始财报上重复计算基础比率。
+pub struct StockFundamentalsReportTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockFundamentalsReportTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockFundamentalsReportTool {
+    fn name(&self) -> &str {
+        "get_fundamentals_report_markdown"
+    }
+    fn description(&self) -> &str {
+        "获取基本面分析报告(预聚合 markdown)：PE/PB/ROE/同比环比/估值带/0-100 健康度评分与质量等级。返回字符串,直接消费"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        // 1. 拉取实时行情
+        let quote = self
+            .client
+            .get_quote(code)
+            .await
+            .map_err(|e| te(format!("get_quote 失败: {e}")))?;
+        // 2. 拉取财务数据
+        let financials = self
+            .client
+            .get_financials(code)
+            .await
+            .map_err(|e| te(format!("get_financials 失败: {e}")))?;
+        // 3. 生成报告 + markdown (Phase 2 迁移后 FundamentalsAnalyzer 位于 astock-data)
+        let report = axagent_astock_data::fundamentals_report::FundamentalsAnalyzer::generate(
+            code,
+            &quote,
+            &financials,
+        );
+        Ok(ToolResult::success(report.to_markdown()))
     }
 }
 
@@ -2452,6 +2504,8 @@ pub fn register_stock_tools(
         Arc::new(StockQuoteTool::new(client.clone())),
         Arc::new(StockKlineTool::new(client.clone())),
         Arc::new(StockFinancialsTool::new(client.clone())),
+        // Phase 2: 基本面报告工具,被 t-fundamentals-data 工作流节点调用
+        Arc::new(StockFundamentalsReportTool::new(client.clone())),
         Arc::new(StockNewsTool::new(client.clone())),
         Arc::new(StockMoneyFlowTool::new(client.clone())),
         Arc::new(StockHotStocksTool::new(client.clone())),

@@ -7,14 +7,19 @@
 pub mod adjustment;
 pub mod as_of;
 pub mod as_of_capability;
+pub mod batch;
 pub mod calendar;
 pub mod daily_snapshot;
 pub mod disk_cache;
-mod error;
-pub mod gate; // 缺陷 F 修复: 并发门控
+pub mod error;
+pub mod fallback;
+pub mod fundamentals_report;
+pub mod gate;
 pub mod indicators;
 pub mod mcp_tools;
+pub mod two_tier_cache;
 pub mod types;
+pub mod validation;
 pub mod valuation_band;
 pub mod vendors;
 
@@ -1515,13 +1520,52 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<ResearchReport>, DataError> {
+        // P4: 按 vendor 申报的 capability 决策
+        // - NativeDateParam: vendor 支持 beginTime/endTime,走 _with_asof 真正按 as_of 窗口拉取
+        // - 其他: as-of 模式记降级,跳过(避免泄漏 2030-01-01 全量窗口)
+        if crate::as_of::is_asof_active() {
+            for name in self
+                .routing
+                .vendors_for("research_reports", &self.routing.research_reports)
+            {
+                if let Some(vendor) = self.find_vendor(name) {
+                    match vendor.asof_capability("get_research_reports") {
+                        AsOfCapability::NativeDateParam => {
+                            if let Ok(reports) =
+                                vendor.get_research_reports_with_asof(stock_code).await
+                            {
+                                // 双重保险:vendor 端已用 as_of 窗口拉取,这里再截一遍防御 vendor bug
+                                let reports = Self::truncate_research_reports_by_asof(reports);
+                                let cache_key = Self::cache_key_for("research_reports", stock_code);
+                                let json = serde_json::to_string(&reports).unwrap_or_default();
+                                self.cache_set(cache_key, json, 3600).await;
+                                return Ok(reports);
+                            }
+                        },
+                        _ => {
+                            crate::as_of::record_degradation(
+                                name,
+                                "get_research_reports",
+                                "vendor 不支持 as-of 参数,跳过(避免泄漏全量窗口)",
+                            );
+                            continue;
+                        },
+                    }
+                }
+            }
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_research_reports",
+                "as-of 模式所有 vendor 均未提供历史研报窗口",
+            );
+            return Ok(vec![]);
+        }
         for name in self
             .routing
             .vendors_for("research_reports", &self.routing.research_reports)
         {
             if let Some(vendor) = self.find_vendor(name) {
                 if let Ok(result) = vendor.get_research_reports(stock_code).await {
-                    let result = Self::truncate_research_reports_by_asof(result);
                     let cache_key = Self::cache_key_for("research_reports", stock_code);
                     let json = serde_json::to_string(&result).unwrap_or_default();
                     self.cache_set(cache_key, json, 3600).await;

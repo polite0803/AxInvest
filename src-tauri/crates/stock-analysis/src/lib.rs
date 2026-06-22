@@ -6,6 +6,9 @@ pub mod decision;
 pub mod decision_tracker;
 pub mod evolution_drift;
 pub mod exit_recommend;
+// Phase 2: fundamentals_report 迁移到 astock-data 层(被 tools crate 依赖),
+// 此处用 pub use 保持向后兼容。
+pub use axagent_astock_data::fundamentals_report;
 pub mod key_levels;
 pub mod market_regime;
 pub mod monitor;

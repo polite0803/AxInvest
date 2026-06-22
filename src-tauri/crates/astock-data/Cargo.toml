@@ -10,6 +10,9 @@ async-trait = "0.1"
 chrono = { workspace = true }
 encoding_rs = "0.8"
 flate2 = "1"
+futures = "0.3"
+moka = { workspace = true }
+redb = { workspace = true }
 reqwest = { workspace = true, features = ["cookies"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

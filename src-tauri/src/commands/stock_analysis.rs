@@ -1,5 +1,9 @@
 use crate::AppState;
 use axagent_astock_data::as_of::{self, AsOfContext};
+use axagent_astock_data::batch::{BatchRequest, BatchResult, BatchRunner, MarketBatchQuery};
+use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, FundamentalsReport};
+use axagent_astock_data::two_tier_cache::CacheStats;
+use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_core::entity::{
     financial_snapshots, portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades,
     watchlist_items,
@@ -435,6 +439,157 @@ pub async fn get_stock_kline(
         .await
     })
     .await
+}
+
+// ── Phase 2: TradingAgents-CN 优势借鉴 — 批量 + 基本面报告 + 缓存统计 ──
+
+/// 批量请求参数
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchQuotesRequest {
+    pub codes: Vec<String>,
+    /// 单只超时（毫秒），默认 8000
+    pub per_stock_timeout_ms: Option<u64>,
+    /// 总超时（毫秒），默认 30000
+    pub total_timeout_ms: Option<u64>,
+    /// 允许失败数（0 = 全部必须成功），默认 0
+    pub max_failures: Option<usize>,
+}
+
+/// 批量获取实时行情（DataFrame 风格）
+///
+/// 内部并发调 `get_quote`,受 `DomainGate` 限流。
+/// 失败股票不阻塞,集中在 `failures` 字段返回。
+#[tauri::command]
+pub async fn batch_get_quotes(
+    state: State<'_, AppState>,
+    request: BatchQuotesRequest,
+) -> Result<BatchResult<StockQuote>, String> {
+    use std::time::Duration;
+
+    let mut req = BatchRequest::new(request.codes);
+    if let Some(ms) = request.per_stock_timeout_ms {
+        req = req.with_per_stock_timeout(Duration::from_millis(ms));
+    }
+    if let Some(ms) = request.total_timeout_ms {
+        req = req.with_total_timeout(Duration::from_millis(ms));
+    }
+    if let Some(n) = request.max_failures {
+        req = req.with_max_failures(n);
+    }
+
+    let client = state.astock_client.clone();
+    let runner = BatchRunner::new(client);
+    Ok(runner.get_quotes_batch(req).await)
+}
+
+/// 批量获取 K 线
+#[tauri::command]
+pub async fn batch_get_klines(
+    state: State<'_, AppState>,
+    codes: Vec<String>,
+    period: String,
+    limit: u32,
+) -> Result<BatchResult<Vec<axagent_astock_data::KLine>>, String> {
+    let client = state.astock_client.clone();
+    let runner = BatchRunner::new(client);
+    Ok(runner.get_klines_batch(codes, &period, limit).await)
+}
+
+/// 批量获取财务数据
+#[tauri::command]
+pub async fn batch_get_financials(
+    state: State<'_, AppState>,
+    codes: Vec<String>,
+) -> Result<BatchResult<Vec<FinancialReport>>, String> {
+    let client = state.astock_client.clone();
+    let runner = BatchRunner::new(client);
+    Ok(runner.get_financials_batch(codes).await)
+}
+
+/// 基本面报告请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundamentalsReportRequest {
+    pub stock_code: String,
+    /// 是否同时返回 Markdown 渲染
+    pub include_markdown: Option<bool>,
+}
+
+/// 生成基本面分析报告（PE/PB/ROE/同比/估值带/健康度评分）
+///
+/// 喂给工作流 a-fundamentals 节点使用:
+/// 报告把 `FinancialReport` + 实时行情聚合成可读结构 + 0-100 健康度评分。
+#[tauri::command]
+pub async fn generate_fundamentals_report(
+    state: State<'_, AppState>,
+    request: FundamentalsReportRequest,
+) -> Result<FundamentalsReportEnvelope, String> {
+    let include_md = request.include_markdown.unwrap_or(true);
+
+    // 1. 拉取实时行情
+    let quote = state
+        .astock_client
+        .get_quote(&request.stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 2. 拉取财务数据（按时间倒序,首项为最新）
+    let financials = state
+        .astock_client
+        .get_financials(&request.stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 3. 生成报告
+    let report = FundamentalsAnalyzer::generate(&request.stock_code, &quote, &financials);
+    let markdown = if include_md {
+        Some(report.to_markdown())
+    } else {
+        None
+    };
+
+    // 4. 拼装返回（含可选 Markdown）
+    Ok(FundamentalsReportEnvelope { report, markdown })
+}
+
+/// 基本面报告包装（含可选 Markdown）
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundamentalsReportEnvelope {
+    pub report: FundamentalsReport,
+    pub markdown: Option<String>,
+}
+
+/// 仅获取 Markdown 渲染（轻量,不返回结构）
+#[tauri::command]
+pub async fn get_fundamentals_report_markdown(
+    state: State<'_, AppState>,
+    stock_code: String,
+) -> Result<String, String> {
+    let quote = state
+        .astock_client
+        .get_quote(&stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    let financials = state
+        .astock_client
+        .get_financials(&stock_code)
+        .await
+        .map_err(|e| e.to_string())?;
+    let report = FundamentalsAnalyzer::generate(&stock_code, &quote, &financials);
+    Ok(report.to_markdown())
+}
+
+/// 双层缓存统计
+#[tauri::command]
+pub async fn get_cache_stats() -> Result<CacheStats, String> {
+    // 当前 L1/L2 cache 由 astock_data 内部管理,后续可改为从 AppState 注入
+    // 这里返回 0/0,等 Phase 3 把 cache 提到 AppState 时再接
+    Ok(CacheStats {
+        l1_entries: 0,
+        l2_entries: 0,
+    })
 }
 
 /// 取消分析 — 设置取消令牌让后台任务停止

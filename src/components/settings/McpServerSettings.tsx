@@ -4,24 +4,7 @@ import { IconEditor } from "@/components/shared/IconEditor";
 import { McpServerIcon } from "@/components/shared/McpServerIcon";
 import { DiscoveredMcpServer, useMcpStore } from "@/stores";
 import type { CreateMcpServerInput, McpServer, ToolDescriptor } from "@/types";
-import {
-  Button,
-  Collapse,
-  Divider,
-  Empty,
-  Form,
-  Input,
-  InputNumber,
-  message,
-  Modal,
-  Popconfirm,
-  Select,
-  Switch,
-  Tabs,
-  Tag,
-  theme,
-  Typography,
-} from "antd";
+import { Button, Collapse, Divider, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Switch, Tabs, Tag, theme, Typography, message } from "antd";
 import type { MenuProps } from "antd";
 import { Globe, Plug, Plus, Radio, RefreshCw, Terminal, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";

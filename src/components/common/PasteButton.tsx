@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { Button, message, theme } from "antd";
+import { Button, theme, App } from "antd";
 import { ClipboardPaste } from "lucide-react";
 import React, { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,6 +26,7 @@ export const PasteButton: React.FC<PasteButtonProps> = ({
   style,
   tooltip,
 }) => {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [loading, setLoading] = React.useState(false);

@@ -2,7 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import type { SkillManifest } from "@/types";
-import { Button, Input, message, Modal, Space, Tabs, Typography } from "antd";
+import { Button, Input, Modal, Space, Tabs, Typography, App } from "antd";
 import { Lightbulb } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,6 +33,7 @@ export function FrontendEditorModal({
   onClose,
   onSaved,
 }: FrontendEditorModalProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [editorTab, setEditorTab] = useState<"json" | "preview">("json");
   const [jsonText, setJsonText] = useState(() => formatJson(DEFAULT_MANIFEST));

@@ -1,6 +1,6 @@
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
-import { Button, Input, InputNumber, message, Select, Slider, Space, Switch, Tag, theme } from "antd";
+import { Button, Input, InputNumber, Select, Slider, Space, Switch, Tag, theme, App } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "./SettingsGroup";
@@ -278,6 +278,7 @@ function VariableControl({ v, value, onChange }: {
 }
 
 export function StockAnalysisConfigPanel(_props: Props) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [template, setTemplate] = useState<WorkflowTemplateResponse | null>(null);

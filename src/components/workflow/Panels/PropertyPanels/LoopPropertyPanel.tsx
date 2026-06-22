@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useWorkflowEditorStore } from "@/stores";
-import { Divider, Input, InputNumber, message, Select, Switch, Tag, theme } from "antd";
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+import { Divider, Input, InputNumber, Select, Switch, Tag, theme, message } from "antd";
 import { X } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";

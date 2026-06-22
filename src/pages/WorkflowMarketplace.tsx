@@ -4,23 +4,7 @@ import { ImportExportModal } from "@/components/workflow/Templates/ImportExportM
 import { invoke, logIpcError } from "@/lib/invoke";
 import { MarketplaceStats, reviewApi, ReviewResponse } from "@/lib/reviewApi";
 import { DownloadOutlined, DownloadOutlined as DLOutlined, StarOutlined, UploadOutlined } from "@ant-design/icons";
-import {
-  Button,
-  Card,
-  Empty,
-  Form,
-  Input,
-  List,
-  message,
-  Modal,
-  Rate,
-  Space,
-  Spin,
-  Tabs,
-  Tag,
-  theme,
-  Typography,
-} from "antd";
+import { Button, Card, Empty, Form, Input, List, Modal, Rate, Space, Spin, Tabs, Tag, theme, Typography, App } from "antd";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -173,6 +157,7 @@ function TemplateCard({
 }
 
 export function WorkflowMarketplace() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [importModalOpen, setImportModalOpen] = useState(false);

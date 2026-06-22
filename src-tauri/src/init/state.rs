@@ -20,13 +20,9 @@ use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
 use axagent_dao::repo::news_archive::{
     upsert_batch as dao_upsert_news, ArchivedNews, NewsArchiveEntry,
 };
-use axagent_entities::news_archive as news_archive_entity;
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
-use sea_orm::ColumnTrait;
 use sea_orm::EntityTrait;
-use sea_orm::QueryFilter;
-use sea_orm::Set;
 use tokio_util::sync::CancellationToken;
 
 /// P6:`NewsArchiveSink` 的具体实现

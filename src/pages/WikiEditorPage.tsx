@@ -12,7 +12,7 @@ import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { Note } from "@/types";
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, HistoryOutlined, SaveOutlined } from "@ant-design/icons";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Button, message, Modal, Popconfirm, Select, Spin, theme } from "antd";
+import { Button, Modal, Popconfirm, Select, Spin, theme, App } from "antd";
 import DOMPurify from "dompurify";
 import {
   ArrowLeft,
@@ -47,6 +47,7 @@ function markdownToHtml(md: string): string {
 }
 
 export function WikiEditorPage({ noteId, onBack }: WikiEditorPageProps) {
+  const { message } = App.useApp();
   const { token } = theme.useToken();
   const { t } = useTranslation();
   const { getNote, updateNote, deleteNote, notes, loadNotes, exportNotePdf } = useWikiStore();

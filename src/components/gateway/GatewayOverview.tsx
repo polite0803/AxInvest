@@ -3,7 +3,7 @@
 import { CopyButton } from "@/components/common/CopyButton";
 import { useGatewayStore } from "@/stores";
 import type { GatewayRequestLog } from "@/types";
-import { Button, Card, Col, Empty, message, Row, Statistic, Table, Tag, theme } from "antd";
+import { Button, Card, Col, Empty, Row, Statistic, Table, Tag, theme, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ArrowDown, ArrowUp, PlayCircle, Power, RefreshCw, Router } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +15,7 @@ interface GatewayOverviewProps {
 }
 
 export function GatewayOverview({ onViewMoreLogs }: GatewayOverviewProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const {

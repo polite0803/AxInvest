@@ -10,7 +10,7 @@ import {
   LeftOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import { Button, Card, message, Select, Space, Spin, Table, Tabs, Tag, theme, Typography } from "antd";
+import { Button, Card, Select, Space, Spin, Table, Tabs, Tag, theme, Typography, App } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
@@ -18,6 +18,7 @@ import { useNavigate, useParams } from "react-router-dom";
 const { Title, Text } = Typography;
 
 export function IngestPage() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const navigate = useNavigate();

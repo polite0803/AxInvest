@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Theme, ThemeColors, useThemeStore } from "@/stores/feature/themeStore";
-import { Button, Card, Form, Input, List, message, Modal, Popconfirm, Space, Typography } from "antd";
+import { Button, Card, Form, Input, List, Modal, Popconfirm, Space, Typography, App } from "antd";
 import { Check, Copy, Delete, RefreshCw, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -68,6 +68,7 @@ function ThemePreview({ colors, name }: ThemePreviewProps) {
 }
 
 export function ThemeManager() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const {
     currentTheme,

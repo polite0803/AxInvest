@@ -2,7 +2,7 @@
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Input, message, Select, Space, Spin, Switch, Tag } from "antd";
+import { Button, Card, Input, Select, Space, Spin, Switch, Tag, App } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -240,6 +240,7 @@ const CAP_LABELS: Record<string, string> = {
 type HealthStatus = "ok" | "fail" | "pending" | "idle";
 
 export function DataVendorsTab() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [vendorValues, setVendorValues] = useState<Record<string, boolean>>({});
   const [iwencaiKey, setIwencaiKey] = useState("");

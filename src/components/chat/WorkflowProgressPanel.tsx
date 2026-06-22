@@ -12,7 +12,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
 } from "@xyflow/react";
-import { Button, message, Spin, theme } from "antd";
+import { Button, Spin, theme, App } from "antd";
 import type { GlobalToken } from "antd/es/theme/interface";
 import {
   AlertTriangle,
@@ -614,6 +614,7 @@ const StepRow = memo(function StepRow({
 export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
   conversationId,
 }) => {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
 

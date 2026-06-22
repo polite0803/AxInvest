@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Button, Card, DatePicker, Input, InputNumber, message, Modal, Select, Space, Table } from "antd";
+import { Button, Card, DatePicker, Input, InputNumber, Modal, Select, Space, Table, App } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -22,6 +22,7 @@ interface FundSummary {
 }
 
 export function FundPanel() {
+  const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [transfers, setTransfers] = useState<FundTransfer[]>([]);
   const [summary, setSummary] = useState<FundSummary | null>(null);

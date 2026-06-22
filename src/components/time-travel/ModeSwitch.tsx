@@ -1,5 +1,5 @@
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { message, Modal, Tooltip } from "antd";
+import { Modal, Tooltip, App } from "antd";
 import { Clock, Zap } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,6 +19,7 @@ import { TimeAnchorTour } from "./TimeAnchorTour";
  *   - Replay → Live 切换要求 Modal 二次确认
  */
 export function ModeSwitch() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const mode = useTimeAnchorStore((s) => s.mode);
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);

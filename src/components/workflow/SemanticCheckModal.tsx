@@ -8,7 +8,7 @@ import {
 } from "@/components/workflow/semanticActions";
 import type { NodeSkillMatch, SkillMatchResult, SkillReplacementAction } from "@/components/workflow/types";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, Descriptions, message, Modal, Space, Tag, theme } from "antd";
+import { Button, Descriptions, Modal, Space, Tag, theme, App } from "antd";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -29,6 +29,7 @@ export const SemanticCheckModal: React.FC<SemanticCheckModalProps> = ({
   matches,
   onApplyReplacement,
 }) => {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { clearSemanticCheckResult } = useWorkflowEditorStore();

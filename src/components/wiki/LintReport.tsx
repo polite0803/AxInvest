@@ -11,7 +11,7 @@ import {
   ReloadOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
-import { Button, Card, Empty, message, Modal, Progress, Select, Space, Table, Tag, theme, Typography } from "antd";
+import { Button, Card, Empty, Modal, Progress, Select, Space, Table, Tag, theme, Typography, App } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -22,6 +22,7 @@ interface LintReportProps {
 }
 
 export function LintReport({ wikiId }: LintReportProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { lintNote, updateLintScore } = useLlmWikiStore();

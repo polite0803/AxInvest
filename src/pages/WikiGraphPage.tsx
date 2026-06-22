@@ -11,7 +11,7 @@ import { invoke } from "@/lib/invoke";
 import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import { FileAddOutlined, NodeIndexOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Button, Empty, Input, message, Select, Space, Spin, Tag, theme, Typography } from "antd";
+import { Button, Empty, Input, Select, Space, Spin, Tag, theme, Typography, App } from "antd";
 import { Eye, PanelLeft, PanelRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,6 +23,7 @@ const MAX_LEFT_PANEL = 400;
 const MAX_RIGHT_PANEL = 600;
 
 export function WikiGraphPage() {
+  const { message } = App.useApp();
   const { token } = theme.useToken();
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();

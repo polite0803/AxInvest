@@ -10,23 +10,7 @@ import {
   ReloadOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
-import {
-  Badge,
-  Button,
-  Card,
-  Col,
-  Empty,
-  List,
-  message,
-  Progress,
-  Row,
-  Space,
-  Spin,
-  Statistic,
-  Tag,
-  Tooltip,
-  Typography,
-} from "antd";
+import { Badge, Button, Card, Col, Empty, List, Progress, Row, Space, Spin, Statistic, Tag, Tooltip, Typography, App } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -43,6 +27,7 @@ export function SyncStatus({
   autoRefresh = false,
   refreshInterval = 30000,
 }: SyncStatusProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [queueItems, setQueueItems] = useState<SyncQueueItem[]>([]);

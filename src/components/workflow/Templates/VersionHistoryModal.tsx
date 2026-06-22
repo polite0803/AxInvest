@@ -2,7 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, List, message, Modal, Select, Spin, Tag, theme, Tooltip } from "antd";
+import { Button, List, Modal, Select, Spin, Tag, theme, Tooltip, App } from "antd";
 import { History, RotateCcw } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -112,6 +112,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
   onClose,
   onLoadVersion,
 }) => {
+  const { message } = App.useApp();
   const [versions, setVersions] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingVersions, setLoadingVersions] = useState(false);

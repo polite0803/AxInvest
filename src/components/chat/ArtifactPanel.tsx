@@ -12,7 +12,7 @@ import {
   EyeOutlined,
   MoreOutlined,
 } from "@ant-design/icons";
-import { Button, Card, message, Segmented, Space } from "antd";
+import { Button, Card, Segmented, Space, App } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArtifactPreview } from "./ArtifactPreview";
@@ -36,6 +36,7 @@ export function ArtifactPanel({
   onPreviewModeChange,
   onFullscreen,
 }: ArtifactPanelProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [currentMode, setCurrentMode] = useState<ArtifactPreviewMode>(previewMode);

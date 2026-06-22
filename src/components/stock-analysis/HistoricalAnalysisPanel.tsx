@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { getActionColor } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Input, message, Spin, Statistic, Tag } from "antd";
+import { Button, Card, Collapse, Empty, Input, Spin, Statistic, Tag, App } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -34,6 +34,7 @@ interface Props {
 }
 
 export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [loading, setLoading] = useState(false);

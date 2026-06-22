@@ -2,7 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Card, Empty, message, Spin, Switch, Table, Tag, Typography } from "antd";
+import { Button, Card, Empty, Spin, Switch, Table, Tag, Typography, App } from "antd";
 import { FolderOpen, PanelRight, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -35,6 +35,7 @@ const POSITION_COLORS: Record<string, string> = {
 };
 
 export function DashboardPluginsSettings() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [plugins, setPlugins] = useState<DashboardPluginInfo[]>([]);
   const [loading, setLoading] = useState(true);

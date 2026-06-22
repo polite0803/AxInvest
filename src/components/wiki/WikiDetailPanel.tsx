@@ -7,21 +7,7 @@ import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { BacklinkInfo, KnowledgeBase, Note, NoteLink } from "@/types";
 import { DeleteOutlined, LinkOutlined, SaveOutlined } from "@ant-design/icons";
 import { Background, Controls, Edge, MiniMap, Node, ReactFlow, useEdgesState, useNodesState } from "@xyflow/react";
-import {
-  Button,
-  Empty,
-  List,
-  message,
-  Modal,
-  Popconfirm,
-  Select,
-  Spin,
-  Tabs,
-  Tag,
-  theme,
-  Tooltip,
-  Typography,
-} from "antd";
+import { Button, Empty, List, Modal, Popconfirm, Select, Spin, Tabs, Tag, theme, Tooltip, Typography, App } from "antd";
 import { ArrowLeftRight, BookOpen, GitGraph, Network, PenLine, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
@@ -46,6 +32,7 @@ export function WikiDetailPanel({
   onNoteUpdated,
   onNavigateToNote,
 }: WikiDetailPanelProps) {
+  const { message } = App.useApp();
   const { token } = theme.useToken();
   const { t } = useTranslation();
   const { getNote, updateNote, deleteNote, getNoteLinks, getNoteBacklinks } = useWikiStore();

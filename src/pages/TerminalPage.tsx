@@ -6,11 +6,12 @@ import { SshConfigModal } from "@/components/terminal/SshConfigModal";
 import { StatusBarWidget } from "@/components/terminal/StatusBarWidget";
 import { TerminalBackendSelector } from "@/components/terminal/TerminalBackendSelector";
 import { useTerminalStore } from "@/stores/feature/terminalStore";
-import { message } from "antd";
+import { App } from "antd";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export function TerminalPage() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { sessions, activeSessionId } = useTerminalStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);

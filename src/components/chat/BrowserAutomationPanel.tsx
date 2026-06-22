@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Input, message, Space, Table, Typography } from "antd";
+import { Button, Card, Input, Space, Table, Typography, App } from "antd";
 import { Globe, Image, Keyboard, MousePointer, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +24,7 @@ interface ExtractedElement {
 }
 
 export function BrowserAutomationPanel() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const mountedRef = useRef(true);
   useEffect(

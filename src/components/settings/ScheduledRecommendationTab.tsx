@@ -1,22 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import {
-  Button,
-  Card,
-  Empty,
-  Form,
-  Input,
-  InputNumber,
-  message,
-  Popconfirm,
-  Select,
-  Slider,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Tooltip,
-} from "antd";
+import { Button, Card, Empty, Form, Input, InputNumber, Popconfirm, Select, Slider, Space, Switch, Table, Tag, Tooltip, App } from "antd";
 import { Clock, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -63,6 +47,7 @@ const ALL_PERIODS: { value: PeriodKey; label: string }[] = [
 ];
 
 export function ScheduledRecommendationTab() {
+  const { message } = App.useApp();
   const [jobs, setJobs] = useState<RecoCronRow[]>([]);
   const [adding, setAdding] = useState(false);
   const [, setLoading] = useState(true);

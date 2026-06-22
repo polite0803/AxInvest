@@ -2,24 +2,7 @@
 
 import { PasteButton } from "@/components/common/PasteButton";
 import { invoke, logIpcError } from "@/lib/invoke";
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Descriptions,
-  Divider,
-  Form,
-  Input,
-  message,
-  Modal,
-  Radio,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-} from "antd";
+import { Alert, Button, Card, Checkbox, Descriptions, Divider, Form, Input, Modal, Radio, Select, Space, Table, Tag, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   AlertTriangle,
@@ -118,6 +101,7 @@ const PROVIDER_ICON_MAP: Record<string, string> = {
 };
 
 export function CloudWorkspaceSelector() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { settings, saveSettings, fetchSettings } = useSettingsStore();
   const [storageType, setStorageType] = useState<CloudStorageType>("s3");

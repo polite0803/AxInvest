@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke, listen, logIpcError } from "@/lib/invoke";
-import { Badge, Button, Empty, message, Popconfirm, Spin, Tag, Typography } from "antd";
+import { Badge, Button, Empty, Popconfirm, Spin, Tag, Typography, App } from "antd";
 import { Circle, LoaderCircle, StopCircle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -25,6 +25,7 @@ interface BackgroundTask {
 }
 
 export function TaskPanel() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
   const [loading, setLoading] = useState(false);

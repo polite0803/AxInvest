@@ -10,22 +10,7 @@ import type {
   ExpertCategory,
   UpdateAgentProfileInput,
 } from "@/types";
-import {
-  Button,
-  Card,
-  Divider,
-  Empty,
-  Input,
-  message,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Tag,
-  theme,
-  Typography,
-} from "antd";
+import { Button, Card, Divider, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Tag, theme, Typography, App } from "antd";
 import {
   Bot,
   Code,
@@ -68,6 +53,7 @@ const emptyProfile = (): CreateAgentProfileInput => ({
 });
 
 export function AgentProfileManager() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const deviceLayout = useUIStore((s) => s.deviceLayout);

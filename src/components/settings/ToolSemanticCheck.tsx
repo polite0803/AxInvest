@@ -4,7 +4,7 @@ import type { ToolUpgradeSuggestion } from "@/components/workflow/types/workflow
 import { invoke } from "@/lib/invoke";
 import { useUIStore } from "@/stores";
 import type { LocalToolGroupInfo, LocalToolInfo } from "@/types";
-import { Button, Card, Empty, Input, List, message, Modal, Spin, Typography } from "antd";
+import { Button, Card, Empty, Input, List, Modal, Spin, Typography, App } from "antd";
 import { ArrowRight, CheckCircle, Search, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -54,6 +54,7 @@ interface ToolUpgradeResponse {
 }
 
 export function ToolSemanticCheck() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const deviceLayout = useUIStore((s) => s.deviceLayout);
   const isSmall = deviceLayout === "mobile" || deviceLayout === "tablet";

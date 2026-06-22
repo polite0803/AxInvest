@@ -2,7 +2,7 @@
 
 import { Tooltip } from "@/components/layout/Tooltip";
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Input, message, Space, Switch, Typography } from "antd";
+import { Button, Card, Input, Space, Switch, Typography, App } from "antd";
 import { Scissors, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,6 +23,7 @@ interface UIElement {
 }
 
 export function ComputerControlPanel() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const mountedRef = useRef(true);
   useEffect(

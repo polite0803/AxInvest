@@ -2,23 +2,7 @@
 
 import { PasteButton } from "@/components/common/PasteButton";
 import { invoke } from "@/lib/invoke";
-import {
-  Button,
-  Card,
-  Empty,
-  Form,
-  Input,
-  message,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-} from "antd";
+import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag, Typography, App } from "antd";
 import { Bell, BellOff, Copy, Plus, RefreshCw, Trash2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -61,6 +45,7 @@ const EVENT_COLORS: Record<string, string> = {
 };
 
 export function WebhookSettings() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [subscriptions, setSubscriptions] = useState<WebhookSubscription[]>([]);
   const [loading, setLoading] = useState(true);

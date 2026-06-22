@@ -1,21 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { type Session, useAxAgent } from "@/sdk";
-import {
-  Badge,
-  Button,
-  Descriptions,
-  Divider,
-  Empty,
-  Input,
-  List,
-  message,
-  Popconfirm,
-  Space,
-  Tag,
-  theme,
-  Typography,
-} from "antd";
+import { Badge, Button, Descriptions, Divider, Empty, Input, List, Popconfirm, Space, Tag, theme, Typography, App } from "antd";
 import { Link2, Plus, Power, RefreshCw, Server } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,6 +13,7 @@ const STORAGE_KEY = "acp_base_url";
 const DEFAULT_BASE_URL = "http://localhost:9876";
 
 export function AcpSettings() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [baseUrl, setBaseUrl] = useState(

@@ -1,25 +1,7 @@
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import {
-  Button,
-  Card,
-  Checkbox,
-  DatePicker,
-  Empty,
-  Input,
-  message,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-} from "antd";
+import { Button, Card, Checkbox, DatePicker, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { RangePickerProps } from "antd/es/date-picker";
 import type { Dayjs } from "dayjs";
 import { useEffect, useRef, useState } from "react";

@@ -1,6 +1,6 @@
 // RhaiEditorTab — Rhai 脚本编辑 + 注册
 
-import { Alert, Button, Card, Form, Input, message, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, Space, Tag, Typography, App } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -11,6 +11,7 @@ const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
 export function RhaiEditorTab() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const registerRhai = useStrategyStore((s) => s.registerRhai);
   const isRegistering = useStrategyStore((s) => s.isRegistering);

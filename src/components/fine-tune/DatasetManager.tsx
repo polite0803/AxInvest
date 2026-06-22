@@ -2,13 +2,14 @@
 
 import { useFineTuneStore } from "@/stores/devtools/fineTuneStore";
 import { DeleteOutlined, FileTextOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Form, Input, message, Modal, Popconfirm, Space, Table } from "antd";
+import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, App } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Column } = Table;
 
 export function DatasetManager() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const {
     datasets,

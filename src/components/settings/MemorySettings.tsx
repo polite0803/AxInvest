@@ -14,26 +14,7 @@ import { closestCenter, DndContext, PointerSensor, useSensor, useSensors } from 
 import type { DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  Badge,
-  Button,
-  Collapse,
-  Divider,
-  Dropdown,
-  Empty,
-  Form,
-  Input,
-  InputNumber,
-  message,
-  Modal,
-  Popconfirm,
-  Progress,
-  Spin,
-  Table,
-  Tag,
-  theme,
-  Typography,
-} from "antd";
+import { Badge, Button, Collapse, Divider, Dropdown, Empty, Form, Input, InputNumber, Modal, Popconfirm, Progress, Spin, Table, Tag, theme, Typography, message } from "antd";
 import type { MenuProps } from "antd";
 import {
   ArrowDown,

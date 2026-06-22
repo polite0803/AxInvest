@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { Divider, Input, InputNumber, message, theme } from "antd";
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+import { Divider, Input, InputNumber, theme, message } from "antd";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { AIAssistButton, useNodeAIAssist } from "../../Hooks";

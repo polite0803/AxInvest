@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import { Button, Input, message, theme } from "antd";
+import { Button, Input, theme, App } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -10,6 +10,7 @@ interface SteerInputProps {
 }
 
 export function SteerInput({ conversationId }: SteerInputProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const [instruction, setInstruction] = useState("");

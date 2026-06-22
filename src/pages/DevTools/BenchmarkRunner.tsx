@@ -6,11 +6,12 @@ import { BenchmarkSelector } from "@/components/benchmark/BenchmarkSelector";
 import { TaskList } from "@/components/benchmark/TaskList";
 import { useEvaluatorStore } from "@/stores/devtools/evaluatorStore";
 import type { BenchmarkTask, TaskResult } from "@/types";
-import { Button, Card, message, Spin, Tabs, theme } from "antd";
+import { Button, Card, Spin, Tabs, theme, App } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 export function BenchmarkRunner() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const {

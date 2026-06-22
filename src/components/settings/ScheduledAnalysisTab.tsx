@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, Form, Input, message, Popconfirm, Select, Spin, Switch, Table, Tag } from "antd";
+import { Button, Card, Empty, Form, Input, Popconfirm, Select, Spin, Switch, Table, Tag, App } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -25,6 +25,7 @@ function getCronPresets(t: (k: string) => string) {
 }
 
 export function ScheduledAnalysisTab() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);

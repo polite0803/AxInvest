@@ -7,7 +7,7 @@
  *   暴露工具 (🤖) — 模板节点 exposed_tools，LLM 自主决定调用
  */
 import { invoke } from "@/lib/invoke";
-import { Button, Input, message, Popover, Select, Space, Spin, Tag, Tooltip } from "antd";
+import { Button, Input, Popover, Select, Space, Spin, Tag, Tooltip, App } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -104,6 +104,7 @@ const PROFILE_ROLE_IDS: Record<string, string> = {
 };
 
 export function AgentProfileList() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [rows, setRows] = useState<AgentNodeRow[]>([]);
   const [allTools, setAllTools] = useState<string[]>([]);

@@ -17,7 +17,7 @@ import {
   ReloadOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, message, Spin, Table, Tag, Tooltip } from "antd";
+import { Button, Empty, Spin, Table, Tag, Tooltip, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -44,6 +44,7 @@ function formatTime(ms: number): string {
 }
 
 export function EvolutionDriftPanel() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const dashboard = useStockAnalysisStore((s) => s.evolutionDashboard);
   const recalculating = useStockAnalysisStore((s) => s.evolutionRecalculating);

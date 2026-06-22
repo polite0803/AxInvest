@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { Button, Divider, Input, message, Select, Switch, theme } from "antd";
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+import { Button, Divider, Input, Select, Switch, theme, message } from "antd";
 import { Plus, Trash2 } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";

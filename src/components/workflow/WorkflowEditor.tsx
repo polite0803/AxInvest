@@ -35,7 +35,7 @@ import {
 import { useWorkflowEditorStore } from "@/stores";
 
 import { useWorkEngineStore } from "@/stores/feature/workEngineStore";
-import { Button, message, Modal, Spin, theme } from "antd";
+import { Button, Modal, Spin, theme, App } from "antd";
 import { useTranslation } from "react-i18next";
 import { AIPanel } from "./AIPanel/AIPanel";
 import { CanvasTitleBar } from "./CanvasTitleBar";
@@ -148,6 +148,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   templateId,
   onClose,
 }) => {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const {

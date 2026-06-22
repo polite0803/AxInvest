@@ -3,7 +3,7 @@
 import { invoke } from "@/lib/invoke";
 import { IngestResult, useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { DeleteOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, UploadOutlined } from "@ant-design/icons";
-import { Button, Card, Form, Input, List, message, Progress, Select, Space, Typography, Upload } from "antd";
+import { Button, Card, Form, Input, List, Progress, Select, Space, Typography, Upload, App } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,6 +16,7 @@ interface IngestPanelProps {
 }
 
 export function IngestPanel({ wikiId, onClose }: IngestPanelProps) {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const { ingestSource } = useLlmWikiStore();
   const [form] = Form.useForm();

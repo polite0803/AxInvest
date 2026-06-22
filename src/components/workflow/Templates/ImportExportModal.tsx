@@ -2,20 +2,8 @@
 
 import { invoke } from "@/lib/invoke";
 import { validate_workflow } from "@/lib/workflowLayout";
-import {
-  Alert,
-  Button,
-  Descriptions,
-  Divider,
-  Input,
-  message,
-  Modal,
-  Select,
-  Tabs,
-  theme,
-  Typography,
-  Upload,
-} from "antd";
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+import { Alert, Button, Descriptions, Divider, Input, Modal, Select, Tabs, theme, Typography, Upload, message } from "antd";
 import type { UploadProps } from "antd";
 import { Check, Copy, Download, FolderOpen, Upload as UploadIcon } from "lucide-react";
 import React, { useEffect, useMemo, useRef, useState } from "react";

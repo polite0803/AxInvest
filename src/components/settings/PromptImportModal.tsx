@@ -4,7 +4,8 @@ import { usePromptTemplateStore } from "@/stores/feature/promptTemplateStore";
 import type { ImportPromptResult, ImportPromptTemplateInput } from "@/types";
 import { DownloadOutlined, FolderOpenOutlined, GithubOutlined, InboxOutlined, LinkOutlined } from "@ant-design/icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Alert, Button, Form, Input, message, Modal, Progress, Space, Tabs, Tag, Typography, Upload } from "antd";
+// eslint-disable-next-line @typescript-eslint/no-deprecated
+import { Alert, Button, Form, Input, Modal, Progress, Space, Tabs, Tag, Typography, Upload, message } from "antd";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 

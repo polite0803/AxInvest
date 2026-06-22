@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import { Button, Dropdown, Input, message } from "antd";
+import { Button, Dropdown, Input, App } from "antd";
 import { Check, History, Pencil, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,7 @@ interface AnalysisRecord {
 
 /** 个股分析页搜索框下方的历史分析快捷按钮 */
 export function AnalysisHistoryButton() {
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [records, setRecords] = useState<AnalysisRecord[]>([]);

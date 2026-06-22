@@ -28,7 +28,9 @@ function scanDir(dir, regex) {
 }
 
 // 只扫描 AxInvest 相关的 section
-const AX_INVEST_SECTIONS = ["stockAnalysis", "trade", "nav"];
+// common.* 段虽非 AxInvest 特有,但在 stock-analysis 等核心模块也被大量使用,
+// 漏掉会导致 t("common.xxx") 显示原始 key。统一扫描避免盲点。
+const AX_INVEST_SECTIONS = ["stockAnalysis", "trade", "nav", "common"];
 for (const section of AX_INVEST_SECTIONS) {
   const re = new RegExp(`t\\("(${section}\\.[^"]+)"\\)`, "g");
   for (const dir of SOURCE_DIRS) { scanDir(dir, re); }

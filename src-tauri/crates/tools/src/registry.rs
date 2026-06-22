@@ -531,6 +531,7 @@ impl UnifiedToolRegistry {
             ToolCategory::Knowledge => "builtin-knowledge",
             ToolCategory::Browser => "builtin-browser",
             ToolCategory::Desktop => "builtin-desktop",
+            ToolCategory::Finance => "builtin-finance",
         }
     }
 

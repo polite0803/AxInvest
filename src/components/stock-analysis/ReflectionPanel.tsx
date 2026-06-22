@@ -52,6 +52,8 @@ interface CronJobResponse {
 
 export function ReflectionPanel() {
   const { t } = useTranslation();
+  const { Text } = Typography;
+  const { RangePicker } = DatePicker;
 
   const CRON_PRESETS = [
     { label: t("stockAnalysis.reflection.daily0600"), value: "0 6 * * *" },
@@ -62,10 +64,17 @@ export function ReflectionPanel() {
 
   const [reflections, setReflections] = useState<ReflectionRow[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJobResponse[]>([]);
+  // P1-5 修复: 加载状态 — 表格 Spin + 刷新按钮 loading
+  const [loading, setLoading] = useState(false);
   const [cronExpr, setCronExpr] = useState("0 6 * * *");
   const [threshold, setThreshold] = useState(0);
   const [depth, setDepth] = useState("light");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // P1-7 修复: 反思历史筛选 (股票代码 / 状态)
+  const [filterCode, setFilterCode] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"" | "running" | "completed" | "failed">("");
+  const [filterDateRange, setFilterDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
 
   const [manualAsOf, setManualAsOf] = useState<Dayjs | null>(null);
   const [manualOutcome, setManualOutcome] = useState("");
@@ -89,6 +98,7 @@ export function ReflectionPanel() {
   const loadTokenRef = useRef(0);
   const load = async () => {
     const myToken = ++loadTokenRef.current;
+    setLoading(true); // P1-5 修复
     try {
       const [r, c] = await Promise.all([
         invoke<ReflectionRow[]>("list_reflections", {}),
@@ -100,12 +110,32 @@ export function ReflectionPanel() {
     } catch (e) {
       // P0-2 修复: 加载失败必须显式告知用户,否则后端挂掉时用户无感知
       message.error(t("stockAnalysis.reflection.loadFailed", { error: String(e) }));
+    } finally {
+      if (myToken === loadTokenRef.current) { setLoading(false); }
     }
   };
 
   useEffect(() => {
     // Bug 4 修复: 走统一入口
     Promise.resolve().then(() => load());
+  }, []);
+
+  // P1-6 修复: 自动刷新 — 30s 轮询 + 标签页可见性恢复时立即拉一次
+  // 防止定时反思跑完后用户必须手动刷新才能看到新记录
+  useEffect(() => {
+    const POLL_MS = 30_000;
+    const id = setInterval(() => {
+      // 只在标签页可见时轮询,避免后台无意义请求
+      if (document.visibilityState === "visible") { void load(); }
+    }, POLL_MS);
+    const onVis = () => {
+      if (document.visibilityState === "visible") { void load(); }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
 
   // 后端 CronJobStatus 用 #[serde(rename_all = "snake_case")] 序列化,
@@ -169,6 +199,130 @@ export function ReflectionPanel() {
       await load();
     } catch (e) {
       message.error(t("stockAnalysis.reflection.deleteFailed", { error: String(e) }));
+    }
+  };
+
+  // P2-15 修复: 清空全部反思 (并行删除,失败累加)
+  const clearAllReflections = async () => {
+    const ids = reflections.map((r) => r.id);
+    if (ids.length === 0) { return; }
+    const results = await Promise.allSettled(
+      ids.map((id) => invoke("delete_reflection", { reflectionId: id })),
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed === 0) {
+      message.success(t("stockAnalysis.reflection.clearAllSuccess", { count: ids.length }));
+    } else {
+      message.warning(t("stockAnalysis.reflection.clearAllPartial", { total: ids.length, failed }));
+    }
+    await load();
+  };
+
+  // P1-7 修复: 反思历史筛选 (股票代码模糊匹配 + 状态 + 时间区间)
+  const filteredReflections = reflections.filter((r) => {
+    if (filterCode && !r.stockCode.toLowerCase().includes(filterCode.toLowerCase())) {
+      return false;
+    }
+    if (filterStatus) {
+      const isFailed = typeof r.status === "string" && r.status.startsWith("failed:");
+      if (filterStatus === "failed" ? !isFailed : r.status !== filterStatus) {
+        return false;
+      }
+    }
+    if (filterDateRange && filterDateRange[0]) {
+      const created = new Date(r.createdAt);
+      if (created < filterDateRange[0].startOf("day").toDate()) { return false; }
+    }
+    if (filterDateRange && filterDateRange[1]) {
+      const created = new Date(r.createdAt);
+      if (created > filterDateRange[1].endOf("day").toDate()) { return false; }
+    }
+    return true;
+  });
+
+  const resetFilters = () => {
+    setFilterCode("");
+    setFilterStatus("");
+    setFilterDateRange(null);
+  };
+
+  // P2-13 修复: 反思历史导出 CSV/JSON (前端 blob 下载,无需后端)
+  const exportReflections = (rows: ReflectionRow[]) => {
+    if (rows.length === 0) { return; }
+    const csv = [
+      [
+        "stockCode",
+        "stockName",
+        "asOfDate",
+        "actualOutcome",
+        "status",
+        "depth",
+        "whatWentWrong",
+        "fixForFuture",
+        "createdAt",
+      ].join(","),
+      ...rows.map((r) =>
+        [
+          r.stockCode,
+          `"${(r.stockName || "").replace(/"/g, '""')}"`,
+          r.asOfDate,
+          `"${(r.actualOutcome || "").replace(/"/g, '""')}"`,
+          r.status,
+          r.reflectionDepth || "",
+          `"${(r.whatWentWrong || "").replace(/"/g, '""')}"`,
+          `"${(r.fixForFuture || "").replace(/"/g, '""')}"`,
+          new Date(r.createdAt).toISOString(),
+        ].join(",")
+      ),
+    ].join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reflections_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    message.success(t("stockAnalysis.reflection.exportSuccess", { count: rows.length }));
+  };
+
+  // P2-11 修复: cron 下次运行时间 (前端解析,无需新依赖)
+  const computeNextRun = (cronExpression: string): string | null => {
+    try {
+      // 简单 cron 5-field 解析: 仅支持 * / 数字 / 逗号 / 横线 / step /
+      // 完整实现需 ~150 行,这里支持常见 4 种预设足够
+      const parts = cronExpression.trim().split(/\s+/);
+      if (parts.length !== 5) { return null; }
+      const [min, hour, , , dow] = parts;
+      // 解析: 返回"每天 HH:MM"或"周N HH:MM"
+      const now = new Date();
+      const next = new Date(now);
+      next.setSeconds(0);
+      next.setMilliseconds(0);
+      // 简化为下一个匹配的 hour:min (不处理 step/dow 复杂情况)
+      const targetMin = min === "*" ? now.getMinutes() : parseInt(min, 10);
+      const targetHour = hour === "*" ? now.getHours() : parseInt(hour, 10);
+      next.setMinutes(targetMin);
+      next.setHours(targetHour);
+      if (next <= now) { next.setDate(next.getDate() + 1); }
+      // weekday
+      if (dow !== "*") {
+        const allowedDays = dow.split(",").map((d) => {
+          if (d.includes("-")) {
+            const [a, b] = d.split("-").map((x) => parseInt(x, 10));
+            return { a, b };
+          }
+          return { a: parseInt(d, 10), b: parseInt(d, 10) };
+        });
+        while (true) {
+          const day = next.getDay();
+          const match = allowedDays.some(({ a, b }) => day >= a && day <= b);
+          if (match) { break; }
+          next.setDate(next.getDate() + 1);
+        }
+      }
+      return next.toLocaleString("zh-CN", { hour12: false });
+    } catch {
+      return null;
     }
   };
 
@@ -307,6 +461,13 @@ export function ReflectionPanel() {
                   ? t("stockAnalysis.reflection.running")
                   : t("stockAnalysis.reflection.paused"),
               })}
+              {/* P2-11 修复: 显示下次运行时间 */}
+              {isEnabled && (() => {
+                const nextRun = computeNextRun(activeCron.schedule);
+                return nextRun
+                  ? t("stockAnalysis.reflection.nextRunAt", { time: nextRun })
+                  : null;
+              })()}
             </Text>
           )}
         </Space>
@@ -316,93 +477,161 @@ export function ReflectionPanel() {
       <Card
         title={t("stockAnalysis.reflection.historyTitle")}
         size="small"
-        extra={<Button size="small" onClick={load}>{t("stockAnalysis.reflection.refreshBtn")}</Button>}
-      >
-        {reflections.length === 0
-          ? <Empty description={t("stockAnalysis.reflection.empty")} />
-          : (
-            <Table
-              dataSource={reflections}
-              rowKey="id"
-              pagination={{ pageSize: 10, size: "small" }}
+        extra={
+          <Space size="small">
+            <Button size="small" onClick={load} loading={loading}>
+              {t("stockAnalysis.reflection.refreshBtn")}
+            </Button>
+            <Button
               size="small"
-              scroll={{ x: 800 }}
-              expandable={{
-                expandedRowKeys: expandedId ? [expandedId] : [],
-                onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedId(keys[0] as string || null),
-                expandedRowRender: (r: ReflectionRow) => (
-                  <ExpandedReflectionRow row={r} t={t as (key: string, opts?: object) => string} />
-                ),
-              }}
+              onClick={() => exportReflections(filteredReflections)}
+              disabled={filteredReflections.length === 0}
             >
-              <Table.Column title={t("stockAnalysis.reflection.colCode")} dataIndex="stockCode" width={90} />
-              <Table.Column title={t("stockAnalysis.reflection.colName")} dataIndex="stockName" width={100} />
-              <Table.Column title={t("stockAnalysis.reflection.colAsOf")} dataIndex="asOfDate" width={100} />
-              <Table.Column
-                title={t("stockAnalysis.reflection.colResult")}
-                dataIndex="actualOutcome"
-                width={160}
-                render={(v: string) => <Text type="danger">{v}</Text>}
-              />
-              <Table.Column
-                title={t("stockAnalysis.reflection.colStatus")}
-                dataIndex="status"
-                width={140}
-                render={(v: string) => {
-                  const color = v === "completed" ? "green" : v.startsWith("failed:") ? "red" : "orange";
-                  return <Tag color={color}>{v || "running"}</Tag>;
+              {t("stockAnalysis.reflection.exportBtn")}
+            </Button>
+            {reflections.length > 0 && (
+              <Popconfirm
+                title={t("stockAnalysis.reflection.clearAllConfirm", { count: reflections.length })}
+                okText={t("common.confirm")}
+                cancelText={t("common.cancel")}
+                onConfirm={clearAllReflections}
+              >
+                <Button danger size="small">
+                  {t("stockAnalysis.reflection.clearAllBtn")}
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        }
+      >
+        {/* P1-7 修复: 反思历史筛选条 */}
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Input
+            placeholder={t("stockAnalysis.reflection.filterCodePlaceholder")}
+            value={filterCode}
+            onChange={(e) => setFilterCode(e.target.value)}
+            allowClear
+            style={{ width: 140 }}
+          />
+          <Select
+            value={filterStatus}
+            onChange={setFilterStatus}
+            options={[
+              { label: t("stockAnalysis.reflection.filterStatusAll"), value: "" },
+              { label: t("stockAnalysis.reflection.filterStatusRunning"), value: "running" },
+              { label: t("stockAnalysis.reflection.filterStatusCompleted"), value: "completed" },
+              { label: t("stockAnalysis.reflection.filterStatusFailed"), value: "failed" },
+            ]}
+            style={{ width: 120 }}
+          />
+          <RangePicker
+            value={filterDateRange}
+            onChange={(d) => setFilterDateRange(d as [Dayjs | null, Dayjs | null] | null)}
+            allowClear
+            format="YYYY-MM-DD"
+          />
+          {(filterCode || filterStatus || filterDateRange) && (
+            <Button size="small" onClick={resetFilters}>
+              {t("stockAnalysis.reflection.filterResetBtn")}
+            </Button>
+          )}
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("stockAnalysis.reflection.filterResultCount", {
+              shown: filteredReflections.length,
+              total: reflections.length,
+            })}
+          </Text>
+        </Space>
+        {/* P1-5 修复: 加载状态 — 表格 Spin */}
+        <Spin spinning={loading}>
+          {reflections.length === 0
+            ? <Empty description={t("stockAnalysis.reflection.empty")} />
+            : filteredReflections.length === 0
+            ? <Empty description={t("stockAnalysis.reflection.filterEmpty")} />
+            : (
+              <Table
+                dataSource={filteredReflections}
+                rowKey="id"
+                pagination={{ pageSize: 10, size: "small" }}
+                size="small"
+                scroll={{ x: 800 }}
+                expandable={{
+                  expandedRowKeys: expandedId ? [expandedId] : [],
+                  onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedId(keys[0] as string || null),
+                  expandedRowRender: (r: ReflectionRow) => (
+                    <ExpandedReflectionRow row={r} t={t as (key: string, opts?: object) => string} onRefresh={load} />
+                  ),
                 }}
-              />
-              <Table.Column
-                title={t("stockAnalysis.reflection.colCause")}
-                dataIndex="whatWentWrong"
-                ellipsis
-                render={(v: string | null) => v || "-"}
-              />
-              <Table.Column
-                title={t("stockAnalysis.reflection.colTime")}
-                dataIndex="createdAt"
-                width={150}
-                render={(v: number) => new Date(v).toLocaleDateString("zh-CN")}
-              />
-              <Table.Column
-                title={t("stockAnalysis.reflection.colAction")}
-                width={150}
-                fixed="right"
-                render={(_: unknown, r: ReflectionRow) => (
-                  <Space size="small">
-                    {
-                      /* P0-3 修复: 失败的反思可一键重跑(复用 run_reflection_now),
+              >
+                <Table.Column title={t("stockAnalysis.reflection.colCode")} dataIndex="stockCode" width={90} />
+                <Table.Column title={t("stockAnalysis.reflection.colName")} dataIndex="stockName" width={100} />
+                <Table.Column title={t("stockAnalysis.reflection.colAsOf")} dataIndex="asOfDate" width={100} />
+                <Table.Column
+                  title={t("stockAnalysis.reflection.colResult")}
+                  dataIndex="actualOutcome"
+                  width={160}
+                  render={(v: string) => <Text type="danger">{v}</Text>}
+                />
+                <Table.Column
+                  title={t("stockAnalysis.reflection.colStatus")}
+                  dataIndex="status"
+                  width={140}
+                  render={(v: string) => {
+                    const color = v === "completed" ? "green" : v.startsWith("failed:") ? "red" : "orange";
+                    return <Tag color={color}>{v || "running"}</Tag>;
+                  }}
+                />
+                <Table.Column
+                  title={t("stockAnalysis.reflection.colCause")}
+                  dataIndex="whatWentWrong"
+                  ellipsis
+                  render={(v: string | null) => v || "-"}
+                />
+                <Table.Column
+                  title={t("stockAnalysis.reflection.colTime")}
+                  dataIndex="createdAt"
+                  width={150}
+                  render={(v: number) => new Date(v).toLocaleDateString("zh-CN")}
+                />
+                <Table.Column
+                  title={t("stockAnalysis.reflection.colAction")}
+                  width={150}
+                  fixed="right"
+                  render={(_: unknown, r: ReflectionRow) => (
+                    <Space size="small">
+                      {
+                        /* P0-3 修复: 失败的反思可一键重跑(复用 run_reflection_now),
                     成功后生成新记录,旧失败记录保留(可手动删除)。
                     仅 failed:* 状态显示,避免误操作正在 running/completed 的记录。 */
-                    }
-                    {typeof r.status === "string" && r.status.startsWith("failed:") && (
+                      }
+                      {typeof r.status === "string" && r.status.startsWith("failed:") && (
+                        <Popconfirm
+                          title={t("stockAnalysis.reflection.rerunConfirm")}
+                          okText={t("common.confirm")}
+                          cancelText={t("common.cancel")}
+                          onConfirm={() => rerunReflection(r)}
+                        >
+                          <Button size="small">
+                            {t("stockAnalysis.reflection.rerunBtn")}
+                          </Button>
+                        </Popconfirm>
+                      )}
                       <Popconfirm
-                        title={t("stockAnalysis.reflection.rerunConfirm")}
+                        title={t("stockAnalysis.reflection.deleteConfirm")}
                         okText={t("common.confirm")}
                         cancelText={t("common.cancel")}
-                        onConfirm={() => rerunReflection(r)}
+                        onConfirm={() => deleteReflection(r.id)}
                       >
-                        <Button size="small">
-                          {t("stockAnalysis.reflection.rerunBtn")}
+                        <Button danger size="small">
+                          {t("stockAnalysis.reflection.deleteBtn")}
                         </Button>
                       </Popconfirm>
-                    )}
-                    <Popconfirm
-                      title={t("stockAnalysis.reflection.deleteConfirm")}
-                      okText={t("common.confirm")}
-                      cancelText={t("common.cancel")}
-                      onConfirm={() => deleteReflection(r.id)}
-                    >
-                      <Button danger size="small">
-                        {t("stockAnalysis.reflection.deleteBtn")}
-                      </Button>
-                    </Popconfirm>
-                  </Space>
-                )}
-              />
-            </Table>
-          )}
+                    </Space>
+                  )}
+                />
+              </Table>
+            )}
+        </Spin>
       </Card>
     </div>
   );
@@ -517,6 +746,8 @@ function ExpandedReflectionRow(
   const [aiStreaming, setAiStreaming] = useState(false);
   const [aiContent, setAiContent] = useState("");
   const [aiActions, setAiActions] = useState<AiChatAction[]>([]);
+  // P1-9 修复: 部分应用 — 默认全选,用户可取消单条
+  const [aiSelected, setAiSelected] = useState<Set<number>>(new Set());
   const [aiApplying, setAiApplying] = useState(false);
   const aiUnlistensRef = useRef<Array<() => void>>([]);
 
@@ -568,6 +799,8 @@ function ExpandedReflectionRow(
         if (c.done) {
           setAiContent(accumulated);
           setAiActions(parseActionsFromAccumulated(accumulated));
+          // P1-9 修复: 解析完后默认全选,用户可手动取消
+          setAiSelected(new Set(parseActionsFromAccumulated(accumulated).map((_, i) => i)));
           setAiStreaming(false);
         } else {
           setAiContent(accumulated + "▍");
@@ -603,7 +836,9 @@ function ExpandedReflectionRow(
    * - rollback_on_failure: bool（默认 true，单条 action 失败 / validation 失败时倒序回滚）
    */
   const handleApplyAiActions = async () => {
-    if (aiActions.length === 0) { return; }
+    // P1-9 修复: 只 apply 用户勾选中的子集
+    const toApply = aiActions.filter((_, i) => aiSelected.has(i));
+    if (toApply.length === 0) { return; }
     setAiApplying(true);
     try {
       const result = await invoke<{
@@ -614,7 +849,7 @@ function ExpandedReflectionRow(
         rolled_back: boolean;
         error: string | null;
       }>("apply_diff_with_validation", {
-        actions: aiActions,
+        actions: toApply,
         validation: { type: "noop", params: {} },
         rollback_on_failure: true,
       });
@@ -622,11 +857,11 @@ function ExpandedReflectionRow(
         message.success(
           t("stockAnalysis.reflection.aiApplySuccess", { count: result.applied_count }),
         );
-        setAiModalOpen(false);
         // P0-4 修复: 应用成功后刷新反思列表,避免用户看到陈旧数据,
         // 同时关闭弹窗后用户能立即看到新生成的反思行(如果后端触发了重跑)
         // load 是父组件作用域,通过 onRefresh prop 传入
         await onRefresh?.();
+        doCloseAiModal();
       } else {
         message.error(
           t("stockAnalysis.reflection.aiApplyFailed", {
@@ -643,7 +878,23 @@ function ExpandedReflectionRow(
   };
 
   const handleAiModalClose = () => {
+    // P2-14 修复: 关闭弹窗时若还有未应用的 action,先询问避免误丢
+    if (aiActions.length > 0 && aiSelected.size > 0) {
+      Modal.confirm({
+        title: t("stockAnalysis.reflection.aiDiscardTitle"),
+        content: t("stockAnalysis.reflection.aiDiscardContent", { count: aiSelected.size }),
+        okText: t("stockAnalysis.reflection.aiDiscardOk"),
+        cancelText: t("common.cancel"),
+        onOk: () => doCloseAiModal(),
+      });
+    } else {
+      doCloseAiModal();
+    }
+  };
+
+  const doCloseAiModal = () => {
     setAiModalOpen(false);
+    setAiSelected(new Set()); // 重置选择
     aiUnlistensRef.current.forEach((fn) => fn());
     aiUnlistensRef.current = [];
   };
@@ -810,10 +1061,11 @@ function ExpandedReflectionRow(
             key="apply"
             type="primary"
             loading={aiApplying}
-            disabled={aiActions.length === 0 || aiStreaming}
+            // P1-9 修复: 按钮文案与禁用态基于用户勾选数
+            disabled={aiSelected.size === 0 || aiStreaming}
             onClick={handleApplyAiActions}
           >
-            {t("stockAnalysis.reflection.aiApplyBtn", { count: aiActions.length })}
+            {t("stockAnalysis.reflection.aiApplyBtn", { count: aiSelected.size })}
           </Button>,
         ]}
       >
@@ -824,9 +1076,25 @@ function ExpandedReflectionRow(
         )}
         {aiActions.length > 0 && (
           <div style={{ marginBottom: 12 }}>
-            <Text strong style={{ fontSize: 13 }}>
-              {t("stockAnalysis.reflection.aiDiffPreviewTitle", { count: aiActions.length })}
-            </Text>
+            <Space style={{ marginBottom: 8, width: "100%", justifyContent: "space-between" }}>
+              <Text strong style={{ fontSize: 13 }}>
+                {t("stockAnalysis.reflection.aiDiffPreviewTitle", {
+                  count: aiSelected.size,
+                  total: aiActions.length,
+                })}
+              </Text>
+              <Space size="small">
+                <Button
+                  size="small"
+                  onClick={() => setAiSelected(new Set(aiActions.map((_, i) => i)))}
+                >
+                  {t("stockAnalysis.reflection.aiSelectAllBtn")}
+                </Button>
+                <Button size="small" onClick={() => setAiSelected(new Set())}>
+                  {t("stockAnalysis.reflection.aiSelectNoneBtn")}
+                </Button>
+              </Space>
+            </Space>
             <div style={{ marginTop: 8 }}>
               {aiActions.map((a, i) => (
                 <div
@@ -837,12 +1105,29 @@ function ExpandedReflectionRow(
                     padding: 8,
                     marginBottom: 6,
                     fontSize: 12,
+                    background: aiSelected.has(i) ? "transparent" : "var(--bg-disabled, #f5f5f5)",
                   }}
                 >
-                  <div style={{ marginBottom: 4 }}>
-                    <Tag color={ACTION_COLOR[a.action_type] ?? "default"}>
-                      {a.action_type}
-                    </Tag>
+                  {/* P1-9 修复: Checkbox 让用户选择单条 */}
+                  <div style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                    <Checkbox
+                      checked={aiSelected.has(i)}
+                      onChange={(e) => {
+                        const next = new Set(aiSelected);
+                        if (e.target.checked) { next.add(i); }
+                        else { next.delete(i); }
+                        setAiSelected(next);
+                      }}
+                    />
+                    <Tag color={ACTION_COLOR[a.action_type] ?? "default"}>{a.action_type}</Tag>
+                    {/* P1-10 修复: rollback_to_version 显示对比提示 */}
+                    {a.action_type === "rollback_to_version" && (
+                      <Text type="warning" style={{ fontSize: 11 }}>
+                        ⚠ {t("stockAnalysis.reflection.rollbackWarning", {
+                          target: (a.data as { version?: number })?.version ?? "?",
+                        })}
+                      </Text>
+                    )}
                   </div>
                   <pre
                     style={{
@@ -995,6 +1280,7 @@ edit_asset_file 的 description 必填（≤ 200 字）。
 function parseActionsFromAccumulated(content: string): AiChatAction[] {
   const regex = /:::action\s*\n([\s\S]*?)\n:::/g;
   const out: AiChatAction[] = [];
+  const seen = new Set<string>(); // P1-8 dedup
   let match;
   const known = new Set<AiChatAction["action_type"]>([
     "update_variable",
@@ -1011,6 +1297,11 @@ function parseActionsFromAccumulated(content: string): AiChatAction[] {
       // 防御：LLM 可能输出 camelCase（templateId/anchorLine/rollbackOnFailure），
       // 归一化为 snake_case 以匹配上游 ChatAction enum 序列化要求。
       const data = camelToSnakeKeys(parsed.data ?? {}) as AiChatAction["data"];
+      // P1-8 修复: dedup 相同 (action_type, data) 的重复 action
+      // 防止 LLM 重复输出同一 action 被应用多次(尤其 update_variable 同 key)
+      const dedupKey = actionType + "|" + JSON.stringify(data);
+      if (seen.has(dedupKey)) { continue; }
+      seen.add(dedupKey);
       out.push({ action_type: actionType, data } as AiChatAction);
     } catch {
       // skip invalid JSON

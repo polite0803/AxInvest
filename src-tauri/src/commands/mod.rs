@@ -99,5 +99,4 @@ pub mod workflow_ai;
 pub mod workflow_ai_apply;
 pub mod workflow_ai_diagnose;
 pub mod workflow_ai_protocol;
-pub mod workflow_apply;
 pub mod workflow_template;

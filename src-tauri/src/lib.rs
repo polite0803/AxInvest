@@ -700,12 +700,6 @@ pub fn run() {
             commands::workflow_template::seed_preset_templates,
             commands::workflow_template::get_template_versions,
             commands::workflow_template::get_template_by_version,
-            commands::workflow_template::update_workflow_template_variable,
-            commands::workflow_template::rollback_workflow_template_to_version,
-            commands::workflow_template::update_workflow_node_input_mapping,
-            commands::workflow_template::edit_workflow_asset_file,
-            commands::workflow_apply::apply_workflow_diff_with_validation,
-            commands::workflow_apply::restore_asset_file_from_backup,
             // Workflow AI commands
             commands::workflow_ai::generate_workflow_from_prompt,
             commands::workflow_ai::optimize_agent_prompt,

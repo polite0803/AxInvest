@@ -538,46 +538,37 @@ function ExpandedReflectionRow({ row, t }: { row: ReflectionRow; t: (key: string
   };
 
   /**
-   * 用户确认后调 apply_workflow_diff_with_validation 聚合器：
-   * - 多个 action 自动打包
-   * - 后端按顺序 apply + 跑 backtest（可选）+ 失败回滚
-   * - 一次命令完成整个闭环
+   * 用户确认后调上游 `apply_diff_with_validation` 聚合器（workflow_ai_apply.rs:491）：
+   * - actions 直接传 ChatAction[]（强类型 enum，与 AiChatAction discriminated union 1:1）
+   * - validation: ValidationSpec（{ type, params }）
+   * - rollback_on_failure: bool（默认 true，单条 action 失败 / validation 失败时倒序回滚）
    */
   const handleApplyAiActions = async () => {
     if (aiActions.length === 0) { return; }
     setAiApplying(true);
     try {
-      // 把 AiChatAction 转成聚合器期望的格式
-      const wrapped = aiActions.length === 1
-        ? { actionType: aiActions[0].action_type, data: aiActions[0].data as Record<string, unknown> }
-        : null;
-      const input = wrapped
-        ? {
-          actions: [wrapped],
-          validation: { type: "noop", params: {} },
-          rollbackOnFailure: true,
-          note: `反思 ${row.id} 触发`,
-        }
-        : {
-          actions: aiActions.map((a) => ({ actionType: a.action_type, data: a.data as Record<string, unknown> })),
-          validation: { type: "noop", params: {} },
-          rollbackOnFailure: true,
-          note: `反思 ${row.id} 触发（${aiActions.length} 个 action）`,
-        };
       const result = await invoke<{
-        success: boolean;
-        appliedCount: number;
+        validation_passed: boolean;
+        applied_count: number;
+        applied: string[];
+        validation_metrics: unknown;
+        rolled_back: boolean;
         error: string | null;
-        rolledBackToVersion: number | null;
-      }>("apply_workflow_diff_with_validation", { input });
-      if (result.success) {
-        message.success(t("stockAnalysis.reflection.aiApplySuccess", { count: result.appliedCount }));
+      }>("apply_diff_with_validation", {
+        actions: aiActions,
+        validation: { type: "noop", params: {} },
+        rollback_on_failure: true,
+      });
+      if (result.validation_passed) {
+        message.success(
+          t("stockAnalysis.reflection.aiApplySuccess", { count: result.applied_count }),
+        );
         setAiModalOpen(false);
       } else {
         message.error(
           t("stockAnalysis.reflection.aiApplyFailed", {
             error: result.error ?? "未知",
-            rollback: result.rolledBackToVersion !== null ? `（已回滚到 v${result.rolledBackToVersion}）` : "",
+            rollback: result.rolled_back ? t("stockAnalysis.reflection.rolledBack") : "",
           }),
         );
       }
@@ -872,7 +863,8 @@ function buildAiAssistPrompt(row: ReflectionRow): string {
   return `你是工作流修改助手。请基于以下反思结论，输出 1-3 个 :::action 块，
 让前端用户可以预览 + 一键应用。
 
-**重要：templateId 固定为 "${REFLECTION_TEMPLATE_ID}"，所有 update_variable / rollback_to_version 都必须使用这个 templateId。**
+**重要：所有 action payload 字段用 snake_case（template_id, anchor_line, rollback_on_failure）。
+template_id 固定为 "${REFLECTION_TEMPLATE_ID}"。**
 
 【反思上下文】
 - 股票：${row.stockCode} ${row.stockName}
@@ -896,26 +888,33 @@ ${paramsText}
 ${diffText}
 
 【输出格式】
-按以下 schema 输出 1-3 个 :::action 块（用 \`\`\`json 包裹也接受）：
+按以下 schema 输出 1-3 个 :::action 块（用 \`\`\`json 包裹也接受）。
+前端会自动用 apply_diff_with_validation 聚合，所以你**不需要**输出 apply_diff_with_validation 自身。
+edit_asset_file 的 description 必填（≤ 200 字）。
 
 1. 如果是 L1（参数调整）：
    :::action
-   {"action_type":"update_variable","data":{"templateId":"${REFLECTION_TEMPLATE_ID}","name":"<变量名>","value":<new_value>,"reason":"<理由>"}}
+   {"action_type":"update_variable","data":{"template_id":"${REFLECTION_TEMPLATE_ID}","name":"<变量名>","value":<new_value>}}
    :::
 
 2. 如果是 L2（改 .rhai 公式）：
    :::action
-   {"action_type":"edit_asset_file","data":{"path":"src-tauri/src/commands/portfolio-mgr.rhai","operation":"insert_after|replace|delete","anchorLine":<int>,"code":"<新代码段>","description":"<理由>"}}
+   {"action_type":"edit_asset_file","data":{"path":"src-tauri/src/commands/portfolio-mgr.rhai","operation":"insert_after|replace|delete","anchor_line":<int>,"code":"<新代码段>","description":"<≤200 字理由>"}}
    :::
 
 3. 如果是 L3（改 .md 提示词）：
    :::action
-   {"action_type":"edit_asset_file","data":{"path":"<md path>","operation":"insert_after|replace|delete","anchorLine":<int>,"code":"<新提示词段>","description":"<理由>"}}
+   {"action_type":"edit_asset_file","data":{"path":"<md path>","operation":"insert_after|replace|delete","anchor_line":<int>,"code":"<新提示词段>","description":"<≤200 字理由>"}}
    :::
 
-4. 如果有 ≥2 个动作（涉及同一模板），用聚合器：
+4. 如果是回滚：
    :::action
-   {"action_type":"apply_diff_with_validation","data":{"actions":[{"actionType":"update_variable","data":{...}}],"validation":{"type":"noop","params":{}},"rollbackOnFailure":true,"note":"<理由>"}}
+   {"action_type":"rollback_to_version","data":{"template_id":"${REFLECTION_TEMPLATE_ID}","target_version":<int>}}
+   :::
+
+5. 如果是改 sub-workflow input_mapping：
+   :::action
+   {"action_type":"update_input_mapping","data":{"node_id":"<nodeId>","mappings":[{"target":"<var>","source":"<var>"}]}}
    :::
 
 不要输出除 :::action 块以外的其他内容（除简短中文解释外）。`;
@@ -936,13 +935,30 @@ function parseActionsFromAccumulated(content: string): AiChatAction[] {
     try {
       const parsed = JSON.parse(match[1].trim());
       const actionType = parsed.action_type;
-      const data = parsed.data ?? {};
-      if (known.has(actionType as AiChatAction["action_type"])) {
-        out.push({ action_type: actionType, data } as AiChatAction);
-      }
+      if (!known.has(actionType as AiChatAction["action_type"])) { continue; }
+      // 防御：LLM 可能输出 camelCase（templateId/anchorLine/rollbackOnFailure），
+      // 归一化为 snake_case 以匹配上游 ChatAction enum 序列化要求。
+      const data = camelToSnakeKeys(parsed.data ?? {}) as AiChatAction["data"];
+      out.push({ action_type: actionType, data } as AiChatAction);
     } catch {
       // skip invalid JSON
     }
   }
   return out;
+}
+
+/** 把对象所有顶层 key 从 camelCase 转为 snake_case（递归）。用于防御 LLM 输出不一致。 */
+function camelToSnakeKeys<T = unknown>(v: T): T {
+  if (Array.isArray(v)) {
+    return v.map((x) => camelToSnakeKeys(x)) as unknown as T;
+  }
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      const snake = k.replace(/[A-Z]/g, (m) => "_" + m.toLowerCase());
+      out[snake] = camelToSnakeKeys(val);
+    }
+    return out as T;
+  }
+  return v;
 }

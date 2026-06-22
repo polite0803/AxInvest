@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "請先在搜尋欄輸入股票代碼",
     "reAnalyzeNeedCodeHint": "當前未選定股票，需在頂部搜尋欄選擇後再啟動分析",
     "searchStock": "搜尋股票",
+    "loadAnalysisFailed": "載入歷史分析失敗",
+    "retry": "重試",
     "willOverwrite": "將覆蓋原記錄（保留相同 analysisId）",
     "position": "仓位",
     "targetPrice": "目标价",
@@ -8973,6 +8975,7 @@
     "confidencePrefix": "置信度 ",
     "scoreSuffix": "分",
     "emptyHint": "點擊上方按鈕運行 Serenity 瓶頸篩選",
+    "noCandidateTitle": "本次未產出候選標的",
     "errorUnknown": "未知錯誤",
     "callFailed": "呼叫失敗"
   }

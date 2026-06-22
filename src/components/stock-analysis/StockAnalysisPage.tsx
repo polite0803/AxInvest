@@ -126,6 +126,20 @@ export function StockAnalysisPage() {
 
   useEffect(() => {
     if (!id) { return; }
+    // ── 同步预填：避免 loadAnalysis 异步期间(或失败时)占位卡显示"搜索股票"按钮 ──
+    // 用户从 AnalysisHistoryButton 进入时,history 缓存必有该条,
+    // 立即把 stockCode / stockName / analysisId 写进 store,
+    // DecisionBanner 占位卡就能直接渲染"重跑分析"按钮,
+    // 而不是默认空 stockCode 走"搜索股票"分支。
+    const state = useStockAnalysisStore.getState();
+    const cached = state.history.find((h) => h.id === id);
+    useStockAnalysisStore.setState({
+      analysisId: id,
+      ...(cached
+        ? { stockCode: cached.stockCode, stockName: cached.stockName }
+        : {}),
+    });
+
     let cancelled = false;
     loadAnalysis(id).then(() => {
       if (cancelled) { return; }
@@ -135,6 +149,13 @@ export function StockAnalysisPage() {
         const kp = PERIOD_MAP[useStockAnalysisStore.getState().klinePeriod] ?? PERIOD_MAP["6m"];
         getStockKline(code, kp.period, kp.limit);
       }
+    }).catch((e) => {
+      if (cancelled) { return; }
+      // 修复:loadAnalysis 失败时把错误暴露到 store,占位卡渲染"重试"按钮
+      // 而不是永远停在"搜索股票"分支(用户认为这违反"history 已有 stockCode"的预期)
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[StockAnalysis] loadAnalysis failed:", msg);
+      useStockAnalysisStore.setState({ error: msg });
     });
     return () => {
       cancelled = true;

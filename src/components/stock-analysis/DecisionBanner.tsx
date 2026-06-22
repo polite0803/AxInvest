@@ -22,6 +22,8 @@ export function DecisionBanner() {
   const stockName = useStockAnalysisStore((s) => s.stockName);
   // 重跑分析: 透传当前 analysisId 让后端"覆盖"同 id 旧记录(而非新建一条)
   const analysisId = useStockAnalysisStore((s) => s.analysisId);
+  // 加载失败错误(loadAnalysis reject 时由 StockAnalysisPage 写入)
+  const error = useStockAnalysisStore((s) => s.error);
   const quote = useStockAnalysisStore((s) => s.quote);
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
@@ -143,9 +145,55 @@ export function DecisionBanner() {
   // normalizeDecision 入口已保证非空对象，所以这里的 !decision 意味着：
   //   1) LLM 输出无法解析出 decision（portfolio-mgr 节点结果残缺/被截断）
   //   2) 决策 JSON 是全零空壳（loadAnalysis 已主动跳过 set）
+  //   3) loadAnalysis 本身失败（store.error 有值，stockCode 同步预填过但记录详情加载失败）
   // 此时不再 return null，而是渲染"决策缺失"占位卡，让用户知道工作流
-  // 已完成但决策信息不完整，并提供"重跑"入口。
+  // 已完成但决策信息不完整，并提供"重跑 / 重试"入口。
   if (!decision) {
+    // 修复：loadAnalysis 失败时优先渲染"加载失败 + 重试"，避免永远停在
+    // "搜索股票"分支(用户认为这违反"history 已有 stockCode"的预期)。
+    // StockAnalysisPage 的 useEffect 已从 history 缓存同步预填 stockCode，
+    // 所以 error 状态下 stockCode 通常是有值的 → 走"重试"分支。
+    if (error) {
+      return (
+        <Card
+          id="decision-banner-top"
+          size="small"
+          styles={{ body: { padding: "12px 16px" } }}
+          style={{
+            borderLeft: "4px solid var(--sa-red, #ef4444)",
+          }}
+          data-testid="decision-banner-load-failed"
+        >
+          <div className="flex items-start gap-2">
+            <span style={{ fontSize: 18, lineHeight: 1 }}>⚠️</span>
+            <div className="flex-1">
+              <div className="text-sm font-semibold mb-1">
+                {t("stockAnalysis.loadAnalysisFailed")}
+              </div>
+              <div
+                className="text-xs mb-2"
+                style={{ color: "var(--muted)", wordBreak: "break-all" }}
+              >
+                {error}
+              </div>
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  // 重试：清掉 error 状态后重新调用 loadAnalysis
+                  useStockAnalysisStore.setState({ error: null });
+                  if (analysisId) {
+                    void useStockAnalysisStore.getState().loadAnalysis(analysisId);
+                  }
+                }}
+              >
+                {t("stockAnalysis.retry")}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      );
+    }
     return (
       <Card
         id="decision-banner-top"
@@ -192,7 +240,9 @@ export function DecisionBanner() {
                     size="small"
                     type="primary"
                     onClick={() => {
-                      // 占位阶段 stockCode 还没就绪：聚焦顶部搜索栏让用户输入。
+                      // 占位阶段 stockCode 还没就绪(极少见:用户从未打开过 history 缓存,
+                      // 也未在搜索栏选过股票,直接通过分享链接进入):
+                      // 聚焦顶部搜索栏让用户输入。
                       const search = document.querySelector<HTMLInputElement>(
                         "[data-testid='stock-analysis-search-input']",
                       );

@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "기록 분석 불러오기 실패",
+    "retry": "재시도",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8974,6 +8976,7 @@
     "confidencePrefix": "신뢰도 ",
     "scoreSuffix": " 점",
     "emptyHint": "위 버튼을 클릭하여 Serenity 병목 스크리닝 실행",
+    "noCandidateTitle": "이번 실행에서 후보 종목이 생성되지 않았습니다",
     "errorUnknown": "알 수 없는 오류",
     "callFailed": "호출 실패"
   }

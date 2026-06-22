@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "Error al cargar el historial de análisis",
+    "retry": "Reintentar",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8974,6 +8976,7 @@
     "confidencePrefix": "Confianza ",
     "scoreSuffix": " puntos",
     "emptyHint": "Haga clic en el botón de arriba para ejecutar el cribado de cuellos de botella Serenity",
+    "noCandidateTitle": "No se generaron acciones candidatas",
     "errorUnknown": "Error desconocido",
     "callFailed": "Llamada fallida"
   }

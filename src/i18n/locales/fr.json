@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "Échec du chargement de l'historique d'analyse",
+    "retry": "Réessayer",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8974,6 +8976,7 @@
     "confidencePrefix": "Confiance ",
     "scoreSuffix": " points",
     "emptyHint": "Cliquez sur le bouton ci-dessus pour exécuter le criblage des goulots Serenity",
+    "noCandidateTitle": "Aucune action candidate générée",
     "errorUnknown": "Erreur inconnue",
     "callFailed": "Échec de l'appel"
   }

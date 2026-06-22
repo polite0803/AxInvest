@@ -7677,6 +7677,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "فشل تحميل سجل التحليل",
+    "retry": "إعادة المحاولة",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -9153,6 +9155,7 @@
     "confidencePrefix": "الثقة ",
     "scoreSuffix": " نقطة",
     "emptyHint": "انقر على الزر أعلاه لتشغيل فحص اختناقات Serenity",
+    "noCandidateTitle": "لم يتم إنشاء أي أسهم مرشحة",
     "errorUnknown": "خطأ غير معروف",
     "callFailed": "فشل الاتصال"
   }

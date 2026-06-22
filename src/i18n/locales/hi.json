@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "विश्लेषण इतिहास लोड करने में विफल",
+    "retry": "पुनः प्रयास करें",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8974,6 +8976,7 @@
     "confidencePrefix": "विश्वास ",
     "scoreSuffix": " अंक",
     "emptyHint": "Serenity बॉतलनेक स्क्रीनिंग चलाने के लिए ऊपर बटन पर क्लिक करें",
+    "noCandidateTitle": "कोई उम्मीदवार स्टॉक उत्पन्न नहीं हुआ",
     "errorUnknown": "अज्ञात त्रुटि",
     "callFailed": "कॉल विफल"
   }

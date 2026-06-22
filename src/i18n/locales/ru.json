@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "Не удалось загрузить историю анализа",
+    "retry": "Повторить",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8974,6 +8976,7 @@
     "confidencePrefix": "Уверенность ",
     "scoreSuffix": " баллов",
     "emptyHint": "Нажмите кнопку выше, чтобы запустить отбор узких мест Serenity",
+    "noCandidateTitle": "Кандидаты не сгенерированы",
     "errorUnknown": "Неизвестная ошибка",
     "callFailed": "Вызов не удался"
   }

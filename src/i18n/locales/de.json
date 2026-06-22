@@ -7604,6 +7604,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "Analyseverlauf konnte nicht geladen werden",
+    "retry": "Wiederholen",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8974,6 +8976,7 @@
     "confidencePrefix": "Konfidenz ",
     "scoreSuffix": " Punkte",
     "emptyHint": "Klicken Sie auf die obige Schaltfläche, um die Serenity-Flaschenhals-Screening auszuführen",
+    "noCandidateTitle": "Keine Kandidatenaktien generiert",
     "errorUnknown": "Unbekannter Fehler",
     "callFailed": "Aufruf fehlgeschlagen"
   }

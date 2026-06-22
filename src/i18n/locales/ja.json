@@ -7602,6 +7602,8 @@
     "reAnalyzeNeedCode": "Enter a stock code in the search bar first",
     "reAnalyzeNeedCodeHint": "No stock selected — pick one from the top search bar to start analysis",
     "searchStock": "Search Stock",
+    "loadAnalysisFailed": "履歴分析の読み込みに失敗しました",
+    "retry": "再試行",
     "willOverwrite": "Will overwrite the original record (same analysisId retained)",
     "position": "Position",
     "targetPrice": "Target Price",
@@ -8833,6 +8835,7 @@
     "confidencePrefix": "信頼度 ",
     "scoreSuffix": " 点",
     "emptyHint": "上のボタンをクリックして Serenity ボトルネック・スクリーニングを実行",
+    "noCandidateTitle": "今回の実行では候補銘柄が生成されませんでした",
     "errorUnknown": "未知のエラー",
     "callFailed": "呼び出し失敗"
   },

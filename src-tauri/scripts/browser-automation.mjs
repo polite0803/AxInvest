@@ -76,19 +76,37 @@ process.stdin.on("data", async (data) => {
         break;
       }
       case "http_get": {
-        // 通过页面导航发送 GET 请求绕过 CORS 限制，返回响应体纯文本
-        // 先保存当前页 URL，导航到目标 API，提取 body，再回退
+        // 通过页面导航发送 GET 请求绕过 CORS 和 TLS 指纹限制
+        // 返回 body + 诊断信息（实际 URL、title、body 前 300 字符）
         const prevUrl = page.url();
-        await page.goto(msg.params.url, {
-          waitUntil: "domcontentloaded",
-          timeout: 20000,
-        });
-        const body = await page.evaluate(() => document.body.innerText);
+        let navigatedUrl = "";
+        let pageTitle = "";
+        let body = "";
+        let contentType = "";
+        try {
+          const resp = await page.goto(msg.params.url, {
+            waitUntil: "domcontentloaded",
+            timeout: 20000,
+          });
+          navigatedUrl = page.url();
+          pageTitle = await page.title();
+          if (resp) {
+            contentType = resp.headers()["content-type"] || "";
+          }
+          body = await page.evaluate(() => document.body.innerText);
+          // 截取前 3000 字符防止回传过大
+          if (body.length > 3000) {
+            body = body.slice(0, 3000);
+          }
+        } catch (navErr) {
+          navigatedUrl = page.url();
+          body = `PAGE_GOTO_ERROR: ${navErr.message}`;
+        }
         // 回退到原页面
         if (prevUrl && prevUrl !== "about:blank") {
           page.goBack().catch(() => {});
         }
-        result = { body };
+        result = { body, navigatedUrl, pageTitle, contentType };
         break;
       }
       case "evaluate": {

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { AppHeader } from "@/components/layout/AppHeader";
+import { IpcReconnectBanner } from "@/components/layout/IpcReconnectBanner";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SkillPageRenderer } from "@/components/skill/SkillPageRenderer";
+import { useIpcHealth } from "@/hooks/useIpcHealth";
 import { useSkillExtensionStore } from "@/stores";
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense, useMemo } from "react";
@@ -139,6 +141,7 @@ function NotFoundRoute() {
 }
 
 export const ContentArea = memo(function ContentArea() {
+  const ipcHealthy = useIpcHealth();
   const skillPages = useSkillExtensionStore((s) => s.pages);
   const location = useLocation();
   const stockInvestmentPaths = new Set([
@@ -165,6 +168,7 @@ export const ContentArea = memo(function ContentArea() {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <IpcReconnectBanner healthy={ipcHealthy} />
       {!isStockPage && <AppHeader />}
       <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Routes>

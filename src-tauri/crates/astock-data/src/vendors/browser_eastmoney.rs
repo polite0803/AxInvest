@@ -15,9 +15,9 @@ pub trait BrowserHttpFetch: Send + Sync {
     /// 使用浏览器 fetch API（受 CORS 限制）
     async fn fetch_json(&self, url: &str, headers: &[(&str, &str)]) -> Result<Value, String>;
 
-    /// 通过页面导航发送 HTTP GET 请求，返回响应体纯文本
+    /// 通过页面导航发送 HTTP GET 请求，返回诊断结构 `{ body, navigatedUrl, pageTitle, contentType }`
     /// 使用 page.goto() 导航（绕过 CORS 限制），适用于 JSON API
-    async fn fetch_text(&self, url: &str) -> Result<String, String>;
+    async fn fetch_text(&self, url: &str) -> Result<Value, String>;
 }
 
 /// 通过浏览器内核请求东方财富 API 的 vendor
@@ -65,7 +65,7 @@ async fn browser_fetch(
         message: "browser fetcher not configured".into(),
     })?;
 
-    let body = f
+    let result = f
         .fetch_text(url)
         .await
         .map_err(|e| DataError::VendorError {
@@ -73,19 +73,44 @@ async fn browser_fetch(
             message: format!("browser fetch failed: {e}"),
         })?;
 
-    // 先尝试按 JSON 数组/对象解析
+    // 诊断信息
+    let navigated_url = result["navigatedUrl"].as_str().unwrap_or("unknown");
+    let content_type = result["contentType"].as_str().unwrap_or("unknown");
+    let page_title = result["pageTitle"].as_str().unwrap_or("");
+
+    let body = result["body"].as_str().unwrap_or("");
     let trimmed = body.trim();
-    if trimmed.is_empty() {
+
+    // 如果是 page.goto 错误，先记录诊断信息
+    if trimmed.starts_with("PAGE_GOTO_ERROR:") {
+        tracing::warn!(
+            "[browser_eastmoney] page.goto 导航失败: {trimmed}, url={navigated_url}, contentType={content_type}"
+        );
         return Err(DataError::VendorError {
             vendor: "browser_eastmoney".into(),
-            message: "browser fetch returned empty body".into(),
+            message: format!("page.goto failed: {trimmed}"),
+        });
+    }
+
+    if trimmed.is_empty() {
+        tracing::warn!(
+            "[browser_eastmoney] 返回空body, navigatedUrl={navigated_url}, contentType={content_type}, title={page_title}"
+        );
+        return Err(DataError::VendorError {
+            vendor: "browser_eastmoney".into(),
+            message: format!(
+                "empty body (url={navigated_url}, type={content_type})"
+            ),
         });
     }
 
     serde_json::from_str(trimmed).map_err(|e| {
+        let snippet = &trimmed[..trimmed.len().min(200)];
+        tracing::warn!(
+            "[browser_eastmoney] JSON解析失败: {e}, body={snippet}, navigatedUrl={navigated_url}, contentType={content_type}"
+        );
         DataError::ParseError(format!(
-            "JSON parse failed: {e}, body={}",
-            &trimmed[..trimmed.len().min(200)]
+            "JSON error: {e} (url={navigated_url})"
         ))
     })
 }

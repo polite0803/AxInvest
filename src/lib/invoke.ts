@@ -369,7 +369,9 @@ export function isTauri(): boolean {
 /**
  * Invoke a Tauri command with optional timeout.
  * If the timeout elapses, the promise rejects with a TimeoutError.
- */
+ *
+ * NOTE: 大多数调用方应使用 `invokeWithRetry` 以在网络瞬断时自动恢复。
+ * `invoke` 不重试，连接丢失的错误会直接抛出到组件层。
 export async function invoke<T>(
   cmd: string,
   args?: Record<string, unknown>,
@@ -537,4 +539,111 @@ export async function listen<T>(
     "[invoke] listen() called in browser mode - events will not fire",
   );
   return () => {};
+}
+
+// ─── IPC 心跳 & 连接恢复 ───
+
+type IpcHealthListener = (healthy: boolean) => void;
+
+let healthListeners: Set<IpcHealthListener> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let lastHeartbeatOk = true;
+let consecutiveFailures = 0;
+const HEARTBEAT_INTERVAL_MS = 30_000; // 每 30 秒 ping 一次
+const MAX_CONSECUTIVE_FAILURES = 3; // 连续 3 次失败触发断连
+
+/**
+ * 注册 IPC 健康状态监听器。
+ * 当心跳检测到连接断开/恢复时通知监听器。
+ * 返回取消函数。
+ */
+export function onIpcHealthChange(listener: IpcHealthListener): () => void {
+  if (!healthListeners) {
+    healthListeners = new Set();
+  }
+  healthListeners.add(listener);
+  return () => {
+    healthListeners?.delete(listener);
+  };
+}
+
+function notifyHealthChange(healthy: boolean) {
+  healthListeners?.forEach((fn) => {
+    try {
+      fn(healthy);
+    } catch {
+      // 不扩散
+    }
+  });
+}
+
+/**
+ * 启动 IPC 心跳检测。
+ * 每 30 秒发一次轻量 invoke，连续 3 次失败时通知连接断开。
+ * 恢复时通知重连。
+ */
+export function startIpcHeartbeat(): void {
+  if (heartbeatTimer || !isTauri()) return;
+
+  const ping = async () => {
+    if (!isTauri()) return;
+    try {
+      await invoke<unknown>("get_settings", undefined, 5_000);
+      if (!lastHeartbeatOk) {
+        console.info("[heartbeat] IPC 连接已恢复");
+        notifyHealthChange(true);
+      }
+      lastHeartbeatOk = true;
+      consecutiveFailures = 0;
+    } catch {
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES && lastHeartbeatOk) {
+        console.warn(
+          `[heartbeat] IPC 连接可能已断开（连续 ${consecutiveFailures} 次失败）`,
+        );
+        notifyHealthChange(false);
+      }
+      lastHeartbeatOk = false;
+    }
+  };
+
+  heartbeatTimer = setInterval(ping, HEARTBEAT_INTERVAL_MS);
+  // 立即执行一次
+  ping();
+}
+
+/**
+ * 停止 IPC 心跳检测。
+ */
+export function stopIpcHeartbeat(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  healthListeners?.clear();
+  lastHeartbeatOk = true;
+  consecutiveFailures = 0;
+}
+
+/**
+ * 检查并尝试恢复 IPC 连接。
+ * 先 checkIpcHealth，如果失败则等待 2 秒重试，最多 3 次。
+ * 返回最终的健康状态。
+ */
+export async function recoverIpcConnection(): Promise<boolean> {
+  for (let i = 0; i < 3; i++) {
+    const health = await checkIpcHealth();
+    if (health.ok) {
+      if (!lastHeartbeatOk) {
+        notifyHealthChange(true);
+      }
+      lastHeartbeatOk = true;
+      consecutiveFailures = 0;
+      return true;
+    }
+    if (i < 2) {
+      await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+    }
+  }
+  return false;
 }

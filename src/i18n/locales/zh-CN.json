@@ -9355,5 +9355,11 @@
       "empty": "暂无瓶颈掘金历史",
       "detailEmpty": "该轮暂无候选股记录"
     }
+  },
+  "ipc": {
+    "disconnected": "后端连接已断开",
+    "disconnectedHint": "应用在后台运行过久，后端 IPC 通道可能已断开",
+    "reconnecting": "重连中…",
+    "retry": "重试连接"
   }
 }

@@ -417,7 +417,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
                 .map_err(|e| e.to_string())
         }
 
-        async fn fetch_text(&self, url: &str) -> Result<String, String> {
+        async fn fetch_text(&self, url: &str) -> Result<serde_json::Value, String> {
             axagent_core::browser_automation::browser_http_get_text(url)
                 .await
                 .map_err(|e| e.to_string())

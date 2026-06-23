@@ -707,18 +707,17 @@ impl NodeExecutorTrait for AgentExecutor {
             // tool_calls delta，而是将工具调用嵌在文本内容中。解析后注入标准
             // tool_calls 路径使工具能正常执行。
             if needs_inline_tool_parsing
-                && stream_tool_calls.as_ref().map_or(true, |tc| tc.is_empty())
+                && stream_tool_calls.as_ref().is_none_or(|tc| tc.is_empty())
                 && !stream_content.is_empty()
+                && let Some(parsed) = parse_inline_tool_calls(&stream_content)
             {
-                if let Some(parsed) = parse_inline_tool_calls(&stream_content) {
-                    tracing::info!(
-                        "从文本中解析到 {} 个内联工具调用 (format={:?})",
-                        parsed.len(),
-                        prov.provider_type
-                    );
-                    stream_tool_calls = Some(parsed);
-                    stream_content.clear();
-                }
+                tracing::info!(
+                    "从文本中解析到 {} 个内联工具调用 (format={:?})",
+                    parsed.len(),
+                    prov.provider_type
+                );
+                stream_tool_calls = Some(parsed);
+                stream_content.clear();
             }
 
             // 检查是否有工具调用
@@ -1486,12 +1485,7 @@ fn parse_inline_tool_calls(text: &str) -> Option<Vec<axagent_harness::types::Too
 
     let mut results = Vec::new();
     let mut search = section;
-    loop {
-        // 找 invoke name="..."
-        let invoke_start = match search.find("<|CHAT2API|invoke name=\"") {
-            Some(p) => p,
-            None => break,
-        };
+    while let Some(invoke_start) = search.find("<|CHAT2API|invoke name=\"") {
         let name_start = invoke_start + 26; // len of "<|CHAT2API|invoke name=\""
         let name_end = match search[name_start..].find('"') {
             Some(p) => name_start + p,
@@ -1510,11 +1504,7 @@ fn parse_inline_tool_calls(text: &str) -> Option<Vec<axagent_harness::types::Too
         // 解析 parameter
         let mut args_map = serde_json::Map::new();
         let mut param_search = params_section;
-        loop {
-            let param_start = match param_search.find("<|CHAT2API|parameter name=\"") {
-                Some(p) => p,
-                None => break,
-            };
+        while let Some(param_start) = param_search.find("<|CHAT2API|parameter name=\"") {
             let pname_start_pos = param_start + 29;
             let pname_end = match param_search[pname_start_pos..].find('"') {
                 Some(p) => pname_start_pos + p,
@@ -1824,7 +1814,7 @@ fn validate_strict_mode_output(
 
         // 逐个候选尝试解析
         for candidate in &candidates {
-            if let Ok(_) = serde_json::from_str::<serde_json::Value>(candidate) {
+            if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
                 if candidate != trimmed {
                     tracing::warn!(
                         "strict_mode: 自动修复 LLM 输出格式 (原始={} => 修复后={})",

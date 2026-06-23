@@ -240,17 +240,13 @@ impl PlaywrightClient {
         Ok(raw)
     }
 
-    /// 通过页面导航发送 HTTP GET 请求（绕过 CORS 限制）
+    /// 通过页面导航发送 HTTP GET 请求（绕过 CORS 和 TLS 指纹限制）
     /// 内部使用 page.goto() 直接导航到目标 URL，提取 body 纯文本
     /// CORS 不适用于页面导航，因此可绕过 EastMoney 等不设 CORS 头的 API
-    pub async fn http_get_via_browser(&mut self, url: &str) -> Result<String> {
-        let raw = self
-            .call("http_get", serde_json::json!({ "url": url }))
-            .await?;
-        raw["body"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| anyhow::anyhow!("no body in http_get response"))
+    /// 返回 { body, navigatedUrl, pageTitle, contentType } 的 JSON 结构
+    pub async fn http_get_via_browser(&mut self, url: &str) -> Result<serde_json::Value> {
+        self.call("http_get", serde_json::json!({ "url": url }))
+            .await
     }
 }
 
@@ -327,8 +323,9 @@ pub async fn browser_http_get_json(
 
 /// 通过共享浏览器池发送 HTTP GET 请求并返回纯文本（绕过 CORS）
 /// 使用 page.goto() 导航而非 fetch()，避免 CORS 限制
+/// 返回 { body, navigatedUrl, pageTitle, contentType }
 #[cfg(not(target_os = "android"))]
-pub async fn browser_http_get_text(url: &str) -> anyhow::Result<String> {
+pub async fn browser_http_get_text(url: &str) -> anyhow::Result<serde_json::Value> {
     let pool = shared_browser_pool();
     let mut guard = pool.lock().await;
     if guard.is_none() {

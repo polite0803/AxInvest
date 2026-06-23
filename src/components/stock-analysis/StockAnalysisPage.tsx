@@ -316,7 +316,7 @@ export function StockAnalysisPage() {
       icon: <Sparkles size={14} />,
       children: <EvolutionDriftPanel />,
     },
-  ], []);
+  ], [t]);
 
   // [Phase 2] 决策一致性胶囊 "切换 tab" 事件（tabs 定义之后，确保引用有效性）
   useEffect(() => {

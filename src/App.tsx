@@ -24,7 +24,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useResolvedDarkMode } from "@/hooks/useResolvedDarkMode";
 import { useResponsive } from "@/hooks/useResponsive";
 import { useUpdateChecker } from "@/hooks/useUpdateChecker";
-import { invoke, isTauri, listen } from "@/lib/invoke";
+import { invoke, isTauri, listen, startIpcHeartbeat } from "@/lib/invoke";
 import { useSettingsStore, useStreamStore, useUIStore } from "@/stores";
 import { useShadcnTheme } from "@/theme/shadcnTheme";
 import type { ThemePreset } from "@/theme/shadcnTheme";
@@ -118,6 +118,10 @@ function AppInner() {
     if (isQuickBarWindow) {
       navigate("/quickbar", { replace: true });
       return;
+    }
+    // 启动 IPC 心跳检测（闲置后自动发现连接断开）
+    if (isTauri()) {
+      startIpcHeartbeat();
     }
     if (isTauri()) {
       import("@tauri-apps/api/webviewWindow").then(

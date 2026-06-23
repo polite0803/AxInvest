@@ -34,7 +34,7 @@ pub mod v010_agreement_score;
 pub mod v011_fix_reflection_lessons_fk;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 10;
+pub const CURRENT_VERSION: i32 = 11;
 
 /// 迁移函数签名：所有 `up()` 都遵循这个接口。
 ///

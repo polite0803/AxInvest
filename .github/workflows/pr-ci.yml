@@ -57,7 +57,7 @@ jobs:
           cache: 'npm'
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Check frontend formatting (dprint)
         run: npm run format:check
@@ -172,7 +172,7 @@ jobs:
           cache: 'npm'
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Run frontend tests
         run: npm run test:run
@@ -191,7 +191,7 @@ jobs:
           cache: 'npm'
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Run E2E tests
         env:

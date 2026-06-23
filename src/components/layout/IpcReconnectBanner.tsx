@@ -33,17 +33,17 @@ export function IpcReconnectBanner({ healthy }: Props) {
     <Alert
       type="error"
       showIcon
-      message={t("ipc.disconnected") || "后端连接已断开"}
-      description={t("ipc.disconnectedHint") || "应用在后台运行过久，后端 IPC 通道可能已断开"}
+      message={t("ipc.disconnected")}
+      description={t("ipc.disconnectedHint")}
       action={
         <Button size="small" onClick={handleRetry} disabled={reconnecting}>
           {reconnecting
             ? (
               <>
-                <Spin size="small" /> {t("ipc.reconnecting") || "重连中…"}
+                <Spin size="small" /> {t("ipc.reconnecting")}
               </>
             )
-            : t("ipc.retry") || "重试连接"}
+            : t("ipc.retry")}
         </Button>
       }
       closable={false}

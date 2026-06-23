@@ -7,14 +7,10 @@ publish = false
 
 [dependencies]
 async-trait = "0.1"
-axagent-agent = { path = "../agent" }
 axagent-astock-data = { path = "../astock-data" }
 axagent-core = { path = "../core" }
 axagent-entities = { path = "../entities" }
 axagent-harness = { path = "../harness" }
-axagent-providers = { path = "../providers" }
-axagent-runtime-core = { path = "../runtime-core" }
-axagent-tools = { path = "../tools" }
 chrono = { workspace = true }
 csv = "1"
 futures = "0.3"

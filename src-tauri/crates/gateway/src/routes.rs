@@ -162,7 +162,7 @@ mod tests {
             db,
             master_key: [7u8; 32],
             started_at: 0,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            astock_client: axagent_harness::test_support::empty_market_data_provider(),
             provider_registry: axagent_harness::test_support::empty_provider_registry(),
             adapter: axagent_harness::test_support::empty_platform_adapter(),
             ticket_store: crate::realtime::default_ticket_store(),

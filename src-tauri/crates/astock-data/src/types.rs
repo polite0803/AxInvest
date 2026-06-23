@@ -1,38 +1,8 @@
+use axagent_harness::market_data::{KLine, StockQuote, StockSearchResult};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 
-/// 实时行情
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StockQuote {
-    pub code: String,
-    pub name: String,
-    pub price: f64,
-    /// 昨收价
-    pub pre_close: f64,
-    pub open: f64,
-    pub high: f64,
-    pub low: f64,
-    pub volume: f64,
-    pub amount: f64,
-    pub change_pct: f64,
-    pub turnover_rate: f64,
-    pub pe: Option<f64>,
-    pub pb: Option<f64>,
-    pub total_mv: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub circulating_mv: Option<f64>,
-    /// 涨停价
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit_up: Option<f64>,
-    /// 跌停价
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit_down: Option<f64>,
-    /// 是否ST股票（含*ST）
-    #[serde(default)]
-    pub is_st: bool,
-    pub timestamp: String,
-}
+pub use axagent_harness::market_data::StockQuote;
 
 /// 判断A股市场类型
 ///
@@ -79,22 +49,7 @@ pub fn get_st_price_limit_pct(is_st: bool, market_type: &str) -> f64 {
     }
 }
 
-/// K线数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KLine {
-    pub date: String,
-    pub open: f64,
-    pub high: f64,
-    pub low: f64,
-    pub close: f64,
-    pub volume: f64,
-    pub amount: f64,
-    pub turnover_rate: Option<f64>,
-    /// 累计复权因子 (R3-A); None 表示未应用复权
-    #[serde(default)]
-    pub adj_factor: Option<f64>,
-}
+pub use axagent_harness::market_data::KLine;
 
 /// 财务报告
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,14 +271,7 @@ impl KLinePeriod {
     }
 }
 
-/// 股票搜索结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StockSearchResult {
-    pub code: String,
-    pub name: String,
-    pub market: String,
-}
+pub use axagent_harness::market_data::StockSearchResult;
 
 /// 研报
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -554,18 +502,7 @@ pub struct MarketRawData {
 
 // ─── R3-A 复权 ───
 
-/// 复权方式 (R3-A)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum AdjType {
-    /// 不复权
-    None,
-    /// 前复权（以最近一日为基准）
-    #[default]
-    Forward,
-    /// 后复权（以最早一日为基准）
-    Backward,
-}
+pub use axagent_harness::market_data::AdjType;
 
 /// 单次除权除息事件 (R3-A)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

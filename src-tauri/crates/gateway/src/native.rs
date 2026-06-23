@@ -1286,7 +1286,7 @@ mod tests {
             db: handle.conn.clone(),
             master_key,
             started_at: 0,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            astock_client: axagent_harness::test_support::empty_market_data_provider(),
             provider_registry: axagent_harness::test_support::empty_provider_registry(),
             adapter: axagent_dao::platform_adapter_impl::build_platform_adapter(
                 handle.conn.clone(),
@@ -1711,7 +1711,7 @@ mod tests {
             db: handle.conn.clone(),
             master_key,
             started_at: 0,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            astock_client: axagent_harness::test_support::empty_market_data_provider(),
             provider_registry: axagent_harness::test_support::empty_provider_registry(),
             adapter: axagent_dao::platform_adapter_impl::build_platform_adapter(
                 handle.conn.clone(),

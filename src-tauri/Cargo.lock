@@ -893,6 +893,7 @@ name = "axagent-astock-data"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axagent-harness",
  "chrono",
  "encoding_rs",
  "flate2",
@@ -1013,7 +1014,6 @@ dependencies = [
 name = "axagent-gateway"
 version = "2.6.0"
 dependencies = [
- "axagent-astock-data",
  "axagent-crypto",
  "axagent-dao",
  "axagent-entities",
@@ -1181,7 +1181,7 @@ name = "axagent-quant"
 version = "2.6.0"
 dependencies = [
  "async-trait",
- "axagent-astock-data",
+ "axagent-harness",
  "chrono",
  "rhai",
  "serde",
@@ -1381,14 +1381,10 @@ name = "axagent-stock-analysis"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "axagent-agent",
  "axagent-astock-data",
  "axagent-core",
  "axagent-entities",
  "axagent-harness",
- "axagent-providers",
- "axagent-runtime-core",
- "axagent-tools",
  "chrono",
  "csv",
  "futures",

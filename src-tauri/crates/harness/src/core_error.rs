@@ -109,6 +109,9 @@ pub enum AxAgentError {
 
     #[error("RAG error: {0}")]
     Rag(String),
+
+    #[error("Data source error: {0}")]
+    DataSource(String),
 }
 
 impl AxAgentError {
@@ -222,6 +225,7 @@ impl AxAgentError {
             AxAgentError::ModelIntegrity { .. } => ErrorCode::ValidationError,
             AxAgentError::Inference(_) => ErrorCode::AgentError,
             AxAgentError::Rag(_) => ErrorCode::ValidationError,
+            AxAgentError::DataSource(_) => ErrorCode::NetworkError,
         }
     }
 

@@ -1,6 +1,6 @@
 //! 核心数据类型
 //!
-//! - `Bar`: 与 `axagent-astock-data::KLine` 字段对齐，
+//! - `Bar`: 字段对齐 `axagent_harness::market_data::KLine`，
 //!   扩展涨跌停上下限 + ST 标记（来自 StockQuote）
 //! - `Order` / `Fill`: 订单与成交回报
 //! - `Signal` / `SignalAction` / `CloseReason`: 策略信号
@@ -8,13 +8,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use axagent_astock_data::{KLine, StockQuote};
+use axagent_harness::market_data::{KLine, StockQuote};
 
 use crate::error::QuantError;
 
 /// 统一 K 线结构
 ///
-/// 字段对齐 `axagent_astock_data::KLine`，额外扩展：
+/// 字段对齐 `axagent_harness::market_data::KLine`，额外扩展：
 /// - `code`: 股票代码（多标的回测时由 Engine 注入）
 /// - `limit_up` / `limit_down`: 涨跌停价（来自 StockQuote，未载入时为 None）
 /// - `is_st`: 是否 ST/*ST 股票

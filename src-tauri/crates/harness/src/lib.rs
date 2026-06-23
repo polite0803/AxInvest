@@ -110,6 +110,10 @@ pub use platform_adapter::{
 
 pub mod trajectory_types;
 
+// ── 市场数据契约（MarketDataProvider trait 解耦 quant/gateway → astock-data） ──
+pub mod market_data;
+pub use market_data::{AdjType, KLine, MarketDataProvider, StockQuote, StockSearchResult};
+
 // ── Provider 契约重导出 ──
 pub use context_builder::build_provider_request_context;
 pub use has_provider_registry::HasProviderRegistry;

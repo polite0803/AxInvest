@@ -11,7 +11,7 @@
 //! - **A 股市场微观结构内建**: 撮合器实现 T+1、涨跌停、印花税、佣金、滑点；
 //!   不允许"美式撮合偷看未来"。
 //! - **复盘/回测统一**: 通过 AsOf 时间锚，复盘模式与回测走同一份代码路径，
-//!   复用 `axagent-astock-data` 的 replay routing。
+//!   复用 `MarketDataProvider trait` 的 replay routing。
 //!
 //! ## 模块组织
 //!

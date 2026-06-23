@@ -130,6 +130,43 @@ impl PlatformAdapter for EmptyPlatformAdapter {
     }
 }
 
+// ── MarketDataProvider 测试替身 ──
+// 返回空数据的轻量实现，供 gateway 测试使用。
+
+struct EmptyMarketDataProvider;
+
+#[async_trait::async_trait]
+impl crate::market_data::MarketDataProvider for EmptyMarketDataProvider {
+    async fn get_quote(
+        &self,
+        _stock_code: &str,
+    ) -> Result<crate::market_data::StockQuote> {
+        Err(AxAgentError::DataSource("test stub: no quote".into()))
+    }
+
+    async fn get_klines(
+        &self,
+        _stock_code: &str,
+        _period: &str,
+        _limit: u32,
+        _adj_type: Option<crate::market_data::AdjType>,
+    ) -> Result<Vec<crate::market_data::KLine>> {
+        Ok(vec![])
+    }
+
+    async fn search_stock(
+        &self,
+        _keyword: &str,
+    ) -> Result<Vec<crate::market_data::StockSearchResult>> {
+        Ok(vec![])
+    }
+}
+
+/// 工厂：构造一个 `Arc<dyn MarketDataProvider>` 测试替身
+pub fn empty_market_data_provider() -> Arc<dyn crate::market_data::MarketDataProvider> {
+    Arc::new(EmptyMarketDataProvider)
+}
+
 /// 工厂：构造一个 `Arc<dyn PlatformAdapter>` 测试替身（所有方法返回空 / 错误）
 pub fn empty_platform_adapter() -> Arc<dyn PlatformAdapter> {
     Arc::new(EmptyPlatformAdapter)

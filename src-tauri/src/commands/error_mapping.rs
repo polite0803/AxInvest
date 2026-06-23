@@ -71,6 +71,7 @@ fn error_code_for(e: &AxAgentError) -> &'static str {
         AxAgentError::ModelIntegrity { .. } => error_code::provider_err::FETCH_MODELS_FAILED,
         AxAgentError::Inference(_) => error_code::expert_err::LLM_CALL_FAILED,
         AxAgentError::Rag(_) => error_code::wiki_err::NO_EMBEDDING_PROVIDER,
+        AxAgentError::DataSource(_) => error_code::gateway_err::DATA_FETCH_FAILED,
     }
 }
 

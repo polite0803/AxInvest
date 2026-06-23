@@ -27,8 +27,8 @@ pub struct GatewayAppState {
     pub db: DatabaseConnection,
     pub master_key: [u8; 32],
     pub started_at: i64,
-    /// AStock 客户端（AxInvest 股票数据）
-    pub astock_client: std::sync::Arc<axagent_astock_data::AStockClient>,
+    /// 市场数据提供者（通过 harness trait 解耦，不直接依赖 astock-data）
+    pub astock_client: std::sync::Arc<dyn axagent_harness::market_data::MarketDataProvider>,
     /// 由 Harness 注入的 Provider 注册表（start_with_registry 使用）
     pub provider_registry: Arc<dyn axagent_harness::registry::ProviderRegistry>,
     /// 平台层 trait 聚合（provider / settings / gateway_key / request_log / crypto）。
@@ -138,13 +138,14 @@ impl GatewayServer {
         config: GatewayStartConfig,
         provider_registry: Arc<dyn axagent_harness::registry::ProviderRegistry>,
         adapter: Arc<dyn axagent_harness::PlatformAdapter>,
+        market_data_provider: Arc<dyn axagent_harness::market_data::MarketDataProvider>,
     ) -> Result<Self> {
         let started_at = axagent_harness::util_fns::now_ts();
         let app_state = GatewayAppState {
             db: pool,
             master_key,
             started_at,
-            astock_client: std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            astock_client: market_data_provider,
             provider_registry,
             adapter,
             ticket_store: crate::realtime::default_ticket_store(),

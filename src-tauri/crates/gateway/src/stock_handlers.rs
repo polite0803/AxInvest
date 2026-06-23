@@ -2,7 +2,7 @@
 //!
 //! 对外暴露股票数据查询与分析接口，供外部脚本调用。
 
-use axagent_astock_data::AStockClient;
+use axagent_harness::market_data::MarketDataProvider;
 use axagent_entities::{stock_analyses, watchlist_items};
 use axum::{
     Json,
@@ -79,8 +79,8 @@ fn error_json(status: StatusCode, msg: &str) -> Response {
     (status, Json(serde_json::json!({ "error": msg }))).into_response()
 }
 
-fn aclient(state: &GatewayAppState) -> &AStockClient {
-    &state.astock_client
+fn aclient(state: &GatewayAppState) -> &dyn MarketDataProvider {
+    &*state.astock_client
 }
 
 // ── Handlers ──
@@ -113,7 +113,7 @@ pub async fn get_kline(
     Query(q): Query<KlineQuery>,
 ) -> Response {
     match aclient(&state)
-        .get_klines(&q.code, &q.period, q.limit)
+        .get_klines(&q.code, &q.period, q.limit, None)
         .await
     {
         Ok(klines) => ok_json(klines),

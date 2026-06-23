@@ -327,6 +327,8 @@ pub mod gateway {
     pub const HTTP_UNAVAILABLE: &str = "GATEWAY_HTTP_UNAVAILABLE";
     /// 网关已在运行
     pub const ALREADY_RUNNING: &str = "GATEWAY_ALREADY_RUNNING";
+    /// 数据源获取失败（外部 API / 网络错误）
+    pub const DATA_FETCH_FAILED: &str = "GATEWAY_DATA_FETCH_FAILED";
 }
 
 // ── 别名模块：统一子命令内部使用的简写名称 ──

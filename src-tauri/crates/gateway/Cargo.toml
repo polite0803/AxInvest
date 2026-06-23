@@ -5,7 +5,6 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-axagent-astock-data = { path = "../astock-data" }
 axagent-entities = { path = "../entities" }
 axagent-harness = { path = "../harness" }
 axagent-kit = { path = "../kit" }

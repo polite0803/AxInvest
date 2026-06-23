@@ -1,7 +1,7 @@
 //! K 线数据接入（M2 基础设施）
 //!
 //! 职责：
-//! 1. 拉取 A 股 K 线（`axagent_astock_data::AStockClient::get_klines_with_adj`）
+//! 1. 拉取 A 股 K 线（通过 MarketDataProvider trait）
 //! 2. 拉取对应标的实时行情 `get_quote`（含涨跌停价 + ST 标记）
 //! 3. 合并 KLine + StockQuote → 量化 `Bar`（`Bar::from_kline_with_quote`）
 //! 4. 按日期区间过滤
@@ -14,7 +14,7 @@
 //! - **数据契约**：`start_date <= bar.date <= end_date`（含端点），与 `quant_backtest_run`
 //!   的区间一致。
 
-use axagent_astock_data::{AStockClient, StockQuote, types::AdjType};
+use axagent_harness::market_data::{AdjType, MarketDataProvider, StockQuote};
 
 use crate::error::QuantError;
 use crate::types::Bar;
@@ -25,7 +25,7 @@ pub const DEFAULT_KLINE_LIMIT: u32 = 504;
 /// 拉取 K 线 + Quote → `Vec<Bar>`，按 `[start_date, end_date]` 过滤（闭区间）
 ///
 /// # 参数
-/// - `client`: 共享 `AStockClient`（来自 AppState.astock_client）
+/// - `client`: 共享 `MarketDataProvider`（来自 AppState）
 /// - `code`: A 股代码（"600519" / "000001" / "300750" 等）
 /// - `start_date` / `end_date`: 形如 `"YYYY-MM-DD"`，含端点
 /// - `limit`: 拉取上限，1 年 ~ 252 行，2 年 ~ 504
@@ -38,23 +38,22 @@ pub const DEFAULT_KLINE_LIMIT: u32 = 504;
 /// # 示例
 /// ```no_run
 /// # use axagent_quant::kline_provider::load_bars_with_quote;
-/// # use axagent_astock_data::AStockClient;
-/// # async fn demo() -> Result<(), axagent_quant::QuantError> {
-/// let client = AStockClient::new();
-/// let bars = load_bars_with_quote(&client, "600519", "2023-01-01", "2024-12-31", 504).await?;
+/// # use axagent_harness::market_data::MarketDataProvider;
+/// # async fn demo(client: &dyn MarketDataProvider) -> Result<(), axagent_quant::QuantError> {
+/// let bars = load_bars_with_quote(client, "600519", "2023-01-01", "2024-12-31", 504).await?;
 /// assert!(!bars.is_empty());
 /// # Ok(())
 /// # }
 /// ```
 pub async fn load_bars_with_quote(
-    client: &AStockClient,
+    client: &dyn MarketDataProvider,
     code: &str,
     start_date: &str,
     end_date: &str,
     limit: u32,
 ) -> Result<Vec<Bar>, QuantError> {
     // 1) 并发拉 K 线 + Quote（Quote 失败不致命，klines 失败致命）
-    let klines_fut = client.get_klines_with_adj(code, "daily", limit, Some(AdjType::Forward));
+    let klines_fut = client.get_klines(code, "daily", limit, Some(AdjType::Forward));
     let quote_fut = client.get_quote(code);
     let (klines_res, quote_res) = tokio::join!(klines_fut, quote_fut);
 
@@ -98,7 +97,7 @@ pub async fn load_bars_with_quote(
 /// - 无 quote：使用 `Bar::from_kline`（涨跌停 None, is_st=false）
 pub fn klines_to_bars(
     code: &str,
-    klines: &[axagent_astock_data::KLine],
+    klines: &[axagent_harness::market_data::KLine],
     quote: Option<&StockQuote>,
 ) -> Vec<Bar> {
     klines
@@ -123,7 +122,7 @@ pub fn filter_bars_by_date(bars: Vec<Bar>, start_date: &str, end_date: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axagent_astock_data::KLine;
+    use axagent_harness::market_data::KLine;
 
     fn kline(date: &str, close: f64) -> KLine {
         KLine {

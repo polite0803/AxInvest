@@ -2612,6 +2612,47 @@ impl Default for AStockClient {
     }
 }
 
+// ── MarketDataProvider impl ──────────────────────────────────────────────
+// 实现 harness 契约，让 quant/gateway 通过 trait 调用，无需直接依赖 astock-data。
+
+#[async_trait::async_trait]
+impl axagent_harness::market_data::MarketDataProvider for AStockClient {
+    async fn get_quote(
+        &self,
+        stock_code: &str,
+    ) -> std::result::Result<axagent_harness::market_data::StockQuote, axagent_harness::core_error::AxAgentError>
+    {
+        self.get_quote(stock_code)
+            .await
+            .map_err(|e| axagent_harness::core_error::AxAgentError::DataSource(e.to_string()))
+    }
+
+    async fn get_klines(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+        adj_type: Option<axagent_harness::market_data::AdjType>,
+    ) -> std::result::Result<Vec<axagent_harness::market_data::KLine>, axagent_harness::core_error::AxAgentError>
+    {
+        self.get_klines_with_adj(stock_code, period, limit, adj_type)
+            .await
+            .map_err(|e| axagent_harness::core_error::AxAgentError::DataSource(e.to_string()))
+    }
+
+    async fn search_stock(
+        &self,
+        keyword: &str,
+    ) -> std::result::Result<
+        Vec<axagent_harness::market_data::StockSearchResult>,
+        axagent_harness::core_error::AxAgentError,
+    > {
+        self.search_stock(keyword)
+            .await
+            .map_err(|e| axagent_harness::core_error::AxAgentError::DataSource(e.to_string()))
+    }
+}
+
 /// 提取新闻 publish_time 的 YYYY-MM-DD 前缀；无法解析时返回空串（截断时会被过滤掉）
 fn news_date_key(s: &str) -> &str {
     if s.len() >= 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-' {

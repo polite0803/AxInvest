@@ -4886,6 +4886,9 @@
     },
     "durationMinutes": "{{minutes}} min",
     "durationSeconds": "{{seconds}} sec"
+    "aggregatorNode": {
+      "inputs": "輸入"
+    }
   },
   "atomicSkill": {
     "entryType": "入口類型",

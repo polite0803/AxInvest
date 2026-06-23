@@ -5317,6 +5317,9 @@
     },
     "durationMinutes": "{{minutes}} min",
     "durationSeconds": "{{seconds}} sec"
+    "aggregatorNode": {
+      "inputs": "इनपुट"
+    }
   },
   "atomicSkill": {
     "entryType": "प्रविष्टि प्रकार",

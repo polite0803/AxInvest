@@ -5317,6 +5317,9 @@
     },
     "durationMinutes": "{{minutes}} min",
     "durationSeconds": "{{seconds}} sec"
+    "aggregatorNode": {
+      "inputs": "Entrées"
+    }
   },
   "atomicSkill": {
     "entryType": "Type d'entrée",

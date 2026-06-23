@@ -9100,7 +9100,10 @@
     "expand": "Expandir a {{title}}",
     "expandToPanel": "Expandir a panel",
     "collapse": "Contraer",
-    "collapseToBubble": "Contraer a burbuja"
+    "collapseToBubble": "Contraer a burbuja",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

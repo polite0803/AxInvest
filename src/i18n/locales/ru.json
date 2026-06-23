@@ -9100,7 +9100,10 @@
     "expand": "Развернуть в {{title}}",
     "expandToPanel": "Развернуть в панель",
     "collapse": "Свернуть",
-    "collapseToBubble": "Свернуть в пузырь"
+    "collapseToBubble": "Свернуть в пузырь",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

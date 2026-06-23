@@ -9100,7 +9100,10 @@
     "expand": "展開為「{{title}}」",
     "expandToPanel": "展開為面板",
     "collapse": "折疊",
-    "collapseToBubble": "折疊為氣泡"
+    "collapseToBubble": "折疊為氣泡",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

@@ -9100,7 +9100,10 @@
     "expand": "{{title}}로 펼치기",
     "expandToPanel": "패널로 펼치기",
     "collapse": "접기",
-    "collapseToBubble": "버블로 접기"
+    "collapseToBubble": "버블로 접기",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

@@ -9100,7 +9100,10 @@
     "expand": "توسيع إلى {{title}}",
     "expandToPanel": "توسيع إلى لوحة",
     "collapse": "طي",
-    "collapseToBubble": "طي إلى فقاعة"
+    "collapseToBubble": "طي إلى فقاعة",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

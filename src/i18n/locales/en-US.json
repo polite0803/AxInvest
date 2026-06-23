@@ -7629,7 +7629,10 @@
     "collapseToBubble": "Collapse to Bubble",
     "expand": "Expand as {{title}}",
     "expandToPanel": "Expand to Panel",
-    "notRegistered": "Unregistered dual view: {{id}}"
+    "notRegistered": "Unregistered dual view: {{id}}",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "quant": {
     "backtest": {

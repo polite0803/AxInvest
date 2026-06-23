@@ -9100,7 +9100,10 @@
     "expand": "{{title}} में विस्तृत करें",
     "expandToPanel": "पैनल में विस्तृत करें",
     "collapse": "संकुचित करें",
-    "collapseToBubble": "बुलबुले में संकुचित करें"
+    "collapseToBubble": "बुलबुले में संकुचित करें",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

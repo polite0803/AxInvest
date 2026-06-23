@@ -9100,7 +9100,10 @@
     "expand": "Zu {{title}} erweitern",
     "expandToPanel": "Zum Panel erweitern",
     "collapse": "Einklappen",
-    "collapseToBubble": "Zur Blase einklappen"
+    "collapseToBubble": "Zur Blase einklappen",
+    "decision": {
+      "llmUnavailableHint": "LLM analysis is temporarily unavailable. Please check your model configuration or network connection"
+    }
   },
   "timeTravel": {
     "modeSwitch": {

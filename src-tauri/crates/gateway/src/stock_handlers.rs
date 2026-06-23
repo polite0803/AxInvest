@@ -3,7 +3,7 @@
 //! 对外暴露股票数据查询与分析接口，供外部脚本调用。
 
 use axagent_astock_data::AStockClient;
-use axagent_core::entity::{stock_analyses, watchlist_items};
+use axagent_entities::{stock_analyses, watchlist_items};
 use axum::{
     Json,
     extract::{Path, Query, State},

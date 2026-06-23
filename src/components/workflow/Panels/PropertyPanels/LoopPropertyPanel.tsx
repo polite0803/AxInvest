@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useWorkflowEditorStore } from "@/stores";
-// eslint-disable-next-line @typescript-eslint/no-deprecated
+ 
 import { Divider, Input, InputNumber, message, Select, Switch, Tag, theme } from "antd";
 import { X } from "lucide-react";
 import React from "react";

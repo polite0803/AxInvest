@@ -121,7 +121,7 @@ export function TeammatePanel({
     );
     setCreatingTeam(false);
     setTeamModalOpen(false);
-  }, [conversationId, t, upsertPoolItem]);
+  }, [conversationId, t, upsertPoolItem, message]);
 
   // 按团队分组
   const grouped = useMemo(() => {

@@ -102,7 +102,7 @@ export function WikiGraphPage() {
       message.error(t("wiki.graph.loadError", { error: String(e) }));
     }
     setGraphLoading(false);
-  }, [wikiIdFromUrl, t]);
+  }, [wikiIdFromUrl, t, message]);
 
   useEffect(() => {
     setSelectedVaultId(wikiIdFromUrl);
@@ -256,7 +256,7 @@ export function WikiGraphPage() {
         message.error(String(e));
       }
     },
-    [deleteNote, selectedNodeId, wikiIdFromUrl, loadNotes, loadGraphData, t],
+    [deleteNote, selectedNodeId, wikiIdFromUrl, loadNotes, loadGraphData, t, message],
   );
 
   const handleNoteUpdated = () => {

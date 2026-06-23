@@ -21,7 +21,7 @@ import {
   StarFilled,
   StarOutlined,
 } from "@ant-design/icons";
-// eslint-disable-next-line @typescript-eslint/no-deprecated
+ 
 import { Button, Empty, Form, Input, List, message, Modal, Select, Space, Spin, Tag, theme, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

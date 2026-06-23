@@ -5,7 +5,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { invoke } from "@/lib/invoke";
 import { type ExecutionPhase, TERMINAL_PHASES, useExecutionStore } from "@/stores/feature/executionStore";
 import { listen } from "@tauri-apps/api/event";
-// eslint-disable-next-line @typescript-eslint/no-deprecated
+ 
 import {
   Alert,
   Badge,

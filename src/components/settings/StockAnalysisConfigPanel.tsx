@@ -332,7 +332,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, message]);
 
   // tool → parameter groups
   const toolGroups = useMemo(() => {

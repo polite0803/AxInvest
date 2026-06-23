@@ -74,7 +74,7 @@ export function FrontendEditorModal({
     } finally {
       setAnalyzing(false);
     }
-  }, [skillName, t]);
+  }, [skillName, t, message]);
 
   const handleJsonChange = useCallback((value: string) => {
     setJsonText(value);
@@ -102,7 +102,7 @@ export function FrontendEditorModal({
     } finally {
       setSaving(false);
     }
-  }, [jsonText, skillName, onClose, onSaved, t]);
+  }, [jsonText, skillName, onClose, onSaved, t, message]);
 
   return (
     <Modal

@@ -68,7 +68,7 @@ export function CategoryManagerModal({
         setSaving(false);
       }
     },
-    [createCategory, t],
+    [createCategory, t, message],
   );
 
   const handleEdit = useCallback(
@@ -98,7 +98,7 @@ export function CategoryManagerModal({
         setSaving(false);
       }
     },
-    [editingCategory, updateCategory, t],
+    [editingCategory, updateCategory, t, message],
   );
 
   const handleDelete = useCallback(
@@ -108,7 +108,7 @@ export function CategoryManagerModal({
       // 同步：后端将关联对话的 categoryId 置 null，前端需要刷新
       useConversationStore.getState().fetchConversations();
     },
-    [deleteCategory, t],
+    [deleteCategory, t, message],
   );
 
   const openEdit = useCallback((category: ConversationCategory) => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { MinusCircleOutlined, PlusOutlined } from "@ant-design/icons";
-// eslint-disable-next-line @typescript-eslint/no-deprecated
+ 
 import { Button, Input, message, Select, theme } from "antd";
 import { Sparkles } from "lucide-react";
 import React from "react";

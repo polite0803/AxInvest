@@ -208,8 +208,8 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
     const panel = new Set(extractVarNamesFromPanel());
     const rust = new Set(extractVarNamesFromRust());
     // 排除 vendor_*：它们由 DataVendorsTab 单独管理，避免两边同时写入竞态。
-    // 排除 actual_outcome / reflection_depth：反思复盘工作流运行时注入，非用户配置参数
-    const runtimeInjected = new Set(["actual_outcome", "reflection_depth"]);
+    // 排除 actual_outcome / reflection_depth / stock_lessons：反思复盘工作流运行时注入，非用户配置参数
+    const runtimeInjected = new Set(["actual_outcome", "reflection_depth", "stock_lessons"]);
     const missingInPanel = [...rust]
       .filter((k) => !k.startsWith("vendor_"))
       .filter((k) => !runtimeInjected.has(k))

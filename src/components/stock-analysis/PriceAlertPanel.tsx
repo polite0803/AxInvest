@@ -74,7 +74,7 @@ export function PriceAlertPanel() {
       if (unlisten) { unlisten(); }
       cancelled = true;
     };
-  }, [t]);
+  }, [t, message]);
 
   const addAlert = async (values: Record<string, unknown>) => {
     try {

@@ -97,7 +97,7 @@ export function WikiDetailPanel({
       message.error(String(e));
     }
     setSaving(false);
-  }, [note, hasChanges, updateNote, onNoteUpdated, content, title]);
+  }, [note, hasChanges, updateNote, onNoteUpdated, content, title, message]);
 
   useEffect(() => {
     if (!noteId) {
@@ -180,7 +180,7 @@ export function WikiDetailPanel({
       message.error(t("wiki.sync.error") + ": " + String(e));
     }
     setSyncing(false);
-  }, [note, selectedKbId, t]);
+  }, [note, selectedKbId, t, message]);
 
   // 局部图谱：当前节点 + 直接邻居
   const localGraphData = useMemo(() => {

@@ -349,7 +349,7 @@ export function DataVendorsTab() {
     } finally {
       setSaving(false);
     }
-  }, [vendorValues, iwencaiKey, xueqiuToken, t]);
+  }, [vendorValues, iwencaiKey, xueqiuToken, t, message]);
 
   const checkOne = useCallback(async (vendorName: string) => {
     setHealth((prev) => ({ ...prev, [vendorName]: "pending" }));
@@ -395,7 +395,7 @@ export function DataVendorsTab() {
         return prev;
       });
     }, 100);
-  }, [checkOne, t]);
+  }, [checkOne, t, message]);
 
   if (!loaded) {
     return (

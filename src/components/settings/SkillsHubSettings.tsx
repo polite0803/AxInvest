@@ -75,7 +75,7 @@ export function SkillsHubSettings() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, category]);
+  }, [searchQuery, category, message]);
 
   const handleSearch = () => doSearch(1);
   const handlePageChange = (page: number) => doSearch(page);

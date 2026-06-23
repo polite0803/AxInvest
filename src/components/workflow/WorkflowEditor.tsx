@@ -1022,6 +1022,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     saveSkillWorkflowFromLlm,
     loadTemplate,
     isSaving,
+    message,
   ]);
   // eslint-disable-next-line react-hooks/refs
   handleSaveRef.current = handleSave;
@@ -1205,7 +1206,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         container.parentNode.removeChild(container);
       }
     }
-  }, [reactFlowInstance, currentTemplate, t]);
+  }, [reactFlowInstance, currentTemplate, t, message]);
 
   const handleNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
@@ -1707,7 +1708,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     });
 
     message.success(t("workflow.autoLayout"));
-  }, [reactFlowNodes, reactFlowEdges, parentRefs, setRNodes, updateNode, t, reactFlowInstance]);
+  }, [reactFlowNodes, reactFlowEdges, parentRefs, setRNodes, updateNode, t, reactFlowInstance, message]);
 
   const handleClose = useCallback(() => {
     if (isDirty) {

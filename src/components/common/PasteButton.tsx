@@ -63,7 +63,7 @@ export const PasteButton: React.FC<PasteButtonProps> = ({
     } finally {
       if (mountedRef.current) { setLoading(false); }
     }
-  }, [onPaste, t]);
+  }, [onPaste, t, message]);
 
   return (
     <Button

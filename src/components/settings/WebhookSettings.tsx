@@ -20,7 +20,7 @@ import {
   Typography,
 } from "antd";
 import { Bell, BellOff, Copy, Plus, RefreshCw, Trash2, Webhook } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text, Paragraph, Title } = Typography;
@@ -70,7 +70,7 @@ export function WebhookSettings() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
 
-  const loadSubscriptions = async () => {
+  const loadSubscriptions = useCallback(async () => {
     try {
       const result = await invoke<WebhookSubscription[]>(
         "webhook_list_subscriptions",
@@ -81,12 +81,12 @@ export function WebhookSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [message]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSubscriptions();
-  }, []);
+  }, [loadSubscriptions]);
 
   const handleRefresh = async () => {
     setRefreshing(true);

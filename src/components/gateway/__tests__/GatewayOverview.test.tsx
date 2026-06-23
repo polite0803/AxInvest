@@ -2,9 +2,31 @@
 
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { message } from "antd";
+import { App } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewayOverview } from "../GatewayOverview";
+
+// Mock App.useApp() to provide a controlled message instance for testing.
+// After the message → App.useApp() refactor, the component no longer uses
+// the static `message` import directly.
+const mockMessage = {
+  success: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warning: vi.fn(),
+  loading: vi.fn(),
+  destroy: vi.fn(),
+};
+vi.mock("antd", async () => {
+  const actual = await vi.importActual("antd");
+  return {
+    ...actual,
+    App: {
+      ...((actual as any).App || {}),
+      useApp: () => ({ message: mockMessage }),
+    },
+  };
+});
 
 let status = {
   is_running: false,
@@ -79,7 +101,7 @@ describe("GatewayOverview", () => {
 
   it("shows an error message when starting the gateway fails", async () => {
     startGateway.mockRejectedValueOnce(new Error("TLS cert missing"));
-    const errorSpy = vi.spyOn(message, "error").mockImplementation(() => {
+    const errorSpy = vi.spyOn(mockMessage, "error").mockImplementation(() => {
       const noop = () => {};
       return {
         then: undefined as never,

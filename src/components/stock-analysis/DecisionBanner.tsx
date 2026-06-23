@@ -73,7 +73,7 @@ export function DecisionBanner() {
       message.error(t("stockAnalysis.addFailed"));
     }
     setAdding(false);
-  }, [stockCode, stockName, t, bumpWatchlistVersion]);
+  }, [stockCode, stockName, t, bumpWatchlistVersion, message]);
 
   const actionLabel = (action: string) => t(getActionTKey(action));
 
@@ -120,7 +120,7 @@ export function DecisionBanner() {
     a.click();
     URL.revokeObjectURL(url);
     message.success(t("stockAnalysis.exported"));
-  }, [decision, stockCode, stockName, decisionContext, t, analystReports, debateRounds, riskAssessments]);
+  }, [decision, stockCode, stockName, decisionContext, t, analystReports, debateRounds, riskAssessments, message]);
 
   const handleAskAI = useCallback(() => {
     const ctx = decisionContext;
@@ -140,7 +140,7 @@ export function DecisionBanner() {
     }).catch(() => {
       navigate(`/chat?code=${stockCode}`);
     });
-  }, [decision, stockCode, stockName, decisionContext, navigate, t]);
+  }, [decision, stockCode, stockName, decisionContext, navigate, t, message]);
 
   // ── 决策缺失占位 ──
   // normalizeDecision 入口已保证非空对象，所以这里的 !decision 意味着：

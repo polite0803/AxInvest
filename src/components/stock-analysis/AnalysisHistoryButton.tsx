@@ -57,7 +57,7 @@ export function AnalysisHistoryButton() {
       .catch(() => {
         message.error(t("stockAnalysis.deleteFailed"));
       });
-  }, [t]);
+  }, [t, message]);
 
   const startRename = useCallback((e: React.MouseEvent, r: AnalysisRecord) => {
     e.stopPropagation();
@@ -78,7 +78,7 @@ export function AnalysisHistoryButton() {
       .catch(() => {
         message.error(t("stockAnalysis.renameFailed"));
       });
-  }, [editValue, t]);
+  }, [editValue, t, message]);
 
   const cancelRename = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

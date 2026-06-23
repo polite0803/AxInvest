@@ -88,7 +88,7 @@ export function ToolSemanticCheck() {
       }
     };
     loadTools();
-  }, []);
+  }, [message]);
 
   const filteredTools = allTools.filter(
     (tool) =>
@@ -126,7 +126,7 @@ export function ToolSemanticCheck() {
         setSearchLoading(false);
       }
     },
-    [t],
+    [t, message],
   );
 
   useEffect(() => {
@@ -166,7 +166,7 @@ export function ToolSemanticCheck() {
     } finally {
       setUpgradeLoading(false);
     }
-  }, [selectedMatch, t]);
+  }, [selectedMatch, t, message]);
 
   const handleMatchSelect = useCallback(
     (source: ToolToCheck, match: ToolMatch) => {

@@ -115,7 +115,7 @@ export function TaskPanel() {
         message.error(`${t("task.stopFail")}: ${String(e)}`);
       }
     },
-    [fetchTasks, t],
+    [fetchTasks, t, message],
   );
 
   const runningCount = tasks.filter((t) => t.status === "running").length;

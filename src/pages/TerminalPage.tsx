@@ -47,7 +47,7 @@ export function TerminalPage() {
       message.info(t("terminal.dockerConnectPending"));
       setDockerModalOpen(false);
     },
-    [t],
+    [t, message],
   );
 
   const handleSshConnect = useCallback(
@@ -60,7 +60,7 @@ export function TerminalPage() {
       message.info(t("terminal.sshConnectPending"));
       setSshModalOpen(false);
     },
-    [t],
+    [t, message],
   );
 
   return (

@@ -137,7 +137,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
     } finally {
       setLoadingVersions(false);
     }
-  }, [template, loadTemplateVersions, t]);
+  }, [template, loadTemplateVersions, t, message]);
 
   useEffect(() => {
     if (visible && template?.id) {
@@ -184,7 +184,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
       setDiffEntries([]);
       message.error(t("workflow.versionHistory.compareFailed"));
     }
-  }, [template, diffVerA, diffVerB, t]);
+  }, [template, diffVerA, diffVerB, t, message]);
 
   /** 回滚到指定版本：用旧版本数据创建新版本 */
   const handleRollback = useCallback(async () => {
@@ -228,7 +228,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
     } finally {
       setRollingBack(false);
     }
-  }, [template, rollbackVersion, t, loadVersions]);
+  }, [template, rollbackVersion, t, loadVersions, message]);
 
   const diffCount = diffEntries
     ? {

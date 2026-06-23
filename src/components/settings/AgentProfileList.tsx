@@ -334,7 +334,7 @@ export function AgentProfileList() {
     } finally {
       setSaving(null);
     }
-  }, [editPrompt, t]);
+  }, [editPrompt, t, message]);
 
   const handleSaveNodeConfig = useCallback(async () => {
     if (!editRow) { return; }
@@ -359,7 +359,7 @@ export function AgentProfileList() {
     } finally {
       setSaving(null);
     }
-  }, [editRow, t, loadAll]);
+  }, [editRow, t, loadAll, message]);
 
   const handleSave = useCallback(
     async (nodeId: string, tools: string[]) => {
@@ -379,7 +379,7 @@ export function AgentProfileList() {
         setSaving(null);
       }
     },
-    [t, loadAll],
+    [t, loadAll, message],
   );
 
   if (loading) {

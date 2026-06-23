@@ -755,7 +755,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
         pollTimerRef.current = null;
       }
     };
-  }, [workflowId]);
+  }, [workflowId, message]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── 实时滴答:每 1s 触发一次 setRealtimeTick,使 running 节点 elapsed time 滚动 ──
@@ -808,7 +808,7 @@ export const WorkflowProgressPanel: React.FC<WorkflowProgressPanelProps> = ({
     } finally {
       setCancelling(false);
     }
-  }, [workflowId, t]);
+  }, [workflowId, t, message]);
 
   // --- Render ---
 

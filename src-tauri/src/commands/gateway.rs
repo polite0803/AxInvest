@@ -523,7 +523,8 @@ pub async fn start_gateway(state: State<'_, AppState>) -> Result<(), String> {
                 state.harness.master_key_owned(),
             )),
         ),
-        state.astock_client.clone() as std::sync::Arc<dyn axagent_harness::market_data::MarketDataProvider>,
+        state.astock_client.clone()
+            as std::sync::Arc<dyn axagent_harness::market_data::MarketDataProvider>,
     )
     .await
     .map_err(|e| e.to_string())?;

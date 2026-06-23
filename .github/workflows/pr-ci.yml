@@ -250,6 +250,7 @@ jobs:
 
       - name: Install cargo-deny
         run: cargo install cargo-deny
+        continue-on-error: true
 
       - name: Run cargo deny check
         working-directory: src-tauri

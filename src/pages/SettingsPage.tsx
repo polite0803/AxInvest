@@ -6,7 +6,7 @@ import { SkillPageRenderer } from "@/components/skill/SkillPageRenderer";
 import { invoke } from "@/lib/invoke";
 import { useSkillExtensionStore, useUIStore } from "@/stores";
 import type { SettingsSection } from "@/types";
-import { Button, Result, Spin, theme, message } from "antd";
+import { Button, message, Result, Spin, theme } from "antd";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 

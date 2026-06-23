@@ -2,7 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Card, Empty, Spin, Switch, Table, Tag, Typography, App } from "antd";
+import { App, Button, Card, Empty, Spin, Switch, Table, Tag, Typography } from "antd";
 import { FolderOpen, PanelRight, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

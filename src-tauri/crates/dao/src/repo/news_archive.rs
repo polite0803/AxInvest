@@ -142,10 +142,7 @@ fn row_to_archived(r: news_archive::Model) -> ArchivedNews {
 /// 清理早于 `before_ts_ms` 的旧记录,返回删除条数。
 ///
 /// 建议每月由 cron 触发一次,保留窗口默认 1 年(由调用方传入阈值)。
-pub async fn purge_older_than(
-    db: &DatabaseConnection,
-    before_ts_ms: i64,
-) -> Result<u64, DbErr> {
+pub async fn purge_older_than(db: &DatabaseConnection, before_ts_ms: i64) -> Result<u64, DbErr> {
     let res = news_archive::Entity::delete_many()
         .filter(news_archive::Column::PublishTime.lt(before_ts_ms))
         .exec(db)

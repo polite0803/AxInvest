@@ -2,7 +2,7 @@
 
 import { MinusCircleOutlined, PlusOutlined } from "@ant-design/icons";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Button, Input, Select, theme, message } from "antd";
+import { Button, Input, message, Select, theme } from "antd";
 import { Sparkles } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";

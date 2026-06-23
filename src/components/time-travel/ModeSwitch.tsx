@@ -1,5 +1,5 @@
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { Modal, Tooltip, App } from "antd";
+import { App, Modal, Tooltip } from "antd";
 import { Clock, Zap } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";

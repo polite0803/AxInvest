@@ -4,7 +4,7 @@ import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { ExpandOutlined } from "@ant-design/icons";
-import { Button, Card, Modal, Tag, App } from "antd";
+import { App, Button, Card, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

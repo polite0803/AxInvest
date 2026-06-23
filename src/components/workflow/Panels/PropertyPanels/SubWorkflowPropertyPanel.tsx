@@ -2,7 +2,7 @@
 
 import { useWorkflowEditorStore } from "@/stores";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Button, Divider, Input, Select, Switch, theme, message } from "antd";
+import { Button, Divider, Input, message, Select, Switch, theme } from "antd";
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AIAssistButton, useNodeAIAssist } from "../../Hooks";

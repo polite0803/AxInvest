@@ -1,0 +1,32 @@
+
+[1mAxAgent CI 本地检查[0m
+[36m模式: 快速 (dprint + rustfmt + tsc)[0m
+[36m平台: win32 | Node: v24.14.0[0m
+
+[1m[前端检查][0m
+  dprint 格式化检查                                        [32m✓[0m
+  TypeScript 类型检查                                     [32m✓[0m
+  ESLint 静态检查 (typescript-eslint + react-hooks)       [31m✗[0m
+
+[31m  231:6  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\OneManager\AxInvest\src\components\workflow\WorkflowEditor.tsx
+  1011:6  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  1208:6  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  1710:6  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\OneManager\AxInvest\src\pages\SkillsPage.tsx
+  18:1  warning  Unused eslint-disable directive (no problems were reported from '@typescript-eslint/no-deprecated')
+
+D:\OneManager\AxInvest\src\pages\TerminalPage.tsx
+  50:5  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  63:5  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\OneManager\AxInvest\src\pages\WikiGraphPage.tsx
+  105:6  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  259:5  warning  React Hook useCallback has a missing dependency: 'message'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+✖ 61 problems (1 error, 60 warnings)
+  0 errors and 19 warnings potentially fixable with the `--fix` option.[0m
+
+[1m[31m→ 检查失败，中断执行。请修复上述错误后重新运行。[0m

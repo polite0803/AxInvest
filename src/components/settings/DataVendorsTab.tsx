@@ -2,7 +2,7 @@
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Input, Select, Space, Spin, Switch, Tag, App } from "antd";
+import { App, Button, Card, Input, Select, Space, Spin, Switch, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 

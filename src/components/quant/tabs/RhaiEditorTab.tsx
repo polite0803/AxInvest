@@ -1,6 +1,6 @@
 // RhaiEditorTab — Rhai 脚本编辑 + 注册
 
-import { Alert, Button, Card, Form, Input, Space, Tag, Typography, App } from "antd";
+import { Alert, App, Button, Card, Form, Input, Space, Tag, Typography } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 

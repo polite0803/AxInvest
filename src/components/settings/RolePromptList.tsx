@@ -3,7 +3,7 @@
  * 从 agent_roles 表加载，支持展开编辑 + 保存。
  */
 import { invoke } from "@/lib/invoke";
-import { Button, Input, Spin, Tag, App } from "antd";
+import { App, Button, Input, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 

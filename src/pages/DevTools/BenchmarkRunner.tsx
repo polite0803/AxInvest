@@ -6,7 +6,7 @@ import { BenchmarkSelector } from "@/components/benchmark/BenchmarkSelector";
 import { TaskList } from "@/components/benchmark/TaskList";
 import { useEvaluatorStore } from "@/stores/devtools/evaluatorStore";
 import type { BenchmarkTask, TaskResult } from "@/types";
-import { Button, Card, Spin, Tabs, theme, App } from "antd";
+import { App, Button, Card, Spin, Tabs, theme } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 

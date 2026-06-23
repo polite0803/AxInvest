@@ -2,7 +2,7 @@
 
 import { useKnowledgeStore } from "@/stores";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Divider, Input, InputNumber, Select, theme, message } from "antd";
+import { Divider, Input, InputNumber, message, Select, theme } from "antd";
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AIAssistButton, useNodeAIAssist } from "../../Hooks";

@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Dropdown, Empty, Input, Popconfirm, Select, Space, Spin, Tag, App } from "antd";
+import { App, Button, Card, Dropdown, Empty, Input, Popconfirm, Select, Space, Spin, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";

@@ -4,7 +4,26 @@ import { invoke, logIpcError } from "@/lib/invoke";
 import { useAppConfigStore } from "@/stores/feature/appConfigStore";
 import type { FeatureFlags } from "@/stores/feature/appConfigStore";
 import type { SubAgent } from "@/types";
-import { Badge, Button, Card, Descriptions, Divider, Empty, InputNumber, List, Popconfirm, Radio, Space, Spin, Switch, Tabs, Tag, theme, Typography, message } from "antd";
+import {
+  Badge,
+  Button,
+  Card,
+  Descriptions,
+  Divider,
+  Empty,
+  InputNumber,
+  List,
+  message,
+  Popconfirm,
+  Radio,
+  Space,
+  Spin,
+  Switch,
+  Tabs,
+  Tag,
+  theme,
+  Typography,
+} from "antd";
 import {
   AlertTriangle,
   Bot,

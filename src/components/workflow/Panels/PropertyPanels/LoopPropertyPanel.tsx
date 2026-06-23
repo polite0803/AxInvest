@@ -2,7 +2,7 @@
 
 import { useWorkflowEditorStore } from "@/stores";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Divider, Input, InputNumber, Select, Switch, Tag, theme, message } from "antd";
+import { Divider, Input, InputNumber, message, Select, Switch, Tag, theme } from "antd";
 import { X } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";

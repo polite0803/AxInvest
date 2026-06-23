@@ -12,7 +12,7 @@ import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { Note } from "@/types";
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, HistoryOutlined, SaveOutlined } from "@ant-design/icons";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Button, Modal, Popconfirm, Select, Spin, theme, App } from "antd";
+import { App, Button, Modal, Popconfirm, Select, Spin, theme } from "antd";
 import DOMPurify from "dompurify";
 import {
   ArrowLeft,

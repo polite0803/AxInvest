@@ -4,7 +4,7 @@ import type { ToolUpgradeSuggestion } from "@/components/workflow/types/workflow
 import { invoke } from "@/lib/invoke";
 import { useUIStore } from "@/stores";
 import type { LocalToolGroupInfo, LocalToolInfo } from "@/types";
-import { Button, Card, Empty, Input, List, Modal, Spin, Typography, App } from "antd";
+import { App, Button, Card, Empty, Input, List, Modal, Spin, Typography } from "antd";
 import { ArrowRight, CheckCircle, Search, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

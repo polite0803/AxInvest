@@ -12,7 +12,7 @@ import {
   EyeOutlined,
   MoreOutlined,
 } from "@ant-design/icons";
-import { Button, Card, Segmented, Space, App } from "antd";
+import { App, Button, Card, Segmented, Space } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArtifactPreview } from "./ArtifactPreview";

@@ -4,7 +4,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { NoteVersion } from "@/types";
 import { HistoryOutlined, RollbackOutlined } from "@ant-design/icons";
-import { Button, Drawer, Empty, List, Popconfirm, Spin, theme, Typography, App } from "antd";
+import { App, Button, Drawer, Empty, List, Popconfirm, Spin, theme, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 const { Text } = Typography;

@@ -2,7 +2,7 @@ import { invoke } from "@/lib/invoke";
 import { getActionColor, StockAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { Button, Card, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag, App } from "antd";
+import { App, Button, Card, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

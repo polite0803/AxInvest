@@ -1,7 +1,7 @@
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import { BellOutlined, DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Badge, Button, Card, Form, Input, InputNumber, Select, Table, Tabs, Tag, App } from "antd";
+import { App, Badge, Button, Card, Form, Input, InputNumber, Select, Table, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 

@@ -10,7 +10,7 @@ import {
   LeftOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import { Button, Card, Select, Space, Spin, Table, Tabs, Tag, theme, Typography, App } from "antd";
+import { App, Button, Card, Select, Space, Spin, Table, Tabs, Tag, theme, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";

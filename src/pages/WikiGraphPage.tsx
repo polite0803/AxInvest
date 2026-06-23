@@ -11,7 +11,7 @@ import { invoke } from "@/lib/invoke";
 import { useLlmWikiStore } from "@/stores/feature/llmWikiStore";
 import { useWikiStore } from "@/stores/feature/wikiStore";
 import { FileAddOutlined, NodeIndexOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Button, Empty, Input, Select, Space, Spin, Tag, theme, Typography, App } from "antd";
+import { App, Button, Empty, Input, Select, Space, Spin, Tag, theme, Typography } from "antd";
 import { Eye, PanelLeft, PanelRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";

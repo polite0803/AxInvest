@@ -8,7 +8,7 @@ import {
 } from "@/components/workflow/semanticActions";
 import type { NodeSkillMatch, SkillMatchResult, SkillReplacementAction } from "@/components/workflow/types";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, Descriptions, Modal, Space, Tag, theme, App } from "antd";
+import { App, Button, Descriptions, Modal, Space, Tag, theme } from "antd";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 

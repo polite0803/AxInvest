@@ -13,7 +13,7 @@ import {
 import { usePromptTemplateStore } from "@/stores";
 import { useExpertStore } from "@/stores/feature/expertStore";
 import type { CreateAgentProfileInput, PromptTemplate } from "@/types";
-import { Button, Divider, Input, InputNumber, Modal, Select, Tag, theme, message } from "antd";
+import { Button, Divider, Input, InputNumber, message, Modal, Select, Tag, theme } from "antd";
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AIAssistButton, useNodeAIAssist } from "../../Hooks";

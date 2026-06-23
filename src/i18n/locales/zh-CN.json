@@ -5306,7 +5306,7 @@
     "run": "运行",
     "settings": "设置",
     "durationMinutes": "{{minutes}} 分钟",
-    "durationSeconds": "{{seconds}} 秒"
+    "durationSeconds": "{{seconds}} 秒",
     "aggregatorNode": {
       "inputs": "输入"
     }

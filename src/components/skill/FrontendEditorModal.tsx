@@ -2,7 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import type { SkillManifest } from "@/types";
-import { Button, Input, Modal, Space, Tabs, Typography, App } from "antd";
+import { App, Button, Input, Modal, Space, Tabs, Typography } from "antd";
 import { Lightbulb } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

@@ -1,6 +1,22 @@
 import { invoke } from "@/lib/invoke";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Empty, Form, Input, InputNumber, Popconfirm, Select, Slider, Space, Switch, Table, Tag, Tooltip, App } from "antd";
+import {
+  App,
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Popconfirm,
+  Select,
+  Slider,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  Tooltip,
+} from "antd";
 import { Clock, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 

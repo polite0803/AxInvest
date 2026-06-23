@@ -14,7 +14,7 @@ import type {
   StyleKey,
 } from "@/types/stock-analysis";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Alert, Button, Card, Checkbox, Collapse, Empty, Modal, Spin, Tabs, Tag, Tooltip, message } from "antd";
+import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";

@@ -16,7 +16,26 @@ import { useSkillStore, useUIStore } from "@/stores";
 import type { MarketplaceSkill, Skill } from "@/types";
 import { Claude } from "@lobehub/icons";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Button, Card, Collapse, Dropdown, Empty, Input, Modal, Popconfirm, Select, Space, Spin, Switch, Tabs, type TabsProps, Tag, theme, Typography, message } from "antd";
+import {
+  Button,
+  Card,
+  Collapse,
+  Dropdown,
+  Empty,
+  Input,
+  message,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Tabs,
+  type TabsProps,
+  Tag,
+  theme,
+  Typography,
+} from "antd";
 import type { TFunction } from "i18next";
 import {
   BarChart3,

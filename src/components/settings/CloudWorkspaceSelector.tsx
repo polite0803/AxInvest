@@ -2,7 +2,24 @@
 
 import { PasteButton } from "@/components/common/PasteButton";
 import { invoke, logIpcError } from "@/lib/invoke";
-import { Alert, Button, Card, Checkbox, Descriptions, Divider, Form, Input, Modal, Radio, Select, Space, Table, Tag, Typography, App } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Checkbox,
+  Descriptions,
+  Divider,
+  Form,
+  Input,
+  Modal,
+  Radio,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   AlertTriangle,

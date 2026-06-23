@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import { Button, Input, theme, App } from "antd";
+import { App, Button, Input, theme } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 

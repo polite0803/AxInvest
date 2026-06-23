@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { getActionColor } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Input, Spin, Statistic, Tag, App } from "antd";
+import { App, Button, Card, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 

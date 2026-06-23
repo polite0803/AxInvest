@@ -4,7 +4,7 @@ import { ModelSelect } from "@/components/shared/ModelSelect";
 import { usePromptTemplateStore, useProviderStore, useWorkflowEditorStore } from "@/stores";
 import type { PromptTemplate } from "@/types";
 // eslint-disable-next-line @typescript-eslint/no-deprecated
-import { Button, Input, InputNumber, Modal, theme, message } from "antd";
+import { Button, Input, InputNumber, message, Modal, theme } from "antd";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AIAssistButton, useNodeAIAssist } from "../../Hooks";

@@ -4885,7 +4885,7 @@
       "isolated": "Isolated"
     },
     "durationMinutes": "{{minutes}} min",
-    "durationSeconds": "{{seconds}} sec"
+    "durationSeconds": "{{seconds}} sec",
     "aggregatorNode": {
       "inputs": "입력"
     }

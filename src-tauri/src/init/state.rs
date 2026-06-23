@@ -18,7 +18,7 @@ use axagent_astock_data::NewsArchiveSink;
 use axagent_astock_data::types::NewsItem;
 use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
 use axagent_dao::repo::news_archive::{
-    upsert_batch as dao_upsert_news, ArchivedNews, NewsArchiveEntry,
+    ArchivedNews, NewsArchiveEntry, upsert_batch as dao_upsert_news,
 };
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
@@ -61,8 +61,16 @@ impl NewsArchiveSink for NewsArchiveDaoSink {
                     source: source.to_string(),
                     article_code,
                     title: n.title.clone(),
-                    summary: if n.summary.is_empty() { None } else { Some(n.summary.clone()) },
-                    url: if n.url.is_empty() { None } else { Some(n.url.clone()) },
+                    summary: if n.summary.is_empty() {
+                        None
+                    } else {
+                        Some(n.summary.clone())
+                    },
+                    url: if n.url.is_empty() {
+                        None
+                    } else {
+                        Some(n.url.clone())
+                    },
                     media_name: None, // NewsItem 暂无 media_name 字段
                     publish_time_ms,
                     stock_code: stock_code.map(str::to_string),
@@ -176,10 +184,7 @@ fn archived_to_news_item(a: ArchivedNews) -> NewsItem {
 ///
 /// 不需要新加业务逻辑 —— `get_news` 内部已经有 upsert 钩子,这里只是给每个
 /// 自选股各调一次,触发 sink 的批量入库。
-async fn sweep_news_archive_for_watchlist(
-    astock: &AStockClient,
-    db: &sea_orm::DatabaseConnection,
-) {
+async fn sweep_news_archive_for_watchlist(astock: &AStockClient, db: &sea_orm::DatabaseConnection) {
     let watchlist_codes: Vec<String> = match axagent_core::entity::watchlist_items::Entity::find()
         .all(db)
         .await
@@ -408,8 +413,7 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         if let Some(parent) = l2_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let sink: Arc<dyn NewsArchiveSink> =
-            Arc::new(NewsArchiveDaoSink::new(sea_db.clone()));
+        let sink: Arc<dyn NewsArchiveSink> = Arc::new(NewsArchiveDaoSink::new(sea_db.clone()));
         let (client_with_l2, l2) = AStockClient::new().with_l2_cache(l2_path);
         let client = client_with_l2
             .with_daily_snapshot_cache()
@@ -448,7 +452,9 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
                 } else {
                     next_run
                 };
-                let dur = (next_run - now).to_std().unwrap_or(std::time::Duration::from_secs(3600));
+                let dur = (next_run - now)
+                    .to_std()
+                    .unwrap_or(std::time::Duration::from_secs(3600));
                 tracing::info!(
                     "[news_archive] 下次 sweep 在 {} ({:?} 后)",
                     next_run.format("%Y-%m-%d %H:%M:%S"),

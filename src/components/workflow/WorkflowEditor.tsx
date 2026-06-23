@@ -35,7 +35,7 @@ import {
 import { useWorkflowEditorStore } from "@/stores";
 
 import { useWorkEngineStore } from "@/stores/feature/workEngineStore";
-import { Button, Modal, Spin, theme, App } from "antd";
+import { App, Button, Modal, Spin, theme } from "antd";
 import { useTranslation } from "react-i18next";
 import { AIPanel } from "./AIPanel/AIPanel";
 import { CanvasTitleBar } from "./CanvasTitleBar";

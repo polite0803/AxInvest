@@ -7,7 +7,7 @@ import { useWikiStore } from "@/stores/feature/wikiStore";
 import type { BacklinkInfo, KnowledgeBase, Note, NoteLink } from "@/types";
 import { DeleteOutlined, LinkOutlined, SaveOutlined } from "@ant-design/icons";
 import { Background, Controls, Edge, MiniMap, Node, ReactFlow, useEdgesState, useNodesState } from "@xyflow/react";
-import { Button, Empty, List, Modal, Popconfirm, Select, Spin, Tabs, Tag, theme, Tooltip, Typography, App } from "antd";
+import { App, Button, Empty, List, Modal, Popconfirm, Select, Spin, Tabs, Tag, theme, Tooltip, Typography } from "antd";
 import { ArrowLeftRight, BookOpen, GitGraph, Network, PenLine, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";

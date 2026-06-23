@@ -17,7 +17,7 @@ import {
   ReloadOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, Spin, Table, Tag, Tooltip, App } from "antd";
+import { App, Button, Empty, Spin, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";

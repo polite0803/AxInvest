@@ -4973,7 +4973,7 @@
     "run": "Run",
     "settings": "Settings",
     "durationMinutes": "{{minutes}} min",
-    "durationSeconds": "{{seconds}} sec"
+    "durationSeconds": "{{seconds}} sec",
     "aggregatorNode": {
       "inputs": "Inputs"
     }

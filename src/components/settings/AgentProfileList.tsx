@@ -7,7 +7,7 @@
  *   暴露工具 (🤖) — 模板节点 exposed_tools，LLM 自主决定调用
  */
 import { invoke } from "@/lib/invoke";
-import { Button, Input, Popover, Select, Space, Spin, Tag, Tooltip, App } from "antd";
+import { App, Button, Input, Popover, Select, Space, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 

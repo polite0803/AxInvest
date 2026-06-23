@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import { Button, Image, Input, Select, Slider, Space, Typography, App } from "antd";
+import { App, Button, Image, Input, Select, Slider, Space, Typography } from "antd";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";

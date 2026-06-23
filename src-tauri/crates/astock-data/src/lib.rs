@@ -1455,9 +1455,7 @@ impl AStockClient {
                             // 的噪声数据灌入语料库(as-of 模式需要可靠的时间截断)
                             let filtered: Vec<NewsItem> = result
                                 .iter()
-                                .filter(|n| {
-                                    parse_news_publish_time_ms(&n.publish_time).is_some()
-                                })
+                                .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
                                 .cloned()
                                 .collect();
                             if !filtered.is_empty() {

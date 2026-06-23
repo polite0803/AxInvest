@@ -2,7 +2,23 @@
 
 import { PasteButton } from "@/components/common/PasteButton";
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Empty, Form, Input, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag, Typography, App } from "antd";
+import {
+  App,
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
 import { Bell, BellOff, Copy, Plus, RefreshCw, Trash2, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

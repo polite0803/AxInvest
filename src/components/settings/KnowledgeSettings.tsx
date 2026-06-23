@@ -18,7 +18,29 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Collapse, Divider, Dropdown, Empty, Form, Input, InputNumber, List, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag, theme, Tooltip, Typography, message } from "antd";
+import {
+  Button,
+  Collapse,
+  Divider,
+  Dropdown,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  List,
+  message,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+  theme,
+  Tooltip,
+  Typography,
+} from "antd";
 import type { MenuProps } from "antd";
 import {
   BookOpen,

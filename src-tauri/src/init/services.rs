@@ -1545,7 +1545,7 @@ fn start_cron_scheduler(state: &AppState) {
             let astock_client = astock_client.clone();
             let work_engine = work_engine.clone();
             let vector_store = vector_store.clone();
-            let master_key2 = master_key.clone();
+            let master_key2 = master_key;
             tokio::task::spawn(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let result = crate::commands::stock_workflow::run_batch_reflection_inner(

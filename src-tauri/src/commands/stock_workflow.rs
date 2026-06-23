@@ -3748,7 +3748,7 @@ pub async fn run_batch_reflection_inner(
     let mut skipped_young = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
-    for (_i, p) in pendings.iter().take(max_count).enumerate() {
+    for p in pendings.iter().take(max_count) {
         let analysis = match stock_analyses::Entity::find_by_id(&p.original_analysis_id)
             .one(db)
             .await

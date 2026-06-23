@@ -90,6 +90,7 @@
     "framer-motion": "^12.40.0",
     "html2canvas": "^1.4.1",
     "i18next": "^26.0.8",
+    "immer": "^11.1.8",
     "lucide-react": "^1.11.0",
     "markstream-react": "^0.0.43",
     "monaco-editor": "^0.55.1",

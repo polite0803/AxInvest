@@ -18,7 +18,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisProgress } from "./AnalysisProgress";
@@ -266,7 +266,7 @@ export function StockAnalysisPage() {
     return () => window.removeEventListener("timeline-jump", handle);
   }, [searchParams, navigate, sheetOpen]);
 
-  const tabs = [
+  const tabs = useMemo(() => [
     {
       key: "market",
       label: t("stockAnalysis.tab.market"),
@@ -316,7 +316,7 @@ export function StockAnalysisPage() {
       icon: <Sparkles size={14} />,
       children: <EvolutionDriftPanel />,
     },
-  ];
+  ], []);
 
   // [Phase 2] 决策一致性胶囊 "切换 tab" 事件（tabs 定义之后，确保引用有效性）
   useEffect(() => {

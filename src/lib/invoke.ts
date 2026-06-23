@@ -583,10 +583,10 @@ function notifyHealthChange(healthy: boolean) {
  * 恢复时通知重连。
  */
 export function startIpcHeartbeat(): void {
-  if (heartbeatTimer || !isTauri()) return;
+  if (heartbeatTimer || !isTauri()) { return; }
 
   const ping = async () => {
-    if (!isTauri()) return;
+    if (!isTauri()) { return; }
     try {
       await invoke<unknown>("get_settings", undefined, 5_000);
       if (!lastHeartbeatOk) {

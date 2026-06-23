@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { onIpcHealthChange, recoverIpcConnection, startIpcHeartbeat, stopIpcHeartbeat } from "@/lib/invoke";
 import { useEffect, useState } from "react";
-import {
-  onIpcHealthChange,
-  recoverIpcConnection,
-  startIpcHeartbeat,
-  stopIpcHeartbeat,
-} from "@/lib/invoke";
 
 /** 应用启动时调用一次，启动 IPC 心跳。 */
 export function useIpcHeartbeat() {

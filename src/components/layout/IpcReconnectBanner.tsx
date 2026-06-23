@@ -18,7 +18,7 @@ export function IpcReconnectBanner({ healthy }: Props) {
   const { t } = useTranslation();
   const [reconnecting, setReconnecting] = useState(false);
 
-  if (healthy !== false) return null;
+  if (healthy !== false) { return null; }
 
   const handleRetry = async () => {
     setReconnecting(true);
@@ -38,7 +38,11 @@ export function IpcReconnectBanner({ healthy }: Props) {
       action={
         <Button size="small" onClick={handleRetry} disabled={reconnecting}>
           {reconnecting
-            ? <><Spin size="small" /> {t("ipc.reconnecting") || "重连中…"}</>
+            ? (
+              <>
+                <Spin size="small" /> {t("ipc.reconnecting") || "重连中…"}
+              </>
+            )
             : t("ipc.retry") || "重试连接"}
         </Button>
       }

@@ -370,7 +370,7 @@ export function DecisionBanner() {
             onClick={() => setExpanded(true)}
           />
         }
-        styles={{ body: { padding: "12px 16px" } }}
+        styles={{ body: { padding: "6px 12px" } }}
         style={{
           borderLeft: "4px solid var(--accent)",
           ...(highlightedPanel === "decision"
@@ -378,16 +378,16 @@ export function DecisionBanner() {
             : {}),
         }}
       >
-        <div className="mb-3">
+        <div className="mb-2">
           <div className="flex justify-between text-xs mb-1">
             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
-            <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 15 }}>
+            <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 14 }}>
               {confidencePct}%
             </span>
           </div>
           <div
             className="relative"
-            style={{ height: 10, borderRadius: 5, background: "var(--surface)", overflow: "hidden" }}
+            style={{ height: 8, borderRadius: 4, background: "var(--surface)", overflow: "hidden" }}
           >
             <div
               style={{
@@ -401,19 +401,37 @@ export function DecisionBanner() {
           </div>
         </div>
 
+        {/* Reasoning: collapsed in banner, detailed in Modal via expand button */}
         <div
-          className="sa-markdown-content text-xs mb-3 p-2 rounded"
+          className="text-xs mb-2 p-2 rounded cursor-pointer hover:opacity-80 transition-opacity"
           style={{ background: "var(--surface)" }}
+          onClick={() => setExpanded(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { setExpanded(true); }
+          }}
         >
           {cleanToolCallTags(decision.reasoning || "")
-            ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
+            ? (
+              <>
+                <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.reasoning")}</span>
+                <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
+                  {cleanToolCallTags(decision.reasoning!)?.slice(0, 120)}
+                  {cleanToolCallTags(decision.reasoning!)!.length > 120 ? "…" : ""}
+                </span>
+                <span className="ml-1 text-[10px]" style={{ color: "var(--accent)" }}>
+                  ▶ {t("stockAnalysis.showDetail")}
+                </span>
+              </>
+            )
             : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noDecisionReasoning")}</span>}
         </div>
 
         {/* [Phase 2 step 10] 分歧时 LLM 对比标注 */}
         {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmSummary && (
           <div
-            className="text-xs mb-3 p-2 rounded"
+            className="text-xs mb-2 p-2 rounded"
             style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
           >
             <span className="font-medium" style={{ color: "#7c3aed" }}>
@@ -426,40 +444,40 @@ export function DecisionBanner() {
         )}
 
         <div
-          className="grid gap-2 mb-3"
+          className="grid gap-1.5 mb-2"
           style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
         >
           {decision.targetPrice && (
-            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>
+            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.targetPrice")}
               </div>
-              <div className="text-sm font-semibold font-mono">
+              <div className="text-xs font-semibold font-mono">
                 ¥{decision.targetPrice}
               </div>
             </div>
           )}
           {decision.stopLoss && (
-            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>
+            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.stopLoss")}
               </div>
-              <div className="text-sm font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
+              <div className="text-xs font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
                 ¥{decision.stopLoss}
               </div>
             </div>
           )}
-          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
-            <div className="text-sm font-semibold font-mono">{decision.positionPct}%</div>
+          <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+            <div className="text-[10px]" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
+            <div className="text-xs font-semibold font-mono">{decision.positionPct}%</div>
           </div>
           {upside != null && (
-            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>
+            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.expectedUpside")}
               </div>
               <div
-                className="text-sm font-semibold font-mono"
+                className="text-xs font-semibold font-mono"
                 style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
               >
                 {upside >= 0 ? "+" : ""}
@@ -467,10 +485,10 @@ export function DecisionBanner() {
               </div>
             </div>
           )}
-          <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
+          <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+            <div className="text-[10px]" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
             <div
-              className="text-sm font-semibold"
+              className="text-xs font-semibold"
               style={{
                 color: getRiskColor(decision.riskLevel),
               }}
@@ -479,15 +497,17 @@ export function DecisionBanner() {
             </div>
           </div>
           {decision.expectedHoldingDays && (
-            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDays")}</div>
-              <div className="text-sm font-semibold font-mono">{decision.expectedHoldingDays}天</div>
+            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.expectedHoldingDays")}
+              </div>
+              <div className="text-xs font-semibold font-mono">{decision.expectedHoldingDays}天</div>
             </div>
           )}
           {decision.targetTimeframe && (
-            <div className="text-center p-1.5 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</div>
-              <div className="text-sm font-semibold font-mono">{decision.targetTimeframe}</div>
+            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
+              <div className="text-[10px]" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</div>
+              <div className="text-xs font-semibold font-mono">{decision.targetTimeframe}</div>
             </div>
           )}
         </div>
@@ -496,7 +516,7 @@ export function DecisionBanner() {
         {stockCode && decision.action && decision.action !== "HOLD"
           && (
             <div
-              className="flex items-center gap-2 p-2 mt-2 rounded"
+              className="flex items-center gap-2 p-1.5 mt-1.5 rounded"
               style={{ background: "var(--surface)" }}
             >
               <span className="text-xs whitespace-nowrap" style={{ color: "var(--muted)" }}>
@@ -589,7 +609,7 @@ export function DecisionBanner() {
       {/* [Phase 2] 决策一致性胶囊: 点击展开双视角对比 */}
       {decisionAgreementScore !== null && (
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer hover:opacity-80 transition-opacity mt-1"
+          className="flex items-center gap-2 px-3 py-1 rounded cursor-pointer hover:opacity-80 transition-opacity mt-0.5"
           style={{
             background: decisionAgreementScore >= 60
               ? "rgba(16, 185, 129, 0.1)"

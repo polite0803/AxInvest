@@ -8473,7 +8473,8 @@
         "deleteSuccess": "已删除 {{count}} 条荐股记录",
         "selectedCount": "已选 {{count}} 项",
         "exitSelect": "退出多选",
-        "empty": "暂无荐股历史"
+        "empty": "暂无荐股历史",
+        "detailEmpty": "该轮暂无荐股记录"
       }
     },
     "periodUltraShort": "超短线",
@@ -9351,7 +9352,8 @@
       "deleteSuccess": "已删除 {{count}} 条瓶颈掘金记录",
       "selectedCount": "已选 {{count}} 项",
       "exitSelect": "退出多选",
-      "empty": "暂无瓶颈掘金历史"
+      "empty": "暂无瓶颈掘金历史",
+      "detailEmpty": "该轮暂无候选股记录"
     }
   }
 }

@@ -180,6 +180,9 @@ export default defineConfig(async () => ({
     },
   },
   clearScreen: false,
+  optimizeDeps: {
+    include: ["immer"],
+  },
   server: {
     port: 1420,
     strictPort: true,
@@ -202,6 +205,11 @@ export default defineConfig(async () => ({
       provider: "v8",
       reporter: ["text", "lcov"],
       exclude: ["src/test/**", "src/**/*.test.*", "src/**/*.spec.*"],
+    },
+    // immer 是 zustand 的可选 peer dep，vitest 分叉进程中的
+    // __vite-optional-peer-dep 解析机制需要显式 inline 才能找到包
+    deps: {
+      inline: ["immer"],
     },
   },
 }));

@@ -1831,7 +1831,7 @@ fn validate_strict_mode_output(
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default();
-        let preview = &trimmed[..200.min(trimmed.len())];
+        let preview: String = trimmed.chars().take(200).collect();
         tracing::warn!("strict_mode: LLM 输出不是合法 JSON: {serde_err} [前200字符: {preview}]");
         return Err(NodeError::exec_failed(
             error_code::VALIDATION_FAILED,

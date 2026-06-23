@@ -6,7 +6,7 @@ import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
-import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, Sparkles, Users, X } from "lucide-react";
+import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, Sparkles, SplitSquareHorizontal, Users, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -21,8 +21,25 @@ import { ExperimentSidebar } from "./ExperimentSidebar";
 import { ExperimentTrail } from "./ExperimentTrail";
 import { resolveTimelineJump } from "./timelineJump";
 import "./dual-view";
+import { DualViewRenderer } from "./dual-view";
 import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
 import { EventCalendarPanel } from "./EventCalendarPanel";
+
+/** 决策双视角 Tab 内容：从 store 取 LLM vs 公式决策数据传入 DualViewRenderer */
+function DecisionComparisonTabContent() {
+  const store = useStockAnalysisStore();
+  const dualViewData = {
+    decisionAction: store.decision?.action,
+    decisionPositionPct: store.decision?.positionPct,
+    confidence: store.decision?.confidence,
+    llmDecisionAction: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.stance; } catch { return null; } })() : null,
+    llmDecisionPositionPct: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.positionPct; } catch { return null; } })() : null,
+    llmConfidence: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.confidence; } catch { return null; } })() : null,
+    llmDecisionReasoning: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.summary; } catch { return null; } })() : null,
+    decisionAgreementScore: store.decisionAgreementScore,
+  };
+  return <DualViewRenderer id="decision-comparison" data={dualViewData} defaultMode="panel" />;
+}
 import { EvolutionDriftPanel } from "./EvolutionDriftPanel";
 import { IndexQuotesPanel } from "./IndexQuotesPanel";
 import { IndustryRankingPanel } from "./IndustryRankingPanel";
@@ -233,6 +250,12 @@ export function StockAnalysisPage() {
       children: <ValueAssessmentPanel />,
     },
     { key: "risk", label: t("stockAnalysis.tab.risk"), icon: <Shield size={14} />, children: <RiskMatrix /> },
+    {
+      key: "decision-comparison",
+      label: t("stockAnalysis.tab.decision"),
+      icon: <SplitSquareHorizontal size={14} />,
+      children: <DecisionComparisonTabContent />,
+    },
     // Decision tab removed — now rendered as full-width hero at top
     {
       key: "reflection",
@@ -247,6 +270,18 @@ export function StockAnalysisPage() {
       children: <EvolutionDriftPanel />,
     },
   ];
+
+  // [Phase 2] 决策一致性胶囊 "切换 tab" 事件（tabs 定义之后，确保引用有效性）
+  useEffect(() => {
+    const handleSwitchTab = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (typeof tab === "string" && tabs.some((t) => t.key === tab)) {
+        setActiveTab(tab);
+      }
+    };
+    window.addEventListener("switch-tab", handleSwitchTab);
+    return () => window.removeEventListener("switch-tab", handleSwitchTab);
+  }, []);
 
   const allSheetPanels: SheetPanel[] = [
     { key: "holdings", label: t("stockAnalysis.holdingsSheet"), element: <PositionsMiniPanel /> },

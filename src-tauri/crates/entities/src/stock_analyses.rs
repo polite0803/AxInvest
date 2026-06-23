@@ -34,6 +34,9 @@ pub struct Model {
     pub data_snapshot_id: Option<String>,
     /// 决策校验结果：pending / win / loss
     pub outcome: Option<String>,
+    /// LLM 决策 JSON（方案 D 双向并存：trader 节点的 `{stance, positionPct, confidence}`）
+    #[sea_orm(default_value = "NULL")]
+    pub llm_decision_json: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

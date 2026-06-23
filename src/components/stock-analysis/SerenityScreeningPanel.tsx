@@ -15,6 +15,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   DownOutlined,
+  HistoryOutlined,
   LoadingOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -22,7 +23,21 @@ import {
   StockOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { Alert, Button, Card, Empty, Progress, Space, Spin, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Empty,
+  message,
+  Modal,
+  Progress,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -302,6 +317,19 @@ export function SerenityScreeningPanel() {
   >(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
 
+  // 瓶颈掘金历史（多选 + 批量删除）
+  const [serenityHistoryOpen, setSerenityHistoryOpen] = useState(false);
+  const [serenityHistory, setSerenityHistory] = useState<
+    Array<{
+      generatedAt: string;
+      stockCount: number;
+      createdAt: string;
+    }>
+  >([]);
+  const [serenityHistoryLoading, setSerenityHistoryLoading] = useState(false);
+  const [serenitySelected, setSerenitySelected] = useState<string[]>([]);
+  const [serenityDeleting, setSerenityDeleting] = useState(false);
+
   // 组件卸载时清理监听
   useEffect(() => {
     return () => {
@@ -570,6 +598,24 @@ export function SerenityScreeningPanel() {
           {t("serenityPanel.desc")}
         </Text>
         <div className="flex items-center gap-2">
+          <Button
+            size="small"
+            icon={<HistoryOutlined />}
+            onClick={async () => {
+              setSerenityHistoryOpen(true);
+              setSerenityHistoryLoading(true);
+              try {
+                const list = await invoke<typeof serenityHistory>("list_reco_history", {
+                  styleFilter: "serenity",
+                  limit: 50,
+                });
+                setSerenityHistory(list ?? []);
+              } catch { /* */ }
+              setSerenityHistoryLoading(false);
+            }}
+          >
+            {t("serenityPanel.serenityHistory.viewHistory")}
+          </Button>
           <Button
             size="small"
             icon={<AlertOutlined />}
@@ -1079,6 +1125,101 @@ export function SerenityScreeningPanel() {
           </div>
         </Card>
       )}
+
+      {/* 瓶颈掘金历史（多选 + 批量删除） */}
+      <Modal
+        title={t("serenityPanel.serenityHistory.title")}
+        open={serenityHistoryOpen}
+        onCancel={() => {
+          setSerenityHistoryOpen(false);
+          setSerenitySelected([]);
+        }}
+        footer={serenitySelected.length > 0
+          ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">
+                {t("serenityPanel.serenityHistory.selectedCount", { count: serenitySelected.length })}
+              </span>
+              <Button size="small" onClick={() => setSerenitySelected([])}>
+                {t("serenityPanel.serenityHistory.exitSelect")}
+              </Button>
+              <Button
+                size="small"
+                danger
+                loading={serenityDeleting}
+                onClick={async () => {
+                  setSerenityDeleting(true);
+                  try {
+                    await invoke("batch_delete_reco_history", { generatedAts: serenitySelected });
+                    message.success(
+                      t("serenityPanel.serenityHistory.deleteSuccess", { count: serenitySelected.length }),
+                    );
+                    setSerenityHistory((prev) => prev.filter((r) => !serenitySelected.includes(r.generatedAt)));
+                    setSerenitySelected([]);
+                  } catch (e) {
+                    message.error(String(e));
+                  }
+                  setSerenityDeleting(false);
+                }}
+              >
+                {t("serenityPanel.serenityHistory.batchDelete", { count: serenitySelected.length })}
+              </Button>
+            </div>
+          )
+          : null}
+        width={560}
+      >
+        <Table
+          size="small"
+          loading={serenityHistoryLoading}
+          dataSource={serenityHistory}
+          rowKey="generatedAt"
+          pagination={false}
+          columns={[
+            {
+              title: (
+                <Checkbox
+                  checked={serenityHistory.length > 0 && serenitySelected.length === serenityHistory.length}
+                  indeterminate={serenitySelected.length > 0 && serenitySelected.length < serenityHistory.length}
+                  onChange={(e) => {
+                    setSerenitySelected(e.target.checked ? serenityHistory.map((r) => r.generatedAt) : []);
+                  }}
+                />
+              ),
+              key: "select",
+              width: 40,
+              render: (_, r) => (
+                <Checkbox
+                  checked={serenitySelected.includes(r.generatedAt)}
+                  onChange={(e) => {
+                    setSerenitySelected(
+                      e.target.checked
+                        ? [...serenitySelected, r.generatedAt]
+                        : serenitySelected.filter((g) => g !== r.generatedAt),
+                    );
+                  }}
+                />
+              ),
+            },
+            {
+              title: t("serenityPanel.serenityHistory.generatedAt"),
+              dataIndex: "generatedAt",
+              key: "generatedAt",
+              render: (v: string) => (
+                <span className="text-xs font-mono">
+                  {new Date(v).toLocaleString()}
+                </span>
+              ),
+            },
+            {
+              title: t("serenityPanel.serenityHistory.candidateCount"),
+              dataIndex: "stockCount",
+              key: "stockCount",
+              render: (v: number) => <span className="text-xs">{v} 只</span>,
+            },
+          ]}
+        />
+      </Modal>
     </div>
   );
 }

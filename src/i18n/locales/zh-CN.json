@@ -7975,6 +7975,10 @@
     },
     "history": "历史分析",
     "historyEmpty": "暂无历史分析记录",
+    "historyBatchDelete": "批量删除",
+    "historyDeleteConfirm": "确定删除选中的 {{count}} 条分析记录？",
+    "historyDeleteSuccess": "已删除 {{count}} 条分析记录",
+    "historySelectMode": "多选",
     "debateHistory": "历史辩论",
     "addToWatchlist": "加入自选",
     "addedToWatchlist": "已加入自选",
@@ -8004,6 +8008,8 @@
     "risk.conservative": "保守",
     "risk.neutral": "中性",
     "finalDecision": "最终决策",
+    "dualViewConsistency": "双视角一致性",
+    "dualViewDisagreement": "建议人工复核",
     "decisionMissing": "决策信息缺失",
     "decisionMissingHint": "工作流已结束，但 portfolio-mgr 节点未输出可解析的决策（LLM 输出可能被截断或 JSON 残缺）。",
     "reAnalyze": "重跑分析",
@@ -8615,7 +8621,12 @@
       "table.rationale": "理由",
       "table.sampleSize": "样本量",
       "table.strategy": "策略",
-      "table.winRate": "胜率"
+      "table.winRate": "胜率",
+      "agreementTrendTitle": "双视角一致性趋势",
+      "noAgreementData": "暂无一致性数据",
+      "agreementTrendLabel": "一致性趋势",
+      "agreementRecentAvg": "近期平均一致性",
+      "agreementRange": "范围"
     },
     "trade": {
       "pnlPercent": "盈亏比例",
@@ -8742,7 +8753,21 @@
       "styleSerenity": "瓶颈掘金",
       "cachedAt": "缓存于 {{time}}",
       "cachedBadge": "缓存",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "查看荐股历史",
+        "title": "荐股历史",
+        "generatedAt": "推荐时间",
+        "period": "周期",
+        "stockCount": "股票数",
+        "styles": "风格",
+        "batchDelete": "批量删除 ({{count}})",
+        "deleteConfirm": "确定删除选中的 {{count}} 条荐股记录？",
+        "deleteSuccess": "已删除 {{count}} 条荐股记录",
+        "selectedCount": "已选 {{count}} 项",
+        "exitSelect": "退出多选",
+        "empty": "暂无荐股历史"
+      }
     },
     "periodUltraShort": "超短线",
     "periodShort": "短期",
@@ -9605,6 +9630,18 @@
     "feedbackProfitable": "盈利/总数",
     "feedbackButton": "历史回馈",
     "refreshExitButton": "刷新退出信号",
-    "feedbackCatalyst": "催化剂 {{verified}}/{{total}}"
+    "feedbackCatalyst": "催化剂 {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "查看瓶颈掘金历史",
+      "title": "瓶颈掘金历史",
+      "generatedAt": "推荐时间",
+      "candidateCount": "候选数",
+      "batchDelete": "批量删除 ({{count}})",
+      "deleteConfirm": "确定删除选中的 {{count}} 条瓶颈掘金记录？",
+      "deleteSuccess": "已删除 {{count}} 条瓶颈掘金记录",
+      "selectedCount": "已选 {{count}} 项",
+      "exitSelect": "退出多选",
+      "empty": "暂无瓶颈掘金历史"
+    }
   }
 }

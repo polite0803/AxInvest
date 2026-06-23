@@ -44,8 +44,7 @@ pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
             status TEXT NOT NULL DEFAULT 'active', \
             created_at INTEGER NOT NULL, \
             updated_at INTEGER NOT NULL, \
-            FOREIGN KEY (source_reflection_id) REFERENCES stock_reflections(id) ON DELETE SET NULL, \
-            FOREIGN KEY (stock_code) REFERENCES stock_analyses(stock_code) ON DELETE SET NULL\
+            FOREIGN KEY (source_reflection_id) REFERENCES stock_reflections(id) ON DELETE SET NULL\
          )",
     )
     .await?;

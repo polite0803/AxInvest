@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "Aucun historique d'analyse",
+    "historyBatchDelete": "Suppression groupée",
+    "historyDeleteConfirm": "Supprimer les {{count}} analyses sélectionnées ?",
+    "historyDeleteSuccess": "{{count}} analyses supprimées",
+    "historySelectMode": "Sélection multiple",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleWatchlist": "自选股",
       "cachedAt": "En cache à {{time}}",
       "cachedBadge": "En cache",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "Voir l'historique des recommandations",
+        "title": "Historique des recommandations",
+        "generatedAt": "Date de recommandation",
+        "period": "Période",
+        "stockCount": "Nbre d'actions",
+        "styles": "Styles",
+        "batchDelete": "Suppression groupée ({{count}})",
+        "deleteConfirm": "Supprimer les {{count}} recommandations sélectionnées ?",
+        "deleteSuccess": "{{count}} recommandations supprimées",
+        "selectedCount": "{{count}} sélectionnés",
+        "exitSelect": "Quitter la sélection multiple",
+        "empty": "Aucun historique de recommandations"
+      }
     },
     "periodUltraShort": "Court",
     "periodShort": "Court",
@@ -9251,7 +9269,19 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "Voir historique des goulots",
+      "title": "Historique des goulots",
+      "generatedAt": "Date de recommandation",
+      "candidateCount": "Candidats",
+      "batchDelete": "Suppression groupée ({{count}})",
+      "deleteConfirm": "Supprimer les {{count}} enregistrements sélectionnés ?",
+      "deleteSuccess": "{{count}} enregistrements supprimés",
+      "selectedCount": "{{count}} sélectionnés",
+      "exitSelect": "Quitter la sélection multiple",
+      "empty": "Aucun historique de goulots"
+    }
   },
   "quant": {
     "backtest": {

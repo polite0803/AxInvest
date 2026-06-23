@@ -30,9 +30,11 @@ pub mod v006_llm_decision_json;
 pub mod v007_reco_pick_data;
 pub mod v008_reflection_structured;
 pub mod v009_reflection_lessons;
+pub mod v010_agreement_score;
+pub mod v011_fix_reflection_lessons_fk;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 9;
+pub const CURRENT_VERSION: i32 = 10;
 
 /// 迁移函数签名：所有 `up()` 都遵循这个接口。
 ///
@@ -103,6 +105,16 @@ const MIGRATIONS: &[Migration] = &[
         version: 9,
         description: "v009_reflection_lessons: create reflection_lessons table for reusable rules",
         up: |db| Box::pin(v009_reflection_lessons::up(db)),
+    },
+    Migration {
+        version: 10,
+        description: "v010_agreement_score: add agreement_score column to strategy_performance",
+        up: |db| Box::pin(v010_agreement_score::up(db)),
+    },
+    Migration {
+        version: 11,
+        description: "v011_fix_reflection_lessons_fk: drop + recreate reflection_lessons without broken FK on stock_analyses(stock_code)",
+        up: |db| Box::pin(v011_fix_reflection_lessons_fk::up(db)),
     },
 ];
 

@@ -7836,7 +7836,19 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "View Bottleneck Hunt History",
+      "title": "Bottleneck Hunt History",
+      "generatedAt": "Generated At",
+      "candidateCount": "Candidates",
+      "batchDelete": "Batch Delete ({{count}})",
+      "deleteConfirm": "Delete selected {{count}} bottleneck hunt records?",
+      "deleteSuccess": "Deleted {{count}} bottleneck hunt records",
+      "selectedCount": "{{count}} selected",
+      "exitSelect": "Exit Multi-select",
+      "empty": "No bottleneck hunt history"
+    }
   },
   "stockAnalysis": {
     "actionBuy": "Buy",
@@ -8164,6 +8176,10 @@
     "highestRisk": "Highest {{label}} ({{score}})",
     "history": "History",
     "historyEmpty": "No analysis history",
+    "historyBatchDelete": "Batch Delete",
+    "historyDeleteConfirm": "Delete selected {{count}} analysis records?",
+    "historyDeleteSuccess": "Deleted {{count}} analysis records",
+    "historySelectMode": "Multi-select",
     "holdings": "Holdings",
     "holdingsSheet": "Holdings Table",
     "hotStocks": "Hot Stocks",
@@ -8330,7 +8346,21 @@
       "title": "Recommendations",
       "cachedAt": "Cached at {{time}}",
       "cachedBadge": "Cached",
-      "calibrate": "Weight Calibration"
+      "calibrate": "Weight Calibration",
+      "recoHistory": {
+        "viewHistory": "View Reco History",
+        "title": "Recommendation History",
+        "generatedAt": "Generated At",
+        "period": "Period",
+        "stockCount": "Stocks",
+        "styles": "Styles",
+        "batchDelete": "Batch Delete ({{count}})",
+        "deleteConfirm": "Delete selected {{count}} recommendation records?",
+        "deleteSuccess": "Deleted {{count}} recommendation records",
+        "selectedCount": "{{count}} selected",
+        "exitSelect": "Exit Multi-select",
+        "empty": "No recommendation history"
+      }
     },
     "reflection": {
       "asOfLabel": "as-of: {{asOf}} → hindsight: {{hindsight}}",

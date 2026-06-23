@@ -1435,6 +1435,53 @@ fn start_cron_scheduler(state: &AppState) {
 
                     // ── R1 复盘→进化：把每次决策校验的结果写入 strategy_performance ──
                     if outcome == "win" || outcome == "loss" {
+                        // [Phase 3] 计算公式 vs LLM 决策一致性分数
+                        let agreement_score = a.decision_json.as_deref().and_then(|dj| {
+                            a.llm_decision_json.as_deref().and_then(|lj| {
+                                let norm = |s: &str| s.trim().to_lowercase().replace([' ', '/', '_', '\u{3000}'], "");
+                                let fj = serde_json::from_str::<serde_json::Value>(dj).ok()?;
+                                let ljv = serde_json::from_str::<serde_json::Value>(lj).ok()?;
+                                let f_action = fj.get("action").and_then(|v| v.as_str().map(norm));
+                                let l_action = ljv.get("stance").and_then(|v| v.as_str().map(norm));
+                                let f_pos = fj.get("positionPct").and_then(|v| v.as_f64());
+                                let l_pos = ljv.get("positionPct").and_then(|v| v.as_f64());
+                                let f_conf = fj.get("confidence").and_then(|v| v.as_f64());
+                                let l_conf = ljv.get("confidence").and_then(|v| v.as_f64());
+                                let action_score = match (f_action, l_action) {
+                                    (Some(a), Some(b)) => {
+                                        let is_buy = |s: &str| s.contains("买") || s.contains("增持");
+                                        let is_sell = |s: &str| s.contains("卖") || s.contains("减持");
+                                        if a == b { 50.0 }
+                                        else if is_buy(&a) == is_buy(&b) && is_sell(&a) == is_sell(&b) { 40.0 }
+                                        else { 0.0 }
+                                    },
+                                    _ => 25.0,
+                                };
+                                let pos_score = match (f_pos, l_pos) {
+                                    (Some(a), Some(b)) => {
+                                        let diff = (a - b).abs();
+                                        if diff <= 5.0 { 30.0 }
+                                        else if diff <= 15.0 { 20.0 }
+                                        else if diff <= 30.0 { 10.0 }
+                                        else { 0.0 }
+                                    },
+                                    _ => 15.0,
+                                };
+                                let conf_score = match (f_conf, l_conf) {
+                                    (Some(a), Some(b)) => {
+                                        let diff = (a - b).abs();
+                                        if diff <= 0.1 { 20.0 }
+                                        else if diff <= 0.2 { 15.0 }
+                                        else if diff <= 0.4 { 8.0 }
+                                        else { 0.0 }
+                                    },
+                                    _ => 10.0,
+                                };
+                                let total = (action_score + pos_score + conf_score) as f64;
+                                Some(total.round() as i32)
+                            })
+                        });
+
                         // 优先从 reco_picks 获取精确 strategy_id
                         let strategy_id = 'guess: {
                             if let Ok(Some(pick)) = axagent_core::entity::reco_picks::Entity::find()
@@ -1486,6 +1533,7 @@ fn start_cron_scheduler(state: &AppState) {
                             was_correct,
                             a.decision_position_pct.unwrap_or(0.0) as i32,
                             Some(&horizon_json),
+                            agreement_score,
                         )
                         .await
                         .map(|_| perfs_logged += 1)

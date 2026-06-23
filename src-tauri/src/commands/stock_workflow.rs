@@ -18,6 +18,7 @@ use axagent_stock_analysis::blackboard::build_blackboard_snapshot;
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use serde::Serialize;
 use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -343,6 +344,114 @@ fn extract_decision_json(wf: &Workflow) -> Option<String> {
         .and_then(|v| serde_json::to_string(v).ok())
 }
 
+/// 从 Workflow 结果中提取 trader 节点的 LLM 决策 JSON。
+///
+/// trader 节点输出格式:
+/// ```json
+/// { "stance": "买入", "positionPct": 35, "confidence": 0.72,
+///   "summary": "...", "key_points": [...], "scenarios": [...] }
+/// ```
+///
+/// 用作"方案 D 双向并存"的 LLM 视角,与 portfolio-mgr 公式视角对比。
+/// 优先取 `results["trader"]["result"]`（AgentNode 包装内的实际输出），
+/// 回退到 `results["trader"]` 本身。
+fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
+    let trader = wf.results.get("trader")?;
+    let actual = match trader {
+        serde_json::Value::Object(obj) => {
+            // AgentNode 可能包装: { status, result, ... }
+            obj.get("result").cloned().unwrap_or_else(|| trader.clone())
+        },
+        _ => trader.clone(),
+    };
+    serde_json::to_string(&actual).ok()
+}
+
+/// 计算公式决策与 LLM 决策的一致性分数（0-100）。
+///
+/// 借鉴 TradingAgents 的冗余校验机制：
+/// 对比 action（操作方向）、positionPct（仓位百分比）、confidence（置信度）
+/// 三个维度，权重分别为 50/30/20。
+///
+/// 归一化规则（与前端 normalizeAction 保持一致）:
+/// - 移除空格/斜杠/下划线/全角空格
+/// - 小写比较
+/// - "买"和"增持"视为一致，"卖"和"减持"视为一致
+#[allow(dead_code)]
+fn compute_decision_agreement(formula_json: Option<&str>, llm_json: Option<&str>) -> Option<i32> {
+    let fj = serde_json::from_str::<serde_json::Value>(formula_json?).ok()?;
+    let lj = serde_json::from_str::<serde_json::Value>(llm_json?).ok()?;
+
+    // 归一化操作字符串
+    let norm = |s: &str| {
+        s.trim()
+            .to_lowercase()
+            .replace([' ', '/', '_', '\u{3000}'], "")
+    };
+
+    // 公式字段: action / positionPct / confidence
+    let f_action = fj.get("action").and_then(|v| v.as_str().map(norm));
+    let f_pos = fj.get("positionPct").and_then(|v| v.as_f64());
+    let f_conf = fj.get("confidence").and_then(|v| v.as_f64());
+
+    // LLM 字段: stance→action / positionPct / confidence
+    let l_action = lj.get("stance").and_then(|v| v.as_str().map(norm));
+    let l_pos = lj.get("positionPct").and_then(|v| v.as_f64());
+    let l_conf = lj.get("confidence").and_then(|v| v.as_f64());
+
+    // action 一致性 (权重 50%)
+    let action_score: f64 = match (f_action, l_action) {
+        (Some(a), Some(b)) => {
+            let is_buy = |s: &str| s.contains("买") || s.contains("增持");
+            let is_sell = |s: &str| s.contains("卖") || s.contains("减持");
+            if a == b {
+                50.0
+            } else if is_buy(&a) == is_buy(&b) && is_sell(&a) == is_sell(&b) {
+                40.0
+            } else {
+                0.0
+            }
+        },
+        _ => 25.0,
+    };
+
+    // positionPct 一致性 (权重 30%)
+    let pos_score: f64 = match (f_pos, l_pos) {
+        (Some(a), Some(b)) => {
+            let diff = (a - b).abs();
+            if diff <= 5.0 {
+                30.0
+            } else if diff <= 15.0 {
+                20.0
+            } else if diff <= 30.0 {
+                10.0
+            } else {
+                0.0
+            }
+        },
+        _ => 15.0,
+    };
+
+    // confidence 一致性 (权重 20%)
+    let conf_score: f64 = match (f_conf, l_conf) {
+        (Some(a), Some(b)) => {
+            let diff = (a - b).abs();
+            if diff <= 0.1 {
+                20.0
+            } else if diff <= 0.2 {
+                15.0
+            } else if diff <= 0.4 {
+                8.0
+            } else {
+                0.0
+            }
+        },
+        _ => 10.0,
+    };
+
+    Some((action_score + pos_score + conf_score).round() as i32)
+}
+
 /// 解析 as_of_date 入参：None/空串 → None（live），Some(s) → 解析为 AsOfContext
 /// 抽出供单测：未来日期 / 错误格式必须 4xx-style 错误
 pub(crate) fn parse_asof_param(s: Option<String>) -> Result<Option<AsOfContext>, String> {
@@ -654,6 +763,7 @@ async fn run_stock_workflow_inner(
         decision_position_pct: Set(None),
         decision_reasoning: Set(None),
         decision_json: Set(None),
+        llm_decision_json: Set(None),
         blackboard_snapshot: Set(None),
         config_id: Set(None),
         // Time-travel metadata: 标记该 analysis 为 replay 模式 + 截止日
@@ -1043,6 +1153,7 @@ async fn run_stock_workflow_inner(
                         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
                             extract_decision_fields(&decision_json);
                         let degradation_report = as_of::take_asof_degradation_report();
+                        let llm_dj_partial = extract_llm_decision_json(&result);
                         let as_of_for_meta: Option<AsOfContext> = as_of::current_as_of();
                         let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
                             &result.results,
@@ -1076,6 +1187,10 @@ async fn run_stock_workflow_inner(
                             .col_expr(
                                 stock_analyses::Column::DecisionExpectedHoldingDays,
                                 Expr::value(expected_holding_days.map(|d| d as i64)),
+                            )
+                            .col_expr(
+                                stock_analyses::Column::LlmDecisionJson,
+                                Expr::value(llm_dj_partial),
                             )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
@@ -1144,6 +1259,7 @@ async fn run_stock_workflow_inner(
                             &degradation_report,
                         ))
                         .unwrap_or_else(|_| "{}".to_string());
+                        let llm_dj = extract_llm_decision_json(&result);
                         if let Err(e) = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
@@ -1170,6 +1286,10 @@ async fn run_stock_workflow_inner(
                             .col_expr(
                                 stock_analyses::Column::DecisionExpectedHoldingDays,
                                 Expr::value(expected_holding_days.map(|d| d as i64)),
+                            )
+                            .col_expr(
+                                stock_analyses::Column::LlmDecisionJson,
+                                Expr::value(llm_dj),
                             )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
@@ -1291,6 +1411,7 @@ pub async fn run_single_stock_analysis(
         decision_position_pct: Set(None),
         decision_reasoning: Set(None),
         decision_json: Set(None),
+        llm_decision_json: Set(None),
         blackboard_snapshot: Set(None),
         config_id: Set(None),
         analysis_kind: Set("live".into()),
@@ -2121,7 +2242,7 @@ async fn extract_agent_output(raw: serde_json::Value) -> serde_json::Value {
             .chars()
             .rev()
             .collect();
-        tracing::info!("[serenity] candidate 前 200: {} / 后 200: {}", preview, tail);
+        tracing::info!("[serenity] 提取文本 前200: {} / 后200: {}", preview, tail);
         // A: 精确解析（fence 剥离后的文本）
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&candidate) {
             if parsed.is_object() || parsed.is_array() {
@@ -2155,6 +2276,16 @@ async fn extract_agent_output(raw: serde_json::Value) -> serde_json::Value {
         if let Some(parsed) = extract_outer_json(content) {
             return parsed;
         }
+        // E: 检测 LLM 自然语言拒绝（短文本非 JSON），防御性降级
+        let content_len = content.chars().count();
+        if content_len < 30 {
+            tracing::warn!(
+                "[serenity] LLM 内容为短自然语言（长度={}），返回空值防御性降级: {}",
+                content_len,
+                content.chars().take(50).collect::<String>()
+            );
+            return serde_json::Value::Null;
+        }
         let head: String = content.chars().take(300).collect();
         let tail_start = content.chars().count().saturating_sub(200);
         let tail: String = content.chars().skip(tail_start).collect();
@@ -2173,7 +2304,7 @@ async fn extract_agent_output(raw: serde_json::Value) -> serde_json::Value {
             head,
             tail
         );
-        tracing::warn!("[serenity] candidate 前1000: {} / 后200: {}", c_head, c_tail);
+        tracing::warn!("[serenity] 预处理文本 前1000: {} / 后200: {}", c_head, c_tail);
     }
     // 4) 兜底
     raw
@@ -2239,6 +2370,11 @@ fn repair_json(s: &str) -> String {
 
     // LLM 高频手滑："nulll"→"null"
     result = result.replace("nulll", "null");
+
+    // LLM 尾逗号：,"→"、,}→}、,]→]
+    // 只在可能有尾逗号的上下文中处理（简单字符串替换，低风险）
+    result = result.replace(",]", "]");
+    result = result.replace(",}", "}");
 
     let bytes = result.as_bytes();
     let len = bytes.len();
@@ -2372,7 +2508,15 @@ fn extract_named_arrays(text: &str) -> Option<serde_json::Value> {
 
         // 尝试解析这个数组片段
         let array_text = &array_slice[..=end];
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(array_text) {
+        let parsed = match serde_json::from_str::<serde_json::Value>(array_text) {
+            Ok(v) => Some(v),
+            Err(_) => {
+                // 数组内部可能有尾逗号等小语法问题，尝试 repair_json 修复后重试
+                let repaired = repair_json(array_text);
+                serde_json::from_str::<serde_json::Value>(&repaired).ok()
+            },
+        };
+        if let Some(v) = parsed {
             result.insert(key.to_string(), v);
         }
     }
@@ -2515,59 +2659,81 @@ fn find_candidates_deep(value: &serde_json::Value) -> Vec<serde_json::Value> {
     results
 }
 
-/// 从文本内容中尝试启发式提取候选列表
-/// 用于最终兜底：当所有结构化提取都失败时，直接从 LLM 文本输出中挖
-fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>> {
-    // 尝试1: 找 "candidates": [ ... ] 块
-    if let Some(start) = text.find("\"candidates\"") {
-        if let Some(arr_start) = text[start..].find('[') {
-            let arr_start_abs = start + arr_start;
-            // 找匹配的 ]
-            let mut depth = 0;
-            let mut in_str = false;
-            let mut escaped = false;
-            let mut end = arr_start_abs;
-            for i in arr_start_abs..text.len() {
-                let ch = text.as_bytes()[i];
-                if escaped {
-                    escaped = false;
-                    continue;
-                }
-                if ch == b'\\' && in_str {
-                    escaped = true;
-                    continue;
-                }
-                if ch == b'"' {
-                    in_str = !in_str;
-                    continue;
-                }
-                if !in_str {
-                    if ch == b'[' {
-                        depth += 1;
-                    } else if ch == b']' {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = i + 1;
-                            break;
+/// 逐个提取候选对象：在 candidates 数组内对每个顶层 `{...}` 独立尝试解析。
+/// 当某个候选对象内部有语法错误（如字符串中未转义的 `"`）时，不影响其他候选的提取。
+fn extract_candidates_one_by_one(text: &str) -> Option<Vec<serde_json::Value>> {
+    // 1. 定位 candidates 数组起始
+    let arr_start = {
+        let key_pos = text.find("\"candidates\"")?;
+        let after_key = &text[key_pos + 12..];
+        let bracket = after_key.find('[')?;
+        key_pos + 12 + bracket + 1
+    };
+    let content = &text[arr_start..];
+    // 2. 逐个扫描顶层对象：正确追踪 in_string
+    let mut depth: i32 = 0;
+    let mut obj_start: Option<usize> = None;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut results = Vec::new();
+    for (i, &b) in content.as_bytes().iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if b == b'"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        if b == b'{' {
+            depth += 1;
+            if depth == 1 {
+                obj_start = Some(i);
+            }
+        } else if b == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                if let Some(os) = obj_start.take() {
+                    let slice = &content[os..=i];
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(slice) {
+                        results.push(v);
+                    } else {
+                        // 单个候选内部有语法错误 → repair_json 后重试
+                        let repaired = repair_json(slice);
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&repaired) {
+                            results.push(v);
                         }
                     }
                 }
             }
-            // 跳过空数组 []（没有候选数据可提取）
-            if end > arr_start_abs + 1 {
-                let inner = &text[arr_start_abs + 1..end - 1];
-                let json_str = format!("[{}]", inner);
-                if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                    let valid: Vec<serde_json::Value> = arr
-                        .into_iter()
-                        .filter(|c| c.get("stock_code").is_some())
-                        .collect();
-                    if !valid.is_empty() {
-                        return Some(valid);
-                    }
-                }
-            }
+        } else if b == b']' && depth == 0 {
+            break;
         }
+    }
+    if results.is_empty() { None } else { Some(results) }
+}
+
+/// 从文本内容中尝试启发式提取候选列表
+/// 用于最终兜底：当所有结构化提取都失败时，直接从 LLM 文本输出中挖
+/// 返回 (candidates 数组, 是否包含 summary 字段)
+fn try_extract_candidates_from_text(text: &str) -> Option<(Vec<serde_json::Value>, bool)> {
+    // 尝试1: 找 "candidates": [ ... ] 块，逐个提取
+    // 逐个提取相比于全量解析更稳健——即使某个候选对象内部有语法错误，
+    // 其他候选仍能被回收。（LLM 高频问题：字符串值中未转义的引号）
+    if let Some(found) = extract_candidates_one_by_one(text) {
+        let summary_pos = text.find("\"summary\"").map(|p| p.saturating_sub(500));
+        let has_summary = summary_pos.is_some_and(|sp| {
+            let region = &text[sp..sp.saturating_add(200)];
+            region.contains(": \"") || region.contains(":\"")
+        });
+        return Some((found, has_summary));
     }
 
     // 尝试2: 搜索 "stock_code": "XXXXXX" 模式，提取周围的对象
@@ -2607,7 +2773,11 @@ fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>
         search_start = abs_pos + 13; // 跳过已搜索部分
     }
 
-    if found.is_empty() { None } else { Some(found) }
+    if found.is_empty() {
+        None
+    } else {
+        Some((found, false))
+    }
 }
 
 /// 从节点原始输出中直接提取 candidates 数组
@@ -2628,9 +2798,32 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
     let parsed: serde_json::Value = match serde_json::from_str(extracted) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("[serenity] JSON 解析失败: {e}, 尝试兜底提取");
-            // 尝试从 content 中裸搜索 candidates 数组
-            if let Some(found) = try_extract_candidates_from_text(content) {
+            tracing::warn!("[serenity] JSON 解析失败: {e}, 尝试修复链");
+            // 第一层：repair_json 修复括号/引号 → 重新解析
+            let repaired = repair_json(extracted);
+            if let Ok(v) = serde_json::from_str(&repaired) {
+                tracing::info!("[serenity] repair_json 成功");
+                return v;
+            }
+            // 第二层：extract_named_arrays 从裁剪后文本提取
+            if let Some(named) = extract_named_arrays(extracted) {
+                tracing::info!("[serenity] extract_named_arrays(extracted) 成功");
+                return named;
+            }
+            // 第三层：extract_named_arrays 从原始 content 提取
+            // 裁剪后的 extracted 可能被 trim_after_json 截断，
+            // 原始 content 包含完整 JSON，免疫截断问题
+            if let Some(named) = extract_named_arrays(content) {
+                tracing::info!("[serenity] extract_named_arrays(content) 成功");
+                return named;
+            }
+            // 第四层：文本启发式兜底
+            tracing::warn!("[serenity] 修复链前三层均失败，尝试文本兜底提取");
+            if let Some((found, has_summary)) = try_extract_candidates_from_text(content) {
+                if has_summary {
+                    tracing::info!("[serenity] 文本兜底提取成功，0 个候选 + summary 字段");
+                    return serde_json::json!({"candidates": [], "summary": "上游数据不足，无法识别有效候选标的"});
+                }
                 return serde_json::json!({"candidates": found});
             }
             return serde_json::Value::Null;
@@ -2909,12 +3102,14 @@ pub async fn run_serenity_screening(
                         .get("content")
                         .and_then(|c| c.as_str())
                     {
-                        if let Some(extracted) = try_extract_candidates_from_text(content) {
-                            tracing::info!(
-                                "[serenity] 文本兜底提取成功，找到 {} 个候选",
-                                extracted.len()
-                            );
-                            candidate_array = serde_json::json!(extracted);
+                        if let Some((found, _)) = try_extract_candidates_from_text(content) {
+                            if !found.is_empty() {
+                                tracing::info!(
+                                    "[serenity] 文本兜底提取成功，找到 {} 个候选",
+                                    found.len()
+                                );
+                                candidate_array = serde_json::json!(found);
+                            }
                         }
                     }
                 }
@@ -3459,6 +3654,93 @@ async fn do_feedback_loop(state: &State<'_, AppState>) -> Result<serde_json::Val
         "avg_return_pct": (avg_return * 100.0).round() / 100.0,
         "performances": performances,
     }))
+}
+
+/// 列表：荐股推荐历史记录（按 generated_at 分组，每条记录含时间/周期/股票数/风格列表）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoHistoryItem {
+    pub generated_at: String,
+    pub period: String,
+    pub stock_count: i64,
+    pub styles: String,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub async fn list_reco_history(
+    state: State<'_, AppState>,
+    style_filter: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<Vec<RecoHistoryItem>, String> {
+    use sea_orm::{ConnectionTrait, Statement};
+    let db = state.harness.db();
+
+    let mut sql = String::from(
+        "SELECT generated_at, period, COUNT(*) as stock_count, \
+         GROUP_CONCAT(DISTINCT style) as styles, MAX(created_at) as created_at \
+         FROM reco_picks WHERE 1=1",
+    );
+    let mut values: Vec<sea_orm::Value> = Vec::new();
+
+    if let Some(ref style) = style_filter {
+        sql.push_str(" AND style = ?");
+        values.push(style.clone().into());
+    }
+
+    sql.push_str(" GROUP BY generated_at ORDER BY generated_at DESC");
+
+    if let Some(l) = limit {
+        sql.push_str(" LIMIT ?");
+        values.push((l as i64).into());
+    }
+    if let Some(o) = offset {
+        sql.push_str(" OFFSET ?");
+        values.push((o as i64).into());
+    }
+
+    let stmt = Statement::from_sql_and_values(sea_orm::DbBackend::Sqlite, sql.as_str(), values);
+
+    let rows = db
+        .query_all_raw(stmt)
+        .await
+        .map_err(|e| format!("查询荐股历史失败: {e}"))?;
+
+    let items = rows
+        .iter()
+        .map(|row| RecoHistoryItem {
+            generated_at: row
+                .try_get::<String>("", "generated_at")
+                .unwrap_or_default(),
+            period: row.try_get::<String>("", "period").unwrap_or_default(),
+            stock_count: row.try_get::<i64>("", "stock_count").unwrap_or(0),
+            styles: row.try_get::<String>("", "styles").unwrap_or_default(),
+            created_at: row.try_get::<String>("", "created_at").unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(items)
+}
+
+/// 批量删除荐股记录（按 generated_at 删除整轮推荐）
+#[tauri::command]
+pub async fn batch_delete_reco_history(
+    state: State<'_, AppState>,
+    generated_ats: Vec<String>,
+) -> Result<(), String> {
+    use axagent_core::entity::reco_picks;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let db = state.harness.db();
+    for ts in &generated_ats {
+        reco_picks::Entity::delete_many()
+            .filter(reco_picks::Column::GeneratedAt.eq(ts))
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除荐股记录失败: {e}"))?;
+    }
+    Ok(())
 }
 
 /// 删除一条 Serenity 候选记录（回馈闭环中的删除操作）

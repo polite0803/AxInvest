@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "Keine Analyse-Historie",
+    "historyBatchDelete": "Massenlöschen",
+    "historyDeleteConfirm": "Ausgewählte {{count}} Analysen löschen?",
+    "historyDeleteSuccess": "{{count}} Analysen gelöscht",
+    "historySelectMode": "Mehrfachauswahl",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleWatchlist": "自选股",
       "cachedAt": "Zwischengespeichert um {{time}}",
       "cachedBadge": "Zwischengespeichert",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "Empfehlungshistorie anzeigen",
+        "title": "Empfehlungshistorie",
+        "generatedAt": "Empfehlungszeit",
+        "period": "Zeitraum",
+        "stockCount": "Anzahl Aktien",
+        "styles": "Stile",
+        "batchDelete": "Massenlöschen ({{count}})",
+        "deleteConfirm": "Ausgewählte {{count}} Empfehlungen löschen?",
+        "deleteSuccess": "{{count}} Empfehlungen gelöscht",
+        "selectedCount": "{{count}} ausgewählt",
+        "exitSelect": "Mehrfachauswahl beenden",
+        "empty": "Keine Empfehlungshistorie"
+      }
     },
     "periodUltraShort": "Kurz",
     "periodShort": "Kurz",
@@ -9251,7 +9269,19 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "Engpass-Historie anzeigen",
+      "title": "Engpass-Historie",
+      "generatedAt": "Empfehlungszeit",
+      "candidateCount": "Kandidaten",
+      "batchDelete": "Massenlöschen ({{count}})",
+      "deleteConfirm": "Ausgewählte {{count}} Engpass-Einträge löschen?",
+      "deleteSuccess": "{{count}} Engpass-Einträge gelöscht",
+      "selectedCount": "{{count}} ausgewählt",
+      "exitSelect": "Mehrfachauswahl beenden",
+      "empty": "Keine Engpass-Historie"
+    }
   },
   "quant": {
     "backtest": {

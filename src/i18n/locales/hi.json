@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "कोई विश्लेषण इतिहास नहीं",
+    "historyBatchDelete": "बैच हटाएं",
+    "historyDeleteConfirm": "चयनित {{count}} रिकॉर्ड हटाएं?",
+    "historyDeleteSuccess": "{{count}} रिकॉर्ड हटाए गए",
+    "historySelectMode": "एकाधिक चयन",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleWatchlist": "自选股",
       "cachedAt": "{{time}} पर कैश्ड",
       "cachedBadge": "कैश्ड",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "इतिहास देखें",
+        "title": "अनुशंसा इतिहास",
+        "generatedAt": "अनुशंसा समय",
+        "period": "अवधि",
+        "stockCount": "शेयर संख्या",
+        "styles": "शैलियाँ",
+        "batchDelete": "बैच हटाएं ({{count}})",
+        "deleteConfirm": "चयनित {{count}} रिकॉर्ड हटाएं?",
+        "deleteSuccess": "{{count}} रिकॉर्ड हटाए गए",
+        "selectedCount": "{{count}} चयनित",
+        "exitSelect": "चयन बंद करें",
+        "empty": "कोई अनुशंसा इतिहास नहीं"
+      }
     },
     "periodUltraShort": "Short",
     "periodShort": "Short",
@@ -9251,7 +9269,22 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "इतिहास देखें",
+      "title": "अनुशंसा इतिहास",
+      "generatedAt": "अनुशंसा समय",
+      "period": "अवधि",
+      "stockCount": "शेयर संख्या",
+      "candidateCount": "उम्मीदवार संख्या",
+      "styles": "शैलियाँ",
+      "batchDelete": "बैच हटाएं ({{count}})",
+      "deleteConfirm": "चयनित {{count}} रिकॉर्ड हटाएं?",
+      "deleteSuccess": "{{count}} रिकॉर्ड हटाए गए",
+      "selectedCount": "{{count}} चयनित",
+      "exitSelect": "चयन बंद करें",
+      "empty": "कोई अनुशंसा इतिहास नहीं"
+    }
   },
   "quant": {
     "backtest": {

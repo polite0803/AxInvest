@@ -385,6 +385,7 @@ pub async fn record_performance(
     was_correct: i32,
     decision_confidence: i32,
     horizon_pnl_json: Option<&str>,
+    agreement_score: Option<i32>,
 ) -> Result<String, String> {
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
@@ -401,6 +402,7 @@ pub async fn record_performance(
         was_correct: Set(was_correct),
         decision_confidence: Set(decision_confidence),
         horizon_pnl_json: Set(horizon_pnl_json.map(|s| s.to_string())),
+        agreement_score: Set(agreement_score),
         created_at: Set(now),
     };
     strategy_performance::Entity::insert(am)

@@ -650,6 +650,22 @@ pub async fn delete_stock_analysis(
     Ok(())
 }
 
+/// 批量删除历史分析记录
+#[tauri::command]
+pub async fn batch_delete_stock_analyses(
+    state: State<'_, AppState>,
+    analysis_ids: Vec<String>,
+) -> Result<(), String> {
+    let db = state.harness.db();
+    for id in &analysis_ids {
+        stock_analyses::Entity::delete_by_id(id)
+            .exec(db)
+            .await
+            .map_err(|e| format!("批量删除分析记录失败: {e}"))?;
+    }
+    Ok(())
+}
+
 /// 重命名历史分析记录
 #[tauri::command]
 pub async fn rename_stock_analysis(
@@ -945,6 +961,7 @@ pub async fn backtest_analysis(
         if result.was_correct { 1 } else { 0 },
         decision_confidence as i32,
         None,
+        None, // agreement_score: 回测无 LLM 对比
     )
     .await
     .map_err(|e| tracing::warn!("[backtest_analysis] record_performance 失败: {e}"))
@@ -3519,6 +3536,40 @@ pub async fn get_evolution_drift_timeline(
         limit.unwrap_or(60),
     )
     .await
+}
+
+/// 拉取近期决策一致性分数趋势（Phase 3: 双视角一致性趋势图）
+#[tauri::command]
+pub async fn get_agreement_score_history(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    use axagent_core::entity::strategy_performance;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let limit = limit.unwrap_or(50) as u64;
+    let rows = strategy_performance::Entity::find()
+        .filter(strategy_performance::Column::AgreementScore.is_not_null())
+        .order_by_desc(strategy_performance::Column::CreatedAt)
+        .limit(limit)
+        .all(state.harness.db())
+        .await
+        .map_err(|e| format!("查询 agreement_score 历史失败: {e}"))?;
+
+    let result: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "exitAt": r.exit_at,
+                "agreementScore": r.agreement_score.unwrap_or(0),
+                "stockCode": r.stock_code,
+                "stockName": r.stock_name,
+                "returnPct": r.return_pct,
+                "wasCorrect": r.was_correct,
+            })
+        })
+        .collect();
+    Ok(result)
 }
 
 /// 手动触发权重重算（用户在前端 EvolutionDriftPanel 点"立即重算"时使用）

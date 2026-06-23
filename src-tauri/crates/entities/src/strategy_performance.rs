@@ -30,6 +30,8 @@ pub struct Model {
     pub decision_confidence: i32,
     /// 各 horizon 的盈亏序列 JSON（1d/3d/5d/10d/20d）
     pub horizon_pnl_json: Option<String>,
+    /// 公式 vs LLM 决策一致性分数（0-100，Phase 3 新增）
+    pub agreement_score: Option<i32>,
     pub created_at: i64,
 }
 

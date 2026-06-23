@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { getActionColor } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
-import { App, Button, Card, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
+import { App, Button, Card, Checkbox, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -43,6 +43,9 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
   const [btResult, setBtResult] = useState<BacktestResult | null>(null);
   const [btAllResults, setBtAllResults] = useState<BacktestResult[] | null>(null);
   const [btLoading, setBtLoading] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,9 +237,52 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
               onChange={(e) => setSearch(e.target.value)}
               allowClear
             />
-            <Button size="small" loading={btLoading} onClick={runBacktestAll}>
-              {t("stockAnalysis.backtest.runAll")}
-            </Button>
+            {selectMode
+              ? (
+                <>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setSelectMode(false);
+                      setSelectedIds([]);
+                    }}
+                  >
+                    {t("chat.batchExit")}
+                  </Button>
+                  {selectedIds.length > 0 && (
+                    <Button
+                      size="small"
+                      danger
+                      loading={deleting}
+                      onClick={async () => {
+                        setDeleting(true);
+                        try {
+                          await invoke("batch_delete_stock_analyses", { analysisIds: selectedIds });
+                          message.success(t("stockAnalysis.historyDeleteSuccess", { count: selectedIds.length }));
+                          setRecords((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
+                          setSelectedIds([]);
+                          setSelectMode(false);
+                        } catch (e) {
+                          message.error(String(e));
+                        }
+                        setDeleting(false);
+                      }}
+                    >
+                      {t("stockAnalysis.historyBatchDelete")}
+                    </Button>
+                  )}
+                </>
+              )
+              : (
+                <>
+                  <Button size="small" loading={btLoading} onClick={runBacktestAll}>
+                    {t("stockAnalysis.backtest.runAll")}
+                  </Button>
+                  <Button size="small" onClick={() => setSelectMode(true)}>
+                    {t("stockAnalysis.historySelectMode")}
+                  </Button>
+                </>
+              )}
           </div>
         }
       >
@@ -256,30 +302,55 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                 return (
                   <List.Item
                     style={{ cursor: "pointer", padding: "4px 0" }}
-                    onClick={() => runBacktest(r)}
+                    onClick={() => {
+                      if (selectMode) {
+                        setSelectedIds((prev) =>
+                          prev.includes(r.id) ? prev.filter((id) => id !== r.id) : [...prev, r.id]
+                        );
+                      } else {
+                        runBacktest(r);
+                      }
+                    }}
                     actions={[
-                      decision && (
-                        <Tag
-                          key="act"
-                          color={getActionColor(decision.action as string)}
-                          className="text-xs m-0"
-                        >
-                          {decision.action as string}
-                        </Tag>
-                      ),
-                      <Button
-                        key="bt"
-                        size="small"
-                        type="link"
-                        className="text-xs px-1"
-                        loading={btLoading}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          runBacktest(r);
-                        }}
-                      >
-                        {t("stockAnalysis.backtest.run")}
-                      </Button>,
+                      selectMode
+                        ? (
+                          <Checkbox
+                            key="select"
+                            checked={selectedIds.includes(r.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => {
+                              setSelectedIds((prev) =>
+                                prev.includes(r.id) ? prev.filter((id) => id !== r.id) : [...prev, r.id]
+                              );
+                            }}
+                          />
+                        )
+                        : (
+                          <>
+                            {decision && (
+                              <Tag
+                                key="act"
+                                color={getActionColor(decision.action as string)}
+                                className="text-xs m-0"
+                              >
+                                {decision.action as string}
+                              </Tag>
+                            )}
+                            <Button
+                              key="bt"
+                              size="small"
+                              type="link"
+                              className="text-xs px-1"
+                              loading={btLoading}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                runBacktest(r);
+                              }}
+                            >
+                              {t("stockAnalysis.backtest.run")}
+                            </Button>
+                          </>
+                        ),
                     ]}
                   >
                     <div className="flex items-center gap-2 text-xs">

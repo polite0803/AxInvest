@@ -7701,6 +7701,10 @@
     },
     "history": "历史分析",
     "historyEmpty": "暫无历史分析記录",
+    "historyBatchDelete": "批量刪除",
+    "historyDeleteConfirm": "確定刪除選中的 {{count}} 條分析記錄？",
+    "historyDeleteSuccess": "已刪除 {{count}} 條分析記錄",
+    "historySelectMode": "多選",
     "debateHistory": "历史辯論",
     "addToWatchlist": "載入自選",
     "addedToWatchlist": "已載入自選",
@@ -8605,7 +8609,21 @@
       "styleWatchlist": "自選股",
       "cachedAt": "快取於 {{time}}",
       "cachedBadge": "快取",
-      "calibrate": "自動校准"
+      "calibrate": "自動校准",
+      "recoHistory": {
+        "viewHistory": "查看薦股歷史",
+        "title": "薦股歷史",
+        "generatedAt": "推薦時間",
+        "period": "週期",
+        "stockCount": "股票數",
+        "styles": "風格",
+        "batchDelete": "批量刪除 ({{count}})",
+        "deleteConfirm": "確定刪除選中的 {{count}} 條薦股記錄？",
+        "deleteSuccess": "已刪除 {{count}} 條薦股記錄",
+        "selectedCount": "已選 {{count}} 項",
+        "exitSelect": "退出多選",
+        "empty": "暫無薦股歷史"
+      }
     },
     "periodUltraShort": "超短線",
     "periodShort": "短期",
@@ -9251,7 +9269,19 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "查看瓶頸掘金歷史",
+      "title": "瓶頸掘金歷史",
+      "generatedAt": "推薦時間",
+      "candidateCount": "候選數",
+      "batchDelete": "批量刪除 ({{count}})",
+      "deleteConfirm": "確定刪除選中的 {{count}} 條瓶頸掘金記錄？",
+      "deleteSuccess": "已刪除 {{count}} 條瓶頸掘金記錄",
+      "selectedCount": "已選 {{count}} 項",
+      "exitSelect": "退出多選",
+      "empty": "暫無瓶頸掘金歷史"
+    }
   },
   "quant": {
     "backtest": {

@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "Нет истории анализа",
+    "historyBatchDelete": "Удалить",
+    "historyDeleteConfirm": "Удалить выбранные {{count}} записей анализа?",
+    "historyDeleteSuccess": "Удалено {{count}} записей анализа",
+    "historySelectMode": "Выбор нескольких",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleWatchlist": "自选股",
       "cachedAt": "Кэшировано в {{time}}",
       "cachedBadge": "Кэш",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "Показать историю",
+        "title": "История рекомендаций",
+        "generatedAt": "Время рекомендации",
+        "period": "Период",
+        "stockCount": "Кол-во акций",
+        "styles": "Стили",
+        "batchDelete": "Удалить ({{count}})",
+        "deleteConfirm": "Удалить выбранные {{count}} записей?",
+        "deleteSuccess": "Удалено {{count}} записей",
+        "selectedCount": "Выбрано {{count}}",
+        "exitSelect": "Выйти из выбора",
+        "empty": "Нет истории рекомендаций"
+      }
     },
     "periodUltraShort": "Краткосрочно",
     "periodShort": "Краткосрочно",
@@ -9251,7 +9269,22 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "Показать историю",
+      "title": "История рекомендаций",
+      "generatedAt": "Время рекомендации",
+      "period": "Период",
+      "stockCount": "Кол-во акций",
+      "candidateCount": "Кол-во кандидатов",
+      "styles": "Стили",
+      "batchDelete": "Удалить ({{count}})",
+      "deleteConfirm": "Удалить выбранные {{count}} записей?",
+      "deleteSuccess": "Удалено {{count}} записей",
+      "selectedCount": "Выбрано {{count}}",
+      "exitSelect": "Выйти из выбора",
+      "empty": "Нет истории рекомендаций"
+    }
   },
   "quant": {
     "backtest": {

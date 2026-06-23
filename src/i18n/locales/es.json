@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "Sin historial de análisis",
+    "historyBatchDelete": "Eliminar lote",
+    "historyDeleteConfirm": "¿Eliminar {{count}} análisis seleccionados?",
+    "historyDeleteSuccess": "{{count}} análisis eliminados",
+    "historySelectMode": "Selección múltiple",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleWatchlist": "自选股",
       "cachedAt": "En caché a las {{time}}",
       "cachedBadge": "En caché",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "Ver historial de recomendaciones",
+        "title": "Historial de recomendaciones",
+        "generatedAt": "Fecha de recomendación",
+        "period": "Período",
+        "stockCount": "N° de acciones",
+        "styles": "Estilos",
+        "batchDelete": "Eliminar lotes ({{count}})",
+        "deleteConfirm": "¿Eliminar {{count}} recomendaciones seleccionadas?",
+        "deleteSuccess": "{{count}} recomendaciones eliminadas",
+        "selectedCount": "{{count}} seleccionados",
+        "exitSelect": "Salir selección múltiple",
+        "empty": "Sin historial de recomendaciones"
+      }
     },
     "periodUltraShort": "Corto",
     "periodShort": "Corto",
@@ -9251,7 +9269,19 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "Ver historial de cuellos de botella",
+      "title": "Historial de cuellos de botella",
+      "generatedAt": "Fecha de recomendación",
+      "candidateCount": "Candidatos",
+      "batchDelete": "Eliminar lotes ({{count}})",
+      "deleteConfirm": "¿Eliminar {{count}} registros seleccionados?",
+      "deleteSuccess": "{{count}} registros eliminados",
+      "selectedCount": "{{count}} seleccionados",
+      "exitSelect": "Salir selección múltiple",
+      "empty": "Sin historial de cuellos de botella"
+    }
   },
   "quant": {
     "backtest": {

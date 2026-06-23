@@ -18,6 +18,7 @@ import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, T
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
+import { RecoHistoryModal } from "./RecoHistoryModal";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 
 interface RecommendationPanelProps {
@@ -329,6 +330,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           <Button size="small" loading={loading} onClick={load}>
             {t("stockAnalysis.settings.panels.refresh")}
           </Button>
+          <RecoHistoryModal />
           <AutoCalibrateButton t={t} />
         </div>
       }

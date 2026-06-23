@@ -4,6 +4,7 @@ import "./debateDualView";
 import "./riskDualView";
 import "./recommendationDualView";
 import "./analystDualView";
+import "./decisionDualView";
 // 后续接入(回测、节点时间线等)在此处追加
 export { CompactAnalystSummary } from "./CompactAnalystSummary";
 export { CompactDebateNode } from "./CompactDebateNode";

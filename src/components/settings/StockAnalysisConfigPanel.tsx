@@ -70,6 +70,7 @@ function getDefaultVariables(): Variable[] {
   b("monitor_alert_cooldown_secs", 300, "同一标的告警冷却时间 (秒，10-3600)", "number");
   b("monitor_min_severity", "info", "最低推送告警等级: info / warn / critical", "enum");
   b("monitor_channels", "in_app", "推送渠道，逗号分隔: in_app / lark / email / webhook", "string");
+  b("dual_view_disagreement_threshold", 40, "双视角分歧阈值 (0-100)，低于此值标记为需人工复核", "number");
   // 风险/置信度
   b("min_confidence", 60, "最低置信度 (0-100)", "number");
   b("var_confidence", 0.95, "VaR 置信度 (0-1)", "number");

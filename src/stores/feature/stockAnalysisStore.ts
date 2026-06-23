@@ -238,6 +238,10 @@ interface StockAnalysisState {
   dataQualitySummary: string;
   rawData: Record<string, string>;
   decision: StockDecision | null;
+  /** 方案 D 双向并存: LLM 决策原始 JSON（trader 节点输出） */
+  llmDecisionJson: string | null;
+  /** 方案 D 双向并存: 公式 vs LLM 一致性分数 0-100 */
+  decisionAgreementScore: number | null;
   error: string | null;
   errorCode: string | null;
   failedNodes: string[];
@@ -335,6 +339,10 @@ interface StockAnalysisState {
   evolutionDashboard: EvolutionDriftDashboard | null;
   evolutionRecalculating: boolean;
   evolutionLastError: string | null;
+  /** Phase 3: 双视角一致性分数趋势 */
+  agreementScoreHistory: Array<{ exitAt: number; agreementScore: number; stockCode: string; stockName: string; returnPct: number; wasCorrect: number }> | null;
+  agreementScoreHistoryLoading: boolean;
+  fetchAgreementScoreHistory: (limit?: number) => Promise<void>;
   fetchEvolutionDashboard: (asOfDate?: string | null) => Promise<void>;
   recalcEvolutionNow: (asOfDate?: string | null) => Promise<void>;
   loadRecoStrategyWeights: () => Promise<Record<string, number>>;
@@ -423,6 +431,8 @@ const initialState = {
   dataQualitySummary: "",
   rawData: {},
   decision: null,
+  llmDecisionJson: null,
+  decisionAgreementScore: null,
   error: null,
   errorCode: null,
   failedNodes: [],
@@ -449,6 +459,8 @@ const initialState = {
   evolutionDashboard: null,
   evolutionRecalculating: false,
   evolutionLastError: null,
+  agreementScoreHistory: null,
+  agreementScoreHistoryLoading: false,
   portfolioDashboard: null,
   portfolioCorrelations: [],
   portfolioCorrelationsError: null,
@@ -620,6 +632,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       dataQualitySummary: "",
       rawData: {},
       decision: null,
+      llmDecisionJson: null,
+      decisionAgreementScore: null,
       _unlisten: null,
       timeline: [],
       // 清理跨分析轮次缓存，防止上轮数据污染
@@ -745,6 +759,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     const record = await invoke<
       AnalysisSummary & {
         decisionJson: string | null;
+        llmDecisionJson: string | null;
         blackboardSnapshot: string | null;
       }
     >("get_stock_analysis", { analysisId });
@@ -808,6 +823,51 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         console.error("[StockAnalysis] Failed to parse decision JSON:", e);
       }
     }
+    // 方案 D 双向并存: 解析 LLM 决策 JSON 并计算一致性分数
+    let llmDecisionJson: string | null = null;
+    let decisionAgreementScore: number | null = null;
+    if (record.llmDecisionJson) {
+      llmDecisionJson = record.llmDecisionJson;
+      // 一致性分数: 对比公式决策 action/positionPct/confidence 与 LLM 决策 stance/positionPct/confidence
+      try {
+        const dj = record.decisionJson ? JSON.parse(record.decisionJson) : null;
+        const lj = JSON.parse(record.llmDecisionJson);
+        const norm = (s: string) => s.trim().toLowerCase().replace(/[\s\/_\u3000]+/g, "");
+        // action 一致性 (50分)
+        const fa = dj?.action ? norm(String(dj.action)) : null;
+        const la = lj.stance ? norm(String(lj.stance)) : null;
+        let actionScore = 25;
+        if (fa && la) {
+          const isBuy = (s: string) => s.includes("买") || s.includes("增持");
+          const isSell = (s: string) => s.includes("卖") || s.includes("减持");
+          if (fa === la) actionScore = 50;
+          else if (isBuy(fa) && isBuy(la)) actionScore = 40;
+          else if (isSell(fa) && isSell(la)) actionScore = 40;
+          else if (!isBuy(fa) && !isSell(fa) && !isBuy(la) && !isSell(la)) actionScore = 40;
+          else actionScore = 0;
+        }
+        // positionPct 一致性 (30分)
+        const fp = typeof dj?.positionPct === "number" ? dj.positionPct : null;
+        const lp = typeof lj.positionPct === "number" ? lj.positionPct : null;
+        let posScore = 15;
+        if (fp !== null && lp !== null) {
+          const diff = Math.abs(fp - lp);
+          posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
+        }
+        // confidence 一致性 (20分)
+        const fc = typeof dj?.confidence === "number" ? dj.confidence : null;
+        const lc = typeof lj.confidence === "number" ? lj.confidence : null;
+        let confScore = 10;
+        if (fc !== null && lc !== null) {
+          const diff = Math.abs(fc - lc);
+          confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
+        }
+        decisionAgreementScore = Math.round(actionScore + posScore + confScore);
+      } catch (e) {
+        console.warn("[StockAnalysis] Failed to compute agreement score:", e);
+      }
+    }
+    set({ llmDecisionJson, decisionAgreementScore });
     if (record.blackboardSnapshot) {
       try {
         // 后端 axagent_stock_analysis::blackboard::build_blackboard_snapshot 会把
@@ -981,6 +1041,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     } catch (e) {
       console.warn("[EvolutionDrift] load reco strategy weights failed:", e);
       return {};
+    }
+  },
+
+  fetchAgreementScoreHistory: async (limit = 50) => {
+    set({ agreementScoreHistoryLoading: true });
+    try {
+      const data = await invoke<Array<{ exitAt: number; agreementScore: number; stockCode: string; stockName: string; returnPct: number; wasCorrect: number }>>(
+        "get_agreement_score_history", { limit },
+      );
+      set({ agreementScoreHistory: data, agreementScoreHistoryLoading: false });
+    } catch (e) {
+      console.warn("[AgreementScore] 获取一致性趋势失败:", e);
+      set({ agreementScoreHistoryLoading: false });
     }
   },
 

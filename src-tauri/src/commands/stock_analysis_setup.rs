@@ -4899,7 +4899,7 @@ async fn seed_serenity_screening_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 9;
+    const TEMPLATE_VERSION: i32 = 12;
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -5348,10 +5348,10 @@ async fn seed_serenity_screening_workflow_template(
                 position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
-                    max_retries: 2,
+                    max_retries: 1,
                     ..Default::default()
                 },
-                timeout: Some(300),
+                timeout: Some(180),
                 enabled: true,
                 parent_id: None,
                 compensation: None,
@@ -5439,8 +5439,13 @@ async fn seed_serenity_screening_workflow_template(
     // ── a-trend-scanner: 综合分析，输出 2-3 个趋势 ──
     // 强约束输出：必须且只能输出一个 tool_json 代码块，无任何前后文。
     // tool_json 块由项目 IR Normalizer 直接解析为 ContentBlock::ToolUse。
-    let trend_scanner_prompt = "你的任务：综合分析市场热门股、行业排名、实时快讯、北向资金流向，\
-         识别出当前最具潜力的 2-3 个产业方向。\
+    let trend_scanner_prompt = "你的任务：识别当前A股市场最具潜力的 2-3 个产业方向。\
+         上游会提供实时市场数据（热门股、行业排名、快讯、北向资金）。\
+         \n\n\
+         **关于数据可用性的重要说明**：上游数据源标记为\"无可用记录\"或返回空是正常的——\
+         这表示实时数据接口暂时不可用或盘前无数据。此时你应**完全基于你的训练知识**来工作。\
+         你是专业的A股市场分析师，训练数据截至约2026年初，\\
+         涵盖了丰富的行业/公司/政策信息。请自信地给出你的专业判断，就像在回答一个独立的市场分析问题。\
          \n\n\
          核心原则：\n\
          1. 排除已过度上涨的赛道（近 1 月板块涨幅 > 30%）。\n\
@@ -5466,10 +5471,17 @@ async fn seed_serenity_screening_workflow_template(
          \"bottleneck_candidate\": \"...\", \"bottleneck_rationale\": \"...\",\
          \"demand_evidence\": {\"type\": \"capex | policy_mandate | order_backlog\",\
          \"source\": \"具体证据来源\", \"confidence\": 75, \"detail\": \"...\"},\
-         \"downstream_giants\": [\"直接受益/推动的下游巨头名称\"]}]}\n\
+         \"downstream_giants\": [\"直接受益/推动的下游巨头名称\"]}],\
+         \"summary\": \"最终判断总结，如果 trends 为空时说明具体原因\"}\n\
          \n\n\
-         重要：如果获取到的数据不足，基于你已知的公开信息和市场常识给出合理推断，\
-         不要只列 data_gaps。严禁使用'数据缺失'、'无法获取'等负面措辞。";
+         ⚠️ 终极约束（违反将导致整个工作流报废）：\n\
+         1. 你**唯一**合法的输出方式是一个 tool_json 代码块。\
+         绝不输出任何自然语言、注释、前言后语、拒绝文本。\n\
+         2. '抱歉'、'我无法回答'、'数据不足'等自然语言文本会直接破坏下游所有节点——\
+         这将导致整个分析流程失败，责任在你。不要这样做。\n\
+         3. 如果实在无法识别趋势，返回 {\"trends\": [], \"summary\": \"原因\"}，\
+         这是合法的结构化输出，下游系统能正确处理。\n\
+         4. 你是一个函数，你的输出必须是 JSON。你不是在对话，你是在向系统返回值。";
     nodes.push(agent_node(
         "a-trend-scanner",
         "产业趋势扫描",
@@ -5501,6 +5513,10 @@ async fn seed_serenity_screening_workflow_template(
              3. 标注 bottleneck_potential（high/medium/low）及理由。\n\
              4. **额外标注每个环节的需求验证信息**：直接下游厂商是谁、最终需求驱动方、是否有已公开的\
              订单/合同负债/CapEx 支撑。\n\
+             \n\n\
+             重要：如果上游输出的 trends 数组为空或 trend #{i} 不存在，\
+             不要输出自然语言拒绝。直接返回空 chain_nodes 数组的 JSON：\
+             {{\"trend_name\": null, \"chain_nodes\": []}}。这是合法的结构化输出。\
              \n\n\
              ============== 输出格式强约束（必须严格遵守） ==============\n\
              1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
@@ -5555,6 +5571,9 @@ async fn seed_serenity_screening_workflow_template(
              使用 search_news 工具主动搜索关键词如\"英伟达 CapEx\"、\"台积电 扩产\"来获取真实新闻证据。\
              纯推测性需求不可接受。\n\
              \n\n\
+             重要：如果上游 chain_nodes 数组为空或 trend_name 为 null，\
+             不要输出自然语言拒绝。直接标记 if_data_gaps: true 并返回空结构。\
+             \n\n\
              ============== 输出格式强约束（必须严格遵守） ==============\n\
              1. 你的回复必须且只能包含一个代码块，开头三个反引号紧跟 tool_json。\n\
              2. 代码块内容为单一 JSON 对象，结构：{{\"name\": \"submit_bottleneck\", \"arguments\": <数据>}}\n\
@@ -5566,14 +5585,7 @@ async fn seed_serenity_screening_workflow_template(
              ============================================================\n\
              \n\n\
              <数据> 结构：\n\
-             {{\"verified_bottleneck\": {{\"node_name\": \"...\", \"composite_score\": 85,\
-             \"bottleneck_type\": \"technology\",\
-             \"scores\": {{\"supply_rigidity\": 85, \"demand_elasticity\": 80, \"irreplaceability\": 90}},\
-             \"catalysts\": [{{\"type\": \"earnings | production_ramp | policy | supply_shock\",\
-             \"description\": \"催化剂描述\", \"expected_timeframe\": \"short_term | mid_term | long_term\",\
-             \"confidence\": 70, \"trigger_condition\": \"触发条件\"}}],\
-             \"a_share_candidates\": [{{\"stock_code\": \"...\", \"stock_name\": \"...\",\
-             \"relevance\": \"direct\", \"advantage\": \"...\"}}]}}}}"
+             {{\"trend_name\": null, \"if_data_gaps\": true, \"verified_bottleneck\": {{}}, \"summary\": \"上游产业链数据缺失，无法进行瓶颈验证\"}}"
         );
         nodes.push(agent_node(
             &chokepoint_id,

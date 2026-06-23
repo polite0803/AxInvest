@@ -31,6 +31,31 @@ export function DecisionBanner() {
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
+  // 方案 D 双向并存: LLM 决策 JSON + 一致性分数
+  const llmDecisionJson = useStockAnalysisStore((s) => s.llmDecisionJson);
+  const decisionAgreementScore = useStockAnalysisStore((s) => s.decisionAgreementScore);
+  // 分歧阈值（从工作流模板读取,默认 40）
+  const [disagreementThreshold, setDisagreementThreshold] = useState(40);
+  useEffect(() => {
+    invoke<Record<string, unknown>>("get_workflow_template", { id: "stock-analysis" })
+      .then((tmpl) => {
+        const vars = (tmpl?.variables ?? []) as Record<string, unknown>[];
+        const v = vars.find((x: Record<string, unknown>) => x.name === "dual_view_disagreement_threshold");
+        if (v && typeof v.value === "number") {
+          setDisagreementThreshold(v.value);
+        }
+      })
+      .catch(() => {});
+  }, []);
+  // 解析 LLM stance + summary 用于 banner 展示
+  const llmStance = useMemo(() => {
+    if (!llmDecisionJson) return null;
+    try { const j = JSON.parse(llmDecisionJson); return j.stance ?? null; } catch { return null; }
+  }, [llmDecisionJson]);
+  const llmSummary = useMemo(() => {
+    if (!llmDecisionJson) return null;
+    try { const j = JSON.parse(llmDecisionJson); return j.summary ?? null; } catch { return null; }
+  }, [llmDecisionJson]);
   // timeline-jump 高亮：被 evidence 指向时短暂加 ring 样式
   const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
   // 时间旅行: 当前决策所基于的 as-of 锚点 (live 时为 null)
@@ -375,6 +400,21 @@ export function DecisionBanner() {
             : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noDecisionReasoning")}</span>}
         </div>
 
+        {/* [Phase 2 step 10] 分歧时 LLM 对比标注 */}
+        {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmSummary && (
+          <div
+            className="text-xs mb-3 p-2 rounded"
+            style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
+          >
+            <span className="font-medium" style={{ color: "#7c3aed" }}>
+              💡 LLM 视角:
+            </span>
+            <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
+              {llmSummary}
+            </span>
+          </div>
+        )}
+
         <div
           className="grid gap-2 mb-3"
           style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
@@ -536,6 +576,56 @@ export function DecisionBanner() {
         </div>
       </Card>
 
+      {/* [Phase 2] 决策一致性胶囊: 点击展开双视角对比 */}
+      {decisionAgreementScore !== null && (
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer hover:opacity-80 transition-opacity mt-1"
+          style={{
+            background: decisionAgreementScore >= 60
+              ? "rgba(16, 185, 129, 0.1)"
+              : decisionAgreementScore >= 40
+              ? "rgba(245, 158, 11, 0.1)"
+              : "rgba(239, 68, 68, 0.1)",
+          }}
+          onClick={() => {
+            // 用事件总线通知 StockAnalysisPage 切换 tab
+            window.dispatchEvent(new CustomEvent("switch-tab", { detail: "decision-comparison" }));
+          }}
+        >
+          <span className="text-[11px]" style={{ color: "var(--muted)" }}>
+            📊 {t("stockAnalysis.dualViewConsistency")}
+          </span>
+          <span
+            className="font-mono text-[12px] font-semibold"
+            style={{
+              color: decisionAgreementScore >= 60
+                ? "#10b981"
+                : decisionAgreementScore >= 40
+                ? "#f59e0b"
+                : "#ef4444",
+            }}
+          >
+            {decisionAgreementScore}/100
+          </span>
+          {llmStance && (
+            <>
+              <span className="text-[11px]" style={{ color: "var(--muted)" }}>·</span>
+              <span
+                className="px-1.5 rounded text-[10px] font-medium"
+                style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
+              >
+                LLM: {llmStance}
+              </span>
+            </>
+          )}
+          {decisionAgreementScore < disagreementThreshold && (
+              <span className="text-[10px]" style={{ color: "#ef4444" }}>
+                ⚠️ {t("stockAnalysis.dualViewDisagreement")}
+              </span>
+          )}
+        </div>
+      )}
+
       <Modal
         title={
           <div className="flex items-center gap-2">
@@ -635,6 +725,21 @@ export function DecisionBanner() {
             ? <NodeRenderer content={cleanToolCallTags(decision.reasoning || "")} isDark={isDark} />
             : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noDecisionReasoning")}</span>}
         </div>
+
+        {/* [Phase 2 step 10] Modal 内分歧时 LLM 对比标注 */}
+        {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmSummary && (
+          <div
+            className="text-sm mb-4 p-3 rounded"
+            style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
+          >
+            <span className="font-medium" style={{ color: "#7c3aed" }}>
+              💡 LLM 视角:
+            </span>
+            <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
+              {llmSummary}
+            </span>
+          </div>
+        )}
 
         <div className="flex gap-2 items-center flex-wrap">
           {stockCode && !watchlisted && (

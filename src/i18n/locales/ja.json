@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "分析履歴がありません",
+    "historyBatchDelete": "一括削除",
+    "historyDeleteConfirm": "選択した{{count}}件の分析記録を削除しますか？",
+    "historyDeleteSuccess": "{{count}}件の分析記録を削除しました",
+    "historySelectMode": "複数選択",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8487,7 +8491,21 @@
       "styleReversion": "均值回归",
       "styleWatchlist": "自选股",
       "styleSerenity": "ボトルネック発掘",
-      "title": "推荐结果"
+      "title": "推荐结果",
+      "recoHistory": {
+        "viewHistory": "推奨履歴を表示",
+        "title": "推奨履歴",
+        "generatedAt": "推奨時刻",
+        "period": "期間",
+        "stockCount": "銘柄数",
+        "styles": "スタイル",
+        "batchDelete": "一括削除 ({{count}})",
+        "deleteConfirm": "選択した{{count}}件の推奨記録を削除しますか？",
+        "deleteSuccess": "{{count}}件の推奨記録を削除しました",
+        "selectedCount": "{{count}}件選択中",
+        "exitSelect": "選択を解除",
+        "empty": "推奨履歴がありません"
+      }
     },
     "periodShort": "Short Term",
     "periodMid": "Mid Term",
@@ -9087,7 +9105,22 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "推奨履歴を表示",
+      "title": "推奨履歴",
+      "generatedAt": "推奨時刻",
+      "period": "期間",
+      "stockCount": "銘柄数",
+      "candidateCount": "候補数",
+      "styles": "スタイル",
+      "batchDelete": "一括削除 ({{count}})",
+      "deleteConfirm": "選択した{{count}}件の推奨記録を削除しますか？",
+      "deleteSuccess": "{{count}}件の推奨記録を削除しました",
+      "selectedCount": "{{count}}件選択中",
+      "exitSelect": "選択を解除",
+      "empty": "推奨履歴がありません"
+    }
   },
   "trade": {
     "title": "Trading Log",

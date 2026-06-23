@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "لا يوجد سجل تحليل",
+    "historyBatchDelete": "حذف مجمع",
+    "historyDeleteConfirm": "حذف {{count}} سجل تحليل؟",
+    "historyDeleteSuccess": "تم حذف {{count}} سجل تحليل",
+    "historySelectMode": "تحديد متعدد",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleSerenity": "صيد الاختناقات",
       "cachedAt": "مخزّن في {{time}}",
       "cachedBadge": "مخزّن",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "عرض التاريخ",
+        "title": "تاريخ التوصيات",
+        "generatedAt": "وقت التوصية",
+        "period": "الفترة",
+        "stockCount": "عدد الأسهم",
+        "styles": "الأنماط",
+        "batchDelete": "حذف مجمع ({{count}})",
+        "deleteConfirm": "حذف {{count}} سجل؟",
+        "deleteSuccess": "تم حذف {{count}} سجل",
+        "selectedCount": "تم اختيار {{count}}",
+        "exitSelect": "إنهاء التحديد",
+        "empty": "لا يوجد تاريخ توصيات"
+      }
     },
     "periodUltraShort": "Short",
     "periodShort": "Short",
@@ -9343,6 +9361,21 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "عرض التاريخ",
+      "title": "تاريخ التوصيات",
+      "generatedAt": "وقت التوصية",
+      "period": "الفترة",
+      "stockCount": "عدد الأسهم",
+      "candidateCount": "عدد المرشحين",
+      "styles": "الأنماط",
+      "batchDelete": "حذف مجمع ({{count}})",
+      "deleteConfirm": "حذف {{count}} سجل؟",
+      "deleteSuccess": "تم حذف {{count}} سجل",
+      "selectedCount": "تم اختيار {{count}}",
+      "exitSelect": "إنهاء التحديد",
+      "empty": "لا يوجد تاريخ توصيات"
+    }
   }
 }

@@ -7701,6 +7701,10 @@
     },
     "history": "History",
     "historyEmpty": "분석 기록이 없습니다",
+    "historyBatchDelete": "일괄 삭제",
+    "historyDeleteConfirm": "선택한 {{count}}개 분석 기록을 삭제하시겠습니까?",
+    "historyDeleteSuccess": "{{count}}개 분석 기록이 삭제되었습니다",
+    "historySelectMode": "다중 선택",
     "debateHistory": "Debate History",
     "addToWatchlist": "Add to Watchlist",
     "addedToWatchlist": "Added",
@@ -8480,7 +8484,21 @@
       "styleWatchlist": "自选股",
       "cachedAt": "{{time}}에 캐시됨",
       "cachedBadge": "캐시",
-      "calibrate": "自动校准"
+      "calibrate": "自动校准",
+      "recoHistory": {
+        "viewHistory": "추천 내역 보기",
+        "title": "추천 내역",
+        "generatedAt": "추천 시간",
+        "period": "기간",
+        "stockCount": "종목 수",
+        "styles": "스타일",
+        "batchDelete": "일괄 삭제 ({{count}})",
+        "deleteConfirm": "선택한 {{count}}개 추천 기록을 삭제하시겠습니까?",
+        "deleteSuccess": "{{count}}개 추천 기록이 삭제되었습니다",
+        "selectedCount": "{{count}}개 선택됨",
+        "exitSelect": "다중 선택 종료",
+        "empty": "추천 내역이 없습니다"
+      }
     },
     "periodUltraShort": "단기",
     "periodShort": "단기",
@@ -9251,7 +9269,22 @@
     "feedbackProfitable": "Profitable/Total",
     "feedbackButton": "History Feedback",
     "refreshExitButton": "Refresh Exit Signals",
-    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}"
+    "feedbackCatalyst": "Catalyst {{verified}}/{{total}}",
+    "serenityHistory": {
+      "viewHistory": "추천 내역 보기",
+      "title": "추천 내역",
+      "generatedAt": "추천 시간",
+      "period": "기간",
+      "stockCount": "종목 수",
+      "candidateCount": "후보 수",
+      "styles": "스타일",
+      "batchDelete": "일괄 삭제 ({{count}})",
+      "deleteConfirm": "선택한 {{count}}개 추천 기록을 삭제하시겠습니까?",
+      "deleteSuccess": "{{count}}개 추천 기록이 삭제되었습니다",
+      "selectedCount": "{{count}}개 선택됨",
+      "exitSelect": "다중 선택 종료",
+      "empty": "추천 내역이 없습니다"
+    }
   },
   "quant": {
     "backtest": {

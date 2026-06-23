@@ -51,6 +51,9 @@ export function EvolutionDriftPanel() {
   const lastError = useStockAnalysisStore((s) => s.evolutionLastError);
   const fetchDashboard = useStockAnalysisStore((s) => s.fetchEvolutionDashboard);
   const recalc = useStockAnalysisStore((s) => s.recalcEvolutionNow);
+  const fetchAgreementHistory = useStockAnalysisStore((s) => s.fetchAgreementScoreHistory);
+  const agreementHistory = useStockAnalysisStore((s) => s.agreementScoreHistory);
+  const agreementLoading = useStockAnalysisStore((s) => s.agreementScoreHistoryLoading);
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [timelineData, setTimelineData] = useState<
@@ -62,7 +65,8 @@ export function EvolutionDriftPanel() {
 
   useEffect(() => {
     fetchDashboard(asOfDate);
-  }, [asOfDate, fetchDashboard]);
+    fetchAgreementHistory(50);
+  }, [asOfDate, fetchDashboard, fetchAgreementHistory]);
 
   const handleRecalc = async () => {
     await recalc(asOfDate);
@@ -303,6 +307,25 @@ export function EvolutionDriftPanel() {
             </ul>
           )}
       </div>
+
+      {/* Phase 3: 双视角一致性趋势 */}
+      <div style={{ marginTop: 24 }}>
+        <h4>{t("stockAnalysis.evolutionDrift.agreementTrendTitle")}</h4>
+        {agreementLoading
+          ? <Spin size="small" />
+          : !agreementHistory || agreementHistory.length === 0
+          ? <Empty description={t("stockAnalysis.evolutionDrift.noAgreementData")} />
+          : (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs" style={{ color: "var(--muted)" }}>
+                  {t("stockAnalysis.evolutionDrift.agreementRecentAvg")}: {Math.round(agreementHistory.slice(0, 10).reduce((s, r) => s + r.agreementScore, 0) / Math.min(10, agreementHistory.length))}/100
+                </span>
+              </div>
+              <AgreementSparkline points={agreementHistory} />
+            </div>
+          )}
+      </div>
     </div>
   );
 }
@@ -337,5 +360,48 @@ function TimelineSparkline({
         return <circle key={i} cx={x} cy={y} r={3} fill="#1677ff" />;
       })}
     </svg>
+  );
+}
+
+/** Phase 3: 一致性分数趋势 sparkline（紫色调） */
+function AgreementSparkline({
+  points,
+}: {
+  points: Array<{ exitAt: number; agreementScore: number; stockCode: string; stockName: string; returnPct: number; wasCorrect: number }>;
+}) {
+  const { t } = useTranslation();
+  if (points.length === 0) { return null; }
+  const minS = Math.min(...points.map((p) => p.agreementScore));
+  const maxS = Math.max(...points.map((p) => p.agreementScore));
+  const range = maxS - minS || 0.01;
+  const width = 600;
+  const height = 60;
+  const xStep = points.length > 1 ? width / (points.length - 1) : width;
+  const path = points
+    .map((p, i) => {
+      const x = i * xStep;
+      const y = height - ((p.agreementScore - minS) / range) * (height - 10) - 5;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <div>
+      <svg width={width} height={height} style={{ display: "block" }}>
+        <line x1={0} y1={height - 5} x2={width} y2={height - 5} stroke="#d9d9d9" strokeWidth={1} />
+        <path d={path} fill="none" stroke="#7c3aed" strokeWidth={2} />
+        {points.map((p, i) => {
+          const x = i * xStep;
+          const y = height - ((p.agreementScore - minS) / range) * (height - 10) - 5;
+          const color = p.agreementScore >= 60 ? "#10b981" : p.agreementScore >= 40 ? "#f59e0b" : "#ef4444";
+          return <circle key={i} cx={x} cy={y} r={3} fill={color} />;
+        })}
+      </svg>
+      <div className="flex items-center gap-2 mt-1">
+        <span className="text-[10px]" style={{ color: "#7c3aed" }}>{t("stockAnalysis.evolutionDrift.agreementTrendLabel")}</span>
+        <span className="text-[10px]" style={{ color: "var(--muted)" }}>
+          {t("stockAnalysis.evolutionDrift.agreementRange")}: {minS}-{maxS}
+        </span>
+      </div>
+    </div>
   );
 }

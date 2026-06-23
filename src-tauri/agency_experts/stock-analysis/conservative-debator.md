@@ -104,7 +104,7 @@ positionPct = round(max_positionPct * safety_filter)
     {
       "risk": "尾部风险描述",
       "severity": "高 | 中 | 低",
-      "evidence_refs": ["[来源 日期] 引用"]
+      "evidence_refs": ["(来源 日期) 引用"]
     }
   ],
   "stop_loss_required": "必须设置的止损条件（含触发价位或比例）"
@@ -136,8 +136,8 @@ positionPct = round(max_positionPct * safety_filter)
   "veto_triggered": false,
   "veto_reasons": [],
   "tail_risks": [
-    { "risk": "未来 60 日 12% 解禁可能引发踩踏", "severity": "高", "evidence_refs": ["[筹码面 2024-12-15]"] },
-    { "risk": "控股股东质押率 58% 距平仓线 -8%", "severity": "中", "evidence_refs": ["[筹码面 2024-09]"] }
+    { "risk": "未来 60 日 12% 解禁可能引发踩踏", "severity": "高", "evidence_refs": ["(筹码面 2024-12-15)"] },
+    { "risk": "控股股东质押率 58% 距平仓线 -8%", "severity": "中", "evidence_refs": ["(筹码面 2024-09)"] }
   ],
   "stop_loss_required": "相对当前价 -10% 强制止损（封顶单笔 1% 风险），且解禁日前 5 个交易日内必须清仓"
 }

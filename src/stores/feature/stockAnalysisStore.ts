@@ -340,7 +340,18 @@ interface StockAnalysisState {
   evolutionRecalculating: boolean;
   evolutionLastError: string | null;
   /** Phase 3: 双视角一致性分数趋势 */
-  agreementScoreHistory: Array<{ exitAt: number; agreementScore: number; stockCode: string; stockName: string; returnPct: number; wasCorrect: number }> | null;
+  agreementScoreHistory:
+    | Array<
+      {
+        exitAt: number;
+        agreementScore: number;
+        stockCode: string;
+        stockName: string;
+        returnPct: number;
+        wasCorrect: number;
+      }
+    >
+    | null;
   agreementScoreHistoryLoading: boolean;
   fetchAgreementScoreHistory: (limit?: number) => Promise<void>;
   fetchEvolutionDashboard: (asOfDate?: string | null) => Promise<void>;
@@ -840,11 +851,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (fa && la) {
           const isBuy = (s: string) => s.includes("买") || s.includes("增持");
           const isSell = (s: string) => s.includes("卖") || s.includes("减持");
-          if (fa === la) actionScore = 50;
-          else if (isBuy(fa) && isBuy(la)) actionScore = 40;
-          else if (isSell(fa) && isSell(la)) actionScore = 40;
-          else if (!isBuy(fa) && !isSell(fa) && !isBuy(la) && !isSell(la)) actionScore = 40;
-          else actionScore = 0;
+          if (fa === la) { actionScore = 50; }
+          else if (isBuy(fa) && isBuy(la)) { actionScore = 40; }
+          else if (isSell(fa) && isSell(la)) { actionScore = 40; }
+          else if (!isBuy(fa) && !isSell(fa) && !isBuy(la) && !isSell(la)) { actionScore = 40; }
+          else { actionScore = 0; }
         }
         // positionPct 一致性 (30分)
         const fp = typeof dj?.positionPct === "number" ? dj.positionPct : null;
@@ -1047,8 +1058,20 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   fetchAgreementScoreHistory: async (limit = 50) => {
     set({ agreementScoreHistoryLoading: true });
     try {
-      const data = await invoke<Array<{ exitAt: number; agreementScore: number; stockCode: string; stockName: string; returnPct: number; wasCorrect: number }>>(
-        "get_agreement_score_history", { limit },
+      const data = await invoke<
+        Array<
+          {
+            exitAt: number;
+            agreementScore: number;
+            stockCode: string;
+            stockName: string;
+            returnPct: number;
+            wasCorrect: number;
+          }
+        >
+      >(
+        "get_agreement_score_history",
+        { limit },
       );
       set({ agreementScoreHistory: data, agreementScoreHistoryLoading: false });
     } catch (e) {

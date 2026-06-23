@@ -205,6 +205,20 @@ impl StockVendor for TencentVendor {
         let bytes = resp.bytes().await?;
         // 腾讯财经 API 使用 GBK 编码，需手动转 UTF-8
         let text = encoding_rs::GBK.decode(&bytes).0;
+
+        // 上证指数代码（000xxx）可能被误映射为 sz 前缀
+        // 检测到无匹配时用 sh 前缀重试
+        if text.contains("pv_none_match") && stock_code.starts_with("00") {
+            let sh_code = format!("sh{stock_code}");
+            let sh_url = format!("https://qt.gtimg.cn/q={sh_code}");
+            let sh_resp = self.tencent_get(&sh_url).await?;
+            let sh_bytes = sh_resp.bytes().await?;
+            let sh_text = encoding_rs::GBK.decode(&sh_bytes).0;
+            if !sh_text.contains("pv_none_match") {
+                return parse_quote(&sh_text);
+            }
+        }
+
         parse_quote(&text)
     }
 
@@ -227,14 +241,34 @@ impl StockVendor for TencentVendor {
         );
         let resp = self.http.get(&url).send().await;
         // 手动处理 Error 以检查 429
-        match resp {
+        let klines = match resp {
             Ok(r) => {
                 crate::check_response_429(&r, "tencent")?;
                 let body = r.text().await?;
                 parse_klines(&body, stock_code)
             },
             Err(e) => Err(DataError::from(e)),
+        };
+
+        // 上证指数代码（000xxx）可能被误映射为 sz 前缀
+        // 解析结果为空时用 sh 前缀重试
+        if klines.as_ref().map_or(false, |v| v.is_empty()) && stock_code.starts_with("00") {
+            let sh_code = format!("sh{stock_code}");
+            let sh_url = format!(
+                "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={sh_code},{period_code},,,{limit},qfq"
+            );
+            let sh_resp = self.http.get(&sh_url).send().await;
+            if let Ok(r) = sh_resp {
+                if let Ok(body) = r.text().await {
+                    let sh_klines = parse_klines(&body, stock_code);
+                    if sh_klines.as_ref().map_or(false, |v| !v.is_empty()) {
+                        return sh_klines;
+                    }
+                }
+            }
         }
+
+        klines
     }
 
     async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {

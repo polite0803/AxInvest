@@ -49,12 +49,22 @@ export function DecisionBanner() {
   }, []);
   // 解析 LLM stance + summary 用于 banner 展示
   const llmStance = useMemo(() => {
-    if (!llmDecisionJson) return null;
-    try { const j = JSON.parse(llmDecisionJson); return j.stance ?? null; } catch { return null; }
+    if (!llmDecisionJson) { return null; }
+    try {
+      const j = JSON.parse(llmDecisionJson);
+      return j.stance ?? null;
+    } catch {
+      return null;
+    }
   }, [llmDecisionJson]);
   const llmSummary = useMemo(() => {
-    if (!llmDecisionJson) return null;
-    try { const j = JSON.parse(llmDecisionJson); return j.summary ?? null; } catch { return null; }
+    if (!llmDecisionJson) { return null; }
+    try {
+      const j = JSON.parse(llmDecisionJson);
+      return j.summary ?? null;
+    } catch {
+      return null;
+    }
   }, [llmDecisionJson]);
   // timeline-jump 高亮：被 evidence 指向时短暂加 ring 样式
   const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
@@ -619,9 +629,9 @@ export function DecisionBanner() {
             </>
           )}
           {decisionAgreementScore < disagreementThreshold && (
-              <span className="text-[10px]" style={{ color: "#ef4444" }}>
-                ⚠️ {t("stockAnalysis.dualViewDisagreement")}
-              </span>
+            <span className="text-[10px]" style={{ color: "#ef4444" }}>
+              ⚠️ {t("stockAnalysis.dualViewDisagreement")}
+            </span>
           )}
         </div>
       )}

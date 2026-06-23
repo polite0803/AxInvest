@@ -9,18 +9,55 @@ use tokio::time::sleep;
 
 pub struct EastMoneyVendor {
     pub http: reqwest::Client,
+    /// 可选代理客户端（EASTMONEY_PROXY 环境变量配置），用于绕过 IP 封锁
+    pub proxy_http: Option<reqwest::Client>,
 }
 
 impl EastMoneyVendor {
+    /// 从环境变量 EASTMONEY_PROXY 构建代理客户端（如 socks5://192.168.0.235:1080）
+    pub fn build_proxy_client() -> Option<reqwest::Client> {
+        let proxy_url = std::env::var("EASTMONEY_PROXY").ok()?;
+        if proxy_url.is_empty() {
+            return None;
+        }
+        match reqwest::Client::builder()
+            .proxy(reqwest::Proxy::all(&proxy_url).ok()?)
+            .timeout(std::time::Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .cookie_store(true)
+            .pool_max_idle_per_host(8)
+            .min_tls_version(reqwest::tls::Version::TLS_1_2)
+            .build()
+        {
+            Ok(c) => {
+                tracing::info!("[eastmoney] 已配置代理: {proxy_url}");
+                Some(c)
+            },
+            Err(e) => {
+                tracing::warn!("[eastmoney] 代理客户端创建失败: {e}");
+                None
+            },
+        }
+    }
+
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     /// 429 限流时使用更长等待（2s → 4s → 8s）
+    /// IncompleteMessage 时若配置了代理，自动走代理重试
     async fn em_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
         let max_retries = 3;
         let mut delay = Duration::from_secs(1);
         let mut last_err = None;
         for attempt in 0..max_retries {
-            let result = self
-                .http
+            let http_client = if attempt == 0 {
+                &self.http
+            } else if let Some(ref p) = self.proxy_http {
+                // 第1次失败后走代理重试（仅当配置了代理）
+                p
+            } else {
+                &self.http
+            };
+            let result = http_client
                 .get(url)
                 .header("Referer", "https://quote.eastmoney.com/")
                 .header(
@@ -52,16 +89,21 @@ impl EastMoneyVendor {
                     }
                 },
                 Err(e) => {
-                    // IncompleteMessage = 服务器拒绝/中断连接，重试无意义
-                    // 应快速失败让路由层 fallback 到其他数据源
-                    if format!("{e:?}").contains("IncompleteMessage") {
+                    let is_incomplete = format!("{e:?}").contains("IncompleteMessage");
+                    if is_incomplete && attempt == 0 && self.proxy_http.is_some() {
+                        // IncompleteMessage + 有代理 → 不走指数退避，立即走代理重试
+                        tracing::warn!("[eastmoney] IncompleteMessage，切换代理重试({url})");
+                        last_err = Some(e.into());
+                        continue; // 直接用 attempt=1 走代理
+                    }
+                    if is_incomplete {
+                        // IncompleteMessage + 无代理 → 快速失败让路由层 fallback
                         tracing::warn!(
-                            "[em_get] eastmoney IncompleteMessage({url})，快速失败→路由层 fallback"
+                            "[eastmoney] IncompleteMessage({url})，快速失败→路由层 fallback"
                         );
                         return Err(e.into());
                     }
                     if attempt + 1 < max_retries {
-                        // 打印完整错误链（包括 source()）
                         tracing::warn!(
                             "[retry] eastmoney 请求失败 (第{}次, {delay:?}后重试): {e:?}",
                             attempt + 1
@@ -69,9 +111,8 @@ impl EastMoneyVendor {
                         sleep(delay).await;
                         delay *= 2;
                     } else {
-                        // 记录最终错误的完整原因链
                         tracing::error!(
-                            "[em_get] 最终失败: {e:?}, source: {:?}",
+                            "[eastmoney] 最终失败: {e:?}, source: {:?}",
                             std::error::Error::source(&e)
                         );
                         last_err = Some(e.into());
@@ -1685,6 +1726,7 @@ mod asof_capability_tests {
     fn make_vendor() -> EastMoneyVendor {
         EastMoneyVendor {
             http: reqwest::Client::new(),
+            proxy_http: None,
         }
     }
 

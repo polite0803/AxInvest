@@ -88,7 +88,7 @@ positionPct = max(0, min(100, positionPct))
   "blind_spots": [
     {
       "spot": "辩论/评估中被多方和空方都忽略的盲点",
-      "evidence_refs": ["[来源 日期] 引用"]
+      "evidence_refs": ["(来源 日期) 引用"]
     }
   ],
   "positionPct_rationale": "为什么是 consensus-adjusted 中位而不是单纯的 median"
@@ -124,11 +124,11 @@ positionPct = max(0, min(100, positionPct))
   "blind_spots": [
     {
       "spot": "工信部专项政策细则发布前的窗口期可能长达 6 个月，多方按'Q4 落地'假设的隐含时效被低估",
-      "evidence_refs": ["[政策面 2024-09 工信部发布指南]"]
+      "evidence_refs": ["(政策面 2024-09 工信部发布指南)"]
     },
     {
       "spot": "Q3 业绩超预期的低基数效应（2023 同期受疫情影响）未在任何一方的论据中被显式扣除",
-      "evidence_refs": ["[基本面 2023Q3 同期数据未在上下文中]"]
+      "evidence_refs": ["(基本面 2023Q3 同期数据未在上下文中)"]
     }
   ],
   "positionPct_rationale": "三方分歧 54pp 共识度 0.0（已用最低折回系数 0.5），导致中位 35 折半到约 17，再叠加 base_case=25 取整得 28；若分歧收敛到 < 30pp 可上调到中位附近"

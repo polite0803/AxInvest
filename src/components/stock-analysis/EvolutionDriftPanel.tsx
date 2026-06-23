@@ -319,7 +319,10 @@ export function EvolutionDriftPanel() {
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs" style={{ color: "var(--muted)" }}>
-                  {t("stockAnalysis.evolutionDrift.agreementRecentAvg")}: {Math.round(agreementHistory.slice(0, 10).reduce((s, r) => s + r.agreementScore, 0) / Math.min(10, agreementHistory.length))}/100
+                  {t("stockAnalysis.evolutionDrift.agreementRecentAvg")}: {Math.round(
+                    agreementHistory.slice(0, 10).reduce((s, r) => s + r.agreementScore, 0)
+                      / Math.min(10, agreementHistory.length),
+                  )}/100
                 </span>
               </div>
               <AgreementSparkline points={agreementHistory} />
@@ -367,7 +370,16 @@ function TimelineSparkline({
 function AgreementSparkline({
   points,
 }: {
-  points: Array<{ exitAt: number; agreementScore: number; stockCode: string; stockName: string; returnPct: number; wasCorrect: number }>;
+  points: Array<
+    {
+      exitAt: number;
+      agreementScore: number;
+      stockCode: string;
+      stockName: string;
+      returnPct: number;
+      wasCorrect: number;
+    }
+  >;
 }) {
   const { t } = useTranslation();
   if (points.length === 0) { return null; }
@@ -397,7 +409,9 @@ function AgreementSparkline({
         })}
       </svg>
       <div className="flex items-center gap-2 mt-1">
-        <span className="text-[10px]" style={{ color: "#7c3aed" }}>{t("stockAnalysis.evolutionDrift.agreementTrendLabel")}</span>
+        <span className="text-[10px]" style={{ color: "#7c3aed" }}>
+          {t("stockAnalysis.evolutionDrift.agreementTrendLabel")}
+        </span>
         <span className="text-[10px]" style={{ color: "var(--muted)" }}>
           {t("stockAnalysis.evolutionDrift.agreementRange")}: {minS}-{maxS}
         </span>

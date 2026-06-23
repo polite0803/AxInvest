@@ -6,7 +6,18 @@ import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
-import { ArrowLeftRight, Coins, LineChart, RotateCcw, Settings, Shield, Sparkles, SplitSquareHorizontal, Users, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Coins,
+  LineChart,
+  RotateCcw,
+  Settings,
+  Shield,
+  Sparkles,
+  SplitSquareHorizontal,
+  Users,
+  X,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -21,8 +32,8 @@ import { ExperimentSidebar } from "./ExperimentSidebar";
 import { ExperimentTrail } from "./ExperimentTrail";
 import { resolveTimelineJump } from "./timelineJump";
 import "./dual-view";
-import { DualViewRenderer } from "./dual-view";
 import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
+import { DualViewRenderer } from "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";
 
 /** 决策双视角 Tab 内容：从 store 取 LLM vs 公式决策数据传入 DualViewRenderer */
@@ -32,10 +43,46 @@ function DecisionComparisonTabContent() {
     decisionAction: store.decision?.action,
     decisionPositionPct: store.decision?.positionPct,
     confidence: store.decision?.confidence,
-    llmDecisionAction: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.stance; } catch { return null; } })() : null,
-    llmDecisionPositionPct: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.positionPct; } catch { return null; } })() : null,
-    llmConfidence: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.confidence; } catch { return null; } })() : null,
-    llmDecisionReasoning: store.llmDecisionJson ? (() => { try { const j = JSON.parse(store.llmDecisionJson); return j.summary; } catch { return null; } })() : null,
+    llmDecisionAction: store.llmDecisionJson
+      ? (() => {
+        try {
+          const j = JSON.parse(store.llmDecisionJson);
+          return j.stance;
+        } catch {
+          return null;
+        }
+      })()
+      : null,
+    llmDecisionPositionPct: store.llmDecisionJson
+      ? (() => {
+        try {
+          const j = JSON.parse(store.llmDecisionJson);
+          return j.positionPct;
+        } catch {
+          return null;
+        }
+      })()
+      : null,
+    llmConfidence: store.llmDecisionJson
+      ? (() => {
+        try {
+          const j = JSON.parse(store.llmDecisionJson);
+          return j.confidence;
+        } catch {
+          return null;
+        }
+      })()
+      : null,
+    llmDecisionReasoning: store.llmDecisionJson
+      ? (() => {
+        try {
+          const j = JSON.parse(store.llmDecisionJson);
+          return j.summary;
+        } catch {
+          return null;
+        }
+      })()
+      : null,
     decisionAgreementScore: store.decisionAgreementScore,
   };
   return <DualViewRenderer id="decision-comparison" data={dualViewData} defaultMode="panel" />;

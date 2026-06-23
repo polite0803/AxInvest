@@ -38,6 +38,7 @@ pub use types::*;
 pub use valuation_band::{FinancialSnapshotLike, MetricBand, ValuationBand};
 use vendors::akshare::AkshareVendor;
 use vendors::baidu_stock::BaiduStockVendor;
+use vendors::browser_eastmoney::{BrowserEastMoneyVendor, BrowserHttpFetch};
 use vendors::cninfo::CninfoVendor;
 use vendors::eastmoney::EastMoneyVendor;
 use vendors::iwencai::IwencaiVendor;
@@ -182,28 +183,31 @@ impl VendorRouting {
             ],
             klines: vec![
                 "tencent".into(),
-                "sina".into(),
                 "xueqiu".into(),
                 "mootdx".into(),
-                "baidu_stock".into(),
                 "eastmoney".into(),
+                "browser_eastmoney".into(),
             ],
             financials: vec![
                 "eastmoney".into(),
+                "browser_eastmoney".into(),
                 "xueqiu".into(),
-                "baidu_stock".into(),
                 "akshare".into(),
-                "sina".into(),
             ],
             news: vec![
                 "xueqiu".into(),
                 "sina".into(),
                 "eastmoney".into(),
+                "browser_eastmoney".into(),
                 "ths".into(),
-                "baidu_stock".into(),
                 "akshare".into(),
             ],
-            money_flow: vec!["tencent".into(), "eastmoney".into(), "baidu_stock".into()],
+            money_flow: vec![
+                "tencent".into(),
+                "eastmoney".into(),
+                "browser_eastmoney".into(),
+                "baidu_stock".into(),
+            ],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
             search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],
@@ -248,13 +252,12 @@ impl VendorRouting {
                     vec![
                         "tencent".into(),
                         "eastmoney".into(),
-                        "sina".into(),
+                        "browser_eastmoney".into(),
                         "mootdx".into(),
                         "xueqiu".into(),
-                        "baidu_stock".into(),
                     ],
                 );
-                m.insert("financials", vec!["eastmoney".into(), "baidu_stock".into()]);
+                m.insert("financials", vec!["eastmoney".into(), "browser_eastmoney".into()]);
                 m
             },
         }
@@ -279,6 +282,9 @@ pub struct AStockClient {
     /// P6:本地新闻语料库 sink(None 表示不写库,as-of 模式 search_news 降级)
     /// 通过 with_news_archive_sink() 注入。
     news_archive_sink: Option<Arc<dyn NewsArchiveSink>>,
+    /// 浏览器 HTTP fetch 能力（Harness 注入）
+    /// 通过 Playwright/Chromium 绕过 EastMoney JA3 封锁
+    browser_fetcher: Option<Arc<dyn BrowserHttpFetch>>,
 }
 
 impl AStockClient {
@@ -306,10 +312,17 @@ impl AStockClient {
             iwencai_key: RwLock::new(String::new()),
             xq_token: None,
             news_archive_sink: None, // P6:默认不写入,调用方通过 with_news_archive_sink 注入
+            browser_fetcher: None,   // 浏览器 fetch 通过 with_browser_fetcher() 注入
         };
 
         client.register_vendor("tencent", Box::new(TencentVendor { http: http.clone() }));
-        client.register_vendor("eastmoney", Box::new(EastMoneyVendor { http: http.clone() }));
+        client.register_vendor(
+            "eastmoney",
+            Box::new(EastMoneyVendor {
+                http: http.clone(),
+                proxy_http: EastMoneyVendor::build_proxy_client(),
+            }),
+        );
         client.register_vendor("sina", Box::new(SinaVendor { http: http.clone() }));
         client.register_vendor("ths", Box::new(ThsVendor { http: http.clone() }));
         client.register_vendor("cninfo", Box::new(CninfoVendor { http: http.clone() }));
@@ -323,6 +336,7 @@ impl AStockClient {
         );
         client.register_vendor("akshare", Box::new(AkshareVendor { http: http.clone() }));
         client.register_vendor("mootdx", Box::new(MootdxVendor::new()));
+        client.register_vendor("browser_eastmoney", Box::new(BrowserEastMoneyVendor::new()));
         // 雪球数据源（始终注册，token 通过共享 Arc 运行时注入）
         let xq_token = Arc::new(RwLock::new(String::new()));
         client.xq_token = Some(xq_token.clone());
@@ -363,6 +377,24 @@ impl AStockClient {
     /// `search_news` 会优先查 sink 而不是直接降级。
     pub fn with_news_archive_sink(mut self, sink: Arc<dyn NewsArchiveSink>) -> Self {
         self.news_archive_sink = Some(sink);
+        self
+    }
+
+    /// 注入浏览器 HTTP fetch 能力（用于绕过 EastMoney JA3 封锁）
+    /// 接收 axagent-kit::browser_automation::PlaywrightClient 的实现封装
+    pub fn with_browser_fetcher(mut self, fetcher: Arc<dyn BrowserHttpFetch>) -> Self {
+        self.browser_fetcher = Some(fetcher.clone());
+        // 替换已注册的 browser_eastmoney vendor，使其持有 fetcher
+        if let Some(pos) = self
+            .vendors
+            .iter()
+            .position(|(name, _)| name == "browser_eastmoney")
+        {
+            self.vendors[pos] = (
+                "browser_eastmoney".into(),
+                Box::new(BrowserEastMoneyVendor::with_fetcher(fetcher)),
+            );
+        }
         self
     }
 
@@ -3159,6 +3191,7 @@ mod asof_realtime_degrade_tests {
         // (EastMoneyVendor 还没 override,所以默认是 Fallthrough,等 P1 改完后变其他变体)
         let vendor = EastMoneyVendor {
             http: reqwest::Client::new(),
+            proxy_http: None,
         };
         let cap = vendor.asof_capability("get_quote");
         assert!(

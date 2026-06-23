@@ -982,6 +982,7 @@ pub fn run() {
             commands::stock_workflow::refresh_serenity_feedback,
             commands::stock_workflow::delete_serenity_pick,
             commands::stock_workflow::list_reco_history,
+            commands::stock_workflow::get_reco_detail,
             commands::stock_workflow::batch_delete_reco_history,
             commands::stock_analysis::cancel_stock_analysis,
             commands::stock_analysis::compute_what_if,

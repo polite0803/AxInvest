@@ -330,6 +330,25 @@ export function SerenityScreeningPanel() {
   const [serenitySelected, setSerenitySelected] = useState<string[]>([]);
   const [serenityDeleting, setSerenityDeleting] = useState(false);
 
+  // 瓶颈掘金历史详情
+  const [serenityDetailOpen, setSerenityDetailOpen] = useState(false);
+  const [serenityDetailLoading, setSerenityDetailLoading] = useState(false);
+  const [serenityDetailItems, setSerenityDetailItems] = useState<
+    Array<{
+      stockCode: string;
+      stockName: string;
+      confidence: number;
+      generatedAt: string;
+    }>
+  >([]);
+  const [serenityDetailRow, setSerenityDetailRow] = useState<
+    {
+      generatedAt: string;
+      stockCount: number;
+      createdAt: string;
+    } | null
+  >(null);
+
   // 组件卸载时清理监听
   useEffect(() => {
     return () => {
@@ -514,6 +533,29 @@ export function SerenityScreeningPanel() {
       if (code) { startAnalysis(code); }
     },
     [startAnalysis],
+  );
+
+  /** 打开瓶颈掘金历史详情 */
+  const openSerenityDetail = useCallback(
+    async (row: { generatedAt: string; stockCount: number; createdAt: string }) => {
+      setSerenityDetailRow(row);
+      setSerenityDetailOpen(true);
+      setSerenityDetailLoading(true);
+      try {
+        const items = await invoke<
+          Array<{ stockCode: string; stockName: string; confidence: number; generatedAt: string }>
+        >("get_reco_detail", {
+          generatedAt: row.generatedAt,
+          styleFilter: "serenity",
+        });
+        setSerenityDetailItems(items ?? []);
+      } catch (e) {
+        console.error("加载瓶颈掘金详情失败", e);
+        setSerenityDetailItems([]);
+      }
+      setSerenityDetailLoading(false);
+    },
+    [],
   );
 
   // 候选标签颜色
@@ -1175,6 +1217,10 @@ export function SerenityScreeningPanel() {
           dataSource={serenityHistory}
           rowKey="generatedAt"
           pagination={false}
+          onRow={(record) => ({
+            className: "cursor-pointer",
+            onClick: () => openSerenityDetail(record),
+          })}
           columns={[
             {
               title: (
@@ -1191,6 +1237,7 @@ export function SerenityScreeningPanel() {
               render: (_, r) => (
                 <Checkbox
                   checked={serenitySelected.includes(r.generatedAt)}
+                  onClick={(e) => e.stopPropagation()}
                   onChange={(e) => {
                     setSerenitySelected(
                       e.target.checked
@@ -1219,6 +1266,62 @@ export function SerenityScreeningPanel() {
             },
           ]}
         />
+      </Modal>
+
+      {/* 瓶颈掘金历史详情 */}
+      <Modal
+        title={serenityDetailRow
+          ? `${t("serenityPanel.serenityHistory.title")} — ${new Date(serenityDetailRow.generatedAt).toLocaleString()}`
+          : ""}
+        open={serenityDetailOpen}
+        onCancel={() => {
+          setSerenityDetailOpen(false);
+          setSerenityDetailItems([]);
+          setSerenityDetailRow(null);
+        }}
+        footer={null}
+        width={600}
+      >
+        {serenityDetailLoading
+          ? (
+            <div className="py-8 text-center text-sm text-gray-400">
+              {t("common.loading")}
+            </div>
+          )
+          : serenityDetailItems.length === 0
+          ? <Empty description={t("serenityPanel.serenityHistory.detailEmpty")} />
+          : (
+            <div className="flex flex-col gap-2">
+              <div className="text-xs text-gray-500 mb-1">
+                {t("serenityPanel.serenityHistory.candidateCount")}: {serenityDetailItems.length} 只
+              </div>
+              {serenityDetailItems.map((item, i) => (
+                <Card
+                  key={`${item.stockCode}-${i}`}
+                  size="small"
+                  hoverable
+                  className="w-full"
+                  onClick={() => {
+                    setSerenityDetailOpen(false);
+                    handleAnalyze(item.stockCode);
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Text strong className="text-sm">{item.stockName}</Text>
+                      <Text type="secondary" className="text-xs font-mono">{item.stockCode}</Text>
+                    </div>
+                    <Tag color="purple" className="text-xs font-bold">
+                      {t("serenityPanel.confidencePrefix")} {item.confidence}
+                    </Tag>
+                  </div>
+                  <div className="mt-1 text-[10px] text-gray-500">
+                    {new Date(item.generatedAt).toLocaleString()}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
       </Modal>
     </div>
   );

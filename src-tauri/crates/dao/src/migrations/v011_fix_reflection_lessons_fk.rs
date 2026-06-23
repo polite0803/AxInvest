@@ -27,7 +27,8 @@ use sea_orm::{ConnectionTrait, DbErr};
 
 pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     // 重建 reflection_lessons 表，移除错误的 stock_code FK
-    db.execute_unprepared("DROP TABLE IF EXISTS reflection_lessons").await?;
+    db.execute_unprepared("DROP TABLE IF EXISTS reflection_lessons")
+        .await?;
     db.execute_unprepared(
         "CREATE TABLE IF NOT EXISTS reflection_lessons (\
             id TEXT NOT NULL PRIMARY KEY, \

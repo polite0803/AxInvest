@@ -1013,8 +1013,6 @@ dependencies = [
 name = "axagent-gateway"
 version = "2.6.0"
 dependencies = [
- "axagent-astock-data",
- "axagent-core",
  "axagent-crypto",
  "axagent-dao",
  "axagent-entities",

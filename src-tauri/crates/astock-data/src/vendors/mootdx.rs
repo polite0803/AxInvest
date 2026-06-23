@@ -560,7 +560,7 @@ impl StockVendor for MootdxVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let market = Self::market_code(stock_code);
         let mut last_err = None;
-        for (host, port) in TDX_SERVERS.iter().take(3) {
+        for (host, port) in TDX_SERVERS.iter() {
             let vendor = MootdxVendor {
                 host: host.to_string(),
                 port: *port,
@@ -632,7 +632,7 @@ impl StockVendor for MootdxVendor {
         let market = Self::market_code(stock_code) as u16;
         let category = Self::kline_category(period);
         let mut last_err = None;
-        for (host, port) in TDX_SERVERS.iter().take(3) {
+        for (host, port) in TDX_SERVERS.iter() {
             let vendor = MootdxVendor {
                 host: host.to_string(),
                 port: *port,

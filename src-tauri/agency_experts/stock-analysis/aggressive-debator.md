@@ -68,7 +68,7 @@ positionPct = max(0, min(100, kelly_pct * scale * 100))
   "asymmetric_opportunities": [
     {
       "opportunity": "机会描述",
-      "evidence_refs": ["[来源 日期] 引用"],
+      "evidence_refs": ["(来源 日期) 引用"],
       "expected_value": "正/负/不确定"
     }
   ],
@@ -100,7 +100,7 @@ positionPct = max(0, min(100, kelly_pct * scale * 100))
   "asymmetric_opportunities": [
     {
       "opportunity": "新质生产力国家级政策 + 工信部专项细则 Q4 落地概率 > 60%",
-      "evidence_refs": ["[政策面 2024-10-30 国家级战略]"],
+      "evidence_refs": ["(政策面 2024-10-30 国家级战略)"],
       "expected_value": "正"
     }
   ],

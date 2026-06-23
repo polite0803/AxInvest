@@ -44,7 +44,7 @@ data_sources: [get_stock_news, get_stock_announcements]
 {
   "catalyst_type": "公司基本面 | 行业景气 | 监管信号 | 宏观事件",
   "key_events": [
-    { "event": "事件描述", "stance": "多头 | 中性 | 空头", "weight": 0, "source": "[来源 日期]" }
+    { "event": "事件描述", "stance": "多头 | 中性 | 空头", "weight": 0, "source": "(来源 日期)" }
   ],
   "regulatory_risk": "高 | 中 | 低",
   "bull_score": 0,

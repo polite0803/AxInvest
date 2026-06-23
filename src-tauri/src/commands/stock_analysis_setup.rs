@@ -584,7 +584,7 @@ async fn seed_stock_analysis_workflow_template(
     // v17: 辩论子节点 (bull-r1..r3 / bear-r1..r3) 加 1 次重试 + 180s 超时。
     //   修复辩论链雪崩:LLM 偶发超时/429 时 max_retries=0 会让整链死,bear-r1
     //   拿不到 bull-r1 上下文则 R2/R3 全部"暂无数据"。
-    const TEMPLATE_VERSION: i32 = 17;
+    const TEMPLATE_VERSION: i32 = 18;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -1263,7 +1263,12 @@ async fn seed_stock_analysis_workflow_template(
                 rag_source_ids: vec![],
                 model_role: None,
                 consistency_check: None,
-                hallucination_guard: None,
+                hallucination_guard: Some(
+                    axagent_harness::hallucination_guard::HallucinationGuardConfig {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                ),
             },
         })
     };
@@ -4674,7 +4679,12 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 rag_source_ids: vec![],
                 model_role: Some("decision-maker".into()),
                 consistency_check: None,
-                hallucination_guard: None,
+                hallucination_guard: Some(
+                    axagent_harness::hallucination_guard::HallucinationGuardConfig {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                ),
             },
         }),
         // 4. 反思记录持久化：写入 stock_reflections 表供后续查询/复盘
@@ -4753,7 +4763,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     ];
 
     // serenity-reflection 模板版本。v2: 重新种子化
-    const REFLECTION_TEMPLATE_VERSION: i32 = 3;
+    const REFLECTION_TEMPLATE_VERSION: i32 = 4;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =
@@ -4899,7 +4909,7 @@ async fn seed_serenity_screening_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 12;
+    const TEMPLATE_VERSION: i32 = 13;
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -5373,7 +5383,12 @@ async fn seed_serenity_screening_workflow_template(
                 rag_source_ids: vec![],
                 model_role: None,
                 consistency_check: None,
-                hallucination_guard: None,
+                hallucination_guard: Some(
+                    axagent_harness::hallucination_guard::HallucinationGuardConfig {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                ),
             },
         })
     };

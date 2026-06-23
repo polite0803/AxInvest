@@ -43,7 +43,7 @@ title: 空方质询 (R2)
 
 1. **从 `a-*` 报告反推最常见的多方论据模板**（政策利好/估值低位/资金流入/业绩拐点四类），挑出 3 个对当前个股最可能成立的多方隐含论点。
 2. **用工具调用自行取证**：`get_stock_quote` / `get_stock_kline` / `get_stock_financials` / `get_stock_news` / `compute_scoring` / `compute_valuation` 拉取**实时数据**作为正方论据的"假设来源"（用 `target_claim_ref` 注明"基于 a-fundamentals 节点 ROE/营收 等上游数据"）。
-3. **降级模式输出要求**：`cross_examination` 仍为 3 条，`weakness_type` 必须从 6 选 1 枚举中选，`if_unanswered_impact` 必须写"如果多方无法反驳此隐含论点则我方立场加强"——`summary_for_convergence` 必须明确标注 `"[DEGRADED] 多方 R1 缺失，本轮质询基于上游 a-* 报告 + 工具实时数据反推"` 前缀。
+3. **降级模式输出要求**：`cross_examination` 仍为 3 条，`weakness_type` 必须从 6 选 1 枚举中选，`if_unanswered_impact` 必须写"如果多方无法反驳此隐含论点则我方立场加强"——`summary_for_convergence` 必须明确标注 `"(DEGRADED) 多方 R1 缺失，本轮质询基于上游 a-* 报告 + 工具实时数据反推"` 前缀。
 4. **confidence 信号**：因缺乏 R1 真论据，降级模式下 `verdict` 倾向保守（可部分承认正方假设），不要用"绝对反驳"措辞。
 
 降级模式的存在意义：避免辩论链因单点失败而输出"暂无数据"，**始终给 portfolio-mgr 一个可用的多空交锋信号**。

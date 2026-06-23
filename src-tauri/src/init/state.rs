@@ -16,6 +16,7 @@ use crate::state::{BrowserClientField, SandboxExecutorField};
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::NewsArchiveSink;
 use axagent_astock_data::types::NewsItem;
+use axagent_astock_data::vendors::browser_eastmoney::BrowserHttpFetch;
 use axagent_core::cloud_storage::{CloudStorageConfig, SyncEngine};
 use axagent_dao::repo::news_archive::{
     ArchivedNews, NewsArchiveEntry, upsert_batch as dao_upsert_news,
@@ -402,6 +403,27 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
 
     let sync_engine = create_sync_engine(&sea_db, &app_settings, rt.handle());
 
+    // Playwright 浏览器 fetch 封装，用于绕过 EastMoney WAF 的 JA3 TLS 指纹封锁
+    struct PlaywrightFetcher;
+    #[async_trait::async_trait]
+    impl BrowserHttpFetch for PlaywrightFetcher {
+        async fn fetch_json(
+            &self,
+            url: &str,
+            headers: &[(&str, &str)],
+        ) -> Result<serde_json::Value, String> {
+            axagent_core::browser_automation::browser_http_get_json(url, headers)
+                .await
+                .map_err(|e| e.to_string())
+        }
+
+        async fn fetch_text(&self, url: &str) -> Result<String, String> {
+            axagent_core::browser_automation::browser_http_get_text(url)
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
+
     // 共享 AStockClient：astock_client 和 stock_monitor 共用同一实例（共享缓存）
     // 缺陷 D 修复: 注入 L2 磁盘缓存(持久化跨进程) + 启动后台 flush 任务。
     // P6: 注入 news_archive sink,让 get_news / search_news 自动入库
@@ -417,7 +439,8 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         let (client_with_l2, l2) = AStockClient::new().with_l2_cache(l2_path);
         let client = client_with_l2
             .with_daily_snapshot_cache()
-            .with_news_archive_sink(sink);
+            .with_news_archive_sink(sink)
+            .with_browser_fetcher(Arc::new(PlaywrightFetcher));
         (client, l2)
     };
     let astock_client = Arc::new(astock_client);

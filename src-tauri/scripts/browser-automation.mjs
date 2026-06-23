@@ -75,6 +75,27 @@ process.stdin.on("data", async (data) => {
         result = { html: html.slice(0, 100000) };
         break;
       }
+      case "http_get": {
+        // 通过页面导航发送 GET 请求绕过 CORS 限制，返回响应体纯文本
+        // 先保存当前页 URL，导航到目标 API，提取 body，再回退
+        const prevUrl = page.url();
+        await page.goto(msg.params.url, {
+          waitUntil: "domcontentloaded",
+          timeout: 20000,
+        });
+        const body = await page.evaluate(() => document.body.innerText);
+        // 回退到原页面
+        if (prevUrl && prevUrl !== "about:blank") {
+          page.goBack().catch(() => {});
+        }
+        result = { body };
+        break;
+      }
+      case "evaluate": {
+        // 在浏览器上下文中执行任意 JS 代码，返回序列化结果
+        result = await page.evaluate(msg.params.code);
+        break;
+      }
       case "close": {
         await browser.close();
         result = { success: true };

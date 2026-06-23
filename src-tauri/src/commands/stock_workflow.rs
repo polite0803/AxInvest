@@ -9,6 +9,7 @@ use axagent_core::entity::reco_picks;
 use axagent_core::entity::stock_analyses;
 use axagent_core::entity::stock_reflections;
 use axagent_harness::response_normalizer::ResponseNormalizer;
+use axagent_harness::tool::ToolPermissions;
 use axagent_harness::types::{ChatResponse, ContentBlock};
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::Workflow;
@@ -993,6 +994,10 @@ async fn run_stock_workflow_inner(
             dry_run: dry_run.unwrap_or(false),
             ..Default::default()
         };
+        opts.tool_permissions = Some(Arc::new(ToolPermissions {
+            strict_mode: true,
+            ..Default::default()
+        }));
         let mut merged_vars: Vec<axagent_harness::workflow_types::Variable> = vec![
             axagent_harness::workflow_types::Variable {
                 name: "stock_code".into(),
@@ -1502,6 +1507,10 @@ pub async fn run_single_stock_analysis(
         } else {
             Some(variables)
         },
+        tool_permissions: Some(Arc::new(ToolPermissions {
+            strict_mode: true,
+            ..Default::default()
+        })),
         ..Default::default()
     };
 
@@ -2007,6 +2016,10 @@ pub async fn run_reflection_workflow(
         output_schema: loaded.output_schema,
         dry_run: false,
         variables: Some(variables),
+        tool_permissions: Some(Arc::new(ToolPermissions {
+            strict_mode: true,
+            ..Default::default()
+        })),
         ..Default::default()
     };
 
@@ -2717,7 +2730,11 @@ fn extract_candidates_one_by_one(text: &str) -> Option<Vec<serde_json::Value>> {
             break;
         }
     }
-    if results.is_empty() { None } else { Some(results) }
+    if results.is_empty() {
+        None
+    } else {
+        Some(results)
+    }
 }
 
 /// 从文本内容中尝试启发式提取候选列表
@@ -2963,6 +2980,10 @@ pub async fn run_serenity_screening(
         input_schema: loaded.input_schema.clone(),
         output_schema: loaded.output_schema.clone(),
         dry_run: false,
+        tool_permissions: Some(Arc::new(ToolPermissions {
+            strict_mode: true,
+            ..Default::default()
+        })),
         ..Default::default()
     };
 
@@ -3721,6 +3742,63 @@ pub async fn list_reco_history(
         .collect::<Vec<_>>();
 
     Ok(items)
+}
+
+/// 获取某次荐股/瓶颈掘金详情（按 generated_at 获取该轮所有推荐股票）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoDetailItem {
+    pub id: String,
+    pub generated_at: String,
+    pub period: String,
+    pub stock_code: String,
+    pub stock_name: String,
+    pub style: String,
+    pub confidence: i32,
+    pub synthetic: i32,
+    pub seed_pool_json: Option<String>,
+    pub pick_data: Option<String>,
+    pub created_at: String,
+}
+
+#[tauri::command]
+pub async fn get_reco_detail(
+    state: State<'_, AppState>,
+    generated_at: String,
+    style_filter: Option<String>,
+) -> Result<Vec<RecoDetailItem>, String> {
+    use axagent_core::entity::reco_picks;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let db = state.harness.db();
+    let mut query =
+        reco_picks::Entity::find().filter(reco_picks::Column::GeneratedAt.eq(&generated_at));
+
+    if let Some(ref style) = style_filter {
+        query = query.filter(reco_picks::Column::Style.eq(style));
+    }
+
+    let items = query
+        .all(db)
+        .await
+        .map_err(|e| format!("查询荐股详情失败: {e}"))?;
+
+    Ok(items
+        .into_iter()
+        .map(|m| RecoDetailItem {
+            id: m.id,
+            generated_at: m.generated_at,
+            period: m.period,
+            stock_code: m.stock_code,
+            stock_name: m.stock_name,
+            style: m.style,
+            confidence: m.confidence,
+            synthetic: m.synthetic,
+            seed_pool_json: m.seed_pool_json,
+            pick_data: m.pick_data,
+            created_at: m.created_at,
+        })
+        .collect())
 }
 
 /// 批量删除荐股记录（按 generated_at 删除整轮推荐）

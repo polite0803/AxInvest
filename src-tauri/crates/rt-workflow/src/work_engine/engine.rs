@@ -20,6 +20,7 @@ use axagent_core::workflow_types::{
 };
 
 use axagent_harness::RhaiEngineAdapter;
+use axagent_harness::tool::ToolPermissions;
 use rhai::{AST, EvalAltResult, Position};
 
 /// Convert Rhai dynamic map to JSON value
@@ -120,6 +121,9 @@ pub struct RunOptions {
     pub parent_cancel_token: Option<CancellationToken>,
     /// 语言代码（如 "zh-CN"），注入到 agent system_prompt
     pub language: String,
+    /// 工具权限与严格模式约束（None = 不施加额外约束）。
+    /// agent_executor 读取此字段执行 strict_mode prompt 注入 + 输出格式校验。
+    pub tool_permissions: Option<Arc<ToolPermissions>>,
 }
 
 /// 步骤进度事件
@@ -180,6 +184,7 @@ impl Default for RunOptions {
             execution_id: None,
             parent_cancel_token: None,
             language: "zh-CN".to_string(),
+            tool_permissions: None,
         }
     }
 }
@@ -1713,6 +1718,8 @@ impl WorkEngine {
                 exec_ctx.variables = merged_vars;
                 exec_ctx.cancel_token = Some(cancel_token.clone());
                 exec_ctx.dry_run = options.dry_run;
+                // 注入工具权限与严格模式约束（可选）
+                exec_ctx.tool_permissions = options.tool_permissions.clone();
                 {
                     let bp = self.breakpoints.lock().await;
                     exec_ctx.breakpoints = bp.clone();
@@ -1764,6 +1771,7 @@ impl WorkEngine {
                     let sub_cancel_token = cancel_token.clone();
                     let sub_progress_cb = progress_cb.clone();
                     let sub_dry_run = options.dry_run;
+                    let sub_tool_perms = options.tool_permissions.clone();
 
                     let sub_cb: SubWorkflowCallback =
                         Arc::new(
@@ -1828,6 +1836,7 @@ impl WorkEngine {
                                 // 会通过 std::io::Error 传播,此处不特殊处理 — 在普通
                                 // desktop 环境下不会发生;若真发生,thread 内部会立刻
                                 // 析构, rx 收到 Drop 后返回 "channel closed"。
+                                let tool_perms_clone = sub_tool_perms.clone();
                                 thread_builder
                                     .spawn(move || {
                                         let result: Result<(String, serde_json::Value), String> =
@@ -1878,6 +1887,7 @@ impl WorkEngine {
                                                     provider_id: provider_id.clone(),
                                                     step_timeout: sub_step_timeout,
                                                     parent_cancel_token: Some(cancel_token.clone()),
+                                                    tool_permissions: tool_perms_clone.clone(),
                                                     ..Default::default()
                                                 };
                                                 if let Some(cb) = progress_cb.clone() {

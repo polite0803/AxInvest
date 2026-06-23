@@ -348,6 +348,19 @@ impl NodeExecutorTrait for AgentExecutor {
             .resolve_provider(node_model, session_model, session_provider_id, profile_suggested)
             .await?;
 
+        // 根据 provider 类型决定是否需要扫描非标准的文本式工具调用
+        // 部分模型/代理不输出 OpenAI 标准 tool_calls delta，而是将工具调用
+        // 嵌入文本内容中。已知的非标准场景：
+        //   - Qwen 通过 CHAT2API 代理 → <|CHAT2API|tool_calls|> 格式（ProviderType::OpenAI）
+        //   - Hermes/Ollama 等本地模型 → XML 风格 <tool_call>...
+        // OpenAI/Anthropic/Gemini 原生 API 标准输出无需此处理
+        let needs_inline_tool_parsing = matches!(
+            prov.provider_type,
+            axagent_harness::types::ProviderType::OpenAI
+                | axagent_harness::types::ProviderType::Hermes
+                | axagent_harness::types::ProviderType::Ollama
+        );
+
         // 4. 构建 prompt：Role + Expert + 行内追加（运行时拼接，不预缓存）
         let role_desc = resolve_role(&an.config, profile.as_ref());
         let role_name = profile
@@ -689,6 +702,25 @@ impl NodeExecutorTrait for AgentExecutor {
             final_content = stream_content.clone();
             final_thinking = stream_thinking.clone();
 
+            // 检测非标准文本式工具调用（仅对已知使用此格式的 provider 生效）。
+            // 部分模型/代理（如 Qwen 通过 CHAT2API/Hermes/Ollama）不输出标准
+            // tool_calls delta，而是将工具调用嵌在文本内容中。解析后注入标准
+            // tool_calls 路径使工具能正常执行。
+            if needs_inline_tool_parsing
+                && stream_tool_calls.as_ref().map_or(true, |tc| tc.is_empty())
+                && !stream_content.is_empty()
+            {
+                if let Some(parsed) = parse_inline_tool_calls(&stream_content) {
+                    tracing::info!(
+                        "从文本中解析到 {} 个内联工具调用 (format={:?})",
+                        parsed.len(),
+                        prov.provider_type
+                    );
+                    stream_tool_calls = Some(parsed);
+                    stream_content.clear();
+                }
+            }
+
             // 检查是否有工具调用
             let tool_calls = stream_tool_calls;
             let has_tool_calls = tool_calls
@@ -763,10 +795,56 @@ impl NodeExecutorTrait for AgentExecutor {
         }
 
         // ── strict_mode 输出格式校验 ──
+        // 先尝试修复常见 LLM 坏输出模式（markdown fence 包裹、尾逗号等），
+        // 修复后覆盖 final_content 使下游拿到正确内容。
+        // 若修复后仍不合法则让错误传播（触发 retry → LLM 二次执行修正）。
         if let Some(ref perms) = context.tool_permissions
             && perms.strict_mode
         {
-            validate_strict_mode_output(&final_content, &an.config.output_mode)?;
+            let trimmed = final_content.trim().to_string();
+            let fixed = try_extract_json_fragment(&trimmed)
+                .filter(|extracted| serde_json::from_str::<serde_json::Value>(extracted).is_ok())
+                .or_else(|| {
+                    let repaired = repair_json(&trimmed);
+                    if repaired != trimmed
+                        && serde_json::from_str::<serde_json::Value>(&repaired).is_ok()
+                    {
+                        Some(repaired)
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    // 尝试修复未闭合的引用字符串
+                    repair_unclosed_json_strings(&trimmed)
+                        .filter(|fixed| fixed != &trimmed)
+                        .filter(|fixed| serde_json::from_str::<serde_json::Value>(fixed).is_ok())
+                });
+            if let Some(ref fixed_content) = fixed {
+                if fixed_content != &trimmed {
+                    tracing::warn!(
+                        "strict_mode: 自动修复 LLM 输出格式: {} => {}",
+                        trimmed.chars().take(80).collect::<String>(),
+                        fixed_content.chars().take(80).collect::<String>(),
+                    );
+                    final_content = fixed_content.clone();
+                }
+            } else {
+                // 捕获 plain-text 拒绝回答（模型安全机制触发），转为结构化错误
+                // 这解决了 bear-r1 等节点输出"抱歉我无法回答这个问题"绕过 strict_mode 的问题
+                if is_refusal_plain_text(&trimmed) {
+                    let error_json = serde_json::json!({
+                        "error": format!("Agent refused to answer: {}", trimmed.chars().take(100).collect::<String>())
+                    });
+                    final_content = error_json.to_string();
+                    tracing::warn!(
+                        "strict_mode: 检测到模型拒绝回答，自动转为错误 JSON: {}",
+                        final_content.chars().take(80).collect::<String>()
+                    );
+                } else {
+                    validate_strict_mode_output(&trimmed, &an.config.output_mode)?;
+                }
+            }
         }
 
         // ── 防幻觉锚定检查 ──
@@ -1390,9 +1468,306 @@ const STRICT_MODE_INSTRUCTIONS: &str = r#"
 5. **不要做额外假设** — 只基于给定的输入数据执行操作
 "#;
 
+/// 从 LLM 输出的文本内容中解析非标准的工具调用格式。
+///
+/// 部分模型/代理（如 Qwen 通过 CHAT2API）不输出 OpenAI 标准格式的
+/// tool_calls，而是将工具调用嵌在文本中。此函数检测并解析这些格式：
+///   <|CHAT2API|tool_calls><|CHAT2API|invoke name="fn"><|CHAT2API|parameter name="p"><![CDATA[v]]></|CHAT2API|parameter></|CHAT2API|invoke><|CHAT2API|tool_calls>
+/// 解析成功后返回 `Some(Vec<ToolCall>)`，调用方应将 `stream_content` 清空
+/// 并将解析结果作为标准 `tool_calls` 处理。
+fn parse_inline_tool_calls(text: &str) -> Option<Vec<axagent_harness::types::ToolCall>> {
+    // 检查是否有非标准 tool_call 标记
+    let tool_calls_start = text.find("<|CHAT2API|tool_calls>")?;
+    let tool_calls_end = text.rfind("<|CHAT2API|tool_calls>")?;
+    if tool_calls_start == tool_calls_end {
+        return None; // 只有开没有闭，格式不对
+    }
+    let section = &text[tool_calls_start..tool_calls_end];
+
+    let mut results = Vec::new();
+    let mut search = section;
+    loop {
+        // 找 invoke name="..."
+        let invoke_start = match search.find("<|CHAT2API|invoke name=\"") {
+            Some(p) => p,
+            None => break,
+        };
+        let name_start = invoke_start + 26; // len of "<|CHAT2API|invoke name=\""
+        let name_end = match search[name_start..].find('"') {
+            Some(p) => name_start + p,
+            None => break,
+        };
+        let tool_name = &search[name_start..name_end];
+
+        // 从 name_end 之后开始找第一个 parameter 或 invoke 结束
+        let after_name = &search[name_end..];
+        let close_invoke = match after_name.find("</|CHAT2API|invoke>") {
+            Some(p) => name_end + p,
+            None => break,
+        };
+        let params_section = &search[name_end..close_invoke];
+
+        // 解析 parameter
+        let mut args_map = serde_json::Map::new();
+        let mut param_search = params_section;
+        loop {
+            let param_start = match param_search.find("<|CHAT2API|parameter name=\"") {
+                Some(p) => p,
+                None => break,
+            };
+            let pname_start_pos = param_start + 29;
+            let pname_end = match param_search[pname_start_pos..].find('"') {
+                Some(p) => pname_start_pos + p,
+                None => break,
+            };
+            let param_name = &param_search[pname_start_pos..pname_end];
+
+            let after_name = &param_search[pname_end..];
+            let cdata_start = match after_name.find("<![CDATA[") {
+                Some(p) => p + 9,
+                None => break,
+            };
+            let cdata_end = match after_name[cdata_start..].find("]]>") {
+                Some(p) => cdata_start + p,
+                None => break,
+            };
+            let param_value = &after_name[cdata_start..cdata_end];
+
+            args_map
+                .insert(param_name.to_string(), serde_json::Value::String(param_value.to_string()));
+
+            param_search = &after_name[cdata_end + 3..];
+        }
+
+        let args_json = serde_json::Value::Object(args_map);
+        let arguments_str = serde_json::to_string(&args_json).unwrap_or_default();
+
+        results.push(axagent_harness::types::ToolCall {
+            id: format!("inline-{}", results.len()),
+            call_type: "function".to_string(),
+            function: axagent_harness::types::ToolCallFunction {
+                name: tool_name.to_string(),
+                arguments: arguments_str,
+            },
+        });
+
+        search = &search[search.len().min(close_invoke + 19)..]; // skip </|CHAT2API|invoke> (19字节)
+    }
+
+    if results.is_empty() {
+        None
+    } else {
+        Some(results)
+    }
+}
+
+/// 从 LLM 输出中尝试提取 JSON 片段（剥离 markdown 代码围栏）。
+///
+/// 处理 LLM 在 JSON 外包裹 markdown fence 的常见情况：
+///   ```json
+///   {...}
+///   ```
+/// 返回剥离后的文本，若找不到 fence 则返回 None。
+fn try_extract_json_fragment(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    // 优先找 ```json 围栏
+    if let Some(start) = trimmed.find("```json") {
+        let inner = &trimmed[start + 7..];
+        // 跳过内容前换行
+        let inner = inner.trim_start();
+        // 找关闭 fence
+        if let Some(end) = inner.find("```") {
+            let extracted = inner[..end].trim().to_string();
+            if !extracted.is_empty() {
+                return Some(extracted);
+            }
+        }
+        // 没有关闭 fence 也返回（可能截断了）
+        let extracted = inner.trim().to_string();
+        if !extracted.is_empty() {
+            return Some(extracted);
+        }
+    }
+    // 回退：找 ``` 围栏（任意语言标签）
+    if let Some(start) = trimmed.find("```") {
+        let inner = &trimmed[start + 3..];
+        // 跳过语言标签行和换行
+        let inner = if let Some(newline) = inner.find('\n') {
+            &inner[newline + 1..]
+        } else {
+            inner
+        };
+        let inner = inner.trim_start();
+        if let Some(end) = inner.find("```") {
+            let extracted = inner[..end].trim().to_string();
+            if !extracted.is_empty() {
+                return Some(extracted);
+            }
+        }
+        let extracted = inner.trim().to_string();
+        if !extracted.is_empty() {
+            return Some(extracted);
+        }
+    }
+    None
+}
+
+/// 轻量级 JSON 修复：处理 LLM 高频语法错误（尾逗号、nulll 等）。
+/// 注：stock_workflow.rs 中有完整版 repair_json，此处是同步的简化版。
+fn repair_json(s: &str) -> String {
+    let mut result = s.to_string();
+    result = result.replace("nulll", "null");
+    result = result.replace(",]", "]");
+    result = result.replace(",}", "}");
+    result
+}
+
+/// 修复 LLM 输出中高频出现的"未闭合字符串"模式。
+///
+/// 问题模式：JSON 字符串值包含 `[引用标记]` 时，LLM 常忘记在 `]` 前加 `"` 闭合。
+/// 例：`"evidence_refs": ["[a-news 202]` 缺少 `"` 在 `]` 前。
+///
+/// 修复逻辑：找到 `"[` 后紧跟的 `]`，若 `]` 前无 `"` 且 `[` 到 `]` 之间无 `"`，
+/// 则在 `]` 前插入 `"`，将 `"[a-news 202]` 修复为 `"[a-news 202]"`。
+fn repair_unclosed_json_strings(s: &str) -> Option<String> {
+    let mut result = s.to_string();
+    let mut modified = false;
+    let mut search_from = 0;
+
+    loop {
+        // 在剩余字符串中查找 "[ 模式（引号+左方括号，可能是未闭合的引用字符串）
+        let slice = &result[search_from..];
+        if let Some(start) = slice.find("\"[") {
+            let actual_start = search_from + start;
+
+            // 跳过 "[，从右方括号开始的内容中查找 ]
+            let after_bracket = &result[actual_start + 2..];
+            if let Some(bracket_end) = after_bracket.find(']') {
+                let content = &after_bracket[..bracket_end];
+                // 如果 [ 到 ] 之间没有 "，说明这个字符串可能未闭合
+                // (若已正确闭合，会在 ] 后有 " 出现)
+                if !content.contains('"') {
+                    // 检查 ] 后是否已经有 "（已正确闭合）
+                    let trailing = &after_bracket[bracket_end + 1..];
+                    if !trailing.starts_with('"') {
+                        // 在 ] 前插入 " 来闭合字符串
+                        let insert_pos = actual_start + 2 + bracket_end;
+                        result.insert(insert_pos, '"');
+                        modified = true;
+                        search_from = insert_pos + 1;
+                        continue;
+                    }
+                }
+            }
+            search_from = actual_start + 2;
+        } else {
+            break;
+        }
+    }
+
+    if modified { Some(result) } else { None }
+}
+
+/// 检测 LLM 输出是否为纯文本拒绝（模型安全机制触发）。
+/// 匹配"抱歉/无法回答/不能回答/拒绝回答"等常见拒绝模式。
+/// 若发现此类模式，后续逻辑会将输出转换为结构化错误而不是让 strict_mode 校验失败。
+fn is_refusal_plain_text(s: &str) -> bool {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // 先检查是否为合法 JSON——合法 JSON 肯定不是纯文本拒绝
+    if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+        return false;
+    }
+
+    let lower = trimmed.to_lowercase();
+    let refusal_patterns = [
+        "抱歉",
+        "无法回答",
+        "不能回答",
+        "拒绝回答",
+        "sorry",
+        "cannot answer",
+        "can't answer",
+        "i cannot",
+        "i can't",
+        "i am unable",
+        "i'm unable",
+        "not able to answer",
+        "unable to answer",
+    ];
+
+    // 检查是否以拒绝模式开头（纯文本拒绝通常很短，第一句就表明意图）
+    for pattern in &refusal_patterns {
+        if lower.starts_with(pattern) {
+            return true;
+        }
+        // 也检查前 50 字符内是否包含拒绝模式
+        // 注意：字符 = Unicode 标量值，不能用 byte index 切割（会 UTF-8 边界越界）
+        let prefix: String = lower.chars().take(50).collect();
+        if prefix.contains(pattern) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// 从尾部找到最后一个完整闭合的 JSON 对象/数组，截掉后面的垃圾文本。
+/// LLM 经常在 JSON 后面追加自然语言评论，导致解析失败。
+fn trim_after_json(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    if len == 0 {
+        return s;
+    }
+
+    // 正向扫描: 记录每个 depth=0 的位置（即每个顶层闭合点）
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut last_complete_end = 0;
+
+    for (i, &b) in bytes.iter().enumerate().take(len) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if b == b'"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string {
+            match b {
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        last_complete_end = i;
+                    }
+                },
+                _ => {},
+            }
+        }
+    }
+
+    if last_complete_end > 0 {
+        &s[..=last_complete_end]
+    } else {
+        s
+    }
+}
+
 /// strict_mode 下的输出格式校验：
 /// - 当 output_mode 为 Json 时，验证 final_content 是否为合法 JSON
 /// - 若格式不合法，返回错误阻止结果传递给下游
+/// - 自动处理 LLM 常见坏输出模式：markdown fence 包裹、尾逗号等
 fn validate_strict_mode_output(
     final_content: &str,
     output_mode: &axagent_harness::workflow_types::OutputMode,
@@ -1407,14 +1782,71 @@ fn validate_strict_mode_output(
                 "严格模式: LLM 输出为空，期望 JSON 格式",
             ));
         }
-        if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
-            let preview = &trimmed[..200.min(trimmed.len())];
-            tracing::warn!("strict_mode: LLM 输出不是合法 JSON: {preview}");
-            return Err(NodeError::exec_failed(
-                error_code::VALIDATION_FAILED,
-                format!("严格模式: LLM 输出不是合法 JSON（前 200 字符: {preview}）"),
-            ));
+
+        // 常见坏输出模式修复链
+        let mut candidates: Vec<String> = Vec::new();
+        candidates.push(trimmed.to_string());
+
+        // 模式1: markdown fence 包裹 (```json \n {...} \n ```)
+        if let Some(stripped) = try_extract_json_fragment(trimmed) {
+            candidates.push(stripped);
         }
+
+        // 模式2: repair_json 修复尾逗号、nulll 等
+        let repaired = repair_json(trimmed);
+        if repaired != trimmed {
+            candidates.push(repaired.clone());
+            // fence 内也尝试 repair
+            if let Some(stripped) = try_extract_json_fragment(&repaired) {
+                candidates.push(stripped);
+            }
+        }
+
+        // 模式3: 修复未闭合的引用字符串（"[a-news 202] 缺闭合 "）
+        if let Some(unclosed_fixed) = repair_unclosed_json_strings(trimmed)
+            && unclosed_fixed != trimmed
+        {
+            candidates.push(unclosed_fixed);
+        }
+
+        // 模式4: 深度追踪截断——去掉 JSON 后追加的垃圾文本
+        // 例：LLM 在 JSON 后写自然语言注释导致解析失败
+        {
+            let truncated = trim_after_json(trimmed);
+            if truncated.len() < trimmed.len() {
+                candidates.push(truncated.to_string());
+                // 截断后再次尝试 fence 剥离（可能原 fence 因垃圾文本被跳过）
+                if let Some(stripped) = try_extract_json_fragment(truncated) {
+                    candidates.push(stripped);
+                }
+            }
+        }
+
+        // 逐个候选尝试解析
+        for candidate in &candidates {
+            if let Ok(_) = serde_json::from_str::<serde_json::Value>(candidate) {
+                if candidate != trimmed {
+                    tracing::warn!(
+                        "strict_mode: 自动修复 LLM 输出格式 (原始={} => 修复后={})",
+                        trimmed.chars().take(80).collect::<String>(),
+                        candidate.chars().take(80).collect::<String>(),
+                    );
+                }
+                return Ok(());
+            }
+        }
+
+        // 所有修复尝试均失败 → 报告具体失败原因
+        let serde_err = serde_json::from_str::<serde_json::Value>(trimmed)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        let preview = &trimmed[..200.min(trimmed.len())];
+        tracing::warn!("strict_mode: LLM 输出不是合法 JSON: {serde_err} [前200字符: {preview}]");
+        return Err(NodeError::exec_failed(
+            error_code::VALIDATION_FAILED,
+            format!("严格模式: LLM 输出不是合法 JSON（错误: {serde_err}, 前200字符: {preview}）"),
+        ));
     }
     Ok(())
 }

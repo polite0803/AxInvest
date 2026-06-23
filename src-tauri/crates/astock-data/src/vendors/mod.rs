@@ -352,6 +352,7 @@ pub trait StockVendor: Send + Sync {
 
 pub mod akshare;
 pub mod baidu_stock;
+pub mod browser_eastmoney;
 pub mod cninfo;
 pub mod eastmoney;
 pub mod iwencai;

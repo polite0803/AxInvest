@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import monacoEditorPluginModule from "vite-plugin-monaco-editor";
 import { defineConfig, type Plugin } from "vitest/config";
+import type { PluginOption } from "vite";
 
 interface MonacoEditorPluginModule {
   default?: Plugin;
@@ -98,9 +99,25 @@ function removeCrossorigin(): Plugin {
   };
 }
 
+function optionalPeerDepPlugin(): PluginOption {
+  return {
+    name: "optional-peer-dep",
+    resolveId(id) {
+      if (id.startsWith("__vite-optional-peer-dep:")) {
+        // Map zustand's optional peer dep (immer) to the actual package
+        const match = id.match(/^__vite-optional-peer-dep:([^:]+)/);
+        if (match) {
+          return { id: match[1], external: false };
+        }
+      }
+      return null;
+    },
+  } as Plugin;
+}
+
 export default defineConfig(async () => ({
   base: "./",
-  plugins: [react(), tailwindcss(), monacoEditorPlugin({}), shikiLanguageFilter(), removeCrossorigin()],
+  plugins: [react(), tailwindcss(), monacoEditorPlugin({}), shikiLanguageFilter(), removeCrossorigin(), optionalPeerDepPlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -372,6 +372,7 @@ export function isTauri(): boolean {
  *
  * NOTE: 大多数调用方应使用 `invokeWithRetry` 以在网络瞬断时自动恢复。
  * `invoke` 不重试，连接丢失的错误会直接抛出到组件层。
+ */
 export async function invoke<T>(
   cmd: string,
   args?: Record<string, unknown>,

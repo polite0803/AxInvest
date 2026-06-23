@@ -8560,6 +8560,7 @@
       "periodMid": "中期",
       "periodLong": "長期",
       "title": "推薦結果",
+      "emptyNoCache": "暫無快取結果，請點擊刷新獲取最新推薦",
       "generatedAt": "生成於 {{time}}",
       "bannerVendorDisabled": "部分風格已禁用: {styles}",
       "openSettings": "打開設定",
@@ -8599,6 +8600,8 @@
       "styleTrend": "趋势跟踪",
       "styleValue": "价值投資",
       "styleWatchlist": "自選股",
+      "cachedAt": "快取於 {{time}}",
+      "cachedBadge": "快取",
       "calibrate": "自動校准"
     },
     "periodUltraShort": "超短線",

@@ -8435,6 +8435,7 @@
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
+      "emptyNoCache": "कोई कैश्ड परिणाम नहीं। नवीनतम सिफारिशें प्राप्त करने के लिए रीफ़्रेश पर क्लिक करें।",
       "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
@@ -8474,6 +8475,8 @@
       "styleTrend": "趋势跟踪",
       "styleValue": "价值投资",
       "styleWatchlist": "自选股",
+      "cachedAt": "{{time}} पर कैश्ड",
+      "cachedBadge": "कैश्ड",
       "calibrate": "自动校准"
     },
     "periodUltraShort": "Short",

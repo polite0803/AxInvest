@@ -8435,6 +8435,7 @@
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
+      "emptyNoCache": "لا توجد نتائج مخزنة. انقر فوق تحديث للحصول على أحدث التوصيات.",
       "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
@@ -8474,6 +8475,8 @@
       "styleValue": "Value Investing",
       "styleWatchlist": "Watchlist",
       "styleSerenity": "صيد الاختناقات",
+      "cachedAt": "مخزّن في {{time}}",
+      "cachedBadge": "مخزّن",
       "calibrate": "自动校准"
     },
     "periodUltraShort": "Short",

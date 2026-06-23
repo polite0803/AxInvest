@@ -8435,6 +8435,7 @@
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
+      "emptyNoCache": "캐시된 결과가 없습니다. 새로 고침을 클릭하여 최신 추천을 받으세요.",
       "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
@@ -8474,6 +8475,8 @@
       "styleTrend": "趋势跟踪",
       "styleValue": "价值投资",
       "styleWatchlist": "自选股",
+      "cachedAt": "{{time}}에 캐시됨",
+      "cachedBadge": "캐시",
       "calibrate": "自动校准"
     },
     "periodUltraShort": "단기",

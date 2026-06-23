@@ -8435,6 +8435,7 @@
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
+      "emptyNoCache": "No hay resultados en caché. Haz clic en Actualizar para obtener las últimas recomendaciones.",
       "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
@@ -8474,6 +8475,8 @@
       "styleTrend": "趋势跟踪",
       "styleValue": "价值投资",
       "styleWatchlist": "自选股",
+      "cachedAt": "En caché a las {{time}}",
+      "cachedBadge": "En caché",
       "calibrate": "自动校准"
     },
     "periodUltraShort": "Corto",

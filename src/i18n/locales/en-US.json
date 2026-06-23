@@ -8287,6 +8287,7 @@
       "crossCheckTitle": "Analyst Cross-Check (Updated {{updatedAt}})",
       "dataQualitySummary": "{{real}} real + {{synthetic}} fallback",
       "empty": "No recommendation data",
+      "emptyNoCache": "No cached results. Click Refresh to get the latest recommendations.",
       "generatedAt": "Generated {{time}}",
       "lastAnalysis": "Last Analysis",
       "neutral": "Neutral",
@@ -8324,6 +8325,8 @@
       "tagReal": "Real",
       "tagSynthetic": "Fallback",
       "title": "Recommendations",
+      "cachedAt": "Cached at {{time}}",
+      "cachedBadge": "Cached",
       "calibrate": "Weight Calibration"
     },
     "reflection": {

@@ -8435,6 +8435,7 @@
       "periodMid": "Mid",
       "periodLong": "Long",
       "title": "Recommendation",
+      "emptyNoCache": "Нет кэшированных результатов. Нажмите «Обновить», чтобы получить последние рекомендации.",
       "generatedAt": "Generated at {{time}}",
       "bannerVendorDisabled": "Some styles are disabled: {styles}",
       "openSettings": "Open Settings",
@@ -8474,6 +8475,8 @@
       "styleTrend": "趋势跟踪",
       "styleValue": "价值投资",
       "styleWatchlist": "自选股",
+      "cachedAt": "Кэшировано в {{time}}",
+      "cachedBadge": "Кэш",
       "calibrate": "自动校准"
     },
     "periodUltraShort": "Краткосрочно",

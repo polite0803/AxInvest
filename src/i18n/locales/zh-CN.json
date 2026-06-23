@@ -8697,6 +8697,7 @@
       "periodMid": "中期",
       "periodLong": "长期",
       "title": "推荐结果",
+      "emptyNoCache": "暂无缓存结果，请点击刷新获取最新推荐",
       "generatedAt": "生成于 {{time}}",
       "bannerVendorDisabled": "部分风格已禁用: {styles}",
       "openSettings": "打开设定",
@@ -8736,6 +8737,8 @@
       "styleValue": "价值投资",
       "styleWatchlist": "自选股",
       "styleSerenity": "瓶颈掘金",
+      "cachedAt": "缓存于 {{time}}",
+      "cachedBadge": "缓存",
       "calibrate": "自动校准"
     },
     "periodUltraShort": "超短线",

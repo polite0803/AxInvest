@@ -16,7 +16,7 @@ pub mod strategy;
 pub mod types;
 
 pub use strategy::{RecoContext, RecommendStrategy};
-pub use types::{Period, RecoResponse, Style};
+pub use types::{Period, RecoPick, RecoResponse, Style};
 
 use axagent_astock_data::as_of;
 use axagent_astock_data::AStockClient;

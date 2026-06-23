@@ -1344,6 +1344,22 @@ pub async fn run_single_stock_analysis(
     // 5. 解析运行时参数
     let (max_concurrent, step_timeout) = resolve_runtime_options(loaded.variables.as_deref());
 
+    // 5.5 [A1 借鉴] 注入历史反思教训(TradingAgents past_context 机制):
+    //   批量/定时分析场景下,trader/research-mgr/value-investor 节点能看到
+    //   该股最近 90 天的反思教训(lesson_summary),避免重蹈覆辙。前端触发场景下
+    //   run_stock_workflow_inner 同样会注入,这里是补齐 cron / batch 入口。
+    let lessons_str = fetch_stock_lessons(stock_code, db).await;
+    let mut variables = Vec::new();
+    if let Some(ref s) = lessons_str {
+        variables.push(Variable {
+            name: "stock_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(s.clone()),
+            description: Some("A1: 该股最近 90 天的反思教训".into()),
+            is_secret: false,
+        });
+    }
+
     // 6. 创建并运行工作流
     let wf_name = format!("stock-analysis-{stock_code}-batch");
     let workflow = engine
@@ -1360,6 +1376,11 @@ pub async fn run_single_stock_analysis(
         input_schema: loaded.input_schema.clone(),
         output_schema: loaded.output_schema.clone(),
         dry_run: false,
+        variables: if variables.is_empty() {
+            None
+        } else {
+            Some(variables)
+        },
         ..Default::default()
     };
 
@@ -1390,6 +1411,51 @@ pub async fn run_single_stock_analysis(
             })
             .exec(db)
             .await;
+
+            // ── [B1 借鉴] 两阶段协议: 落盘时同步写 stock_reflections pending row ──
+            // TradingAgents 反思模式: 先占位(pending)再异步 resolve。这样:
+            //   1) 系统重启/进程崩溃后,D1 批量反思能扫到所有 pending,不会丢失
+            //   2) 持仓期到时,D1 知道哪些 row 该被 resolve(避免重复 INSERT 触发冲突)
+            //   3) fetch_stock_lessons 可基于 status='resolved' 过滤,只注入真正可用的教训
+            // 字段: as_of_date = analysis_date, raw_return/alpha_return/holding_days
+            //   全部 None(预测不到),status='pending',后续由 D1 批量补全。
+            let pending_id = uuid::Uuid::new_v4().to_string();
+            let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            let _ = stock_reflections::ActiveModel {
+                id: Set(pending_id.clone()),
+                stock_code: Set(stock_code.to_string()),
+                stock_name: Set(stock_name.to_string()),
+                original_analysis_id: Set(analysis_id.clone()),
+                as_of_date: Set(today_str.clone()),
+                hindsight_date: Set(today_str),
+                min_confidence_threshold: Set(70),
+                reflection_depth: Set("light".to_string()),
+                actual_outcome: Set(String::new()),
+                // v008 (C3 借鉴): 结构化 outcome,pending 阶段全 None
+                raw_return: Set(None),
+                alpha_return: Set(None),
+                holding_days: Set(None),
+                benchmark_name: Set(None),
+                // v008 (C2 借鉴): 输出 schema,pending 阶段全 None
+                verdict: Set(None),
+                alpha_cited: Set(None),
+                lesson_summary: Set(None),
+                what_went_wrong: Set(None),
+                missed_signals: Set(None),
+                fix_for_future: Set(None),
+                parameter_suggestions_json: Set(None),
+                decision_json: Set(None),
+                blackboard_snapshot: Set(None),
+                model_version: Set(None),
+                status: Set("pending".to_string()),
+                created_at: Set(chrono::Utc::now().timestamp_millis()),
+                updated_at: Set(chrono::Utc::now().timestamp_millis()),
+            }
+            .insert(db)
+            .await;
+            tracing::info!(
+                "[B1 batch_analysis] {stock_code} ({stock_name}) 已落盘 pending reflection {pending_id},等 D1 持仓期到达 resolve"
+            );
 
             tracing::info!(
                 "[batch_analysis] {stock_code} ({stock_name}) 完成, status={:?}",
@@ -1463,34 +1529,93 @@ async fn fetch_similar_cases(stock_code: &str, db: &sea_orm::DatabaseConnection)
     Some(lines.join("\n"))
 }
 /// 从 stock_reflections 表查询该股最近的结构化反思教训（错因/被忽视信号/改进建议），返回格式化文本。
+///
+/// ## v008 + E1 升级（借鉴 TradingAgents past_context 机制）
+///
+/// 借鉴 TradingAgents 反思机制的多范围教训注入:
+/// - **same_ticker**(3 条): 同 ticker 最近 90 天的反思,直接可借鉴
+/// - **all_recent**(2 条): 所有 ticker 最近 7 天的反思,捕捉市场级教训
+///   (如"近期白马股普遍杀估值""科技股 Q3 业绩雷高发")
+/// - 跨 sector 范围需要 stock_analyses.sector 字段(v009 之后再做)
+///
+/// ## v008 字段选择
+///
+/// 输出 lesson_summary (≤200 字符) + verdict(判定标签) + alpha_cited(关键 alpha)
+/// 替代之前的 what_went_wrong/missed_signals/fix_for_future 三件套
+/// (后三个字段在新反思中可能为空,因为 prompt 现在只强制 short 文本)。
 async fn fetch_stock_lessons(stock_code: &str, db: &sea_orm::DatabaseConnection) -> Option<String> {
     use chrono::Utc;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    // ── same_ticker: 3 条同 ticker 近 90 天 ──
     let three_months_ago = Utc::now() - chrono::Duration::days(90);
-    let all = stock_reflections::Entity::find()
+    let same_ticker: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::StockCode.eq(stock_code))
         .filter(stock_reflections::Column::CreatedAt.gte(three_months_ago.timestamp_millis()))
         .order_by_desc(stock_reflections::Column::CreatedAt)
         .all(db)
         .await
-        .unwrap_or_default();
-    let lessons: Vec<_> = all.into_iter().take(3).collect();
-    if lessons.is_empty() {
+        .unwrap_or_default()
+        .into_iter()
+        .take(3)
+        .collect();
+
+    // ── all_recent: 2 条所有 ticker 近 7 天(跨 ticker 市场级教训)──
+    let seven_days_ago = Utc::now() - chrono::Duration::days(7);
+    let all_recent: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::CreatedAt.gte(seven_days_ago.timestamp_millis()))
+        .filter(stock_reflections::Column::Status.eq("completed")) // 只看已 resolve 的
+        .order_by_desc(stock_reflections::Column::CreatedAt)
+        .all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.stock_code != stock_code) // 排除 same_ticker 已经包含的
+        .take(2)
+        .collect();
+
+    if same_ticker.is_empty() && all_recent.is_empty() {
         return None;
     }
+
     let mut lines: Vec<String> = Vec::new();
-    for (i, l) in lessons.iter().enumerate() {
-        lines.push(format!("#{} 反思于 {}", i + 1, l.hindsight_date));
-        if let Some(ref w) = l.what_went_wrong {
-            lines.push(format!("  - 错因：{}", w));
-        }
-        if let Some(ref m) = l.missed_signals {
-            lines.push(format!("  - 被忽视信号：{}", m));
-        }
-        if let Some(ref f) = l.fix_for_future {
-            lines.push(format!("  - 改进建议：{}", f));
+
+    if !same_ticker.is_empty() {
+        lines.push(format!("【同股近 90 天反思 {} 条】", same_ticker.len()));
+        for (i, l) in same_ticker.iter().enumerate() {
+            lines.push(format!("#{} ({}, 反思于 {})", i + 1, l.stock_code, l.hindsight_date));
+            if let Some(ref ls) = l.lesson_summary {
+                lines.push(format!("  - 总结：{}", ls));
+            }
+            if let Some(ref v) = l.verdict {
+                lines.push(format!("  - 判定：{}", v));
+            }
+            if let Some(ref ac) = l.alpha_cited {
+                lines.push(format!("  - 关键 alpha：{}", ac));
+            }
+            // 兼容旧反思(无 v008 字段)
+            if let Some(ref w) = l.what_went_wrong {
+                lines.push(format!("  - 错因：{}", w));
+            }
+            if let Some(ref f) = l.fix_for_future {
+                lines.push(format!("  - 改进建议：{}", f));
+            }
         }
     }
+
+    if !all_recent.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("【近期市场级反思 {} 条(跨 ticker 近 7 天)】", all_recent.len()));
+        for (i, l) in all_recent.iter().enumerate() {
+            lines.push(format!("#{} {} ({}):", i + 1, l.stock_code, l.stock_name));
+            if let Some(ref ls) = l.lesson_summary {
+                lines.push(format!("  - {}", ls));
+            } else if let Some(ref w) = l.what_went_wrong {
+                lines.push(format!("  - 错因：{}", w));
+            }
+        }
+    }
+
     Some(lines.join("\n"))
 }
 
@@ -1500,7 +1625,23 @@ async fn fetch_stock_lessons(stock_code: &str, db: &sea_orm::DatabaseConnection)
 /// 设置 as_of_date 回到原始分析日期（数据与原分析一致），
 /// 注入 `actual_outcome` 变量让 portfolio-manager 产生反思。
 ///
+/// ## v008 升级（借鉴 TradingAgents 反思机制）
+///
+/// 新增 4 个结构化 outcome 参数（`raw_return` / `alpha_return` /
+/// `holding_days` / `benchmark_name`）作为 C3 借鉴；`actual_outcome`
+/// 保留为 legacy/fallback 自然语言描述。C1 + C2 强约束在 reflection-agent
+/// system_prompt 体现（≤200 字符 lesson_summary + verdict 标签 + alpha_cited）。
+///
+/// ## v009 升级（B1+B2+B3 借鉴）
+///
+/// - B1 落盘协议:调用方(批量分析)已写入 `stock_reflections` row with `status="pending"`。
+/// - B2 幂等守卫:当 `reflection_id` 已存在且 `status="completed"`,直接返回
+///   cached row 的 `lesson_summary` / `verdict` / `decision_json`,避免重跑 LLM。
+/// - B3 原子写:传入 `reflection_id` 时,UPDATE 现有 row 而非 INSERT 新的,
+///   避免重复 INSERT 触发冲突。
+///
 /// 结果写入独立的 `stock_reflections` 表。
+#[allow(clippy::too_many_arguments)]
 pub async fn run_reflection_workflow(
     db: &DatabaseConnection,
     _client: &axagent_astock_data::AStockClient,
@@ -1511,42 +1652,92 @@ pub async fn run_reflection_workflow(
     stock_name: &str,
     original_analysis_id: &str,
     actual_outcome: &str,
+    // v008 (C3 借鉴): 4 个结构化 outcome 变量
+    raw_return: Option<f64>,
+    alpha_return: Option<f64>,
+    holding_days: Option<i32>,
+    benchmark_name: Option<&str>,
     as_of_date: &str,
     hindsight_date: &str,
     min_confidence_threshold: u8,
     reflection_depth: &str,
+    // [B2/B3 借鉴] 反思 row ID(B1 阶段落盘的 pending row)。
+    // 传入则 UPDATE 现有 row;传 None 则按 v1 行为 INSERT 新 row,保持旧调用方兼容。
+    reflection_id: Option<String>,
 ) -> Result<String, String> {
     use axagent_astock_data::as_of;
     use axagent_core::entity::stock_reflections;
+    use sea_orm::sea_query::Expr;
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 
     let now_ms = chrono::Utc::now().timestamp_millis();
-    let analysis_id = uuid::Uuid::new_v4().to_string();
 
-    // 1. 插入反思记录（初始状态）
-    stock_reflections::ActiveModel {
-        id: Set(analysis_id.clone()),
-        stock_code: Set(stock_code.to_string()),
-        stock_name: Set(stock_name.to_string()),
-        original_analysis_id: Set(original_analysis_id.to_string()),
-        as_of_date: Set(as_of_date.to_string()),
-        hindsight_date: Set(hindsight_date.to_string()),
-        min_confidence_threshold: Set(min_confidence_threshold as i32),
-        reflection_depth: Set(reflection_depth.to_string()),
-        actual_outcome: Set(actual_outcome.to_string()),
-        what_went_wrong: Set(None),
-        missed_signals: Set(None),
-        fix_for_future: Set(None),
-        parameter_suggestions_json: Set(None),
-        decision_json: Set(None),
-        blackboard_snapshot: Set(None),
-        model_version: Set(None),
-        status: Set("running".to_string()),
-        created_at: Set(now_ms),
-        updated_at: Set(now_ms),
+    // ── [B2 借鉴] 幂等守卫: 如果 reflection_id 已 completed,直接返回 cached ──
+    if let Some(ref rid) = reflection_id {
+        if let Some(existing) = stock_reflections::Entity::find_by_id(rid.clone())
+            .one(db)
+            .await
+            .map_err(|e| format!("B2 查询已存在反思失败: {e}"))?
+        {
+            if existing.status == "completed" {
+                tracing::info!(
+                    "[B2 idempotency] reflection_id={rid} 已 completed,跳过重跑,直接返回 cached"
+                );
+                return Ok(rid.clone());
+            }
+        }
     }
-    .insert(db)
-    .await
-    .map_err(|e| format!("DB 写入失败: {e}"))?;
+
+    // ── [B3 借鉴] 原子写: reflection_id 存在则 UPDATE pending→running,否则 INSERT ──
+    let analysis_id = reflection_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    if let Some(ref rid) = reflection_id {
+        let _ = stock_reflections::Entity::update_many()
+            .col_expr(stock_reflections::Column::Status, Expr::value("running"))
+            .col_expr(stock_reflections::Column::UpdatedAt, Expr::value(now_ms))
+            .filter(stock_reflections::Column::Id.eq(rid.clone()))
+            .exec(db)
+            .await
+            .map_err(|e| format!("B3 UPDATE pending→running 失败: {e}"))?;
+        tracing::info!("[B3 atomic] reflection_id={rid} pending→running");
+    } else {
+        // 兼容旧调用方路径: INSERT 新 row
+        stock_reflections::ActiveModel {
+            id: Set(analysis_id.clone()),
+            stock_code: Set(stock_code.to_string()),
+            stock_name: Set(stock_name.to_string()),
+            original_analysis_id: Set(original_analysis_id.to_string()),
+            as_of_date: Set(as_of_date.to_string()),
+            hindsight_date: Set(hindsight_date.to_string()),
+            min_confidence_threshold: Set(min_confidence_threshold as i32),
+            reflection_depth: Set(reflection_depth.to_string()),
+            actual_outcome: Set(actual_outcome.to_string()),
+            // v008 (C3 借鉴): 4 个结构化 outcome
+            raw_return: Set(raw_return),
+            alpha_return: Set(alpha_return),
+            holding_days: Set(holding_days),
+            benchmark_name: Set(benchmark_name.map(|s| s.to_string())),
+            // v008 (C2 借鉴): 3 个输出 schema 字段
+            verdict: Set(None),
+            alpha_cited: Set(None),
+            lesson_summary: Set(None),
+            what_went_wrong: Set(None),
+            missed_signals: Set(None),
+            fix_for_future: Set(None),
+            parameter_suggestions_json: Set(None),
+            decision_json: Set(None),
+            blackboard_snapshot: Set(None),
+            model_version: Set(None),
+            status: Set("running".to_string()),
+            created_at: Set(now_ms),
+            updated_at: Set(now_ms),
+        }
+        .insert(db)
+        .await
+        .map_err(|e| format!("DB 写入失败: {e}"))?;
+    }
 
     // 2. 加载反思复盘模板（stock-reflection，DAG 结构与 stock-analysis 一致）
     let loaded = load_and_inject_template(db, stock_code, stock_name, "stock-reflection").await?;
@@ -2771,7 +2962,10 @@ pub async fn run_serenity_screening(
             // best-effort：失败只记日志，不影响返回结果
             {
                 let db = state.harness.db();
-                let now_str = chrono::Utc::now().to_rfc3339();
+                // 统一 generated_at 格式：与 recommend_stocks 一致(ISO 8601 带毫秒)
+                let now_str = chrono::Local::now()
+                    .format("%Y-%m-%dT%H:%M:%S%.3f")
+                    .to_string();
                 let ts_ms = chrono::Utc::now().timestamp_millis();
                 // candidates 可能是 { candidates: [...] } 对象、{name, arguments: {candidates: [...]}} 格式、
                 // 也可能是原始数组
@@ -2799,7 +2993,29 @@ pub async fn run_serenity_screening(
                     if code.is_empty() {
                         continue;
                     }
-                    // 持久化到 reco_picks（含全量 JSON 到 seed_pool_json）
+                    // 构造完整 RecoPick JSON（与 types.rs 中 camelCase 一致）
+                    // 候选数据不保证有价格/入场/止损等字段,缺失时填 0 或默认值
+                    let pick_data_val = serde_json::json!({
+                        "stockCode": code,
+                        "stockName": name,
+                        "style": "serenity",
+                        "period": "mid",
+                        "price": c.get("price").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        "entryLow": c.get("entryLow").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        "entryHigh": c.get("entryHigh").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        "stopLoss": c.get("stopLoss").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        "targetPrice": c.get("targetPrice").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        "positionPct": c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0),
+                        "holdingDays": c.get("holdingDays").and_then(|v| v.as_i64()).unwrap_or(20),
+                        "confidence": conf,
+                        "reasons": c.get("reasons").and_then(|v| v.as_array()).map(|a| {
+                            a.iter().filter_map(|v| v.as_str().map(|s| s.to_owned())).collect::<Vec<_>>()
+                        }).unwrap_or_default(),
+                        "riskNotes": [],
+                        "secondaryStyles": [],
+                        "synthetic": false,
+                    });
+                    // 持久化到 reco_picks
                     let pick_id = format!("serenity-{ts_ms}-{i}-{code}");
                     let pick = reco_picks::ActiveModel {
                         id: Set(pick_id),
@@ -2812,6 +3028,9 @@ pub async fn run_serenity_screening(
                         synthetic: Set(0),
                         seed_pool_json: Set(Some(serde_json::to_string(c).unwrap_or_default())),
                         strategy_weights_json: Set(None),
+                        pick_data: Set(Some(
+                            serde_json::to_string(&pick_data_val).unwrap_or_default(),
+                        )),
                         created_at: Set(now_str.clone()),
                     };
                     if let Err(e) = pick.insert(db).await {
@@ -3225,6 +3444,185 @@ pub async fn delete_serenity_pick(state: State<'_, AppState>, id: String) -> Res
         .map_err(|e| format!("删除候选记录失败: {e}"))?;
     tracing::info!("[serenity] 已删除候选记录: {id}");
     Ok(())
+}
+
+// ── [D1 借鉴] 批量反思 (B1+B2 闭环) ──
+//
+// 借鉴 TradingAgents 反思机制: 持仓期到达时,自动批量 resolve 所有
+// `status='pending'` 的 stock_reflections row,无需用户手动逐条触发。
+//
+// 流程:
+//   1. 扫 stock_reflections where status='pending',按 created_at ASC 处理
+//   2. 对每条 row:
+//      - 读 stock_analyses by original_analysis_id
+//      - 计算持仓期: today - as_of_date
+//      - 若 today - as_of_date >= decision_expected_holding_days (默认 28):
+//        调 run_reflection_workflow(reflection_id=Some(rid)) 走 B3 UPDATE 路径
+//      - 否则 skip (持仓期未到)
+//   3. [D2 借鉴] Resolved FIFO 清理: 删除 90 天前或超 1000 条的 completed row
+//   4. 返回 { total_pending, resolved, failed, skipped_young, cleaned_up }
+//
+// 调用方:
+//   - `CronExecutor` 每天 18:00 调一次(收市后批量反思)
+//   - 前端调试按钮: 手动立即跑一轮
+#[tauri::command]
+pub async fn run_batch_reflection(
+    state: State<'_, AppState>,
+    max_count: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    use axagent_core::entity::stock_analyses;
+    use axagent_core::entity::stock_reflections;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let max_count = max_count.unwrap_or(20) as usize;
+    let db = state.harness.db();
+
+    // 1. 扫所有 pending row,按 created_at ASC(最老的先处理,避免积压)
+    let pendings: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.eq("pending"))
+        .order_by_asc(stock_reflections::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(|e| format!("D1 扫 pending row 失败: {e}"))?;
+
+    tracing::info!(
+        "[D1 batch_reflection] 扫到 {} 条 pending row, max_count={}",
+        pendings.len(),
+        max_count
+    );
+
+    let mut resolved = 0u32;
+    let mut failed = 0u32;
+    let mut skipped_young = 0u32; // 持仓期未到
+    let mut errors: Vec<String> = Vec::new();
+    let today_ms = chrono::Utc::now().timestamp_millis();
+
+    for (i, p) in pendings.iter().take(max_count).enumerate() {
+        // 2a. 读原始分析
+        let analysis = match stock_analyses::Entity::find_by_id(&p.original_analysis_id)
+            .one(db)
+            .await
+        {
+            Ok(Some(a)) => a,
+            Ok(None) => {
+                tracing::warn!(
+                    "[D1] pending reflection {} 关联 analysis_id={} 不存在,skip",
+                    p.id,
+                    p.original_analysis_id
+                );
+                skipped_young += 1;
+                continue;
+            },
+            Err(e) => {
+                tracing::error!("[D1] 查 analysis 失败: {e}");
+                failed += 1;
+                errors.push(format!("{}: 查询 analysis 失败: {e}", p.id));
+                continue;
+            },
+        };
+
+        // 2b. 计算持仓期是否到达
+        // 默认 28 天 = mid 决策标准持仓期(用户没指定时取 stock-analysis 模板默认)
+        let expected_days = analysis
+            .decision_expected_holding_days
+            .map(|d| d as i64)
+            .unwrap_or(28);
+        let analysis_date = analysis.as_of_date.as_deref().unwrap_or(&p.as_of_date);
+        let analysis_ms = chrono::NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| dt.and_utc().timestamp_millis())
+            .unwrap_or(p.created_at);
+        let days_held = (today_ms - analysis_ms).max(0) / 86_400_000; // ms → days
+
+        if days_held < expected_days {
+            tracing::info!(
+                "[D1] pending {} ({}) 持仓 {}/{} 天,未到期 skip",
+                p.id,
+                p.stock_code,
+                days_held,
+                expected_days
+            );
+            skipped_young += 1;
+            continue;
+        }
+
+        // 2c. 调 run_reflection_workflow(B3 UPDATE 路径)
+        let r = run_reflection_workflow(
+            db,
+            &state.astock_client,
+            &state.work_engine,
+            &state.vector_store,
+            state.harness.master_key(),
+            &p.stock_code,
+            &p.stock_name,
+            &p.original_analysis_id,
+            &p.actual_outcome,      // 留空字符串走 legacy fallback
+            None,                   // raw_return: pending 阶段未算
+            None,                   // alpha_return
+            Some(days_held as i32), // holding_days 填入
+            None,                   // benchmark_name
+            analysis_date,
+            &chrono::Utc::now().format("%Y-%m-%d").to_string(),
+            0u8,
+            "light",
+            Some(p.id.clone()), // [B2/B3] 走 UPDATE 路径
+        )
+        .await;
+
+        match r {
+            Ok(_) => {
+                tracing::info!(
+                    "[D1] ✓ resolved {}/{} pending: {} ({})",
+                    i + 1,
+                    pendings.len(),
+                    p.id,
+                    p.stock_code
+                );
+                resolved += 1;
+            },
+            Err(e) => {
+                tracing::error!("[D1] ✗ resolve failed {}: {e}", p.id);
+                failed += 1;
+                errors.push(format!("{}: {e}", p.id));
+            },
+        }
+    }
+
+    // ── [D2 借鉴] Resolved FIFO 清理 ──
+    // 保留最近 1000 条 + 90 天内的 completed row,删除更老的。
+    // pending row 永远保留(B1 借鉴:不能丢反思需求)。
+    let ninety_days_ago_ms = today_ms - 90 * 86_400_000;
+    let cleaned_up = stock_reflections::Entity::delete_many()
+        .filter(stock_reflections::Column::Status.eq("completed"))
+        .filter(stock_reflections::Column::UpdatedAt.lt(ninety_days_ago_ms))
+        .exec(db)
+        .await
+        .map(|r| r.rows_affected)
+        .unwrap_or_else(|e| {
+            tracing::warn!("[D2] FIFO 清理失败: {e}");
+            0
+        });
+    tracing::info!("[D2 fifo_cleanup] 删除 {} 条超龄 completed row", cleaned_up);
+
+    tracing::info!(
+        "[D1 batch_reflection] 完成: total={} resolved={} failed={} skipped_young={} cleaned={}",
+        pendings.len(),
+        resolved,
+        failed,
+        skipped_young,
+        cleaned_up
+    );
+
+    Ok(serde_json::json!({
+        "totalPending": pendings.len(),
+        "processed": pendings.len().min(max_count),
+        "resolved": resolved,
+        "failed": failed,
+        "skippedYoung": skipped_young,
+        "cleanedUp": cleaned_up,
+        "errors": errors,
+    }))
 }
 
 // ── 单元测试：覆盖 LLM 输出 → IR → JSON 提取的全链路 ──

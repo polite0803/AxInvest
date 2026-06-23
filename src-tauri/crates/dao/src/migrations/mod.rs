@@ -25,9 +25,14 @@ pub mod v001_initial;
 pub mod v002_indices;
 pub mod v003_drop_dead_tables;
 pub mod v004_news_archive;
+pub mod v005_node_results_snapshot;
+pub mod v006_llm_decision_json;
+pub mod v007_reco_pick_data;
+pub mod v008_reflection_structured;
+pub mod v009_reflection_lessons;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 4;
+pub const CURRENT_VERSION: i32 = 9;
 
 /// 迁移函数签名：所有 `up()` 都遵循这个接口。
 ///
@@ -68,6 +73,36 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         description: "v003_drop_dead_tables: drop unused categories/apps/context_packs",
         up: |db| Box::pin(v003_drop_dead_tables::up(db)),
+    },
+    Migration {
+        version: 4,
+        description: "v004_news_archive: persist fetched news for as-of mode",
+        up: |db| Box::pin(v004_news_archive::up(db)),
+    },
+    Migration {
+        version: 5,
+        description: "v005_node_results_snapshot: cache full node outputs for rerun_decision_only",
+        up: |db| Box::pin(v005_node_results_snapshot::up(db)),
+    },
+    Migration {
+        version: 6,
+        description: "v006_llm_decision_json: cache llm-decision-maker output for dual-view panel",
+        up: |db| Box::pin(v006_llm_decision_json::up(db)),
+    },
+    Migration {
+        version: 7,
+        description: "v007_reco_pick_data: cache full RecoPick JSON for get_cached_recommendation",
+        up: |db| Box::pin(v007_reco_pick_data::up(db)),
+    },
+    Migration {
+        version: 8,
+        description: "v008_reflection_structured: add raw_return/alpha_return/holding_days/benchmark_name/verdict/alpha_cited/lesson_summary to stock_reflections + composite index",
+        up: |db| Box::pin(v008_reflection_structured::up(db)),
+    },
+    Migration {
+        version: 9,
+        description: "v009_reflection_lessons: create reflection_lessons table for reusable rules",
+        up: |db| Box::pin(v009_reflection_lessons::up(db)),
     },
 ];
 
@@ -200,9 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn migrations_are_idempotent() {
-        let db = Database::connect("sqlite::memory:")
-            .await
-            .expect("in-memory db");
+        let db = Database::connect("sqlite::memory:").await.unwrap();
         run_migrations(&db).await.unwrap();
         // 第二次跑：所有 migration 都在 `applied_max >= m.version` 路径被 skip
         run_migrations(&db)
@@ -212,7 +245,7 @@ mod tests {
         let max: i32 = read_max_version(&db).await.unwrap();
         assert_eq!(max, CURRENT_VERSION, "version should be {}", CURRENT_VERSION);
 
-        // schema_version 表应只有 3 行
+        // schema_version 表应只有 8 行(v1-v8)
         let count_row = db
             .query_one_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
@@ -222,7 +255,7 @@ mod tests {
             .unwrap()
             .expect("count row");
         let cnt: i32 = count_row.try_get_by("cnt").unwrap();
-        assert_eq!(cnt, 3, "schema_version should have exactly 3 rows");
+        assert_eq!(cnt, 9, "schema_version should have exactly 9 rows");
     }
 
     /// 防回归：v002 引入的索引必须真实存在。

@@ -71,6 +71,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [generatedAtText, setGeneratedAtText] = useState<string>("");
+  // 显示策略：挂载 + 切 period 时优先读缓存(上一次的荐股结果),
+  // 只有用户点击"刷新"按钮才走 recommend_stocks 拉新数据
+  const [isCached, setIsCached] = useState(false);
   // P0-1: 荐股面板关联历史分析数据
   const [latestAnalyses, setLatestAnalyses] = useState<Record<string, LatestAnalysisSummary | null>>({});
   // P0-2: 策略回测统计（每个风格的 win rate + Sharpe）
@@ -184,19 +187,69 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     if (myToken === reqTokenRef.current) { setLoading(false); }
   }, [period, asOfDate, i18n.language, triggerBacktest]);
 
-  // Period 切换时自动重载；首次挂载（Tab 切走后 destroyOnHidden 重新渲染）
-  // 不自动请求，避免每次切回 Tab 都后台刷新（用户原话："简直就是傻逼逻辑"）。
-  // 但 mount 时仍触发一次策略回测统计 (triggerBacktest 内部用 backtestTriggeredRef
-  // 去重,不会与 load 内部的调用重复),保证面板 mount 后立即有历史回测数据可见。
+  /**
+   * 缓存加载入口。打开页面 / 切换 period 时调用,优先展示上一次的荐股结果
+   * (避免用户每次打开都触发一次新的后端推荐任务)。
+   *
+   * 行为:
+   * - live 模式 → 调 get_cached_recommendation(period) 读最新缓存
+   * - replay 模式 → 没有缓存概念,直接回退到 load()(同原行为)
+   *
+   * 缓存命中时 isCached=true,UI 上显示"缓存"灰底小标签;
+   * 无缓存(emptyKind=noData)时改用 emptyNoCache 文案,引导用户点"刷新"。
+   */
+  const loadCache = useCallback(async () => {
+    // replay 模式没有缓存(缓存永远是 live 产物),回退到实时
+    if (anchorMode !== "live") {
+      void load();
+      return;
+    }
+    const myToken = ++reqTokenRef.current;
+    setLoading(true);
+    setEmptyKind(null);
+    try {
+      const r = await invoke<RecoResponse | null>("get_cached_recommendation", { period });
+      if (myToken !== reqTokenRef.current) { return; }
+      if (!r || !r.picks || Object.keys(r.picks).length === 0) {
+        setData(r ?? null);
+        // 缓存为空时区分文案,提示用户点"刷新"重新拉取
+        setEmptyKind("noData");
+        setIsCached(false);
+        setLoading(false);
+        return;
+      }
+      setData(r);
+      setIsCached(true);
+      const d = new Date(r.generatedAt);
+      setGeneratedAtText(
+        d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+    } catch (e: unknown) {
+      console.error("[RecommendationPanel] loadCache failed:", e);
+      if (myToken !== reqTokenRef.current) { return; }
+      setData(null);
+      setIsCached(false);
+      setEmptyKind("connectionFailed");
+    }
+    if (myToken === reqTokenRef.current) { setLoading(false); }
+  }, [period, anchorMode, i18n.language, load]);
+
+  // Period 切换时优先读缓存；首次挂载（Tab 切走后 destroyOnHidden 重新渲染）
+  // 也走缓存，避免每次切回 Tab 都后台刷新（用户原话："简直就是傻逼逻辑"）。
+  // mount 时仍触发一次策略回测统计 (triggerBacktest 内部用 backtestTriggeredRef
+  // 去重,不会与 loadCache 内部的调用重复),保证面板 mount 后立即有历史回测数据可见。
   const initialMountRef = useRef(true);
   useEffect(() => {
     if (initialMountRef.current) {
       initialMountRef.current = false;
       void triggerBacktest();
-      return;
     }
-    void load();
-  }, [period, load, triggerBacktest]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadCache();
+  }, [period, loadCache, triggerBacktest]);
 
   const handleAnalyze = async (code: string) => {
     await getStockQuote(code);
@@ -259,8 +312,19 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         <div className="flex items-center gap-2">
           {generatedAtText && (
             <span className="text-[10px] text-gray-400">
-              {t("stockAnalysis.recommendation.generatedAt", { time: generatedAtText })}
+              {isCached
+                ? t("stockAnalysis.recommendation.cachedAt", { time: generatedAtText })
+                : t("stockAnalysis.recommendation.generatedAt", { time: generatedAtText })}
             </span>
+          )}
+          {isCached && (
+            <Tag
+              color="default"
+              className="m-0 text-[10px]"
+              data-testid="reco-cached-badge"
+            >
+              {t("stockAnalysis.recommendation.cachedBadge")}
+            </Tag>
           )}
           <Button size="small" loading={loading} onClick={load}>
             {t("stockAnalysis.settings.panels.refresh")}
@@ -351,12 +415,23 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           ? (
             <PanelEmpty
               kind={emptyKind}
-              description={emptyKind === "noData" ? t("stockAnalysis.recommendation.empty") : undefined}
+              description={emptyKind === "noData"
+                ? (anchorMode !== "live" || isCached
+                  ? t("stockAnalysis.recommendation.empty")
+                  : t("stockAnalysis.recommendation.emptyNoCache"))
+                : undefined}
               onOpenSettings={openDataSourceSettings}
             />
           )
           : !data
-          ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("stockAnalysis.recommendation.empty")} />
+          ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={anchorMode !== "live"
+                ? t("stockAnalysis.recommendation.empty")
+                : t("stockAnalysis.recommendation.emptyNoCache")}
+            />
+          )
           : (
             // P3-4: key={period} forces the Collapse to remount when period changes,
             // so defaultActiveKey re-applies for the new dataset.

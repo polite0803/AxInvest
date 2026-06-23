@@ -2704,6 +2704,9 @@ pub async fn recommend_stocks(
         for picks in response.picks.values() {
             for pick in picks {
                 use sea_orm::ActiveModelTrait;
+                // 序列化完整 pick 到 pick_data —— get_cached_recommendation 会
+                // 读这一列还原 cache,与实时拉取结果 schema 完全等价。
+                let pick_data = serde_json::to_string(pick).ok();
                 let am = reco_picks::ActiveModel {
                     id: sea_orm::Set(uuid::Uuid::new_v4().to_string()),
                     generated_at: sea_orm::Set(generated_at.clone()),
@@ -2715,6 +2718,7 @@ pub async fn recommend_stocks(
                     synthetic: sea_orm::Set(if pick.synthetic { 1 } else { 0 }),
                     seed_pool_json: sea_orm::Set(Some(seed_pool_json.clone())),
                     strategy_weights_json: sea_orm::Set(strategy_weights_json.clone()),
+                    pick_data: sea_orm::Set(pick_data),
                     created_at: sea_orm::Set(created_at.clone()),
                 };
                 let _ = am.insert(state.harness.db()).await;
@@ -2723,6 +2727,121 @@ pub async fn recommend_stocks(
     }
 
     Ok(response)
+}
+
+/// 读取最近一次 live 荐股结果(缓存) —— 智能荐股页打开时优先调此命令,
+/// 避免每次打开都触发一次新的后端推荐任务。
+///
+/// 返回值:
+/// - `Some(RecoResponse)` —— 缓存存在,直接展示
+/// - `None` —— 该 period 还没有历史荐股(可引导用户点"刷新"实时拉取)
+///
+/// 行为:
+/// 1. 查 reco_picks 表:按 period 过滤,取最新 generated_at 对应的所有行
+/// 2. 反序列化每行 pick_data → RecoPick
+/// 3. 按 style 分组,组装 RecoResponse,mode = "cached"
+#[tauri::command]
+pub async fn get_cached_recommendation(
+    state: State<'_, AppState>,
+    period: axagent_stock_analysis::recommender::Period,
+) -> Result<Option<RecoResponse>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+
+    let db = state.harness.db();
+    let period_str = period.as_str();
+
+    // 1) 找该 period 最新的 generated_at
+    // 用 ORDER BY + LIMIT 1 拿最新一次,避免聚合复杂 SQL
+    let latest = reco_picks::Entity::find()
+        .filter(reco_picks::Column::Period.eq(period_str))
+        .filter(reco_picks::Column::PickData.is_not_null()) // 跳过 v007 之前的旧行
+        .order_by_desc(reco_picks::Column::GeneratedAt)
+        .limit(1)
+        .one(db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let Some(latest_row) = latest else {
+        return Ok(None);
+    };
+
+    // 2) 取同 generated_at 的所有行
+    let rows = reco_picks::Entity::find()
+        .filter(reco_picks::Column::Period.eq(period_str))
+        .filter(reco_picks::Column::GeneratedAt.eq(&latest_row.generated_at))
+        .filter(reco_picks::Column::PickData.is_not_null())
+        .all(db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    // 3) 反序列化 + 按 style 分组
+    use std::collections::HashMap;
+    let mut picks_map: HashMap<
+        axagent_stock_analysis::recommender::Style,
+        Vec<axagent_stock_analysis::recommender::RecoPick>,
+    > = HashMap::new();
+
+    for row in &rows {
+        let Some(ref pd) = row.pick_data else {
+            continue;
+        };
+        let Ok(pick) = serde_json::from_str::<axagent_stock_analysis::recommender::RecoPick>(pd)
+        else {
+            continue;
+        };
+        picks_map.entry(pick.style).or_default().push(pick);
+    }
+
+    if picks_map.is_empty() {
+        return Ok(None);
+    }
+
+    // 4) 估算 seed pool size:从同 generated_at 的任意行读 seed_pool_json(若有)
+    let raw_seed_pool_size: usize = rows
+        .iter()
+        .find_map(|r| {
+            r.seed_pool_json.as_ref().and_then(|s| {
+                let parsed: Option<Vec<Vec<String>>> = serde_json::from_str(s).ok();
+                parsed.map(|v| v.len())
+            })
+        })
+        .unwrap_or(0);
+
+    // 5) 解析 generated_at 为毫秒时间戳(ISO 8601 字符串 → timestamp)
+    let generated_at_ms = parse_iso8601_to_millis(&latest_row.generated_at).unwrap_or(0);
+
+    Ok(Some(RecoResponse {
+        period,
+        picks: picks_map,
+        disabled_styles: vec![],
+        degraded_styles: vec![],
+        degraded_reasons: HashMap::new(),
+        generated_at: generated_at_ms,
+        raw_seed_pool_size,
+        as_of_date: None,
+        mode: "cached".to_string(),
+    }))
+}
+
+/// 把 ISO 8601 字符串（如 "2026-06-23T10:24:47.123"）解析为毫秒时间戳。
+/// 解析失败返回 None（不抛错，避免缓存展示被一个坏数据阻断）。
+fn parse_iso8601_to_millis(s: &str) -> Option<i64> {
+    use chrono::TimeZone;
+    // 兼容两种常见格式：带毫秒 / 不带毫秒
+    let formats = ["%Y-%m-%dT%H:%M:%S%.3f", "%Y-%m-%dT%H:%M:%S"];
+    for fmt in formats {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            // 用本地时区解释（recommend_stocks 也是用 chrono::Local::now() 生成）
+            if let chrono::LocalResult::Single(dt) = chrono::Local.from_local_datetime(&naive) {
+                return Some(dt.timestamp_millis());
+            }
+        }
+    }
+    None
 }
 
 /// 失效荐股缓存（设置页保存 vendor 后由前端调用）
@@ -3157,10 +3276,18 @@ pub async fn run_reflection_now(
         &resolved_name,
         "", // original_analysis_id — 手动触发时无原始决策,run_reflection_workflow 已处理跳过
         &actual_outcome,
+        // v008 (C3 借鉴): 4 个结构化 outcome 变量
+        // 手动反思场景: 用户没传 raw/alpha,留 None 走 fallback 显示 "n/a"
+        None,
+        None,
+        None,
+        None,
         &as_of_date,
         &today,
         0u8, // min_confidence_threshold — 手动触发时全量
         &depth,
+        // [B2/B3 借鉴] 手动反思场景无 B1 阶段落盘的 pending row,传 None 走 INSERT 路径
+        None,
     )
     .await
 }

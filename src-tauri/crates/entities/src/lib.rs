@@ -49,6 +49,7 @@ pub mod rl_policies;
 pub mod portfolio_holdings;
 pub mod price_alerts;
 pub mod reco_picks;
+pub mod reflection_lessons;
 pub mod stock_analyses;
 pub mod stock_reflections;
 pub mod trades;

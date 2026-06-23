@@ -1404,10 +1404,21 @@ fn start_cron_scheduler(state: &AppState) {
                             a.stock_name.as_str(),
                             &a.id,
                             &format!("30天后 {} → 失败", pct),
+                            // v008 (C3 借鉴): 4 个结构化 outcome 变量
+                            // evolution_drift cron 场景已有 pct 算式,Phase 2 B1
+                            // 实施时把这里改成 Some(pct) / Some(pct - alpha) 等
+                            None,
+                            None,
+                            None,
+                            None,
                             date.as_str(),
                             &today,
                             0u8,
                             "light",
+                            // [B2/B3 借鉴] evolution_drift cron 也是手动触发场景,无
+                            // B1 阶段落盘的 pending row,传 None 走 INSERT 路径。
+                            // D1 批量反思会传 Some(rid) 走 UPDATE 路径。
+                            None,
                         )
                         .await;
                         match reflection_result {

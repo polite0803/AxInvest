@@ -67,7 +67,9 @@ pub async fn run_initialization(db: &DatabaseConnection) -> Result<(), DbErr> {
             period TEXT NOT NULL, stock_code TEXT NOT NULL, stock_name TEXT NOT NULL, \
             style TEXT NOT NULL, confidence INTEGER NOT NULL DEFAULT 0, \
             synthetic INTEGER NOT NULL DEFAULT 0, \
-            seed_pool_json TEXT, created_at TEXT NOT NULL)",
+            seed_pool_json TEXT, strategy_weights_json TEXT, \
+            pick_data TEXT, \
+            created_at TEXT NOT NULL)",
         // ========================================================================
         // SECTION L: AxInvest — Quant (量化交易 + 量化回测)
         // ========================================================================

@@ -5316,6 +5316,7 @@
       "contextMode": "Context Mode",
       "inherit": "Inherit",
       "isolated": "Isolated"
+    },
     "aggregatorNode": {
       "inputs": "المدخلات"
     }

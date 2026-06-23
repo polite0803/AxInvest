@@ -28,6 +28,10 @@ pub struct Model {
     pub seed_pool_json: Option<String>,
     /// 荐股时的策略权重配置快照 (JSON object, e.g. {"trend_short": 0.85})
     pub strategy_weights_json: Option<String>,
+    /// 完整 RecoPick 序列化 (JSON, v007 新增) —— 用于 get_cached_recommendation
+    /// 命令把上一次的荐股结果完整还原到前端,与实时拉取结果 schema 完全等价。
+    /// 旧行(本 migration 之前生成的)此字段为 NULL,缓存读时被跳过。
+    pub pick_data: Option<String>,
     /// 记录创建时间
     pub created_at: String,
 }

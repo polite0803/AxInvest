@@ -3839,6 +3839,22 @@ async fn seed_stock_analysis_workflow_template(
             description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
             is_secret: false,
         },
+        // ── v18 (A1 借鉴): 历史反思教训注入 ──
+        // TradingAgents 的 past_context 机制: 决策链路(trader/research-mgr/
+        // value-investor)能拿之前反思的简短教训(同 ticker 近 90 天的
+        // lesson_summary),避免重蹈覆辙。
+        // runtime 由 run_stock_workflow_inner / run_single_stock_analysis
+        // 显式注入 fetch_stock_lessons() 的查询结果;此处仅声明 schema 占位,
+        // 确保模板渲染不报 VARIABLE_NOT_FOUND。
+        Variable {
+            name: "stock_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("（暂无历史反思）"),
+            description: Some(
+                "v18: 该股最近 90 天的反思教训(lesson_summary),由 runtime 注入".into(),
+            ),
+            is_secret: false,
+        },
     ];
     let variables_val =
         serde_json::to_string(&variables).map_err(|e| format!("序列化变量失败: {e}"))?;

@@ -29,6 +29,7 @@ pub struct BrowserEastMoneyVendor {
     pub fetcher: Option<Arc<dyn BrowserHttpFetch>>,
 }
 
+#[allow(clippy::new_without_default)]
 impl BrowserEastMoneyVendor {
     pub fn new() -> Self {
         Self { fetcher: None }

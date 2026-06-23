@@ -252,7 +252,7 @@ impl StockVendor for TencentVendor {
 
         // 上证指数代码（000xxx）可能被误映射为 sz 前缀
         // 解析结果为空时用 sh 前缀重试
-        if klines.as_ref().map_or(false, |v| v.is_empty()) && stock_code.starts_with("00") {
+        if klines.as_ref().is_ok_and(|v| v.is_empty()) && stock_code.starts_with("00") {
             let sh_code = format!("sh{stock_code}");
             let sh_url = format!(
                 "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={sh_code},{period_code},,,{limit},qfq"
@@ -261,7 +261,7 @@ impl StockVendor for TencentVendor {
             if let Ok(r) = sh_resp {
                 if let Ok(body) = r.text().await {
                     let sh_klines = parse_klines(&body, stock_code);
-                    if sh_klines.as_ref().map_or(false, |v| !v.is_empty()) {
+                    if sh_klines.as_ref().is_ok_and(|v| !v.is_empty()) {
                         return sh_klines;
                     }
                 }

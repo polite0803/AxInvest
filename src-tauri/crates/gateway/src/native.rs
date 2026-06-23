@@ -861,7 +861,7 @@ fn build_http_client(
     #[cfg(target_os = "android")]
     let mut builder = reqwest::Client::builder().use_native_tls();
     #[cfg(not(target_os = "android"))]
-    let mut builder = reqwest::Client::builder().use_rustls_tls();
+    let mut builder = reqwest::Client::builder().use_native_tls();
 
     if let Some(config) = proxy_config {
         match config.proxy_type.as_deref() {

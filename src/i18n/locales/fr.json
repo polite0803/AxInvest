@@ -9377,5 +9377,11 @@
       "totalPnl": "Total P&L",
       "totalRows": "{{count}} records"
     }
+  },
+  "ipc": {
+    "disconnected": "Backend connection lost",
+    "disconnectedHint": "The app was idle in the background. The IPC channel may have been disconnected.",
+    "reconnecting": "Reconnecting…",
+    "retry": "Retry"
   }
 }

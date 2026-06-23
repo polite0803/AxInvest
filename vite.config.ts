@@ -1,9 +1,9 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import type { PluginOption } from "vite";
 import monacoEditorPluginModule from "vite-plugin-monaco-editor";
 import { defineConfig, type Plugin } from "vitest/config";
-import type { PluginOption } from "vite";
 
 interface MonacoEditorPluginModule {
   default?: Plugin;
@@ -117,7 +117,14 @@ function optionalPeerDepPlugin(): PluginOption {
 
 export default defineConfig(async () => ({
   base: "./",
-  plugins: [react(), tailwindcss(), monacoEditorPlugin({}), shikiLanguageFilter(), removeCrossorigin(), optionalPeerDepPlugin()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    monacoEditorPlugin({}),
+    shikiLanguageFilter(),
+    removeCrossorigin(),
+    optionalPeerDepPlugin(),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

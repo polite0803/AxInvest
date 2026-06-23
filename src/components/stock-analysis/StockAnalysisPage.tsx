@@ -328,7 +328,7 @@ export function StockAnalysisPage() {
     };
     window.addEventListener("switch-tab", handleSwitchTab);
     return () => window.removeEventListener("switch-tab", handleSwitchTab);
-  }, []);
+  }, [tabs]);
 
   const allSheetPanels: SheetPanel[] = [
     { key: "holdings", label: t("stockAnalysis.holdingsSheet"), element: <PositionsMiniPanel /> },

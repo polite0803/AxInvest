@@ -843,7 +843,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       try {
         const dj = record.decisionJson ? JSON.parse(record.decisionJson) : null;
         const lj = JSON.parse(record.llmDecisionJson);
-        const norm = (s: string) => s.trim().toLowerCase().replace(/[\s\/_\u3000]+/g, "");
+        const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
         // action 一致性 (50分)
         const fa = dj?.action ? norm(String(dj.action)) : null;
         const la = lj.stance ? norm(String(lj.stance)) : null;

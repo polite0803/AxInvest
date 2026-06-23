@@ -2620,8 +2620,10 @@ impl axagent_harness::market_data::MarketDataProvider for AStockClient {
     async fn get_quote(
         &self,
         stock_code: &str,
-    ) -> std::result::Result<axagent_harness::market_data::StockQuote, axagent_harness::core_error::AxAgentError>
-    {
+    ) -> std::result::Result<
+        axagent_harness::market_data::StockQuote,
+        axagent_harness::core_error::AxAgentError,
+    > {
         self.get_quote(stock_code)
             .await
             .map_err(|e| axagent_harness::core_error::AxAgentError::DataSource(e.to_string()))
@@ -2633,8 +2635,10 @@ impl axagent_harness::market_data::MarketDataProvider for AStockClient {
         period: &str,
         limit: u32,
         adj_type: Option<axagent_harness::market_data::AdjType>,
-    ) -> std::result::Result<Vec<axagent_harness::market_data::KLine>, axagent_harness::core_error::AxAgentError>
-    {
+    ) -> std::result::Result<
+        Vec<axagent_harness::market_data::KLine>,
+        axagent_harness::core_error::AxAgentError,
+    > {
         self.get_klines_with_adj(stock_code, period, limit, adj_type)
             .await
             .map_err(|e| axagent_harness::core_error::AxAgentError::DataSource(e.to_string()))

@@ -2,8 +2,8 @@
 //!
 //! 对外暴露股票数据查询与分析接口，供外部脚本调用。
 
-use axagent_harness::market_data::MarketDataProvider;
 use axagent_entities::{stock_analyses, watchlist_items};
+use axagent_harness::market_data::MarketDataProvider;
 use axum::{
     Json,
     extract::{Path, Query, State},

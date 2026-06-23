@@ -98,9 +98,7 @@ async fn browser_fetch(
         );
         return Err(DataError::VendorError {
             vendor: "browser_eastmoney".into(),
-            message: format!(
-                "empty body (url={navigated_url}, type={content_type})"
-            ),
+            message: format!("empty body (url={navigated_url}, type={content_type})"),
         });
     }
 

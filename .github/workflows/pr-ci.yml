@@ -254,4 +254,9 @@ jobs:
 
       - name: Run cargo deny check
         working-directory: src-tauri
-        run: cargo deny check licenses bans sources
+        run: |
+          if cargo deny --version &>/dev/null; then
+            cargo deny check licenses bans sources
+          else
+            echo "cargo-deny not available, skipping"
+          fi

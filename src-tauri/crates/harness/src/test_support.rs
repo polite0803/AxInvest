@@ -137,10 +137,7 @@ struct EmptyMarketDataProvider;
 
 #[async_trait::async_trait]
 impl crate::market_data::MarketDataProvider for EmptyMarketDataProvider {
-    async fn get_quote(
-        &self,
-        _stock_code: &str,
-    ) -> Result<crate::market_data::StockQuote> {
+    async fn get_quote(&self, _stock_code: &str) -> Result<crate::market_data::StockQuote> {
         Err(AxAgentError::DataSource("test stub: no quote".into()))
     }
 

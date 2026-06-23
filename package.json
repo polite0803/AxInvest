@@ -110,6 +110,7 @@
     "@dprint/typescript": "^0.93.3",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
+    "@shikijs/types": "^4.2.0",
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2.11.1",
     "@testing-library/jest-dom": "^6.9.1",

@@ -1388,8 +1388,13 @@ fn start_cron_scheduler(state: &AppState) {
 
                     // 判定 loss → 触发反思工作流
                     if outcome == "loss" {
+                        let raw_return_f64 = if price_after > 0.0 {
+                            Some((later_close / price_after - 1.0) * 100.0)
+                        } else {
+                            None
+                        };
                         let pct = if price_after > 0.0 {
-                            format!("{:.1}%", (later_close / price_after - 1.0) * 100.0)
+                            format!("{:.1}%", raw_return_f64.unwrap_or(0.0))
                         } else {
                             "下跌".to_string()
                         };
@@ -1404,20 +1409,17 @@ fn start_cron_scheduler(state: &AppState) {
                             a.stock_name.as_str(),
                             &a.id,
                             &format!("30天后 {} → 失败", pct),
-                            // v008 (C3 借鉴): 4 个结构化 outcome 变量
-                            // evolution_drift cron 场景已有 pct 算式,Phase 2 B1
-                            // 实施时把这里改成 Some(pct) / Some(pct - alpha) 等
+                            // [缺陷7修复] raw_return 传实际收益率而非 None
+                            raw_return_f64,
                             None,
-                            None,
-                            None,
+                            // 约 30 天持仓
+                            Some(30),
                             None,
                             date.as_str(),
                             &today,
                             0u8,
                             "light",
-                            // [B2/B3 借鉴] evolution_drift cron 也是手动触发场景,无
-                            // B1 阶段落盘的 pending row,传 None 走 INSERT 路径。
-                            // D1 批量反思会传 Some(rid) 走 UPDATE 路径。
+                            // [B2/B3 借鉴] evolution_drift cron 场景无 B1 pending row,传 None
                             None,
                         )
                         .await;
@@ -1529,6 +1531,47 @@ fn start_cron_scheduler(state: &AppState) {
                     let _ = store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
                         .await;
+                }
+            });
+            return;
+        }
+
+        // ── 分支 2.5：批量反思（D1 借鉴：定期 resolve pending reflections）──
+        if job.task_type.as_deref() == Some("batch-reflection") {
+            let database = db.clone();
+            let store = cron_store.clone();
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            let astock_client = astock_client.clone();
+            let work_engine = work_engine.clone();
+            let vector_store = vector_store.clone();
+            let master_key2 = master_key.clone();
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let result = crate::commands::stock_workflow::run_batch_reflection_inner(
+                    &database,
+                    &astock_client,
+                    &work_engine,
+                    &vector_store,
+                    &master_key2,
+                    Some(20),
+                )
+                .await;
+                let summary = match &result {
+                    Ok(v) => format!("批量反思 OK: resolved={}", v["resolved"]),
+                    Err(e) => format!("批量反思失败: {e}"),
+                };
+                let success = result.is_ok();
+                let run_result = axagent_runtime_core::TaskRunResult {
+                    success,
+                    output: Some(summary),
+                    error: result.as_ref().err().cloned(),
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                let _ = store.record_run(&job_id, run_result).await;
+                if !recurring {
+                    let _ = store.set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled).await;
                 }
             });
             return;

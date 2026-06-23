@@ -3,7 +3,7 @@
 import { ModelSelect } from "@/components/shared/ModelSelect";
 import { usePromptTemplateStore, useProviderStore, useWorkflowEditorStore } from "@/stores";
 import type { PromptTemplate } from "@/types";
- 
+
 import { Button, Input, InputNumber, message, Modal, theme } from "antd";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";

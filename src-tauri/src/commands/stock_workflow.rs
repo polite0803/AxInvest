@@ -1547,10 +1547,11 @@ async fn fetch_stock_lessons(stock_code: &str, db: &sea_orm::DatabaseConnection)
     use chrono::Utc;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-    // ── same_ticker: 3 条同 ticker 近 90 天 ──
+    // ── same_ticker: 3 条同 ticker 近 90 天已完成反思 ──
     let three_months_ago = Utc::now() - chrono::Duration::days(90);
     let same_ticker: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::StockCode.eq(stock_code))
+        .filter(stock_reflections::Column::Status.eq("completed")) // 只注入已 resolve 的教训
         .filter(stock_reflections::Column::CreatedAt.gte(three_months_ago.timestamp_millis()))
         .order_by_desc(stock_reflections::Column::CreatedAt)
         .all(db)
@@ -1993,7 +1994,7 @@ pub async fn run_reflection_workflow(
             };
 
             let _ = stock_reflections::Entity::update_many()
-                .col_expr(stock_reflections::Column::Status, Expr::value(status_text))
+                .col_expr(stock_reflections::Column::Status, Expr::value(&status_text))
                 .col_expr(stock_reflections::Column::DecisionJson, Expr::value(dj_text))
                 .col_expr(
                     stock_reflections::Column::WhatWentWrong,
@@ -2006,6 +2007,19 @@ pub async fn run_reflection_workflow(
                     Expr::value(params_suggestion_json),
                 )
                 .col_expr(stock_reflections::Column::BlackboardSnapshot, Expr::value(bb_text))
+                // v008 (C2 借鉴): 回写 verdict / alpha_cited / lesson_summary
+                .col_expr(
+                    stock_reflections::Column::Verdict,
+                    Expr::value(reflection_json.get("verdict").and_then(|v| v.as_str().map(|s| s.to_string()))),
+                )
+                .col_expr(
+                    stock_reflections::Column::AlphaCited,
+                    Expr::value(reflection_json.get("alpha_cited").and_then(|v| v.as_str().map(|s| s.to_string()))),
+                )
+                .col_expr(
+                    stock_reflections::Column::LessonSummary,
+                    Expr::value(reflection_json.get("lesson_summary").and_then(|v| v.as_str().map(|s| s.to_string()))),
+                )
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
@@ -2030,6 +2044,26 @@ pub async fn run_reflection_workflow(
             }
 
             tracing::info!("[reflection] {}: 反思完成", stock_code);
+
+            // ── [F1 借鉴] 反思完成后自动提取 lesson 为可重用规则 ──
+            // 借鉴 TradingAgents 反思→规则提取机制:反思完成后把 lesson_summary
+            // 提取为可重用的规则存入 reflection_lessons 表,下次决策可查询。
+            if status_text == "completed" {
+                if let Some(ls) = reflection_json
+                    .get("lesson_summary")
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                {
+                    let _ = extract_lesson_to_rule(
+                        db,
+                        stock_code,
+                        &analysis_id,
+                        &ls,
+                        reflection_json.get("verdict").and_then(|v| v.as_str()),
+                    )
+                    .await;
+                }
+            }
+
             Ok(analysis_id)
         },
         Err(e) => {
@@ -3613,6 +3647,183 @@ pub async fn run_batch_reflection(
         skipped_young,
         cleaned_up
     );
+
+    Ok(serde_json::json!({
+        "totalPending": pendings.len(),
+        "processed": pendings.len().min(max_count),
+        "resolved": resolved,
+        "failed": failed,
+        "skippedYoung": skipped_young,
+        "cleanedUp": cleaned_up,
+        "errors": errors,
+    }))
+}
+
+// ── [F1 借鉴] 提取反思教训为可重用规则 ──
+//
+// 借鉴 TradingAgents 反思→规则提取机制:反思完成后把 lesson_summary
+// 提取为可重用的规则存入 reflection_lessons 表。
+// 规则自动提取规则:lesson_summary ≤200 字符、含明确建议性内容的才提取。
+async fn extract_lesson_to_rule(
+    db: &sea_orm::DatabaseConnection,
+    stock_code: &str,
+    source_reflection_id: &str,
+    lesson_summary: &str,
+    verdict: Option<&str>,
+) -> Result<(), String> {
+    use axagent_core::entity::reflection_lessons;
+    use sea_orm::ActiveModelTrait;
+    use sea_orm::Set;
+
+    // 短文本过短或无实际建议性内容则跳过
+    let trimmed = lesson_summary.trim();
+    if trimmed.len() < 10 || trimmed.len() > 250 {
+        return Ok(());
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    // 从 verdict 推断初始置信度
+    let confidence = match verdict {
+        Some("wrong") => 0.7, // wrong 的教训更有价值,给更高初始置信度
+        Some("partial") => 0.5,
+        _ => 0.3, // correct 或 None 的教训价值较低
+    };
+
+    reflection_lessons::ActiveModel {
+        id: Set(id),
+        lesson_summary: Set(trimmed.to_string()),
+        rule_pattern: Set(None), // 后续由 F1 迭代扩展: LLM 分析 lesson_summary 自动提取
+        source_reflection_id: Set(Some(source_reflection_id.to_string())),
+        stock_code: Set(Some(stock_code.to_string())),
+        applicable_scenarios: Set(None),
+        times_applied: Set(0),
+        success_count: Set(0),
+        confidence: Set(confidence),
+        status: Set("active".to_string()),
+        created_at: Set(now_ms),
+        updated_at: Set(now_ms),
+    }
+    .insert(db)
+    .await
+    .map(|_| ())
+    .map_err(|e| format!("F1 写入 reflection_lessons 失败: {e}"))
+}
+
+// ── [缺陷5 fix] 内部批量反思函数(非 Tauri 命令,供 cron 调度器直接调用) ──
+//
+// 从 run_batch_reflection 提取的核心逻辑。
+// 参数通过独立引用传入,不需要 AppState。
+pub async fn run_batch_reflection_inner(
+    db: &sea_orm::DatabaseConnection,
+    _client: &axagent_astock_data::AStockClient,
+    _engine: &axagent_rt_workflow::work_engine::WorkEngine,
+    _vector_store: &axagent_core::vector_store::VectorStore,
+    _master_key: &[u8; 32],
+    max_count: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    use axagent_core::entity::stock_analyses;
+    use axagent_core::entity::stock_reflections;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+
+    let max_count = max_count.unwrap_or(20) as usize;
+    let today_ms = chrono::Utc::now().timestamp_millis();
+
+    // 1. 扫所有 pending row,按 created_at ASC(最老的先处理,避免积压)
+    let pendings: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.eq("pending"))
+        .order_by_asc(stock_reflections::Column::CreatedAt)
+        .all(db)
+        .await
+        .map_err(|e| format!("run_batch_reflection_inner 扫 pending row 失败: {e}"))?;
+
+    tracing::info!(
+        "[D1 batch_reflection] 扫到 {} 条 pending row, max_count={}",
+        pendings.len(),
+        max_count
+    );
+
+    let mut resolved = 0u32;
+    let mut failed = 0u32;
+    let mut skipped_young = 0u32;
+    let mut errors: Vec<String> = Vec::new();
+
+    for (i, p) in pendings.iter().take(max_count).enumerate() {
+        let analysis = match stock_analyses::Entity::find_by_id(&p.original_analysis_id)
+            .one(db)
+            .await
+        {
+            Ok(Some(a)) => a,
+            Ok(None) => {
+                skipped_young += 1;
+                continue;
+            },
+            Err(e) => {
+                failed += 1;
+                errors.push(format!("{}: 查询 analysis 失败: {e}", p.id));
+                continue;
+            },
+        };
+
+        let expected_days = analysis
+            .decision_expected_holding_days
+            .map(|d| d as i64)
+            .unwrap_or(28);
+        let analysis_date = analysis.as_of_date.as_deref().unwrap_or(&p.as_of_date);
+        let analysis_ms = chrono::NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d")
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+            .map(|dt| dt.and_utc().timestamp_millis())
+            .unwrap_or(p.created_at);
+        let days_held = (today_ms - analysis_ms).max(0) / 86_400_000;
+
+        if days_held < expected_days {
+            skipped_young += 1;
+            continue;
+        }
+
+        let r = run_reflection_workflow(
+            db,
+            _client,
+            _engine,
+            _vector_store,
+            _master_key,
+            &p.stock_code,
+            &p.stock_name,
+            &p.original_analysis_id,
+            &p.actual_outcome,
+            None,
+            None,
+            Some(days_held as i32),
+            None,
+            analysis_date,
+            &chrono::Utc::now().format("%Y-%m-%d").to_string(),
+            0u8,
+            "light",
+            Some(p.id.clone()),
+        )
+        .await;
+
+        match r {
+            Ok(_) => {
+                resolved += 1;
+            },
+            Err(e) => {
+                failed += 1;
+                errors.push(format!("{}: {e}", p.id));
+            },
+        }
+    }
+
+    // D2 FIFO 清理
+    let ninety_days_ago_ms = today_ms - 90 * 86_400_000;
+    let cleaned_up = stock_reflections::Entity::delete_many()
+        .filter(stock_reflections::Column::Status.eq("completed"))
+        .filter(stock_reflections::Column::UpdatedAt.lt(ninety_days_ago_ms))
+        .exec(db)
+        .await
+        .map(|r| r.rows_affected)
+        .unwrap_or(0);
 
     Ok(serde_json::json!({
         "totalPending": pendings.len(),

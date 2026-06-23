@@ -15,7 +15,7 @@ import { invoke } from "@/lib/invoke";
 import { useSkillStore, useUIStore } from "@/stores";
 import type { MarketplaceSkill, Skill } from "@/types";
 import { Claude } from "@lobehub/icons";
- 
+
 import {
   Button,
   Card,

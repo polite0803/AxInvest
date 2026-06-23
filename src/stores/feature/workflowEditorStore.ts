@@ -868,7 +868,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             state.nodes = [];
             state.edges = [];
           }
-          state.templates = state.templates.filter((t) => t.id !== id);
+          state.templates = state.templates.filter((t: WorkflowTemplateResponse) => t.id !== id);
           state.isLoading = false;
         });
         return true;
@@ -1051,7 +1051,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       set((state) => {
         // ID 冲突检测：若已存在同名节点，生成新 ID 避免覆盖
         let nodeToAdd = node;
-        if (state.nodes.some((n) => n.id === node.id)) {
+        if (state.nodes.some((n: WorkflowNode) => n.id === node.id)) {
           nodeToAdd = { ...node, id: `node-${crypto.randomUUID()}` };
         }
         state.past.push(buildHistoryEntry(state));
@@ -1078,7 +1078,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           }
           state._lastUndoRecordTime = now;
         }
-        const index = state.nodes.findIndex((n) => n.id === nodeId);
+        const index = state.nodes.findIndex((n: WorkflowNode) => n.id === nodeId);
         if (index !== -1) {
           const existing = state.nodes[index];
           // 深合并嵌套对象：联合类型各变体 config/retry 类型不同，
@@ -1123,16 +1123,16 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
 
         state._batchDeletingIds = new Set(toDelete);
 
-        state.nodes = state.nodes.filter((n) => !toDelete.has(n.id));
+        state.nodes = state.nodes.filter((n: WorkflowNode) => !toDelete.has(n.id));
         state.edges = state.edges.filter(
-          (e) => !toDelete.has(e.source) && !toDelete.has(e.target),
+          (e: WorkflowEdge) => !toDelete.has(e.source) && !toDelete.has(e.target),
         );
 
         // 清理其他节点 config 中对被删节点的引用
         // 1. 容器节点 branches/debater_steps/body_steps/agent_steps/input_sources 中的引用
         // 2. 容器节点 subGraph.nodes 中的引用
         // 3. 普通节点 config 中的引用
-        state.nodes = state.nodes.map((n) => {
+        state.nodes = state.nodes.map((n: WorkflowNode) => {
           const cfg = (n as unknown as { config?: Record<string, unknown> }).config;
           if (!cfg) { return n; }
 
@@ -1199,7 +1199,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
 
         // 清理 parentRefs 中被删节点作为子或作为父的登记项
         const nextParentRefs: Record<string, string> = {};
-        for (const [k, v] of Object.entries(state.parentRefs)) {
+        for (const [k, v] of Object.entries(state.parentRefs) as [string, string][]) {
           if (!toDelete.has(k) && !toDelete.has(v)) {
             nextParentRefs[k] = v;
           }
@@ -1229,12 +1229,14 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         {
           const nextExpanded: Record<string, typeof state.expandedSubWorkflows[string]> = {};
           let esChanged = false;
-          for (const [swId, swData] of Object.entries(state.expandedSubWorkflows)) {
+          for (
+            const [swId, swData] of Object.entries(state.expandedSubWorkflows) as [string, ExpandedSubWorkflowData][]
+          ) {
             if (toDelete.has(swId)) {
               esChanged = true;
               continue;
             }
-            if (swData?.nodes?.some((n) => toDelete.has(n.id))) {
+            if (swData?.nodes?.some((n: WorkflowNode) => toDelete.has(n.id))) {
               esChanged = true;
               continue;
             }
@@ -1277,7 +1279,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           }
           state._lastUndoRecordTime = now;
         }
-        const index = state.edges.findIndex((e) => e.id === edgeId);
+        const index = state.edges.findIndex((e: WorkflowEdge) => e.id === edgeId);
         if (index !== -1) {
           state.edges[index] = { ...state.edges[index], ...updates };
           state.isDirty = true;
@@ -1293,7 +1295,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           state.past = state.past.slice(-50);
         }
         state._lastUndoRecordTime = Date.now();
-        state.edges = state.edges.filter((e) => e.id !== edgeId);
+        state.edges = state.edges.filter((e: WorkflowEdge) => e.id !== edgeId);
         if (state.selectedEdgeId === edgeId) {
           state.selectedEdgeId = null;
         }
@@ -1676,9 +1678,9 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         if (result) {
           set((state) => {
             if (mergeMode && state.nodes.length > 0) {
-              const existingIds = new Set(state.nodes.map(n => n.id));
+              const existingIds = new Set(state.nodes.map((n: WorkflowNode) => n.id));
               const prefix = `ai-${Date.now()}`;
-              const newNodes = result.nodes.map(n => ({
+              const newNodes = result.nodes.map((n: WorkflowNode) => ({
                 ...n,
                 id: existingIds.has(n.id) ? `${prefix}-${n.id}` : n.id,
                 position: { x: n.position.x + 50, y: n.position.y + 50 },
@@ -1689,7 +1691,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
                   nodeIdMap.set(orig.id, newNodes[i].id);
                 }
               });
-              const newEdges = result.edges.map(e => ({
+              const newEdges = result.edges.map((e: WorkflowEdge) => ({
                 ...e,
                 id: `ai-edge-${Date.now()}-${e.id}`,
                 source: nodeIdMap.get(e.source) || e.source,
@@ -1748,7 +1750,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       });
       try {
         const { nodes } = get();
-        const currentNodeTypes = nodes.map(n => n.type).filter(Boolean) as string[];
+        const currentNodeTypes = nodes.map((n: WorkflowNode) => n.type).filter(Boolean) as string[];
         const result = await invoke<
           Array<{
             node_type: string;
@@ -1951,7 +1953,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             }).config;
             if (!cfg.debater_steps.includes(fix.step_id)) { break; }
             const newSteps = cfg.debater_steps.filter((s) => s !== fix.step_id);
-            const newSubNodes = cfg.subGraph?.nodes.filter((n) => n.id !== fix.step_id) ?? [];
+            const newSubNodes = cfg.subGraph?.nodes.filter((n: { id: string }) => n.id !== fix.step_id) ?? [];
             const newSubEdges = cfg.subGraph?.edges.filter(
               (e) => e.source !== fix.step_id && e.target !== fix.step_id,
             ) ?? [];
@@ -2055,7 +2057,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         errorUnlisten = null;
       };
       try {
-        const history = aiChatMessages.map((m) => ({
+        const history = aiChatMessages.map((m: AiChatMessage) => ({
           role: m.role,
           content: m.rawContent || m.content,
         }));
@@ -2075,7 +2077,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
               const actions = parseActionsFromContent(accumulatedContent);
               const cleanContent = stripActionBlocks(accumulatedContent);
               set((state) => {
-                state.aiChatMessages = state.aiChatMessages.map((m) =>
+                state.aiChatMessages = state.aiChatMessages.map((m: AiChatMessage) =>
                   m.id === assistantMsg.id
                     ? { ...m, content: cleanContent, isStreaming: false, actions, rawContent: accumulatedContent }
                     : m
@@ -2087,7 +2089,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
             } else {
               const displayContent = stripPartialActionBlocks(accumulatedContent);
               set((state) => {
-                state.aiChatMessages = state.aiChatMessages.map((m) =>
+                state.aiChatMessages = state.aiChatMessages.map((m: AiChatMessage) =>
                   m.id === assistantMsg.id
                     ? { ...m, content: displayContent + "▍", isStreaming: true, rawContent: accumulatedContent }
                     : m
@@ -2101,7 +2103,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           (event) => {
             if (event.payload.conversation_id !== aiChatSessionId) { return; }
             set((state) => {
-              state.aiChatMessages = state.aiChatMessages.map((m) =>
+              state.aiChatMessages = state.aiChatMessages.map((m: AiChatMessage) =>
                 m.id === assistantMsg.id
                   ? { ...m, content: m.content + `\n\n❌ Error: ${event.payload.error}`, isStreaming: false }
                   : m
@@ -2128,7 +2130,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         logIpcError("AI Chat")(error);
         cleanupListeners();
         set((state) => {
-          state.aiChatMessages = state.aiChatMessages.map((m) =>
+          state.aiChatMessages = state.aiChatMessages.map((m: AiChatMessage) =>
             m.id === assistantMsg.id
               ? { ...m, content: `❌ ${String(error)}`, isStreaming: false }
               : m
@@ -2146,7 +2148,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
       _aiChatCleanup?.();
       set((state) => {
         state._aiChatCleanup = null;
-        state.aiChatMessages = state.aiChatMessages.map((m) =>
+        state.aiChatMessages = state.aiChatMessages.map((m: AiChatMessage) =>
           m.id === aiChatStreamingMessageId
             ? { ...m, isStreaming: false }
             : m
@@ -2187,7 +2189,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         }
         case "add_node": {
           const newNode = action.data.node;
-          const existingIds = new Set(nodes.map(n => n.id));
+          const existingIds = new Set(nodes.map((n: WorkflowNode) => n.id));
           const finalId = existingIds.has(newNode.id) ? `ai-${Date.now()}-${newNode.id}` : newNode.id;
           const offset = action.data.position ?? { x: 50, y: 50 };
           set((state) => {
@@ -2206,8 +2208,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           break;
         }
         case "add_nodes": {
-          const existingIds = new Set(nodes.map(n => n.id));
-          const newNodes = action.data.nodes.map(n => ({
+          const existingIds = new Set(nodes.map((n: WorkflowNode) => n.id));
+          const newNodes = action.data.nodes.map((n: WorkflowNode) => ({
             ...n,
             id: existingIds.has(n.id) ? `ai-${Date.now()}-${n.id}` : n.id,
             position: { x: n.position.x + 50, y: n.position.y + 50 },
@@ -2237,7 +2239,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
                 }
                 state._lastUndoRecordTime = now;
               }
-              state.nodes = state.nodes.map(n => {
+              state.nodes = state.nodes.map((n: WorkflowNode) => {
                 if (n.id !== node_id) { return n; }
                 const merged: Record<string, unknown> = { ...changes };
                 if (merged.config && typeof merged.config === "object" && n.config) {
@@ -2259,8 +2261,8 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
                 state.past = state.past.slice(-50);
               }
               state._lastUndoRecordTime = Date.now();
-              state.nodes = state.nodes.filter(n => n.id !== id);
-              state.edges = state.edges.filter(e => e.source !== id && e.target !== id);
+              state.nodes = state.nodes.filter((n: WorkflowNode) => n.id !== id);
+              state.edges = state.edges.filter((e: WorkflowEdge) => e.source !== id && e.target !== id);
             });
           }
           break;
@@ -2275,8 +2277,10 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
                 state.past = state.past.slice(-50);
               }
               state._lastUndoRecordTime = Date.now();
-              state.nodes = state.nodes.filter(n => !idsToDelete.has(n.id));
-              state.edges = state.edges.filter(e => !idsToDelete.has(e.source) && !idsToDelete.has(e.target));
+              state.nodes = state.nodes.filter((n: WorkflowNode) => !idsToDelete.has(n.id));
+              state.edges = state.edges.filter((e: WorkflowEdge) =>
+                !idsToDelete.has(e.source) && !idsToDelete.has(e.target)
+              );
             });
           }
           break;
@@ -2307,7 +2311,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
                 state.past = state.past.slice(-50);
               }
               state._lastUndoRecordTime = Date.now();
-              state.edges = state.edges.map(e => (e.id === edge_id ? { ...e, ...changes } : e));
+              state.edges = state.edges.map((e: WorkflowEdge) => (e.id === edge_id ? { ...e, ...changes } : e));
             });
           }
           break;
@@ -2322,7 +2326,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
                 state.past = state.past.slice(-50);
               }
               state._lastUndoRecordTime = Date.now();
-              state.edges = state.edges.filter(e => e.id !== id);
+              state.edges = state.edges.filter((e: WorkflowEdge) => e.id !== id);
             });
           }
           break;
@@ -2468,15 +2472,27 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         return;
       }
       set((state) => {
-        state.aiActionTransactions = state.aiActionTransactions.map((t) =>
-          t.id === txId ? { ...t, appliedCount: t.appliedCount + 1 } : t
-        );
+        state.aiActionTransactions = state.aiActionTransactions.map((
+          t: {
+            id: string;
+            timestamp: number;
+            appliedCount: number;
+            beforeNodes: WorkflowNode[];
+            beforeEdges: WorkflowEdge[];
+          },
+        ) => t.id === txId ? { ...t, appliedCount: t.appliedCount + 1 } : t);
       });
     },
 
     commitAiActionTransaction: (txId: string) => {
       set((state) => {
-        state.aiActionTransactions = state.aiActionTransactions.filter((t) => t.id !== txId);
+        state.aiActionTransactions = state.aiActionTransactions.filter((t: {
+          id: string;
+          timestamp: number;
+          appliedCount: number;
+          beforeNodes: WorkflowNode[];
+          beforeEdges: WorkflowEdge[];
+        }) => t.id !== txId);
       });
     },
 
@@ -2490,7 +2506,13 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
         // beginAiActionTransaction 已在事务开始前由调用方记录了历史快照
         state.nodes = snapshotNodes;
         state.edges = snapshotEdges;
-        state.aiActionTransactions = state.aiActionTransactions.filter((t) => t.id !== txId);
+        state.aiActionTransactions = state.aiActionTransactions.filter((t: {
+          id: string;
+          timestamp: number;
+          appliedCount: number;
+          beforeNodes: WorkflowNode[];
+          beforeEdges: WorkflowEdge[];
+        }) => t.id !== txId);
         state.isDirty = true;
       });
     },
@@ -2617,9 +2639,9 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
               delete state.parentRefs[n.id];
             }
             // 清理子节点与主画布的连接边
-            const subNodeIds = new Set(sub.nodes.map((n) => n.id));
+            const subNodeIds = new Set(sub.nodes.map((n: WorkflowNode) => n.id));
             state.edges = state.edges.filter(
-              (e) => !subNodeIds.has(e.source) && !subNodeIds.has(e.target),
+              (e: WorkflowEdge) => !subNodeIds.has(e.source) && !subNodeIds.has(e.target),
             );
           }
           delete state.expandedSubWorkflows[nodeId];
@@ -2669,7 +2691,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           target: idMap.get(e.target) || e.target,
         }));
 
-        const autoNodes = subNodes.map((n) => ({
+        const autoNodes = subNodes.map((n: WorkflowNode) => ({
           id: n.id,
           type: n.type,
           position: n.position,

@@ -4621,13 +4621,26 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 system_prompt: "你的任务：对历史股票分析进行反思复盘。\n\
                     目标股票代码: {{stock_code}}，股票名称: {{stock_name}}\n\
                     实际走势结果: {{actual_outcome}}（非空 → 反思模式）\n\
+                    ——结构化 outcome 变量（v008 C3 借鉴:硬数字,避免 LLM 脑补）——\n\
+                    原始收益率: {{raw_return_pct}}%\n\
+                    相对基准超额: {{alpha_return_pct}}%\n\
+                    实际持有天数: {{holding_days}} 天\n\
+                    基准名称: {{benchmark_name}}\n\
                     反思深度: {{reflection_depth}}（light = 简要；deep = 详细推理链）\n\n\
+                    历史反思教训（避免重蹈覆辙）:\n\
+                    {{stock_lessons}}\n\n\
                     重要原则：\n\
                     1. 必须严格基于 actual_outcome 提供的实际走势与上游分析结论做对比，识别错因。\n\
                     2. 严禁输出空结果或只列 data_gaps。\n\
-                    3. 反思深度=deep 时给出可执行的检查清单（具体指标阈值、信号确认步骤）。\n\n\
+                    3. 强制简短：lesson_summary 字段必须 ≤200 字符、≤2 句。\n\
+                    4. 反思深度=deep 时给出可执行的检查清单（具体指标阈值、信号确认步骤）。\n\
+                    5. 用 verdict 字段标记本次反思判定（correct/partial/wrong 三选一）。\n\
+                    6. 如果复盘发现本可优化决策，在 alpha_cited 字段说明关键 alpha 信号。\n\n\
                     你必须输出严格 JSON 格式（不要 Markdown 代码块，不要多余文本），字段如下：\n\
                     {\n\
+                      \"verdict\": \"correct | partial | wrong\",\n\
+                      \"alpha_cited\": \"引用本次未被重视但事后证明重要的 alpha 信号\",\n\
+                      \"lesson_summary\": \"≤200 字符、≤2 句简短总结\",\n\
                       \"what_went_wrong\": \"哪里判断错了，简要说明\",\n\
                       \"missed_signals\": [\"被忽略的信号1\", \"被忽略的信号2\"],\n\
                       \"fix_for_future\": \"下次如何避免同样的错误\",\n\
@@ -4640,6 +4653,11 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     ("stock_name".to_string(), "trigger".to_string()),
                     ("actual_outcome".to_string(), "trigger".to_string()),
                     ("reflection_depth".to_string(), "trigger".to_string()),
+                    ("raw_return_pct".to_string(), "trigger".to_string()),
+                    ("alpha_return_pct".to_string(), "trigger".to_string()),
+                    ("holding_days".to_string(), "trigger".to_string()),
+                    ("benchmark_name".to_string(), "trigger".to_string()),
+                    ("stock_lessons".to_string(), "trigger".to_string()),
                 ]
                 .into_iter()
                 .collect(),
@@ -4735,7 +4753,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     ];
 
     // serenity-reflection 模板版本。v2: 重新种子化
-    const REFLECTION_TEMPLATE_VERSION: i32 = 2;
+    const REFLECTION_TEMPLATE_VERSION: i32 = 3;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =

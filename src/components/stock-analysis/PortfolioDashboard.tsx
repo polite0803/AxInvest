@@ -39,14 +39,17 @@ export function PortfolioDashboard() {
     try {
       const result = await invoke<Holding[]>("list_portfolio");
       setHoldings(result.sort((a, b) => b.marketValue - a.marketValue));
-    } catch (e) {
-      console.error("[portfolio] load failed:", e);
+    } catch (_e) {
+      console.error("[portfolio] load failed:", _e);
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    loadHoldings();
+    const initLoad = async () => {
+      await loadHoldings();
+    };
+    initLoad();
     refreshInterval.current = setInterval(loadHoldings, 30000); // 30s auto-refresh
     return () => {
       if (refreshInterval.current) { clearInterval(refreshInterval.current); }
@@ -64,7 +67,7 @@ export function PortfolioDashboard() {
       await invoke("remove_portfolio_holding", { id });
       message.success(t("common.deleted"));
       loadHoldings();
-    } catch (e) {
+    } catch (_e) {
       message.error(t("common.error"));
     }
   };

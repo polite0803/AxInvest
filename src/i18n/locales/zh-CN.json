@@ -8144,8 +8144,8 @@
       "riskAggressive": "激进风险评估",
       "riskConservative": "保守风险评估",
       "riskNeutral": "中性风险评估",
-      "riskAggregation": "Risk Aggregation",
-      "riskClassification": "Risk Classification",
+      "riskAggregation": "风险聚合",
+      "riskClassification": "风险分类",
       "bullAnalyst": "Bull",
       "bearAnalyst": "Bear",
       "failedSteps": "失败步骤",
@@ -8173,7 +8173,8 @@
       "comprehensive": "综合",
       "conservative": "保守",
       "neutral": "中性",
-      "researchManager": "研究经理"
+      "researchManager": "研究经理",
+      "convergence": "风险收敛"
     },
     "workflowStarting": "⏳ 正在启动 {{stockCode}} 股票分析工作流...",
     "success": "成功",
@@ -9060,6 +9061,7 @@
     "workflow.partialFailed": "partialFailed",
     "workflow.positionPct": "仓位",
     "workflow.riskAggregation": "风险聚合",
+    "workflow.riskConvergence": "风险收敛",
     "workflow.riskAggressive": "激进风险评估",
     "workflow.riskClassification": "风险分类",
     "workflow.riskConservative": "保守风险评估",

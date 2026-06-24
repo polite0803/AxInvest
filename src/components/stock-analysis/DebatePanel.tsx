@@ -535,8 +535,6 @@ export function DebatePanel() {
   const pct = Math.round(sentimentRatio * 100);
   const pointerLeft = `${sentimentRatio * 100}%`;
 
-  if (debateRounds.length === 0) { return null; }
-
   // 预处理所有轮次数据
   const processedRounds = debateRounds.map((r) => ({
     round: r.round,
@@ -555,20 +553,12 @@ export function DebatePanel() {
   );
   const showWarning = failedRounds.length > 0 || degradedRounds.length > 0;
 
-  // 阶段 6: 重跑辩论 — 直接触发一次 stock-analysis workflow
-  // (用 stockAnalysisStore 的 startAnalysis;不引入新后端命令)
-  // startAnalysis hook 已在组件顶部声明
-  const handleRerun = () => {
-    const { stockCode } = useStockAnalysisStore.getState();
-    if (!stockCode) { return; }
-    void startAnalysis(stockCode);
-  };
-
   // P1.5-5: Round 切换状态
   const [activeRoundIdx, setActiveRoundIdx] = useState(0);
   const activeRound = processedRounds[activeRoundIdx];
 
   // 找 R3 裁决卡片: 从所有轮次中提取最终立场
+  // processedRounds 在本组件内创建且不突变，使用 useMemo 的唯一目的是传稳定引用
   const finalVerdict = useMemo(() => {
     for (const r of processedRounds) {
       if (r.bull.parsed?.final_position || r.bull.parsed?.claim) {
@@ -579,7 +569,19 @@ export function DebatePanel() {
       }
     }
     return null;
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   }, [processedRounds]);
+
+  if (debateRounds.length === 0) { return null; }
+
+  // 阶段 6: 重跑辩论 — 直接触发一次 stock-analysis workflow
+  // (用 stockAnalysisStore 的 startAnalysis;不引入新后端命令)
+  // startAnalysis hook 已在组件顶部声明
+  const handleRerun = () => {
+    const { stockCode } = useStockAnalysisStore.getState();
+    if (!stockCode) { return; }
+    void startAnalysis(stockCode);
+  };
 
   // Round 标签
   const roundOptions = processedRounds.map((r, i) => ({

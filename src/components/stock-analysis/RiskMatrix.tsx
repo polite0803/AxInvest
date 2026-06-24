@@ -187,6 +187,7 @@ const RISK_LABEL_KEYS: Record<string, string> = {
   "research-mgr": "stockAnalysis.risk.researchManager",
   "comprehensive": "stockAnalysis.risk.comprehensive",
   "risk-aggregated": "stockAnalysis.workflow.riskAggregation",
+  "risk-convergence": "stockAnalysis.workflow.riskConvergence",
   "risk-level": "stockAnalysis.riskLevel",
 };
 

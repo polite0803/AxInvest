@@ -69,7 +69,10 @@ export function ScheduledAnalysisPanel() {
   }, []);
 
   useEffect(() => {
-    loadJobs();
+    const init = async () => {
+      await loadJobs();
+    };
+    init();
   }, [loadJobs]);
 
   const handleCreate = async () => {
@@ -95,20 +98,20 @@ export function ScheduledAnalysisPanel() {
     setSubmitting(false);
   };
 
-  const handleToggle = async (id: string, enabled: boolean) => {
+  const handleToggle = useCallback(async (id: string, enabled: boolean) => {
     try {
       await invoke("toggle_stock_cron", { id, enabled });
       loadJobs();
     } catch { /* silent */ }
-  };
+  }, [loadJobs]);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     try {
       await invoke("delete_stock_cron", { id });
       message.success(t("common.deleted"));
       loadJobs();
     } catch { /* silent */ }
-  };
+  }, [loadJobs, t]);
 
   /** P1: 从持仓一键导入 */
   const handleImportFromPortfolio = async () => {

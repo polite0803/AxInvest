@@ -12,6 +12,7 @@ const SPECIAL_MAP: Record<string, string> = {
   "agg-risk": "stockAnalysis.workflow.aggRisk",
   "risk-agg": "stockAnalysis.workflow.riskAggregation",
   "risk-aggregated": "stockAnalysis.workflow.riskAggregation",
+  "risk-convergence": "stockAnalysis.workflow.riskConvergence",
   "v-validate": "stockAnalysis.workflow.vValidate",
   "notify-result": "stockAnalysis.workflow.notifyResult",
 };

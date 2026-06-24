@@ -12,7 +12,7 @@ use axagent_harness::response_normalizer::ResponseNormalizer;
 use axagent_harness::tool::ToolPermissions;
 use axagent_harness::types::{ChatResponse, ContentBlock};
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
-use axagent_harness::{ToolRegistry, ToolContext};
+use axagent_harness::{ToolContext, ToolRegistry};
 use axagent_rt_workflow::Workflow;
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_runtime_core::DefaultResponseNormalizer;
@@ -1481,7 +1481,9 @@ pub async fn run_single_stock_analysis(
     variables.push(Variable {
         name: "stock_lessons".into(),
         var_type: "string".into(),
-        value: serde_json::Value::String(lessons_str.unwrap_or_else(|| "（暂无历史反思）".to_string())),
+        value: serde_json::Value::String(
+            lessons_str.unwrap_or_else(|| "（暂无历史反思）".to_string()),
+        ),
         description: Some("A1: 该股最近 90 天的反思教训".into()),
         is_secret: false,
     });
@@ -4368,9 +4370,7 @@ pub async fn export_md_to_docx(
         "output_path": output_path,
         "title": title.unwrap_or_else(|| "股票分析报告".to_string()),
     });
-    let ctx = ToolContext::new(
-        std::env::temp_dir().to_string_lossy().to_string(),
-    );
+    let ctx = ToolContext::new(std::env::temp_dir().to_string_lossy().to_string());
     let registry = state.local_tool_registry.lock().await;
     let tool = registry
         .get("ExportWord")
@@ -4392,9 +4392,7 @@ pub async fn export_md_to_pptx(
         "output_path": output_path,
         "title": title.unwrap_or_else(|| "股票分析报告".to_string()),
     });
-    let ctx = ToolContext::new(
-        std::env::temp_dir().to_string_lossy().to_string(),
-    );
+    let ctx = ToolContext::new(std::env::temp_dir().to_string_lossy().to_string());
     let registry = state.local_tool_registry.lock().await;
     let tool = registry
         .get("ExportPptx")

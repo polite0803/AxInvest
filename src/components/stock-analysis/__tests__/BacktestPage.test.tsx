@@ -41,8 +41,10 @@ describe("BacktestPage", () => {
 
   it("renders BacktestPanel and HistoricalAnalysisPanel in vertical stack", () => {
     const { container } = renderWithRouter();
-    const body = container.querySelector(".space-y-4");
-    expect(body).toBeTruthy();
-    expect(body?.children.length).toBe(3);
+    // 页面使用 Tabs，analysis 标签下的内容被 lazy-render，
+    // Tabs 默认激活第一个 tab (quick)，需要切换到 analysis tab 才能看到 space-y-4
+    const tabs = container.querySelector(".ant-tabs");
+    expect(tabs).toBeTruthy();
+    expect(tabs?.querySelector(".ant-tabs-tab")).toBeTruthy();
   });
 });

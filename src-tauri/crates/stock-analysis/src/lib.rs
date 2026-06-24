@@ -4,6 +4,7 @@ pub mod blackboard;
 pub mod data_clean;
 pub mod decision;
 pub mod decision_tracker;
+pub mod evidence_weight;
 pub mod evolution_drift;
 pub mod exit_recommend;
 // Phase 2: fundamentals_report 迁移到 astock-data 层(被 tools crate 依赖),

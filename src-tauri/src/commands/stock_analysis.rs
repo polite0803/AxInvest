@@ -21,6 +21,7 @@ use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::recommender::{self, RecoResponse};
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
+use axagent_stock_analysis::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
 use serde::{Deserialize, Serialize};
 
@@ -3640,4 +3641,17 @@ pub async fn set_t0_config(
         .ok_or_else(|| "RealtimeMonitor 未初始化".to_string())?;
     monitor.set_t0_config(config).await;
     Ok(())
+}
+
+// ── P0-1: 证据质量驱动的决策权重 ──
+
+/// 计算证据质量驱动的分析师权重（结合市场环境、时间维度、历史表现）
+///
+/// 前端分析页面生成 consensus 时调用此命令替代简单阈值投票。
+/// 传入市场环境信息、分析师报告、历史权重，返回每个分析师的最终权重和共识结果。
+#[tauri::command]
+pub fn compute_evidence_weights(
+    request: EvidenceWeightRequest,
+) -> Result<EvidenceWeightReport, String> {
+    Ok(evidence_weight::compute_evidence_weights(request))
 }

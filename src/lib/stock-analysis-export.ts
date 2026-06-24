@@ -311,7 +311,7 @@ function downloadBlob(content: string, filename: string, mime: string) {
 export async function exportAnalysisReport(
   data: ExportData,
   format: ExportFormat,
-  t?: TFunction,
+  t: TFunction,
 ): Promise<string> {
   const markdown = buildMarkdownReport(data);
   const baseName = `AxInvest_${data.stockCode}_${new Date().toISOString().slice(0, 10)}`;
@@ -322,22 +322,22 @@ export async function exportAnalysisReport(
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       const path = await save({ defaultPath: `${baseName}.md`, filters: [{ name: "Markdown", extensions: ["md"] }] });
-      if (!path) { return t ? t("stockAnalysis.exportCancelled") : "已取消"; }
+      if (!path) { return t("stockAnalysis.exportCancelled"); }
       await writeTextFile(path, content);
-      return t ? t("stockAnalysis.exportSaved", { path }) : `已导出: ${path}`;
+      return t("stockAnalysis.exportSaved", { path });
     }
     downloadBlob(content, `${baseName}.md`, "text/markdown;charset=utf-8");
-    return t ? t("stockAnalysis.exportDownloaded", { name: `${baseName}.md` }) : `已下载: ${baseName}.md`;
+    return t("stockAnalysis.exportDownloaded", { name: `${baseName}.md` });
   }
 
   if (format === "docx") {
-    if (!isTauri()) { return t ? t("stockAnalysis.docxDesktopOnly") : "DOCX 导出仅在桌面端可用"; }
+    if (!isTauri()) { return t("stockAnalysis.docxDesktopOnly"); }
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({
       defaultPath: `${baseName}.docx`,
-      filters: [{ name: t ? t("stockAnalysis.docxFilterName") : "Word 文档", extensions: ["docx"] }],
+      filters: [{ name: t("stockAnalysis.docxFilterName"), extensions: ["docx"] }],
     });
-    if (!path) { return t ? t("stockAnalysis.exportCancelled") : "已取消"; }
+    if (!path) { return t("stockAnalysis.exportCancelled"); }
     return await invoke<string>("export_md_to_docx", {
       markdown,
       outputPath: path,
@@ -346,13 +346,13 @@ export async function exportAnalysisReport(
   }
 
   if (format === "pptx") {
-    if (!isTauri()) { return t ? t("stockAnalysis.pptxDesktopOnly") : "PPTX 导出仅在桌面端可用"; }
+    if (!isTauri()) { return t("stockAnalysis.pptxDesktopOnly"); }
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({
       defaultPath: `${baseName}.pptx`,
-      filters: [{ name: t ? t("stockAnalysis.pptxFilterName") : "PowerPoint 演示文稿", extensions: ["pptx"] }],
+      filters: [{ name: t("stockAnalysis.pptxFilterName"), extensions: ["pptx"] }],
     });
-    if (!path) { return t ? t("stockAnalysis.exportCancelled") : "已取消"; }
+    if (!path) { return t("stockAnalysis.exportCancelled"); }
     return await invoke<string>("export_md_to_pptx", {
       markdown,
       outputPath: path,
@@ -360,5 +360,5 @@ export async function exportAnalysisReport(
     });
   }
 
-  return t ? t("stockAnalysis.exportUnsupportedFormat", { format }) : `不支持的格式: ${format}`;
+  return t("stockAnalysis.exportUnsupportedFormat", { format });
 }

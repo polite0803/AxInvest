@@ -168,8 +168,9 @@ export function DecisionBanner() {
       };
       const result = await exportAnalysisReport(exportData, format);
       message.success(result);
-    } catch (e: any) {
-      message.error(`导出失败: ${e?.message ?? e}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      message.error(`导出失败: ${errMsg}`);
     } finally {
       setExporting(null);
     }

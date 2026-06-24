@@ -1477,8 +1477,7 @@ pub async fn run_single_stock_analysis(
     //   run_stock_workflow_inner 同样会注入,这里是补齐 cron / batch 入口。
     //   必须始终注入,即使为空（否则 VARIABLE_NOT_FOUND）。
     let lessons_str = fetch_stock_lessons(stock_code, db).await;
-    let mut variables = Vec::new();
-    variables.push(Variable {
+    let variables = vec![Variable {
         name: "stock_lessons".into(),
         var_type: "string".into(),
         value: serde_json::Value::String(
@@ -1486,7 +1485,7 @@ pub async fn run_single_stock_analysis(
         ),
         description: Some("A1: 该股最近 90 天的反思教训".into()),
         is_secret: false,
-    });
+    }];
 
     // 6. 创建并运行工作流
     let wf_name = format!("stock-analysis-{stock_code}-batch");

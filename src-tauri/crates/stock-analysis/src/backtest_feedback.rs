@@ -227,7 +227,11 @@ pub fn analyze_backtest_feedback(input: FeedbackInput) -> BacktestFeedbackReport
 
     // 5. 计算整体准确率
     let total_samples = input.participations.len() as u32;
-    let total_correct = input.participations.iter().filter(|p| p.was_correct).count() as u32;
+    let total_correct = input
+        .participations
+        .iter()
+        .filter(|p| p.was_correct)
+        .count() as u32;
     let overall_accuracy = if total_samples > 0 {
         total_correct as f64 / total_samples as f64
     } else {
@@ -283,10 +287,7 @@ fn generate_suggestion(
         return PromptSuggestion {
             suggestion_type: "tweak_prompt".into(),
             suggested_weight: 0.7,
-            description: format!(
-                "准确率 {:.0}%,建议降低 bias 强度,权重降至 0.7",
-                accuracy * 100.0
-            ),
+            description: format!("准确率 {:.0}%,建议降低 bias 强度,权重降至 0.7", accuracy * 100.0),
         };
     }
 
@@ -374,9 +375,7 @@ mod tests {
     #[test]
     fn high_accuracy_earns_weight_boost() {
         let participations: Vec<_> = (0..30)
-            .map(|i| {
-                participation("a-technical", "short", "bullish", 0.8, i % 3 != 0, i)
-            })
+            .map(|i| participation("a-technical", "short", "bullish", 0.8, i % 3 != 0, i))
             .collect();
         let report = analyze_backtest_feedback(FeedbackInput { participations });
         let tech = report
@@ -385,11 +384,7 @@ mod tests {
             .find(|p| p.analyst_id == "a-technical")
             .unwrap();
         // 30 次中约 20 次正确(~66% 准确率)
-        assert!(
-            tech.accuracy > 0.5,
-            "高准确率应 > 0.5, 实际={}",
-            tech.accuracy
-        );
+        assert!(tech.accuracy > 0.5, "高准确率应 > 0.5, 实际={}", tech.accuracy);
         assert!(
             tech.suggestion.suggested_weight > 1.0,
             "高准确率应提权, 实际={}",
@@ -408,24 +403,15 @@ mod tests {
             .iter()
             .find(|p| p.analyst_id == "bad-analyst")
             .unwrap();
-        assert!(
-            bad.accuracy < 0.3,
-            "故意设错应低于 0.3, 实际={}",
-            bad.accuracy
-        );
-        assert_eq!(
-            bad.suggestion.suggestion_type, "review_logic",
-            "极低准确率应触发 review_logic"
-        );
+        assert!(bad.accuracy < 0.3, "故意设错应低于 0.3, 实际={}", bad.accuracy);
+        assert_eq!(bad.suggestion.suggestion_type, "review_logic", "极低准确率应触发 review_logic");
     }
 
     #[test]
     fn overconfidence_detected() {
         // 高置信度但低准确率
         let participations: Vec<_> = (0..15)
-            .map(|i| {
-                participation("overconfident", "short", "bullish", 0.95, i % 2 == 0, i)
-            })
+            .map(|i| participation("overconfident", "short", "bullish", 0.95, i % 2 == 0, i))
             .collect();
         let report = analyze_backtest_feedback(FeedbackInput { participations });
         let oc = report
@@ -439,10 +425,7 @@ mod tests {
             "过度自信应被检测: calibration={}",
             oc.confidence_calibration
         );
-        assert_eq!(
-            oc.suggestion.suggestion_type, "tweak_prompt",
-            "过度自信应触发 tweak_prompt"
-        );
+        assert_eq!(oc.suggestion.suggestion_type, "tweak_prompt", "过度自信应触发 tweak_prompt");
     }
 
     #[test]
@@ -461,15 +444,8 @@ mod tests {
             .iter()
             .find(|p| p.analyst_id == "declining")
             .unwrap();
-        assert_eq!(
-            decl.trend, "declining",
-            "下降趋势应被检测, 实际={}",
-            decl.trend
-        );
-        assert!(
-            decl.suggestion.suggested_weight < 1.0,
-            "下降趋势应降权"
-        );
+        assert_eq!(decl.trend, "declining", "下降趋势应被检测, 实际={}", decl.trend);
+        assert!(decl.suggestion.suggested_weight < 1.0, "下降趋势应降权");
     }
 
     #[test]
@@ -497,10 +473,7 @@ mod tests {
             participations.push(participation("laggard", "short", "bullish", 0.8, false, i));
         }
         let report = analyze_backtest_feedback(FeedbackInput { participations });
-        assert!(
-            report.top_performers.contains(&"star".to_string()),
-            "星号分析师应在 top 列表"
-        );
+        assert!(report.top_performers.contains(&"star".to_string()), "星号分析师应在 top 列表");
         assert!(
             report.bottom_performers.contains(&"laggard".to_string()),
             "落后分析师应在 bottom 列表"

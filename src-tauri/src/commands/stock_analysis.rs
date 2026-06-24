@@ -3,7 +3,6 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchRequest, BatchResult, BatchRunner, MarketBatchQuery};
 use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, FundamentalsReport};
 use axagent_astock_data::two_tier_cache::CacheStats;
-use chrono::Datelike;
 use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_core::entity::{
     financial_snapshots, portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades,
@@ -25,6 +24,7 @@ use axagent_stock_analysis::recommender::{self, RecoResponse};
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
+use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 
 // ── What-If 回测命令（结构化参数方案 Phase 5/6）──
@@ -3759,9 +3759,7 @@ pub fn analyze_backtest_feedback(
 pub fn parse_analysis_intent(
     input: String,
 ) -> Result<axagent_stock_analysis::intent_parser::ParsedIntent, String> {
-    Ok(axagent_stock_analysis::intent_parser::parse_analysis_intent(
-        &input,
-    ))
+    Ok(axagent_stock_analysis::intent_parser::parse_analysis_intent(&input))
 }
 
 // ── P1-2: VLM 截图导入持仓 ──
@@ -3792,8 +3790,8 @@ pub async fn import_portfolio_from_vlm(
     raw_vlm_output: String,
     replace_existing: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    use axagent_stock_analysis::vlm_import::{holdings_to_import_params, parse_vlm_output};
     use axagent_core::entity::portfolio_holdings;
+    use axagent_stock_analysis::vlm_import::{holdings_to_import_params, parse_vlm_output};
     use sea_orm::{EntityTrait, Set};
 
     let parsed = parse_vlm_output(&raw_vlm_output);
@@ -3960,8 +3958,7 @@ pub async fn quick_backtest(
 
             // 计算持有期后的 exit date
             let _exit_date = {
-                let base = NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d")
-                    .unwrap_or_default();
+                let base = NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d").unwrap_or_default();
                 let mut exit = base;
                 let mut days_forward = 0;
                 while days_forward < hold_days {
@@ -4000,7 +3997,11 @@ pub async fn quick_backtest(
                 exit_price,
                 return_pct,
                 was_correct,
-                decision_action: if return_pct > 0.0 { "买入".into() } else { "卖出/持有".into() },
+                decision_action: if return_pct > 0.0 {
+                    "买入".into()
+                } else {
+                    "卖出/持有".into()
+                },
                 decision_confidence: 50.0f64.min(50.0 + return_pct.abs()),
             })
         })

@@ -173,9 +173,7 @@ fn extract_json_array(text: &str) -> Option<String> {
 }
 
 /// 生成批量导入命令的参数列表
-pub fn holdings_to_import_params(
-    holdings: &[ParsedHolding],
-) -> Vec<ImportHoldingParam> {
+pub fn holdings_to_import_params(holdings: &[ParsedHolding]) -> Vec<ImportHoldingParam> {
     holdings
         .iter()
         .map(|h| ImportHoldingParam {
@@ -259,17 +257,15 @@ mod tests {
 
     #[test]
     fn generates_import_params() {
-        let holdings = vec![
-            ParsedHolding {
-                stock_code: "600519".into(),
-                stock_name: "贵州茅台".into(),
-                shares: 100.0,
-                avg_cost: 1800.0,
-                current_price: None,
-                market_value: None,
-                pnl_pct: None,
-            },
-        ];
+        let holdings = vec![ParsedHolding {
+            stock_code: "600519".into(),
+            stock_name: "贵州茅台".into(),
+            shares: 100.0,
+            avg_cost: 1800.0,
+            current_price: None,
+            market_value: None,
+            pnl_pct: None,
+        }];
         let params = holdings_to_import_params(&holdings);
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].stock_code, "600519");

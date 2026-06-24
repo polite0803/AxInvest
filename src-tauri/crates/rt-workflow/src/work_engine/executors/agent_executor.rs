@@ -1718,14 +1718,20 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
         let mut in_str = false;
         let mut inserts: Vec<usize> = Vec::new();
         while i < bytes.len() {
-            if bytes[i] == b'\\' && in_str { i += 2; continue; }
+            if bytes[i] == b'\\' && in_str {
+                i += 2;
+                continue;
+            }
             if bytes[i] == b'"' {
                 if !in_str {
                     in_str = true;
                 } else {
                     in_str = false;
                 }
-            } else if in_str && (bytes[i] == b',' || bytes[i] == b']' || bytes[i] == b'}') && bytes[i] != b'"' {
+            } else if in_str
+                && (bytes[i] == b',' || bytes[i] == b']' || bytes[i] == b'}')
+                && bytes[i] != b'"'
+            {
                 inserts.push(i);
                 in_str = false;
             }
@@ -1751,7 +1757,7 @@ fn closing_brackets_from_stack(stack: &[u8]) -> String {
         match b {
             b'{' => out.push('}'),
             b'[' => out.push(']'),
-            _ => {}
+            _ => {},
         }
     }
     out
@@ -1780,14 +1786,33 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
     let mut escaped = false;
 
     for &b in bytes.iter() {
-        if escaped { escaped = false; continue; }
-        if b == b'\\' && in_string { escaped = true; continue; }
-        if b == b'"' { in_string = !in_string; continue; }
-        if in_string { continue; }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if b == b'"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
         match b {
             b'{' | b'[' => stack.push(b),
-            b'}' => { if stack.last() == Some(&b'{') { stack.pop(); } }
-            b']' => { if stack.last() == Some(&b'[') { stack.pop(); } }
+            b'}' => {
+                if stack.last() == Some(&b'{') {
+                    stack.pop();
+                }
+            },
+            b']' => {
+                if stack.last() == Some(&b'[') {
+                    stack.pop();
+                }
+            },
             _ => {},
         }
     }
@@ -1827,10 +1852,21 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
     let mut esc = false;
 
     for (i, &b) in bytes.iter().enumerate() {
-        if esc { esc = false; continue; }
-        if b == b'\\' && in_str { esc = true; continue; }
-        if b == b'"' { in_str = !in_str; continue; }
-        if in_str { continue; }
+        if esc {
+            esc = false;
+            continue;
+        }
+        if b == b'\\' && in_str {
+            esc = true;
+            continue;
+        }
+        if b == b'"' {
+            in_str = !in_str;
+            continue;
+        }
+        if in_str {
+            continue;
+        }
 
         match b {
             b'{' => {
@@ -1838,13 +1874,13 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
                     states.push((i, stk.clone()));
                 }
                 stk.push(b'{');
-            }
+            },
             b'[' => {
                 if !stk.is_empty() {
                     states.push((i, stk.clone()));
                 }
                 stk.push(b'[');
-            }
+            },
             b'}' => {
                 if stk.last() == Some(&b'{') {
                     stk.pop();
@@ -1852,7 +1888,7 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
                 if !stk.is_empty() {
                     states.push((i, stk.clone()));
                 }
-            }
+            },
             b']' => {
                 if stk.last() == Some(&b'[') {
                     stk.pop();
@@ -1860,7 +1896,7 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
                 if !stk.is_empty() {
                     states.push((i, stk.clone()));
                 }
-            }
+            },
             _ => continue,
         }
     }
@@ -2038,16 +2074,27 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
     let mut end_pos = 0;
 
     for (i, &b) in bytes.iter().enumerate() {
-        if escaped { escaped = false; continue; }
-        if b == b'\\' && in_string { escaped = true; continue; }
-        if b == b'"' { in_string = !in_string; continue; }
-        if in_string { continue; }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if b == b'"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
         match b {
             b'{' => depth_curly += 1,
             b'}' => depth_curly -= 1,
             b'[' => depth_square += 1,
             b']' => depth_square -= 1,
-            _ => {}
+            _ => {},
         }
         if depth_curly == 0 && depth_square == 0 && i > 0 {
             end_pos = i + 1;
@@ -2059,10 +2106,14 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
         end_pos = bytes.len();
     }
 
-    if end_pos == 0 { return None; }
+    if end_pos == 0 {
+        return None;
+    }
 
     let extracted = candidate[..end_pos].trim().to_string();
-    if extracted.is_empty() { return None; }
+    if extracted.is_empty() {
+        return None;
+    }
 
     // 先 repair 再解析
     let repaired = repair_json(&extracted);
@@ -2215,7 +2266,9 @@ fn validate_strict_mode_output(
                 .unwrap_or_default();
             tracing::warn!(
                 "strict_mode: 候选[{}] 解析失败: {} [前100字符: {}]",
-                i, err, c.chars().take(100).collect::<String>()
+                i,
+                err,
+                c.chars().take(100).collect::<String>()
             );
         }
         let serde_err = serde_json::from_str::<serde_json::Value>(trimmed)

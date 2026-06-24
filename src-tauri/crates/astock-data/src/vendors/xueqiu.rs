@@ -241,18 +241,17 @@ impl StockVendor for XueqiuVendor {
         if ct.starts_with("text/html") || ct.starts_with("text/plain") {
             let body = resp.text().await.unwrap_or_default();
             let preview = &body[..body.len().min(200)];
-            tracing::warn!(
-                "[xueqiu] 新闻接口返回非 JSON (Content-Type={ct}), preview={preview}"
-            );
+            tracing::warn!("[xueqiu] 新闻接口返回非 JSON (Content-Type={ct}), preview={preview}");
             return Err(DataError::VendorError {
                 vendor: "xueqiu".into(),
                 message: format!("雪球新闻接口返回非 JSON (Content-Type={ct})，可能是阿里云 WAF 拦截或 API 已变更"),
             });
         }
 
-        let json: serde_json::Value = resp.json().await.map_err(|e| {
-            DataError::ParseError(format!("xueqiu news json 解析失败: {e}"))
-        })?;
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| DataError::ParseError(format!("xueqiu news json 解析失败: {e}")))?;
         let items = json["list"]
             .as_array()
             .ok_or_else(|| DataError::ParseError("xueqiu news: missing list array".into()))?;

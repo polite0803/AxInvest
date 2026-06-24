@@ -301,7 +301,9 @@ fn extract_action(input: &str) -> &'static str {
         }
     }
     // 再检查"分析类"动作（深度）
-    for kw in &["调研", "分析", "研究", "评估", "评价", "诊断", "扫描", "监测"] {
+    for kw in &[
+        "调研", "分析", "研究", "评估", "评价", "诊断", "扫描", "监测",
+    ] {
         if input.contains(kw) {
             return "research";
         }
@@ -314,7 +316,10 @@ fn extract_stock_name(input: &str, horizon: &Option<&'static str>) -> Option<Str
     let mut result = input.to_string();
 
     // 去掉动作词
-    for kw in &["调研", "分析", "看看", "研究", "查", "查看", "评估", "评价", "诊断", "扫描", "监测", "关注"] {
+    for kw in &[
+        "调研", "分析", "看看", "研究", "查", "查看", "评估", "评价", "诊断", "扫描", "监测",
+        "关注",
+    ] {
         result = result.replace(kw, "");
     }
 

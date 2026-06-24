@@ -1420,7 +1420,12 @@ async fn seed_stock_analysis_workflow_template(
         // F-8 重排: a-hot-money 前置改为资金流向工具
         ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
         // F-8 重排: a-lockup 前置改为解禁质押工具
-        ("t-lockup-data", "获取解禁+增减持+大宗交易", "get_stock_lockup_bundle", "stock_code"),
+        (
+            "t-lockup-data",
+            "获取解禁+增减持+大宗交易",
+            "get_stock_lockup_bundle",
+            "stock_code",
+        ),
         // F-8 重排: a-research 前置改为研报工具
         ("t-research-data", "获取研报+新闻", "get_stock_research_reports", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
@@ -2085,11 +2090,8 @@ async fn seed_stock_analysis_workflow_template(
             2550.0,
         );
         if let WorkflowNode::Agent(ref mut a) = rc {
-            a.config.context_sources = vec![
-                "risk-agg".into(),
-                "risk-con".into(),
-                "risk-neu".into(),
-            ];
+            a.config.context_sources =
+                vec!["risk-agg".into(), "risk-con".into(), "risk-neu".into()];
             a.config.model_role = Some("risk-evaluator".into());
             a.config.max_tool_rounds = Some(1);
             a.config.output_mode = OutputMode::Json;
@@ -2572,14 +2574,7 @@ async fn seed_stock_analysis_workflow_template(
         let fq_id = "quality-fallback";
         let fq_title = "数据不足→保守决策：持仓不变/减仓观望";
         let fq_y = 4500.0;
-        let mut fq = agent(
-            fq_id,
-            fq_title,
-            "quality-fallback",
-            None,
-            20.0,
-            fq_y,
-        );
+        let mut fq = agent(fq_id, fq_title, "quality-fallback", None, 20.0, fq_y);
         if let WorkflowNode::Agent(ref mut a) = fq {
             a.config.context_sources = vec![
                 "rule-check".into(),

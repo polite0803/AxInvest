@@ -1587,7 +1587,11 @@ impl Tool for StockLockupBundleTool {
             .as_str()
             .filter(|s| !s.is_empty())
             .ok_or_else(|| te("stock_code不能为空".into()))?;
-        let r = self.client.get_lockup_bundle(code).await.map_err(|e| te(e.to_string()))?;
+        let r = self
+            .client
+            .get_lockup_bundle(code)
+            .await
+            .map_err(|e| te(e.to_string()))?;
         Ok(ToolResult::success(r.to_string()))
     }
 }

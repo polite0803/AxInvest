@@ -22,7 +22,11 @@ impl SinaVendor {
     }
 
     /// 备选新闻端点：尝试其他已知的新浪新闻接口
-    async fn get_news_fallback(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+    async fn get_news_fallback(
+        &self,
+        stock_code: &str,
+        limit: u32,
+    ) -> Result<Vec<NewsItem>, DataError> {
         let url = format!(
             "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getStockNews?code={stock_code}&num={}&page=1&type=last",
             limit.min(50)
@@ -70,7 +74,8 @@ impl SinaVendor {
             ))
         })?;
 
-        let items = json.as_array()
+        let items = json
+            .as_array()
             .or_else(|| json["result"].as_array())
             .or_else(|| json["data"].as_array())
             .cloned()
@@ -80,10 +85,22 @@ impl SinaVendor {
             .iter()
             .map(|item| NewsItem {
                 title: item["title"].as_str().unwrap_or("").to_string(),
-                summary: item["summary"].as_str().or_else(|| item["digest"].as_str()).unwrap_or("").to_string(),
+                summary: item["summary"]
+                    .as_str()
+                    .or_else(|| item["digest"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 source: item["source"].as_str().unwrap_or("新浪财经").to_string(),
-                url: item["url"].as_str().or_else(|| item["article_url"].as_str()).unwrap_or("").to_string(),
-                publish_time: item["ctime"].as_str().or_else(|| item["date"].as_str()).unwrap_or("").to_string(),
+                url: item["url"]
+                    .as_str()
+                    .or_else(|| item["article_url"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                publish_time: item["ctime"]
+                    .as_str()
+                    .or_else(|| item["date"].as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 sentiment_score: None,
             })
             .collect())
@@ -275,14 +292,11 @@ impl StockVendor for SinaVendor {
             return self.get_news_fallback(stock_code, limit).await;
         }
 
-        let items: Vec<serde_json::Value> = resp.json().await.map_err(|e| {
-            DataError::VendorError {
+        let items: Vec<serde_json::Value> =
+            resp.json().await.map_err(|e| DataError::VendorError {
                 vendor: "sina".into(),
-                message: format!(
-                    "新闻 JSON 解析失败: {e} (Content-Type={ct}, url={primary_url})"
-                ),
-            }
-        })?;
+                message: format!("新闻 JSON 解析失败: {e} (Content-Type={ct}, url={primary_url})"),
+            })?;
 
         if items.is_empty() {
             tracing::warn!("[sina] 新闻主端点返回空数组，尝试备选端点");

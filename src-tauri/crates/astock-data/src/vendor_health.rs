@@ -105,16 +105,18 @@ impl VendorHealthTracker {
     pub async fn record_success(&self, name: &str) {
         let mut vendors = self.vendors.write().await;
         let now = chrono::Utc::now().timestamp_millis();
-        let entry = vendors.entry(name.to_string()).or_insert_with(|| VendorHealth {
-            name: name.to_string(),
-            consecutive_failures: 0,
-            total_successes: 0,
-            total_failures: 0,
-            status: VendorStatus::Healthy,
-            last_error: None,
-            last_success_at: None,
-            last_failure_at: None,
-        });
+        let entry = vendors
+            .entry(name.to_string())
+            .or_insert_with(|| VendorHealth {
+                name: name.to_string(),
+                consecutive_failures: 0,
+                total_successes: 0,
+                total_failures: 0,
+                status: VendorStatus::Healthy,
+                last_error: None,
+                last_success_at: None,
+                last_failure_at: None,
+            });
         entry.consecutive_failures = 0;
         entry.total_successes += 1;
         entry.status = VendorStatus::Healthy;
@@ -125,16 +127,18 @@ impl VendorHealthTracker {
     pub async fn record_failure(&self, name: &str, error: &str) -> bool {
         let mut vendors = self.vendors.write().await;
         let now = chrono::Utc::now().timestamp_millis();
-        let entry = vendors.entry(name.to_string()).or_insert_with(|| VendorHealth {
-            name: name.to_string(),
-            consecutive_failures: 0,
-            total_successes: 0,
-            total_failures: 0,
-            status: VendorStatus::Healthy,
-            last_error: None,
-            last_success_at: None,
-            last_failure_at: None,
-        });
+        let entry = vendors
+            .entry(name.to_string())
+            .or_insert_with(|| VendorHealth {
+                name: name.to_string(),
+                consecutive_failures: 0,
+                total_successes: 0,
+                total_failures: 0,
+                status: VendorStatus::Healthy,
+                last_error: None,
+                last_success_at: None,
+                last_failure_at: None,
+            });
         entry.consecutive_failures += 1;
         entry.total_failures += 1;
         entry.last_error = Some(error.to_string());
@@ -171,7 +175,7 @@ impl VendorHealthTracker {
                             } else {
                                 false
                             }
-                        }
+                        },
                         VendorStatus::Disabled => false,
                     }
                 } else {
@@ -222,10 +226,7 @@ impl VendorHealthTracker {
     }
 
     /// 获取缺省 vendor 列表（Healthy 优先，再试 Degraded）
-    pub async fn try_vendors<'a>(
-        &self,
-        names: &'a [String],
-    ) -> Vec<&'a String> {
+    pub async fn try_vendors<'a>(&self, names: &'a [String]) -> Vec<&'a String> {
         let vendors = self.vendors.read().await;
         let now = chrono::Utc::now().timestamp_millis();
         let recovery_ms = (self.config.recovery_interval_secs * 1000) as i64;
@@ -243,9 +244,9 @@ impl VendorHealthTracker {
                             recoverable.push(name);
                         }
                     }
-                }
+                },
                 None => healthy.push(name),
-                _ => {}
+                _ => {},
             }
         }
 
@@ -262,7 +263,9 @@ mod tests {
     async fn healthy_vendor_available() {
         let tracker = VendorHealthTracker::new(VendorHealthConfig::default());
         tracker.record_success("tencent").await;
-        let healthy = tracker.get_healthy_vendors(&["tencent".to_string(), "sina".to_string()]).await;
+        let healthy = tracker
+            .get_healthy_vendors(&["tencent".to_string(), "sina".to_string()])
+            .await;
         assert!(healthy.contains(&"tencent".to_string()));
     }
 
@@ -272,7 +275,9 @@ mod tests {
         for _ in 0..3 {
             tracker.record_failure("bad-vendor", "timeout").await;
         }
-        let healthy = tracker.get_healthy_vendors(&["bad-vendor".to_string()]).await;
+        let healthy = tracker
+            .get_healthy_vendors(&["bad-vendor".to_string()])
+            .await;
         assert!(healthy.is_empty(), "降级后的 vendor 不应出现在健康列表");
     }
 
@@ -295,7 +300,9 @@ mod tests {
     #[tokio::test]
     async fn tracks_fallback_path() {
         let tracker = VendorHealthTracker::new(VendorHealthConfig::default());
-        tracker.record_fallback("quotes", "000001", "tencent", "sina", "timeout").await;
+        tracker
+            .record_fallback("quotes", "000001", "tencent", "sina", "timeout")
+            .await;
         let log = tracker.get_fallback_log().await;
         assert_eq!(log.len(), 1);
         assert_eq!(log[0].primary_vendor, "tencent");

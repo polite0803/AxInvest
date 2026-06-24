@@ -2275,9 +2275,18 @@ impl AStockClient {
 
     /// 筹码面分析数据聚合：一次调用获取解禁 + 增减持 + 大宗交易
     /// 供 lockup-watcher 冷启动使用，避免 LLM 因单源空数据而不主动调其他工具
-    pub async fn get_lockup_bundle(&self, stock_code: &str) -> Result<serde_json::Value, DataError> {
-        let lockup = self.get_lockup_schedule(stock_code).await.unwrap_or_default();
-        let trades = self.get_shareholder_trades(stock_code).await.unwrap_or_default();
+    pub async fn get_lockup_bundle(
+        &self,
+        stock_code: &str,
+    ) -> Result<serde_json::Value, DataError> {
+        let lockup = self
+            .get_lockup_schedule(stock_code)
+            .await
+            .unwrap_or_default();
+        let trades = self
+            .get_shareholder_trades(stock_code)
+            .await
+            .unwrap_or_default();
         let block = self.get_block_trades(stock_code).await.unwrap_or_default();
         Ok(serde_json::json!({
             "lockup_schedule": lockup,

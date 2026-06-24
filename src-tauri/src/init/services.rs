@@ -1297,6 +1297,71 @@ fn start_cron_scheduler(state: &AppState) {
             return;
         }
 
+        // ── 分支 3：持仓自动扫描（P1-1）──
+        if job.task_type.as_deref() == Some("portfolio-scan") {
+            let engine = work_engine.clone();
+            let store = cron_store.clone();
+            let client = astock_client.clone();
+            let database = db.clone();
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let mut success_count = 0u32;
+                let mut fail_count = 0u32;
+                let mut errors = Vec::new();
+
+                use sea_orm::EntityTrait;
+                match axagent_core::entity::portfolio_holdings::Entity::find()
+                    .all(&database)
+                    .await
+                {
+                    Ok(holdings) => {
+                        for h in &holdings {
+                            // 构造携带持仓上下文的 prompt
+                            let holding_ctx = format!(
+                                "当前持仓 {} ({})：{} 股, 成本价 {:.2}",
+                                h.stock_name, h.stock_code, h.shares, h.avg_cost,
+                            );
+                            let result = crate::commands::stock_workflow::run_single_stock_analysis(
+                                &database, &client, &engine,
+                                &h.stock_code, &h.stock_name,
+                            )
+                            .await;
+                            match result {
+                                Ok(_) => success_count += 1,
+                                Err(e) => {
+                                    fail_count += 1;
+                                    errors.push(format!("{}: {}", h.stock_code, e));
+                                },
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("[portfolio_scan] 查询持仓失败: {e}");
+                    },
+                }
+
+                let summary = format!("持仓扫描完成: {success_count} 成功, {fail_count} 失败");
+                tracing::info!("[portfolio_scan] {summary}");
+
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: fail_count == 0,
+                    output: Some(summary),
+                    error: if errors.is_empty() { None } else { Some(errors.join("; ")) },
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+
         // ── 分支 2：决策校验（30天回看）──
         if job.task_type.as_deref() == Some("validate-decisions") {
             let engine = work_engine.clone();

@@ -9086,7 +9086,8 @@
     "reasoning": "الاستدلال",
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
-    "llmPerspective": "منظور LLM"
+    "llmPerspective": "منظور LLM",
+    "expectedHoldingDaysLabel": "أيام"
   },
   "trade": {
     "title": "Trading Log",

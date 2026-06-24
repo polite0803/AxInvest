@@ -76,14 +76,45 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
     && typeof view.llmDecisionPositionPct === "number"
     && Math.abs(view.decisionPositionPct - view.llmDecisionPositionPct) <= 5;
 
-  // LLM 视角完全不可用 → 提示降级
+  // LLM 视角完全不可用 → 回退显示公式决策单视角
   if (!hasLlm && agreement === null) {
+    // 即使公式决策也存在不足时显示空状态
+    const hasFormula = view.decisionAction != null && view.decisionAction !== "" && view.decisionAction !== "null";
+    if (!hasFormula) {
+      return (
+        <div className="decision-comparison-panel p-4">
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("dualView.decision.llmUnavailableHint")}
+          />
+        </div>
+      );
+    }
+    // 有公式决策但无 LLM 双视角 → 降级显示公式决策单列
     return (
-      <div className="decision-comparison-panel p-4">
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t("dualView.decision.llmUnavailableHint")}
-        />
+      <div className="decision-comparison-panel p-3 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Tag color="warning">LLM 视角不可用</Tag>
+          <span className="text-xs" style={{ color: "var(--muted)" }}>
+            回退显示公式决策 — 暂无双视角对比
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-[12px]">
+          <div className="font-semibold" style={{ color: "var(--muted)" }}>{t("dualView.decision.field")}</div>
+          <div className="font-semibold text-center" style={{ color: "#2563eb" }}>
+            {t("dualView.decision.formula")}
+          </div>
+          <div>{t("dualView.decision.action")}</div>
+          <div className="text-center">
+            <Tag color={actionTagColor(view.decisionAction)}>{view.decisionAction}</Tag>
+          </div>
+          <div>{t("dualView.decision.positionPct")}</div>
+          <div className="text-center font-mono">{fmtNum(view.decisionPositionPct, "%")}</div>
+          <div>{t("dualView.decision.confidence")}</div>
+          <div className="text-center font-mono">{fmtNum(view.confidence, "")}</div>
+          <div>{t("dualView.decision.reasoning")}</div>
+          <div className="text-[11px] whitespace-pre-wrap">{view.llmDecisionReasoning || view.decisionAction}</div>
+        </div>
       </div>
     );
   }

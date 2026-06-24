@@ -1,10 +1,12 @@
 import { invoke } from "@/lib/invoke";
+import { exportAnalysisReport } from "@/lib/stock-analysis-export";
+import type { ExportData, ExportFormat } from "@/lib/stock-analysis-export";
 import { computeStockConsensus } from "@/lib/stock-analysis-utils";
 import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import { ExpandOutlined } from "@ant-design/icons";
-import { App, Button, Card, Modal, Tag } from "antd";
+import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
+import { App, Button, Card, Dropdown, Modal, Tag } from "antd";
 import NodeRenderer from "markstream-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,6 +31,12 @@ export function DecisionBanner() {
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
+  const valueAssessments = useStockAnalysisStore((s) => s.valueAssessments);
+  const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary);
+  const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
+  const dataWarnings = useStockAnalysisStore((s) => s.dataWarnings);
+  const ruleCheckResults = useStockAnalysisStore((s) => s.ruleCheckResults);
+  const rawData = useStockAnalysisStore((s) => s.rawData);
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
   // 方案 D 双向并存: LLM 决策 JSON + 一致性分数
@@ -125,37 +133,70 @@ export function DecisionBanner() {
   }, [decision, stockCode, stockName, quote]);
 
   // Hooks 必须在 early return 之前 — 闭包内部自己处理 null decision
-  const handleExport = useCallback(() => {
-    const ctx = decisionContext;
-    if (!ctx || !decision || !stockCode || !stockName) { return; }
-    const { currentPrice, upside, confidencePct } = ctx;
-    const lines = [
-      t("stockAnalysis.export.title"),
-      t("stockAnalysis.export.stock", { name: stockName, code: stockCode }),
-      t("stockAnalysis.export.date", { date: new Date().toLocaleDateString() }),
-      t("stockAnalysis.export.price", { price: currentPrice.toFixed(2) }),
-      t("stockAnalysis.export.decision", { action: decision.action, confidence: confidencePct }),
-      t("stockAnalysis.export.target", { target: decision.targetPrice ?? "-", stopLoss: decision.stopLoss ?? "-" }),
-      t("stockAnalysis.export.position", { pct: decision.positionPct, risk: t(getRiskTKey(decision.riskLevel)) }),
-      upside != null ? t("stockAnalysis.export.upside", { pct: (upside >= 0 ? "+" : "") + upside.toFixed(1) }) : "",
-      ``,
-      t("stockAnalysis.export.reasoning"),
-      decision.reasoning,
-      ``,
-      t("stockAnalysis.export.analystReports", { count: Object.keys(analystReports).length }),
-      t("stockAnalysis.export.debateRounds", { count: debateRounds.length }),
-      t("stockAnalysis.export.riskAssessments", { count: Object.keys(riskAssessments).length }),
-    ].filter(Boolean).join("\n");
+  const [exporting, setExporting] = useState<string | null>(null);
 
-    const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `AxInvest_${stockCode}_${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-    message.success(t("stockAnalysis.exported"));
-  }, [decision, stockCode, stockName, decisionContext, t, analystReports, debateRounds, riskAssessments, message]);
+  const handleExport = useCallback(async (format: ExportFormat) => {
+    if (!decision || !stockCode || !stockName) { return; }
+    setExporting(format);
+    try {
+      const exportData: ExportData = {
+        stockCode,
+        stockName,
+        asOfDate,
+        quote: quote
+          ? {
+            price: quote.price,
+            change: quote.price - quote.preClose,
+            changePct: quote.changePct,
+            high: quote.high,
+            low: quote.low,
+            volume: quote.volume,
+            amount: quote.amount,
+          }
+          : null,
+        analystReports,
+        debateRounds,
+        riskAssessments,
+        valueAssessments,
+        decision,
+        llmDecisionJson,
+        dataQualitySummary,
+        ruleCheckResults,
+        rawData,
+        failedNodes,
+        dataWarnings,
+      };
+      const result = await exportAnalysisReport(exportData, format);
+      message.success(result);
+    } catch (e: any) {
+      message.error(`导出失败: ${e?.message ?? e}`);
+    } finally {
+      setExporting(null);
+    }
+  }, [
+    decision,
+    stockCode,
+    stockName,
+    asOfDate,
+    quote,
+    analystReports,
+    debateRounds,
+    riskAssessments,
+    valueAssessments,
+    llmDecisionJson,
+    dataQualitySummary,
+    ruleCheckResults,
+    rawData,
+    failedNodes,
+    dataWarnings,
+    message,
+  ]);
+
+  const exportMenuItems: { key: ExportFormat; icon: React.ReactNode; label: string }[] = [
+    { key: "md", icon: <FileTextOutlined />, label: "Markdown (.md)" },
+    { key: "docx", icon: <FileWordOutlined />, label: "Word 文档 (.docx)" },
+    { key: "pptx", icon: <FilePptOutlined />, label: "PowerPoint (.pptx)" },
+  ];
 
   const handleAskAI = useCallback(() => {
     const ctx = decisionContext;
@@ -480,11 +521,11 @@ export function DecisionBanner() {
           </div>
         )}
 
-        {/* 紧凑指标行：inline flex 避免三列 grid 留白 */}
-        <div className="flex gap-2 items-center flex-wrap mb-2">
+        {/* 紧凑指标行：grid 分列填满 Card 宽度，避免右侧留空 */}
+        <div className="grid gap-1.5 mb-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
           {decision.targetPrice && (
             <span
-              className="text-xs px-2 py-0.5 rounded font-mono"
+              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</span>
@@ -493,7 +534,7 @@ export function DecisionBanner() {
           )}
           {decision.stopLoss && (
             <span
-              className="text-xs px-2 py-0.5 rounded font-mono"
+              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--sa-red)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
@@ -501,7 +542,7 @@ export function DecisionBanner() {
             </span>
           )}
           <span
-            className="text-xs px-2 py-0.5 rounded font-mono"
+            className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
             style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
           >
             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</span>
@@ -509,7 +550,7 @@ export function DecisionBanner() {
           </span>
           {upside != null && (
             <span
-              className="text-xs px-2 py-0.5 rounded font-mono"
+              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{
                 background: "var(--surface)",
                 color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)",
@@ -520,7 +561,7 @@ export function DecisionBanner() {
             </span>
           )}
           <span
-            className="text-xs px-2 py-0.5 rounded"
+            className="text-xs px-2 py-1 rounded flex items-center justify-between"
             style={{ background: "var(--surface)", color: getRiskColor(decision.riskLevel) }}
           >
             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</span>
@@ -528,10 +569,10 @@ export function DecisionBanner() {
           </span>
           {decision.expectedHoldingDays && (
             <span
-              className="text-xs px-2 py-0.5 rounded font-mono"
+              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
-              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDays")}</span>
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDaysLabel")}</span>
               <span className="font-semibold">
                 {t("stockAnalysis.expectedHoldingDays", { days: decision.expectedHoldingDays })}
               </span>
@@ -539,7 +580,7 @@ export function DecisionBanner() {
           )}
           {decision.targetTimeframe && (
             <span
-              className="text-xs px-2 py-0.5 rounded font-mono"
+              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</span>
@@ -631,12 +672,37 @@ export function DecisionBanner() {
           {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
           {stockCode && (
             <>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  useStockAnalysisStore.getState().startAnalysis(
+                    stockCode,
+                    analysisId ? { replaceAnalysisId: analysisId } : undefined,
+                  );
+                }}
+              >
+                {t("stockAnalysis.reAnalyze")}
+              </Button>
               <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
                 {t("stockAnalysis.askAI")}
               </Button>
-              <Button size="small" icon={<span>📥</span>} onClick={handleExport}>
-                {t("stockAnalysis.exportReport")}
-              </Button>
+              <Dropdown
+                menu={{
+                  items: exportMenuItems.map((item) => ({
+                    key: item.key,
+                    icon: item.icon,
+                    label: item.label,
+                    disabled: exporting === item.key,
+                    onClick: () => handleExport(item.key),
+                  })),
+                }}
+                trigger={["click"]}
+              >
+                <Button size="small" loading={exporting !== null} icon={<span>📥</span>}>
+                  {t("stockAnalysis.exportReport")}
+                </Button>
+              </Dropdown>
             </>
           )}
         </div>
@@ -839,12 +905,36 @@ export function DecisionBanner() {
           {watchlisted && <Tag color="gold">⭐ {t("stockAnalysis.inWatchlist")}</Tag>}
           {stockCode && (
             <>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  useStockAnalysisStore.getState().startAnalysis(
+                    stockCode,
+                    analysisId ? { replaceAnalysisId: analysisId } : undefined,
+                  );
+                }}
+              >
+                {t("stockAnalysis.reAnalyze")}
+              </Button>
               <Button icon={<span>💬</span>} onClick={handleAskAI}>
                 {t("stockAnalysis.askAI")}
               </Button>
-              <Button icon={<span>📥</span>} onClick={handleExport}>
-                {t("stockAnalysis.exportReport")}
-              </Button>
+              <Dropdown
+                menu={{
+                  items: exportMenuItems.map((item) => ({
+                    key: item.key,
+                    icon: item.icon,
+                    label: item.label,
+                    disabled: exporting === item.key,
+                    onClick: () => handleExport(item.key),
+                  })),
+                }}
+                trigger={["click"]}
+              >
+                <Button loading={exporting !== null} icon={<span>📥</span>}>
+                  {t("stockAnalysis.exportReport")}
+                </Button>
+              </Dropdown>
             </>
           )}
         </div>

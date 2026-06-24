@@ -9086,7 +9086,8 @@
     "reasoning": "추론",
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
-    "llmPerspective": "LLM 관점"
+    "llmPerspective": "LLM 관점",
+    "expectedHoldingDaysLabel": "보유 일수"
   },
   "trade": {
     "title": "Trading Log",

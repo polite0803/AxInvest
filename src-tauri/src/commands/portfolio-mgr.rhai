@@ -106,6 +106,18 @@ let inst_bonus = if institutional_trace_str == "有建仓痕迹" || institutiona
 let adjustment = consensus_adj + dqi_adj + risk_adj + cat_bonus + inst_bonus;
 let confidence = clamp(total_score + adjustment, 0.0, 100.0);
 
+// ── 数据不足检测 ──
+// 当所有关键输入都处于默认值（上游分析师/工具节点均未产出有效数据）时，
+// 输出"无法判断"而非基于默认值生成虚假的"持有"决策。
+// 必须放在 adjustment 计算之后（Rhai 中引用未声明变量返回 ()）。
+let insufficient_data = adjustment == 0.0
+    && total_score == 50.0
+    && consensus_score == 50.0
+    && !has_aggregate_prediction
+    && !has_backtest_data
+    && catalyst_level_str == ""
+    && institutional_trace_str == "";
+
 // ── 预测聚合：LLM 分析师一致方向修正 ──
 let prediction_boost = if has_aggregate_prediction && aggregate_direction_str == "bullish" {
     aggregate_confidence_num * 15.0
@@ -129,12 +141,23 @@ let final_confidence = clamp(
 let base_pos = if risk_adj >= 0.0 { final_confidence * 0.8 } else { final_confidence * 0.5 };
 let position_pct = clamp(base_pos, 0.0, 100.0);
 
-let overall_action = if final_confidence >= 80.0 && position_pct >= 30.0 { "增持" }
+let overall_action = if insufficient_data { "无法判断" }
+    else if final_confidence >= 80.0 && position_pct >= 30.0 { "增持" }
     else if final_confidence >= 60.0 { "买入" }
     else if final_confidence >= 40.0 { "持有" }
     else if final_confidence < 30.0 { "卖出" }
     else if position_pct < 20.0 { "减持" }
     else { "持有" };
+
+// 数据不足时构建缺失数据源清单（Rhai 无 .filter()，用条件拼接）
+let data_gaps = if insufficient_data {
+    let gaps = [];
+    if total_score == 50.0 { gaps.push("技术服务评分(t-scoring)"); }
+    if consensus_score == 50.0 { gaps.push("辩论共识分数(debate-convergence)"); }
+    if catalyst_level_str == "" { gaps.push("催化剂评估(a-catalyst)"); }
+    if institutional_trace_str == "" { gaps.push("资金面机构分析(hot-money)"); }
+    gaps
+} else { [] };
 
 // ── 时间维度推导（加权打分法） ──
 let is_high_risk = overall_risk_str == "高风险" || overall_risk_str == "高" || overall_risk_str == "极高";
@@ -204,6 +227,9 @@ let take_profit_pct = switch time_horizon {
 };
 
 // ── reasoning ──
+let insufficient_note = if insufficient_data {
+    ` | 数据不足: 上游 ${data_gaps.len()} 个节点未产出有效数据，无法可靠决策`
+} else { "" };
 let bayes_note = if has_backtest_data {
     ` | 贝叶斯: prior=${bayesian_prior} n=${signal_quality_sample_count} sample=${signal_quality_win_rate} posterior=${bayesian_posterior} factor=${signal_quality_factor}`
 } else { "" };
@@ -220,7 +246,8 @@ let pred_note = if has_aggregate_prediction {
     "riskLevel": overall_risk_str,
     "stopLossPct": if position_pct > 0.0 { stop_loss_pct } else { 0.0 },
     "takeProfitPct": if position_pct > 0.0 { take_profit_pct } else { 0.0 },
-    "reasoning": `决策=${overall_action} 置信度=${final_confidence} 仓位=${position_pct}% 风险=${overall_risk_str} 共识=${consensus_score}${bayes_note}${refl_note}${pred_note}`,
+    "reasoning": `决策=${overall_action} 置信度=${final_confidence} 仓位=${position_pct}% 风险=${overall_risk_str} 共识=${consensus_score}${insufficient_note}${bayes_note}${refl_note}${pred_note}`,
+    "data_gaps": data_gaps,
     "key_conditions_to_track": [],
     "decisive_bull_acks": [],
     "decisive_bear_acks": [],

@@ -8804,6 +8804,7 @@
     "earningsOnChart": "财报标注",
     "timeHorizon": "时间维度",
     "expectedHoldingDays": "持有{{days}}天",
+    "expectedHoldingDaysLabel": "持有天数",
     "targetTimeframe": "目标期限",
     "timeHorizonUltraShort": "超短线",
     "timeHorizonShort": "短线",

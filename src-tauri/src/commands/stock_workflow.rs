@@ -12,6 +12,7 @@ use axagent_harness::response_normalizer::ResponseNormalizer;
 use axagent_harness::tool::ToolPermissions;
 use axagent_harness::types::{ChatResponse, ContentBlock};
 use axagent_harness::workflow_types::{JsonSchema, Variable, WorkflowEdge, WorkflowNode};
+use axagent_harness::{ToolRegistry, ToolContext};
 use axagent_rt_workflow::Workflow;
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use axagent_runtime_core::DefaultResponseNormalizer;
@@ -1101,16 +1102,16 @@ async fn run_stock_workflow_inner(
             is_secret: false,
         });
         // 注入历史反思教训（从 stock_reflections 表取最近的结构化反思结果）
+        // 必须始终注入，即使为空，否则 value-investor/research-mgr/trader 等节点
+        // 的 input_mapping 引用 {{stock_lessons}} 会报 VARIABLE_NOT_FOUND。
         let lessons_str = fetch_stock_lessons(&stock_code, &db).await;
-        if let Some(ref lessons) = lessons_str {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "stock_lessons".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(lessons.clone()),
-                description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
-                is_secret: false,
-            });
-        }
+        merged_vars.push(axagent_harness::workflow_types::Variable {
+            name: "stock_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(lessons_str.unwrap_or_else(|| "（暂无历史反思）".to_string())),
+            description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
+            is_secret: false,
+        });
         opts.variables = Some(merged_vars);
 
         match engine.run_workflow(&wf_id, opts).await {
@@ -1474,17 +1475,16 @@ pub async fn run_single_stock_analysis(
     //   批量/定时分析场景下,trader/research-mgr/value-investor 节点能看到
     //   该股最近 90 天的反思教训(lesson_summary),避免重蹈覆辙。前端触发场景下
     //   run_stock_workflow_inner 同样会注入,这里是补齐 cron / batch 入口。
+    //   必须始终注入,即使为空（否则 VARIABLE_NOT_FOUND）。
     let lessons_str = fetch_stock_lessons(stock_code, db).await;
     let mut variables = Vec::new();
-    if let Some(ref s) = lessons_str {
-        variables.push(Variable {
-            name: "stock_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(s.clone()),
-            description: Some("A1: 该股最近 90 天的反思教训".into()),
-            is_secret: false,
-        });
-    }
+    variables.push(Variable {
+        name: "stock_lessons".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(lessons_str.unwrap_or_else(|| "（暂无历史反思）".to_string())),
+        description: Some("A1: 该股最近 90 天的反思教训".into()),
+        is_secret: false,
+    });
 
     // 6. 创建并运行工作流
     let wf_name = format!("stock-analysis-{stock_code}-batch");
@@ -4353,4 +4353,52 @@ mod serenity_extract_tests {
         assert!(parse_loose_json("").is_none());
         assert!(parse_loose_json("   ").is_none());
     }
+}
+
+/// 将 Markdown 文本导出为 Word (.docx) 文件，通过 ToolRegistry 调用 ExportWordTool
+#[tauri::command]
+pub async fn export_md_to_docx(
+    state: State<'_, AppState>,
+    markdown: String,
+    output_path: String,
+    title: Option<String>,
+) -> Result<String, String> {
+    let input = serde_json::json!({
+        "markdown": markdown,
+        "output_path": output_path,
+        "title": title.unwrap_or_else(|| "股票分析报告".to_string()),
+    });
+    let ctx = ToolContext::new(
+        std::env::temp_dir().to_string_lossy().to_string(),
+    );
+    let registry = state.local_tool_registry.lock().await;
+    let tool = registry
+        .get("ExportWord")
+        .ok_or_else(|| "ExportWord 工具未注册".to_string())?;
+    let result = tool.call(input, &ctx).await.map_err(|e| e.to_string())?;
+    Ok(result.content)
+}
+
+/// 将 Markdown 文本导出为 PowerPoint (.pptx) 文件，通过 ToolRegistry 调用 ExportPptxTool
+#[tauri::command]
+pub async fn export_md_to_pptx(
+    state: State<'_, AppState>,
+    markdown: String,
+    output_path: String,
+    title: Option<String>,
+) -> Result<String, String> {
+    let input = serde_json::json!({
+        "markdown": markdown,
+        "output_path": output_path,
+        "title": title.unwrap_or_else(|| "股票分析报告".to_string()),
+    });
+    let ctx = ToolContext::new(
+        std::env::temp_dir().to_string_lossy().to_string(),
+    );
+    let registry = state.local_tool_registry.lock().await;
+    let tool = registry
+        .get("ExportPptx")
+        .ok_or_else(|| "ExportPptx 工具未注册".to_string())?;
+    let result = tool.call(input, &ctx).await.map_err(|e| e.to_string())?;
+    Ok(result.content)
 }

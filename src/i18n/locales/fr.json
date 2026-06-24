@@ -9086,7 +9086,8 @@
     "reasoning": "Raisonnement",
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
-    "llmPerspective": "Perspective LLM"
+    "llmPerspective": "Perspective LLM",
+    "expectedHoldingDaysLabel": "Jours"
   },
   "trade": {
     "title": "Trading Log",

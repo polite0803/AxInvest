@@ -86,6 +86,7 @@
     "d3-force": "^3.0.0",
     "dagre": "^0.8.5",
     "dayjs": "^1.11.13",
+    "docx": "^9.7.1",
     "dom-to-image-more": "^3.7.2",
     "dompurify": "^3.4.2",
     "echarts": "^6.0.0",

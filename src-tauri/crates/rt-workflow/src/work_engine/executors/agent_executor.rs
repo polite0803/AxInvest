@@ -1929,16 +1929,17 @@ fn validate_strict_mode_output(
             .flat_map(|c| {
                 let mut fixes: Vec<String> = Vec::new();
                 // 如果还没被剥离 fence，再尝试一次
-                if let Some(stripped) = try_extract_json_fragment(c) {
-                    if !candidates.iter().any(|x| x.as_str() == stripped.as_str()) {
-                        fixes.push(stripped);
-                    }
+                if let Some(stripped) = try_extract_json_fragment(c)
+                    && !candidates.iter().any(|x| x.as_str() == stripped.as_str())
+                {
+                    fixes.push(stripped);
                 }
                 // 未闭合字符串修复
-                if let Some(fixed) = repair_unclosed_json_strings(c) {
-                    if fixed != *c && !candidates.iter().any(|x| x.as_str() == fixed.as_str()) {
-                        fixes.push(fixed);
-                    }
+                if let Some(fixed) = repair_unclosed_json_strings(c)
+                    && fixed != *c
+                    && !candidates.iter().any(|x| x.as_str() == fixed.as_str())
+                {
+                    fixes.push(fixed);
                 }
                 // repair_json（尾逗号等）
                 let repaired = repair_json(c);
@@ -1946,13 +1947,12 @@ fn validate_strict_mode_output(
                     fixes.push(repaired);
                 }
                 // 截断 JSON 修复
-                if let Some(trunc_fixed) = try_fix_truncated_json(c) {
-                    if !candidates
+                if let Some(trunc_fixed) = try_fix_truncated_json(c)
+                    && !candidates
                         .iter()
                         .any(|x| x.as_str() == trunc_fixed.as_str())
-                    {
-                        fixes.push(trunc_fixed);
-                    }
+                {
+                    fixes.push(trunc_fixed);
                 }
                 fixes
             })

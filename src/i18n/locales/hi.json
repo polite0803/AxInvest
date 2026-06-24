@@ -9086,7 +9086,8 @@
     "reasoning": "तर्क",
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
-    "llmPerspective": "LLM परिप्रेक्ष्य"
+    "llmPerspective": "LLM परिप्रेक्ष्य",
+    "expectedHoldingDaysLabel": "दिन"
   },
   "trade": {
     "title": "Trading Log",

@@ -1019,6 +1019,8 @@ pub fn run() {
             commands::stock_analysis::delete_validate_decisions_cron,
             commands::stock_analysis::run_reflection_now,
             commands::stock_workflow::run_batch_reflection,
+            commands::stock_workflow::export_md_to_docx,
+            commands::stock_workflow::export_md_to_pptx,
             commands::stock_analysis::create_batch_reflection_cron,
             commands::stock_analysis::list_batch_reflection_crons,
             commands::stock_analysis::toggle_batch_reflection_cron,

@@ -9086,7 +9086,8 @@
     "reasoning": "推論",
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
-    "llmPerspective": "LLM 視点"
+    "llmPerspective": "LLM 視点",
+    "expectedHoldingDaysLabel": "保有日数"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",

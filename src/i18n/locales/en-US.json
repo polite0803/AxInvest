@@ -9323,7 +9323,8 @@
     "reasoning": "Reasoning",
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
-    "llmPerspective": "LLM Perspective"
+    "llmPerspective": "LLM Perspective",
+    "expectedHoldingDaysLabel": "Holding Days"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

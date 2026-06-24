@@ -190,6 +190,7 @@ export function DecisionBanner() {
     rawData,
     failedNodes,
     dataWarnings,
+    t,
     message,
   ]);
 

@@ -3889,19 +3889,19 @@
     {
       "file": "src/components/stock-analysis/dual-view/CompactDecisionComparison.tsx",
       "lines": "49,50",
-      "reason": "硬编码中文字符串 (中文股票评级判断)",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/dual-view/DecisionComparisonPanel.tsx",
       "lines": "41,42",
-      "reason": "硬编码中文字符串 (中文股票评级判断)",
+      "reason": "硬编码中文字符串",
       "phase": 3
     },
     {
       "file": "src/components/stock-analysis/dual-view/decisionDualView.tsx",
       "lines": "13",
-      "reason": "硬编码中文字符串 (dual view title)",
+      "reason": "硬编码中文字符串",
       "phase": 3
     }
   ]

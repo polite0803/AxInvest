@@ -9083,7 +9083,9 @@
       "risk": "Risk Assessment"
     },
     "showDetail": "詳細",
-    "reasoning": "推論"
+    "reasoning": "推論",
+    "dualViewConsistency": "Dual-View Consistency",
+    "dualViewDisagreement": "Manual Review Recommended"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",

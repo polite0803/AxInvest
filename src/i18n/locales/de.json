@@ -9083,7 +9083,9 @@
       "risk": "Risk Assessment"
     },
     "showDetail": "Details",
-    "reasoning": "Begründung"
+    "reasoning": "Begründung",
+    "dualViewConsistency": "Dual-View Consistency",
+    "dualViewDisagreement": "Manual Review Recommended"
   },
   "trade": {
     "title": "Trading Log",

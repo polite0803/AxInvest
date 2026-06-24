@@ -9082,7 +9082,9 @@
       "risk": "Risk Assessment"
     },
     "showDetail": "詳情",
-    "reasoning": "推理"
+    "reasoning": "推理",
+    "dualViewConsistency": "双视角一致性",
+    "dualViewDisagreement": "建议人工复核"
   },
   "trade": {
     "title": "交易日志",

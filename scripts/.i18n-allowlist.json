@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-17",
-  "total_entries": 650,
-  "total_files": 650,
+  "total_entries": 652,
+  "total_files": 652,
   "entries": [
     {
       "file": "amplitude",
@@ -997,6 +997,18 @@
     {
       "file": "workflowStarting",
       "lines": "⏳,S,t,a,r,i,n,g,{,s,o,c,k,C,d,e,},l,y,w,f,.",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "dualViewConsistency",
+      "lines": "D,u,a,l,-,V,i,e,w,C,o,n,s,t,c,y",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "dualViewDisagreement",
+      "lines": "M,a,n,u,l,R,e,v,i,w,c,o,m,d",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

@@ -9083,7 +9083,9 @@
       "risk": "Risk Assessment"
     },
     "showDetail": "세부 정보",
-    "reasoning": "추론"
+    "reasoning": "추론",
+    "dualViewConsistency": "Dual-View Consistency",
+    "dualViewDisagreement": "Manual Review Recommended"
   },
   "trade": {
     "title": "Trading Log",

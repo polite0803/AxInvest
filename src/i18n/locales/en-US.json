@@ -9320,7 +9320,9 @@
     "backtest.alpha": "超额收益",
     "backtest.avgConfidence": "平均置信度",
     "showDetail": "Details",
-    "reasoning": "Reasoning"
+    "reasoning": "Reasoning",
+    "dualViewConsistency": "Dual-View Consistency",
+    "dualViewDisagreement": "Manual Review Recommended"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

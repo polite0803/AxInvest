@@ -378,6 +378,8 @@ const zhCN = {
   dataFetching: "获取中",
   dataSource: "数据源",
   dataWaiting: "等待",
+  dualViewConsistency: "双视角一致性",
+  dualViewDisagreement: "建议人工复核",
   ep: "市盈率",
   expandView: "大屏查看",
   expectedUpside: "预期涨幅",
@@ -1141,6 +1143,8 @@ const enUS = {
       cron: "Cron expression",
     },
   },
+  dualViewConsistency: "Dual-View Consistency",
+  dualViewDisagreement: "Manual Review Recommended",
   evolutionDrift: {
     title: "Evolution Drift",
     recalcNow: "Recalculate Now",

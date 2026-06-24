@@ -1642,10 +1642,13 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
     /// 检查 trailing 字符串中是否已有合法的字符串闭合引号。
     /// 合法闭合引号：`"` 后跟（空白可忽略）`,`, `]`, `}`, 或字符串结束。
     fn has_valid_closing_quote(trailing: &str) -> bool {
-        // trailing 不以 `"` 开头，跳过第一个字符后查找 `"`
-        // （以 `"` 开头的情况已经被调用方的 !trailing.starts_with('"') 筛掉了）
-        trailing[1..].find('"').map_or(false, |qpos| {
-            let after_q = &trailing[1..][qpos + 1..];
+        // trailing 不以 `"` 开头，跳过第一个字符（非 ASCII 安全）后查找 `"`
+        // 注意：必须用 char_indices() 而非字节索引 [1..]，否则在多字节 UTF-8 字符上 panic
+        // （已修复：期 infinite loop bug，`期` 占 3 字节，[1..] 落在字符内部）
+        let skip = trailing.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+        let rest = &trailing[skip..];
+        rest.find('"').map_or(false, |qpos| {
+            let after_q = &rest[qpos + 1..];
             let trimmed = after_q.trim_start();
             trimmed.is_empty()
                 || trimmed.starts_with(',')

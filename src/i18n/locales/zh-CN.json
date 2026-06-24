@@ -9041,7 +9041,15 @@
     "reasoning": "推理",
     "llmPerspective": "LLM 视角",
     "llmViewUnavailable": "LLM 视角不可用",
-    "formulaFallbackHint": "回退显示公式决策 — 暂无双视角对比"
+    "formulaFallbackHint": "回退显示公式决策 — 暂无双视角对比",
+    "exportCancelled": "已取消",
+    "exportSaved": "已导出: {{path}}",
+    "exportDownloaded": "已下载: {{name}}",
+    "docxDesktopOnly": "DOCX 导出仅在桌面端可用",
+    "docxFilterName": "Word 文档",
+    "pptxDesktopOnly": "PPTX 导出仅在桌面端可用",
+    "pptxFilterName": "PowerPoint 演示文稿",
+    "exportUnsupportedFormat": "不支持的格式: {{format}}"
   },
   "trade": {
     "title": "交易日志",

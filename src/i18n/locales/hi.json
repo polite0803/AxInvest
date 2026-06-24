@@ -9089,7 +9089,15 @@
     "llmPerspective": "LLM परिप्रेक्ष्य",
     "expectedHoldingDaysLabel": "दिन",
     "llmViewUnavailable": "LLM दृश्य अनुपलब्ध",
-    "formulaFallbackHint": "सूत्र निर्णय पर वापसी — कोई दोहरा दृश्य तुलना नहीं"
+    "formulaFallbackHint": "सूत्र निर्णय पर वापसी — कोई दोहरा दृश्य तुलना नहीं",
+    "exportCancelled": "रद्द",
+    "exportSaved": "सहेजा: {{path}}",
+    "exportDownloaded": "डाउनलोड: {{name}}",
+    "docxDesktopOnly": "DOCX निर्यात केवल डेस्कटॉप पर उपलब्ध",
+    "docxFilterName": "Word दस्तावेज़",
+    "pptxDesktopOnly": "PPTX निर्यात केवल डेस्कटॉप पर उपलब्ध",
+    "pptxFilterName": "PowerPoint प्रस्तुति",
+    "exportUnsupportedFormat": "असमर्थित प्रारूप: {{format}}"
   },
   "trade": {
     "title": "Trading Log",

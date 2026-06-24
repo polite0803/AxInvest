@@ -9089,7 +9089,15 @@
     "llmPerspective": "Perspectiva LLM",
     "expectedHoldingDaysLabel": "Días",
     "llmViewUnavailable": "Vista LLM no disponible",
-    "formulaFallbackHint": "Retroceso a decisión de fórmula — sin comparación de doble vista"
+    "formulaFallbackHint": "Retroceso a decisión de fórmula — sin comparación de doble vista",
+    "exportCancelled": "Cancelado",
+    "exportSaved": "Guardado: {{path}}",
+    "exportDownloaded": "Descargado: {{name}}",
+    "docxDesktopOnly": "Exportación DOCX solo disponible en escritorio",
+    "docxFilterName": "Documento de Word",
+    "pptxDesktopOnly": "Exportación PPTX solo disponible en escritorio",
+    "pptxFilterName": "Presentación de PowerPoint",
+    "exportUnsupportedFormat": "Formato no soportado: {{format}}"
   },
   "trade": {
     "title": "Trading Log",

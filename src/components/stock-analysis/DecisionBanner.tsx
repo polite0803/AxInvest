@@ -166,7 +166,7 @@ export function DecisionBanner() {
         failedNodes,
         dataWarnings,
       };
-      const result = await exportAnalysisReport(exportData, format);
+      const result = await exportAnalysisReport(exportData, format, t);
       message.success(result);
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);

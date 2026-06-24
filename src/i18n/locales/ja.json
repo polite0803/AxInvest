@@ -9089,7 +9089,15 @@
     "llmPerspective": "LLM 視点",
     "expectedHoldingDaysLabel": "保有日数",
     "llmViewUnavailable": "LLM ビュー利用不可",
-    "formulaFallbackHint": "フォーミュラ決定にフォールバック — デュアルビュー比較なし"
+    "formulaFallbackHint": "フォーミュラ決定にフォールバック — デュアルビュー比較なし",
+    "exportCancelled": "キャンセル",
+    "exportSaved": "保存: {{path}}",
+    "exportDownloaded": "ダウンロード: {{name}}",
+    "docxDesktopOnly": "DOCX エクスポートはデスクトップのみ",
+    "docxFilterName": "Word 文書",
+    "pptxDesktopOnly": "PPTX エクスポートはデスクトップのみ",
+    "pptxFilterName": "PowerPoint プレゼンテーション",
+    "exportUnsupportedFormat": "未対応の形式: {{format}}"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",

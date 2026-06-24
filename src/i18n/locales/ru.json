@@ -9089,7 +9089,15 @@
     "llmPerspective": "Перспектива LLM",
     "expectedHoldingDaysLabel": "Дни",
     "llmViewUnavailable": "Представление LLM недоступно",
-    "formulaFallbackHint": "Возврат к решению по формуле — сравнения двойного вида нет"
+    "formulaFallbackHint": "Возврат к решению по формуле — сравнения двойного вида нет",
+    "exportCancelled": "Отменено",
+    "exportSaved": "Сохранено: {{path}}",
+    "exportDownloaded": "Скачано: {{name}}",
+    "docxDesktopOnly": "Экспорт DOCX доступен только на декстопе",
+    "docxFilterName": "Документ Word",
+    "pptxDesktopOnly": "Экспорт PPTX доступен только на декстопе",
+    "pptxFilterName": "Презентация PowerPoint",
+    "exportUnsupportedFormat": "Неподдерживаемый формат: {{format}}"
   },
   "trade": {
     "title": "Trading Log",

@@ -9088,7 +9088,15 @@
     "llmPerspective": "LLM 視角",
     "expectedHoldingDaysLabel": "持有天數",
     "llmViewUnavailable": "LLM 視角不可用",
-    "formulaFallbackHint": "回退顯示公式決策 — 暫無雙視角對比"
+    "formulaFallbackHint": "回退顯示公式決策 — 暫無雙視角對比",
+    "exportCancelled": "已取消",
+    "exportSaved": "已導出: {{path}}",
+    "exportDownloaded": "已下載: {{name}}",
+    "docxDesktopOnly": "DOCX 導出僅在桌面端可用",
+    "docxFilterName": "Word 文檔",
+    "pptxDesktopOnly": "PPTX 導出僅在桌面端可用",
+    "pptxFilterName": "PowerPoint 演示文稿",
+    "exportUnsupportedFormat": "不支援的格式: {{format}}"
   },
   "trade": {
     "title": "交易日志",

@@ -9089,7 +9089,15 @@
     "llmPerspective": "منظور LLM",
     "expectedHoldingDaysLabel": "أيام",
     "llmViewUnavailable": "عرض LLM غير متاح",
-    "formulaFallbackHint": "التراجع إلى قرار الصيغة — لا توجد مقارنة ثنائية الرؤية"
+    "formulaFallbackHint": "التراجع إلى قرار الصيغة — لا توجد مقارنة ثنائية الرؤية",
+    "exportCancelled": "ألغي",
+    "exportSaved": "تم الحفظ: {{path}}",
+    "exportDownloaded": "تم التنزيل: {{name}}",
+    "docxDesktopOnly": "تصدير DOCX متاح فقط على سطح المكتب",
+    "docxFilterName": "مستند Word",
+    "pptxDesktopOnly": "تصدير PPTX متاح فقط على سطح المكتب",
+    "pptxFilterName": "عرض PowerPoint التقديمي",
+    "exportUnsupportedFormat": "تنسيق غير مدعوم: {{format}}"
   },
   "trade": {
     "title": "Trading Log",

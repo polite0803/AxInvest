@@ -9326,7 +9326,15 @@
     "llmPerspective": "LLM Perspective",
     "expectedHoldingDaysLabel": "Holding Days",
     "llmViewUnavailable": "LLM view unavailable",
-    "formulaFallbackHint": "Falling back to formula decision — no dual-view comparison"
+    "formulaFallbackHint": "Falling back to formula decision — no dual-view comparison",
+    "exportCancelled": "Cancelled",
+    "exportSaved": "Saved: {{path}}",
+    "exportDownloaded": "Downloaded: {{name}}",
+    "docxDesktopOnly": "DOCX export only available on desktop",
+    "docxFilterName": "Word Document",
+    "pptxDesktopOnly": "PPTX export only available on desktop",
+    "pptxFilterName": "PowerPoint Presentation",
+    "exportUnsupportedFormat": "Unsupported format: {{format}}"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

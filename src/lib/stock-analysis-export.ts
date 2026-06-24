@@ -142,7 +142,7 @@ export function buildMarkdownReport(data: ExportData): string {
       lines.push(`> ${d.reasoning}\n`);
     }
     // 数据不足时展示缺失数据源
-    const dataGaps = (d as Record<string, unknown>).data_gaps;
+    const dataGaps = dRecord.data_gaps;
     if (Array.isArray(dataGaps) && dataGaps.length > 0) {
       h(3, "缺失数据源");
       for (const g of dataGaps) {
@@ -150,12 +150,12 @@ export function buildMarkdownReport(data: ExportData): string {
       }
       lines.push("");
     }
-    const dRecord = d as Record<string, unknown>;
+    const dRecord = d as unknown as Record<string, unknown>;
     // 多时间维度信号
     const signals: Record<string, { action: string; confidence: number }> = {};
     for (const k of ["ultraShortTermSignal", "shortTermSignal", "midTermSignal", "longTermSignal"] as const) {
       const s = dRecord[k] as { action?: string; confidence?: number } | undefined;
-      if (s?.action) { signals[k] = s; }
+      if (s?.action) { signals[k] = { action: s.action, confidence: s.confidence ?? 0 }; }
     }
     if (Object.keys(signals).length > 0) {
       h(3, "多时间维度信号");

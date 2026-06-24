@@ -659,16 +659,19 @@ impl NodeExecutorTrait for AgentExecutor {
             let mut stream_tool_calls: Option<Vec<axagent_harness::types::ToolCall>> = None;
             let mut stream_usage = (0u32, 0u32);
 
-            // v8.1: 60s per-chunk 超时，防止 LLM provider 挂起导致 engine 永久阻塞。
-            // 外层还有 node_timeout（默认 120s）兜底，但每次 stream.next() 阻塞太久
+            // v8.1: per-chunk 超时，防止 LLM provider 挂起导致 engine 永久阻塞。
+            // 默认 60s，可通过 AgentNodeConfig.stream_chunk_timeout_secs 配置。
+            // 外层还有 node_timeout 兜底，但每次 stream.next() 阻塞太久
             // 会让整个 JoinSet 卡住，其他已完成 Agent 的结果无法推进引擎。
-            while let Some(chunk) = tokio::time::timeout(Duration::from_secs(60), stream.next())
+            let chunk_timeout = Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(60));
+            while let Some(chunk) = tokio::time::timeout(chunk_timeout, stream.next())
                 .await
                 .map_err(|_| {
                     NodeError::exec_failed(
                         error_code::TIMEOUT,
                         format!(
-                            "Agent LLM stream chunk timeout after 60s (round {}/{}), node={}",
+                            "Agent LLM stream chunk timeout after {}s (round {}/{}), node={}",
+                            chunk_timeout.as_secs(),
                             round + 1,
                             max_rounds,
                             node.base_id(),
@@ -818,6 +821,10 @@ impl NodeExecutorTrait for AgentExecutor {
                     repair_unclosed_json_strings(&trimmed)
                         .filter(|fixed| fixed != &trimmed)
                         .filter(|fixed| serde_json::from_str::<serde_json::Value>(fixed).is_ok())
+                })
+                .or_else(|| {
+                    // 尝试修复截断的 JSON（max_tokens 限制导致输出不完整）
+                    try_fix_truncated_json(&trimmed)
                 });
             if let Some(ref fixed_content) = fixed {
                 if fixed_content != &trimmed {
@@ -1614,34 +1621,57 @@ fn repair_json(s: &str) -> String {
 
 /// 修复 LLM 输出中高频出现的"未闭合字符串"模式。
 ///
-/// 问题模式：JSON 字符串值包含 `[引用标记]` 时，LLM 常忘记在 `]` 前加 `"` 闭合。
-/// 例：`"evidence_refs": ["[a-news 202]` 缺少 `"` 在 `]` 前。
+/// 问题模式：JSON 字符串值包含引用标记时，LLM 常忘记在闭合括号前加 `"`。
 ///
-/// 修复逻辑：找到 `"[` 后紧跟的 `]`，若 `]` 前无 `"` 且 `[` 到 `]` 之间无 `"`，
-/// 则在 `]` 前插入 `"`，将 `"[a-news 202]` 修复为 `"[a-news 202]"`。
+/// 修复逻辑：
+///   - `"[来源 日期]` → `"[来源 日期]"`（方括号引用，旧格式）
+///   - `"(来源 日期) 文本` → `"(来源 日期) 文本"`（圆括号引用，新格式）
+///
+/// 具体做法：对 `"[` 和 `"(` 两种模式分别执行修复扫描，
+/// 若内容中无 `"` 且结尾括号后无 `"`，则在结尾括号前插入 `"` 闭合字符串。
 fn repair_unclosed_json_strings(s: &str) -> Option<String> {
     let mut result = s.to_string();
     let mut modified = false;
-    let mut search_from = 0;
 
+    // 第一遍：修复 `"[来源 日期]` 模式（方括号引用）
+    let mut search_from = 0;
     loop {
-        // 在剩余字符串中查找 "[ 模式（引号+左方括号，可能是未闭合的引用字符串）
         let slice = &result[search_from..];
         if let Some(start) = slice.find("\"[") {
             let actual_start = search_from + start;
-
-            // 跳过 "[，从右方括号开始的内容中查找 ]
-            let after_bracket = &result[actual_start + 2..];
-            if let Some(bracket_end) = after_bracket.find(']') {
-                let content = &after_bracket[..bracket_end];
-                // 如果 [ 到 ] 之间没有 "，说明这个字符串可能未闭合
-                // (若已正确闭合，会在 ] 后有 " 出现)
+            let after_open = &result[actual_start + 2..];
+            if let Some(close_pos) = after_open.find(']') {
+                let content = &after_open[..close_pos];
                 if !content.contains('"') {
-                    // 检查 ] 后是否已经有 "（已正确闭合）
-                    let trailing = &after_bracket[bracket_end + 1..];
+                    let trailing = &after_open[close_pos + 1..];
                     if !trailing.starts_with('"') {
-                        // 在 ] 前插入 " 来闭合字符串
-                        let insert_pos = actual_start + 2 + bracket_end;
+                        let insert_pos = actual_start + 2 + close_pos;
+                        result.insert(insert_pos, '"');
+                        modified = true;
+                        search_from = insert_pos + 1;
+                        continue;
+                    }
+                }
+            }
+            search_from = actual_start + 2;
+        } else {
+            break;
+        }
+    }
+
+    // 第二遍：修复 `"(来源 日期)` 模式（圆括号引用，新 prompt 格式）
+    let mut search_from = 0;
+    loop {
+        let slice = &result[search_from..];
+        if let Some(start) = slice.find("\"(") {
+            let actual_start = search_from + start;
+            let after_open = &result[actual_start + 2..];
+            if let Some(close_pos) = after_open.find(')') {
+                let content = &after_open[..close_pos];
+                if !content.contains('"') {
+                    let trailing = &after_open[close_pos + 1..];
+                    if !trailing.starts_with('"') {
+                        let insert_pos = actual_start + 2 + close_pos;
                         result.insert(insert_pos, '"');
                         modified = true;
                         search_from = insert_pos + 1;
@@ -1656,6 +1686,82 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
     }
 
     if modified { Some(result) } else { None }
+}
+
+/// 修复 LLM 输出被截断（max_tokens 限制）导致的 JSON 不完整。
+///
+/// 问题模式：LLM 在生成 JSON 的过程中用完了 token 预算，导致：
+///   - 括号不匹配（`{` > `}` 或 `[` > `]`）
+///   - 字符串未闭合（缺少尾随 `"`）
+///
+/// 修复逻辑：
+///   1. 逐字符扫描，追踪 {} 和 [] 深度以及字符串状态
+///   2. 若深度 > 0，补全缺失的闭合括号
+///   3. 若字符串未闭合，先补 `"` 再补括号
+///   4. 尝试解析，成功则返回修复后内容
+fn try_fix_truncated_json(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() || (!s.starts_with('{') && !s.starts_with('[')) {
+        return None;
+    }
+
+    let bytes = s.as_bytes();
+    let mut depth_curly: i32 = 0;
+    let mut depth_square: i32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for &b in bytes.iter() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if b == b'\\' && in_string {
+            escaped = true;
+            continue;
+        }
+        if b == b'"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        match b {
+            b'{' => depth_curly += 1,
+            b'}' => depth_curly -= 1,
+            b'[' => depth_square += 1,
+            b']' => depth_square -= 1,
+            _ => {}
+        }
+    }
+
+    // 括号平衡且不在字符串中 → 非截断
+    if depth_curly <= 0 && depth_square <= 0 && !in_string {
+        return None;
+    }
+
+    let mut result = s.to_string();
+
+    // 如果字符串未闭合，先补上闭合引号
+    if in_string {
+        result.push('"');
+    }
+
+    // 补全缺失的闭合括号（先 ] 再 }，因为 JSON 规范要求先关数组再关对象）
+    for _ in 0..depth_square {
+        result.push(']');
+    }
+    for _ in 0..depth_curly {
+        result.push('}');
+    }
+
+    // 验证修复后的结果
+    if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+        Some(result)
+    } else {
+        None
+    }
 }
 
 /// 检测 LLM 输出是否为纯文本拒绝（模型安全机制触发）。
@@ -1811,6 +1917,13 @@ fn validate_strict_mode_output(
                 }
             }
         }
+
+        // 模式5: 修复截断的 JSON（max_tokens 限制导致输出不完整）
+        // 优先对已被 fence 剥离后的候选内容尝试截断修复
+        let truncation_candidates: Vec<String> = candidates.iter()
+            .filter_map(|c| try_fix_truncated_json(c))
+            .collect();
+        candidates.extend(truncation_candidates);
 
         // 逐个候选尝试解析
         for candidate in &candidates {

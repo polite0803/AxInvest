@@ -40,7 +40,7 @@ export function DecisionBanner() {
   const bumpWatchlistVersion = useStockAnalysisStore((s) => s.bumpWatchlistVersion);
   const watchlistVersion = useStockAnalysisStore((s) => s.watchlistVersion);
   // P0-1: 证据质量驱动共识
-  const stockCodeEvidence = useStockAnalysisStore((s) => stockCode ? s.evidenceReport[stockCode] : null);
+  const stockCodeEvidence = useStockAnalysisStore((s) => stockCode ? s.evidenceReport?.[stockCode] : null);
   // 方案 D 双向并存: LLM 决策 JSON + 一致性分数
   const llmDecisionJson = useStockAnalysisStore((s) => s.llmDecisionJson);
   const decisionAgreementScore = useStockAnalysisStore((s) => s.decisionAgreementScore);

@@ -571,6 +571,34 @@ export function DecisionBanner() {
             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</span>
             <span className="font-semibold">{t(getRiskTKey(decision.riskLevel))}</span>
           </span>
+          {/* P0-1: 证据质量门控显示 */}
+          {stockCodeEvidence && stockCodeEvidence.holdGate && (
+            <span
+              className="text-xs px-2 py-1 rounded flex items-center justify-between"
+              style={{
+                background: "var(--surface)",
+                color: stockCodeEvidence.holdGate.holdAllowed ? "var(--sa-blue)" : "var(--sa-amber)",
+              }}
+            >
+              <span style={{ color: "var(--muted)" }}>门控</span>
+              <span className="font-semibold text-[10px]">
+                {stockCodeEvidence.holdGate.holdAllowed ? "✅ HOLD" : "🎯 强制方向"}
+              </span>
+            </span>
+          )}
+          {stockCodeEvidence && (
+            <span
+              className="text-xs px-2 py-1 rounded flex items-center justify-between font-mono"
+              style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+            >
+              <span style={{ color: "var(--muted)" }}>证据分</span>
+              <span className="font-semibold">
+                多{stockCodeEvidence.consensus.bullishScore.toFixed(1)}{" "}
+                | 空{stockCodeEvidence.consensus.bearishScore.toFixed(1)}{" "}
+                | 净{stockCodeEvidence.consensus.netScore.toFixed(1)}
+              </span>
+            </span>
+          )}
           {decision.expectedHoldingDays && (
             <span
               className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"

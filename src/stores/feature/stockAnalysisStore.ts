@@ -1603,7 +1603,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
               const { computeEvidenceDrivenConsensus } = await import("@/lib/stock-analysis-utils");
               const evidenceResult = await computeEvidenceDrivenConsensus(
                 parsed.analystReports,
-                undefined as any, // marketRegime will be fetched inside
+                undefined as unknown as import("@/lib/stock-analysis-utils").MarketRegimeInfo, // marketRegime will be fetched inside
                 horizon,
                 null,
               );

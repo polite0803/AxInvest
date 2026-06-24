@@ -1,4 +1,5 @@
 pub mod backtest;
+pub mod backtest_feedback;
 pub mod backtest_strategy;
 pub mod blackboard;
 pub mod data_clean;

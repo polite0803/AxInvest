@@ -1080,6 +1080,7 @@ pub fn run() {
             commands::stock_analysis::get_stock_announcements,
             commands::stock_analysis::get_earnings_calendar,
             commands::stock_analysis::compute_evidence_weights,
+            commands::stock_analysis::analyze_backtest_feedback,
             commands::stock_analysis::compute_valuation_band,
             commands::stock_analysis::list_financial_snapshots,
             commands::stock_analysis::get_hot_stocks,

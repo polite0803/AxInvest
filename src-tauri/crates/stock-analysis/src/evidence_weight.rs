@@ -721,7 +721,7 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
 mod tests {
     use super::*;
 
-    fn make_analyst(id: &str, stance: &str, conf: f64) -> AnalystInput {
+    fn make_analyst(id: &str, stance: &str, _conf: f64) -> AnalystInput {
         AnalystInput {
             analyst_id: id.to_string(),
             report_text: None,

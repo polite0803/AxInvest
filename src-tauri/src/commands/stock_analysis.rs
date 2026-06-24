@@ -11,6 +11,7 @@ use axagent_core::entity::{
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
+use axagent_stock_analysis::backtest_feedback;
 use axagent_stock_analysis::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::plugin::AnalystPluginManager;
@@ -3654,4 +3655,18 @@ pub fn compute_evidence_weights(
     request: EvidenceWeightRequest,
 ) -> Result<EvidenceWeightReport, String> {
     Ok(evidence_weight::compute_evidence_weights(request))
+}
+
+// ── P0-2: 回测→Prompt 优化 ──
+
+/// 分析回测结果，生成分析师反馈报告
+///
+/// 输入回测参与记录，输出每位分析师的表现分析、趋势判断和 Prompt 调整建议。
+/// 前端 BacktestPanel 完成回测后调用此命令，展示分析和调整建议。
+#[tauri::command]
+pub fn analyze_backtest_feedback(
+    participations: Vec<backtest_feedback::AnalysisParticipation>,
+) -> Result<backtest_feedback::BacktestFeedbackReport, String> {
+    let input = backtest_feedback::FeedbackInput { participations };
+    Ok(backtest_feedback::analyze_backtest_feedback(input))
 }

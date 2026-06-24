@@ -9087,7 +9087,9 @@
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
     "llmPerspective": "Perspectiva LLM",
-    "expectedHoldingDaysLabel": "Días"
+    "expectedHoldingDaysLabel": "Días",
+    "llmViewUnavailable": "Vista LLM no disponible",
+    "formulaFallbackHint": "Retroceso a decisión de fórmula — sin comparación de doble vista"
   },
   "trade": {
     "title": "Trading Log",

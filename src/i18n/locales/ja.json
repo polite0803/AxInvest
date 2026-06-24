@@ -9087,7 +9087,9 @@
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
     "llmPerspective": "LLM 視点",
-    "expectedHoldingDaysLabel": "保有日数"
+    "expectedHoldingDaysLabel": "保有日数",
+    "llmViewUnavailable": "LLM ビュー利用不可",
+    "formulaFallbackHint": "フォーミュラ決定にフォールバック — デュアルビュー比較なし"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",

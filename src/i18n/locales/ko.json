@@ -9087,7 +9087,9 @@
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
     "llmPerspective": "LLM 관점",
-    "expectedHoldingDaysLabel": "보유 일수"
+    "expectedHoldingDaysLabel": "보유 일수",
+    "llmViewUnavailable": "LLM 보기 불가",
+    "formulaFallbackHint": "수식 결정으로 대체 — 이중 보기 비교 없음"
   },
   "trade": {
     "title": "Trading Log",

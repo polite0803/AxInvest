@@ -9324,7 +9324,9 @@
     "dualViewConsistency": "Dual-View Consistency",
     "dualViewDisagreement": "Manual Review Recommended",
     "llmPerspective": "LLM Perspective",
-    "expectedHoldingDaysLabel": "Holding Days"
+    "expectedHoldingDaysLabel": "Holding Days",
+    "llmViewUnavailable": "LLM view unavailable",
+    "formulaFallbackHint": "Falling back to formula decision — no dual-view comparison"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

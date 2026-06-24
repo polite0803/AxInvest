@@ -94,9 +94,9 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
     return (
       <div className="decision-comparison-panel p-3 space-y-3">
         <div className="flex items-center gap-2 mb-2">
-          <Tag color="warning">LLM 视角不可用</Tag>
+          <Tag color="warning">{t("stockAnalysis.llmViewUnavailable")}</Tag>
           <span className="text-xs" style={{ color: "var(--muted)" }}>
-            回退显示公式决策 — 暂无双视角对比
+            {t("stockAnalysis.formulaFallbackHint")}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2 text-[12px]">

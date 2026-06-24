@@ -9086,7 +9086,9 @@
     "dualViewConsistency": "双视角一致性",
     "dualViewDisagreement": "建议人工复核",
     "llmPerspective": "LLM 視角",
-    "expectedHoldingDaysLabel": "持有天數"
+    "expectedHoldingDaysLabel": "持有天數",
+    "llmViewUnavailable": "LLM 視角不可用",
+    "formulaFallbackHint": "回退顯示公式決策 — 暫無雙視角對比"
   },
   "trade": {
     "title": "交易日志",

@@ -9039,7 +9039,9 @@
     "backtest.avgConfidence": "平均置信度",
     "showDetail": "详情",
     "reasoning": "推理",
-    "llmPerspective": "LLM 视角"
+    "llmPerspective": "LLM 视角",
+    "llmViewUnavailable": "LLM 视角不可用",
+    "formulaFallbackHint": "回退显示公式决策 — 暂无双视角对比"
   },
   "trade": {
     "title": "交易日志",

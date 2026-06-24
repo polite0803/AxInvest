@@ -11,6 +11,7 @@ use axagent_core::entity::{
 use axagent_stock_analysis::backtest::{
     BacktestEngine, BacktestResult, BacktestStats, HistoricalAnalysis,
 };
+use axagent_stock_analysis::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
 use axagent_stock_analysis::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
 use axagent_stock_analysis::plugin::AnalystPluginManager;
 use axagent_stock_analysis::portfolio_monitor::{
@@ -21,7 +22,6 @@ use axagent_stock_analysis::position_limits::PositionLimits;
 use axagent_stock_analysis::recommender::{self, RecoResponse};
 use axagent_stock_analysis::review::{DailyReview, PostCloseReview};
 use axagent_stock_analysis::screener::{ScreenCriteria, ScreenResult, StockScreener};
-use axagent_stock_analysis::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
 use axagent_stock_analysis::trading::{PositionSummary, TradePredictionComparison};
 use serde::{Deserialize, Serialize};
 

@@ -63,7 +63,7 @@ fn classify_domain(analyst_id: &str) -> AnalystDomain {
         "a-market" | "a-technical" => AnalystDomain::Technical,
         "sentiment" | "a-sentiment" | "a-news" | "a-hot-money" | "capital" => {
             AnalystDomain::Sentiment
-        }
+        },
         "research-mgr" => AnalystDomain::Research,
         _ => {
             // 按关键词后缀推断
@@ -76,7 +76,7 @@ fn classify_domain(analyst_id: &str) -> AnalystDomain {
             } else {
                 AnalystDomain::Sentiment
             }
-        }
+        },
     }
 }
 
@@ -238,7 +238,7 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("a-macro", 0.3);
             w.insert("macro", 0.3);
             w.insert("a-sector", 0.5);
-        }
+        },
         "short" => {
             w.insert("a-market", 1.5);
             w.insert("a-technical", 1.5);
@@ -254,7 +254,7 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("macro", 0.7);
             w.insert("a-sector", 0.8);
             w.insert("research-mgr", 1.0);
-        }
+        },
         "long" => {
             w.insert("fundamental", 1.5);
             w.insert("a-fundamentals", 1.5);
@@ -270,7 +270,7 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("capital", 0.5);
             w.insert("a-technical", 0.6);
             w.insert("a-market", 0.6);
-        }
+        },
         // mid (default)
         _ => {
             w.insert("a-fundamentals", 1.2);
@@ -287,7 +287,7 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("a-news", 1.0);
             w.insert("a-hot-money", 0.9);
             w.insert("capital", 0.9);
-        }
+        },
     }
     w
 }
@@ -303,8 +303,8 @@ fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystDomain,
     let mut modifiers = HashMap::new();
 
     let vol_penalty = match regime.volatility.as_str() {
-        "high" => 0.85,  // 高波动 → 所有 domain ×0.85
-        "low" => 1.05,   // 低波动 → 轻微提升
+        "high" => 0.85, // 高波动 → 所有 domain ×0.85
+        "low" => 1.05,  // 低波动 → 轻微提升
         _ => 1.0,
     };
 
@@ -315,14 +315,14 @@ fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystDomain,
             modifiers.insert(AnalystDomain::Fundamental, 1.10 * vol_penalty);
             modifiers.insert(AnalystDomain::Macro, 1.05 * vol_penalty);
             modifiers.insert(AnalystDomain::Research, 1.05 * vol_penalty);
-        }
+        },
         "bear" => {
             modifiers.insert(AnalystDomain::Fundamental, 1.35 * vol_penalty);
             modifiers.insert(AnalystDomain::Macro, 1.30 * vol_penalty);
             modifiers.insert(AnalystDomain::Research, 1.20 * vol_penalty);
             modifiers.insert(AnalystDomain::Technical, 0.80 * vol_penalty);
             modifiers.insert(AnalystDomain::Sentiment, 0.75 * vol_penalty);
-        }
+        },
         "volatile" => {
             // 高波动: 全 domain 降权
             modifiers.insert(AnalystDomain::Fundamental, 0.80);
@@ -330,7 +330,7 @@ fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystDomain,
             modifiers.insert(AnalystDomain::Technical, 0.70);
             modifiers.insert(AnalystDomain::Sentiment, 0.65);
             modifiers.insert(AnalystDomain::Research, 0.90);
-        }
+        },
         // sideways / 震荡: 精选个股模式
         _ => {
             modifiers.insert(AnalystDomain::Fundamental, 1.15 * vol_penalty);
@@ -338,7 +338,7 @@ fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystDomain,
             modifiers.insert(AnalystDomain::Research, 1.10 * vol_penalty);
             modifiers.insert(AnalystDomain::Macro, 1.00 * vol_penalty);
             modifiers.insert(AnalystDomain::Technical, 0.95 * vol_penalty);
-        }
+        },
     }
 
     modifiers
@@ -349,20 +349,34 @@ fn extract_stance(analyst: &AnalystInput) -> (String, f64) {
     // 优先使用结构化字段
     if let Some(ref stance) = analyst.stance {
         let lower = stance.to_lowercase();
-        if lower.contains("买") || lower.contains("多") || lower.contains("涨")
-            || lower.contains("bull") || lower.contains("buy")
-            || lower.contains("乐观") || lower.contains("上行") || lower.contains("流入")
+        if lower.contains("买")
+            || lower.contains("多")
+            || lower.contains("涨")
+            || lower.contains("bull")
+            || lower.contains("buy")
+            || lower.contains("乐观")
+            || lower.contains("上行")
+            || lower.contains("流入")
         {
             return ("bullish".into(), 0.8);
         }
-        if lower.contains("卖") || lower.contains("空") || lower.contains("跌")
-            || lower.contains("bear") || lower.contains("sell")
-            || lower.contains("悲观") || lower.contains("下行") || lower.contains("流出")
+        if lower.contains("卖")
+            || lower.contains("空")
+            || lower.contains("跌")
+            || lower.contains("bear")
+            || lower.contains("sell")
+            || lower.contains("悲观")
+            || lower.contains("下行")
+            || lower.contains("流出")
         {
             return ("bearish".into(), 0.8);
         }
-        if lower.contains("中性") || lower.contains("观望") || lower.contains("持有")
-            || lower.contains("hold") || lower.contains("neutral") || lower.contains("震荡")
+        if lower.contains("中性")
+            || lower.contains("观望")
+            || lower.contains("持有")
+            || lower.contains("hold")
+            || lower.contains("neutral")
+            || lower.contains("震荡")
         {
             return ("neutral".into(), 0.7);
         }
@@ -396,8 +410,12 @@ fn extract_stance(analyst: &AnalystInput) -> (String, f64) {
         let mut bull_count = 0;
         let mut bear_count = 0;
 
-        let bull_kw = ["买入", "增持", "看多", "看涨", "利好", "上涨", "bull", "buy", "增长", "改善"];
-        let bear_kw = ["卖出", "减持", "看空", "看跌", "利空", "下跌", "bear", "sell", "下滑", "恶化"];
+        let bull_kw = [
+            "买入", "增持", "看多", "看涨", "利好", "上涨", "bull", "buy", "增长", "改善",
+        ];
+        let bear_kw = [
+            "卖出", "减持", "看空", "看跌", "利空", "下跌", "bear", "sell", "下滑", "恶化",
+        ];
 
         for kw in &bull_kw {
             if lower.contains(kw) {
@@ -444,30 +462,27 @@ fn check_hold_gate(analysts: &[AnalystWeight]) -> HoldGateResult {
                 if a.stance_direction != "neutral" && a.stance_confidence > 0.5 {
                     tech_has_trend = true;
                 }
-            }
+            },
             AnalystDomain::Sentiment => {
                 if a.stance_direction != "neutral" && a.stance_confidence > 0.5 {
                     money_has_dir = true;
                 }
-            }
+            },
             AnalystDomain::Fundamental | AnalystDomain::Macro => {
                 if a.stance_direction == "bullish" || a.stance_direction == "bearish" {
                     if a.stance_confidence > 0.5 {
                         fund_has_catalyst = true;
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
     let hold_allowed = !tech_has_trend && !money_has_dir && !fund_has_catalyst;
 
     let (reason, suggested_action) = if hold_allowed {
-        (
-            "技术面无趋势 + 资金面无方向 + 基本面无催化剂 → HOLD 允许".into(),
-            "HOLD".into(),
-        )
+        ("技术面无趋势 + 资金面无方向 + 基本面无催化剂 → HOLD 允许".into(), "HOLD".into())
     } else if tech_has_trend && money_has_dir {
         (
             format!(
@@ -478,20 +493,11 @@ fn check_hold_gate(analysts: &[AnalystWeight]) -> HoldGateResult {
             "FORCE_DIRECTION".into(),
         )
     } else if tech_has_trend {
-        (
-            "技术面有明确趋势 → 必须选 BUY 或 SELL".into(),
-            "FORCE_DIRECTION".into(),
-        )
+        ("技术面有明确趋势 → 必须选 BUY 或 SELL".into(), "FORCE_DIRECTION".into())
     } else if fund_has_catalyst {
-        (
-            "基本面/新闻面有催化剂 → 必须选 BUY 或 SELL".into(),
-            "FORCE_DIRECTION".into(),
-        )
+        ("基本面/新闻面有催化剂 → 必须选 BUY 或 SELL".into(), "FORCE_DIRECTION".into())
     } else {
-        (
-            "资金面/情绪面有明确方向 → 必须选方向".into(),
-            "FORCE_DIRECTION".into(),
-        )
+        ("资金面/情绪面有明确方向 → 必须选方向".into(), "FORCE_DIRECTION".into())
     };
 
     HoldGateResult {
@@ -544,12 +550,12 @@ fn compute_evidence_consensus(analysts: &[AnalystWeight]) -> EvidenceConsensus {
             "bullish" | "bearish" => {
                 // 方向明确时，用净占比作为信心
                 (raw_confidence * 70.0 + 30.0).min(95.0)
-            }
+            },
             "divided" => {
                 // 分歧时，看哪方更强
                 let max_side = bullish_score.max(bearish_score);
                 (max_side / total_weight * 50.0).min(60.0)
-            }
+            },
             _ => 30.0,
         };
 
@@ -580,8 +586,8 @@ fn compute_recommended_position(
     // 根据共识方向和置信度计算仓位
     let base_pct = match consensus.consensus.as_str() {
         "bullish" => consensus.confidence * 0.8, // 0-80%
-        "bearish" => 0.0,                         // 看空 → 不持仓
-        "divided" => consensus.confidence * 0.3,  // 分歧 → 0-30%
+        "bearish" => 0.0,                        // 看空 → 不持仓
+        "divided" => consensus.confidence * 0.3, // 分歧 → 0-30%
         _ => 0.0,
     };
 
@@ -671,7 +677,8 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
     let consensus = compute_evidence_consensus(&analyst_weights);
 
     // 7. 计算推荐动作
-    let recommended_action = if hold_gate.suggested_action == "FORCE_DIRECTION" {
+    let suggested_action = hold_gate.suggested_action.clone();
+    let recommended_action = if suggested_action == "FORCE_DIRECTION" {
         match consensus.consensus.as_str() {
             "bullish" => "BUY",
             "bearish" => "SELL",
@@ -679,7 +686,7 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
             _ => "HOLD",
         }
     } else {
-        &hold_gate.suggested_action
+        &suggested_action
     };
 
     // 8. 计算推荐仓位
@@ -691,11 +698,11 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
         "BUY" | "SELL" => {
             // 方向明确 → 用共识置信度
             consensus.confidence
-        }
+        },
         "HOLD" => {
             // HOLD → 通常信心较高(因为经过了门槛筛选)
             60.0
-        }
+        },
         _ => consensus.confidence,
     };
 
@@ -839,10 +846,7 @@ mod tests {
             historical_weights: None,
         };
         let report = compute_evidence_weights(request);
-        assert!(
-            report.hold_gate.hold_allowed,
-            "三无(无趋势+无方向+无催化剂)应允许 HOLD"
-        );
+        assert!(report.hold_gate.hold_allowed, "三无(无趋势+无方向+无催化剂)应允许 HOLD");
         assert_eq!(report.recommended_action, "HOLD");
     }
 
@@ -860,10 +864,7 @@ mod tests {
             historical_weights: None,
         };
         let report = compute_evidence_weights(request);
-        assert!(
-            !report.hold_gate.hold_allowed,
-            "技术面有趋势 → 必须选方向"
-        );
+        assert!(!report.hold_gate.hold_allowed, "技术面有趋势 → 必须选方向");
         assert!(
             report.recommended_action == "BUY" || report.recommended_action == "SELL",
             "推荐动作应为 BUY/SELL, 实际={}",

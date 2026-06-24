@@ -663,7 +663,8 @@ impl NodeExecutorTrait for AgentExecutor {
             // 默认 60s，可通过 AgentNodeConfig.stream_chunk_timeout_secs 配置。
             // 外层还有 node_timeout 兜底，但每次 stream.next() 阻塞太久
             // 会让整个 JoinSet 卡住，其他已完成 Agent 的结果无法推进引擎。
-            let chunk_timeout = Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(60));
+            let chunk_timeout =
+                Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(60));
             while let Some(chunk) = tokio::time::timeout(chunk_timeout, stream.next())
                 .await
                 .map_err(|_| {
@@ -1732,7 +1733,7 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
             b'}' => depth_curly -= 1,
             b'[' => depth_square += 1,
             b']' => depth_square -= 1,
-            _ => {}
+            _ => {},
         }
     }
 
@@ -1918,12 +1919,43 @@ fn validate_strict_mode_output(
             }
         }
 
-        // 模式5: 修复截断的 JSON（max_tokens 限制导致输出不完整）
-        // 优先对已被 fence 剥离后的候选内容尝试截断修复
-        let truncation_candidates: Vec<String> = candidates.iter()
-            .filter_map(|c| try_fix_truncated_json(c))
+        // ── 遍历修复链：对所有已有候选进行二次修复 ──
+        // 之前的修复（fence 剥离/repair_json/截断/闭合）只针对原始 trimmed，
+        // 但 fence 剥离后的候选可能也需要同样的修复（如截断修复、未闭合字符串等）。
+        let secondary_fixes: Vec<String> = candidates
+            .iter()
+            .flat_map(|c| {
+                let mut fixes: Vec<String> = Vec::new();
+                // 如果还没被剥离 fence，再尝试一次
+                if let Some(stripped) = try_extract_json_fragment(c) {
+                    if !candidates.iter().any(|x| x.as_str() == stripped.as_str()) {
+                        fixes.push(stripped);
+                    }
+                }
+                // 未闭合字符串修复
+                if let Some(fixed) = repair_unclosed_json_strings(c) {
+                    if fixed != *c && !candidates.iter().any(|x| x.as_str() == fixed.as_str()) {
+                        fixes.push(fixed);
+                    }
+                }
+                // repair_json（尾逗号等）
+                let repaired = repair_json(c);
+                if repaired != *c && !candidates.iter().any(|x| x.as_str() == repaired.as_str()) {
+                    fixes.push(repaired);
+                }
+                // 截断 JSON 修复
+                if let Some(trunc_fixed) = try_fix_truncated_json(c) {
+                    if !candidates
+                        .iter()
+                        .any(|x| x.as_str() == trunc_fixed.as_str())
+                    {
+                        fixes.push(trunc_fixed);
+                    }
+                }
+                fixes
+            })
             .collect();
-        candidates.extend(truncation_candidates);
+        candidates.extend(secondary_fixes);
 
         // 逐个候选尝试解析
         for candidate in &candidates {

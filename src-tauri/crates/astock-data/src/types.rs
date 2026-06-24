@@ -267,7 +267,6 @@ impl KLinePeriod {
     }
 }
 
-
 /// 研报
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

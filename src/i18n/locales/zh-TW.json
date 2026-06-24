@@ -7747,6 +7747,10 @@
     "stopLoss": "止损",
     "riskLevel": "風險等级",
     "confidence": "置信度",
+    "confidenceHigh": "高置信",
+    "confidenceMedium": "中等置信",
+    "confidenceLow": "低置信（多空分歧）",
+    "consensusAbbr": "共識",
     "tab.market": "行情",
     "tab.analysts": "分析师",
     "tab.debate": "辯論",
@@ -8261,10 +8265,10 @@
     },
     "moreRounds": "还有 {{count}} 轮辯論",
     "noData": "noData",
-    "noDecisionReasoning": "noDecisionReasoning",
+    "noDecisionReasoning": "暫無決策理由",
     "noRecords": "暫无記录",
     "noReport": "暫無報告",
-    "noRiskData": "noRiskData",
+    "noRiskData": "暫無風險評估數據",
     "progress": {
       "completed": "completed",
       "fetchingData": "fetchingData",
@@ -9036,7 +9040,9 @@
       "debate": "Bull-Bear Debate",
       "decision": "Investment Decision",
       "risk": "Risk Assessment"
-    }
+    },
+    "showDetail": "詳情",
+    "reasoning": "推理"
   },
   "trade": {
     "title": "交易日志",

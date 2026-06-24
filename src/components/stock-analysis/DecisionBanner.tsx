@@ -315,7 +315,19 @@ export function DecisionBanner() {
   const confidencePct = Math.round(decision.confidence ?? 0);
   const meterColor = confidencePct >= 70
     ? "var(--sa-green)"
-    : confidencePct >= 40
+    : confidencePct >= 45
+    ? "var(--sa-amber)"
+    : "var(--sa-red)";
+
+  // 置信度定性标签：让用户快速理解数字含义，而非只看到裸百分比
+  const confidenceLabel = confidencePct >= 70
+    ? t("stockAnalysis.confidenceHigh")
+    : confidencePct >= 45
+    ? t("stockAnalysis.confidenceMedium")
+    : t("stockAnalysis.confidenceLow");
+  const confidenceLabelColor = confidencePct >= 70
+    ? "var(--sa-green)"
+    : confidencePct >= 45
     ? "var(--sa-amber)"
     : "var(--sa-red)";
 
@@ -378,22 +390,47 @@ export function DecisionBanner() {
             : {}),
         }}
       >
+        {/* 置信度条：数字 + 定性标签 + 共识上下文 */}
         <div className="mb-2">
-          <div className="flex justify-between text-xs mb-1">
-            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
-            <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 14 }}>
-              {confidencePct}%
-            </span>
+          <div className="flex justify-between items-center text-xs mb-1">
+            <div className="flex items-center gap-1.5">
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
+              <span
+                className="font-mono font-semibold"
+                style={{ color: meterColor, fontSize: 15 }}
+              >
+                {confidencePct}%
+              </span>
+              <span
+                className="text-[10px] px-1.5 py-px rounded font-medium"
+                style={{
+                  background: `${confidenceLabelColor}18`,
+                  color: confidenceLabelColor,
+                  border: `1px solid ${confidenceLabelColor}40`,
+                }}
+              >
+                {confidenceLabel}
+              </span>
+            </div>
+            {/* 共识分数：当 dual view 分数可用时展示，帮助用户理解低置信原因 */}
+            {decisionAgreementScore !== null && (
+              <span
+                className="text-[10px]"
+                style={{ color: "var(--muted)" }}
+              >
+                📊 {t("stockAnalysis.consensusAbbr")} {decisionAgreementScore}/100
+              </span>
+            )}
           </div>
           <div
             className="relative"
-            style={{ height: 8, borderRadius: 4, background: "var(--surface)", overflow: "hidden" }}
+            style={{ height: 6, borderRadius: 3, background: "var(--surface)", overflow: "hidden" }}
           >
             <div
               style={{
                 width: `${confidencePct}%`,
                 height: "100%",
-                borderRadius: 5,
+                borderRadius: 3,
                 background: `linear-gradient(to right, ${meterColor}88, ${meterColor})`,
                 transition: "width 0.6s ease",
               }}
@@ -443,72 +480,69 @@ export function DecisionBanner() {
           </div>
         )}
 
-        <div
-          className="grid gap-1.5 mb-2"
-          style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
-        >
+        {/* 紧凑指标行：inline flex 避免三列 grid 留白 */}
+        <div className="flex gap-2 items-center flex-wrap mb-2">
           {decision.targetPrice && (
-            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {t("stockAnalysis.targetPrice")}
-              </div>
-              <div className="text-xs font-semibold font-mono">
-                ¥{decision.targetPrice}
-              </div>
-            </div>
+            <span
+              className="text-xs px-2 py-0.5 rounded font-mono"
+              style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+            >
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</span>
+              <span className="font-semibold">¥{decision.targetPrice}</span>
+            </span>
           )}
           {decision.stopLoss && (
-            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {t("stockAnalysis.stopLoss")}
-              </div>
-              <div className="text-xs font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
-                ¥{decision.stopLoss}
-              </div>
-            </div>
+            <span
+              className="text-xs px-2 py-0.5 rounded font-mono"
+              style={{ background: "var(--surface)", color: "var(--sa-red)" }}
+            >
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
+              <span className="font-semibold">¥{decision.stopLoss}</span>
+            </span>
           )}
-          <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-[10px]" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
-            <div className="text-xs font-semibold font-mono">{decision.positionPct}%</div>
-          </div>
+          <span
+            className="text-xs px-2 py-0.5 rounded font-mono"
+            style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+          >
+            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</span>
+            <span className="font-semibold">{decision.positionPct}%</span>
+          </span>
           {upside != null && (
-            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {t("stockAnalysis.expectedUpside")}
-              </div>
-              <div
-                className="text-xs font-semibold font-mono"
-                style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
-              >
-                {upside >= 0 ? "+" : ""}
-                {upside.toFixed(1)}%
-              </div>
-            </div>
-          )}
-          <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-[10px]" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
-            <div
-              className="text-xs font-semibold"
+            <span
+              className="text-xs px-2 py-0.5 rounded font-mono"
               style={{
-                color: getRiskColor(decision.riskLevel),
+                background: "var(--surface)",
+                color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)",
               }}
             >
-              {t(getRiskTKey(decision.riskLevel))}
-            </div>
-          </div>
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedUpside")}</span>
+              <span className="font-semibold">{upside >= 0 ? "+" : ""}{upside.toFixed(1)}%</span>
+            </span>
+          )}
+          <span
+            className="text-xs px-2 py-0.5 rounded"
+            style={{ background: "var(--surface)", color: getRiskColor(decision.riskLevel) }}
+          >
+            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</span>
+            <span className="font-semibold">{t(getRiskTKey(decision.riskLevel))}</span>
+          </span>
           {decision.expectedHoldingDays && (
-            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {t("stockAnalysis.expectedHoldingDays")}
-              </div>
-              <div className="text-xs font-semibold font-mono">{decision.expectedHoldingDays}天</div>
-            </div>
+            <span
+              className="text-xs px-2 py-0.5 rounded font-mono"
+              style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+            >
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDays")}</span>
+              <span className="font-semibold">{decision.expectedHoldingDays}天</span>
+            </span>
           )}
           {decision.targetTimeframe && (
-            <div className="text-center p-1 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</div>
-              <div className="text-xs font-semibold font-mono">{decision.targetTimeframe}</div>
-            </div>
+            <span
+              className="text-xs px-2 py-0.5 rounded font-mono"
+              style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+            >
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</span>
+              <span className="font-semibold">{decision.targetTimeframe}</span>
+            </span>
           )}
         </div>
 
@@ -678,11 +712,34 @@ export function DecisionBanner() {
         styles={{ body: { maxHeight: "80vh", overflow: "auto" } }}
       >
         <div className="mb-4">
-          <div className="flex justify-between mb-1">
-            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
-            <span className="font-mono font-semibold" style={{ color: meterColor, fontSize: 20 }}>
-              {confidencePct}%
-            </span>
+          <div className="flex justify-between items-center mb-1">
+            <div className="flex items-center gap-2">
+              <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
+              <span
+                className="font-mono font-semibold"
+                style={{ color: meterColor, fontSize: 22 }}
+              >
+                {confidencePct}%
+              </span>
+              <span
+                className="text-xs px-2 py-0.5 rounded font-medium"
+                style={{
+                  background: `${confidenceLabelColor}18`,
+                  color: confidenceLabelColor,
+                  border: `1px solid ${confidenceLabelColor}40`,
+                }}
+              >
+                {confidenceLabel}
+              </span>
+            </div>
+            {decisionAgreementScore !== null && (
+              <span
+                className="text-xs"
+                style={{ color: "var(--muted)" }}
+              >
+                📊 {t("stockAnalysis.consensusAbbr")} {decisionAgreementScore}/100
+              </span>
+            )}
           </div>
           <div
             className="relative"

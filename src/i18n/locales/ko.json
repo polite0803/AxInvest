@@ -7747,6 +7747,10 @@
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
+    "confidenceHigh": "높은 신뢰도",
+    "confidenceMedium": "중간 신뢰도",
+    "confidenceLow": "낮은 신뢰도 (의견 차이)",
+    "consensusAbbr": "합의",
     "tab.market": "Market",
     "tab.analysts": "Analysts",
     "tab.debate": "Debate",
@@ -8261,10 +8265,10 @@
     },
     "moreRounds": "moreRounds",
     "noData": "noData",
-    "noDecisionReasoning": "noDecisionReasoning",
+    "noDecisionReasoning": "결정 근거 없음",
     "noRecords": "noRecords",
     "noReport": "리포트 없음",
-    "noRiskData": "noRiskData",
+    "noRiskData": "위험 평가 데이터 없음",
     "progress": {
       "completed": "completed",
       "fetchingData": "fetchingData",
@@ -9036,7 +9040,9 @@
       "debate": "Bull-Bear Debate",
       "decision": "Investment Decision",
       "risk": "Risk Assessment"
-    }
+    },
+    "showDetail": "세부 정보",
+    "reasoning": "추론"
   },
   "trade": {
     "title": "Trading Log",

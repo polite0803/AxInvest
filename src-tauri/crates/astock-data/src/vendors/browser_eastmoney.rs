@@ -56,6 +56,9 @@ fn to_em_secid(stock_code: &str) -> String {
 
 /// 通过浏览器页面导航发送 GET 请求，解析 JSON 响应
 /// 使用 page.goto() 而非 fetch()，绕过 CORS 限制
+///
+/// 添加预热机制：发送真实 API 请求前先导航到东方财富首页，
+/// 让浏览器执行 JS 指纹脚本、设置 cookies，降低 WAF 误杀概率。
 async fn browser_fetch(
     fetcher: Option<&Arc<dyn BrowserHttpFetch>>,
     url: &str,
@@ -64,6 +67,19 @@ async fn browser_fetch(
         vendor: "browser_eastmoney".into(),
         message: "browser fetcher not configured".into(),
     })?;
+
+    // ── 预热：先导航到东方财富首页，设置浏览器指纹 & cookies ──
+    let warmup_url = "https://www.eastmoney.com/";
+    match f.fetch_text(warmup_url).await {
+        Ok(_) => {
+            tracing::debug!("[browser_eastmoney] 预热成功({warmup_url})");
+            // 等待 JS 指纹脚本执行 & cookies 设置完成
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        },
+        Err(e) => {
+            tracing::warn!("[browser_eastmoney] 预热失败({warmup_url}): {e}，继续原始请求");
+        },
+    }
 
     let result = f
         .fetch_text(url)

@@ -314,6 +314,10 @@ pub struct AgentNodeConfig {
     /// 防幻觉锚定检查配置（可选，不配置时零影响）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hallucination_guard: Option<HallucinationGuardConfig>,
+    /// 流式 LLM 单 chunk 超时秒数（可选，不配置时默认 60s）。
+    /// 防止 LLM provider 挂起导致 engine 永久阻塞。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_chunk_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

@@ -7747,6 +7747,10 @@
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
+    "confidenceHigh": "Высокая",
+    "confidenceMedium": "Средняя",
+    "confidenceLow": "Низкая (расхождение)",
+    "consensusAbbr": "Консенсус",
     "tab.market": "Market",
     "tab.analysts": "Analysts",
     "tab.debate": "Debate",
@@ -8261,10 +8265,10 @@
     },
     "moreRounds": "moreRounds",
     "noData": "noData",
-    "noDecisionReasoning": "noDecisionReasoning",
+    "noDecisionReasoning": "Нет обоснования решения",
     "noRecords": "noRecords",
     "noReport": "Нет отчёта",
-    "noRiskData": "noRiskData",
+    "noRiskData": "Нет данных оценки рисков",
     "progress": {
       "completed": "completed",
       "fetchingData": "fetchingData",
@@ -9036,7 +9040,9 @@
       "debate": "Bull-Bear Debate",
       "decision": "Investment Decision",
       "risk": "Risk Assessment"
-    }
+    },
+    "showDetail": "Подробности",
+    "reasoning": "Обоснование"
   },
   "trade": {
     "title": "Trading Log",

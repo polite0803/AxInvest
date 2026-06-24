@@ -7747,6 +7747,10 @@
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
+    "confidenceHigh": "उच्च",
+    "confidenceMedium": "मध्यम",
+    "confidenceLow": "निम्न (भिन्न)",
+    "consensusAbbr": "सर्वसम्मति",
     "tab.market": "Market",
     "tab.analysts": "Analysts",
     "tab.debate": "Debate",
@@ -8261,10 +8265,10 @@
     },
     "moreRounds": "moreRounds",
     "noData": "noData",
-    "noDecisionReasoning": "noDecisionReasoning",
+    "noDecisionReasoning": "कोई निर्णय तर्क नहीं",
     "noRecords": "noRecords",
     "noReport": "कोई रिपोर्ट नहीं",
-    "noRiskData": "noRiskData",
+    "noRiskData": "कोई जोखिम मूल्यांकन डेटा नहीं",
     "progress": {
       "completed": "completed",
       "fetchingData": "fetchingData",
@@ -9036,7 +9040,9 @@
       "debate": "Bull-Bear Debate",
       "decision": "Investment Decision",
       "risk": "Risk Assessment"
-    }
+    },
+    "showDetail": "विवरण",
+    "reasoning": "तर्क"
   },
   "trade": {
     "title": "Trading Log",

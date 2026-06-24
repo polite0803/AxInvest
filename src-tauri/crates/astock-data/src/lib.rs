@@ -205,6 +205,7 @@ impl VendorRouting {
             money_flow: vec![
                 "tencent".into(),
                 "eastmoney".into(),
+                "sina".into(),
                 "browser_eastmoney".into(),
                 "baidu_stock".into(),
             ],

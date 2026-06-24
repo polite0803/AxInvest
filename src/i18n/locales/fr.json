@@ -7747,6 +7747,10 @@
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
+    "confidenceHigh": "Élevé",
+    "confidenceMedium": "Moyen",
+    "confidenceLow": "Faible (divergent)",
+    "consensusAbbr": "Consensus",
     "tab.market": "Market",
     "tab.analysts": "Analysts",
     "tab.debate": "Debate",
@@ -8261,10 +8265,10 @@
     },
     "moreRounds": "moreRounds",
     "noData": "noData",
-    "noDecisionReasoning": "noDecisionReasoning",
+    "noDecisionReasoning": "Aucun raisonnement de décision",
     "noRecords": "noRecords",
     "noReport": "Aucun rapport",
-    "noRiskData": "noRiskData",
+    "noRiskData": "Aucune donnée d'évaluation des risques",
     "progress": {
       "completed": "completed",
       "fetchingData": "fetchingData",
@@ -9036,7 +9040,9 @@
       "debate": "Bull-Bear Debate",
       "decision": "Investment Decision",
       "risk": "Risk Assessment"
-    }
+    },
+    "showDetail": "Détails",
+    "reasoning": "Raisonnement"
   },
   "trade": {
     "title": "Trading Log",

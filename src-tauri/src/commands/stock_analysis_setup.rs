@@ -1269,6 +1269,7 @@ async fn seed_stock_analysis_workflow_template(
                         ..Default::default()
                     },
                 ),
+                stream_chunk_timeout_secs: None,
             },
         })
     };
@@ -4685,6 +4686,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                         ..Default::default()
                     },
                 ),
+                stream_chunk_timeout_secs: None,
             },
         }),
         // 4. 反思记录持久化：写入 stock_reflections 表供后续查询/复盘
@@ -5389,6 +5391,7 @@ async fn seed_serenity_screening_workflow_template(
                         ..Default::default()
                     },
                 ),
+                stream_chunk_timeout_secs: None,
             },
         })
     };

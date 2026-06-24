@@ -141,6 +141,7 @@ pub fn compile_plan_to_dag(
                         model_role: None,
                         consistency_check: None,
                         hallucination_guard: None,
+                        stream_chunk_timeout_secs: None,
                         input_mapping: std::collections::HashMap::new(),
                     },
                 }),

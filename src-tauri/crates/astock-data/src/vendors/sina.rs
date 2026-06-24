@@ -204,8 +204,58 @@ impl StockVendor for SinaVendor {
             .collect())
     }
 
-    async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
-        Ok(None)
+    async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
+        // 新浪财经资金流向 API（个股）
+        // https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj
+        // 返回字段:
+        //   r0_in/r0_out — 超大单流入/流出
+        //   r1_in/r1_out — 大单流入/流出
+        //   r2_in/r2_out — 中单流入/流出
+        //   r3_in/r3_out — 小单流入/流出
+        //   netamount   — 净流入总额
+        let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
+            "sh"
+        } else {
+            "sz"
+        };
+        let url = format!(
+            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj?format=text&daima={market}{stock_code}"
+        );
+        let resp = self.sina_get(&url).await?;
+        let json: serde_json::Value = resp.json().await?;
+
+        let parse = |key: &str| -> f64 {
+            json.get(key)
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0)
+        };
+
+        let r0_in = parse("r0_in");
+        let r0_out = parse("r0_out");
+        let r1_in = parse("r1_in");
+        let r1_out = parse("r1_out");
+        let r2_in = parse("r2_in");
+        let r2_out = parse("r2_out");
+        let r3_in = parse("r3_in");
+        let r3_out = parse("r3_out");
+
+        // 如果所有字段都是 0，说明请求失败或股票无数据
+        if r0_in == 0.0 && r0_out == 0.0 && r1_in == 0.0 && r1_out == 0.0 {
+            return Ok(None);
+        }
+
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+        Ok(Some(MoneyFlow {
+            date: today,
+            // 主力净流入 = 超大单净流入 + 大单净流入
+            main_net_inflow: (r0_in - r0_out) + (r1_in - r1_out),
+            super_large_net: r0_in - r0_out,
+            large_net: r1_in - r1_out,
+            medium_net: r2_in - r2_out,
+            small_net: r3_in - r3_out,
+        }))
     }
 
     async fn get_dragon_tiger(&self, _: &str) -> Result<Vec<DragonTigerEntry>, DataError> {

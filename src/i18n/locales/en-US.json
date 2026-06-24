@@ -7989,6 +7989,10 @@
     "conceptBlocksEmpty": "No concept blocks",
     "concepts": "Concept Tags",
     "confidence": "Confidence",
+    "confidenceHigh": "High",
+    "confidenceMedium": "Medium",
+    "confidenceLow": "Low (diverged)",
+    "consensusAbbr": "Consensus",
     "contextCopied": "Context copied",
     "contradiction": "Decision Contradiction",
     "dailyReview": {
@@ -8208,7 +8212,7 @@
     "noHoldings": "No holdings",
     "noRecords": "No records",
     "noReport": "No report",
-    "noRiskData": "No risk data",
+    "noRiskData": "No risk assessment data",
     "offlineMode": "Offline mode",
     "open": "Open",
     "openSettings": "Open Settings",
@@ -9273,7 +9277,9 @@
     "valueAssessment.buffettLabel": "巴菲特",
     "valueAssessment.expand": "展开",
     "backtest.alpha": "超额收益",
-    "backtest.avgConfidence": "平均置信度"
+    "backtest.avgConfidence": "平均置信度",
+    "showDetail": "Details",
+    "reasoning": "Reasoning"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

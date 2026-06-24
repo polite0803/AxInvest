@@ -7747,6 +7747,10 @@
     "stopLoss": "Stop Loss",
     "riskLevel": "Risk Level",
     "confidence": "Confidence",
+    "confidenceHigh": "高信頼度",
+    "confidenceMedium": "中信頼度",
+    "confidenceLow": "低信頼度（意見分裂）",
+    "consensusAbbr": "コンセンサス",
     "tab.market": "Market",
     "tab.analysts": "Analysts",
     "tab.debate": "Debate",
@@ -8268,10 +8272,10 @@
     },
     "moreRounds": "{{count}} more rounds",
     "noData": "No data",
-    "noDecisionReasoning": "No decision reasoning",
+    "noDecisionReasoning": "判断理由なし",
     "noRecords": "No records",
     "noReport": "No report",
-    "noRiskData": "No risk data",
+    "noRiskData": "リスク評価データなし",
     "progress": {
       "completed": "完了",
       "fetchingData": "获取股票数据...",
@@ -9036,7 +9040,9 @@
       "debate": "Bull-Bear Debate",
       "decision": "Investment Decision",
       "risk": "Risk Assessment"
-    }
+    },
+    "showDetail": "詳細",
+    "reasoning": "推論"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",

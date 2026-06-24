@@ -468,12 +468,11 @@ fn check_hold_gate(analysts: &[AnalystWeight]) -> HoldGateResult {
                     money_has_dir = true;
                 }
             },
-            AnalystDomain::Fundamental | AnalystDomain::Macro => {
-                if a.stance_direction == "bullish" || a.stance_direction == "bearish" {
-                    if a.stance_confidence > 0.5 {
-                        fund_has_catalyst = true;
-                    }
-                }
+            AnalystDomain::Fundamental | AnalystDomain::Macro
+                if (a.stance_direction == "bullish" || a.stance_direction == "bearish")
+                    && a.stance_confidence > 0.5 =>
+            {
+                fund_has_catalyst = true;
             },
             _ => {},
         }

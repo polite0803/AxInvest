@@ -2,6 +2,8 @@
 // 向后兼容的 re-export，新代码应直接从 @/lib/stock-analysis-utils 导入
 export {
   classifySentiment,
+  computeEvidenceDrivenConsensus,
+  computeEvidenceWeights,
   computeStockConsensus,
   type Consensus,
   getActionColor,
@@ -17,6 +19,17 @@ export {
   StockAction,
   type StockConsensus,
   StockRiskLevel,
+} from "@/lib/stock-analysis-utils";
+
+// 证据质量驱动权重的类型定义
+export type {
+  AnalystInput,
+  AnalystWeight,
+  EvidenceConsensus,
+  EvidenceWeightReport,
+  EvidenceWeightRequest,
+  HoldGateResult,
+  MarketRegimeInfo,
 } from "@/lib/stock-analysis-utils";
 
 // StockActionType / StockRiskLevelType 由 @/lib/stock-analysis-utils 导出

@@ -404,7 +404,10 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
     let sync_engine = create_sync_engine(&sea_db, &app_settings, rt.handle());
 
     // Playwright 浏览器 fetch 封装，用于绕过 EastMoney WAF 的 JA3 TLS 指纹封锁
+    // 仅在非 Android 平台可用
+    #[cfg(not(target_os = "android"))]
     struct PlaywrightFetcher;
+    #[cfg(not(target_os = "android"))]
     #[async_trait::async_trait]
     impl BrowserHttpFetch for PlaywrightFetcher {
         async fn fetch_json(
@@ -437,10 +440,15 @@ pub fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState, Strin
         }
         let sink: Arc<dyn NewsArchiveSink> = Arc::new(NewsArchiveDaoSink::new(sea_db.clone()));
         let (client_with_l2, l2) = AStockClient::new().with_l2_cache(l2_path);
+        #[cfg(not(target_os = "android"))]
         let client = client_with_l2
             .with_daily_snapshot_cache()
             .with_news_archive_sink(sink)
             .with_browser_fetcher(Arc::new(PlaywrightFetcher));
+        #[cfg(target_os = "android")]
+        let client = client_with_l2
+            .with_daily_snapshot_cache()
+            .with_news_archive_sink(sink);
         (client, l2)
     };
     let astock_client = Arc::new(astock_client);

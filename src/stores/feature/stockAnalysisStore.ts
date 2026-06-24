@@ -295,6 +295,10 @@ interface StockAnalysisState {
   stockCodeConsensus: Record<string, StockConsensus>;
   setStockCodeConsensus: (stockCode: string, consensus: StockConsensus) => void;
 
+  // P0-1: 证据质量驱动权重（可选，无则走旧版简单共识）
+  evidenceReport: Record<string, import("@/lib/stock-analysis-utils").EvidenceWeightReport>;
+  setEvidenceReport: (stockCode: string, report: import("@/lib/stock-analysis-utils").EvidenceWeightReport) => void;
+
   // Phase 9: Time-travel snapshot metadata
   // - `asOfDate`: 当前 analysis 的 as_of_date（live 时为 null）
   // - `mode`: 模式标签（"live" / "replay" / "backtest_sweep"）
@@ -464,6 +468,7 @@ const initialState = {
   timeline: [],
   highlightedPanel: null,
   stockCodeConsensus: {},
+  evidenceReport: {},
   asOfDate: null,
   mode: "live" as const,
   violations: [],
@@ -1187,6 +1192,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }));
   },
 
+  setEvidenceReport: (stockCode, report) => {
+    if (!stockCode) { return; }
+    set((s) => ({
+      evidenceReport: { ...s.evidenceReport, [stockCode]: report },
+    }));
+  },
+
   setKlinePeriod: (period: string) => {
     set({ klinePeriod: period });
   },
@@ -1581,8 +1593,27 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // RecommendationPanel 会读取这个缓存来提示用户"推荐与共识是否一致"。
         const stockCode = get().stockCode;
         if (stockCode && parsed.analystReports && Object.keys(parsed.analystReports).length > 0) {
-          const consensus = computeStockConsensus(parsed.analystReports, undefined, get().decision?.timeHorizon);
+          const horizon = get().decision?.timeHorizon;
+          // 先算旧版共识作为 fallback
+          const consensus = computeStockConsensus(parsed.analystReports, undefined, horizon);
           get().setStockCodeConsensus(stockCode, consensus);
+          // 异步尝试证据驱动共识（不阻塞，失败不影响旧版结果）
+          (async () => {
+            try {
+              const { computeEvidenceDrivenConsensus } = await import("@/lib/stock-analysis-utils");
+              const evidenceResult = await computeEvidenceDrivenConsensus(
+                parsed.analystReports,
+                undefined as any, // marketRegime will be fetched inside
+                horizon,
+                null,
+              );
+              if (evidenceResult.evidenceReport) {
+                get().setEvidenceReport(stockCode, evidenceResult.evidenceReport);
+                // 如果证据驱动共识与旧版不同，用新版覆盖
+                get().setStockCodeConsensus(stockCode, evidenceResult);
+              }
+            } catch { /* 静默失败，旧版结果兜底 */ }
+          })();
         }
       });
       unlisteners.push(u2);

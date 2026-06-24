@@ -5,6 +5,91 @@
  * 保留 @/types/stock-analysis 作为向后兼容的 re-export 入口。
  */
 
+// ── 证据质量驱动权重 (P0-1) ──
+
+import { invoke } from "@/lib/invoke";
+
+/** 市场环境信息（与后端 EvidenceWeightRequest 对应） */
+export interface MarketRegimeInfo {
+  regime: string;
+  confidence: number;
+  volatility: string;
+  description: string;
+  volatilityPct?: number | null;
+  consecutiveUp: number;
+  consecutiveDown: number;
+}
+
+/** 分析师输入 */
+export interface AnalystInput {
+  analystId: string;
+  reportText?: string | null;
+  stance?: string | null;
+  bullScore?: number | null;
+  bearScore?: number | null;
+  positionPct?: number | null;
+}
+
+/** 证据权重计算请求 */
+export interface EvidenceWeightRequest {
+  marketRegime: MarketRegimeInfo;
+  timeHorizon: string;
+  analysts: AnalystInput[];
+  historicalWeights?: Record<string, number> | null;
+}
+
+/** 分析师权重详情 */
+export interface AnalystWeight {
+  analystId: string;
+  domain: string;
+  horizonWeight: number;
+  regimeModifier: number;
+  historyModifier: number;
+  finalWeight: number;
+  stanceDirection: string;
+  stanceConfidence: number;
+}
+
+/** 共识结果 */
+export interface EvidenceConsensus {
+  bullishScore: number;
+  bearishScore: number;
+  neutralScore: number;
+  totalWeight: number;
+  netScore: number;
+  consensus: string;
+  confidence: number;
+}
+
+/** HOLD 门控结果 */
+export interface HoldGateResult {
+  holdAllowed: boolean;
+  reason: string;
+  technicalHasTrend: boolean;
+  moneyflowHasDirection: boolean;
+  fundamentalHasCatalyst: boolean;
+  suggestedAction: string;
+}
+
+/** 完整证据权重报告 */
+export interface EvidenceWeightReport {
+  marketRegime: MarketRegimeInfo;
+  timeHorizon: string;
+  analystWeights: AnalystWeight[];
+  consensus: EvidenceConsensus;
+  holdGate: HoldGateResult;
+  recommendedAction: string;
+  recommendedPositionPct: number;
+  overallConfidence: number;
+}
+
+/** 调用后端证据质量驱动权重计算 */
+export async function computeEvidenceWeights(
+  request: EvidenceWeightRequest,
+): Promise<EvidenceWeightReport> {
+  return invoke<EvidenceWeightReport>("compute_evidence_weights", { request });
+}
+
 // ── 枚举常量 ──
 
 /** 股票操作动作枚举 — 内部统一用英文标识，展示时通过 i18n 翻译 */
@@ -502,6 +587,74 @@ export function computeStockConsensus(
     total: Math.round(total * 10) / 10,
     updatedAt: updatedAt ?? Date.now(),
   };
+}
+
+/**
+ * 证据质量驱动的共识计算（P0-1）。
+ *
+ * 替代简单的阈值投票，结合市场环境(regime)、时间维度、分析师历史表现
+ * 动态分配权重，并检查 HOLD 门控条件。
+ *
+ * @param reports 分析师报告字典
+ * @param marketRegime 市场环境信息（从 loadMarketRegime 获取）
+ * @param timeHorizon 投资周期
+ * @param historicalWeights 可选的历史表现权重
+ * @param updatedAt 可选的时间戳
+ */
+export async function computeEvidenceDrivenConsensus(
+  reports: Record<string, string>,
+  marketRegime: MarketRegimeInfo,
+  timeHorizon?: string | null,
+  historicalWeights?: Record<string, number> | null,
+  updatedAt?: number,
+): Promise<StockConsensus & { evidenceReport?: EvidenceWeightReport }> {
+  try {
+    // 构建分析师输入
+    const analysts: AnalystInput[] = Object.entries(reports).map(([analystId, text]) => {
+      const json = tryParseJson(text);
+      return {
+        analystId,
+        reportText: text,
+        stance: json ? (String(json["stance"] ?? json["view"] ?? json["verdict"] ?? "") || null) : null,
+        bullScore: json ? (json["bull_score"] as number ?? json["bullScore"] as number ?? null) : null,
+        bearScore: json ? (json["bear_score"] as number ?? json["bearScore"] as number ?? null) : null,
+        positionPct: json ? (json["positionPct"] as number ?? json["position_pct"] as number ?? null) : null,
+      };
+    });
+
+    const request: EvidenceWeightRequest = {
+      marketRegime,
+      timeHorizon: timeHorizon ?? "mid",
+      analysts,
+      historicalWeights: historicalWeights ?? null,
+    };
+
+    const evidenceReport = await computeEvidenceWeights(request);
+
+    // 将后端结果映射为前端 StockConsensus 格式
+    const consensus = evidenceReport.consensus;
+    const consensusMap: Record<string, Consensus> = {
+      bullish: "bullish",
+      bearish: "bearish",
+      divided: "divided",
+      neutral: "neutral",
+    };
+
+    return {
+      consensus: consensusMap[consensus.consensus] ?? "neutral",
+      bullish: consensus.bullishScore,
+      bearish: consensus.bearishScore,
+      neutral: consensus.neutralScore,
+      total: consensus.totalWeight,
+      updatedAt: updatedAt ?? Date.now(),
+      evidenceReport,
+    };
+  } catch (err) {
+    // fallback: 如果后端不可用，回退到前端旧版计算
+    console.warn("[computeEvidenceDrivenConsensus] 后端计算失败，回退到前端简单共识:", err);
+    const result = computeStockConsensus(reports, updatedAt, timeHorizon);
+    return { ...result, evidenceReport: undefined };
+  }
 }
 
 // ── 分析师名称映射（已迁移至 i18n: stockAnalysis.workflow.analyst.*）──

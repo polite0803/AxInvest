@@ -8144,7 +8144,7 @@
     "expandView": "Full View",
     "expectedUpside": "Expected Upside",
     "timeHorizon": "Time Horizon",
-    "expectedHoldingDays": "Holding Days",
+    "expectedHoldingDays": "{{days}} days",
     "targetTimeframe": "Target Timeline",
     "timeHorizonUltraShort": "Ultra Short",
     "timeHorizonShort": "Short Term",
@@ -9322,7 +9322,8 @@
     "showDetail": "Details",
     "reasoning": "Reasoning",
     "dualViewConsistency": "Dual-View Consistency",
-    "dualViewDisagreement": "Manual Review Recommended"
+    "dualViewDisagreement": "Manual Review Recommended",
+    "llmPerspective": "LLM Perspective"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

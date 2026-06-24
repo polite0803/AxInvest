@@ -660,11 +660,13 @@ impl NodeExecutorTrait for AgentExecutor {
             let mut stream_usage = (0u32, 0u32);
 
             // v8.1: per-chunk 超时，防止 LLM provider 挂起导致 engine 永久阻塞。
-            // 默认 60s，可通过 AgentNodeConfig.stream_chunk_timeout_secs 配置。
+            // 默认 120s（v24.6: 从 60s 调到 120s），可通过 AgentNodeConfig.stream_chunk_timeout_secs 配置。
+            // 原因：DeepSeek 等模型在大上下文（如 K-line 120 根 K 线）下的 TTFB 偶发 >60s，
+            // 60s per-chunk 超时过于激进，导致首 chunk 未到就提前超时 Failed。
             // 外层还有 node_timeout 兜底，但每次 stream.next() 阻塞太久
             // 会让整个 JoinSet 卡住，其他已完成 Agent 的结果无法推进引擎。
             let chunk_timeout =
-                Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(60));
+                Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(120));
             while let Some(chunk) = tokio::time::timeout(chunk_timeout, stream.next())
                 .await
                 .map_err(|_| {

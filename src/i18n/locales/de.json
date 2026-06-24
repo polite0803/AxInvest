@@ -8875,7 +8875,7 @@
     },
     "earningsOnChart": "财报标注",
     "timeHorizon": "时间维度",
-    "expectedHoldingDays": "持有天数",
+    "expectedHoldingDays": "{{days}} Tage",
     "targetTimeframe": "目标期限",
     "timeHorizonUltraShort": "超短线",
     "timeHorizonShort": "短线",
@@ -9085,7 +9085,8 @@
     "showDetail": "Details",
     "reasoning": "Begründung",
     "dualViewConsistency": "Dual-View Consistency",
-    "dualViewDisagreement": "Manual Review Recommended"
+    "dualViewDisagreement": "Manual Review Recommended",
+    "llmPerspective": "LLM-Perspektive"
   },
   "trade": {
     "title": "Trading Log",

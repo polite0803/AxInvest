@@ -1449,15 +1449,6 @@ async fn seed_stock_analysis_workflow_template(
         let mut an = agent(id, title, _expert, Some("p-analysts"), x_agent, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
             a.config.context_sources = vec![tool_id.to_string()];
-            // market-analyst 增加超时重试：LLM provider 首 chunk 偶发 >60s，
-            // 重试 2 次 + 指数退避，避免一次超时直接 Failed
-            if *id == "a-market-analyst" {
-                a.base.retry = RetryConfig {
-                    enabled: true,
-                    max_retries: 2,
-                    ..Default::default()
-                };
-            }
             // catalyst-analyst 需要 3 轮：R1 读公告→确认催化剂,R2 调 K线/概念验证,R3 综合评估叙事
             a.config.max_tool_rounds = if *id == "a-catalyst" {
                 Some(3)

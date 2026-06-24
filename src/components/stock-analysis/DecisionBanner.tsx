@@ -472,7 +472,7 @@ export function DecisionBanner() {
             style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
           >
             <span className="font-medium" style={{ color: "#7c3aed" }}>
-              💡 LLM 视角:
+              💡 {t("stockAnalysis.llmPerspective")}:
             </span>
             <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
               {llmSummary}
@@ -532,7 +532,9 @@ export function DecisionBanner() {
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDays")}</span>
-              <span className="font-semibold">{decision.expectedHoldingDays}天</span>
+              <span className="font-semibold">
+                {t("stockAnalysis.expectedHoldingDays", { days: decision.expectedHoldingDays })}
+              </span>
             </span>
           )}
           {decision.targetTimeframe && (
@@ -820,7 +822,7 @@ export function DecisionBanner() {
             style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
           >
             <span className="font-medium" style={{ color: "#7c3aed" }}>
-              💡 LLM 视角:
+              💡 {t("stockAnalysis.llmPerspective")}:
             </span>
             <span className="ml-1" style={{ color: "var(--color-text-secondary)" }}>
               {llmSummary}

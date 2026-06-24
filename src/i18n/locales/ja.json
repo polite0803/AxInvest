@@ -8035,7 +8035,7 @@
     "askAI": "AIに質問",
     "expectedUpside": "期待上昇率",
     "timeHorizon": "時間軸",
-    "expectedHoldingDays": "保有日数",
+    "expectedHoldingDays": "{{days}}日間保有",
     "targetTimeframe": "目標期間",
     "timeHorizonUltraShort": "超短期",
     "timeHorizonShort": "短期",
@@ -9085,7 +9085,8 @@
     "showDetail": "詳細",
     "reasoning": "推論",
     "dualViewConsistency": "Dual-View Consistency",
-    "dualViewDisagreement": "Manual Review Recommended"
+    "dualViewDisagreement": "Manual Review Recommended",
+    "llmPerspective": "LLM 視点"
   },
   "serenityPanel": {
     "desc": "Serenity ボトルネック法：市場データから産業チェーン内のボトルネックリンクを発見し、潜在的な銘柄を自動スクリーニングします",

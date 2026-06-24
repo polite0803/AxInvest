@@ -8825,7 +8825,7 @@
     },
     "earningsOnChart": "Earnings Labels",
     "timeHorizon": "Time Horizon",
-    "expectedHoldingDays": "Holding Days",
+    "expectedHoldingDays": "{{days}} يوم",
     "targetTimeframe": "Target Timeline",
     "timeHorizonUltraShort": "Ultra Short",
     "timeHorizonShort": "Short Term",
@@ -9085,7 +9085,8 @@
     "showDetail": "التفاصيل",
     "reasoning": "الاستدلال",
     "dualViewConsistency": "Dual-View Consistency",
-    "dualViewDisagreement": "Manual Review Recommended"
+    "dualViewDisagreement": "Manual Review Recommended",
+    "llmPerspective": "منظور LLM"
   },
   "trade": {
     "title": "Trading Log",

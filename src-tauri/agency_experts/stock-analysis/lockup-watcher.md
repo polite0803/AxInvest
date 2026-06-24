@@ -3,7 +3,7 @@ role: stock-analyst
 stage: analyst
 analyst_id: lockup
 title: 筹码面观察者
-data_sources: [get_stock_lockup, get_stock_shareholder_trades, get_stock_block_trades]
+data_sources: [get_stock_lockup_bundle]
 ---
 
 ## 目标股票

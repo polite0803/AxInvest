@@ -357,6 +357,9 @@ export function validate_workflow(
       (n as any).kind === "decorative" || (n as any).data?.kind === "decorative"
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       || (n as any).config?.kind === "decorative"
+      // 没有入/出边的 parallel 容器并且 auto_input_from_parent=false → 视觉分组
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      || (tType === "parallel" && (n as any).config?.autoInputFromParent === false)
     ) { continue; }
 
     const hasChildren = nodes.some((x) => x.parentId === n.id);
@@ -416,7 +419,9 @@ export function validate_workflow(
     } else if (tType === "switch") {
       const outgoing = edges.filter((e) => e.source === n.id);
       const hasBranch = outgoing.some((e) => e.sourceHandle?.startsWith("branch-"));
-      if (!hasBranch) {
+      // 同时也检查是否有 case label 出口（"acceptable" 等）或默认出口
+      const hasAnyPort = outgoing.length > 0;
+      if (!hasBranch && !hasAnyPort) {
         const key = "workflow.layout.validate.unconnected_port";
         const params = { nodeId: n.id, missing: "branch" };
         issues.push({

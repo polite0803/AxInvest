@@ -62,6 +62,10 @@ pub struct CronJob {
     pub next_run_at: Option<i64>,
     /// 重试/超时配置
     pub config: TaskConfig,
+    /// 连续失败次数（P1.5-2 自动停用）
+    pub consecutive_failures: u32,
+    /// 连续失败上限（默认 5 次后自动暂停）
+    pub max_consecutive_failures: u32,
     /// 创建/更新时间
     pub created_at: i64,
     pub updated_at: i64,
@@ -127,6 +131,8 @@ impl CronJob {
             last_result: None,
             next_run_at: None,
             config: TaskConfig::default(),
+            consecutive_failures: 0,
+            max_consecutive_failures: 5,
             created_at: now,
             updated_at: now,
         }
@@ -306,14 +312,34 @@ impl CronJobStore {
         .await
     }
 
+    /// 记录执行结果，连续失败 N 次后自动暂停
     pub async fn record_run(&self, id: &str, result: TaskRunResult) -> bool {
         let now = now_millis();
+        let paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let paused_clone = paused.clone();
+
         self.update(id, |job| {
             job.last_run_at = Some(now);
             job.run_count += 1;
-            job.last_result = Some(result);
+            job.last_result = Some(result.clone());
+
+            if result.success {
+                job.consecutive_failures = 0;
+            } else {
+                job.consecutive_failures += 1;
+                if job.consecutive_failures >= job.max_consecutive_failures {
+                    job.status = CronJobStatus::Paused;
+                    paused_clone.store(true, std::sync::atomic::Ordering::Release);
+                    tracing::warn!(
+                        "[CronJobStore] 任务 {} 连续失败 {} 次，已自动暂停",
+                        id,
+                        job.consecutive_failures
+                    );
+                }
+            }
         })
-        .await
+        .await;
+        paused.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub async fn count(&self) -> usize {

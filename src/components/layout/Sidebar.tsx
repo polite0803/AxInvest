@@ -14,6 +14,7 @@ import { MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { Avatar } from "antd";
 import {
   ArrowLeftRight,
+  Calendar,
   Clock,
   Eye,
   Filter,
@@ -28,6 +29,7 @@ import {
   Settings,
   Sun,
   User,
+  Wallet,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,6 +46,8 @@ const pageKeyToPath: Record<PageKey, string> = {
   workflow: "/workflow",
   "stock-analysis": "/stock-analysis",
   watchlist: "/watchlist",
+  portfolio: "/portfolio",
+  "scheduled-analysis": "/scheduled-analysis",
   screener: "/screener",
   trade: "/trade",
   backtest: "/backtest",
@@ -129,6 +133,20 @@ const builtinNavItems: NavItem[] = [
     icon: <Eye size={18} />,
     labelKey: "nav.watchlist",
     path: "/watchlist",
+    isPlugin: false,
+  },
+  {
+    key: "portfolio",
+    icon: <Wallet size={18} />,
+    labelKey: "nav.portfolio",
+    path: "/portfolio",
+    isPlugin: false,
+  },
+  {
+    key: "scheduled-analysis",
+    icon: <Calendar size={18} />,
+    labelKey: "nav.scheduledAnalysis",
+    path: "/scheduled-analysis",
     isPlugin: false,
   },
   {
@@ -456,7 +474,9 @@ export function Sidebar() {
     sections.push({
       key: "invest-monitor",
       labelKey: "sidebar.sectionInvestMonitor",
-      items: builtinNavItems.filter((n) => n.key === "watchlist"),
+      items: builtinNavItems.filter((n) =>
+        n.key === "watchlist" || n.key === "portfolio" || n.key === "scheduled-analysis"
+      ),
     });
 
     sections.push({

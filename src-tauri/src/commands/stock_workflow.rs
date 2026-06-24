@@ -1105,11 +1105,34 @@ async fn run_stock_workflow_inner(
         // 必须始终注入，即使为空，否则 value-investor/research-mgr/trader 等节点
         // 的 input_mapping 引用 {{stock_lessons}} 会报 VARIABLE_NOT_FOUND。
         let lessons_str = fetch_stock_lessons(&stock_code, &db).await;
+        let default_lessons = "（暂无历史反思）".to_string();
+        let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
         merged_vars.push(axagent_harness::workflow_types::Variable {
             name: "stock_lessons".into(),
             var_type: "string".into(),
-            value: serde_json::Value::String(lessons_str.unwrap_or_else(|| "（暂无历史反思）".to_string())),
+            value: serde_json::Value::String(lessons_val.clone()),
             description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
+            is_secret: false,
+        });
+        // P1: 注入 per-role 经验和教训到辩论角色 prompt
+        merged_vars.push(axagent_harness::workflow_types::Variable {
+            name: "bull_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(format!(
+                "你作为多方研究员的过往经验教训：{}",
+                lessons_val
+            )),
+            description: Some("该股多方视角的历史反思教训".into()),
+            is_secret: false,
+        });
+        merged_vars.push(axagent_harness::workflow_types::Variable {
+            name: "bear_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(format!(
+                "你作为空方研究员的过往经验教训：{}",
+                lessons_val
+            )),
+            description: Some("该股空方视角的历史反思教训".into()),
             is_secret: false,
         });
         opts.variables = Some(merged_vars);
@@ -1477,15 +1500,37 @@ pub async fn run_single_stock_analysis(
     //   run_stock_workflow_inner 同样会注入,这里是补齐 cron / batch 入口。
     //   必须始终注入,即使为空（否则 VARIABLE_NOT_FOUND）。
     let lessons_str = fetch_stock_lessons(stock_code, db).await;
-    let variables = vec![Variable {
-        name: "stock_lessons".into(),
-        var_type: "string".into(),
-        value: serde_json::Value::String(
-            lessons_str.unwrap_or_else(|| "（暂无历史反思）".to_string()),
-        ),
-        description: Some("A1: 该股最近 90 天的反思教训".into()),
-        is_secret: false,
-    }];
+    let default_lessons = "（暂无历史反思）".to_string();
+    let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
+    let variables = vec![
+        Variable {
+            name: "stock_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(lessons_val.clone()),
+            description: Some("A1: 该股最近 90 天的反思教训".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "bull_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(format!(
+                "你作为多方研究员的过往经验教训：{}",
+                lessons_val
+            )),
+            description: Some("该股多方视角的历史反思教训".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "bear_lessons".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(format!(
+                "你作为空方研究员的过往经验教训：{}",
+                lessons_val
+            )),
+            description: Some("该股空方视角的历史反思教训".into()),
+            is_secret: false,
+        },
+    ];
 
     // 6. 创建并运行工作流
     let wf_name = format!("stock-analysis-{stock_code}-batch");

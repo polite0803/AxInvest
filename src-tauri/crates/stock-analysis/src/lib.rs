@@ -8,6 +8,7 @@ pub mod decision_tracker;
 pub mod evidence_weight;
 pub mod evolution_drift;
 pub mod exit_recommend;
+pub mod intent_parser;
 // Phase 2: fundamentals_report 迁移到 astock-data 层(被 tools crate 依赖),
 // 此处用 pub use 保持向后兼容。
 pub use axagent_astock_data::fundamentals_report;
@@ -35,4 +36,5 @@ pub mod trade_stats;
 pub mod trading;
 pub mod value;
 pub mod value_investing;
+pub mod vlm_import;
 pub mod weight_decay;

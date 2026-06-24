@@ -20,6 +20,74 @@ impl SinaVendor {
         crate::check_response_429(&resp, "sina")?;
         Ok(resp)
     }
+
+    /// 备选新闻端点：尝试其他已知的新浪新闻接口
+    async fn get_news_fallback(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        let url = format!(
+            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getStockNews?code={stock_code}&num={}&page=1&type=last",
+            limit.min(50)
+        );
+        let resp = self.sina_get(&url).await?;
+
+        let body = resp.text().await.unwrap_or_default();
+        let trimmed = body.trim();
+
+        // 检查空响应
+        if trimmed.is_empty() {
+            return Err(DataError::VendorError {
+                vendor: "sina".into(),
+                message: "新浪新闻备选端点返回空响应".into(),
+            });
+        }
+
+        // 检查 JSONP 包裹
+        let json_str = if let Some(start) = trimmed.find('(') {
+            if let Some(end) = trimmed.rfind(')') {
+                if end > start {
+                    &trimmed[start + 1..end]
+                } else {
+                    trimmed
+                }
+            } else {
+                trimmed
+            }
+        } else {
+            trimmed
+        };
+
+        // 检查错误响应
+        if json_str.contains("__ERROR") || json_str.contains("Service not found") {
+            return Err(DataError::VendorError {
+                vendor: "sina".into(),
+                message: format!("新浪新闻备选端点不可用: {json_str:.100}"),
+            });
+        }
+
+        let json: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+            DataError::ParseError(format!(
+                "sina fallback news parse: {e}, raw={}",
+                &trimmed[..trimmed.len().min(120)]
+            ))
+        })?;
+
+        let items = json.as_array()
+            .or_else(|| json["result"].as_array())
+            .or_else(|| json["data"].as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        Ok(items
+            .iter()
+            .map(|item| NewsItem {
+                title: item["title"].as_str().unwrap_or("").to_string(),
+                summary: item["summary"].as_str().or_else(|| item["digest"].as_str()).unwrap_or("").to_string(),
+                source: item["source"].as_str().unwrap_or("新浪财经").to_string(),
+                url: item["url"].as_str().or_else(|| item["article_url"].as_str()).unwrap_or("").to_string(),
+                publish_time: item["ctime"].as_str().or_else(|| item["date"].as_str()).unwrap_or("").to_string(),
+                sentiment_score: None,
+            })
+            .collect())
+    }
 }
 
 #[async_trait]
@@ -183,13 +251,43 @@ impl StockVendor for SinaVendor {
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        let url = format!(
+        // 注意: vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{code}.json
+        // 目前(2026-06)返回 HTTP 200 + 空 body(Content-Type: text/html)，疑似接口已废弃。
+        // 先尝试原端点，如果失败则尝试备选端点；仍失败则返回清晰错误供上游降级。
+        let primary_url = format!(
             "https://vip.stock.finance.sina.com.cn/corp/go.php/vCB_AllNewsStock/symbol/{stock_code}.json?page=1&num={}",
             limit.min(50)
         );
-        let resp = self.sina_get(&url).await?;
 
-        let items: Vec<serde_json::Value> = resp.json().await?;
+        let resp = self.sina_get(&primary_url).await?;
+        let ct = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok().map(String::from))
+            .unwrap_or_default();
+
+        // 如果 Content-Type 不是 JSON，放弃解析并尝试备选端点
+        if !ct.contains("json") && !ct.contains("javascript") {
+            let body_len = resp.content_length().unwrap_or(0);
+            tracing::warn!(
+                "[sina] 新闻主端点返回非 JSON (Content-Type={ct}, Content-Length={body_len})，尝试备选端点"
+            );
+            return self.get_news_fallback(stock_code, limit).await;
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await.map_err(|e| {
+            DataError::VendorError {
+                vendor: "sina".into(),
+                message: format!(
+                    "新闻 JSON 解析失败: {e} (Content-Type={ct}, url={primary_url})"
+                ),
+            }
+        })?;
+
+        if items.is_empty() {
+            tracing::warn!("[sina] 新闻主端点返回空数组，尝试备选端点");
+            return self.get_news_fallback(stock_code, limit).await;
+        }
 
         Ok(items
             .iter()
@@ -206,13 +304,6 @@ impl StockVendor for SinaVendor {
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
         // 新浪财经资金流向 API（个股）
-        // https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj
-        // 返回字段:
-        //   r0_in/r0_out — 超大单流入/流出
-        //   r1_in/r1_out — 大单流入/流出
-        //   r2_in/r2_out — 中单流入/流出
-        //   r3_in/r3_out — 小单流入/流出
-        //   netamount   — 净流入总额
         let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
             "sh"
         } else {
@@ -271,9 +362,6 @@ impl StockVendor for SinaVendor {
     }
 
     // ── P3:sina 能力申报 ──
-    // get_quote:实时快照 → SynthesizeFromKline
-    // get_news:带 publish_date,lib.rs 截断正确 → Fallthrough
-    // 其他 stub:Fallthrough
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             "get_quote" => AsOfCapability::SynthesizeFromKline,

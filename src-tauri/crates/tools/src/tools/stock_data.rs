@@ -1559,6 +1559,39 @@ impl Tool for StockLockupTool {
     }
 }
 
+/// 筹码面分析数据聚合工具：一次调用返回解禁 + 增减持 + 大宗交易
+pub struct StockLockupBundleTool {
+    pub client: Arc<AStockClient>,
+}
+impl StockLockupBundleTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for StockLockupBundleTool {
+    fn name(&self) -> &str {
+        "get_stock_lockup_bundle"
+    }
+    fn description(&self) -> &str {
+        "获取筹码面分析数据（解禁 + 增减持 + 大宗交易三方聚合）"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{"stock_code":{"type":"string","description":"6位股票代码"}},"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let r = self.client.get_lockup_bundle(code).await.map_err(|e| te(e.to_string()))?;
+        Ok(ToolResult::success(r.to_string()))
+    }
+}
+
 // ── 25. StockShareholderTradesTool ──
 pub struct StockShareholderTradesTool {
     pub client: Arc<AStockClient>,
@@ -2602,6 +2635,7 @@ pub fn register_stock_tools(
         Arc::new(StockMarketDragonTigerTool::new(client.clone())),
         Arc::new(StockIndexQuotesTool::new(client.clone())),
         Arc::new(StockLockupTool::new(client.clone())),
+        Arc::new(StockLockupBundleTool::new(client.clone())),
         Arc::new(StockShareholderTradesTool::new(client.clone())),
         Arc::new(StockDividendRecordsTool::new(client.clone())),
         Arc::new(StockNorthBoundHoldingTool::new(client.clone())),

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { PageHeader } from "./_shared/PageHeader";
 import { BacktestPanel } from "./BacktestPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
+import { QuickBacktestPanel } from "./QuickBacktestPanel";
 import { RecoSignalTimeline } from "./RecoSignalTimeline";
 import { RecoStrategyMatrix } from "./RecoStrategyMatrix";
 import { WhatIfBacktest } from "./WhatIfBacktest";
@@ -28,6 +29,11 @@ export function BacktestPage() {
           <Tabs
             size="small"
             items={[
+              {
+                key: "quick",
+                label: t("stockAnalysis.backtest.quickBacktest") ?? "快速回测",
+                children: <QuickBacktestPanel />,
+              },
               {
                 key: "analysis",
                 label: t("stockAnalysis.backtest.tabAnalysis") ?? "分析回测",

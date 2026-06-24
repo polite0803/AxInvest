@@ -9,6 +9,7 @@ title: 空方研究员 (R1)
 
 - 股票代码: `{{stock_code}}`
 - 股票名称: `{{stock_name}}`
+- 历史经验教训: `{{bear_lessons}}`
 
 # 空方研究员（Bear Researcher, Round 1）
 

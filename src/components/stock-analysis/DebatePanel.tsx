@@ -1,7 +1,7 @@
 import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { ExpandOutlined, ReloadOutlined, WarningOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Collapse, Empty, Modal, Tag } from "antd";
+import { Alert, Button, Card, Empty, Modal, Segmented, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
@@ -564,11 +564,43 @@ export function DebatePanel() {
     void startAnalysis(stockCode);
   };
 
+  // P1.5-5: Round 切换状态
+  const [activeRoundIdx, setActiveRoundIdx] = useState(0);
+  const activeRound = processedRounds[activeRoundIdx];
+
+  // 找 R3 裁决卡片: 从所有轮次中提取最终立场
+  const finalVerdict = useMemo(() => {
+    for (const r of processedRounds) {
+      if (r.bull.parsed?.final_position || r.bull.parsed?.claim) {
+        return r.bull.parsed;
+      }
+      if (r.bear.parsed?.final_position || r.bear.parsed?.claim) {
+        return r.bear.parsed;
+      }
+    }
+    return null;
+  }, [processedRounds]);
+
+  // Round 标签
+  const roundOptions = processedRounds.map((r, i) => ({
+    label: `第${r.round}轮`,
+    value: i,
+  }));
+
   return (
     <>
       <Card
         size="small"
-        title={t("stockAnalysis.debate")}
+        title={
+          <div className="flex items-center gap-2">
+            <span>{t("stockAnalysis.debate")}</span>
+            {finalVerdict && (finalVerdict.final_position || finalVerdict.claim) && (
+              <Tag color={finalVerdict.final_position?.includes("bear") ? "green" : "red"}>
+                最终裁决: {finalVerdict.claim?.slice(0, 30) || finalVerdict.final_position || "待定"}
+              </Tag>
+            )}
+          </div>
+        }
         extra={
           <div className="flex items-center gap-1">
             {showWarning && (
@@ -647,32 +679,56 @@ export function DebatePanel() {
           </div>
         </div>
 
-        <Collapse
-          size="small"
-          items={processedRounds.slice(0, 4).map((r, i) => ({
-            key: i,
-            label: <span>{t("stockAnalysis.debateRound", { round: r.round })}</span>,
-            children: (
+        {/* P1.5-5: Round 标签切换代替原有的 Collapse */}
+        {processedRounds.length > 0 && (
+          <div className="mb-2">
+            <Segmented
+              size="small"
+              value={activeRoundIdx}
+              options={roundOptions}
+              onChange={(val) => setActiveRoundIdx(val as number)}
+              className="mb-2"
+            />
+            {/* 裁决卡片高亮 */}
+            {finalVerdict && roundOptions[activeRoundIdx]?.label?.includes("3") && (
+              <div
+                className="p-2 rounded text-xs mb-2 font-medium"
+                style={{
+                  background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(124,58,237,0.04))",
+                  border: "1px solid rgba(124,58,237,0.3)",
+                  borderRadius: 8,
+                }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span role="img" aria-label="gavel">⚖️</span>
+                  <span className="font-semibold" style={{ color: "#7c3aed" }}>裁决理由</span>
+                </div>
+                <Typography.Paragraph
+                  ellipsis={{ rows: 3, expandable: true, symbol: "展开" }}
+                  className="mb-0"
+                  style={{ fontSize: 11, color: "var(--color-text-secondary)" }}
+                >
+                  {finalVerdict.claim || "暂无裁决说明"}
+                </Typography.Paragraph>
+              </div>
+            )}
+            {/* 当前轮次的辩论内容 */}
+            {activeRound && (
               <div className="flex flex-col sm:flex-row gap-2" style={{ maxHeight: 360, overflow: "auto" }}>
                 <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-red)" }}>
                   <Tag color="red">{t("stockAnalysis.bull")}</Tag>
                   <div className="mt-1">
-                    <DebateContentView content={r.bull} isDark={isDark} />
+                    <DebateContentView content={activeRound.bull} isDark={isDark} />
                   </div>
                 </div>
                 <div className="flex-1 p-2 rounded" style={{ borderLeft: "3px solid var(--sa-green)" }}>
                   <Tag color="green">{t("stockAnalysis.bear")}</Tag>
                   <div className="mt-1">
-                    <DebateContentView content={r.bear} isDark={isDark} />
+                    <DebateContentView content={activeRound.bear} isDark={isDark} />
                   </div>
                 </div>
               </div>
-            ),
-          }))}
-        />
-        {processedRounds.length > 4 && (
-          <div className="text-center text-xs mt-1" style={{ color: "var(--muted)" }}>
-            {t("stockAnalysis.moreRounds", { count: processedRounds.length - 4 })}
+            )}
           </div>
         )}
       </Card>
@@ -716,25 +772,68 @@ export function DebatePanel() {
             />
           </div>
         </div>
-        {processedRounds.map((r, i) => (
-          <div key={i} className="mb-4">
-            <div className="text-sm font-semibold mb-2">{t("stockAnalysis.debateRound", { round: r.round })}</div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
-                <Tag color="red">{t("stockAnalysis.bull")}</Tag>
-                <div className="mt-2">
-                  <DebateContentView content={r.bull} isDark={isDark} />
+        {/* P1.5-5: Modal 内的 Round 切换 */}
+        {processedRounds.length > 0 && (
+          <div className="mb-3">
+            <Segmented
+              size="small"
+              value={activeRoundIdx}
+              options={roundOptions}
+              onChange={(val) => setActiveRoundIdx(val as number)}
+              className="mb-3"
+            />
+            {/* 裁决卡片高亮（全屏模式） */}
+            {finalVerdict && roundOptions[activeRoundIdx]?.label?.includes("3") && (
+              <div
+                className="p-3 rounded mb-3"
+                style={{
+                  background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(124,58,237,0.04))",
+                  border: "1px solid rgba(124,58,237,0.3)",
+                  borderRadius: 8,
+                }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span style={{ fontSize: 20 }} role="img" aria-label="gavel">⚖️</span>
+                  <span className="font-semibold" style={{ color: "#7c3aed" }}>最终裁决</span>
+                </div>
+                <Typography.Paragraph
+                  ellipsis={{ rows: 5, expandable: true, symbol: "展开全文" }}
+                  className="mb-1"
+                  style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
+                >
+                  {finalVerdict.claim || "暂无裁决说明"}
+                </Typography.Paragraph>
+                {finalVerdict.final_position && (
+                  <Tag color={finalVerdict.final_position.includes("bear") ? "green" : "red"}>
+                    立场: {finalVerdict.final_position}
+                  </Tag>
+                )}
+                {typeof finalVerdict.confidence === "number" && (
+                  <Tag color="blue">
+                    置信度: {finalVerdict.confidence}
+                  </Tag>
+                )}
+              </div>
+            )}
+            {/* 当前轮次 */}
+            {activeRound && (
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-red)" }}>
+                  <Tag color="red">{t("stockAnalysis.bull")}</Tag>
+                  <div className="mt-2">
+                    <DebateContentView content={activeRound.bull} isDark={isDark} />
+                  </div>
+                </div>
+                <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
+                  <Tag color="green">{t("stockAnalysis.bear")}</Tag>
+                  <div className="mt-2">
+                    <DebateContentView content={activeRound.bear} isDark={isDark} />
+                  </div>
                 </div>
               </div>
-              <div className="flex-1 p-3 rounded" style={{ borderLeft: "4px solid var(--sa-green)" }}>
-                <Tag color="green">{t("stockAnalysis.bear")}</Tag>
-                <div className="mt-2">
-                  <DebateContentView content={r.bear} isDark={isDark} />
-                </div>
-              </div>
-            </div>
+            )}
           </div>
-        ))}
+        )}
       </Modal>
     </>
   );

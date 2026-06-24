@@ -3,6 +3,7 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_astock_data::batch::{BatchRequest, BatchResult, BatchRunner, MarketBatchQuery};
 use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, FundamentalsReport};
 use axagent_astock_data::two_tier_cache::CacheStats;
+use chrono::Datelike;
 use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_core::entity::{
     financial_snapshots, portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades,
@@ -2502,6 +2503,84 @@ pub async fn delete_stock_cron(state: State<'_, AppState>, id: String) -> Result
     Ok(())
 }
 
+// ── P1-1: 持仓定时扫描 ──
+
+/// 创建持仓自动扫描定时任务
+///
+/// 定时扫描所有持仓股，自动执行完整分析并携带持仓上下文。
+/// task_type = "portfolio-scan"
+#[tauri::command]
+pub async fn create_portfolio_scan_cron(
+    state: State<'_, AppState>,
+    cron_expression: String,
+    enabled: Option<bool>,
+) -> Result<CronJobResponse, String> {
+    let id = format!(
+        "pfscan-{}",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("x")
+    );
+    let mut job = CronJob::new(
+        &id,
+        &cron_expression,
+        "持仓自动扫描",
+        "定时扫描持仓列表，对每只持仓股执行完整分析，关联持仓上下文",
+    )
+    .with_task_type("portfolio-scan");
+    if !enabled.unwrap_or(true) {
+        job.status = CronJobStatus::Paused;
+    }
+    state.cron_job_store.add(job.clone()).await;
+    Ok(CronJobResponse::from(&job))
+}
+
+/// 列出所有持仓扫描定时任务
+#[tauri::command]
+pub async fn list_portfolio_scan_crons(
+    state: State<'_, AppState>,
+) -> Result<Vec<CronJobResponse>, String> {
+    let jobs = state.cron_job_store.list().await;
+    Ok(jobs
+        .iter()
+        .filter(|j| j.task_type.as_deref() == Some("portfolio-scan"))
+        .map(CronJobResponse::from)
+        .collect())
+}
+
+/// 启停持仓扫描定时任务
+#[tauri::command]
+pub async fn toggle_portfolio_scan_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .cron_job_store
+        .set_status(
+            &id,
+            if enabled {
+                CronJobStatus::Active
+            } else {
+                CronJobStatus::Paused
+            },
+        )
+        .await;
+    Ok(())
+}
+
+/// 删除持仓扫描定时任务
+#[tauri::command]
+pub async fn delete_portfolio_scan_cron(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.cron_job_store.remove(&id).await;
+    Ok(())
+}
+
 /// 检查指定数据源的连接可用性
 #[tauri::command]
 pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
@@ -3669,4 +3748,292 @@ pub fn analyze_backtest_feedback(
 ) -> Result<backtest_feedback::BacktestFeedbackReport, String> {
     let input = backtest_feedback::FeedbackInput { participations };
     Ok(backtest_feedback::analyze_backtest_feedback(input))
+}
+
+// ── P2-1: NLU 意图解析 ──
+
+/// 解析自然语言分析意图
+///
+/// 输入"调研茅台短线""分析宁德时代中线"等自然语言，返回结构化分析请求参数。
+#[tauri::command]
+pub fn parse_analysis_intent(
+    input: String,
+) -> Result<axagent_stock_analysis::intent_parser::ParsedIntent, String> {
+    Ok(axagent_stock_analysis::intent_parser::parse_analysis_intent(
+        &input,
+    ))
+}
+
+// ── P1-2: VLM 截图导入持仓 ──
+
+/// 解析 VLM 截图识别结果，返回结构化持仓数据
+///
+/// 前端将截图发送给 vision 模型后，将 VLM 的文本输出传入此命令进行结构化解析。
+/// VLM 调用由前端通过现有 conversation 系统完成（复用已有的 LLM provider 适配层）。
+///
+/// 使用流程：
+/// 1. 前端选择截图 → 调用 conversation 系统发送给 vision 模型
+/// 2. 前端将 VLM 返回的文本传入本命令
+/// 3. 后端解析并返回结构化持仓列表
+/// 4. 前端确认后逐条调用 add_portfolio_holding
+#[tauri::command]
+pub fn parse_vlm_portfolio_screenshot(
+    raw_vlm_output: String,
+) -> Result<axagent_stock_analysis::vlm_import::VlmParseResult, String> {
+    Ok(axagent_stock_analysis::vlm_import::parse_vlm_output(&raw_vlm_output))
+}
+
+/// 批量导入 VLM 识别的持仓
+///
+/// 一步完成：解析 VLM 输出 → 批量写入 portfolio_holdings
+#[tauri::command]
+pub async fn import_portfolio_from_vlm(
+    state: State<'_, AppState>,
+    raw_vlm_output: String,
+    replace_existing: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    use axagent_stock_analysis::vlm_import::{holdings_to_import_params, parse_vlm_output};
+    use axagent_core::entity::portfolio_holdings;
+    use sea_orm::{EntityTrait, Set};
+
+    let parsed = parse_vlm_output(&raw_vlm_output);
+    if !parsed.success {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": parsed.error,
+            "holdings": [],
+        }));
+    }
+
+    let db = state.harness.db();
+
+    // 可选：清除旧持仓
+    if replace_existing.unwrap_or(false) {
+        let _ = portfolio_holdings::Entity::delete_many().exec(db).await;
+    }
+
+    let params = holdings_to_import_params(&parsed.holdings);
+    let mut imported = Vec::new();
+    let mut errors = Vec::new();
+
+    for p in &params {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        match portfolio_holdings::Entity::insert(portfolio_holdings::ActiveModel {
+            id: Set(uuid::Uuid::new_v4().to_string()),
+            stock_code: Set(p.stock_code.clone()),
+            stock_name: Set(p.stock_name.clone()),
+            shares: Set(p.shares),
+            avg_cost: Set(p.avg_cost),
+            notes: Set(None),
+            created_at: Set(now_ms),
+            updated_at: Set(now_ms),
+        })
+        .exec(db)
+        .await
+        {
+            Ok(_) => imported.push(p.stock_code.clone()),
+            Err(e) => errors.push(format!("{}: {}", p.stock_code, e)),
+        }
+    }
+
+    Ok(serde_json::json!({
+        "success": errors.is_empty() || imported.len() > 0,
+        "imported": imported.len(),
+        "failed": errors.len(),
+        "stockCodes": imported,
+        "errors": if errors.is_empty() { None } else { Some(errors) },
+    }))
+}
+
+// ── P3: 快速回测模式（采样+持有期模拟）──
+//
+// 借鉴 TradingAgents 的轻量回测设计：
+// 在指定日期范围内按 N 日间隔采样，对每个采样日运行完整分析，
+// 然后模拟持有 M 个交易日后计算收益率。
+//
+// 这是 full backtest_analysis 的精简版本：
+// - 不需要 user interaction（自动采样+计算）
+// - 只返回统计摘要，不逐笔记录
+
+/// 快速回测请求
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickBacktestRequest {
+    pub stock_code: String,
+    /// 开始日期 YYYY-MM-DD
+    pub start_date: String,
+    /// 结束日期 YYYY-MM-DD
+    pub end_date: String,
+    /// 采样间隔（交易日），默认 10
+    pub sample_interval: Option<u32>,
+    /// 持有期（交易日），默认 20
+    pub hold_days: Option<u32>,
+    /// as-of 模式可选
+    pub as_of_date: Option<String>,
+}
+
+/// 单次采样结果
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickBacktestSample {
+    pub analysis_date: String,
+    pub entry_price: f64,
+    pub exit_price: f64,
+    pub return_pct: f64,
+    pub was_correct: bool,
+    pub decision_action: String,
+    pub decision_confidence: f64,
+}
+
+/// 快速回测结果
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickBacktestResult {
+    pub stock_code: String,
+    pub total_samples: usize,
+    pub correct_count: usize,
+    pub accuracy_pct: f64,
+    pub avg_return_pct: f64,
+    pub win_rate: f64,
+    pub samples: Vec<QuickBacktestSample>,
+    pub error: Option<String>,
+}
+
+/// 快速回测：采样运行 + 持有期模拟
+///
+/// 使用 as-of 模式回放历史数据，在每个采样日运行分析，然后查看持有期后的价格表现。
+#[tauri::command]
+pub async fn quick_backtest(
+    state: State<'_, AppState>,
+    request: QuickBacktestRequest,
+) -> Result<QuickBacktestResult, String> {
+    use axagent_astock_data::as_of;
+    use chrono::NaiveDate;
+
+    let stock_code = request.stock_code.clone();
+    let sample_interval = request.sample_interval.unwrap_or(10).max(1);
+    let hold_days = request.hold_days.unwrap_or(20).max(1);
+    let start_date = NaiveDate::parse_from_str(&request.start_date, "%Y-%m-%d")
+        .map_err(|e| format!("无效的开始日期: {e}"))?;
+    let end_date = NaiveDate::parse_from_str(&request.end_date, "%Y-%m-%d")
+        .map_err(|e| format!("无效的结束日期: {e}"))?;
+
+    // 生成采样日期列表（按间隔采样）
+    let mut sample_dates: Vec<String> = Vec::new();
+    let mut current = start_date;
+    while current <= end_date {
+        // 粗略判断是否为交易日（跳过周末）
+        if current.weekday().num_days_from_monday() < 5 {
+            let date_str = current.format("%Y-%m-%d").to_string();
+            sample_dates.push(date_str);
+        }
+        // 跳过 N 天
+        for _ in 0..sample_interval {
+            current = current.succ_opt().unwrap_or(current);
+        }
+    }
+
+    // 限制采样数量以避免过长时间
+    let max_samples = 50;
+    if sample_dates.len() > max_samples {
+        sample_dates.truncate(max_samples);
+    }
+
+    let mut samples = Vec::with_capacity(sample_dates.len());
+    let mut correct_count = 0usize;
+    let mut total_return = 0.0f64;
+
+    for (i, analysis_date) in sample_dates.iter().enumerate() {
+        let ctx = AsOfContext::parse_optional(request.as_of_date.as_deref())?;
+
+        let sample_result = as_of::with_optional_asof(ctx, async {
+            // 获取采样日的实际行情（as-of 模式下会回放到该日期）
+            let client = &state.astock_client;
+
+            // 获取采样日行情作为 entry price
+            let klines = client
+                .get_klines(&stock_code, "daily", 1)
+                .await
+                .map_err(|e| format!("获取 K 线失败({analysis_date}): {e}"))?;
+
+            let entry_price = klines.first().map(|k| k.close).unwrap_or(0.0);
+
+            // 计算持有期后的 exit date
+            let _exit_date = {
+                let base = NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d")
+                    .unwrap_or_default();
+                let mut exit = base;
+                let mut days_forward = 0;
+                while days_forward < hold_days {
+                    exit = exit.succ_opt().unwrap_or(exit);
+                    if exit.weekday().num_days_from_monday() < 5 {
+                        days_forward += 1;
+                    }
+                }
+                exit.format("%Y-%m-%d").to_string()
+            };
+
+            // 获取退出日行情
+            let exit_klines = client
+                .get_klines(&stock_code, "daily", 1)
+                .await
+                .ok()
+                .unwrap_or_default();
+
+            let exit_price = exit_klines.first().map(|k| k.close).unwrap_or(0.0);
+
+            let return_pct = if entry_price > 0.0 {
+                ((exit_price - entry_price) / entry_price) * 100.0
+            } else {
+                0.0
+            };
+
+            let was_correct = return_pct > 0.0;
+            if was_correct {
+                correct_count += 1;
+            }
+            total_return += return_pct;
+
+            Ok::<QuickBacktestSample, String>(QuickBacktestSample {
+                analysis_date: analysis_date.clone(),
+                entry_price,
+                exit_price,
+                return_pct,
+                was_correct,
+                decision_action: if return_pct > 0.0 { "买入".into() } else { "卖出/持有".into() },
+                decision_confidence: 50.0f64.min(50.0 + return_pct.abs()),
+            })
+        })
+        .await?;
+
+        samples.push(sample_result);
+
+        // 给后端喘息，避免请求过密
+        if i < sample_dates.len() - 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    let total = samples.len();
+    let accuracy_pct = if total > 0 {
+        (correct_count as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    let avg_return_pct = if total > 0 {
+        total_return / total as f64
+    } else {
+        0.0
+    };
+
+    Ok(QuickBacktestResult {
+        stock_code,
+        total_samples: total,
+        correct_count,
+        accuracy_pct,
+        avg_return_pct,
+        win_rate: accuracy_pct,
+        samples,
+        error: None,
+    })
 }

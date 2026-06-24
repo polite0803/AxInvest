@@ -51,6 +51,10 @@ const LazyStockAnalysisPage = lazy(() =>
   import("@/pages/StockAnalysisPage").then((m) => ({ default: m.StockAnalysisPage }))
 );
 const LazyWatchlistPage = lazy(() => import("@/pages/WatchlistPage").then((m) => ({ default: m.WatchlistPage })));
+const LazyPortfolioPage = lazy(() => import("@/pages/PortfolioPage").then((m) => ({ default: m.PortfolioPage })));
+const LazyScheduledAnalysisPage = lazy(() =>
+  import("@/pages/ScheduledAnalysisPage").then((m) => ({ default: m.ScheduledAnalysisPage }))
+);
 const LazyScreenerPage = lazy(() => import("@/pages/ScreenerPage").then((m) => ({ default: m.ScreenerPage })));
 const LazyTradePage = lazy(() => import("@/pages/TradePage").then((m) => ({ default: m.TradePage })));
 const LazyBacktestPage = lazy(() => import("@/pages/BacktestPage").then((m) => ({ default: m.BacktestPage })));
@@ -147,6 +151,8 @@ export const ContentArea = memo(function ContentArea() {
   const stockInvestmentPaths = new Set([
     "/stock-analysis",
     "/watchlist",
+    "/portfolio",
+    "/scheduled-analysis",
     "/screener",
     "/trade",
     "/backtest",
@@ -241,6 +247,14 @@ export const ContentArea = memo(function ContentArea() {
           <Route
             path="/watchlist"
             element={<SafeLazyPage Page={LazyWatchlistPage} />}
+          />
+          <Route
+            path="/portfolio"
+            element={<SafeLazyPage Page={LazyPortfolioPage} />}
+          />
+          <Route
+            path="/scheduled-analysis"
+            element={<SafeLazyPage Page={LazyScheduledAnalysisPage} />}
           />
           <Route
             path="/screener"

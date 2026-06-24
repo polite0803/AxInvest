@@ -224,11 +224,35 @@ impl StockVendor for XueqiuVendor {
         );
         let count = limit.min(50);
         // 雪球股票时间线接口：个股动态（新闻+讨论）
+        // 注意：此接口被阿里云 WAF 保护，token 无效或网络环境触发 WAF 时会返回
+        // text/html WAF 挑战页面而非 JSON。检查 Content-Type 以提前识别这种情形。
         let url = format!(
             "https://xueqiu.com/statuses/stock_timeline.json?symbol_id={symbol_id}&page=1&count={count}"
         );
         let resp = self.xq_get(&url).await?;
-        let json: serde_json::Value = resp.json().await?;
+
+        // 预检 Content-Type，防止将 WAF HTML 页面当作 JSON 解析
+        // 先克隆 Content-Type 字符串，避免借用 resp
+        let ct = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok().map(String::from))
+            .unwrap_or_default();
+        if ct.starts_with("text/html") || ct.starts_with("text/plain") {
+            let body = resp.text().await.unwrap_or_default();
+            let preview = &body[..body.len().min(200)];
+            tracing::warn!(
+                "[xueqiu] 新闻接口返回非 JSON (Content-Type={ct}), preview={preview}"
+            );
+            return Err(DataError::VendorError {
+                vendor: "xueqiu".into(),
+                message: format!("雪球新闻接口返回非 JSON (Content-Type={ct})，可能是阿里云 WAF 拦截或 API 已变更"),
+            });
+        }
+
+        let json: serde_json::Value = resp.json().await.map_err(|e| {
+            DataError::ParseError(format!("xueqiu news json 解析失败: {e}"))
+        })?;
         let items = json["list"]
             .as_array()
             .ok_or_else(|| DataError::ParseError("xueqiu news: missing list array".into()))?;

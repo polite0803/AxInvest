@@ -22,6 +22,7 @@ pub mod two_tier_cache;
 pub mod types;
 pub mod validation;
 pub mod valuation_band;
+pub mod vendor_health;
 pub mod vendors;
 
 use chrono::Local;
@@ -194,6 +195,11 @@ impl VendorRouting {
                 "xueqiu".into(),
                 "akshare".into(),
             ],
+            // 注意(2026-06): xueqiu 的 stock_timeline.json 被阿里云 WAF 拦截,
+            // 无有效 token 或非浏览器环境时返回 WAF 挑战页面(HTML)而非 JSON。
+            // sina 的 /corp/go.php/vCB_AllNewsStock/symbol/{code}.json 端点返回
+            // HTTP 200 + 空 body(接口疑似废弃), 已添加备选端点。
+            // 两个源失败后由 eastmoney(搜索API)兜底, 实际可用。
             news: vec![
                 "xueqiu".into(),
                 "sina".into(),
@@ -2265,6 +2271,19 @@ impl AStockClient {
             }
         }
         Ok(vec![])
+    }
+
+    /// 筹码面分析数据聚合：一次调用获取解禁 + 增减持 + 大宗交易
+    /// 供 lockup-watcher 冷启动使用，避免 LLM 因单源空数据而不主动调其他工具
+    pub async fn get_lockup_bundle(&self, stock_code: &str) -> Result<serde_json::Value, DataError> {
+        let lockup = self.get_lockup_schedule(stock_code).await.unwrap_or_default();
+        let trades = self.get_shareholder_trades(stock_code).await.unwrap_or_default();
+        let block = self.get_block_trades(stock_code).await.unwrap_or_default();
+        Ok(serde_json::json!({
+            "lockup_schedule": lockup,
+            "shareholder_trades": trades,
+            "block_trades": block,
+        }))
     }
 
     pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {

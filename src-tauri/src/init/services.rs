@@ -1319,7 +1319,7 @@ fn start_cron_scheduler(state: &AppState) {
                     Ok(holdings) => {
                         for h in &holdings {
                             // 构造携带持仓上下文的 prompt
-                            let holding_ctx = format!(
+                            let _holding_ctx = format!(
                                 "当前持仓 {} ({})：{} 股, 成本价 {:.2}",
                                 h.stock_name, h.stock_code, h.shares, h.avg_cost,
                             );

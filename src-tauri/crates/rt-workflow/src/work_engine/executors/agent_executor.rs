@@ -1579,13 +1579,13 @@ fn try_extract_json_fragment(text: &str) -> Option<String> {
         if let Some(end) = inner.find("```") {
             let extracted = inner[..end].trim().to_string();
             if !extracted.is_empty() {
-                return Some(extracted);
+                return Some(strip_control_chars(&extracted));
             }
         }
         // 没有关闭 fence 也返回（可能截断了）
         let extracted = inner.trim().to_string();
         if !extracted.is_empty() {
-            return Some(extracted);
+            return Some(strip_control_chars(&extracted));
         }
     }
     // 回退：找 ``` 围栏（任意语言标签）
@@ -1601,12 +1601,12 @@ fn try_extract_json_fragment(text: &str) -> Option<String> {
         if let Some(end) = inner.find("```") {
             let extracted = inner[..end].trim().to_string();
             if !extracted.is_empty() {
-                return Some(extracted);
+                return Some(strip_control_chars(&extracted));
             }
         }
         let extracted = inner.trim().to_string();
         if !extracted.is_empty() {
-            return Some(extracted);
+            return Some(strip_control_chars(&extracted));
         }
     }
     None
@@ -1632,9 +1632,27 @@ fn repair_json(s: &str) -> String {
 ///
 /// 具体做法：对 `"[` 和 `"(` 两种模式分别执行修复扫描，
 /// 若内容中无 `"` 且结尾括号后无 `"`，则在结尾括号前插入 `"` 闭合字符串。
+///
+/// 注意：插入前会检查 trailing 中是否已有合法闭合引号（如 `"(DEGRADED) 文本"`
+/// 的 trailing ` 文本"` 中含 `"`，是合法闭合），防止假阳性破坏合法 JSON。
 fn repair_unclosed_json_strings(s: &str) -> Option<String> {
     let mut result = s.to_string();
     let mut modified = false;
+
+    /// 检查 trailing 字符串中是否已有合法的字符串闭合引号。
+    /// 合法闭合引号：`"` 后跟（空白可忽略）`,`, `]`, `}`, 或字符串结束。
+    fn has_valid_closing_quote(trailing: &str) -> bool {
+        // trailing 不以 `"` 开头，跳过第一个字符后查找 `"`
+        // （以 `"` 开头的情况已经被调用方的 !trailing.starts_with('"') 筛掉了）
+        trailing[1..].find('"').map_or(false, |qpos| {
+            let after_q = &trailing[1..][qpos + 1..];
+            let trimmed = after_q.trim_start();
+            trimmed.is_empty()
+                || trimmed.starts_with(',')
+                || trimmed.starts_with(']')
+                || trimmed.starts_with('}')
+        })
+    }
 
     // 第一遍：修复 `"[来源 日期]` 模式（方括号引用）
     let mut search_from = 0;
@@ -1647,7 +1665,7 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
                 let content = &after_open[..close_pos];
                 if !content.contains('"') {
                     let trailing = &after_open[close_pos + 1..];
-                    if !trailing.starts_with('"') {
+                    if !trailing.starts_with('"') && !has_valid_closing_quote(trailing) {
                         let insert_pos = actual_start + 2 + close_pos;
                         result.insert(insert_pos, '"');
                         modified = true;
@@ -1673,7 +1691,7 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
                 let content = &after_open[..close_pos];
                 if !content.contains('"') {
                     let trailing = &after_open[close_pos + 1..];
-                    if !trailing.starts_with('"') {
+                    if !trailing.starts_with('"') && !has_valid_closing_quote(trailing) {
                         let insert_pos = actual_start + 2 + close_pos;
                         result.insert(insert_pos, '"');
                         modified = true;
@@ -1688,20 +1706,63 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
         }
     }
 
+    // 第三遍：修复截断导致的未闭合字符串（`"` 后缺失 `"` 直接遇到 `,` / `]` / `}`）
+    // 典型场景：evidence_refs 最后一条 `"(a-news 2026-06-24)` 被截断，
+    // 只剩 `"(a-new` 然后跟着 `]`
+    {
+        let bytes: Vec<u8> = result.bytes().collect();
+        let mut i = 0;
+        let mut in_str = false;
+        let mut inserts: Vec<usize> = Vec::new();
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && in_str { i += 2; continue; }
+            if bytes[i] == b'"' {
+                if !in_str {
+                    in_str = true;
+                } else {
+                    in_str = false;
+                }
+            } else if in_str && (bytes[i] == b',' || bytes[i] == b']' || bytes[i] == b'}') && bytes[i] != b'"' {
+                inserts.push(i);
+                in_str = false;
+            }
+            i += 1;
+        }
+        if in_str {
+            inserts.push(bytes.len());
+        }
+        // 从后往前插入，避免位置偏移
+        for &pos in inserts.iter().rev() {
+            result.insert(pos, '"');
+            modified = true;
+        }
+    }
+
     if modified { Some(result) } else { None }
 }
 
-/// 修复 LLM 输出被截断（max_tokens 限制）导致的 JSON 不完整。
+/// 使用括号栈生成正确的闭合顺序（`{ [ { [` → `] } ] }`，而非 `]]}}`）。
+fn closing_brackets_from_stack(stack: &[u8]) -> String {
+    let mut out = String::with_capacity(stack.len());
+    for &b in stack.iter().rev() {
+        match b {
+            b'{' => out.push('}'),
+            b'[' => out.push(']'),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// 修复 LLM 输出被截断（max_tokens 限制）或因遗漏括号导致的 JSON 不完整。
 ///
-/// 问题模式：LLM 在生成 JSON 的过程中用完了 token 预算，导致：
-///   - 括号不匹配（`{` > `}` 或 `[` > `]`）
-///   - 字符串未闭合（缺少尾随 `"`）
+/// 处理两种模式：
+///   1. 尾部截断：括号深度 > 0 或字符串未闭合 → 在末尾补全
+///   2. 中间遗漏：LLM 打开数组 `[` 后忘记 `]`，继续写父级字段
+///      （如 `"evidence_refs": ["(ref)", "next_field": "val"`）
+///      → 在每个结构字符位置尝试截断 + 插入缺失括号
 ///
-/// 修复逻辑：
-///   1. 逐字符扫描，追踪 {} 和 [] 深度以及字符串状态
-///   2. 若深度 > 0，补全缺失的闭合括号
-///   3. 若字符串未闭合，先补 `"` 再补括号
-///   4. 尝试解析，成功则返回修复后内容
+/// 使用括号栈追踪未闭合括号类型，确保闭合顺序正确（`]`/`}` 交替而非全部同类集中）。
 fn try_fix_truncated_json(s: &str) -> Option<String> {
     let s = s.trim();
     if s.is_empty() || (!s.starts_with('{') && !s.starts_with('[')) {
@@ -1709,62 +1770,123 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
     }
 
     let bytes = s.as_bytes();
-    let mut depth_curly: i32 = 0;
-    let mut depth_square: i32 = 0;
+
+    // ── 第一遍扫描：使用括号栈追踪未闭合括号 ──
+    let mut stack: Vec<u8> = Vec::new(); // 未闭合的括号类型栈
     let mut in_string = false;
     let mut escaped = false;
 
     for &b in bytes.iter() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if b == b'\\' && in_string {
-            escaped = true;
-            continue;
-        }
-        if b == b'"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
+        if escaped { escaped = false; continue; }
+        if b == b'\\' && in_string { escaped = true; continue; }
+        if b == b'"' { in_string = !in_string; continue; }
+        if in_string { continue; }
         match b {
-            b'{' => depth_curly += 1,
-            b'}' => depth_curly -= 1,
-            b'[' => depth_square += 1,
-            b']' => depth_square -= 1,
+            b'{' | b'[' => stack.push(b),
+            b'}' => { if stack.last() == Some(&b'{') { stack.pop(); } }
+            b']' => { if stack.last() == Some(&b'[') { stack.pop(); } }
             _ => {},
         }
     }
 
-    // 括号平衡且不在字符串中 → 非截断
-    if depth_curly <= 0 && depth_square <= 0 && !in_string {
+    // ── 策略1：在末尾补全缺失括号 ──
+    if !stack.is_empty() || in_string {
+        let mut result = s.to_string();
+
+        if in_string {
+            result.push('"');
+        }
+
+        // 使用栈生成正确闭合顺序（pop 前先保留）
+        let close = closing_brackets_from_stack(&stack);
+        result.push_str(&close);
+
+        let repaired = repair_json(&result);
+        if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+            return Some(repaired);
+        }
+        if repaired != result && serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+            return Some(result);
+        }
+    } else {
         return None;
     }
 
-    let mut result = s.to_string();
+    // ── 策略2：在结构字符位置截断 + 插入缺失括号 ──
+    // 处理模式：LLM 忘记 `]` 后继续写父级字段
+    // 需要同时记录结构字符处的栈状态，确保闭合顺序正确。
+    const MAX_CANDIDATES: usize = 50;
 
-    // 如果字符串未闭合，先补上闭合引号
-    if in_string {
-        result.push('"');
+    // (pos, stack_snapshot) — 记录此位置时仍未闭合的括号栈
+    let mut states: Vec<(usize, Vec<u8>)> = Vec::new();
+    let mut stk: Vec<u8> = Vec::new();
+    let mut in_str = false;
+    let mut esc = false;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if esc { esc = false; continue; }
+        if b == b'\\' && in_str { esc = true; continue; }
+        if b == b'"' { in_str = !in_str; continue; }
+        if in_str { continue; }
+
+        match b {
+            b'{' => {
+                if !stk.is_empty() {
+                    states.push((i, stk.clone()));
+                }
+                stk.push(b'{');
+            }
+            b'[' => {
+                if !stk.is_empty() {
+                    states.push((i, stk.clone()));
+                }
+                stk.push(b'[');
+            }
+            b'}' => {
+                if stk.last() == Some(&b'{') {
+                    stk.pop();
+                }
+                if !stk.is_empty() {
+                    states.push((i, stk.clone()));
+                }
+            }
+            b']' => {
+                if stk.last() == Some(&b'[') {
+                    stk.pop();
+                }
+                if !stk.is_empty() {
+                    states.push((i, stk.clone()));
+                }
+            }
+            _ => continue,
+        }
     }
 
-    // 补全缺失的闭合括号（先 ] 再 }，因为 JSON 规范要求先关数组再关对象）
-    for _ in 0..depth_square {
-        result.push(']');
-    }
-    for _ in 0..depth_curly {
-        result.push('}');
+    // 去重（同一位置可能被多个记录）
+    states.dedup_by(|a, b| a.0 == b.0);
+
+    // 从后往前尝试
+    let start = states.len().saturating_sub(MAX_CANDIDATES);
+    for idx in (start..states.len()).rev() {
+        let (pos, ref need_close) = states[idx];
+        if need_close.is_empty() {
+            continue;
+        }
+
+        let mut candidate = s[..=pos].to_string();
+        let close = closing_brackets_from_stack(need_close);
+        candidate.push_str(&close);
+
+        let repaired = repair_json(&candidate);
+        if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+            return Some(repaired);
+        }
+        if repaired != candidate && serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
+            return Some(candidate);
+        }
     }
 
-    // 验证修复后的结果
-    if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
-        Some(result)
-    } else {
-        None
-    }
+    None
 }
 
 /// 检测 LLM 输出是否为纯文本拒绝（模型安全机制触发）。
@@ -1863,6 +1985,90 @@ fn trim_after_json(s: &str) -> &str {
     }
 }
 
+/// 剥离 JSON 字符串中的原始控制字符（\u{0000}-\u{001F}）
+///
+/// LLM 常在字符串值中直接输出原始控制字符（如未转义的换行、制表符等），
+/// 导致 serde_json 解析失败（control character found while parsing a string）。
+///
+/// 处理策略：将原始控制字符替换为空格（保留词间分隔），
+/// 已正确转义的控制字符（如 `\n` 的两个字符 '\\' + 'n'）不受影响。
+fn strip_control_chars(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if ('\u{0000}'..='\u{001F}').contains(&c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+/// 从字符串中提取第一个 JSON 对象/数组，跳过所有前缀非 JSON 内容。
+/// 覆盖 LLM 在 JSON 前加 ```json / 文本说明等所有前缀场景。
+fn try_extract_first_json(s: &str) -> Option<String> {
+    let s = s.trim();
+    let start = s.find(|c: char| c == '{' || c == '[')?;
+    let candidate: String = s[start..].to_string();
+    // 先剥离控制字符再尝试解析
+    let cleaned = strip_control_chars(&candidate);
+    if serde_json::from_str::<serde_json::Value>(&cleaned).is_ok() {
+        return Some(cleaned);
+    }
+    try_fix_truncated_json(&cleaned)
+}
+
+/// 从字符串中提取最长的合法 JSON 前缀。
+/// 先查第一个 `{` 或 `[`，然后逐字符扫描追踪括号平衡，
+/// 在深度归零处截断，尝试解析。
+/// 作为所有其他修复失败后的最终兜底。
+fn try_extract_balanced_json(s: &str) -> Option<String> {
+    let s = trim_after_json(s);
+    let start = s.find(|c: char| c == '{' || c == '[')?;
+    let candidate = &s[start..];
+
+    let bytes = candidate.as_bytes();
+    let mut depth_curly: i32 = 0;
+    let mut depth_square: i32 = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut end_pos = 0;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if escaped { escaped = false; continue; }
+        if b == b'\\' && in_string { escaped = true; continue; }
+        if b == b'"' { in_string = !in_string; continue; }
+        if in_string { continue; }
+        match b {
+            b'{' => depth_curly += 1,
+            b'}' => depth_curly -= 1,
+            b'[' => depth_square += 1,
+            b']' => depth_square -= 1,
+            _ => {}
+        }
+        if depth_curly == 0 && depth_square == 0 && i > 0 {
+            end_pos = i + 1;
+            break;
+        }
+    }
+
+    if end_pos == 0 && (depth_curly > 0 || depth_square > 0) {
+        end_pos = bytes.len();
+    }
+
+    if end_pos == 0 { return None; }
+
+    let extracted = candidate[..end_pos].trim().to_string();
+    if extracted.is_empty() { return None; }
+
+    // 先 repair 再解析
+    let repaired = repair_json(&extracted);
+    if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+        return Some(repaired);
+    }
+    try_fix_truncated_json(&repaired)
+}
+
 /// strict_mode 下的输出格式校验：
 /// - 当 output_mode 为 Json 时，验证 final_content 是否为合法 JSON
 /// - 若格式不合法，返回错误阻止结果传递给下游
@@ -1885,6 +2091,19 @@ fn validate_strict_mode_output(
         // 常见坏输出模式修复链
         let mut candidates: Vec<String> = Vec::new();
         candidates.push(trimmed.to_string());
+
+        // 模式0: 跳过所有非 JSON 前缀，从第一个 { 或 [ 开始尝试
+        if let Some(extracted) = try_extract_first_json(trimmed) {
+            if extracted != trimmed {
+                candidates.push(extracted);
+            }
+        }
+
+        // 模式1: 剥离原始控制字符（LLM 常在 JSON 字符串值中输出 \u0000-\u001F）
+        let stripped_control = strip_control_chars(trimmed);
+        if stripped_control != trimmed {
+            candidates.push(stripped_control);
+        }
 
         // 模式1: markdown fence 包裹 (```json \n {...} \n ```)
         if let Some(stripped) = try_extract_json_fragment(trimmed) {
@@ -1921,6 +2140,13 @@ fn validate_strict_mode_output(
             }
         }
 
+        // 模式5: 终极兜底——括号平衡提取
+        if let Some(balanced) = try_extract_balanced_json(trimmed) {
+            if !candidates.iter().any(|x| x.as_str() == balanced.as_str()) {
+                candidates.push(balanced);
+            }
+        }
+
         // ── 遍历修复链：对所有已有候选进行二次修复 ──
         // 之前的修复（fence 剥离/repair_json/截断/闭合）只针对原始 trimmed，
         // 但 fence 剥离后的候选可能也需要同样的修复（如截断修复、未闭合字符串等）。
@@ -1954,6 +2180,11 @@ fn validate_strict_mode_output(
                 {
                     fixes.push(trunc_fixed);
                 }
+                // 控制字符剥离（修复 fence 提取后仍有控制字符的问题）
+                let cleaned = strip_control_chars(c);
+                if cleaned != *c && !candidates.iter().any(|x| x.as_str() == cleaned.as_str()) {
+                    fixes.push(cleaned);
+                }
                 fixes
             })
             .collect();
@@ -1973,7 +2204,17 @@ fn validate_strict_mode_output(
             }
         }
 
-        // 所有修复尝试均失败 → 报告具体失败原因
+        // 所有修复尝试均失败 → 报告具体失败原因（列出前 3 个候选的错误）
+        for (i, c) in candidates.iter().take(3).enumerate() {
+            let err = serde_json::from_str::<serde_json::Value>(c)
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default();
+            tracing::warn!(
+                "strict_mode: 候选[{}] 解析失败: {} [前100字符: {}]",
+                i, err, c.chars().take(100).collect::<String>()
+            );
+        }
         let serde_err = serde_json::from_str::<serde_json::Value>(trimmed)
             .err()
             .map(|e| e.to_string())

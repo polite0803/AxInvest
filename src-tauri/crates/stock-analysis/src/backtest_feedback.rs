@@ -11,7 +11,7 @@
 //!
 //! ## 工作流
 //!
-//! ```
+//! ```text
 //! 回测完成 → backtest_feedback::analyze()
 //!   → 每位分析师的准确率/偏差分析
 //!   → 生成 PromptAdjustmentReport

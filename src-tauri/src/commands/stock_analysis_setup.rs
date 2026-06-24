@@ -79,6 +79,10 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         include_str!("../../agency_experts/stock-analysis/data-quality-inspector.md"),
     ),
     (
+        "quality-fallback",
+        include_str!("../../agency_experts/stock-analysis/quality-fallback.md"),
+    ),
+    (
         "rule-checker",
         include_str!("../../agency_experts/stock-analysis/rule-checker.md"),
     ),
@@ -89,6 +93,10 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     (
         "debate-convergence",
         include_str!("../../agency_experts/stock-analysis/debate-convergence.md"),
+    ),
+    (
+        "risk-convergence",
+        include_str!("../../agency_experts/stock-analysis/risk-convergence.md"),
     ),
     ("reflection", include_str!("../../agency_experts/stock-analysis/reflection.md")),
     // ── Serenity 瓶颈分析 4 专家 ──
@@ -107,6 +115,15 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     (
         "candidate-mapper",
         include_str!("../../agency_experts/stock-analysis/candidate-mapper.md"),
+    ),
+    // ── P2: 借鉴 TradingAgents 的新分析师 ──
+    (
+        "social-media-analyst",
+        include_str!("../../agency_experts/stock-analysis/social-media-analyst.md"),
+    ),
+    (
+        "volume-price-analyst",
+        include_str!("../../agency_experts/stock-analysis/volume-price-analyst.md"),
     ),
 ];
 
@@ -133,15 +150,19 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("trader", "trader"),
     ("value-investor", "stock-analyst"),
     ("data-quality-inspector", "stock-analyst"),
+    ("quality-fallback", "decision-maker"),
     ("rule-checker", "risk-evaluator"),
     ("catalyst-analyst", "stock-analyst"),
     ("debate-convergence", "debater"),
+    ("risk-convergence", "risk-evaluator"),
     ("reflection", "decision-maker"),
     // ── Serenity 瓶颈分析师 ──
     ("trend-scanner", "stock-analyst"),
     ("chain-decomposer", "stock-analyst"),
     ("chokepoint-identifier", "stock-analyst"),
     ("candidate-mapper", "stock-analyst"),
+    ("social-media-analyst", "stock-analyst"),
+    ("volume-price-analyst", "stock-analyst"),
 ];
 
 struct StockRoleDef {
@@ -159,9 +180,9 @@ const STOCK_ROLES: &[StockRoleDef] = &[
         name: "股票分析师",
         description: "A股多维分析",
         system_prompt: "你是专业的 A 股分析师，基于行情数据、财务数据、新闻资讯等对股票进行深度分析。",
-        // 修复 Defect #6: 提升到 12 以容纳 9 个 a-* + value-investor + data-quality-inspector + catalyst-analyst
-        // （共 12 个 stock-analyst 角色节点），留 1 槽位余量。
-        max_concurrent: 13,
+        // 修复 Defect #6: 提升到 14 以容纳 11 个 a-* + value-investor + data-quality-inspector + catalyst-analyst
+        // + social-media-analyst + volume-price-analyst（共 14 个 stock-analyst 角色节点），留 1 槽位余量。
+        max_concurrent: 15,
         timeout_seconds: 600,
     },
     StockRoleDef {
@@ -265,6 +286,7 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     (
         "lockup-watcher",
         &[
+            "get_stock_lockup_bundle",
             "get_stock_lockup",
             "get_stock_shareholder_trades",
             "get_stock_margin_data",
@@ -333,6 +355,8 @@ static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     // data-quality-inspector 只需阅读上游分析师报告（context_sources 注入），
     // 不需要外部工具调用
     ("data-quality-inspector", &["search_stock"]),
+    // quality-fallback: 数据降级时的保守决策，只需少量查询
+    ("quality-fallback", &["get_stock_quote", "get_stock_kline", "compute_scoring"]),
     // rule-checker 需要读取技术指标与估值/风控结果
     (
         "rule-checker",
@@ -584,7 +608,14 @@ async fn seed_stock_analysis_workflow_template(
     // v17: 辩论子节点 (bull-r1..r3 / bear-r1..r3) 加 1 次重试 + 180s 超时。
     //   修复辩论链雪崩:LLM 偶发超时/429 时 max_retries=0 会让整链死,bear-r1
     //   拿不到 bull-r1 上下文则 R2/R3 全部"暂无数据"。
-    const TEMPLATE_VERSION: i32 = 18;
+    // v19: 风险辩论收敛: agg-risk 之后新增 risk-convergence 节点,
+    //   三方风控辩论分歧分析+综合裁决(P1-3)
+    // v20: p-analysts 容器加伪边绕过前端"死分支"校验；
+    //   quality-fallback 用专属 expert 替代 value-investor 占位；
+    //   risk-evaluator 节点设置 max_retries=1 规避瞬时 500 错误
+    // v21: 辩论节点 max_tokens 8192 → 16384，防止 JSON 截断
+    // v22: 全部 agent 节点 max_tokens 默认 8192 → 32768
+    const TEMPLATE_VERSION: i32 = 1;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
@@ -1114,6 +1145,11 @@ async fn seed_stock_analysis_workflow_template(
         description: Some("获取限售解禁日程（解禁日期、股数、比例、股东名称）".into()),
         parameters: stock_code_params(),
     };
+    let td_lockup_bundle = ToolDef {
+        name: "get_stock_lockup_bundle".into(),
+        description: Some("获取筹码面分析数据（解禁+增减持+大宗交易三方聚合）".into()),
+        parameters: stock_code_params(),
+    };
     let td_sh_trades = ToolDef {
         name: "get_stock_shareholder_trades".into(),
         description: Some("获取大股东增减持记录（变动类型、数量、均价、原因）".into()),
@@ -1184,6 +1220,7 @@ async fn seed_stock_analysis_workflow_template(
         ("get_stock_peers", td_peers.clone()),
         ("get_stock_option_pcr", td_pcr.clone()),
         ("get_stock_lockup", td_lockup.clone()),
+        ("get_stock_lockup_bundle", td_lockup_bundle.clone()),
         ("get_stock_shareholder_trades", td_sh_trades.clone()),
         ("get_stock_dividend_records", td_dividend.clone()),
         ("get_stock_north_bound", td_nb_holding.clone()),
@@ -1221,10 +1258,10 @@ async fn seed_stock_analysis_workflow_template(
                 position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
-                    max_retries: 0,
+                    max_retries: 1, // 上游 LLM provider 间歇 500，1 次重试即可规避
                     ..Default::default()
                 },
-                timeout: Some(120),
+                timeout: Some(300),
                 enabled: true,
                 parent_id: parent_id.map(String::from),
                 compensation: None,
@@ -1253,7 +1290,7 @@ async fn seed_stock_analysis_workflow_template(
                 output_var: id.into(),
                 model: None,
                 temperature: Some(0.3),
-                max_tokens: Some(8192),
+                max_tokens: Some(32768),
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Text,
@@ -1269,7 +1306,7 @@ async fn seed_stock_analysis_workflow_template(
                         ..Default::default()
                     },
                 ),
-                stream_chunk_timeout_secs: None,
+                stream_chunk_timeout_secs: Some(300),
             },
         })
     };
@@ -1383,7 +1420,7 @@ async fn seed_stock_analysis_workflow_template(
         // F-8 重排: a-hot-money 前置改为资金流向工具
         ("t-hotmoney-data", "获取资金流向", "get_stock_money_flow", "stock_code"),
         // F-8 重排: a-lockup 前置改为解禁质押工具
-        ("t-lockup-data", "获取解禁质押", "get_stock_lockup", "stock_code"),
+        ("t-lockup-data", "获取解禁+增减持+大宗交易", "get_stock_lockup_bundle", "stock_code"),
         // F-8 重排: a-research 前置改为研报工具
         ("t-research-data", "获取研报+新闻", "get_stock_research_reports", "stock_code"),
         ("t-sector-data", "获取行情+行业排名", "get_industry_ranking", "stock_code"),
@@ -1521,6 +1558,26 @@ async fn seed_stock_analysis_workflow_template(
             sub_graph: None,               // v23+：稍后通过 inject_container_subgraphs 注入
         },
     }));
+    // 前端验证要求容器节点有至少一条入边/出边，这里添加伪边绕过"死分支"检查。
+    // 运行时容器立即完成，这些边不影响调度。
+    edges.push(WorkflowEdge {
+        id: "e-trigger-p-analysts".into(),
+        source: "trigger".into(),
+        source_handle: None,
+        target: "p-analysts".into(),
+        target_handle: None,
+        edge_type: EdgeType::Direct,
+        label: None,
+    });
+    edges.push(WorkflowEdge {
+        id: "e-p-analysts-debate".into(),
+        source: "p-analysts".into(),
+        source_handle: None,
+        target: "debate-bull-bear".into(),
+        target_handle: None,
+        edge_type: EdgeType::Direct,
+        label: None,
+    });
 
     // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
     // 分析师节点已直接连接 DebateNode（无中间条件节点）
@@ -2015,7 +2072,34 @@ async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{rid}-agg-risk"), rid, "agg-risk"));
     }
 
+    // ── P1-3: 三档风险辩论收敛（agg-risk 之后、算法工具之前）──
+    // 读取三方风险评估输出，分析分歧并生成收敛报告。
+    // 收敛输出结构见 risk-convergence.md
+    {
+        let mut rc = agent(
+            "risk-convergence",
+            "三档风险辩论收敛：分歧分析与综合裁决",
+            "risk-convergence",
+            None,
+            300.0,
+            2550.0,
+        );
+        if let WorkflowNode::Agent(ref mut a) = rc {
+            a.config.context_sources = vec![
+                "risk-agg".into(),
+                "risk-con".into(),
+                "risk-neu".into(),
+            ];
+            a.config.model_role = Some("risk-evaluator".into());
+            a.config.max_tool_rounds = Some(1);
+            a.config.output_mode = OutputMode::Json;
+        }
+        nodes.push(rc);
+        edges.push(edge("e-agg-risk-risk-convergence", "agg-risk", "risk-convergence"));
+    }
+
     // ── 算法 Tool 节点：仅 3 个核心评分/估值/风控（独立画布节点，parent_id = None）──
+    // 位置：risk-convergence 节点 (300, 2550) 之后横排，间距 180
     // 位置：agg-risk 节点 (300, 2400) 之后横排，间距 180
     let algo_tools: &[(&str, &str, &str, &str, f64, f64)] = &[
         ("t-scoring", "技术评分", "compute_scoring", "stock_code", 300.0, 2700.0),
@@ -2027,7 +2111,7 @@ async fn seed_stock_analysis_workflow_template(
     for (tool_id, title, tool_name, arg_key, x, y) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key, None, *x, *y));
     }
-    edges.push(edge("e-agg-risk-t-scoring", "agg-risk", "t-scoring"));
+    edges.push(edge("e-risk-convergence-t-scoring", "risk-convergence", "t-scoring"));
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 
@@ -2491,7 +2575,7 @@ async fn seed_stock_analysis_workflow_template(
         let mut fq = agent(
             fq_id,
             fq_title,
-            "value-investor", // 仅用于占位，system_prompt 会完全覆盖
+            "quality-fallback",
             None,
             20.0,
             fq_y,
@@ -4670,7 +4754,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 output_var: "reflection".into(),
                 model: None,
                 temperature: Some(0.3),
-                max_tokens: Some(8192),
+                max_tokens: Some(32768),
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Json,
@@ -4686,7 +4770,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                         ..Default::default()
                     },
                 ),
-                stream_chunk_timeout_secs: None,
+                stream_chunk_timeout_secs: Some(300),
             },
         }),
         // 4. 反思记录持久化：写入 stock_reflections 表供后续查询/复盘
@@ -4764,8 +4848,8 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         },
     ];
 
-    // serenity-reflection 模板版本。v2: 重新种子化
-    const REFLECTION_TEMPLATE_VERSION: i32 = 4;
+    // serenity-reflection 模板版本。v1: 重新种子化
+    const REFLECTION_TEMPLATE_VERSION: i32 = 1;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =
@@ -4911,7 +4995,7 @@ async fn seed_serenity_screening_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 13;
+    const TEMPLATE_VERSION: i32 = 1;
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -5375,7 +5459,7 @@ async fn seed_serenity_screening_workflow_template(
                 output_var: id.into(),
                 model: None,
                 temperature: Some(0.3),
-                max_tokens: Some(8192),
+                max_tokens: Some(32768),
                 tools: vec![],
                 exposed_tools: vec![],
                 output_mode: OutputMode::Json,
@@ -5391,7 +5475,7 @@ async fn seed_serenity_screening_workflow_template(
                         ..Default::default()
                     },
                 ),
-                stream_chunk_timeout_secs: None,
+                stream_chunk_timeout_secs: Some(300),
             },
         })
     };

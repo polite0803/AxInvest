@@ -21,6 +21,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AnalysisDebugPanel } from "./AnalysisDebugPanel";
 import { AnalysisProgress } from "./AnalysisProgress";
 import { AnalystReportGrid } from "./AnalystReportGrid";
 import { AnnouncementsPanel } from "./AnnouncementsPanel";
@@ -125,6 +126,7 @@ export function StockAnalysisPage() {
   const { id } = useParams<{ id: string }>();
   const loadAnalysis = useStockAnalysisStore((s) => s.loadAnalysis);
   const status = useStockAnalysisStore((s) => s.status);
+  const [showDebug, setShowDebug] = useState(false);
   const error = useStockAnalysisStore((s) => s.error);
   const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
   const failedNodeErrors = useStockAnalysisStore((s) => s.failedNodeErrors);
@@ -413,6 +415,20 @@ export function StockAnalysisPage() {
             <StockSearchBar />
             <div style={{ margin: "4px 16px 0 16px", display: "flex", gap: 8, alignItems: "center" }}>
               <AnalysisHistoryButton />
+              {/* Debug 面板切换按钮 — 始终可见 */}
+              <button
+                className="text-xs px-2 py-0.5 rounded cursor-pointer hover:opacity-80 transition-opacity"
+                style={{
+                  background: showDebug ? "#7c3aed" : "rgba(124,58,237,0.12)",
+                  color: showDebug ? "#fff" : "#a78bfa",
+                  border: "1px solid rgba(124,58,237,0.3)",
+                  fontWeight: 500,
+                }}
+                onClick={() => setShowDebug(!showDebug)}
+                title="打开/关闭分析调试面板"
+              >
+                🔍 {showDebug ? "隐藏 Debug" : "Debug 面板"}
+              </button>
             </div>
 
             {/* Decision hero (full width, at top) — outside flex row to avoid layout shift */}
@@ -444,9 +460,28 @@ export function StockAnalysisPage() {
                   )
                   : (
                     <>
+                      {showDebug && <AnalysisDebugPanel />}
+
                       {status === "loading" && (
                         <div className="sa-loading">
                           <AnalysisProgress />
+                          <div className="flex justify-center mt-2">
+                            <button
+                              className="text-xs px-3 py-1 rounded cursor-pointer transition-colors"
+                              style={{
+                                background: "rgba(239,68,68,0.15)",
+                                color: "#ef4444",
+                                border: "1px solid rgba(239,68,68,0.3)",
+                              }}
+                              onClick={() => {
+                                if (window.confirm(t("stockAnalysis.stopAnalysisConfirm"))) {
+                                  useStockAnalysisStore.getState().cancelAnalysis();
+                                }
+                              }}
+                            >
+                              ⏹ {t("stockAnalysis.stopAnalysis")}
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -539,7 +574,26 @@ export function StockAnalysisPage() {
                                 background: "var(--surface)",
                               }}
                             >
-                              <AnalysisProgress />
+                              <div className="flex items-start gap-3">
+                                <div className="flex-1">
+                                  <AnalysisProgress />
+                                </div>
+                                <button
+                                  className="text-xs px-2.5 py-1 rounded cursor-pointer transition-colors shrink-0 mt-1"
+                                  style={{
+                                    background: "rgba(239,68,68,0.15)",
+                                    color: "#ef4444",
+                                    border: "1px solid rgba(239,68,68,0.3)",
+                                  }}
+                                  onClick={() => {
+                                    if (window.confirm(t("stockAnalysis.stopAnalysisConfirm"))) {
+                                      useStockAnalysisStore.getState().cancelAnalysis();
+                                    }
+                                  }}
+                                >
+                                  ⏹ {t("stockAnalysis.stopAnalysis")}
+                                </button>
+                              </div>
                             </div>
                           )}
                           <div className="sa-tabs">

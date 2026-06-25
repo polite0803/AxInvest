@@ -1745,7 +1745,6 @@ async fn seed_stock_analysis_workflow_template(
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
             a.config.max_tool_rounds = Some(2);
-            a.config.output_mode = OutputMode::Json;
             a.config.model_role = Some("debater".into());
             // 注入前序轮次辩论输出 + 所有分析师报告作为上下文
             let mut ctx: Vec<String> = Vec::new();
@@ -1781,7 +1780,6 @@ async fn seed_stock_analysis_workflow_template(
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&bull_tools));
             a.config.max_tool_rounds = Some(2);
-            a.config.output_mode = OutputMode::Json;
             a.config.model_role = Some("debater".into());
             // 注入前序轮次 + 本轮多方输出 + 所有分析师报告作为上下文
             let mut ctx: Vec<String> = Vec::new();
@@ -1864,7 +1862,6 @@ async fn seed_stock_analysis_workflow_template(
             ];
             a.config.model_role = Some("stock-analyst".into());
             a.config.max_tool_rounds = Some(2);
-            a.config.output_mode = OutputMode::Json;
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| *k == "value-investor")
@@ -2096,7 +2093,6 @@ async fn seed_stock_analysis_workflow_template(
                 vec!["risk-agg".into(), "risk-con".into(), "risk-neu".into()];
             a.config.model_role = Some("risk-evaluator".into());
             a.config.max_tool_rounds = Some(1);
-            a.config.output_mode = OutputMode::Json;
         }
         nodes.push(rc);
         edges.push(edge("e-agg-risk-risk-convergence", "agg-risk", "risk-convergence"));

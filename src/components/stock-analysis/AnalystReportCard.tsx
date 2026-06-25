@@ -292,6 +292,18 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
   // 有解析结果：尝试结构化渲染
   if (parsed) {
+    // strict_mode 下 LLM 输出被重构成 {"report":"...","verdict":{"verdict":"看多","bull_score":7,...}}
+    // verdict/bull_score/bear_score/confidence 在嵌套的 verdict 对象里，需要提取到顶层
+    if (parsed.verdict && typeof parsed.verdict === "object" && !Array.isArray(parsed.verdict)) {
+      const v = parsed.verdict as Record<string, unknown>;
+      if (typeof v.verdict === "string") { parsed.verdict = v.verdict; }
+      else if (typeof v.stance === "string") { parsed.verdict = v.stance; }
+      if (parsed.bull_score == null && typeof v.bull_score === "number") { parsed.bull_score = v.bull_score as number; }
+      if (parsed.bear_score == null && typeof v.bear_score === "number") { parsed.bear_score = v.bear_score as number; }
+      if (parsed.confidence == null && typeof v.confidence === "number") { parsed.confidence = v.confidence as number; }
+      // report 文本不在 summary 里，在 report 字段
+      if (!parsed.summary && typeof parsed.report === "string") { parsed.summary = parsed.report; }
+    }
     const summary = extractSummary(parsed);
     const tags = extractTags(parsed);
     const points = extractKeyPoints(parsed);
@@ -331,9 +343,9 @@ export function AnalystReportCard({ expertId, report }: Props) {
           styles={{ body: { flex: 1, maxHeight: 400, overflow: "auto" } }}
         >
           {/* 看多/看空/置信度 显眼展示 */}
-          {(bullScore != null || bearScore != null || parsed.verdict) && (
+          {(bullScore != null || bearScore != null || (typeof parsed.verdict === "string")) && (
             <div className="flex items-center gap-3 mb-2 flex-wrap">
-              {parsed.verdict && (
+              {typeof parsed.verdict === "string" && (
                 <Tag color={verdictColor} style={{ fontSize: 13, padding: "2px 10px", fontWeight: 600 }}>
                   {parsed.verdict}
                 </Tag>

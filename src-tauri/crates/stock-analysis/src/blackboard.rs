@@ -62,9 +62,32 @@ pub fn build_blackboard_snapshot(
             || *node_id == "research-mgr"
             || *node_id == "portfolio-mgr";
         if is_structured {
-            bb.insert(key, raw_output.clone());
+            // 结构化节点：优先用 report + verdict 重构带 VERDICT 标签的文本
+            let mut value_to_store = raw_output.clone();
+            if let Some(obj) = raw_output.as_object() {
+                if let Some(verdict) = obj.get("verdict") {
+                    if let Some(report) = obj.get("report").and_then(|v| v.as_str()) {
+                        let reconstructed = format!("{}<!-- VERDICT: {} -->", report, verdict);
+                        value_to_store = Value::String(reconstructed);
+                    }
+                }
+            }
+            bb.insert(key, value_to_store);
         } else {
-            let text = extract_node_text(raw_output);
+            let mut text = extract_node_text(raw_output);
+            // 如果 content 是 JSON 且含有 verdict 字段（strict_mode 重构格式），
+            // 把 verdict 补回 <!-- VERDICT: ... --> 标签，让前端 tryParseVerdictFormat 能识别
+            if let Some(obj) = raw_output.as_object() {
+                if let Some(content_str) = obj.get("content").and_then(|v| v.as_str()) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content_str) {
+                        if let Some(verdict) = json.get("verdict") {
+                            if let Some(report) = json.get("report").and_then(|v| v.as_str()) {
+                                text = format!("{}<!-- VERDICT: {} -->", report, verdict);
+                            }
+                        }
+                    }
+                }
+            }
             bb.insert(key, Value::String(text));
         }
 

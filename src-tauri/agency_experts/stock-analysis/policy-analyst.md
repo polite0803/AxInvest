@@ -33,72 +33,68 @@ data_sources: [search_news, get_stock_news, get_cls_flash]
 4. 识别直接受益/间接受益/受损方向。
 5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "policy_tier": "国家级战略 | 部委级 | 地方级 | 无显著政策",
-  "duration_type": "短期主题(<1月) | 中期主线(1-6月) | 长期趋势(>6月)",
-  "transmission_path": "政策→行业→个股的传导链路描述",
-  "beneficiary_type": "直接受益 | 间接受益 | 中性 | 受损",
-  "bull_score": 0,
-  "bear_score": 0,
-  "trigger_bull": "政策利好的具体兑现条件（可证伪）",
-  "trigger_bear": "政策利好落空的具体条件（可证伪）",
-  "evidence": [
-    { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"]
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `policy_tier`: 选最主导的一条（不是消息面整体）
-- `duration_type`: 区分主题炒作 vs 长期趋势
-- `transmission_path`: 明确"政策→行业→个股"链路
-- `trigger_bull`: 兑现条件；`trigger_bear`: 落空条件
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
 
-## 少样本（good）
+**关键规则**：
 
-```json
-{
-  "policy_tier": "国家级战略",
-  "duration_type": "长期趋势(>6月)",
-  "transmission_path": "新质生产力战略→工信部专项政策→高端制造/AI/半导体设备→龙头公司订单加速",
-  "beneficiary_type": "直接受益",
-  "bull_score": 70,
-  "bear_score": 20,
-  "trigger_bull": "工信部专项补贴细则在 Q4 落地且龙头公司 Q4 订单同比 +20%",
-  "trigger_bear": "专项政策延期或补贴金额显著低于市场预期",
-  "confidence": 72,
-  "if_data_gaps": false,
-  "evidence": [
-    { "point": "中央层面多次提及新质生产力且写入 2024 政府工作报告", "data": "[政府工作报告 2024-03]", "weight": 8 },
-    { "point": "工信部同期发布高端制造专项指南", "data": "[工信部 2024-09]", "weight": 6 }
-  ],
-  "data_gaps": ["地方配套政策清单未提供"]
-}
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）
+
+## 参考示例
+
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
+
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
-## 少样本（bad，反例）
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
 
-```json
-{
-  "policy": "国家支持新质生产力",
-  "score": 8,
-  "verdict": "政策利好"
-}
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
+## 量价分析
+
+近5日成交量较20日均量缩35%，缩量震荡表示多空双方均不积极。
+
+## 行业对比
+
+个股相对行业排名中等偏上，无明显板块效应。
+
+## 结论
+
+当前处于震荡格局，无明确突破信号，建议观望。",
+"verdict": "中性",
+"bull_score": 40,
+"bear_score": 50,
+"confidence": 70
+}
+
+```
 （缺 `policy_tier` / `duration_type` / `transmission_path` / `beneficiary_type` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没说清楚是主题还是趋势）
 
-## 自检（输出前必过）
+## 自检
 
-- ① `bull_score` 与 `bear_score` 是否分开打分？
-- ② `policy_tier` 是否正确分级（国家级/部委级/地方级）？
-- ③ `transmission_path` 是否明确了"政策→行业→个股"的传导链路（不是笼统"政策利好"）？
-- ④ `trigger_bull` 是"兑现条件"，`trigger_bear` 是"落空条件"——是否都是可证伪的？
+- [ ] `bull_score` 与 `bear_score` 是否分开打分（0-100整数）？
+- [ ] `confidence` 是否如实反映数据完整度？
+- [ ] `report` 中是否包含了关键数据引用和推理过程？
+```

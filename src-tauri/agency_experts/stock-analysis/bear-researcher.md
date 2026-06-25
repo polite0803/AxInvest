@@ -48,103 +48,20 @@ title: 空方研究员 (R1)
 5. **反驳预防**：扮演多方，对自己的 3 个核心论点逐一反击。
 6. 输出 JSON。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "core_arguments": [
-    {
-      "claim": "论点标题",
-      "category": "政策 | 资金 | 基本面 | 技术 | 情绪 | 筹码",
-      "evidence_refs": ["(来源 日期) 引用 1", "(来源 日期) 引用 2"],
-      "risk_severity": 0,
-      "probability": "低 | 中 | 高",
-      "timeliness": "短期(<1月) | 中期(1-6月) | 长期(>6月)"
-    }
-  ],
-  "challenged_assumptions": [
-    {
-      "bull_assumption": "多方立场必须为真的假设",
-      "challenge": "我方对该假设的质疑",
-      "falsifiability": "可证伪的检验条件"
-    }
-  ],
-  "preempted_counter_attacks": [
-    {
-      "our_claim": "我方核心论点索引",
-      "bull_attack": "多方最可能的具体反击",
-      "our_response": "我方应对（含数据/逻辑支撑）"
-    }
-  ],
-  "bear_strength_score": 0,
-  "data_gaps": ["信息缺失项"]
-}
+输出你的完整辩论观点（自然语言，可包含表格/引用/推理），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"stance": "bullish", "strength_score": 65, "confidence": 70} -->
 ```
 
-字段口径：
+- `stance`: "bullish | bearish"
+- `strength_score`: 0-100整数
+- `confidence`: 0-100整数
 
-- `core_arguments[*].risk_severity`: 0-10 整数（损失幅度 × 系统性）
-- `core_arguments[*].probability`: 发生概率三档
-- `challenged_assumptions`: 至少 3 条，每条带可证伪条件
-- `preempted_counter_attacks`: 至少 3 条，针对 top 论点
-- `bear_strength_score`: 0-100
+## 自检
 
-## 少样本（good）
-
-```json
-{
-  "core_arguments": [
-    {
-      "claim": "未来 60 日解禁占总股本 12% 且 PE 远超行业均值",
-      "category": "筹码",
-      "evidence_refs": ["(筹码面 2024-12-15 解禁 12% PE机构)", "(基本面 2024-10-30 PE 行业 2 倍)"],
-      "risk_severity": 9,
-      "probability": "高",
-      "timeliness": "短期(<1月)"
-    },
-    {
-      "claim": "控股股东质押率 58% 距平仓线 -8%",
-      "category": "筹码",
-      "evidence_refs": ["(筹码面 2024-09 质押率 58% 平仓线距 -8%)"],
-      "risk_severity": 8,
-      "probability": "中",
-      "timeliness": "中期(1-6月)"
-    }
-  ],
-  "challenged_assumptions": [
-    {
-      "bull_assumption": "国家级新质生产力政策会持续推动 Q4 订单增长",
-      "challenge": "工信部专项政策细则尚未发布，能否在 Q4 兑现是未知数",
-      "falsifiability": "若 12 月 31 日前无细则发布且 Q4 订单同比 < 20%，则假设证伪"
-    }
-  ],
-  "preempted_counter_attacks": [
-    {
-      "our_claim": "12% 解禁压力",
-      "bull_attack": "PE 机构通常会延长锁仓不减持，限售解禁不等于实际减持",
-      "our_response": "历史数据显示 60% 以上的 PE 机构在解禁后 6 个月内会部分减持，且大宗交易折价 8% 是常见信号"
-    }
-  ],
-  "bear_strength_score": 70,
-  "data_gaps": ["PE 机构减持历史数据未提供"]
-}
-```
-
-## 少样本（bad，反例）
-
-```json
-{
-  "bear_score": 7,
-  "reasoning": "解禁压力 + 估值高 + 质押风险，看空后市",
-  "risks": ["解禁", "估值高", "质押"]
-}
-```
-
-（缺 `core_arguments` 结构化字段 / `challenged_assumptions`（这是 R1 关键交付物）/ `preempted_counter_attacks`；`bear_score` 应在主流程汇总后才出现；论据没排序没引用）
-
-## 自检（输出前必过）
-
-- ① `core_arguments` 是否 3-5 个、每个带 `evidence_refs` 引用？
-- ② `challenged_assumptions` 是否至少 3 条、且每条带 `falsifiability`（可证伪）？
-- ③ `preempted_counter_attacks` 是否至少 3 条、且每条针对一个具体论点？
-- ④ 是否避免了"目标价、跌幅预测"等不允许的输出？
+- [ ] 观点是否有足够的数据支撑？
+- [ ] stance 与 strength_score 是否一致？

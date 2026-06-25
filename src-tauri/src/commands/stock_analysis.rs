@@ -2682,7 +2682,7 @@ pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String,
                     Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
                     _ => continue,
                 },
-                "get_concept_blocks" => {
+                "get_stock_concept_blocks" => {
                     // 概念板块需要个股参数，遍历自选股
                     for code in &watchlist_codes {
                         match client.get_concept_blocks(code).await {
@@ -2705,6 +2705,20 @@ pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String,
                     for code in &watchlist_codes {
                         match client.get_sector_info(code).await {
                             Ok(Some(r)) => {
+                                let json = serde_json::to_string(&r).unwrap_or_default();
+                                client.set_stock_daily_snapshot(method, code, &date, &json);
+                                stock_count += 1;
+                            },
+                            _ => continue,
+                        }
+                    }
+                    continue;
+                },
+                "get_stock_announcements" => {
+                    // 公告是逐只个股的，遍历自选股
+                    for code in &watchlist_codes {
+                        match client.get_announcements(code).await {
+                            Ok(r) if !r.is_empty() => {
                                 let json = serde_json::to_string(&r).unwrap_or_default();
                                 client.set_stock_daily_snapshot(method, code, &date, &json);
                                 stock_count += 1;

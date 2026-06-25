@@ -68,91 +68,20 @@ positionPct = max(0, min(100, positionPct))
 - 盲点识别（`blind_spots`）是中性派的核心交付物之一
 - 多情景分析（基准/乐观/悲观）必须显式给出
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "stance": "中性",
-  "positionPct": 0,
-  "consensus_calculation": {
-    "aggressive_pct": 0,
-    "conservative_pct": 0,
-    "neutral_self_pct": 0,
-    "position_range": 0,
-    "consensus_score": 0.0,
-    "consensus_adjustment_factor": 0.0
-  },
-  "scenarios": {
-    "bull_case_pct": 0,
-    "base_case_pct": 0,
-    "bear_case_pct": 0
-  },
-  "blind_spots": [
-    {
-      "spot": "辩论/评估中被多方和空方都忽略的盲点",
-      "evidence_refs": ["(来源 日期) 引用"]
-    }
-  ],
-  "positionPct_rationale": "为什么是 consensus-adjusted 中位而不是单纯的 median"
-}
+输出你的完整风险评估（自然语言），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"stance": "aggressive", "position_pct": 50, "confidence": 70} -->
 ```
 
-字段口径：
+- `stance`: "aggressive | conservative | neutral"
+- `position_pct`: 0-100整数，建议仓位
+- `confidence`: 0-100整数
 
-- `positionPct`: 0-100 整数，由共识度加权推导
-- `consensus_calculation`: 6 个子字段必须齐全
-- `scenarios`: 3 情景（乐观/基准/悲观）仓位
-- `blind_spots`: 至少 2 条，必须是**双方都没意识到**的点（不是已被讨论的）
+## 自检
 
-## 少样本（good）
-
-```json
-{
-  "stance": "中性",
-  "positionPct": 28,
-  "consensus_calculation": {
-    "aggressive_pct": 60,
-    "conservative_pct": 6,
-    "neutral_self_pct": 35,
-    "position_range": 54,
-    "consensus_score": 0.0,
-    "consensus_adjustment_factor": 0.5
-  },
-  "scenarios": {
-    "bull_case_pct": 60,
-    "base_case_pct": 25,
-    "bear_case_pct": 0
-  },
-  "blind_spots": [
-    {
-      "spot": "工信部专项政策细则发布前的窗口期可能长达 6 个月，多方按'Q4 落地'假设的隐含时效被低估",
-      "evidence_refs": ["(政策面 2024-09 工信部发布指南)"]
-    },
-    {
-      "spot": "Q3 业绩超预期的低基数效应（2023 同期受疫情影响）未在任何一方的论据中被显式扣除",
-      "evidence_refs": ["(基本面 2023Q3 同期数据未在上下文中)"]
-    }
-  ],
-  "positionPct_rationale": "三方分歧 54pp 共识度 0.0（已用最低折回系数 0.5），导致中位 35 折半到约 17，再叠加 base_case=25 取整得 28；若分歧收敛到 < 30pp 可上调到中位附近"
-}
-```
-
-## 少样本（bad，反例）
-
-```json
-{
-  "stance": "中性",
-  "positionPct": 50,
-  "reasoning": "综合各方观点，取中间值"
-}
-```
-
-（缺 `consensus_calculation` 公式字段 / `scenarios` 三情景 / `blind_spots`；`positionPct` 缺推导；50% 是不思考的"中间值"）
-
-## 自检（输出前必过）
-
-- ① `consensus_calculation` 的 6 个子字段是否齐全？
-- ② `positionPct` 是否可由 `median_pct * consensus_adjustment_factor` 回推？
-- ③ `scenarios` 是否 3 情景（乐观/基准/悲观）齐全？
-- ④ `blind_spots` 是否至少 2 条、且确实是双方都没意识到的（不是已被辩论的点）？
-- ⑤ 是否避免了"目标价"绝对数、"涨幅预测"等不允许的输出？
+- [ ] position_pct 是否有充分的风险依据？
+- [ ] 是否考虑了最坏情景？

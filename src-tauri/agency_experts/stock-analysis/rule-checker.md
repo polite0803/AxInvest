@@ -30,34 +30,13 @@ category: risk
 
 ## 输出格式
 
-请以 JSON 格式输出规则检查结果：
+输出你的完整风险评估（自然语言），
+然后在**末尾另起一行**追加机读标签：
 
-```json
-{
-  "expert": "rule-checker",
-  "type": "规则检查",
-  "passed": true,
-  "violations": [
-    "违规描述 1",
-    "违规描述 2"
-  ],
-  "corrections": [
-    "修正建议 1（如：自动设定止损价 = 12.50）",
-    "修正建议 2（如：等待 RSI6 回落至 70 以下）"
-  ],
-  "force_signals": [],
-  "auto_stop_loss": 0.0,
-  "summary": "规则检查通过 / 存在 N 项违规",
-  "risk_flags": [
-    "风险点 1",
-    "风险点 2"
-  ]
-}
+```
+<!-- VERDICT: {"stance": "aggressive", "position_pct": 50, "confidence": 70} -->
 ```
 
-字段口径：
-
-- `passed`: 全部规则通过为 true，存在任一违规为 false
-- `force_signals`: 强制覆盖的信号，可选值：`block_buy` / `force_hold` / `reduce_position`
-- `auto_stop_loss`: 若原 stopLoss 缺失，自动计算出的止损价；若无缺失则为 0.0
-- `summary`: 一句话总结（≤ 30 字）
+- `stance`: "aggressive | conservative | neutral"
+- `position_pct`: 0-100整数，建议仓位
+- `confidence`: 0-100整数

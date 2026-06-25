@@ -33,98 +33,68 @@ data_sources: [get_stock_money_flow, get_stock_dragon_tiger, get_north_bound_flo
 4. 识别题材轮动主线与涨停接力可持续性。
 5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "main_flow_state": "持续流入 | 流入放缓 | 平衡 | 流出 | 持续流出",
-  "active_player": "机构 | 游资 | 北向 | 多方共振 | 无显著主力",
-  "dragon_tiger_signal": "机构扫货 | 游资接力 | 机构出货 | 游资对倒 | 无龙虎榜",
-  "limit_up_sustainability": "强 | 中 | 弱 | 不适用",
-  "bull_score": 0,
-  "bear_score": 0,
-  "trigger_bull": "资金面强化多头的具体条件（可证伪）",
-  "trigger_bear": "资金面强化空头的具体条件（可证伪）",
-  "evidence": [
-    { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"],
-  "prediction": {
-    "timeframe": "short_term | mid_term | long_term",
-    "direction": "bullish | bearish | neutral",
-    "confidence": 0.0-1.0,
-    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
-      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
-    ]
-  },
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `main_flow_state`: 5 个枚举值之一，必须是趋势（不是单日）
-- `active_player`: 当前最主导的资金性质
-- `dragon_tiger_signal`: 龙虎榜信号分类（不是简单"看多/看空"）
-- `trigger_*`: 必须是可证伪的条件
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
 
-## 少样本（good）
+**关键规则**：
 
-```json
-{
-  "main_flow_state": "持续流入",
-  "active_player": "多方共振",
-  "dragon_tiger_signal": "机构扫货",
-  "limit_up_sustainability": "强",
-  "bull_score": 70,
-  "bear_score": 20,
-  "trigger_bull": "主力净流入连续 5 日且龙虎榜机构净买入 > 5000 万",
-  "trigger_bear": "主力单日净流出 > 2 亿且北向连续 3 日净流出",
-  "confidence": 72,
-  "if_data_gaps": false,
-  "evidence": [
-    { "point": "近 5 日主力净流入累计 4.2 亿", "data": "[主力资金 2024-10-23~10-30 累计 +4.2亿]", "weight": 7 },
-    { "point": "龙虎榜显示 3 家机构席位净买入合计 6800 万", "data": "[龙虎榜 2024-10-29]", "weight": 6 }
-  ],
-  "data_gaps": ["保留原有缺失项"],
-  "prediction": {
-    "timeframe": "mid_term",
-    "direction": "bullish",
-    "confidence": 0.6,
-    "key_drivers": ["此为示例请替换为实际因素"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
-      { "scenario": "bull", "probability": 0.25, "outcome": "乐观情景", "trigger": "利好触发" },
-      { "scenario": "bear", "probability": 0.25, "outcome": "悲观情景", "trigger": "利空触发" }
-    ]
-  }
-}
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）
+
+## 参考示例
+
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
+
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
-## 少样本（bad，反例）
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
 
-```json
-{
-  "flow": "净流入",
-  "score": 7,
-  "verdict": "主力看好"
-}
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
+## 量价分析
+
+近5日成交量较20日均量缩35%，缩量震荡表示多空双方均不积极。
+
+## 行业对比
+
+个股相对行业排名中等偏上，无明显板块效应。
+
+## 结论
+
+当前处于震荡格局，无明确突破信号，建议观望。",
+"verdict": "中性",
+"bull_score": 40,
+"bear_score": 50,
+"confidence": 70
+}
+
+```
 （缺 `main_flow_state` 趋势字段 / `active_player` / `dragon_tiger_signal` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没说清是机构还是游资）
 
-## 自检（输出前必过）
+## 自检
 
-- ① `bull_score` 与 `bear_score` 是否分开打分？
-- ② `active_player` 是否明确区分了机构/游资/北向（不是笼统"主力"）？
-- ③ `main_flow_state` 是否反映了趋势（不是单日异动）？
-- ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
-- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
-- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
-- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
-- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？
+- [ ] `bull_score` 与 `bear_score` 是否分开打分（0-100整数）？
+- [ ] `confidence` 是否如实反映数据完整度？
+- [ ] `report` 中是否包含了关键数据引用和推理过程？
+```

@@ -41,55 +41,26 @@ color: orange
 4. 设定入场价、止损价、目标价
 5. 输出结构化交易方案
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "stance": "买入 | 卖出 | 观望",
-  "positionPct": 30,
-  "confidence": 0.75,
-  "timeHorizon": "ultra_short | short | mid | long",
-  "expectedHoldingDays": 5,
-  "summary": "交易方案概述：方向、仓位、时间维度、核心逻辑（100-300字）",
-  "key_points": [
-    "入场价及理由",
-    "止损价及最大亏损比例",
-    "目标价及预期收益",
-    "T+1隔夜风险评估",
-    "分批建仓/执行策略建议"
-  ],
-  "scenarios": [
-    {
-      "scenario": "base",
-      "probability": 0.5,
-      "action": "基准情况下的建仓/平仓操作",
-      "entry_condition": "入场触发条件"
-    },
-    {
-      "scenario": "bull",
-      "probability": 0.25,
-      "action": "超预期上涨时的加仓或止盈操作",
-      "entry_condition": "乐观情况触发条件"
-    },
-    {
-      "scenario": "bear",
-      "probability": 0.25,
-      "action": "不及预期时的止损或反向操作",
-      "entry_condition": "悲观情况触发条件"
-    }
-  ]
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `stance`: 交易方向（买入/卖出/观望）
-- `positionPct`: 建议仓位比例 0-100
-- `confidence`: 对交易方案的信心 0-1
-- `timeHorizon`: 时间维度（ultra_short=1-3天, short=5天, mid=28天, long=90+天）
-- `expectedHoldingDays`: 预期持有天数（交易日）
-- `summary`: 交易方案概述，包含方向、仓位、时间维度、核心逻辑
-- `key_points`: 具体执行要点列表
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
+
+**关键规则**：
+
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）
 
 ## 少样本（good）
 
@@ -109,10 +80,8 @@ color: orange
 }
 ```
 
-## 自检（输出前必过）
+## 自检
 
-- ① `stance` 是否明确（买入/卖出/观望三者之一）？
-- ② `positionPct` 是否在 0-100 之间？
-- ③ `summary` 是否包含方向、仓位、核心逻辑？
-- ④ `key_points` 是否覆盖入场价、止损、目标价、T+1风险、执行策略？
-- ⑤ 是否避免了"绝对目标价"预测（只给相对百分比或区间）？
+- [ ] 报告正文是否完整覆盖了所有关键论据？
+- [ ] VERDICT标签是否在输出的最后一行？
+- [ ] VERDICT内JSON是否合法？

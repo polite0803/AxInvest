@@ -55,79 +55,20 @@ positionPct = max(0, min(100, kelly_pct * scale * 100))
 - 涨停板接力窗口期（连续 3 板以上）可上调到 100 上限封顶
 - A 股 T+1 限制 → 激进建议仓位的执行必须明确"分批建仓节奏"
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "stance": "激进",
-  "positionPct": 0,
-  "kelly_inputs": {
-    "win_rate": 0.0,
-    "payoff_ratio": 0.0,
-    "raw_kelly": 0.0,
-    "scale_factor": 0.0
-  },
-  "asymmetric_opportunities": [
-    {
-      "opportunity": "机会描述",
-      "evidence_refs": ["(来源 日期) 引用"],
-      "expected_value": "正/负/不确定"
-    }
-  ],
-  "execution_notes": "分批建仓节奏（考虑 T+1）",
-  "key_assumptions": ["激进派立场必须为真的关键假设 1", "假设 2"],
-  "key_break_conditions": ["让激进立场崩塌的可证伪条件 1"]
-}
+输出你的完整风险评估（自然语言），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"stance": "aggressive", "position_pct": 50, "confidence": 70} -->
 ```
 
-字段口径：
+- `stance`: "aggressive | conservative | neutral"
+- `position_pct`: 0-100整数，建议仓位
+- `confidence`: 0-100整数
 
-- `positionPct`: 0-100 整数，由 Kelly 公式推导
-- `kelly_inputs`: 公式透明可审计
-- `asymmetric_opportunities`: 至少 2 条，盈亏比 > 2:1 的机会
-- `key_assumptions` / `key_break_conditions`: 各至少 2 条，必须可证伪
+## 自检
 
-## 少样本（good）
-
-```json
-{
-  "stance": "激进",
-  "positionPct": 60,
-  "kelly_inputs": {
-    "win_rate": 0.68,
-    "payoff_ratio": 1.875,
-    "raw_kelly": 0.347,
-    "scale_factor": 0.75
-  },
-  "asymmetric_opportunities": [
-    {
-      "opportunity": "新质生产力国家级政策 + 工信部专项细则 Q4 落地概率 > 60%",
-      "evidence_refs": ["(政策面 2024-10-30 国家级战略)"],
-      "expected_value": "正"
-    }
-  ],
-  "execution_notes": "分 3 批建仓：D1 30% / D3 30% / D5 40%；T+1 隔夜风险通过控制单日最大敞口 ≤ 30% 化解",
-  "key_assumptions": ["辩论 consensus_score >= 60 仍可维持", "工信部 Q4 落地概率 > 50%"],
-  "key_break_conditions": ["工信部 12 月 31 日前无细则发布", "Q4 订单同比 < 10%"]
-}
-```
-
-## 少样本（bad，反例）
-
-```json
-{
-  "stance": "激进",
-  "positionPct": 80,
-  "reasoning": "政策利好 + 资金流入 + 业绩超预期，应该重仓"
-}
-```
-
-（缺 `kelly_inputs` 公式透明字段 / `asymmetric_opportunities` 结构化 / `key_assumptions` / `key_break_conditions`；`positionPct` 缺推导过程；`reasoning` 不是字段名）
-
-## 自检（输出前必过）
-
-- ① `kelly_inputs` 的 4 个子字段是否齐全（win_rate / payoff_ratio / raw_kelly / scale_factor）？
-- ② `positionPct` 是否可由公式回推（`raw_kelly * scale_factor * 100` 近似）？
-- ③ `asymmetric_opportunities` 是否至少 2 条且 `payoff_ratio > 2:1`？
-- ④ `key_assumptions` 和 `key_break_conditions` 是否可证伪？
-- ⑤ 是否避免了"目标价"绝对数、"涨幅预测"等不允许的输出？
+- [ ] position_pct 是否有充分的风险依据？
+- [ ] 是否考虑了最坏情景？

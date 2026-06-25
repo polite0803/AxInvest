@@ -50,83 +50,20 @@ title: 多方质询 (R2)
 
 降级模式的存在意义：避免辩论链因单点失败而输出"暂无数据"，**始终给 portfolio-mgr 一个可用的多空交锋信号**。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "cross_examination": [
-    {
-      "target_claim_ref": "空方 R1 core_arguments 索引（描述性）",
-      "weakness_type": "证据弱 | 逻辑跳跃 | 概率高估 | 时效性失效 | 反驳预防空话 | 数据可信度",
-      "questions": [
-        "可证伪的具体问题 1（不是开放反问）",
-        "可证伪的具体问题 2"
-      ],
-      "if_unanswered_impact": "如果空方无法回答，对我方立场的边际改善是什么"
-    }
-  ],
-  "summary_for_convergence": "交给 debate-convergence 节点的 1-2 句总结"
-}
+输出你的完整辩论观点（自然语言，可包含表格/引用/推理），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"stance": "bullish", "strength_score": 65, "confidence": 70} -->
 ```
 
-字段口径：
+- `stance`: "bullish | bearish"
+- `strength_score`: 0-100整数
+- `confidence`: 0-100整数
 
-- `cross_examination`: 恰好 3 条
-- `weakness_type`: 5 选 1 枚举
-- `questions`: 每条 1-2 个问题；问题必须以"如果 X 发生则你的论点 Y 是否成立"的可证伪形式
-- `summary_for_convergence`: 给收敛节点的简短总结
+## 自检
 
-## 少样本（good）
-
-```json
-{
-  "cross_examination": [
-    {
-      "target_claim_ref": "空方核心论点 1：未来 60 日解禁占总股本 12%",
-      "weakness_type": "证据弱",
-      "questions": [
-        "PE 机构解禁后 6 个月内的实际减持比例是多少？是否使用了 2020 年以来的全市场样本？样本量是否 > 100 起？",
-        "你引用的'60% 减持率'是否区分了不同市场环境（牛/熊/震荡）？当前是否处于你引用的历史样本的市场环境？"
-      ],
-      "if_unanswered_impact": "如果无法区分市场环境，我方对'解禁必然导致下跌'的论据可打折为'风险信号但非必然'"
-    },
-    {
-      "target_claim_ref": "空方核心论点 2：控股股东质押率 58% 距平仓线 -8%",
-      "weakness_type": "时效性失效",
-      "questions": [
-        "质押公告日是 2024-09，距今约 30 个交易日，期间股价是否已上涨使平仓线距离改善？",
-        "控股股东是否有补充质押或提前还款的能力？纾困基金/股东借款的可见性如何？"
-      ],
-      "if_unanswered_impact": "如果实际距离当前价 > 5% 且股东有补充能力，则平仓风险从'高'降为'中'"
-    },
-    {
-      "target_claim_ref": "空方核心论点 3：政策细则延后会证伪多头",
-      "weakness_type": "概率高估",
-      "questions": [
-        "工信部专项政策从规划到细则的历史平均时滞是多少？你估计的'12 月 31 日前'是基于什么分布？",
-        "若 Q4 订单不达预期但 2025 H1 细则落地，空头论据是否仍然有效？"
-      ],
-      "if_unanswered_impact": "如果时滞可能延后 1-2 个季度，则空方'Q4 即兑现'的时间假设过强"
-    }
-  ],
-  "summary_for_convergence": "空方 R1 在解禁减持率、质押时效、政策时滞三处证据较弱或可被反驳；若空方回答不充分，我方多维度共振（政策+资金+基本面）的权重应放大"
-}
-```
-
-## 少样本（bad，反例）
-
-```json
-{
-  "questions": ["你为什么看空？", "你的证据可靠吗？"],
-  "verdict": "空方论据不充分"
-}
-```
-
-（缺 `target_claim_ref` 锚定具体论点 / `weakness_type` 分类 / `if_unanswered_impact` 边际影响；问题是开放反问不是可证伪；3 条结构缺失；`verdict` 是判决不是质询）
-
-## 自检（输出前必过）
-
-- ① 是否恰好 3 条 `cross_examination`，每条都锚定空方 R1 的具体论点？
-- ② 每个 `questions` 是否都是"如果 X 不成立则你的论点 Y 崩塌"的可证伪形式（不是"你怎么看"这种开放反问）？
-- ③ 是否避免了"目标价、涨幅预测"等不允许的输出？
-- ④ `summary_for_convergence` 是否给收敛节点留下了可量化的"如果 X 回答不充分则我方立场 Y 加强"的指引？
+- [ ] 观点是否有足够的数据支撑？
+- [ ] stance 与 strength_score 是否一致？

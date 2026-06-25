@@ -50,83 +50,20 @@ title: 空方质询 (R2)
 
 降级模式的存在意义：避免辩论链因单点失败而输出"暂无数据"，**始终给 portfolio-mgr 一个可用的多空交锋信号**。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "cross_examination": [
-    {
-      "target_claim_ref": "多方 R1 core_arguments 索引（描述性）",
-      "weakness_type": "证据弱 | 逻辑跳跃 | 概率高估 | 时效性失效 | 反驳预防空话 | 数据可信度",
-      "questions": [
-        "可证伪的具体问题 1",
-        "可证伪的具体问题 2"
-      ],
-      "if_unanswered_impact": "如果多方无法回答，对我方立场的边际改善是什么"
-    }
-  ],
-  "summary_for_convergence": "交给 debate-convergence 节点的 1-2 句总结"
-}
+输出你的完整辩论观点（自然语言，可包含表格/引用/推理），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"stance": "bullish", "strength_score": 65, "confidence": 70} -->
 ```
 
-字段口径：
+- `stance`: "bullish | bearish"
+- `strength_score`: 0-100整数
+- `confidence`: 0-100整数
 
-- `cross_examination`: 恰好 3 条
-- `weakness_type`: 5 选 1 枚举
-- `questions`: 每条 1-2 个问题；可证伪
-- `summary_for_convergence`: 给收敛节点的简短总结
+## 自检
 
-## 少样本（good）
-
-```json
-{
-  "cross_examination": [
-    {
-      "target_claim_ref": "多方核心论点 1：政策+资金+基本面三维度共振",
-      "weakness_type": "逻辑跳跃",
-      "questions": [
-        "三维度'同向'的定义是什么？是同向出现还是同向放大？如果 Q4 业绩低于预期，政策利好能否独立支撑股价？",
-        "历史上有几次'政策+资金+基本面'三维度同时看多后 6 个月内跑输的案例？样本量是多少？"
-      ],
-      "if_unanswered_impact": "如果三维度不是独立证据而是'政策→资金→基本面'的传导链，则任一环节断裂都会让共振瓦解"
-    },
-    {
-      "target_claim_ref": "多方核心论点 2：Q3 业绩超预期 12%",
-      "weakness_type": "证据弱",
-      "questions": [
-        "超预期 12% 是相对'一致预期'还是相对'实际公布值'？一致预期在公告前 7 日是否已上调？",
-        "应收账款增速 95% 远超营收增速 58%，是否已在上游 news/fundamentals 报告的 regulatory_risk 中标注？"
-      ],
-      "if_unanswered_impact": "如果超预期是低基数效应且应收风险已识别，则'业绩超预期'论据需打 7 折"
-    },
-    {
-      "target_claim_ref": "多方反驳预防：政策落地节奏比 2022 年半导体大基金更具体",
-      "weakness_type": "反驳预防空话",
-      "questions": [
-        "你引用的 2022 年半导体大基金类比的样本量是 1 次，基于单次类比的'更具体'结论有多强的统计意义？",
-        "若 Q4 订单不达预期，多方建议的'减仓到多少 %'是量化还是定性？"
-      ],
-      "if_unanswered_impact": "如果反驳预防只是定性描述，则空方'政策延后'的下行情景需要被赋予更高权重"
-    }
-  ],
-  "summary_for_convergence": "多方 R1 在共振传导链是否独立、Q3 业绩超预期是否低基数、反驳预防是否量化三处证据较弱；若多方回答不充分，我方筹码面风险（解禁+质押）的权重应放大"
-}
-```
-
-## 少样本（bad，反例）
-
-```json
-{
-  "questions": ["你为什么看多？", "政策真的会兑现吗？"],
-  "verdict": "多方论据不充分"
-}
-```
-
-（缺 `target_claim_ref` 锚定 / `weakness_type` 分类 / `if_unanswered_impact`；问题是开放反问；3 条结构缺失；`verdict` 是判决不是质询）
-
-## 自检（输出前必过）
-
-- ① 是否恰好 3 条 `cross_examination`，每条都锚定多方 R1 的具体论点？
-- ② 每个 `questions` 是否都是"如果 X 不成立则你的论点 Y 崩塌"的可证伪形式？
-- ③ 是否避免了"目标价、跌幅预测"等不允许的输出？
-- ④ `summary_for_convergence` 是否给收敛节点留下了可量化的指引？
+- [ ] 观点是否有足够的数据支撑？
+- [ ] stance 与 strength_score 是否一致？

@@ -55,36 +55,21 @@ category: analyst
 
 ## 输出格式
 
-请以 JSON 格式输出质量评估：
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
 
-```json
-{
-  "expert": "data-quality-inspector",
-  "type": "数据质量评估",
-  "grade": "A | B | C | D | F",
-  "score": 0-100,  // 用于 portfolio-manager 的 dqi_data_quality 字段，不要缩放、不要分段，直接输出原始分数
-  "summary": "一句话总评（≤ 50 字）",
-  "coverage": {
-    "total_analysts": 9,
-    "complete_reports": 9,
-    "placeholder_reports": 0,
-    "failed_reports": 0
-  },
-  "tool_credibility": {
-    "t_scoring": { "freshness": "today", "completeness": 100, "warnings": [] },
-    "t_valuation": { "freshness": "recent_quarter", "completeness": 100, "warnings": [] },
-    "t_risk": { "freshness": "realtime", "completeness": 100, "warnings": [] },
-    "tool_score": 90
-  },
-  "warnings": [
-    "具体警告 1（如：a-fundamentals 报告字数 < 200）",
-    "具体警告 2（如：t-scoring BIAS指标异常：MA数据不足）"
-  ],
-  "data_gaps": [
-    "信息缺失项 1",
-    "信息缺失项 2"
-  ],
-  "consistency_check": "通过 | 警告 | 失败",
-  "consistency_notes": "若存在矛盾，简要说明"
-}
 ```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
+```
+
+VERDICT标签字段说明：
+
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
+
+**关键规则**：
+
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）

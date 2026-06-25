@@ -41,88 +41,39 @@ data_sources: [get_stock_news, get_stock_dragon_tiger, get_stock_concept_blocks,
 4. 判断情绪持续性：是脉冲式还是趋势式。
 5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
-## 输出 JSON Schema
+## 输出格式
 
-```json
-{
-  "sentiment_type": "event_driven | trend_following | mixed",
-  "sentiment_heat": "冷清 | 正常 | 高涨 | 过热",
-  "consensus_level": "极端看多 | 偏多 | 中性 | 偏空 | 极端看空",
-  "bull_score": 0,
-  "bear_score": 0,
-  "heat_change_pct": 0.0,
-  "is_extreme": false,
-  "trigger_bull": "舆情情绪对多头的具体触发条件",
-  "trigger_bear": "舆情情绪对空头的具体触发条件",
-  "evidence": [
-    { "point": "舆情观察", "data": "(来源 日期 数值)", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"],
-  "prediction": {
-    "timeframe": "short_term | mid_term | long_term",
-    "direction": "bullish | bearish | neutral",
-    "confidence": 0.0-1.0,
-    "key_drivers": [],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "", "trigger": "" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "", "trigger": "" },
-      { "scenario": "bear", "probability": 0.2, "outcome": "", "trigger": "" }
-    ]
-  }
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "偏多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `bull_score` / `bear_score`: 0-100 整数，分开打分
-- `heat_change_pct`: 舆情热度较 5 日均值的变化百分比（可为负数）
-- `is_extreme`: 布尔值，标记是否处于极端情绪状态
-- `confidence`: 0-100 整数
-- `if_data_gaps`: 布尔值
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
 
-## 少样本（good）
+## 参考示例
 
 ```json
 {
-  "sentiment_type": "event_driven",
-  "sentiment_heat": "高涨",
-  "consensus_level": "偏多",
-  "bull_score": 65,
-  "bear_score": 35,
-  "heat_change_pct": 180.0,
-  "is_extreme": false,
-  "trigger_bull": "正面业绩预告引发论坛讨论量暴增，短期看多情绪有望持续 2-3 个交易日",
-  "trigger_bear": "若后续 2 日无实质利好跟进，情绪可能快速降温",
-  "evidence": [
-    { "point": "昨日业绩预告后论坛讨论量较 5 日均值增长 180%", "data": "(东方财富 2026-06-20 180%)", "weight": 8 },
-    { "point": "雪球看多比例 65%，尚未达到极端阈值", "data": "(雪球 2026-06-20 65%)", "weight": 6 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 75,
-  "data_gaps": [],
-  "prediction": {
-    "timeframe": "short_term",
-    "direction": "bullish",
-    "confidence": 0.65,
-    "key_drivers": ["业绩预告后续解读", "板块联动效应"],
-    "scenarios": [
-      {
-        "scenario": "base",
-        "probability": 0.5,
-        "outcome": "情绪温和消退，股价小幅上涨后震荡",
-        "trigger": "无新增催化"
-      },
-      {
-        "scenario": "bull",
-        "probability": 0.3,
-        "outcome": "情绪扩散带动板块跟涨，股价脉冲式上冲",
-        "trigger": "同板块个股跟涨"
-      },
-      { "scenario": "bear", "probability": 0.2, "outcome": "情绪快速消退，股价回补缺口", "trigger": "大盘走弱拖累" }
-    ]
-  }
+  "report": "## 趋势分析
+近20日价格区间收敛至28.5-32.0。均线系统：5日/10日/20日三条均线纠缠，无明确方向。
+
+## 量价分析
+近5日成交量较20日均量缩35%，缩量震荡表示多空双方均不积极。
+
+## 行业对比
+个股相对行业排名中等偏上，无明显板块效应。
+
+## 结论
+当前处于震荡格局，无明确突破信号，建议观望。",
+  "verdict": "中性",
+  "bull_score": 40,
+  "bear_score": 50,
+  "confidence": 70
 }
 ```

@@ -62,24 +62,21 @@ category: analyst
 
 ## 输出格式
 
-**必须直接输出纯 JSON（不要包裹在代码块中），如下：**
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
 
-{
-"expert": "value-investor",
-"type": "价值投资分析",
-"business_model": "一句话描述商业模式",
-"moat_rating": "宽护城河 | 窄护城河 | 无护城河",
-"moat_reasoning": "护城河判断理由",
-"financial_health": "ROE/负债率/现金流综合评价",
-"intrinsic_value_range": "内在价值估算区间",
-"margin_of_safety": "安全边际判断",
-"buffett_verdict": "会不会买？如果不会，等什么条件？",
-"ideal_buy_price": "巴菲特愿意支付的价格",
-"risk_flags": ["风险点1", "风险点2"]
-}
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
+```
 
-**重要**：
+VERDICT标签字段说明：
 
-- 输出必须是合法的 JSON，可以被 JSON.parse() 解析
-- 不要添加 `json` 代码块包裹
-- 不要添加任何解释文字，直接输出 JSON
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
+
+**关键规则**：
+
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）

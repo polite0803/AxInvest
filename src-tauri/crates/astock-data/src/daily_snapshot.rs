@@ -26,13 +26,15 @@ pub const SNAPSHOT_METHODS: &[&str] = &[
     "get_hot_stocks",
     "get_industry_ranking",
     "get_cls_flash",
-    "get_concept_blocks",
+    "get_stock_concept_blocks",  // 工具名，LLM 调用时用；vendor asof_capability 用 get_concept_blocks
     "search_stock",
     "get_sector_info",
     "get_money_flow",
     "get_north_bound_holding",
     "get_margin_data",
     "get_index_quotes",
+    "get_stock_announcements",
+    // get_market_dragon_tiger / get_board_fund_flow 等全市场快照可后续补充
 ];
 
 /// 需要遍历个股的 per-stock 快照方法（相对于全市场方法）

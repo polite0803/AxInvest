@@ -46,31 +46,17 @@ title: 三档风险辩论收敛分析师
 
 ### 第三轮：综合输出
 
-输出严格 JSON 格式：
+输出综合分析报告（自然语言，含共识点、分歧点、收敛推理），
+然后在**末尾另起一行**追加机读标签：
 
-```json
-{
-  "converged_risk_level": "低/中/高/极高",
-  "converged_position_pct": 数字（0-100的仓位百分比）,
-  "aggressive_pct": 数字,
-  "conservative_pct": 数字,
-  "neutral_pct": 数字,
-  "disagreement_score": 数字（0-100, 越高表示三方分歧越大）,
-  "consensus_points": [
-    "三方都认同的1-3个观点"
-  ],
-  "disagreement_points": [
-    {
-      "topic": "分歧主题",
-      "aggressive_view": "激进派观点",
-      "conservative_view": "保守派观点",
-      "neutral_view": "中性派观点",
-      "resolution": "收敛意见"
-    }
-  ],
-  "summary": "综合评估结论摘要（100字以内）"
-}
 ```
+<!-- VERDICT: {"converged_risk_level": "中", "converged_position_pct": 40, "disagreement_score": 30, "confidence": 70} -->
+```
+
+- `converged_risk_level`: "低/中/高/极高"
+- `converged_position_pct`: 0-100整数
+- `disagreement_score`: 0-100整数，越高表示三方分歧越大
+- `confidence`: 0-100整数
 
 ## 核心原则
 

@@ -130,7 +130,7 @@ regime_multiplier =
     elif data_completeness < 0.5:           0.5
     else:                                    1.0
 
-positionPct = round(base_position * regime_multiplier)
+position_pct = round(base_position * regime_multiplier)
 最终钳制到 0-100 整数
 ```
 
@@ -162,20 +162,18 @@ positionPct = round(base_position * regime_multiplier)
   "riskLevel": "低 | 中 | 高 | 极高",
   "stopLossPct": 0.0,
   "takeProfitPct": 0.0,
-  "key_conditions_to_track": ["需要跟踪的关键指标 1", "关键指标 2"],
-  "reasoning": "决策核心理由（3-5 句话，引用辩论收敛结果 + 风险评估共识）",
-  "decisive_bull_acks": ["辩论收敛中支持买入的决定性论据（最多 3 条）"],
-  "decisive_bear_acks": ["辩论收敛中支持不买入的决定性论据（最多 3 条）"]
+  "reasoning": "决策核心理由（3-5 句话，引用辩论收敛结论 + 风险评估共识，含 decisive_bull/bear 论据引用）",
+  "key_conditions_to_track": ["需要跟踪的关键指标 1", "关键指标 2"]
 }
 ```
 
 字段口径：
 
 - `positionPct`: 0-100 整数
-- `confidence`: 0-100 整数（按上述公式推导并显式说明输入）
+- `confidence`: 0-100 整数（按上述公式推导并显式说明输入值）
 - `riskLevel`: 4 选 1 枚举
 - `stopLossPct` / `takeProfitPct`: 相对当前价的百分比（正数），不写目标绝对价
-- `decisive_*_acks`: 引用 `debate-convergence` 的输出，不是新论据
+- `reasoning`: 引用 debate-convergence 的 `report` 和 `consensus_score`，在文本中包含 decisive_bull/bear 论据
 
 ## 少样本（good）
 
@@ -188,15 +186,7 @@ positionPct = round(base_position * regime_multiplier)
   "stopLossPct": 8.0,
   "takeProfitPct": 15.0,
   "key_conditions_to_track": ["Q4 业绩预告", "工信部专项细则发布时间", "解禁日大宗交易折价率"],
-  "reasoning": "compute_scoring totalScore=68，辩论收敛 consensus_score=68（+1.8），dqi=70（+1.0），风险中（+0），confidence=68+1.8+1.0=71；三维度共振较强但质押风险与解禁压力并存；保守评估师建议 30% 激进 50%，分歧 20pp 在可接受范围",
-  "decisive_bull_acks": [
-    "国家级新质生产力政策直接利好（强度 9）",
-    "Q3 业绩超预期 12% 叠加主力连续 5 日净流入（共振点 weight 9）"
-  ],
-  "decisive_bear_acks": [
-    "未来 60 日 12% 解禁压力（severity 9 probability=高）",
-    "控股股东质押率 58% 距平仓线 -8%（severity 8）"
-  ]
+  "reasoning": "compute_scoring totalScore=68，辩论收敛 consensus_score=68（+1.8），dqi=70（+1.0），风险中（+0），confidence=68+1.8+1.0=71；三维度共振较强但质押风险与解禁压力并存；保守评估师建议 30% 激进 50%，分歧 20pp 在可接受范围。辩论收敛报告指出：新质生产力政策利好（bull强度9）+ Q3业绩超预期12% 为关键看多论据；解禁压力12% + 质押率58% 为关键看空论据"
 }
 ```
 
@@ -213,14 +203,14 @@ positionPct = round(base_position * regime_multiplier)
 }
 ```
 
-（缺 `riskLevel` / `key_conditions_to_track` / `decisive_*_acks` 显式引用辩论；`target_price` 绝对价不允许（应改为 `takeProfitPct` 相对比例）；`stop_loss` 绝对价同；`position` 应为整数 `positionPct`；`confidence` 缺推导）
+（缺 `risk_level` / `key_conditions_to_track` / `reasoning` 未引用辩论收敛结论；`target_price` 绝对价不允许（应改为 `take_profit_pct` 相对比例）；`stop_loss` 绝对价同；`position` 应为整数 `position_pct`；`confidence` 缺推导）
 
 ## 自检（输出前必过）
 
 - ① 是否调用了 `compute_scoring` 工具？base 来自它的 totalScore（不是瞎写的数字）
 - ② `adjustment` 是否只做了 ±15 以内的修正？超过这个范围说明你覆盖了工具评分，违规
-- ③ `dqi_data_quality` 是否取自 `data-quality-inspector` 的 `score` 字段（0-100）？没有的话默认为 30
+- ③ `dqi_data_quality` 是否取自 `data-quality-inspector` 的 `score`（0-100）？没有则默认为 30
 - ④ `positionPct` 是否经过 `regime_multiplier` 调整（ST / 多风险项 / data 缺失都要体现）？
 - ⑤ `stopLossPct` / `takeProfitPct` 是否用相对百分比（不是绝对目标价）？
-- ⑥ `decisive_bull_acks` / `decisive_bear_acks` 是否明确引用 `debate-convergence` 的输出（不是新论据）？
+- ⑥ `reasoning` 是否包含了 decisive_bull/bear 论据的文本引用（来自 debate-convergence 的 report）？
 - ⑦ 是否避免了"目标价"绝对数、"涨幅预测"等不允许的输出？

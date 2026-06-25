@@ -39,103 +39,68 @@ data_sources: [get_stock_research_reports]
 4. 识别核心研报观点分歧（多空研报的关键分歧点）。
 5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "coverage_density": "密集 | 中等 | 稀疏",
-  "eps_revision_trend": "持续上调 | 稳定 | 持续下调",
-  "rating_distribution": "买入主导 | 增持主导 | 中性偏多 | 观点分化 | 中性偏空",
-  "report_quality_signal": "深度研报主导 | 快评主导 | 吹票嫌疑",
-  "bull_score": 0,
-  "bear_score": 0,
-  "trigger_bull": "研报面利好的具体兑现条件（可证伪）",
-  "trigger_bear": "研报面利空的具体兑现条件（可证伪）",
-  "evidence": [
-    { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"],
-  "prediction": {
-    "timeframe": "short_term | mid_term | long_term",
-    "direction": "bullish | bearish | neutral",
-    "confidence": 0.0-1.0,
-    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
-      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
-    ]
-  },
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `coverage_density`: 近 3 个月研报数量
-- `eps_revision_trend`: 方向性趋势（不是绝对值）
-- `rating_distribution`: 主导评级 + 分歧度
-- `report_quality_signal`: 警惕"吹票"研报
-- `trigger_*`: 必须是可证伪的条件
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
 
-## 少样本（good）
+**关键规则**：
 
-```json
-{
-  "coverage_density": "密集",
-  "eps_revision_trend": "持续上调",
-  "rating_distribution": "买入主导",
-  "report_quality_signal": "深度研报主导",
-  "bull_score": 70,
-  "bear_score": 20,
-  "trigger_bull": "Q3 业绩公布后 EPS 一致预期再次上调 > 5%",
-  "trigger_bear": "Q3 业绩低于一致预期 10% 触发下调潮",
-  "confidence": 72,
-  "if_data_gaps": false,
-  "evidence": [
-    {
-      "point": "近 3 月 12 家券商覆盖 一致预期 EPS 从 0.85 上调至 0.92",
-      "data": "[一致预期 2024-08~10 EPS 0.85→0.92 12家]",
-      "weight": 7
-    },
-    { "point": "评级分布 70% 买入 25% 增持 5% 中性", "data": "[评级分布 2024-10-30]", "weight": 5 }
-  ],
-  "data_gaps": ["目标价中位数变化趋势未提供"],
-  "prediction": {
-    "timeframe": "mid_term",
-    "direction": "bullish",
-    "confidence": 0.72,
-    "key_drivers": ["EPS 持续上调趋势", "深度研报覆盖增加"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "基准情景", "trigger": "大概率事件" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景", "trigger": "利好触发" },
-      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景", "trigger": "利空触发" }
-    ]
-  }
-}
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）
+
+## 参考示例
+
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
+
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
-## 少样本（bad，反例）
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
 
-```json
-{
-  "consensus": "买入",
-  "score": 8,
-  "verdict": "机构看好"
-}
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
+## 量价分析
+
+近5日成交量较20日均量缩35%，缩量震荡表示多空双方均不积极。
+
+## 行业对比
+
+个股相对行业排名中等偏上，无明显板块效应。
+
+## 结论
+
+当前处于震荡格局，无明确突破信号，建议观望。",
+"verdict": "中性",
+"bull_score": 40,
+"bear_score": 50,
+"confidence": 70
+}
+
+```
 （缺 `coverage_density` / `eps_revision_trend` 方向 / `rating_distribution` / `report_quality_signal` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没看 EPS 趋势，只看单点评级）
 
-## 自检（输出前必过）
+## 自检
 
-- ① `bull_score` 与 `bear_score` 是否分开打分？
-- ② `eps_revision_trend` 是否反映了方向性趋势（不是单点 EPS 绝对值）？
-- ③ `report_quality_signal` 是否正确识别了"吹票"嫌疑？
-- ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？
-- ⑥ prediction.scenarios 的三个 probability 是否加起来约为 1.0（允许 ±0.05 误差）？
-- ⑦ prediction.confidence 是否与上方 analysis.confidence 大致一致（差值不应超过 15%）？
-- ⑧ 如果 analysis 中 if_data_gaps=true，prediction.confidence 是否已降至 0.6 以下？
-- ⑨ prediction.key_drivers 中的每条因素是否能对应到上方 evidence 中的具体条目？
+- [ ] `bull_score` 与 `bear_score` 是否分开打分（0-100整数）？
+- [ ] `confidence` 是否如实反映数据完整度？
+- [ ] `report` 中是否包含了关键数据引用和推理过程？
+```

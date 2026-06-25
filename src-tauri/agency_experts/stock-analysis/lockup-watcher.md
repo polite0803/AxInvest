@@ -39,80 +39,68 @@ data_sources: [get_stock_lockup_bundle]
 4. 评估质押风险敞口（平仓线距当前价距离、纾困可能性）。
 5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "unlock_pressure": "极大 | 大 | 中 | 小 | 极小",
-  "shareholder_behavior": "增持 | 减持 | 质押增加 | 质押解除 | 静默",
-  "pledge_risk": "高 | 中 | 低",
-  "concentration_trend": "集中 | 分散 | 稳定",
-  "bull_score": 0,
-  "bear_score": 0,
-  "trigger_bull": "筹码面利空化解的具体条件（可证伪）",
-  "trigger_bear": "筹码面利空兑现的具体条件（可证伪）",
-  "evidence": [
-    { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"]
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `unlock_pressure`: 综合规模 + 概率 + 减持新规，不是单纯看解禁市值
-- `shareholder_behavior`: 当前最显著的行为类型
-- `pledge_risk`: 质押比例 > 50% 通常为"高"
-- `trigger_*`: 必须是可证伪的条件
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
 
-## 少样本（good）
+**关键规则**：
 
-```json
-{
-  "unlock_pressure": "大",
-  "shareholder_behavior": "质押增加",
-  "pledge_risk": "高",
-  "concentration_trend": "分散",
-  "bull_score": 20,
-  "bear_score": 70,
-  "trigger_bull": "大股东在解禁前发布增持公告且质押率降至 30% 以下",
-  "trigger_bear": "解禁后 30 日内大宗交易折价 > 8% 且股东人数单季 +15%",
-  "confidence": 75,
-  "if_data_gaps": true,
-  "evidence": [
-    {
-      "point": "未来 60 日解禁占总股本 12% 解禁股东为原始 PE 机构",
-      "data": "[解禁清单 2024-12-15 12% PE机构]",
-      "weight": 8
-    },
-    {
-      "point": "控股股东质押率 58% 平仓线距当前价 -8%",
-      "data": "[质押公告 2024-09 质押率 58% 平仓线距当前价 -8%]",
-      "weight": 7
-    }
-  ],
-  "data_gaps": ["股东人数近 1 年变化趋势未提供"]
-}
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）
+
+## 参考示例
+
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
+
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
-## 少样本（bad，反例）
+```
+近20日价格区间收敛至28.5-32.0，均线系统纠缠。成交量较20日均量缩35%。
 
-```json
-{
-  "unlock": "有解禁压力",
-  "score": 3,
-  "verdict": "短期承压"
-}
+**结论**：当前处于震荡格局，无明确突破信号，建议观望。
+
+<!-- VERDICT: {"verdict": "中性", "bull_score": 40, "bear_score": 50, "confidence": 70} -->
 ```
 
+## 量价分析
+
+近5日成交量较20日均量缩35%，缩量震荡表示多空双方均不积极。
+
+## 行业对比
+
+个股相对行业排名中等偏上，无明显板块效应。
+
+## 结论
+
+当前处于震荡格局，无明确突破信号，建议观望。",
+"verdict": "中性",
+"bull_score": 40,
+"bear_score": 50,
+"confidence": 70
+}
+
+```
 （缺 `unlock_pressure` 量化 / `shareholder_behavior` / `pledge_risk` / `concentration_trend` / `trigger_*` / `evidence`；`score` 字段名错；多空没分开；没说清是主动减持还是被动质押）
 
-## 自检（输出前必过）
+## 自检
 
-- ① `bull_score` 与 `bear_score` 是否分开打分？
-- ② `shareholder_behavior` 是否区分了主动 vs 被动（减持 vs 质押增加）？
-- ③ `pledge_risk` 是否考虑了质押率 + 平仓线距离？
-- ④ `evidence[*].data` 是否每条都带 `[来源 日期 数值]` 格式？是否避免了笼统"有解禁压力"等定性描述？
+- [ ] `bull_score` 与 `bear_score` 是否分开打分（0-100整数）？
+- [ ] `confidence` 是否如实反映数据完整度？
+- [ ] `report` 中是否包含了关键数据引用和推理过程？
+```

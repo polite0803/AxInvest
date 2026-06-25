@@ -128,12 +128,25 @@ async fn data_quality_precheck(
         Err(e) => SourceCheck::Partial(format!("资金流获取失败: {e}")),
     };
 
+    // P2: 补充数据源检查 — 覆盖 catalyst-analyst / sector-analyst 的依赖
+    let announcements_check = match client.get_announcements(stock_code).await {
+        Ok(anns) if !anns.is_empty() => SourceCheck::Ok,
+        Ok(_) => SourceCheck::Partial("无公告数据".into()),
+        Err(e) => SourceCheck::Partial(format!("公告获取失败: {e}")),
+    };
+    let concept_check = match client.get_concept_blocks(stock_code).await {
+        Ok(Some(blocks)) if !blocks.concepts.is_empty() => SourceCheck::Ok,
+        _ => SourceCheck::Partial("无概念板块数据".into()),
+    };
+
     aggregate_precheck(vec![
         ("quote", quote_check),
         ("financials", fin_check),
         ("klines", kline_check),
         ("news", news_check),
         ("money_flow", money_flow_check),
+        ("announcements", announcements_check),  // catalyst-analyst
+        ("concept_blocks", concept_check),       // catalyst / sector
     ])
 }
 

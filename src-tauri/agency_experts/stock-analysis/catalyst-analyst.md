@@ -42,52 +42,26 @@ data_sources: [get_stock_news, get_stock_announcements, get_stock_sector_info, g
    - `bull_score` = 催化剂+叙事对多方情绪的强化程度
    - `bear_score` = 催化剂证伪/叙事崩塌/概念回调的风险程度
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "catalyst_level": "L3估值体系级 | L2业绩拐点级 | L1普通消息 | 无催化剂",
-  "catalyst_detail": "催化剂的具体描述",
-  "narrative_completeness": "完整 | 较完整 | 部分 | 薄弱 | 无叙事",
-  "narrative_missing": ["叙事中缺失的关键要素"],
-  "institutional_trace": "有建仓痕迹 | 疑似建仓 | 无异常 | 资金出逃",
-  "valuation_rerating_potential": "高 | 中 | 低 | 不适用",
-  "valuation_rerating_logic": "估值重估的具体逻辑链条",
-  "is_concept_driven": true,
-  "concept_risk": "高（基本面尚未验证） | 中（部分验证中） | 低（已有业绩支撑）",
-  "bull_score": 0,
-  "bear_score": 0,
-  "trigger_bull": "催化剂兑现或叙事强化的具体条件（可证伪）",
-  "trigger_bear": "催化剂证伪或叙事退潮的具体条件（可证伪）",
-  "evidence": [
-    { "point": "观察", "data": "[来源 日期 数值]", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"],
-  "prediction": {
-    "timeframe": "short_term | mid_term | long_term",
-    "direction": "bullish | bearish | neutral",
-    "confidence": 0.0-1.0,
-    "key_drivers": ["最可能决定方向的核心因素1", "核心因素2"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "基准情景描述", "trigger": "触发条件" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "乐观情景描述", "trigger": "触发条件" },
-      { "scenario": "bear", "probability": 0.2, "outcome": "悲观情景描述", "trigger": "触发条件" }
-    ]
-  },
-}
+输出你的完整分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 65, "bear_score": 35, "confidence": 70} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `catalyst_level`: L3/L2/L1/无 四级，用于决定下游是否将其视为关键变量
-- `narrative_completeness`: 叙事5要素完整度（市场空间/解决方案/落地案例/增长路径/竞争壁垒）
-- `institutional_trace`: 基于量价数据的机构资金行为推断
-- `valuation_rerating_*`: 仅评估"估值体系是否可能切换"，不做目标价预测
-- `is_concept_driven` + `concept_risk`: 显式标记概念驱动型行情的风险
-- `trigger_*`: 必须是可证伪的条件
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
+
+**关键规则**：
+
+1. 报告正文是自由自然语言，任意格式都可以
+2. VERDICT标签必须是输出内容的**最后一行**
+3. VERDICT内部JSON必须合法（键名用双引号、无尾逗号）
 
 ## 少样本（good）——301302 华如科技 XSim 叙事
 
@@ -129,11 +103,8 @@ data_sources: [get_stock_news, get_stock_announcements, get_stock_sector_info, g
 }
 ```
 
-## 自检（输出前必过）
+## 自检
 
-- ① `catalyst_level` 是否严格按三级分类评估，没有夸大普通消息？
-- ② `narrative_completeness` 是否逐条对照 5 要素（市场空间/解决方案/落地案例/增长路径/竞争壁垒）？
-- ③ `institutional_trace` 是否基于量价数据，而非主观猜测？
-- ④ `is_concept_driven` 如果是 true，是否同时标注了 `concept_risk`？
-- ⑤ `trigger_*` 是否为可证伪条件（"如果股价涨到 X" 不是可证伪条件，"如果公司拿下 Y 合同"才是）？
-- ⑥ `valuation_rerating_*` 是否只做弹性区间分析，没有给出具体目标价？
+- [ ] `bull_score` 与 `bear_score` 是否分开打分（0-100整数）？
+- [ ] `confidence` 是否如实反映数据完整度？
+- [ ] `report` 中是否包含了关键数据引用和推理过程？

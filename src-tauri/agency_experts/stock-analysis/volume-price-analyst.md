@@ -44,93 +44,39 @@ data_sources: [get_stock_kline, get_stock_quote, get_stock_money_flow]
 4. 识别量价背离信号和放量异常信号。
 5. 输出 `bull_score / bear_score` 分量（0-100 整数）。
 
-## 输出 JSON Schema
+## 输出格式
 
-```json
-{
-  "wyckoff_phase": "accumulation | markup | distribution | markdown | 无法判定",
-  "volume_ratio_vs_20ma": 0.0,
-  "price_volume_divergence": "无背离 | 顶背离 | 底背离 | 量价齐升 | 量价齐跌",
-  "volume_position": "低位缩量 | 低位放量 | 高位缩量 | 高位放量 | 中位正常",
-  "bull_score": 0,
-  "bear_score": 0,
-  "trigger_bull": "量价关系对多头的具体触发条件",
-  "trigger_bear": "量价关系对空头的具体触发条件",
-  "evidence": [
-    { "point": "量价观察", "data": "(来源 日期 数值)", "weight": 0 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 0,
-  "data_gaps": ["信息缺失项"],
-  "prediction": {
-    "timeframe": "short_term | mid_term | long_term",
-    "direction": "bullish | bearish | neutral",
-    "confidence": 0.0-1.0,
-    "key_drivers": [],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "", "trigger": "" },
-      { "scenario": "bull", "probability": 0.3, "outcome": "", "trigger": "" },
-      { "scenario": "bear", "probability": 0.2, "outcome": "", "trigger": "" }
-    ]
-  }
-}
+输出你的完整量价分析报告（自然语言，可包含Markdown表格/清单/推理过程），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"verdict": "看多", "bull_score": 70, "bear_score": 30, "confidence": 75} -->
 ```
 
-字段口径：
+VERDICT标签字段说明：
 
-- `wyckoff_phase`: 威科夫市场阶段
-- `volume_ratio_vs_20ma`: 当日成交量 / 20 日均量
-- `price_volume_divergence`: 量价背离类型
-- `volume_position`: 量能在价格位置上的分类
-- `bull_score` / `bear_score`: 0-100 整数
-- `confidence`: 0-100 整数
-- `evidence[*].weight`: 0-10 整数
+- `verdict`: "看多 | 偏多 | 中性 | 偏空 | 看空"
+- `bull_score` / `bear_score`: 0-100整数
+- `confidence`: 0-100整数
 
-## 少样本（good）
+## 参考示例
 
 ```json
 {
-  "wyckoff_phase": "accumulation",
-  "volume_ratio_vs_20ma": 1.8,
-  "price_volume_divergence": "量价齐升",
-  "volume_position": "低位放量",
-  "bull_score": 70,
-  "bear_score": 30,
-  "trigger_bull": "低位放量上涨，威科夫吸筹特征明显，主力建仓迹象，后续看涨",
-  "trigger_bear": "若后续放量滞涨（努力无结果），则吸筹可能转为派发",
-  "evidence": [
-    { "point": "近 5 日连续放量上涨，成交量达 20 日均量的 1.8 倍", "data": "(日K线 2026-06-20 1.8x)", "weight": 8 },
-    { "point": "价格突破前期平台，但尚未远离成本区", "data": "(日K线 2026-06-20)", "weight": 7 },
-    { "point": "量价配合良好，无背离信号", "data": "(日K线 2026-06-20)", "weight": 6 }
-  ],
-  "if_data_gaps": false,
-  "confidence": 75,
-  "data_gaps": [],
-  "prediction": {
-    "timeframe": "short_term",
-    "direction": "bullish",
-    "confidence": 0.7,
-    "key_drivers": ["成交量能否维持", "价格能否站稳突破位"],
-    "scenarios": [
-      {
-        "scenario": "base",
-        "probability": 0.5,
-        "outcome": "放量上攻后缩量回调确认支撑",
-        "trigger": "量能维持 1.2x 以上"
-      },
-      {
-        "scenario": "bull",
-        "probability": 0.3,
-        "outcome": "持续放量突破，进入 markup 阶段",
-        "trigger": "量比持续 >1.5"
-      },
-      {
-        "scenario": "bear",
-        "probability": 0.2,
-        "outcome": "放量滞涨，吸筹失败转为派发",
-        "trigger": "量比 >1.5 但价格不涨"
-      }
-    ]
-  }
+  "report": "## 趋势分析
+近20日价格区间收敛至28.5-32.0。均线系统：5日/10日/20日三条均线纠缠，无明确方向。
+
+## 量价分析
+近5日成交量较20日均量缩35%，缩量震荡表示多空双方均不积极。
+
+## 行业对比
+个股相对行业排名中等偏上，无明显板块效应。
+
+## 结论
+当前处于震荡格局，无明确突破信号，建议观望。",
+  "verdict": "中性",
+  "bull_score": 40,
+  "bear_score": 50,
+  "confidence": 70
 }
 ```

@@ -33,122 +33,36 @@ purpose: 多空 3 轮辩论后的最终收敛，输出结构化 JSON 供 decisio
 
 ## 工作流程
 
-1. **逐轮读 JSON**：
-   - R1 输出含 `core_arguments`（3-5 条原始论据）、`claim`（一句话立场）、`confidence`
-   - R2 输出含 `cross_examination`（3 条质询），每条含 `target_claim_ref` / `verdict` / `response`
-   - R3 输出含 `r2_cross_examination_response`（3 条质询回应）、`final_position` / `claim` / `confidence` / `strengthened_arguments`（2-3 条最终保留论据）
-2. **建质询应对表**：把 R2 的 3 条质询 ↔ R3 的 3 条回应一一对应起来。验证 `verdict` 分布（rejected / partially_accepted / accepted）。
+1. **逐轮读各研究员输出**：
+   - 每位研究员输出含 `report`（完整辩论观点）、`stance`（bullish/bearish）、`strength_score`（0-100 立场强度）、`confidence`（0-100 数据完整度）
+   - 从 `report` 文本中提取核心论据（arguments）、质询回应、立场变化
+2. **建质询应对表**：对比 bull 和 bear 双方的 report 内容，识别哪些论点被有效反驳、哪些被接受、哪些僵持。
 3. **收敛出 3 个"决定性 bull 论据"和 3 个"决定性 bear 论据"**：
-   - **优先来源**：R3 的 `strengthened_arguments`（每方 2-3 条）
-   - **次选来源**：R1 的 `core_arguments` 中，R2 未质疑过且 R3 未隐含承认失效的论据
-   - 决定性定义：① 双方有一方在 R3 明确承认其重要性，或 ② 有一方在 R1/R2 提出后另一方在 R3 未有效反驳（R3 response.verdict=rejected 且 strengthened_arguments 仍引用）
-4. **收敛出 3 个"剩余分歧点"**：R3 双方立场对立、且 R2 质询 + R3 回应后仍无共识的点。
+   - **优先来源**：双方 R3 的 `strength_score` 最高的论点 + `report` 中强调的最终保留论据
+   - 决定性定义：① 一方在 report 中明确强调且另一方在后续轮次未有效反驳，或 ② strength_score 差距 >20 分
+4. **收敛出 3 个"剩余分歧点"**：双方立场对立、多轮辩论后仍无共识的点。
 5. **计算 `consensus_score` (0-100)**：
    - 起点 50（中性）
-   - R3 双方 verdict=accepted 比例 × +20（共识强）
-   - R3 双方 verdict=rejected 比例 × -20（共识弱、双方僵持）
+   - 双方 strength_score 差距 < 15 分 → +20（共识强）
+   - 双方 strength_score 差距 > 30 分 → strength_score 高的一方向 -10（一方明显占优时不应给高共识分）
    - remaining_disputes 数量 × -5
-6. **聚合预测**：以 R3 `final_position` 为基础（不是 R1），给出多情景。
-7. **列出 `uncertainty_factors`**：R3 `data_gaps` + 辩论中提到但 R3 未解决的点。
+6. **聚合预测**：以双方 final stance + strength_score 为基础，给出多情景预测。
+7. **列出 `uncertainty_factors`**：各方 `data_gaps` + 辩论中未解决的分歧点。
 
-## 输出 JSON Schema（严格遵循，不要新增字段）
+## 输出格式
 
-```json
-{
-  "decisive_bull": [
-    { "claim": "短句核心论断", "evidence": "对应数据/事件", "confidence": 0, "weight": 0 }
-  ],
-  "decisive_bear": [
-    { "claim": "短句核心论断", "evidence": "对应数据/事件", "confidence": 0, "weight": 0 }
-  ],
-  "remaining_disputes": [
-    {
-      "topic": "分歧主题",
-      "bull_position": "多方立场",
-      "bear_position": "空方立场",
-      "resolution_needed": "需要什么数据/事件才能消除分歧"
-    }
-  ],
-  "consensus_score": 0,
-  "uncertainty_factors": ["未充分论证的不确定项 1", "未充分论证的不确定项 2"],
-  "aggregate_prediction": {
-    "timeframe": "short_term | mid_term | long_term",
-    "direction": "bullish | bearish | neutral | divided",
-    "confidence": 0.0-1.0,
-    "bull_analysts": ["方向一致的 analyst_id 列表"],
-    "bear_analysts": ["方向相反的 analyst_id 列表"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "分析师共识最高的情景", "trigger": "大概率正常事件" },
-      { "scenario": "tail_risk", "probability": 0.2, "outcome": "多数分析师忽略但可能影响重大的情景", "trigger": "小概率高影响事件" }
-    ]
-  }
-}
+输出你的完整收敛分析（自然语言），
+然后在**末尾另起一行**追加机读标签：
+
+```
+<!-- VERDICT: {"consensus_score": 65, "direction": "bullish", "confidence": 70} -->
 ```
 
-字段口径：
+- `consensus_score`: 0-100整数，60+视为基本共识
+- `direction`: "bullish | bearish | neutral | divided"
+- `confidence`: 0-100整数
 
-- `confidence`: 0-100 整数，你对该论据可证据化的把握（不是该论据对股价的影响）
-- `weight`: 0-10 整数，该论据对最终决策方向的影响力
-- `consensus_score`: 0-100 整数，60+ 视为双方已达成基本共识
-- `aggregate_prediction`: 综合各分析师 prediction 的聚合结果。`direction = "divided"` 表示分析师之间方向分歧严重
+## 自检
 
-## 少样本（good）
-
-```json
-{
-  "decisive_bull": [
-    {
-      "claim": "Q3 一致预期 EPS 较上月上调 8%，业绩拐点已确认",
-      "evidence": "[同花顺一致预期 2024-10 EPS=0.85，前值 0.78]",
-      "confidence": 90,
-      "weight": 8
-    }
-  ],
-  "decisive_bear": [
-    {
-      "claim": "近 60 日主力净流出累计 12 亿，机构资金面走弱",
-      "evidence": "[东方财富资金流 2024-09~10 主力净流入累计 -12.3 亿]",
-      "confidence": 85,
-      "weight": 7
-    }
-  ],
-  "remaining_disputes": [
-    {
-      "topic": "Q4 业绩持续性",
-      "bull_position": "新签订单已覆盖 Q4 60% 产能",
-      "bear_position": "下游需求 Q4 边际走弱",
-      "resolution_needed": "Q4 月度经营数据或行业 PMI"
-    }
-  ],
-  "consensus_score": 45,
-  "uncertainty_factors": ["政策端后续力度未明确", "海外业务汇率敞口未披露"],
-  "aggregate_prediction": {
-    "timeframe": "short_term",
-    "direction": "divided",
-    "confidence": 0.4,
-    "bull_analysts": ["market", "sector", "sentiment"],
-    "bear_analysts": ["fundamentals", "research", "hot-money"],
-    "scenarios": [
-      { "scenario": "base", "probability": 0.5, "outcome": "短期震荡，等待催化剂落地", "trigger": "无超预期事件" }
-    ]
-  }
-}
-```
-
-## 少样本（bad，反例）
-
-```json
-{
-  "decisive_bull": [{ "claim": "公司前景看好", "evidence": "市场预期向好", "confidence": 90 }],
-  "consensus_score": 50
-}
-```
-
-（`claim` 含糊、`evidence` 无具体数据、未给 bear、缺 `remaining_disputes` / `uncertainty_factors` / `weight`）
-
-## 自检（输出前必过）
-
-- ① 6 段辩论 JSON 中出现的关键数字是否都已在 decisive 字段有引用？
-- ② `decisive_bull` 与 `decisive_bear` 是否各 ≤ 3 个（多了就不是"决定性"）？
-- ③ `remaining_disputes` 是否列出了双方未达成共识的关键点（不是"无" = 漏列）？
-- ④ `consensus_score` 与 `uncertainty_factors` 是否与上述论据一致（不要高分却列很多不确定项）？
+- [ ] 观点是否有足够的数据支撑？
+- [ ] stance 与 strength_score 是否一致？

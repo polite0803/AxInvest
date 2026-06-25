@@ -1837,7 +1837,7 @@ async fn seed_stock_analysis_workflow_template(
             a.config.context_sources = ctx;
             a.config.model_role = Some("debater".into());
             a.config.max_tool_rounds = Some(1);
-            a.config.output_mode = OutputMode::Json;
+            a.config.output_mode = OutputMode::Text; // prompt(debate-convergence.md)要求 VERDICT 标签格式，必须用 Text 模式
             a.config.input_mapping = build_analyst_input_mapping(&a_ids);
         }
         nodes.push(dc);

@@ -465,7 +465,10 @@ impl NodeExecutorTrait for AgentExecutor {
         if let Some(ref perms) = context.tool_permissions
             && perms.strict_mode
         {
-            let strict_instructions = if matches!(an.config.output_mode, axagent_harness::workflow_types::OutputMode::Json) {
+            let strict_instructions = if matches!(
+                an.config.output_mode,
+                axagent_harness::workflow_types::OutputMode::Json
+            ) {
                 r#"
 
 ## 严格模式约束
@@ -493,7 +496,11 @@ impl NodeExecutorTrait for AgentExecutor {
 "#
             };
             all_segments.push(TemplateSegment::Static(strict_instructions.to_string()));
-            tracing::warn!("Agent node {} strict_mode enabled (output_mode={:?})", an.base.id, an.config.output_mode);
+            tracing::warn!(
+                "Agent node {} strict_mode enabled (output_mode={:?})",
+                an.base.id,
+                an.config.output_mode
+            );
         }
 
         // 4g. input_mapping 变量自动注入：将声明的输入变量值注入 system_prompt 尾部
@@ -738,6 +745,19 @@ impl NodeExecutorTrait for AgentExecutor {
             total_usage.1 += stream_usage.1;
             final_content = stream_content.clone();
             final_thinking = stream_thinking.clone();
+
+            // 日志：LLM 返回内容为空时发出警告（帮助排查 analyst 节点无数据问题）
+            if final_content.trim().is_empty() {
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    model = %model,
+                    usage = ?stream_usage,
+                    has_thinking = %final_thinking.is_some(),
+                    has_tool_calls = %stream_tool_calls.as_ref().is_some_and(|tc| !tc.is_empty()),
+                    "Agent LLM 返回空内容 (round {}/{}, output_mode={:?})",
+                    round + 1, max_rounds, an.config.output_mode
+                );
+            }
 
             // 检测非标准文本式工具调用（仅对已知使用此格式的 provider 生效）。
             // 部分模型/代理（如 Qwen 通过 CHAT2API/Hermes/Ollama）不输出标准
@@ -1508,7 +1528,6 @@ fn user_prompt_for_rag(
     }
 }
 
-
 /// 从 LLM 输出的文本内容中解析非标准的工具调用格式。
 ///
 /// 部分模型/代理（如 Qwen 通过 CHAT2API）不输出 OpenAI 标准格式的
@@ -2105,6 +2124,7 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
 
 /// strict_mode 下的输出格式校验：
 /// - 当 output_mode 为 Json 时，验证 final_content 是否为合法 JSON
+/// - 当 output_mode 为 Text 时，验证 final_content 是否为非空（防止 LLM 空输出静默通过）
 /// - 若格式不合法，返回错误阻止结果传递给下游
 /// - 自动处理 LLM 常见坏输出模式：markdown fence 包裹、尾逗号等
 fn validate_strict_mode_output(
@@ -2112,16 +2132,18 @@ fn validate_strict_mode_output(
     output_mode: &axagent_harness::workflow_types::OutputMode,
 ) -> Result<(), NodeError> {
     use axagent_harness::workflow_types::OutputMode;
-    if matches!(output_mode, OutputMode::Json) {
-        let trimmed = final_content.trim();
-        if trimmed.is_empty() {
-            tracing::warn!("strict_mode: LLM 输出为空，期望 JSON");
-            return Err(NodeError::exec_failed(
-                error_code::VALIDATION_FAILED,
-                "严格模式: LLM 输出为空，期望 JSON 格式",
-            ));
-        }
+    let trimmed = final_content.trim();
 
+    // 所有模式通用：空输出检测
+    if trimmed.is_empty() {
+        tracing::warn!("strict_mode: LLM 输出为空 (output_mode={:?})", output_mode);
+        return Err(NodeError::exec_failed(
+            error_code::VALIDATION_FAILED,
+            format!("严格模式: LLM 输出为空 (output_mode={:?})", output_mode),
+        ));
+    }
+
+    if matches!(output_mode, OutputMode::Json) {
         // 常见坏输出模式修复链
         let mut candidates: Vec<String> = Vec::new();
         candidates.push(trimmed.to_string());

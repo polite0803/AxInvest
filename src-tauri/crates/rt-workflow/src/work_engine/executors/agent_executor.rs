@@ -1630,8 +1630,12 @@ fn repair_json(s: &str) -> String {
     result = insert_comma_between_brackets(&result, ']', '{');
     result = insert_comma_between_brackets(&result, '}', '{');
     result = insert_comma_between_brackets(&result, '}', '[');
+    // 缺失冒号：`"key" "value"` / `"key"  "value"` / `"key"(value`
+    // 发生在 LLM 输出 JSON 时漏掉了 key-value 间的冒号
+    result = insert_missing_colon(&result);
     // 双引号键修复: 连续两个引号 `""k` → `"k`
     result = result.replace("\"\"", "\"");
+    // 字符串值缺开引号: `"key"(` 或 `"key" "text` 但缺冒号的情况已由 insert_missing_colon 处理
     result
 }
 
@@ -1666,6 +1670,57 @@ fn insert_comma_between_brackets(s: &str, left: char, right: char) -> String {
         i += 1;
     }
     String::from_utf8(result).unwrap_or_else(|_| s.to_string())
+}
+
+/// 修复缺失冒号：`"key"` 后直接跟 `"` 或 `(`（中间可能有空白）但缺 `:`
+/// 匹配 `"key" "value"` → `"key": "value"`、`"key"(value` → `"key":(value`  
+fn insert_missing_colon(s: &str) -> String {
+    let mut result = s.to_string();
+    // `"` + 可选空白 + `"` → 中间插 `:`（仅在 `"` 闭合 key 的情况下）
+    // 使用正则风格替换：找到 `"` 后跟空白再跟 `"` 的模式
+    // 用简单循环 + find 来实现
+    loop {
+        let before = result.clone();
+        // 查找 `"key" "` 模式：`"` 后跟非 `"` 非空白字符，然后 `"`，然后空白，然后 `"` 且中间没有 `:`
+        let bytes = result.as_bytes();
+        let mut found = false;
+        let mut insert_pos = 0;
+        let mut i = 0;
+        while i + 2 < bytes.len() {
+            if bytes[i] == b'"' {
+                // 找这个 `"` 的配对（下一个未被转义的 `"`）
+                let mut j = i + 1;
+                let mut escaped = false;
+                while j < bytes.len() {
+                    if escaped { escaped = false; j += 1; continue; }
+                    if bytes[j] == b'\\' { escaped = true; j += 1; continue; }
+                    if bytes[j] == b'"' { break; }
+                    j += 1;
+                }
+                if j >= bytes.len() { break; } // 未闭合的字符串，跳出
+                // 检查 `"` 闭合后有没有 `:`（跳过空白）
+                let mut k = j + 1;
+                while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t' || bytes[k] == b'\n') {
+                    k += 1;
+                }
+                if k < bytes.len() && bytes[k] == b':' { i = k + 1; continue; } // 已有冒号
+                if k < bytes.len() && (bytes[k] == b'"' || bytes[k] == b'(' || bytes[k] == b'{' || bytes[k] == b'[') {
+                    // 缺冒号！在闭合 `"` 后、空白前插入 `:`
+                    insert_pos = j + 1; // 在闭合 `"` 的后面
+                    found = true;
+                    break;
+                }
+                i = j + 1;
+            } else {
+                i += 1;
+            }
+        }
+        if found {
+            result.insert(insert_pos, ':');
+        }
+        if result == before { break; }
+    }
+    result
 }
 
 /// 修复 LLM 输出中高频出现的"未闭合字符串"模式。

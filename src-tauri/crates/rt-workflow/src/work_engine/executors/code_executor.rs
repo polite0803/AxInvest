@@ -201,11 +201,14 @@ impl NodeExecutorTrait for CodeExecutor {
         // ── 直接执行模式（execute_directly=true）──
         // Rhai 脚本在 DAG 中直接执行，通过 input_mapping 消费上游结构化参数。
         if code_node.config.execute_directly && code_node.config.language == "rhai" {
-            tracing::info!(
-                "[code_executor] Rhai execution: node_type={:?}, input_mapping keys={:?}, variables keys={:?}",
-                super::node_type_name(node),
+            tracing::warn!(
+                "[code_executor] Rhai execution: node_id={}, input_mapping keys={:?}, variables keys count={}, totalScore resolve={:?}, consensusScore resolve={:?}, catalyst_level resolve={:?}",
+                code_node.base.id,
                 code_node.config.input_mapping.keys().collect::<Vec<_>>(),
-                context.variables.keys().collect::<Vec<_>>(),
+                context.variables.keys().count(),
+                super::resolve_var_path("t-scoring.result.totalScore", &context.variables),
+                super::resolve_var_path("debate-convergence.params.consensus_score", &context.variables),
+                super::resolve_var_path("a-catalyst.params.catalyst_level", &context.variables),
             );
             let (result, input_params) = execute_rhai_directly(
                 &code_node.config.code,

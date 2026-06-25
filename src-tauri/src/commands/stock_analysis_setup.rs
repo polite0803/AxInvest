@@ -1258,7 +1258,7 @@ async fn seed_stock_analysis_workflow_template(
                 position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
-                    max_retries: 1, // 上游 LLM provider 间歇 500，1 次重试即可规避
+                    max_retries: 2, // provider 间歇不可用 + JSON 格式偶发异常
                     ..Default::default()
                 },
                 timeout: Some(300),

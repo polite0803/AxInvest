@@ -43,6 +43,8 @@ test.describe("Workflow Editor E2E Tests", () => {
   });
 
   test("should create new template", async ({ page }) => {
+    // 确保关闭任何弹窗遮罩
+    await dismissModals(page);
     const newButton = page.getByTestId("workflow-create-new-btn").first();
     await expect(newButton).toBeVisible({ timeout: 5000 });
     await newButton.click();

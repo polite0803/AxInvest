@@ -267,13 +267,13 @@ export function AnalystReportCard({ expertId, report }: Props) {
   const cleanedReport = cleanToolCallTags(report);
   // 优先解析 <!-- VERDICT: {...} --> 格式（分析师自由文本 + 末尾 verdict 标签）
   let parsed = tryParseVerdictFormat(cleanedReport);
-  let displayContent: string;
+  let displayContent: string = "";
   if (parsed) {
     displayContent = cleanedReport;
   } else {
     const beautified = tryBeautifyJson(cleanedReport);
     parsed = tryParse(beautified);
-    displayContent = beautified || report;
+    displayContent = beautified || report || "";
   }
   const [expanded, setExpanded] = useState(false);
   const hasContent = !!displayContent || !!parsed;

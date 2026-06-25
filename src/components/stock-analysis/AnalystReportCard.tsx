@@ -49,6 +49,13 @@ interface ParsedReport {
   margin_of_safety?: string;
   buffett_verdict?: string;
   ideal_buy_price?: string | null;
+  catalyst_detail?: string;
+  catalyst_level?: string;
+  narrative_completeness?: string;
+  narrative_missing?: string[];
+  institutional_trace?: string;
+  concept_risk?: string;
+  key_events?: Array<{ event?: string; source?: string; stance?: string; weight?: number }>;
   // 通用分析
   analysis?: string;
   assessment?: string;
@@ -153,6 +160,7 @@ function extractSummary(parsed: ParsedReport): string {
     parsed.moat_reasoning,
     parsed.financial_health,
     parsed.margin_of_safety,
+    parsed.catalyst_detail,
   ];
   for (const c of candidates) {
     if (typeof c === "string" && c.length > 10) { return c; }
@@ -171,6 +179,10 @@ function extractTags(parsed: ParsedReport): string[] {
   if (parsed.main_flow_state) { tags.push(`资金流:${parsed.main_flow_state}`); }
   if (parsed.dragon_tiger_signal) { tags.push(parsed.dragon_tiger_signal); }
   if (parsed.moat_rating) { tags.push(`护城河:${parsed.moat_rating}`); }
+  if (parsed.catalyst_level) { tags.push(parsed.catalyst_level); }
+  if (parsed.narrative_completeness) { tags.push(`叙事:${parsed.narrative_completeness}`); }
+  if (parsed.institutional_trace) { tags.push(`资金:${parsed.institutional_trace}`); }
+  if (parsed.concept_risk) { tags.push(`概念风险:${parsed.concept_risk}`); }
   if (typeof parsed.bull_score === "number" && parsed.bull_score > 0) {
     // 归一化到百分制：十分制(≤10) ×10，百分制(>10) 不处理
     const normalized = parsed.bull_score <= 10 ? parsed.bull_score * 10 : parsed.bull_score;
@@ -201,6 +213,14 @@ function extractKeyPoints(parsed: ParsedReport): string[] {
   }
   if (Array.isArray(parsed.data_gaps) && parsed.data_gaps.length > 0) {
     return parsed.data_gaps.slice(0, 3);
+  }
+  if (Array.isArray(parsed.narrative_missing) && parsed.narrative_missing.length > 0) {
+    return parsed.narrative_missing;
+  }
+  if (Array.isArray(parsed.key_events) && parsed.key_events.length > 0) {
+    return parsed.key_events
+      .filter((e) => e && typeof e.event === "string")
+      .map((e) => `${e.event}${e.source ? ` (${e.source})` : ""}`);
   }
   return [];
 }
@@ -272,52 +292,10 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
   // 有解析结果：尝试结构化渲染
   if (parsed) {
-    let summary = extractSummary(parsed);
+    const summary = extractSummary(parsed);
     const tags = extractTags(parsed);
-    let points = extractKeyPoints(parsed);
+    const points = extractKeyPoints(parsed);
     const riskFlags = extractRiskFlags(parsed);
-
-    // ── 兜底：提取器没匹配但 parsed 有实质内容 → 自动推断 ──
-    // 覆盖 catalyst/news/social-media 等专家输出格式
-    if (!summary && points.length === 0 && tags.length === 0) {
-      // 取第一个长字符串字段作为 summary
-      for (const val of Object.values(parsed)) {
-        if (typeof val === "string" && val.length > 10 && !val.startsWith("[") && !val.startsWith("http")) {
-          summary = val;
-          break;
-        }
-      }
-      // 取第一个有意义的值数组作为 points
-      if (points.length === 0) {
-        for (const val of Object.values(parsed)) {
-          if (Array.isArray(val) && val.length > 0) {
-            const first = val[0];
-            if (typeof first === "object" && first !== null && first.event) {
-              points = val.map((v: Record<string, unknown>) => String(v.event ?? ""));
-            } else if (typeof first === "object" && first !== null && first.claim) {
-              points = val.map((v: Record<string, unknown>) => String(v.claim ?? ""));
-            } else if (typeof first === "object" && first !== null && first.point) {
-              points = val.map((v: Record<string, unknown>) => String(v.point ?? ""));
-            } else if (typeof first === "string") {
-              points = val.filter((v: unknown) => typeof v === "string");
-            }
-            if (points.length > 0) { break; }
-          }
-        }
-      }
-      // 生成标签：取枚举型短字符串字段
-      for (const key of Object.keys(parsed)) {
-        const v = parsed[key];
-        if (typeof v === "string" && v.length < 20 && !v.includes("，") && !v.includes("。")) {
-          if (
-            key === "catalyst_level" || key === "narrative_completeness" || key === "concept_risk"
-            || key === "institutional_trace" || key === "valuation_rerating_potential"
-          ) {
-            tags.push(v);
-          }
-        }
-      }
-    }
     const empty = isEmptyAnalysis(parsed);
     const confidence = typeof parsed.confidence === "number"
       ? (parsed.confidence > 1 ? parsed.confidence : parsed.confidence * 100)

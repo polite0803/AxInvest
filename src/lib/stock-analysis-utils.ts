@@ -112,6 +112,7 @@ export const STOCK_ACTION_LABELS: Record<string, StockActionType> = {
   "减持": StockAction.REDUCE,
   "卖出": StockAction.SELL,
   "不确定": StockAction.UNCERTAIN,
+  "无法判断": StockAction.UNCERTAIN,
   "观望": StockAction.HOLD,
   "减仓": StockAction.REDUCE,
   "加仓": StockAction.INCREASE,

@@ -151,6 +151,9 @@ let overall_action = if insufficient_data { "无法判断" }
 
 // 数据不足时构建缺失数据源清单（Rhai 无 .filter()，用条件拼接）
 let data_gaps = if insufficient_data {
+    // 同时归零置信度和持仓，避免前台显示"虚假"数值
+    final_confidence = 0.0;
+    position_pct = 0.0;
     let gaps = [];
     if total_score == 50.0 { gaps.push("技术服务评分(t-scoring)"); }
     if consensus_score == 50.0 { gaps.push("辩论共识分数(debate-convergence)"); }

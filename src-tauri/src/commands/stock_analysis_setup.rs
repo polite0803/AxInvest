@@ -2113,7 +2113,7 @@ async fn seed_stock_analysis_workflow_template(
     for (tool_id, title, tool_name, arg_key, x, y) in algo_tools {
         nodes.push(tool_node(tool_id, title, tool_name, tool_id, arg_key, None, *x, *y));
     }
-    edges.push(edge("e-risk-convergence-t-scoring", "risk-convergence", "t-scoring"));
+    edges.push(edge("e-bear-r3-t-scoring", "bear-r3", "t-scoring"));
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 

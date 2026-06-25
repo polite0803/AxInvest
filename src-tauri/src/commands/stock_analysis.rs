@@ -3835,7 +3835,7 @@ pub async fn import_portfolio_from_vlm(
     }
 
     Ok(serde_json::json!({
-        "success": errors.is_empty() || imported.len() > 0,
+        "success": errors.is_empty() || !imported.is_empty(),
         "imported": imported.len(),
         "failed": errors.len(),
         "stockCodes": imported,

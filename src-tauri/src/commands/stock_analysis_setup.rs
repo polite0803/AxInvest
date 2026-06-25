@@ -617,6 +617,8 @@ async fn seed_stock_analysis_workflow_template(
     // v22: 全部 agent 节点 max_tokens 默认 8192 → 32768
     // v23: agent 节点 max_retries 从 1 提升到 2（LLM JSON 异常 + provider 瞬断重试）
     //      所有 agent prompt 补全授权声明防止模型拒绝回答
+    // v24: 移除辩论 R1/R2/R3 / research-mgr / risk-convergence 的 OutputMode::Json
+    //      这些节点的 prompt 使用自由文本 + VERDICT 标签格式,Json 模式导致 strict_mode 误判
     const TEMPLATE_VERSION: i32 = 1;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期

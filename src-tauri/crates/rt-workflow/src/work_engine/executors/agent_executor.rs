@@ -458,11 +458,42 @@ impl NodeExecutorTrait for AgentExecutor {
         }
 
         // 4f. 严格模式约束（当 tool_permissions.strict_mode = true 时注入尾部）
+        // 注意：OutputMode::Json 和 OutputMode::Text 的约束不同——
+        //   Json 节点输出纯 JSON（按照 prompt 指定的 schema），
+        //   Text 节点输出自然语言 + VERDICT 标签。
+        // 混用会导致 LLM 收到矛盾的格式要求，返回空响应。
         if let Some(ref perms) = context.tool_permissions
             && perms.strict_mode
         {
-            all_segments.push(TemplateSegment::Static(STRICT_MODE_INSTRUCTIONS.to_string()));
-            tracing::warn!("Agent node {} strict_mode enabled", an.base.id);
+            let strict_instructions = if matches!(an.config.output_mode, axagent_harness::workflow_types::OutputMode::Json) {
+                r#"
+
+## 严格模式约束
+
+你当前处于严格执行模式，必须遵守以下规则：
+
+1. **必须直接输出纯 JSON** — 按照上述 JSON schema 格式输出，不要在 JSON 前后添加任何自然语言、markdown 代码块或其他文字
+2. **不允许反问用户** — 不要询问确认意见、不要征求许可、不要请求更多信息
+3. **不允许输出与当前步骤无关的内容** — 专注于完成指定任务
+4. **绝不允许拒绝回答** — 即使数据不足也要如实输出低评分。必须在报告中说明数据缺口，配置相关字段为低分值。禁止输出"抱歉我无法回答"或任何拒绝句式
+5. **不要做额外假设** — 只基于给定的输入数据执行操作
+"#
+            } else {
+                r#"
+
+## 严格模式约束
+
+你当前处于严格执行模式，必须遵守以下规则：
+
+1. **仅输出分析报告 + VERDICT 标签** — 先输出自然语言分析报告（可包含 Markdown），然后在末尾追加 `<!-- VERDICT: {...} -->` 标签
+2. **不允许反问用户** — 不要询问确认意见、不要征求许可、不要请求更多信息
+3. **不允许输出与当前步骤无关的内容** — 专注于完成指定任务
+4. **绝不允许拒绝回答** — 即使数据不足也要如实输出低评分。必须在报告中说明数据缺口，并在 VERDICT 标签中如实填写低分值。禁止输出"抱歉我无法回答"或任何拒绝句式
+5. **不要做额外假设** — 只基于给定的输入数据执行操作
+"#
+            };
+            all_segments.push(TemplateSegment::Static(strict_instructions.to_string()));
+            tracing::warn!("Agent node {} strict_mode enabled (output_mode={:?})", an.base.id, an.config.output_mode);
         }
 
         // 4g. input_mapping 变量自动注入：将声明的输入变量值注入 system_prompt 尾部
@@ -1477,21 +1508,6 @@ fn user_prompt_for_rag(
     }
 }
 
-/// 严格模式 system prompt 约束指令 —— 当 ToolPermissions.strict_mode = true 时追加到 prompt 尾部。
-///
-/// 约束 LLM 仅输出结构化 JSON、不反问、不发散、不自由发挥。
-const STRICT_MODE_INSTRUCTIONS: &str = r#"
-
-## 严格模式约束
-
-你当前处于严格执行模式，必须遵守以下规则：
-
-1. **仅输出分析报告 + VERDICT 标签** — 先输出自然语言分析报告（可包含 Markdown），然后在末尾追加 `<!-- VERDICT: {...} -->` 标签
-2. **不允许反问用户** — 不要询问确认意见、不要征求许可、不要请求更多信息
-3. **不允许输出与当前步骤无关的内容** — 专注于完成指定任务
-4. **绝不允许拒绝回答** — 即使数据不足也要如实输出低评分。必须在报告中说明数据缺口，并在 VERDICT 标签中如实填写低分值。禁止输出"抱歉我无法回答"或任何拒绝句式
-5. **不要做额外假设** — 只基于给定的输入数据执行操作
-"#;
 
 /// 从 LLM 输出的文本内容中解析非标准的工具调用格式。
 ///

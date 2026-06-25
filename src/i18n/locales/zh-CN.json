@@ -2809,7 +2809,9 @@
     "exportMarkdown": "导出 Markdown",
     "saveFailed": "保存失败",
     "saved": "已保存",
-    "unknownError": "未知错误"
+    "unknownError": "未知错误",
+    "deleted": "已删除",
+    "required": "必填项"
   },
   "image": {
     "loadError": "图片加载失败",
@@ -8295,7 +8297,8 @@
       "result": "结果",
       "decisionAction": "决策",
       "confidence": "置信度",
-      "winsAndLosses": "盈亏统计"
+      "winsAndLosses": "盈亏统计",
+      "winRate": "胜率"
     },
     "chart": {
       "restore": "还原",
@@ -9086,7 +9089,9 @@
     "docxFilterName": "Word 文档",
     "pptxDesktopOnly": "PPTX 导出仅在桌面端可用",
     "pptxFilterName": "PowerPoint 演示文稿",
-    "exportUnsupportedFormat": "不支持的格式: {{format}}"
+    "exportUnsupportedFormat": "不支持的格式: {{format}}",
+    "stockName": "股票名称",
+    "stockCode": "股票代码"
   },
   "trade": {
     "title": "交易日志",

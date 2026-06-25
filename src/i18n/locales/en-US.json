@@ -2950,7 +2950,9 @@
     "exportMarkdown": "Export Markdown",
     "saveFailed": "Save failed",
     "saved": "Saved",
-    "unknownError": "Unknown error"
+    "unknownError": "Unknown error",
+    "deleted": "Deleted",
+    "required": "Required"
   },
   "plan": {
     "defaultTitle": "Execution Plan",
@@ -7989,7 +7991,7 @@
       "sampleInterval": "Sample Interval",
       "holdDays": "Hold (trading days)",
       "totalRuns": "Total Runs",
-      "correctCount": "Correct",
+      "correctCount": "Correct Count",
       "completed": "Backtest completed, {{count}} runs",
       "noData": "No backtest data",
       "running": "Running backtest...",
@@ -8002,7 +8004,8 @@
       "title": "Backtest Analysis",
       "total": "Total Analyses",
       "winsAndLosses": "Win/Loss Stats",
-      "wrong": "Wrong"
+      "wrong": "Wrong",
+      "winRate": "Win Rate"
     },
     "bannerVendorDisabled": "Some styles disabled: {styles}",
     "bear": "Bear",
@@ -9367,7 +9370,11 @@
     "docxFilterName": "Word Document",
     "pptxDesktopOnly": "PPTX export only available on desktop",
     "pptxFilterName": "PowerPoint Presentation",
-    "exportUnsupportedFormat": "Unsupported format: {{format}}"
+    "exportUnsupportedFormat": "Unsupported format: {{format}}",
+    "stopAnalysis": "Stop",
+    "stopAnalysisConfirm": "Are you sure you want to stop the current analysis?",
+    "stockName": "Stock Name",
+    "stockCode": "Stock Code"
   },
   "timeTravel": {
     "backtestHint": "Replay mode: the following stats only aggregate replay data anchored at as-of {{date}}.",

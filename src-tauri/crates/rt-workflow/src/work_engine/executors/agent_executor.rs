@@ -1647,7 +1647,7 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
         // （已修复：期 infinite loop bug，`期` 占 3 字节，[1..] 落在字符内部）
         let skip = trailing.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
         let rest = &trailing[skip..];
-        rest.find('"').map_or(false, |qpos| {
+        rest.find('"').is_some_and(|qpos| {
             let after_q = &rest[qpos + 1..];
             let trimmed = after_q.trim_start();
             trimmed.is_empty()
@@ -1723,11 +1723,7 @@ fn repair_unclosed_json_strings(s: &str) -> Option<String> {
                 continue;
             }
             if bytes[i] == b'"' {
-                if !in_str {
-                    in_str = true;
-                } else {
-                    in_str = false;
-                }
+                in_str = !in_str;
             } else if in_str
                 && (bytes[i] == b',' || bytes[i] == b']' || bytes[i] == b'}')
                 && bytes[i] != b'"'
@@ -1803,15 +1799,11 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
         }
         match b {
             b'{' | b'[' => stack.push(b),
-            b'}' => {
-                if stack.last() == Some(&b'{') {
-                    stack.pop();
-                }
+            b'}' if stack.last() == Some(&b'{') => {
+                stack.pop();
             },
-            b']' => {
-                if stack.last() == Some(&b'[') {
-                    stack.pop();
-                }
+            b']' if stack.last() == Some(&b'[') => {
+                stack.pop();
             },
             _ => {},
         }
@@ -2047,7 +2039,7 @@ fn strip_control_chars(s: &str) -> String {
 /// 覆盖 LLM 在 JSON 前加 ```json / 文本说明等所有前缀场景。
 fn try_extract_first_json(s: &str) -> Option<String> {
     let s = s.trim();
-    let start = s.find(|c: char| c == '{' || c == '[')?;
+    let start = s.find(['{', '['])?;
     let candidate: String = s[start..].to_string();
     // 先剥离控制字符再尝试解析
     let cleaned = strip_control_chars(&candidate);
@@ -2063,7 +2055,7 @@ fn try_extract_first_json(s: &str) -> Option<String> {
 /// 作为所有其他修复失败后的最终兜底。
 fn try_extract_balanced_json(s: &str) -> Option<String> {
     let s = trim_after_json(s);
-    let start = s.find(|c: char| c == '{' || c == '[')?;
+    let start = s.find(['{', '['])?;
     let candidate = &s[start..];
 
     let bytes = candidate.as_bytes();
@@ -2147,10 +2139,10 @@ fn validate_strict_mode_output(
         candidates.push(trimmed.to_string());
 
         // 模式0: 跳过所有非 JSON 前缀，从第一个 { 或 [ 开始尝试
-        if let Some(extracted) = try_extract_first_json(trimmed) {
-            if extracted != trimmed {
-                candidates.push(extracted);
-            }
+        if let Some(extracted) = try_extract_first_json(trimmed)
+            && extracted != trimmed
+        {
+            candidates.push(extracted);
         }
 
         // 模式1: 剥离原始控制字符（LLM 常在 JSON 字符串值中输出 \u0000-\u001F）
@@ -2195,10 +2187,10 @@ fn validate_strict_mode_output(
         }
 
         // 模式5: 终极兜底——括号平衡提取
-        if let Some(balanced) = try_extract_balanced_json(trimmed) {
-            if !candidates.iter().any(|x| x.as_str() == balanced.as_str()) {
-                candidates.push(balanced);
-            }
+        if let Some(balanced) = try_extract_balanced_json(trimmed)
+            && !candidates.iter().any(|x| x.as_str() == balanced.as_str())
+        {
+            candidates.push(balanced);
         }
 
         // ── 遍历修复链：对所有已有候选进行二次修复 ──

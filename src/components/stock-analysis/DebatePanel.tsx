@@ -569,7 +569,7 @@ export function DebatePanel() {
       }
     }
     return null;
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
   }, [processedRounds]);
 
   if (debateRounds.length === 0) { return null; }

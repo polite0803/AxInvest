@@ -278,6 +278,38 @@ function tryParseJson(text: string): Record<string, unknown> | null {
  * - 纯文本关键词匹配（买入/卖出/持有/看多/看空 等维度）
  */
 export function classifySentiment(report: string): "bullish" | "bearish" | "neutral" {
+  // 0) 优先解析 <!-- VERDICT: {...} --> 格式（分析师自由文本 + 末尾 verdict 标签）
+  const verdictIdx = report.indexOf("<!-- VERDICT:");
+  if (verdictIdx !== -1) {
+    try {
+      const jsonStr = report.slice(verdictIdx + "<!-- VERDICT:".length);
+      const jsonEnd = jsonStr.indexOf("-->");
+      if (jsonEnd !== -1) {
+        const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
+        const stance = String(meta.verdict ?? meta.stance ?? "").trim().toLowerCase();
+        if (stance) {
+          if (/看多|买入|增持|做多|看涨|多头|利好|上涨|乐观|上行|流入|bull|buy|overweight/i.test(stance)) {
+            return "bullish";
+          }
+          if (/看空|卖出|减持|做空|看跌|空头|利空|下跌|悲观|下行|流出|bear|sell|underweight/i.test(stance)) {
+            return "bearish";
+          }
+          if (/中性|观望|持有|震荡|hold|neutral/i.test(stance)) {
+            return "neutral";
+          }
+        }
+        // 用 bull_score / bear_score 判断
+        const bull = Number(meta.bull_score ?? -1);
+        const bear = Number(meta.bear_score ?? -1);
+        if (bull >= 0 && bear >= 0) {
+          if (bull > bear) { return "bullish"; }
+          if (bear > bull) { return "bearish"; }
+          return "neutral";
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   // 1) 尝试从 JSON 结构化字段提取
   const json = tryParseJson(report);
   if (json) {

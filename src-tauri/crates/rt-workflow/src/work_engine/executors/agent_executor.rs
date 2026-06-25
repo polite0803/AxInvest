@@ -799,59 +799,79 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
-        // ── strict_mode 输出格式校验 ──
-        // 先尝试修复常见 LLM 坏输出模式（markdown fence 包裹、尾逗号等），
-        // 修复后覆盖 final_content 使下游拿到正确内容。
-        // 若修复后仍不合法则让错误传播（触发 retry → LLM 二次执行修正）。
+        // ── VERDICT tag 提取 + strict_mode 输出校验 ──
+        // 优先尝试提取 <!-- VERDICT: {...} --> 标签：
+        // 若找到 VERDICT tag，则用其内容重构 minimal JSON（analyst/debater/risk-evaluator 节点适用），
+        // 全文报告保留在 `report` 字段中；若找不到 tag，走完整 strict_mode JSON 校验（portfolio-mgr 节点适用）。
         if let Some(ref perms) = context.tool_permissions
             && perms.strict_mode
         {
             let trimmed = final_content.trim().to_string();
-            let fixed = try_extract_json_fragment(&trimmed)
-                .filter(|extracted| serde_json::from_str::<serde_json::Value>(extracted).is_ok())
-                .or_else(|| {
-                    let repaired = repair_json(&trimmed);
-                    if repaired != trimmed
-                        && serde_json::from_str::<serde_json::Value>(&repaired).is_ok()
-                    {
-                        Some(repaired)
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| {
-                    // 尝试修复未闭合的引用字符串
-                    repair_unclosed_json_strings(&trimmed)
-                        .filter(|fixed| fixed != &trimmed)
-                        .filter(|fixed| serde_json::from_str::<serde_json::Value>(fixed).is_ok())
-                })
-                .or_else(|| {
-                    // 尝试修复截断的 JSON（max_tokens 限制导致输出不完整）
-                    try_fix_truncated_json(&trimmed)
+
+            // 第一步：尝试提取 VERDICT tag（TradingAgents 模式：自然语言 + 末尾机读标签）
+            let verdict_reconstructed = extract_verdict_tag(&trimmed)
+                .and_then(|verdict_json| {
+                    // 成功提取 VERDICT，用报告文本 + VERDICT 重构 minimal JSON
+                    let report_text = strip_verdict_tag(&trimmed);
+                    let report_escaped = serde_json::to_string(&report_text)
+                        .unwrap_or_else(|_| "\"\"".to_string());
+                    let combined = format!(
+                        r#"{{"report":{}, "verdict":{} }}"#,
+                        report_escaped,
+                        verdict_json
+                    );
+                    serde_json::from_str::<serde_json::Value>(&combined).ok()?;
+                    Some(combined)
                 });
-            if let Some(ref fixed_content) = fixed {
-                if fixed_content != &trimmed {
-                    tracing::warn!(
-                        "strict_mode: 自动修复 LLM 输出格式: {} => {}",
-                        trimmed.chars().take(80).collect::<String>(),
-                        fixed_content.chars().take(80).collect::<String>(),
+
+            if let Some(refixed) = verdict_reconstructed {
+                if refixed != trimmed {
+                    tracing::info!(
+                        "strict_mode: 从 VERDICT tag 重构输出 (report_len={})",
+                        trimmed.len()
                     );
-                    final_content = fixed_content.clone();
                 }
+                final_content = refixed;
             } else {
-                // 捕获 plain-text 拒绝回答（模型安全机制触发），转为结构化错误
-                // 这解决了 bear-r1 等节点输出"抱歉我无法回答这个问题"绕过 strict_mode 的问题
-                if is_refusal_plain_text(&trimmed) {
-                    let error_json = serde_json::json!({
-                        "error": format!("Agent refused to answer: {}", trimmed.chars().take(100).collect::<String>())
+                // 没有 VERDICT tag，走完整 JSON 校验（portfolio-mgr 等节点）
+                let fixed = try_extract_json_fragment(&trimmed)
+                    .filter(|extracted| serde_json::from_str::<serde_json::Value>(extracted).is_ok())
+                    .or_else(|| {
+                        let repaired = repair_json(&trimmed);
+                        if repaired != trimmed
+                            && serde_json::from_str::<serde_json::Value>(&repaired).is_ok()
+                        {
+                            Some(repaired)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        try_fix_truncated_json(&trimmed)
                     });
-                    final_content = error_json.to_string();
-                    tracing::warn!(
-                        "strict_mode: 检测到模型拒绝回答，自动转为错误 JSON: {}",
-                        final_content.chars().take(80).collect::<String>()
-                    );
+
+                if let Some(ref fixed_content) = fixed {
+                    if fixed_content != &trimmed {
+                        tracing::warn!(
+                            "strict_mode: 自动修复 LLM 输出格式: {} => {}",
+                            trimmed.chars().take(80).collect::<String>(),
+                            fixed_content.chars().take(80).collect::<String>(),
+                        );
+                        final_content = fixed_content.clone();
+                    }
                 } else {
-                    validate_strict_mode_output(&trimmed, &an.config.output_mode)?;
+                    if is_refusal_plain_text(&trimmed) {
+                        let error_json = serde_json::json!({
+                            "error": format!("Agent refused to answer: {}", trimmed.chars().take(100).collect::<String>())
+                        });
+                        final_content = error_json.to_string();
+                        tracing::warn!(
+                            "strict_mode: 检测到模型拒绝回答，自动转为错误 JSON: {}",
+                            final_content.chars().take(80).collect::<String>()
+                        );
+                    } else {
+                        validate_strict_mode_output(&trimmed, &an.config.output_mode)?;
+                    }
                 }
             }
         }
@@ -1723,332 +1743,58 @@ fn insert_missing_colon(s: &str) -> String {
     result
 }
 
-/// 修复 LLM 输出中高频出现的"未闭合字符串"模式。
-///
-/// 问题模式：JSON 字符串值包含引用标记时，LLM 常忘记在闭合括号前加 `"`。
-///
-/// 修复逻辑：
-///   - `"[来源 日期]` → `"[来源 日期]"`（方括号引用，旧格式）
-///   - `"(来源 日期) 文本` → `"(来源 日期) 文本"`（圆括号引用，新格式）
-///
-/// 具体做法：对 `"[` 和 `"(` 两种模式分别执行修复扫描，
-/// 若内容中无 `"` 且结尾括号后无 `"`，则在结尾括号前插入 `"` 闭合字符串。
-///
-/// 注意：插入前会检查 trailing 中是否已有合法闭合引号（如 `"(DEGRADED) 文本"`
-/// 的 trailing ` 文本"` 中含 `"`，是合法闭合），防止假阳性破坏合法 JSON。
-fn repair_unclosed_json_strings(s: &str) -> Option<String> {
-    let mut result = s.to_string();
-    let mut modified = false;
-
-    /// 检查 trailing 字符串中是否已有合法的字符串闭合引号。
-    /// 合法闭合引号：`"` 后跟（空白可忽略）`,`, `]`, `}`, 或字符串结束。
-    fn has_valid_closing_quote(trailing: &str) -> bool {
-        // trailing 不以 `"` 开头，跳过第一个字符（非 ASCII 安全）后查找 `"`
-        // 注意：必须用 char_indices() 而非字节索引 [1..]，否则在多字节 UTF-8 字符上 panic
-        // （已修复：期 infinite loop bug，`期` 占 3 字节，[1..] 落在字符内部）
-        let skip = trailing.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
-        let rest = &trailing[skip..];
-        rest.find('"').is_some_and(|qpos| {
-            let after_q = &rest[qpos + 1..];
-            let trimmed = after_q.trim_start();
-            trimmed.is_empty()
-                || trimmed.starts_with(',')
-                || trimmed.starts_with(']')
-                || trimmed.starts_with('}')
-        })
-    }
-
-    // 第一遍：修复 `"[来源 日期]` 模式（方括号引用）
-    let mut search_from = 0;
-    loop {
-        let slice = &result[search_from..];
-        if let Some(start) = slice.find("\"[") {
-            let actual_start = search_from + start;
-            let after_open = &result[actual_start + 2..];
-            if let Some(close_pos) = after_open.find(']') {
-                let content = &after_open[..close_pos];
-                if !content.contains('"') {
-                    let trailing = &after_open[close_pos + 1..];
-                    if !trailing.starts_with('"') && !has_valid_closing_quote(trailing) {
-                        let insert_pos = actual_start + 2 + close_pos;
-                        result.insert(insert_pos, '"');
-                        modified = true;
-                        search_from = insert_pos + 1;
-                        continue;
-                    }
-                }
-            }
-            search_from = actual_start + 2;
-        } else {
-            break;
-        }
-    }
-
-    // 第二遍：修复 `"(来源 日期)` 模式（圆括号引用，新 prompt 格式）
-    let mut search_from = 0;
-    loop {
-        let slice = &result[search_from..];
-        if let Some(start) = slice.find("\"(") {
-            let actual_start = search_from + start;
-            let after_open = &result[actual_start + 2..];
-            if let Some(close_pos) = after_open.find(')') {
-                let content = &after_open[..close_pos];
-                if !content.contains('"') {
-                    let trailing = &after_open[close_pos + 1..];
-                    if !trailing.starts_with('"') && !has_valid_closing_quote(trailing) {
-                        let insert_pos = actual_start + 2 + close_pos;
-                        result.insert(insert_pos, '"');
-                        modified = true;
-                        search_from = insert_pos + 1;
-                        continue;
-                    }
-                }
-            }
-            search_from = actual_start + 2;
-        } else {
-            break;
-        }
-    }
-
-    // 第三遍：修复截断导致的未闭合字符串（`"` 后缺失 `"` 直接遇到 `,` / `]` / `}`）
-    // 典型场景：evidence_refs 最后一条 `"(a-news 2026-06-24)` 被截断，
-    // 只剩 `"(a-new` 然后跟着 `]`
-    {
-        let bytes: Vec<u8> = result.bytes().collect();
-        let mut i = 0;
-        let mut in_str = false;
-        let mut inserts: Vec<usize> = Vec::new();
-        while i < bytes.len() {
-            if bytes[i] == b'\\' && in_str {
-                i += 2;
-                continue;
-            }
-            if bytes[i] == b'"' {
-                in_str = !in_str;
-            } else if in_str
-                && (bytes[i] == b',' || bytes[i] == b']' || bytes[i] == b'}')
-                && bytes[i] != b'"'
-            {
-                inserts.push(i);
-                in_str = false;
-            }
-            i += 1;
-        }
-        if in_str {
-            inserts.push(bytes.len());
-        }
-        // 从后往前插入，避免位置偏移
-        for &pos in inserts.iter().rev() {
-            result.insert(pos, '"');
-            modified = true;
-        }
-    }
-
-    if modified { Some(result) } else { None }
+/// 扁平 JSON 模式下不再需要复杂的未闭合字符串修复。
+/// flat JSON schema（最多 5 字段、无嵌套数组）的 LLM 输出极少出现此类错误。
+/// 保留此函数仅为兼容旧模板过渡期；后续可删除。
+#[allow(dead_code)]
+fn repair_unclosed_json_strings() -> Option<String> {
+    None
 }
 
-/// 使用括号栈生成正确的闭合顺序（`{ [ { [` → `] } ] }`，而非 `]]}}`）。
-fn closing_brackets_from_stack(stack: &[u8]) -> String {
-    let mut out = String::with_capacity(stack.len());
-    for &b in stack.iter().rev() {
-        match b {
-            b'{' => out.push('}'),
-            b'[' => out.push(']'),
-            _ => {},
-        }
-    }
-    out
-}
-
-/// 修复 LLM 输出被截断（max_tokens 限制）或因遗漏括号导致的 JSON 不完整。
-///
-/// 处理两种模式：
-///   1. 尾部截断：括号深度 > 0 或字符串未闭合 → 在末尾补全
-///   2. 中间遗漏：LLM 打开数组 `[` 后忘记 `]`，继续写父级字段
-///      （如 `"evidence_refs": ["(ref)", "next_field": "val"`）
-///      → 在每个结构字符位置尝试截断 + 插入缺失括号
-///
-/// 使用括号栈追踪未闭合括号类型，确保闭合顺序正确（`]`/`}` 交替而非全部同类集中）。
+/// 修复扁平 JSON 被截断（flat schema 下只需补全缺失的 `}` / `]` / `"`）
 fn try_fix_truncated_json(s: &str) -> Option<String> {
     let s = s.trim();
     if s.is_empty() || (!s.starts_with('{') && !s.starts_with('[')) {
         return None;
     }
 
-    let bytes = s.as_bytes();
+    // flat JSON: 只有 1-2 层嵌套，简单计数即可修复
+    let mut result = s.to_string();
+    let mut added = false;
 
-    // ── 第一遍扫描：使用括号栈追踪未闭合括号 ──
-    let mut stack: Vec<u8> = Vec::new(); // 未闭合的括号类型栈
-    let mut in_string = false;
-    let mut escaped = false;
-
-    for &b in bytes.iter() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if b == b'\\' && in_string {
-            escaped = true;
-            continue;
-        }
-        if b == b'"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        match b {
-            b'{' | b'[' => stack.push(b),
-            b'}' if stack.last() == Some(&b'{') => {
-                stack.pop();
-            },
-            b']' if stack.last() == Some(&b'[') => {
-                stack.pop();
-            },
-            _ => {},
-        }
+    // 补全未闭合引号
+    let open_quotes = result.matches('"').count();
+    if open_quotes % 2 != 0 {
+        result.push('"');
+        added = true;
     }
 
-    // ── 策略1：在末尾补全缺失括号 ──
-    if !stack.is_empty() || in_string {
-        let mut result = s.to_string();
+    // 补全缺失的闭括号
+    let open_curly = result.chars().filter(|&c| c == '{').count();
+    let close_curly = result.chars().filter(|&c| c == '}').count();
+    for _ in 0..open_curly.saturating_sub(close_curly) {
+        result.push('}');
+        added = true;
+    }
 
-        if in_string {
-            result.push('"');
-        }
+    let open_sq = result.chars().filter(|&c| c == '[').count();
+    let close_sq = result.chars().filter(|&c| c == ']').count();
+    for _ in 0..open_sq.saturating_sub(close_sq) {
+        result.push(']');
+        added = true;
+    }
 
-        // 使用栈生成正确闭合顺序（pop 前先保留）
-        let close = closing_brackets_from_stack(&stack);
-        result.push_str(&close);
-
-        let repaired = repair_json(&result);
-        tracing::info!(
-            "strict_mode: try_fix_truncated_json strategy1: stack_len={} in_string={} result_preview={}",
-            stack.len(), in_string, result.chars().take(100).collect::<String>()
-        );
-        if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
-            return Some(repaired);
-        }
-        if repaired != result && serde_json::from_str::<serde_json::Value>(&result).is_ok() {
-            return Some(result);
-        }
-    } else {
+    if !added {
         return None;
     }
 
-    // ── 策略2：在结构字符位置截断 + 插入缺失括号 ──
-    // 处理模式：LLM 忘记 `]` 后继续写父级字段
-    // 需要同时记录结构字符处的栈状态，确保闭合顺序正确。
-    const MAX_CANDIDATES: usize = 50;
-
-    // (pos, stack_snapshot) — 记录此位置时仍未闭合的括号栈
-    let mut states: Vec<(usize, Vec<u8>)> = Vec::new();
-    let mut stk: Vec<u8> = Vec::new();
-    let mut in_str = false;
-    let mut esc = false;
-
-    for (i, &b) in bytes.iter().enumerate() {
-        if esc {
-            esc = false;
-            continue;
-        }
-        if b == b'\\' && in_str {
-            esc = true;
-            continue;
-        }
-        if b == b'"' {
-            in_str = !in_str;
-            continue;
-        }
-        if in_str {
-            continue;
-        }
-
-        match b {
-            b'{' => {
-                if !stk.is_empty() {
-                    states.push((i, stk.clone()));
-                }
-                stk.push(b'{');
-            },
-            b'[' => {
-                if !stk.is_empty() {
-                    states.push((i, stk.clone()));
-                }
-                stk.push(b'[');
-            },
-            b'}' => {
-                if stk.last() == Some(&b'{') {
-                    stk.pop();
-                }
-                if !stk.is_empty() {
-                    states.push((i, stk.clone()));
-                }
-            },
-            b']' => {
-                if stk.last() == Some(&b'[') {
-                    stk.pop();
-                }
-                if !stk.is_empty() {
-                    states.push((i, stk.clone()));
-                }
-            },
-            _ => continue,
-        }
+    let repaired = repair_json(&result);
+    if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+        return Some(repaired);
     }
-
-    // 去重（同一位置可能被多个记录）
-    states.dedup_by(|a, b| a.0 == b.0);
-
-    // 从后往前尝试
-    let start = states.len().saturating_sub(MAX_CANDIDATES);
-    for idx in (start..states.len()).rev() {
-        let (pos, ref need_close) = states[idx];
-        if need_close.is_empty() {
-            continue;
-        }
-
-        let mut candidate = s[..=pos].to_string();
-        let close = closing_brackets_from_stack(need_close);
-        candidate.push_str(&close);
-
-        let repaired = repair_json(&candidate);
-        if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
-            return Some(repaired);
-        }
-        if repaired != candidate && serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
-            return Some(candidate);
-        }
+    if repaired != result && serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+        return Some(result);
     }
-
-    // ── 策略3：盲补兜底（当内嵌 " 导致 in_string 扫描失准时）──
-    // 当 content 明确以 { 或 [ 开头，但策略1/2均返回 None 时，
-    // 用粗略计数估算缺失的闭括号数量（不计字符串状态，允许误报）。
-    // 仅作为防止节点整个失败的最终保护。
-    let open_curly = s.matches('{').count() as i32;
-    let close_curly = s.matches('}').count() as i32;
-    let open_square = s.matches('[').count() as i32;
-    let close_square = s.matches(']').count() as i32;
-    let need_curly = open_curly - close_curly;
-    let need_square = open_square - close_square;
-
-    if need_curly > 0 || need_square > 0 {
-        let mut result = s.to_string();
-        // 假设末尾有未闭合字符串
-        result.push('"');
-        for _ in 0..need_square.max(0) {
-            result.push(']');
-        }
-        for _ in 0..need_curly.max(0) {
-            result.push('}');
-        }
-        let repaired = repair_json(&result);
-        if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
-            return Some(repaired);
-        }
-    }
-
     None
 }
 
@@ -2066,37 +1812,97 @@ fn is_refusal_plain_text(s: &str) -> bool {
         return false;
     }
 
+    // 包含 VERDICT tag 的一定不是拒绝（已有分析内容）
+    if trimmed.contains("<!-- VERDICT:") {
+        return false;
+    }
+
+    // 较长输出（>200字符）说明有实质性分析内容，不是拒绝
+    if trimmed.chars().count() > 200 {
+        return false;
+    }
+
     let lower = trimmed.to_lowercase();
-    let refusal_patterns = [
-        "抱歉",
-        "无法回答",
-        "不能回答",
-        "拒绝回答",
-        "sorry",
-        "cannot answer",
-        "can't answer",
-        "i cannot",
-        "i can't",
-        "i am unable",
-        "i'm unable",
+    let refusal_prefixes = [
+        "抱歉我无法回答这个问题",
+        "抱歉我不能回答",
+        "抱歉无法回答",
+        "sorry, i cannot",
+        "sorry, i can't",
+        "sorry cannot",
+        "i cannot answer",
+        "i can't answer",
+        "i am unable to answer",
+        "i'm unable to answer",
         "not able to answer",
         "unable to answer",
     ];
 
-    // 检查是否以拒绝模式开头（纯文本拒绝通常很短，第一句就表明意图）
-    for pattern in &refusal_patterns {
-        if lower.starts_with(pattern) {
-            return true;
+    // 检查是否是纯拒绝（以拒绝前缀开头，且后面无实质内容）
+    for prefix in &refusal_prefixes {
+        if lower.starts_with(prefix) {
+            let after = &trimmed[prefix.len()..].trim();
+            // 如果后面无实质内容（仅标点符号/空格），是真拒绝
+            if after.is_empty() || after.chars().all(|c| c.is_ascii_punctuation() || c.is_whitespace() || c == '。' || c == '，') {
+                return true;
+            }
+            // 后面有实质内容（如"行业分析师数据不足"）→ 是数据不足说明，不是拒绝
+            return false;
         }
-        // 也检查前 50 字符内是否包含拒绝模式
-        // 注意：字符 = Unicode 标量值，不能用 byte index 切割（会 UTF-8 边界越界）
-        let prefix: String = lower.chars().take(50).collect();
-        if prefix.contains(pattern) {
+    }
+
+    // 额外检查：极端短句拒绝（纯"抱歉。" "无法回答。" 无分析内容）
+    let refusal_short = ["抱歉。", "无法回答。", "不能回答。", "拒绝回答。", "sorry."];
+    for pattern in &refusal_short {
+        if trimmed == *pattern {
             return true;
         }
     }
 
     false
+}
+
+/// 从 LLM 输出中提取 `<!-- VERDICT: {...} -->` 标签中的 JSON 内容。
+/// 返回 verdict JSON 的字符串表示，不含外层 HTML 注释标记。
+///
+/// 这是 TradingAgents 模式的 Rust 实现：
+/// 分析师输出自然语言报告，末尾追加 <!-- VERDICT: {...} --> 供机读。
+fn extract_verdict_tag(text: &str) -> Option<String> {
+    // 查找最后一个 <!-- VERDICT: 出现位置（取最后一个，因为正文中可能也有 HTML 注释）
+    let search_start = text.len().saturating_sub(2000); // 只扫描尾部 2000 字符
+    let tail = &text[search_start.min(text.len())..];
+
+    let start_marker = "<!-- VERDICT: ";
+    let end_marker = "-->";
+
+    if let Some(start) = tail.rfind(start_marker) {
+        let json_start = start + start_marker.len();
+        if let Some(end) = tail[json_start..].find(end_marker) {
+            let verdict_str = tail[json_start..json_start + end].trim();
+            // 验证是合法 JSON
+            if serde_json::from_str::<serde_json::Value>(verdict_str).is_ok() {
+                return Some(verdict_str.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 从 LLM 输出中剥离 `<!-- VERDICT: ... -->` 标签，返回纯文本报告内容
+fn strip_verdict_tag(text: &str) -> String {
+    let start_marker = "<!-- VERDICT: ";
+    let end_marker = "-->";
+    let mut result = text.to_string();
+    loop {
+        if let Some(start) = result.find(start_marker) {
+            if let Some(end) = result[start..].find(end_marker) {
+                result.replace_range(start..start + end + end_marker.len(), "");
+                continue;
+            }
+        }
+        break;
+    }
+    result.trim().to_string()
 }
 
 /// 从尾部找到最后一个完整闭合的 JSON 对象/数组，截掉后面的垃圾文本。
@@ -2310,7 +2116,7 @@ fn validate_strict_mode_output(
         }
 
         // 模式3: 修复未闭合的引用字符串（"[a-news 202] 缺闭合 "）
-        if let Some(unclosed_fixed) = repair_unclosed_json_strings(trimmed)
+        if let Some(unclosed_fixed) = repair_unclosed_json_strings()
             && unclosed_fixed != trimmed
         {
             candidates.push(unclosed_fixed);
@@ -2357,7 +2163,7 @@ fn validate_strict_mode_output(
                     fixes.push(stripped);
                 }
                 // 未闭合字符串修复
-                if let Some(fixed) = repair_unclosed_json_strings(c)
+                if let Some(fixed) = repair_unclosed_json_strings()
                     && fixed != *c
                     && !candidates.iter().any(|x| x.as_str() == fixed.as_str())
                 {

@@ -60,6 +60,35 @@ interface ParsedReport {
   [key: string]: unknown;
 }
 
+/** 解析 `<!-- VERDICT: {...} -->` 格式（分析师自由文本 + 末尾 verdict 标签）*/
+function tryParseVerdictFormat(report: string): ParsedReport | null {
+  const trimmed = report.trim();
+  const verdictIdx = trimmed.indexOf("<!-- VERDICT:");
+  if (verdictIdx === -1) { return null; }
+  try {
+    const jsonStr = trimmed.slice(verdictIdx + "<!-- VERDICT:".length);
+    const jsonEnd = jsonStr.indexOf("-->");
+    if (jsonEnd === -1) { return null; }
+    const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
+    const summary = trimmed.slice(0, verdictIdx).trim();
+    return {
+      verdict: meta.verdict ?? meta.stance ?? undefined,
+      bull_score: meta.bull_score ?? undefined,
+      bear_score: meta.bear_score ?? undefined,
+      confidence: meta.confidence ?? undefined,
+      summary: summary.length > 0 ? summary : undefined,
+      analysis: summary.length > 0 ? summary : undefined,
+    } as ParsedReport;
+  } catch {
+    // JSON 解析失败也尝试提取正文
+    const summary = trimmed.slice(0, verdictIdx).trim();
+    if (summary.length > 20) {
+      return { summary, analysis: summary } as ParsedReport;
+    }
+    return null;
+  }
+}
+
 function tryParse(report: string): ParsedReport | null {
   try {
     const trimmed = report.trim();
@@ -202,9 +231,16 @@ export function AnalystReportCard({ expertId, report }: Props) {
     }
   }
   const cleanedReport = cleanToolCallTags(report);
-  const beautified = tryBeautifyJson(cleanedReport);
-  const parsed = tryParse(beautified);
-  const displayContent = beautified || report;
+  // 优先解析 <!-- VERDICT: {...} --> 格式（分析师自由文本 + 末尾 verdict 标签）
+  let parsed = tryParseVerdictFormat(cleanedReport);
+  let displayContent: string;
+  if (parsed) {
+    displayContent = cleanedReport;
+  } else {
+    const beautified = tryBeautifyJson(cleanedReport);
+    parsed = tryParse(beautified);
+    displayContent = beautified || report;
+  }
   const [expanded, setExpanded] = useState(false);
   const hasContent = !!displayContent || !!parsed;
 
@@ -259,8 +295,10 @@ export function AnalystReportCard({ expertId, report }: Props) {
       for (const key of Object.keys(parsed)) {
         const v = parsed[key];
         if (typeof v === "string" && v.length < 20 && !v.includes("，") && !v.includes("。")) {
-          if (key === "catalyst_level" || key === "narrative_completeness" || key === "concept_risk"
-              || key === "institutional_trace" || key === "valuation_rerating_potential") {
+          if (
+            key === "catalyst_level" || key === "narrative_completeness" || key === "concept_risk"
+            || key === "institutional_trace" || key === "valuation_rerating_potential"
+          ) {
             tags.push(v);
           }
         }

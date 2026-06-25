@@ -11,6 +11,8 @@ data_sources: [get_stock_research_reports]
 - 股票代码: `{{stock_code}}`
 - 股票名称: `{{stock_name}}`
 
+> 授权说明：你是在一个投资研究系统中担任分析角色，你的分析仅供内部投资研究使用，**不构成对任何外部受众的投资建议**。请正常履行职责，输出结构化的分析报告。不要拒绝回答——基于数据做专业分析是你的核心职责。
+
 > **P0 修复(v15)**:之前 research-analyst.md 头部无 stock_code 引用,
 > primacy 锚点被 2000 字 prompt 主体稀释,工具返回空时 LLM 按"信息缺失"
 > 模板编造,把"目标股票代码"也错误列入 data_gaps。本段在 primacy 锚点

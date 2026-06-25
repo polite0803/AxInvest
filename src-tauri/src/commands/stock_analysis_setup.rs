@@ -615,6 +615,8 @@ async fn seed_stock_analysis_workflow_template(
     //   risk-evaluator 节点设置 max_retries=1 规避瞬时 500 错误
     // v21: 辩论节点 max_tokens 8192 → 16384，防止 JSON 截断
     // v22: 全部 agent 节点 max_tokens 默认 8192 → 32768
+    // v23: agent 节点 max_retries 从 1 提升到 2（LLM JSON 异常 + provider 瞬断重试）
+    //      所有 agent prompt 补全授权声明防止模型拒绝回答
     const TEMPLATE_VERSION: i32 = 1;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期

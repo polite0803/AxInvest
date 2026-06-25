@@ -71,10 +71,24 @@ function tryParseVerdictFormat(report: string): ParsedReport | null {
     if (jsonEnd === -1) { return null; }
     const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
     const summary = trimmed.slice(0, verdictIdx).trim();
+    // 兼容两种字段命名：
+    //   分析师节点: verdict / bull_score / bear_score / confidence
+    //   辩论节点:   stance / strength_score / confidence（无 bear_score）
+    const bull = meta.bull_score ?? meta.strength_score ?? undefined;
+    const bear = meta.bear_score ?? undefined;
+    // 辩论节点的 stance 映射到 verdict
+    let verdict = meta.verdict ?? undefined;
+    if (!verdict && meta.stance) {
+      const s = String(meta.stance).toLowerCase();
+      if (s.includes("bull") || s.includes("看多")) { verdict = "看多"; }
+      else if (s.includes("bear") || s.includes("看空")) { verdict = "看空"; }
+      else if (s.includes("neutral") || s.includes("中性")) { verdict = "中性"; }
+      else { verdict = meta.stance; }
+    }
     return {
-      verdict: meta.verdict ?? meta.stance ?? undefined,
-      bull_score: meta.bull_score ?? undefined,
-      bear_score: meta.bear_score ?? undefined,
+      verdict,
+      bull_score: bull,
+      bear_score: bear,
       confidence: meta.confidence ?? undefined,
       summary: summary.length > 0 ? summary : undefined,
       analysis: summary.length > 0 ? summary : undefined,
@@ -309,33 +323,73 @@ export function AnalystReportCard({ expertId, report }: Props) {
       ? (parsed.confidence > 1 ? parsed.confidence : parsed.confidence * 100)
       : (typeof parsed.positionPct === "number" ? parsed.positionPct : null);
 
+    // 计算看多/看空/中性显眼展示
+    const bullScore = typeof parsed.bull_score === "number"
+      ? (parsed.bull_score > 1 ? parsed.bull_score : parsed.bull_score * 100)
+      : null;
+    const bearScore = typeof parsed.bear_score === "number"
+      ? (parsed.bear_score > 1 ? parsed.bear_score : parsed.bear_score * 100)
+      : null;
+    const verdictColor = parsed.verdict
+      ? (String(parsed.verdict).includes("看多") || String(parsed.verdict).includes("bull")
+        ? "red" // A股红=涨
+        : String(parsed.verdict).includes("看空") || String(parsed.verdict).includes("bear")
+        ? "green" // A股绿=跌
+        : "default")
+      : "default";
     return (
       <>
         <Card
           size="small"
           className="h-full flex flex-col"
           title={
-            <span>
+            <span className="flex items-center gap-2 flex-wrap">
               {name}
               {parsed.type && <Tag style={{ marginLeft: 8 }}>{parsed.type}</Tag>}
-              {empty && <Tag color="orange" style={{ marginLeft: 8 }}>数据不足</Tag>}
+              {empty && <Tag color="orange">数据不足</Tag>}
             </span>
           }
           extra={expandBtn}
           styles={{ body: { flex: 1, maxHeight: 400, overflow: "auto" } }}
         >
+          {/* 看多/看空/置信度 显眼展示 */}
+          {(bullScore != null || bearScore != null || parsed.verdict) && (
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
+              {parsed.verdict && (
+                <Tag color={verdictColor} style={{ fontSize: 13, padding: "2px 10px", fontWeight: 600 }}>
+                  {parsed.verdict}
+                </Tag>
+              )}
+              {bullScore != null && (
+                <span className="text-xs" style={{ color: "#f5222d", fontWeight: 600 }}>
+                  看多 {Math.round(bullScore)}
+                </span>
+              )}
+              {bearScore != null && (
+                <span className="text-xs" style={{ color: "#52c41a", fontWeight: 600 }}>
+                  看空 {Math.round(bearScore)}
+                </span>
+              )}
+              {confidence != null && (
+                <span className="text-xs" style={{ color: "var(--muted)" }}>
+                  {t("stockAnalysis.confidence")} {confidence.toFixed(0)}%
+                </span>
+              )}
+            </div>
+          )}
+
           {summary && (
-            <div className="sa-markdown-content text-xs">
+            <div className="sa-markdown-content text-xs" style={{ marginTop: 4 }}>
               <NodeRenderer content={summary} isDark={isDark} />
             </div>
           )}
           {points.length > 0 && (
-            <ul className="text-xs list-disc pl-4 mb-1 mt-1" style={{ color: "var(--muted)" }}>
+            <ul className="text-xs list-disc pl-4 mb-1 mt-2" style={{ color: "var(--muted)" }}>
               {points.map((p, i) => <li key={i}>{p}</li>)}
             </ul>
           )}
           {tags.length > 0 && (
-            <div className="flex gap-1 flex-wrap mt-1">
+            <div className="flex gap-1 flex-wrap mt-2">
               {tags.map((s, i) => (
                 <Tag key={i} color={getSignalColor(s)}>
                   {s}
@@ -344,16 +398,11 @@ export function AnalystReportCard({ expertId, report }: Props) {
             </div>
           )}
           {riskFlags.length > 0 && (
-            <div className="flex gap-1 flex-wrap mt-1">
+            <div className="flex gap-1 flex-wrap mt-2">
               {riskFlags.map((r, i) => <Tag key={i} color="orange">{r}</Tag>)}
             </div>
           )}
-          {confidence != null && (
-            <div className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.confidence")}: {confidence.toFixed(0)}%
-            </div>
-          )}
-          {!summary && points.length === 0 && tags.length === 0 && (
+          {!parsed.verdict && bullScore == null && bearScore == null && !summary && points.length === 0 && (
             <div className="text-xs" style={{ color: "var(--muted)" }}>
               分析完成，但未返回结构化内容
             </div>

@@ -1869,19 +1869,16 @@ fn is_refusal_plain_text(s: &str) -> bool {
 /// 分析师输出自然语言报告，末尾追加 <!-- VERDICT: {...} --> 供机读。
 fn extract_verdict_tag(text: &str) -> Option<String> {
     // 查找最后一个 <!-- VERDICT: 出现位置（取最后一个，因为正文中可能也有 HTML 注释）
-    let search_start = text.len().saturating_sub(2000); // 只扫描尾部 2000 字符
-    let tail = &text[search_start.min(text.len())..];
-
+    // 安全做法：直接在全文本上 rfind，不手动做字节切片
     let start_marker = "<!-- VERDICT: ";
     let end_marker = "-->";
-
-    if let Some(start) = tail.rfind(start_marker) {
+    if let Some(start) = text.rfind(start_marker) {
         let json_start = start + start_marker.len();
-        if let Some(end) = tail[json_start..].find(end_marker) {
-            let verdict_str = tail[json_start..json_start + end].trim();
-            // 验证是合法 JSON
-            if serde_json::from_str::<serde_json::Value>(verdict_str).is_ok() {
-                return Some(verdict_str.to_string());
+        if let Some(end_offset) = text[json_start..].find(end_marker) {
+            let verdict_str = &text[json_start..json_start + end_offset];
+            let trimmed = verdict_str.trim();
+            if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+                return Some(trimmed.to_string());
             }
         }
     }

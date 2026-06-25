@@ -458,15 +458,15 @@ fn check_hold_gate(analysts: &[AnalystWeight]) -> HoldGateResult {
     for a in analysts {
         let domain = classify_domain(&a.analyst_id);
         match domain {
-            AnalystDomain::Technical => {
-                if a.stance_direction != "neutral" && a.stance_confidence > 0.5 {
-                    tech_has_trend = true;
-                }
+            AnalystDomain::Technical
+                if a.stance_direction != "neutral" && a.stance_confidence > 0.5 =>
+            {
+                tech_has_trend = true;
             },
-            AnalystDomain::Sentiment => {
-                if a.stance_direction != "neutral" && a.stance_confidence > 0.5 {
-                    money_has_dir = true;
-                }
+            AnalystDomain::Sentiment
+                if a.stance_direction != "neutral" && a.stance_confidence > 0.5 =>
+            {
+                money_has_dir = true;
             },
             AnalystDomain::Fundamental | AnalystDomain::Macro
                 if (a.stance_direction == "bullish" || a.stance_direction == "bearish")

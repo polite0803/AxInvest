@@ -48,7 +48,6 @@ const HORIZON_KEYWORDS: &[(&str, &str)] = &[
 
 /// 提取动作类型（由内部匹配取代）
 // const ACTION_KEYWORDS was removed, logic inline in extract_action()
-
 /// 预定义的 A 股热门股票名称→代码映射（作为 fallback）
 const HOT_STOCK_MAP: &[(&str, &str, &str)] = &[
     ("贵州茅台", "600519", "贵州茅台"),

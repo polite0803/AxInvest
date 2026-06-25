@@ -147,8 +147,8 @@ fn extract_json_array(text: &str) -> Option<String> {
     // 尝试从 Markdown code block 中提取
     if let Some(start) = trimmed.find("```") {
         let after_start = &trimmed[start + 3..].trim();
-        let after_lang = if after_start.starts_with("json") {
-            &after_start[4..]
+        let after_lang = if let Some(stripped) = after_start.strip_prefix("json") {
+            stripped
         } else {
             after_start
         };

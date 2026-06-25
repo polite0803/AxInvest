@@ -809,20 +809,16 @@ impl NodeExecutorTrait for AgentExecutor {
             let trimmed = final_content.trim().to_string();
 
             // 第一步：尝试提取 VERDICT tag（TradingAgents 模式：自然语言 + 末尾机读标签）
-            let verdict_reconstructed = extract_verdict_tag(&trimmed)
-                .and_then(|verdict_json| {
-                    // 成功提取 VERDICT，用报告文本 + VERDICT 重构 minimal JSON
-                    let report_text = strip_verdict_tag(&trimmed);
-                    let report_escaped = serde_json::to_string(&report_text)
-                        .unwrap_or_else(|_| "\"\"".to_string());
-                    let combined = format!(
-                        r#"{{"report":{}, "verdict":{} }}"#,
-                        report_escaped,
-                        verdict_json
-                    );
-                    serde_json::from_str::<serde_json::Value>(&combined).ok()?;
-                    Some(combined)
-                });
+            let verdict_reconstructed = extract_verdict_tag(&trimmed).and_then(|verdict_json| {
+                // 成功提取 VERDICT，用报告文本 + VERDICT 重构 minimal JSON
+                let report_text = strip_verdict_tag(&trimmed);
+                let report_escaped =
+                    serde_json::to_string(&report_text).unwrap_or_else(|_| "\"\"".to_string());
+                let combined =
+                    format!(r#"{{"report":{}, "verdict":{} }}"#, report_escaped, verdict_json);
+                serde_json::from_str::<serde_json::Value>(&combined).ok()?;
+                Some(combined)
+            });
 
             if let Some(refixed) = verdict_reconstructed {
                 if refixed != trimmed {
@@ -835,7 +831,9 @@ impl NodeExecutorTrait for AgentExecutor {
             } else {
                 // 没有 VERDICT tag，走完整 JSON 校验（portfolio-mgr 等节点）
                 let fixed = try_extract_json_fragment(&trimmed)
-                    .filter(|extracted| serde_json::from_str::<serde_json::Value>(extracted).is_ok())
+                    .filter(|extracted| {
+                        serde_json::from_str::<serde_json::Value>(extracted).is_ok()
+                    })
                     .or_else(|| {
                         let repaired = repair_json(&trimmed);
                         if repaired != trimmed
@@ -846,9 +844,7 @@ impl NodeExecutorTrait for AgentExecutor {
                             None
                         }
                     })
-                    .or_else(|| {
-                        try_fix_truncated_json(&trimmed)
-                    });
+                    .or_else(|| try_fix_truncated_json(&trimmed));
 
                 if let Some(ref fixed_content) = fixed {
                     if fixed_content != &trimmed {
@@ -1669,7 +1665,9 @@ fn insert_comma_between_brackets(s: &str, left: char, right: char) -> String {
         if bytes[i] == left as u8 {
             // 检查后面是否有空白 + right
             let mut j = i + 1;
-            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r') {
+            while j < bytes.len()
+                && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r')
+            {
                 j += 1;
             }
             if j < bytes.len() && bytes[j] == right as u8 {
@@ -1712,19 +1710,41 @@ fn insert_missing_colon(s: &str) -> String {
                 let mut j = i + 1;
                 let mut escaped = false;
                 while j < bytes.len() {
-                    if escaped { escaped = false; j += 1; continue; }
-                    if bytes[j] == b'\\' { escaped = true; j += 1; continue; }
-                    if bytes[j] == b'"' { break; }
+                    if escaped {
+                        escaped = false;
+                        j += 1;
+                        continue;
+                    }
+                    if bytes[j] == b'\\' {
+                        escaped = true;
+                        j += 1;
+                        continue;
+                    }
+                    if bytes[j] == b'"' {
+                        break;
+                    }
                     j += 1;
                 }
-                if j >= bytes.len() { break; } // 未闭合的字符串，跳出
+                if j >= bytes.len() {
+                    break;
+                } // 未闭合的字符串，跳出
                 // 检查 `"` 闭合后有没有 `:`（跳过空白）
                 let mut k = j + 1;
-                while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t' || bytes[k] == b'\n') {
+                while k < bytes.len()
+                    && (bytes[k] == b' ' || bytes[k] == b'\t' || bytes[k] == b'\n')
+                {
                     k += 1;
                 }
-                if k < bytes.len() && bytes[k] == b':' { i = k + 1; continue; } // 已有冒号
-                if k < bytes.len() && (bytes[k] == b'"' || bytes[k] == b'(' || bytes[k] == b'{' || bytes[k] == b'[') {
+                if k < bytes.len() && bytes[k] == b':' {
+                    i = k + 1;
+                    continue;
+                } // 已有冒号
+                if k < bytes.len()
+                    && (bytes[k] == b'"'
+                        || bytes[k] == b'('
+                        || bytes[k] == b'{'
+                        || bytes[k] == b'[')
+                {
                     // 缺冒号！在闭合 `"` 后、空白前插入 `:`
                     insert_pos = j + 1; // 在闭合 `"` 的后面
                     found = true;
@@ -1738,7 +1758,9 @@ fn insert_missing_colon(s: &str) -> String {
         if found {
             result.insert(insert_pos, ':');
         }
-        if result == before { break; }
+        if result == before {
+            break;
+        }
     }
     result
 }
@@ -1843,7 +1865,11 @@ fn is_refusal_plain_text(s: &str) -> bool {
         if lower.starts_with(prefix) {
             let after = &trimmed[prefix.len()..].trim();
             // 如果后面无实质内容（仅标点符号/空格），是真拒绝
-            if after.is_empty() || after.chars().all(|c| c.is_ascii_punctuation() || c.is_whitespace() || c == '。' || c == '，') {
+            if after.is_empty()
+                || after.chars().all(|c| {
+                    c.is_ascii_punctuation() || c.is_whitespace() || c == '。' || c == '，'
+                })
+            {
                 return true;
             }
             // 后面有实质内容（如"行业分析师数据不足"）→ 是数据不足说明，不是拒绝
@@ -2024,14 +2050,14 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
                     // } 不匹配栈顶 → 优先尝试修复
                     break;
                 }
-            }
+            },
             b']' => {
                 if stack.last() == Some(&b'[') {
                     stack.pop();
                 } else {
                     break;
                 }
-            }
+            },
             _ => {},
         }
         if stack.is_empty() && i > 0 {
@@ -2121,7 +2147,9 @@ fn validate_strict_mode_output(
 
         // 模式3b: 括号缺失/截断修复（补充缺失的 ]/}，处理"数组未关继续写父级字段"模式）
         if let Some(trunc_fixed) = try_fix_truncated_json(trimmed)
-            && !candidates.iter().any(|x| x.as_str() == trunc_fixed.as_str())
+            && !candidates
+                .iter()
+                .any(|x| x.as_str() == trunc_fixed.as_str())
         {
             candidates.push(trunc_fixed);
         }

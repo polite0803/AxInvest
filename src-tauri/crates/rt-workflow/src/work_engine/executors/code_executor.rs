@@ -212,7 +212,10 @@ impl NodeExecutorTrait for CodeExecutor {
                 context.variables.contains_key("raw-data"),
                 context.variables.keys().take(10).collect::<Vec<_>>(),
                 super::resolve_var_path("t-scoring.result.totalScore", &context.variables),
-                super::resolve_var_path("debate-convergence.params.consensus_score", &context.variables),
+                super::resolve_var_path(
+                    "debate-convergence.params.consensus_score",
+                    &context.variables
+                ),
                 super::resolve_var_path("a-catalyst.params.catalyst_level", &context.variables),
             );
             let (result, input_params) = execute_rhai_directly(

@@ -145,8 +145,8 @@ async fn data_quality_precheck(
         ("klines", kline_check),
         ("news", news_check),
         ("money_flow", money_flow_check),
-        ("announcements", announcements_check),  // catalyst-analyst
-        ("concept_blocks", concept_check),       // catalyst / sector
+        ("announcements", announcements_check), // catalyst-analyst
+        ("concept_blocks", concept_check),      // catalyst / sector
     ])
 }
 

@@ -26,7 +26,7 @@ pub const SNAPSHOT_METHODS: &[&str] = &[
     "get_hot_stocks",
     "get_industry_ranking",
     "get_cls_flash",
-    "get_stock_concept_blocks",  // 工具名，LLM 调用时用；vendor asof_capability 用 get_concept_blocks
+    "get_stock_concept_blocks", // 工具名，LLM 调用时用；vendor asof_capability 用 get_concept_blocks
     "search_stock",
     "get_sector_info",
     "get_money_flow",

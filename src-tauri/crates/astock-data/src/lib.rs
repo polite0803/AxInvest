@@ -1888,7 +1888,7 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_concept_blocks", &date) {
+                if let Some(cached) = self.try_daily_snapshot("get_stock_concept_blocks", &date) {
                     // 概念板块按个股有差异,缓存只能做"今日全市场数据"的兜底
                     // 如果精确到个股,需要后续细化
                     if let Ok(r) = serde_json::from_str::<Option<ConceptBlocks>>(&cached) {
@@ -1905,6 +1905,11 @@ impl AStockClient {
                             if let Ok(Some(r)) =
                                 vendor.get_concept_blocks_with_asof(stock_code).await
                             {
+                                return Ok(Some(r));
+                            }
+                        },
+                        AsOfCapability::Fallthrough => {
+                            if let Ok(Some(r)) = vendor.get_concept_blocks(stock_code).await {
                                 return Ok(Some(r));
                             }
                         },
@@ -2117,6 +2122,13 @@ impl AStockClient {
                     match vendor.asof_capability("get_industry_ranking") {
                         AsOfCapability::NativeDateParam => {
                             if let Ok(r) = vendor.get_industry_ranking_with_asof().await {
+                                if !r.is_empty() {
+                                    return Ok(r);
+                                }
+                            }
+                        },
+                        AsOfCapability::Fallthrough => {
+                            if let Ok(r) = vendor.get_industry_ranking().await {
                                 if !r.is_empty() {
                                     return Ok(r);
                                 }

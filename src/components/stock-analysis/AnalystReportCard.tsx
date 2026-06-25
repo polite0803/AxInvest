@@ -222,10 +222,50 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
   // 有解析结果：尝试结构化渲染
   if (parsed) {
-    const summary = extractSummary(parsed);
+    let summary = extractSummary(parsed);
     const tags = extractTags(parsed);
-    const points = extractKeyPoints(parsed);
+    let points = extractKeyPoints(parsed);
     const riskFlags = extractRiskFlags(parsed);
+
+    // ── 兜底：提取器没匹配但 parsed 有实质内容 → 自动推断 ──
+    // 覆盖 catalyst/news/social-media 等专家输出格式
+    if (!summary && points.length === 0 && tags.length === 0) {
+      // 取第一个长字符串字段作为 summary
+      for (const val of Object.values(parsed)) {
+        if (typeof val === "string" && val.length > 10 && !val.startsWith("[") && !val.startsWith("http")) {
+          summary = val;
+          break;
+        }
+      }
+      // 取第一个有意义的值数组作为 points
+      if (points.length === 0) {
+        for (const val of Object.values(parsed)) {
+          if (Array.isArray(val) && val.length > 0) {
+            const first = val[0];
+            if (typeof first === "object" && first !== null && first.event) {
+              points = val.map((v: Record<string, unknown>) => String(v.event ?? ""));
+            } else if (typeof first === "object" && first !== null && first.claim) {
+              points = val.map((v: Record<string, unknown>) => String(v.claim ?? ""));
+            } else if (typeof first === "object" && first !== null && first.point) {
+              points = val.map((v: Record<string, unknown>) => String(v.point ?? ""));
+            } else if (typeof first === "string") {
+              points = val.filter((v: unknown) => typeof v === "string");
+            }
+            if (points.length > 0) { break; }
+          }
+        }
+      }
+      // 生成标签：取枚举型短字符串字段
+      for (const key of Object.keys(parsed)) {
+        const v = parsed[key];
+        if (typeof v === "string" && v.length < 20 && !v.includes("，") && !v.includes("。")) {
+          if (key === "catalyst_level" || key === "narrative_completeness" || key === "concept_risk"
+              || key === "institutional_trace" || key === "valuation_rerating_potential") {
+            tags.push(v);
+          }
+        }
+      }
+    }
     const empty = isEmptyAnalysis(parsed);
     const confidence = typeof parsed.confidence === "number"
       ? (parsed.confidence > 1 ? parsed.confidence : parsed.confidence * 100)

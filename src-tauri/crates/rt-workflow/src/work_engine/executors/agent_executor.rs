@@ -1616,10 +1616,56 @@ fn try_extract_json_fragment(text: &str) -> Option<String> {
 /// 注：stock_workflow.rs 中有完整版 repair_json，此处是同步的简化版。
 fn repair_json(s: &str) -> String {
     let mut result = s.to_string();
+    // 常见 LLM 输出错误修复
     result = result.replace("nulll", "null");
+    // 尾逗号: `,]` → `]`, `,}` → `}`
     result = result.replace(",]", "]");
     result = result.replace(",}", "}");
+    // 双逗号: `,,` → `,`
+    while result.contains(",,") {
+        result = result.replace(",,", ",");
+    }
+    // 缺失逗号：数组/对象边界间缺失逗号（LLM 高频错误）
+    // 处理 `]{`, `}{`, `}[` 等模式（可能含空白符）
+    result = insert_comma_between_brackets(&result, ']', '{');
+    result = insert_comma_between_brackets(&result, '}', '{');
+    result = insert_comma_between_brackets(&result, '}', '[');
+    // 双引号键修复: 连续两个引号 `""k` → `"k`
+    result = result.replace("\"\"", "\"");
     result
+}
+
+/// 在两个字符之间插入逗号（处理中间有空白符的情况）
+/// 例如 `]    {` → `],    {`
+fn insert_comma_between_brackets(s: &str, left: char, right: char) -> String {
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len() + 16);
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == left as u8 {
+            // 检查后面是否有空白 + right
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r') {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == right as u8 {
+                // 在 left 和 right 之间插入逗号（如果还没有逗号）
+                // 检查 left 和 right 之间是否已有逗号
+                let has_comma = (i + 1..j).any(|k| bytes[k] == b',');
+                if !has_comma {
+                    result.push(left as u8);
+                    // 保留中间空白
+                    result.extend_from_slice(&bytes[i + 1..j]);
+                    result.push(b',');
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
 /// 修复 LLM 输出中高频出现的"未闭合字符串"模式。
@@ -1822,6 +1868,10 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
         result.push_str(&close);
 
         let repaired = repair_json(&result);
+        tracing::info!(
+            "strict_mode: try_fix_truncated_json strategy1: stack_len={} in_string={} result_preview={}",
+            stack.len(), in_string, result.chars().take(100).collect::<String>()
+        );
         if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
             return Some(repaired);
         }
@@ -1914,6 +1964,33 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
         }
         if repaired != candidate && serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
             return Some(candidate);
+        }
+    }
+
+    // ── 策略3：盲补兜底（当内嵌 " 导致 in_string 扫描失准时）──
+    // 当 content 明确以 { 或 [ 开头，但策略1/2均返回 None 时，
+    // 用粗略计数估算缺失的闭括号数量（不计字符串状态，允许误报）。
+    // 仅作为防止节点整个失败的最终保护。
+    let open_curly = s.matches('{').count() as i32;
+    let close_curly = s.matches('}').count() as i32;
+    let open_square = s.matches('[').count() as i32;
+    let close_square = s.matches(']').count() as i32;
+    let need_curly = open_curly - close_curly;
+    let need_square = open_square - close_square;
+
+    if need_curly > 0 || need_square > 0 {
+        let mut result = s.to_string();
+        // 假设末尾有未闭合字符串
+        result.push('"');
+        for _ in 0..need_square.max(0) {
+            result.push(']');
+        }
+        for _ in 0..need_curly.max(0) {
+            result.push('}');
+        }
+        let repaired = repair_json(&result);
+        if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+            return Some(repaired);
         }
     }
 
@@ -2050,8 +2127,8 @@ fn try_extract_first_json(s: &str) -> Option<String> {
 }
 
 /// 从字符串中提取最长的合法 JSON 前缀。
-/// 先查第一个 `{` 或 `[`，然后逐字符扫描追踪括号平衡，
-/// 在深度归零处截断，尝试解析。
+/// 先查第一个 `{` 或 `[`，然后逐字符扫描用栈追踪括号平衡，
+/// 在栈为空时截断。
 /// 作为所有其他修复失败后的最终兜底。
 fn try_extract_balanced_json(s: &str) -> Option<String> {
     let s = trim_after_json(s);
@@ -2059,8 +2136,7 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
     let candidate = &s[start..];
 
     let bytes = candidate.as_bytes();
-    let mut depth_curly: i32 = 0;
-    let mut depth_square: i32 = 0;
+    let mut stack: Vec<u8> = Vec::new(); // 用栈追踪括号嵌套顺序
     let mut in_string = false;
     let mut escaped = false;
     let mut end_pos = 0;
@@ -2082,19 +2158,31 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
             continue;
         }
         match b {
-            b'{' => depth_curly += 1,
-            b'}' => depth_curly -= 1,
-            b'[' => depth_square += 1,
-            b']' => depth_square -= 1,
+            b'{' | b'[' => stack.push(b),
+            b'}' => {
+                if stack.last() == Some(&b'{') {
+                    stack.pop();
+                } else {
+                    // } 不匹配栈顶 → 优先尝试修复
+                    break;
+                }
+            }
+            b']' => {
+                if stack.last() == Some(&b'[') {
+                    stack.pop();
+                } else {
+                    break;
+                }
+            }
             _ => {},
         }
-        if depth_curly == 0 && depth_square == 0 && i > 0 {
+        if stack.is_empty() && i > 0 {
             end_pos = i + 1;
             break;
         }
     }
 
-    if end_pos == 0 && (depth_curly > 0 || depth_square > 0) {
+    if end_pos == 0 && !stack.is_empty() {
         end_pos = bytes.len();
     }
 
@@ -2171,6 +2259,13 @@ fn validate_strict_mode_output(
             && unclosed_fixed != trimmed
         {
             candidates.push(unclosed_fixed);
+        }
+
+        // 模式3b: 括号缺失/截断修复（补充缺失的 ]/}，处理"数组未关继续写父级字段"模式）
+        if let Some(trunc_fixed) = try_fix_truncated_json(trimmed)
+            && !candidates.iter().any(|x| x.as_str() == trunc_fixed.as_str())
+        {
+            candidates.push(trunc_fixed);
         }
 
         // 模式4: 深度追踪截断——去掉 JSON 后追加的垃圾文本
@@ -2268,7 +2363,9 @@ fn validate_strict_mode_output(
             .map(|e| e.to_string())
             .unwrap_or_default();
         let preview: String = trimmed.chars().take(200).collect();
-        tracing::warn!("strict_mode: LLM 输出不是合法 JSON: {serde_err} [前200字符: {preview}]");
+        let full: String = trimmed.chars().take(3000).collect();
+        tracing::error!("strict_mode: LLM 输出不是合法 JSON: {serde_err} [前200字符: {preview}]");
+        tracing::error!("strict_mode: 完整输出(前3000字符): {full}");
         return Err(NodeError::exec_failed(
             error_code::VALIDATION_FAILED,
             format!("严格模式: LLM 输出不是合法 JSON（错误: {serde_err}, 前200字符: {preview}）"),

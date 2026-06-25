@@ -1764,7 +1764,7 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
 
     // 补全未闭合引号
     let open_quotes = result.matches('"').count();
-    if open_quotes % 2 != 0 {
+    if open_quotes & 1 == 1 {
         result.push('"');
         added = true;
     }
@@ -1891,11 +1891,11 @@ fn strip_verdict_tag(text: &str) -> String {
     let end_marker = "-->";
     let mut result = text.to_string();
     loop {
-        if let Some(start) = result.find(start_marker) {
-            if let Some(end) = result[start..].find(end_marker) {
-                result.replace_range(start..start + end + end_marker.len(), "");
-                continue;
-            }
+        if let Some(start) = result.find(start_marker)
+            && let Some(end) = result[start..].find(end_marker)
+        {
+            result.replace_range(start..start + end + end_marker.len(), "");
+            continue;
         }
         break;
     }

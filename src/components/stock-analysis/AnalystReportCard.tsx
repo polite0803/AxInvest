@@ -21,7 +21,7 @@ function registerCustomParagraph() {
   customParagraphRegistered = true;
 
   const CustomParagraph: React.FC<{
-    node: Record<string, unknown>;
+    node: Record<string, unknown> & { children?: unknown[] };
     ctx?: RenderContext;
     renderNode?: RenderNodeFn;
     indexKey?: React.Key;

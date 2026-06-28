@@ -68,6 +68,7 @@ pub mod quant;
 #[cfg(not(mobile))]
 pub mod quickbar;
 pub mod reflection;
+pub mod recommendation_cron;
 pub mod research;
 pub mod rl;
 pub mod sandbox;

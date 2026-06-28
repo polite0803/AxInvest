@@ -103,12 +103,15 @@ async fn data_quality_precheck(
         Err(e) => SourceCheck::Partial(format!("获取失败: {e}")),
     };
 
-    // P0-2 修复: 请求 500 匹配内部 fetch_limit，最大限度保留截断后数据
-    // Err 改为 Partial (vendor 临时限流/降级不应阻塞整个分析)
+    // V38 修复: K 线至少需要 60 日才能计算 MA(20)+MACD(26) 等关键技术指标。
+    // 不足 60 日但 ≥30 日时仅降级为 Partial（可继续但技术分析受限）。
     let kline_check = match client.get_klines(stock_code, "daily", 500).await {
-        Ok(klines) if klines.len() >= 15 => SourceCheck::Ok,
+        Ok(klines) if klines.len() >= 60 => SourceCheck::Ok,
+        Ok(klines) if klines.len() >= 30 => {
+            SourceCheck::Partial(format!("仅 {} 行, 技术分析受限", klines.len()))
+        },
         Ok(klines) if !klines.is_empty() => {
-            SourceCheck::Partial(format!("仅 {} 行, 不足 15 日", klines.len()))
+            SourceCheck::Partial(format!("仅 {} 行, 严重不足", klines.len()))
         },
         Ok(_) => SourceCheck::Failed("K 线为空".into()),
         Err(e) => SourceCheck::Partial(format!("K 线获取受阻（可重试）: {e}")),
@@ -139,15 +142,46 @@ async fn data_quality_precheck(
         _ => SourceCheck::Partial("无概念板块数据".into()),
     };
 
-    aggregate_precheck(vec![
-        ("quote", quote_check),
-        ("financials", fin_check),
-        ("klines", kline_check),
-        ("news", news_check),
-        ("money_flow", money_flow_check),
-        ("announcements", announcements_check), // catalyst-analyst
-        ("concept_blocks", concept_check),      // catalyst / sector
-    ])
+    // V40 修复: 补充对核心分析师依赖的数据源预检（不阻塞分析，仅标记 Partial）
+    // a-sector / a-catalyst 依赖 sector_info；a-lockup 依赖 lockup_schedule
+    let sector_check = match client.get_sector_info(stock_code).await {
+        Ok(Some(_)) => SourceCheck::Ok,
+        _ => SourceCheck::Partial("无行业板块数据".into()),
+    };
+    let lockup_check = match client.get_lockup_schedule(stock_code).await {
+        Ok(items) if !items.is_empty() => SourceCheck::Ok,
+        _ => SourceCheck::Partial("无限售解禁数据".into()),
+    };
+
+    // V38 修复: 核心数据源（quote + klines）完全失败时整体 Insufficient，
+    // 次级数据源（news/money_flow/announcements/concept_blocks）失败只 Partial。
+    let core_ok = matches!(quote_check, SourceCheck::Ok) && matches!(kline_check, SourceCheck::Ok);
+    if !core_ok {
+        let mut msgs: Vec<String> = Vec::new();
+        if !matches!(quote_check, SourceCheck::Ok) {
+            if let SourceCheck::Failed(r) | SourceCheck::Partial(r) = &quote_check {
+                msgs.push(format!("行情: {r}"));
+            }
+        }
+        if !matches!(kline_check, SourceCheck::Ok) {
+            if let SourceCheck::Failed(r) | SourceCheck::Partial(r) = &kline_check {
+                msgs.push(format!("K线: {r}"));
+            }
+        }
+        QualityPrecheckResult::Insufficient(msgs.join("; "))
+    } else {
+        aggregate_precheck(vec![
+            ("quote", quote_check),
+            ("financials", fin_check),
+            ("klines", kline_check),
+            ("news", news_check),
+            ("money_flow", money_flow_check),
+            ("announcements", announcements_check),
+            ("concept_blocks", concept_check),
+            ("sector_info", sector_check),
+            ("lockup_schedule", lockup_check),
+        ])
+    }
 }
 
 struct LoadedTemplate {
@@ -353,6 +387,17 @@ fn extract_decision_json(wf: &Workflow) -> Option<String> {
             return Some(s);
         }
     }
+    // V40 修复: 当 quality-gate 判定为 D/F 时，portfolio-mgr 公式决策被
+    // quality-fallback(AgentNode)的保守决策替代。此时取 quality-fallback 的
+    // content JSON 作为最终决策，确保前端 DB 展示与质量门禁路径一致。
+    if let Some(qf) = wf.results.get("quality-fallback") {
+        if let Some(content_str) = qf.get("content").and_then(|v| v.as_str()) {
+            // quality-fallback 输出格式: {"action":"持有/减持/卖出","positionPct":0-20,"reasoning":"..."}
+            if serde_json::from_str::<serde_json::Value>(content_str).is_ok() {
+                return Some(content_str.to_string());
+            }
+        }
+    }
     // 回退: workflow 顶层 output(无 output_schema 或非 stock-analysis 工作流)
     wf.output
         .as_ref()
@@ -372,14 +417,112 @@ fn extract_decision_json(wf: &Workflow) -> Option<String> {
 /// 回退到 `results["trader"]` 本身。
 fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
     let trader = wf.results.get("trader")?;
-    let actual = match trader {
+    // V37 修复: trader 是 AgentNode，输出结构为 {role, content: <json_string>, ...}，
+    // LLM 的业务字段（action/targetPrice/confidence）在 content JSON 字符串内部。
+    // 旧代码取 .result（CodeNode 的字段），AgentNode 无此字段→永远 fallback 到包装对象，
+    // 导致 compute_decision_agreement 拿不到 action 字段，一致性分数走兜底。
+    // V41 修复: content 是 JSON 字符串，需解析为 JSON 对象再序列化后存储。
+    // 旧代码直接 serialize Value::String(content)，导致 DB 中存储的是双重嵌套
+    // 的 JSON 字符串（前端 JSON.parse 后仍是字符串而非对象）。
+    match trader {
         serde_json::Value::Object(obj) => {
-            // AgentNode 可能包装: { status, result, ... }
-            obj.get("result").cloned().unwrap_or_else(|| trader.clone())
+            if let Some(content_str) = obj.get("content").and_then(|v| v.as_str()) {
+                // 解析 content 内层 JSON 字符串为 JSON 对象，再序列化
+                if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(content_str) {
+                    // V46 修复: 标准化 LLM 输出的 action 字段
+                    // trader prompt 规定 action ∈ {买入,增持,持有,减持,卖出,观望},
+                    // 但 LLM 可能输出"不确定""未知"等非标准值（尤其是当数据矛盾时
+                    // LLM 选择输出"不确定"作为逃逸）。
+                    // 通过白名单强制映射, 防止 DB 和 UI 出现非标准值。
+                    // 注意: 不修改 targetPrice/stopLoss/confidence 等数值字段,
+                    // 它们错误时 portfolio-mgr 的 sanity 预检会兜底。
+                    normalize_llm_action(&mut parsed);
+                    return serde_json::to_string(&parsed).ok();
+                }
+                // 解析失败时回退：返回原始 content 字符串
+                return Some(content_str.to_string());
+            }
+            serde_json::to_string(trader).ok()
         },
-        _ => trader.clone(),
+        _ => serde_json::to_string(trader).ok(),
+    }
+}
+
+/// 标准化 LLM 输出的 action 字段, 映射非标准值到标准值。
+///
+/// 标准值: 买入, 增持, 持有, 减持, 卖出, 观望
+/// 非标准值映射规则:
+///   "不确定" / "未知" / "? " / "" → "观望" (无判断 → 不操作)
+///   "回避" / "远离" / "清仓" / "止损" → "卖出" (明确看空 → 卖出)
+///   "卖" / "sell" → "卖出", "买" / "buy" → "买入"
+///   "减" → "减持"
+fn normalize_llm_action(parsed: &mut serde_json::Value) {
+    let obj = match parsed.as_object_mut() {
+        Some(o) => o,
+        None => return,
     };
-    serde_json::to_string(&actual).ok()
+    let action = match obj.get("action").and_then(|v| v.as_str()) {
+        Some(a) => a,
+        None => return,
+    };
+    let trimmed = action.trim();
+    // 已在标准白名单中 → 不处理
+    const STANDARD: &[&str] = &["买入", "增持", "持有", "减持", "卖出", "观望"];
+    if STANDARD.contains(&trimmed) {
+        return;
+    }
+    // V46 映射表: 把 LLM 可能输出的所有非标准值映射到标准值
+    let normalized: &str = match trimmed {
+        // 无判断 → 观望
+        "不确定" | "未知" | "?" | "??" | "" | "无法判断" | "无法确定" => "观望",
+        // 明确看空 → 卖出
+        "回避" | "远离" | "清仓" | "止损" | "割肉" | "离场" => "卖出",
+        // 近义词映射
+        "卖" | "sell" | "做空" | "空" => "卖出",
+        "买" | "buy" | "做多" | "多" => "买入",
+        "减" => "减持",
+        "增" | "加" => "增持",
+        "持" => "持有",
+        "观" => "观望",
+        // 兜底: 其他未知值 → 观望（保守操作）
+        _ => {
+            tracing::warn!("[normalize_llm_action] 未知 action 值 {:?}, 兜底映射为观望", trimmed);
+            "观望"
+        },
+    };
+    obj.insert("action".to_string(), serde_json::Value::String(normalized.to_string()));
+}
+
+/// 双视角一致性诊断结果
+///
+/// V50 升级: compute_decision_agreement 不再只返回 0-100 总分,
+/// 而是返回分维度诊断结构体。上层可根据维度详情:
+///   - 决定 confidence 调制幅度
+///   - 生成分歧诊断 reasoning 文本
+///   - 判断是否触发人工复核
+struct AgreementBreakdown {
+    /// 总分 0-100
+    total: i32,
+    /// action 维度原始分 (满分 50)
+    action_score: f64,
+    /// action 是否基本一致 (>= 35 分)
+    action_ok: bool,
+    /// action 一致性说明 (exact_match / same_direction / opposite / ...)
+    action_note: String,
+    /// 公式视角的 action 原始值
+    formula_action: String,
+    /// LLM 视角的 action 原始值
+    llm_action: String,
+    /// positionPct 维度原始分 (满分 30)
+    position_score: f64,
+    /// 仓位差值绝对值
+    position_gap: Option<f64>,
+    /// confidence 维度原始分 (满分 20)
+    confidence_score: f64,
+    /// 置信度差值绝对值
+    confidence_gap: Option<f64>,
+    /// 冲突类型: all_agree / opposite_direction / action_divergence / position_gap / confidence_gap
+    conflict_type: String,
 }
 
 /// 计算公式决策与 LLM 决策的一致性分数（0-100）。
@@ -388,12 +531,21 @@ fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
 /// 对比 action（操作方向）、positionPct（仓位百分比）、confidence（置信度）
 /// 三个维度，权重分别为 50/30/20。
 ///
+/// V40 修复：
+/// - 从 trader 输出取 action 而非 stance（trader prompt 输出字段为 action）
+/// - trader 无 positionPct 字段，故 LLM 的 positionPct 视为缺失→pos_score 走兜底 15
+/// - 移除 #[allow(dead_code)]，在 stock_workflow 完成时调用并写入决策元数据
+///
 /// 归一化规则（与前端 normalizeAction 保持一致）:
 /// - 移除空格/斜杠/下划线/全角空格
 /// - 小写比较
 /// - "买"和"增持"视为一致，"卖"和"减持"视为一致
-#[allow(dead_code)]
-fn compute_decision_agreement(formula_json: Option<&str>, llm_json: Option<&str>) -> Option<i32> {
+///
+/// V50 升级: 返回 AgreementBreakdown 而非 Option<i32>，包含分维度诊断
+fn compute_decision_agreement(
+    formula_json: Option<&str>,
+    llm_json: Option<&str>,
+) -> Option<AgreementBreakdown> {
     let fj = serde_json::from_str::<serde_json::Value>(formula_json?).ok()?;
     let lj = serde_json::from_str::<serde_json::Value>(llm_json?).ok()?;
 
@@ -409,24 +561,70 @@ fn compute_decision_agreement(formula_json: Option<&str>, llm_json: Option<&str>
     let f_pos = fj.get("positionPct").and_then(|v| v.as_f64());
     let f_conf = fj.get("confidence").and_then(|v| v.as_f64());
 
-    // LLM 字段: stance→action / positionPct / confidence
-    let l_action = lj.get("stance").and_then(|v| v.as_str().map(norm));
+    // V40: LLM 字段也取 action（trader prompt 输出格式中的字段名是 action 而非 stance）
+    let l_action = lj.get("action").and_then(|v| v.as_str().map(norm));
     let l_pos = lj.get("positionPct").and_then(|v| v.as_f64());
     let l_conf = lj.get("confidence").and_then(|v| v.as_f64());
 
-    // action 一致性 (权重 50%)
+    // V50: 保存原始 action 值用于诊断展示
+    let f_action_raw = fj
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+    let l_action_raw = lj
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+    // V50: 预计算维度差值
+    let pos_gap: Option<f64> = match (f_pos, l_pos) {
+        (Some(a), Some(b)) => Some((a - b).abs()),
+        _ => None,
+    };
+    let conf_gap: Option<f64> = match (f_conf, l_conf) {
+        (Some(a), Some(b)) => Some((a - b).abs()),
+        _ => None,
+    };
+
+    // V45 修复: action 一致性评分精细化（纠正"中性桶"虚高问题）
+    //
+    // 旧逻辑缺陷: 所有"非买卖"的 action 归入同一个"中性桶", 给 40/50 分。
+    //   导致 "持有"(明确持仓决策) vs "不确定"(无判断) 得到 80% 一致性,
+    //   与 "买入 vs 增持"(同向微差) 同分, 语义上完全不合理。
+    //
+    // 新逻辑 — 四级评分:
+    //   精确匹配(50) > 同向同类(35) > 中性不同义(5~15) > 对立方向(0)
+    //
+    // 中性内部细分:
+    //   "持有" vs "观望" = 15 (都是明确操作建议, 只是激进度不同)
+    //   "持有/观望" vs "不确定" = 5 (一个明确, 一个无判断, 差距极大)
+    //   "观望" vs "不确定" = 10 (观望至少排除了买卖, 不确定连这个都没排除)
+    let is_buy = |s: &str| s.contains("买") || s.contains("增持");
+    let is_sell = |s: &str| s.contains("卖") || s.contains("减持");
+    let is_hold = |s: &str| s == "持有";
+    let is_watch = |s: &str| s == "观望";
+    let is_uncertain = |s: &str| s.contains("不确定") || s.contains("未知");
     let action_score: f64 = match (f_action, l_action) {
-        (Some(a), Some(b)) => {
-            let is_buy = |s: &str| s.contains("买") || s.contains("增持");
-            let is_sell = |s: &str| s.contains("卖") || s.contains("减持");
-            if a == b {
-                50.0
-            } else if is_buy(&a) == is_buy(&b) && is_sell(&a) == is_sell(&b) {
-                40.0
-            } else {
-                0.0
-            }
+        (Some(a), Some(b)) if a == b => 50.0,
+        (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => 35.0,
+        (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => 35.0,
+        // 中性但不同义: 持有 vs 观望 = 15
+        (Some(a), Some(b)) if (is_hold(&a) && is_watch(&b)) || (is_hold(&b) && is_watch(&a)) => {
+            15.0
         },
+        // 明确中性 vs 不确定: 持有/观望 vs 不确定 = 5
+        (Some(a), Some(b)) if (is_hold(&a) || is_watch(&a)) && is_uncertain(&b) => 5.0,
+        (Some(a), Some(b)) if (is_hold(&b) || is_watch(&b)) && is_uncertain(&a) => 5.0,
+        // 观望 vs 不确定 = 10 (观望比持有弱一点, 所以惩罚轻一些)
+        (Some(a), Some(b))
+            if is_watch(&a) && is_uncertain(&b) || is_watch(&b) && is_uncertain(&a) =>
+        {
+            10.0
+        },
+        // 对立方向
+        (Some(_), Some(_)) => 0.0,
+        // 单侧缺失
         _ => 25.0,
     };
 
@@ -464,7 +662,50 @@ fn compute_decision_agreement(formula_json: Option<&str>, llm_json: Option<&str>
         _ => 10.0,
     };
 
-    Some((action_score + pos_score + conf_score).round() as i32)
+    let total = (action_score + pos_score + conf_score).round() as i32;
+
+    // ── V50: 冲突类型分类 ──
+    let conflict_type: &str = if action_score >= 45.0 && pos_score >= 25.0 && conf_score >= 18.0 {
+        "all_agree"
+    } else if action_score == 0.0 {
+        "opposite_direction"
+    } else if action_score <= 5.0 {
+        "action_divergence"
+    } else if pos_score <= 10.0 {
+        "position_gap"
+    } else {
+        "confidence_gap"
+    };
+    // ── V50: action_note 分类 ──
+    let action_note: &str = if action_score >= 50.0 {
+        "exact_match"
+    } else if action_score >= 35.0 {
+        "same_direction"
+    } else if action_score >= 15.0 {
+        "hold_vs_watch"
+    } else if action_score >= 10.0 {
+        "watch_vs_uncertain"
+    } else if action_score >= 5.0 {
+        "definite_vs_uncertain"
+    } else if action_score == 0.0 {
+        "opposite"
+    } else {
+        "missing_one_side"
+    };
+
+    Some(AgreementBreakdown {
+        total,
+        action_score,
+        action_ok: action_score >= 35.0,
+        action_note: action_note.to_string(),
+        formula_action: f_action_raw,
+        llm_action: l_action_raw,
+        position_score: pos_score,
+        position_gap: pos_gap,
+        confidence_score: conf_score,
+        confidence_gap: conf_gap,
+        conflict_type: conflict_type.to_string(),
+    })
 }
 
 /// 解析 as_of_date 入参：None/空串 → None（live），Some(s) → 解析为 AsOfContext
@@ -475,8 +716,10 @@ pub(crate) fn parse_asof_param(s: Option<String>) -> Result<Option<AsOfContext>,
 
 /// 默认值，与 stock-analysis 模板的 defaults 保持一致；
 /// 改动这里请同步 `StockAnalysisConfigPanel.getDefaultVariables()`。
-const DEFAULT_MAX_CONCURRENT: usize = 12;
-const DEFAULT_STEP_TIMEOUT_SECS: u64 = 300;
+/// V39 修复: 从 300s 提升到 600s，适配 max_tool_rounds=3 的多轮工具节点
+/// （trader/research-mgr 等节点 3 轮 LLM+工具调用总耗时约 200-400s）。
+const DEFAULT_MAX_CONCURRENT: usize = 8;
+const DEFAULT_STEP_TIMEOUT_SECS: u64 = 600;
 
 /// 从模板 variables 中解析 RunOptions 关键参数。
 ///
@@ -693,6 +936,438 @@ mod tests {
     }
 }
 
+/// 从 `<!-- VERDICT: {...} -->` 标签中提取并解析 VERDICT JSON。
+/// 旧版 snapshot 中数据质量报告（如 data-quality）被存储为
+/// `"report文本<!-- VERDICT: {...} -->"` 格式的纯文本字符串，
+/// 此函数从其中提取 VERDICT JSON 供后续字段导航恢复。
+fn extract_verdict_from_text(text: &str) -> Option<serde_json::Value> {
+    let start_marker = "<!-- VERDICT: ";
+    let end_marker = "-->";
+    if let Some(start) = text.rfind(start_marker) {
+        let json_start = start + start_marker.len();
+        if let Some(end_offset) = text[json_start..].find(end_marker) {
+            let verdict_str = text[json_start..json_start + end_offset].trim();
+            if !verdict_str.is_empty() {
+                return serde_json::from_str::<serde_json::Value>(verdict_str).ok();
+            }
+        }
+    }
+    None
+}
+
+/// 仅重跑决策（portfolio-mgr CodeNode），不复用上游节点。
+///
+/// 从已有分析的 `blackboard_snapshot` 中读取缓存的所有上游节点输出，
+/// 注入 portfolio-mgr 的 Rhai 脚本中重新计算决策。
+/// 适用于：修改 portfolio-mgr.rhai 公式后快速验证，无需等待完整 DAG。
+#[tauri::command]
+pub async fn rerun_decision(
+    state: State<'_, AppState>,
+    analysis_id: String,
+) -> Result<serde_json::Value, String> {
+    use rhai::{Engine, Scope};
+    use std::collections::HashMap;
+
+    let db = state.harness.db();
+
+    // 1. 加载分析记录
+    let analysis = stock_analyses::Entity::find_by_id(&analysis_id)
+        .one(db)
+        .await
+        .map_err(|e| format!("查询分析记录失败: {e}"))?
+        .ok_or_else(|| format!("分析记录不存在: {analysis_id}"))?;
+
+    // 2. 解析 blackboard_snapshot → variables map
+    let snapshot_str = analysis.blackboard_snapshot.unwrap_or_default();
+    let mut snapshot: HashMap<String, serde_json::Value> = serde_json::from_str(&snapshot_str)
+        .map_err(|e| format!("解析 blackboard_snapshot 失败: {e}"))?;
+
+    // 将 _raw.{nodeId} 条目提升到顶层（去除 _raw. 前缀），使 input_mapping
+    // 中的原始 nodeId 路径（如 t-scoring.result.totalScore）能正确解析。
+    // _raw.* 由 build_blackboard_snapshot 在 blackboard.rs 中写入。
+    let raw_keys: Vec<String> = snapshot
+        .keys()
+        .filter(|k| k.starts_with("_raw."))
+        .cloned()
+        .collect();
+    if !raw_keys.is_empty() {
+        for raw_key in raw_keys {
+            if let Some(key) = raw_key.strip_prefix("_raw.") {
+                if let Some(val) = snapshot.remove(&raw_key) {
+                    // 不覆盖已有 key（remapped key 优先）
+                    snapshot.entry(key.to_string()).or_insert(val);
+                }
+            }
+        }
+    } else {
+        // 旧版 snapshot（无 _raw.* 前缀）：反向推导 remapped key 的原始 nodeId
+        let reverse_keys: Vec<(String, String)> = snapshot
+            .keys()
+            .filter_map(|k| {
+                // ⚠️ 特定映射必须在通用 report.* 前缀匹配之前，
+                // 否则 report.investment-plan 会被 strip_prefix("report.")
+                // 截成 "investment-plan" 而非正确的 "trader"
+                if *k == "report.investment-plan" {
+                    Some(("trader".to_string(), k.clone()))
+                } else if *k == "value.assessment" {
+                    Some(("value-investor".to_string(), k.clone()))
+                } else if *k == "rule_check.summary" {
+                    Some(("rule-check".to_string(), k.clone()))
+                } else if *k == "data_quality_summary" {
+                    Some(("data-quality".to_string(), k.clone()))
+                } else if *k == "raw.combined" {
+                    Some(("raw-data".to_string(), k.clone()))
+                } else {
+                    k.strip_prefix("report.")
+                        .map(|id| (id.to_string(), k.clone()))
+                }
+            })
+            .collect();
+        for (orig_id, remapped_key) in reverse_keys {
+            if !snapshot.contains_key(&orig_id) {
+                if let Some(val) = snapshot.get(&remapped_key) {
+                    snapshot.insert(orig_id, val.clone());
+                }
+            }
+        }
+    }
+
+    // 3. 加载工作流模板 → 提取 portfolio-mgr CodeNode
+    let template = axagent_core::entity::workflow_template::Entity::find()
+        .filter(axagent_core::entity::workflow_template::Column::Id.eq("stock-analysis"))
+        .one(db)
+        .await
+        .map_err(|e| format!("查询工作流模板失败: {e}"))?
+        .ok_or_else(|| "工作流模板不存在".to_string())?;
+
+    let nodes: Vec<WorkflowNode> =
+        serde_json::from_str(&template.nodes).map_err(|e| format!("解析模板节点失败: {e}"))?;
+
+    // 找到 portfolio-mgr 节点及其 code + input_mapping
+    let (code, input_mapping) = nodes
+        .iter()
+        .find_map(|n| {
+            if let WorkflowNode::Code(cn) = n {
+                if cn.config.execute_directly && cn.base.id == "portfolio-mgr" {
+                    Some((cn.config.code.clone(), cn.config.input_mapping.clone()))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| "未找到 portfolio-mgr CodeNode".to_string())?;
+
+    // 4. 执行 Rhai 脚本（与 code_executor::execute_rhai_directly 相同逻辑）
+    let mut engine = Engine::new();
+    engine.register_fn("clamp", |value: f64, min: f64, max: f64| -> f64 {
+        if value < min {
+            min
+        } else if value > max {
+            max
+        } else {
+            value
+        }
+    });
+    engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
+        arr.iter()
+            .map(|item| item.to_string())
+            .collect::<Vec<_>>()
+            .join(sep)
+    });
+    let mut scope = Scope::new();
+
+    // 简化版 resolve_var_path：导航 JSON 嵌套（支持 JSON 字符串自动解析）
+    fn resolve_path(
+        path: &str,
+        vars: &HashMap<String, serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        if path.is_empty() {
+            return None;
+        }
+        let parts: Vec<&str> = path.split('.').collect();
+        if let Some(root) = vars.get(parts[0]) {
+            let mut current = root.clone();
+            for part in &parts[1..] {
+                if let serde_json::Value::String(s) = &current {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+                        current = parsed;
+                    }
+                }
+                current = current.get(part)?.clone();
+            }
+            Some(current)
+        } else {
+            vars.get(path).cloned()
+        }
+    }
+
+    // 注入 input_mapping 到 Rhai scope
+    let has_raw = snapshot.keys().any(|k| k.starts_with("_raw."));
+    // V37: 旧版 snapshot（无 _raw.*）中 ToolNode/AgentNode 的值已被 extract_node_text
+    // 提取为纯文本，JSON 结构已丢失，resolve_path 无法下钻到内部字段。
+    // 剥除 .result./.content. 前缀后，子字段导航仍会失败（纯文本不是 JSON）。
+    // 此时大部分 input_mapping 解析为 None，Rhai 侧 weights_collapsed 兜底。
+    // 建议用户重新运行完整工作流以生成新版 snapshot。
+    if !has_raw {
+        tracing::warn!(
+            "[rerun_decision] 旧版 snapshot（无 _raw.*），JSON 结构已丢失，建议重新运行完整工作流。input_mapping 将尽力使用已有数据。"
+        );
+    }
+
+    // V40 修复: 旧版 snapshot 的 remapped key → 原始 nodeId 反向映射
+    // build_blackboard_snapshot 对某些节点做了 key 重命名，此处构建反向表
+    // 以便 resolve_path 能找到正确的键。
+    let remap_old: std::collections::HashMap<&str, &str> = [
+        ("data_quality_summary", "data-quality"),
+        ("report.investment-plan", "trader"),
+        ("value.assessment", "value-investor"),
+        ("rule_check.summary", "rule-check"),
+        ("raw.combined", "raw-data"),
+    ]
+    .into_iter()
+    .collect();
+
+    for (target_key, source_key) in &input_mapping {
+        // 对于旧版 snapshot（无 _raw.*），尝试剥除 result./content. 前缀：
+        // 因为旧版 build_blackboard_snapshot 已经把 ToolNode 的 result 和 AgentNode
+        // 的 content 提取为纯文本，外层包裹已丢失。剥除后路径直接从 JSON 内容开始。
+        let mut used_key = if has_raw {
+            source_key.clone()
+        } else {
+            // 尝试剥除 node_id.result. → node_id. 和 node_id.content. → node_id.
+            source_key
+                .replacen(".result.", ".", 1)
+                .replacen(".content.", ".", 1)
+        };
+        // V40 修复: 旧版 snapshot 中 remapped key 的查找
+        // resolve_path 的第一步是 vars.get(parts[0])，如果 parts[0] 是
+        // "data-quality" 但旧版 snapshot 的 key 是 "data_quality_summary"，
+        // 查找会失败。此处尝试用 remap_old 转换 key。
+        if !has_raw {
+            let first_seg = used_key.split('.').next().unwrap_or("");
+            if let Some(&mapped) = remap_old.get(first_seg) {
+                used_key = used_key.replacen(first_seg, mapped, 1);
+            }
+        }
+        let value = resolve_path(&used_key, &snapshot);
+        match &value {
+            None | Some(serde_json::Value::Null) => {
+                // V40: 旧版 snapshot 中值可能是纯文本字符串（extract_node_text），
+                // 此时 resolve_path 找不到子字段（如 .content.score），但整条记录
+                // 可能以字符串形式存在。尝试以 used_key 的 root 部分直查整个值。
+                if !has_raw {
+                    let root = used_key.split('.').next().unwrap_or("");
+                    if let Some(full_text) = snapshot.get(root).and_then(|v| v.as_str()) {
+                        let trimmed_text = full_text.trim().to_string();
+
+                        // V42 增强: 旧版 snapshot 的文本中可能包含
+                        // <!-- VERDICT: {...} --> 标签。尝试提取标签内的 JSON 并
+                        // 按 used_key 中的子字段路径导航，以恢复结构化数据。
+                        let mut injected_from_verdict = false;
+                        if let Some(verdict_json) = extract_verdict_from_text(&trimmed_text) {
+                            // 从 used_key 中提取子字段路径（去掉 root 部分）
+                            let used_parts: Vec<&str> = used_key.split('.').collect();
+                            if used_parts.len() > 1 {
+                                let mut cur = &verdict_json;
+                                for part in &used_parts[1..] {
+                                    cur = match cur.get(*part) {
+                                        Some(v) => v,
+                                        None => {
+                                            cur = &serde_json::Value::Null;
+                                            break;
+                                        },
+                                    };
+                                }
+                                if !cur.is_null() {
+                                    match cur {
+                                        serde_json::Value::Number(n) => {
+                                            let val = n.as_f64().unwrap_or(0.0);
+                                            let _ = scope.push_constant(target_key.as_str(), val);
+                                            tracing::info!(
+                                                "[rerun_decision] 旧版 snapshot VERDICT 恢复: {target_key} ← {root}<!--VERDICT-->#{part} = {val}",
+                                                part = used_parts[1..].join(".")
+                                            );
+                                            injected_from_verdict = true;
+                                        },
+                                        serde_json::Value::String(s) => {
+                                            let _ =
+                                                scope.push_constant(target_key.as_str(), s.clone());
+                                            tracing::info!(
+                                                "[rerun_decision] 旧版 snapshot VERDICT 恢复: {target_key} ← {root}<!--VERDICT-->#{part} = {s}",
+                                                part = used_parts[1..].join(".")
+                                            );
+                                            injected_from_verdict = true;
+                                        },
+                                        _ => {},
+                                    }
+                                }
+                            }
+                        }
+
+                        if injected_from_verdict {
+                            continue;
+                        }
+
+                        // 尝试解析为数字（如 "B" 等级文本虽然无法解析，但 score 字段
+                        // 如 "85" 可以解析为数字）
+                        if let Ok(num) = trimmed_text.parse::<f64>() {
+                            let _ = scope.push_constant(target_key.as_str(), num);
+                            tracing::warn!(
+                                "[rerun_decision] 旧版 snapshot 回退: {target_key} ← {root} (解析为数字 {num})"
+                            );
+                        } else {
+                            // V40: 纯文本字符串不能注入给预期为数字的 Rhai 变量
+                            //（如 dqi_score 若为文本会导致 (dqi_score-50)/50 类型错误）。
+                            // 只对已知文本字段注入字符串，其余推入 () 让
+                            // Rhai 侧走 weights_collapsed 兜底。
+                            if target_key == "stock_lessons" || target_key == "sanity_reason" {
+                                let _ = scope.push_constant(target_key.as_str(), trimmed_text);
+                                tracing::warn!(
+                                    "[rerun_decision] 旧版 snapshot 回退: {target_key} ← {root} (纯文本)"
+                                );
+                            } else {
+                                let _ = scope.push_constant(target_key.as_str(), ());
+                                tracing::warn!(
+                                    "[rerun_decision] 旧版 snapshot 回退: {target_key} ← {root} (纯文本无法用于数值计算，放弃)"
+                                );
+                            }
+                        }
+                        continue;
+                    }
+                }
+                let _ = scope.push_constant(target_key.as_str(), ());
+            },
+            Some(serde_json::Value::Number(n)) => {
+                let val = n.as_f64().unwrap_or(0.0);
+                let _ = scope.push_constant(target_key.as_str(), val);
+            },
+            Some(serde_json::Value::String(s)) => {
+                let _ = scope.push_constant(target_key.as_str(), s.clone());
+            },
+            Some(serde_json::Value::Bool(b)) => {
+                let _ = scope.push_constant(target_key.as_str(), *b);
+            },
+            Some(serde_json::Value::Array(arr)) => {
+                let items: rhai::Array = arr
+                    .iter()
+                    .map(|v| match v {
+                        serde_json::Value::Number(n) => {
+                            rhai::Dynamic::from(n.as_f64().unwrap_or(0.0))
+                        },
+                        serde_json::Value::String(s) => rhai::Dynamic::from(s.clone()),
+                        serde_json::Value::Bool(b) => rhai::Dynamic::from(*b),
+                        _ => rhai::Dynamic::UNIT,
+                    })
+                    .collect();
+                scope.push_dynamic(target_key.as_str(), rhai::Dynamic::from(items));
+            },
+            Some(serde_json::Value::Object(obj)) => {
+                let mut map = rhai::Map::new();
+                for (k, v) in obj {
+                    let val = match v {
+                        serde_json::Value::Number(n) => {
+                            rhai::Dynamic::from(n.as_f64().unwrap_or(0.0))
+                        },
+                        serde_json::Value::String(s) => rhai::Dynamic::from(s.clone()),
+                        serde_json::Value::Bool(b) => rhai::Dynamic::from(*b),
+                        _ => continue,
+                    };
+                    map.insert(k.clone().into(), val);
+                }
+                scope.push_dynamic(target_key.as_str(), rhai::Dynamic::from(map));
+            },
+        }
+    }
+
+    // 执行 Rhai 脚本
+    let result: rhai::Dynamic = engine
+        .eval_with_scope(&mut scope, &code)
+        .map_err(|e| format!("Rhai 脚本执行失败: {e}"))?;
+
+    // 转换 Rhai 结果到 JSON
+    fn to_json(v: &rhai::Dynamic) -> serde_json::Value {
+        if v.is_unit() {
+            return serde_json::Value::Null;
+        }
+        if v.is_bool() {
+            return serde_json::Value::Bool(v.as_bool().unwrap_or(false));
+        }
+        if let Ok(s) = v.clone().into_string() {
+            return serde_json::Value::String(s);
+        }
+        if let Ok(f) = v.as_float() {
+            if let Some(n) = serde_json::Number::from_f64(f) {
+                return serde_json::Value::Number(n);
+            }
+        }
+        if let Some(arr) = v.clone().try_cast::<rhai::Array>() {
+            return serde_json::Value::Array(arr.into_iter().map(|item| to_json(&item)).collect());
+        }
+        if let Some(map) = v.clone().try_cast::<rhai::Map>() {
+            let mut obj = serde_json::Map::new();
+            for (k, val) in &map {
+                obj.insert(format!("{k}"), to_json(val));
+            }
+            return serde_json::Value::Object(obj);
+        }
+        serde_json::Value::String(format!("{v}"))
+    }
+    let decision_value = to_json(&result);
+
+    // 5. 提取决策字段
+    let action = decision_value
+        .get("action")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let position_pct = decision_value.get("positionPct").and_then(|v| v.as_f64());
+    let confidence = decision_value.get("confidence").and_then(|v| v.as_f64());
+    let reasoning = decision_value
+        .get("reasoning")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let time_horizon = decision_value
+        .get("timeHorizon")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let holding_days = decision_value.get("expectedHoldingDays").and_then(|v| {
+        if let Some(f) = v.as_f64() {
+            Some(f as i64)
+        } else {
+            v.as_i64()
+        }
+    });
+
+    let decision_json_str = serde_json::to_string(&decision_value).unwrap_or_default();
+
+    // 6. 更新分析记录
+    stock_analyses::Entity::update_many()
+        .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
+        .col_expr(stock_analyses::Column::DecisionPositionPct, Expr::value(position_pct))
+        .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(reasoning))
+        .col_expr(stock_analyses::Column::DecisionJson, Expr::value(decision_json_str))
+        .col_expr(stock_analyses::Column::DecisionTimeHorizon, Expr::value(time_horizon))
+        .col_expr(stock_analyses::Column::DecisionExpectedHoldingDays, Expr::value(holding_days))
+        .col_expr(
+            stock_analyses::Column::UpdatedAt,
+            Expr::value(chrono::Utc::now().timestamp_millis()),
+        )
+        .filter(stock_analyses::Column::Id.eq(&analysis_id))
+        .exec(db)
+        .await
+        .map_err(|e| format!("更新分析记录失败: {e}"))?;
+
+    tracing::warn!(
+        "[rerun_decision] 决策重跑完成: analysis_id={analysis_id}, confidence={confidence:?}"
+    );
+
+    Ok(json!({
+        "analysis_id": analysis_id,
+        "decision": decision_value,
+    }))
+}
+
 /// 启动股票分析工作流（DAG 模式）。
 ///
 /// - 默认：生成新 UUID 并 INSERT 新 `stock_analyses` 行（fresh start）。
@@ -739,28 +1414,27 @@ async fn run_stock_workflow_inner(
         .map_err(|e| format!("行情获取失败: {e}"))?;
     let now_ms = chrono::Utc::now().timestamp_millis();
 
-    // 重跑分析（override 模式）：先按 id 删掉旧行，让 INSERT 用相同 id 即可"覆盖"。
-    // 业务语义：保留 id 稳定（前端 store 引用不会断），created_at 更新（重跑 = 新执行），
-    // decision / blackboard_snapshot 完全替换。覆盖失败时降级为"新建"，不阻塞用户。
-    let analysis_id = match analysis_id_override.as_ref() {
-        Some(provided) => {
-            match stock_analyses::Entity::delete_by_id(provided.as_str())
-                .exec(state.harness.db())
-                .await
-            {
-                Ok(_) => provided.clone(),
-                Err(e) => {
-                    tracing::warn!(
-                        "[run_stock_workflow] 删除旧 analysis 失败,降级为新建: id={}, err={}",
-                        provided,
-                        e
-                    );
-                    uuid::Uuid::new_v4().to_string()
-                },
-            }
-        },
-        None => uuid::Uuid::new_v4().to_string(),
+    // 重跑分析（override 模式）：不删旧行，先用临时 ID INSERT 新行。
+    // 工作流成功后再删旧行 + 更新临时行 ID 为 override id。
+    // 失败则删除临时行，旧数据完好无损。
+    let override_target = if let Some(ref provided) = analysis_id_override {
+        // 验证旧行存在再记录，避免 Delete Nonexistent 后 ID 丢失
+        match stock_analyses::Entity::find_by_id(provided.as_str())
+            .one(state.harness.db())
+            .await
+        {
+            Ok(Some(_)) => Some(provided.clone()),
+            _ => {
+                tracing::warn!(
+                    "[run_stock_workflow] override_id={provided} 对应的旧行不存在,跳过覆盖"
+                );
+                None
+            },
+        }
+    } else {
+        None
     };
+    let analysis_id = uuid::Uuid::new_v4().to_string();
 
     stock_analyses::ActiveModel {
         id: Set(analysis_id.clone()),
@@ -812,7 +1486,7 @@ async fn run_stock_workflow_inner(
     match quality_check {
         QualityPrecheckResult::Insufficient(reason) => {
             tracing::warn!(
-                "[stock_workflow] 数据质量不足，跳过 DAG 执行: {reason} ({}",
+                "[stock_workflow] 数据质量不足，跳过 DAG 执行: {reason} ({})",
                 stock_code_for_check
             );
             // 更新 stock_analyses 状态
@@ -873,6 +1547,15 @@ async fn run_stock_workflow_inner(
                     }
                 }
             }
+            if v.name == "vendor_neodata_token" {
+                if let serde_json::Value::String(ref token) = v.value {
+                    if !token.is_empty() {
+                        if let Some(ref nd) = state.astock_client.neodata_token {
+                            *nd.write().await = token.clone();
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -893,6 +1576,7 @@ async fn run_stock_workflow_inner(
     let app_h = app.clone();
     let db = state.harness.db().clone();
     let aid = analysis_id.clone();
+    let override_target_for_spawn = override_target.clone();
 
     let progress_app = app.clone();
     let progress_wf_id = wf_id.clone();
@@ -959,15 +1643,6 @@ async fn run_stock_workflow_inner(
     let input_schema = loaded.input_schema;
     let output_schema = loaded.output_schema;
     let template_vars = loaded.variables;
-
-    // 读取 min_confidence 阈值（在 tokio::spawn 之外读取，捕获到闭包中）
-    // 来自 StockAnalysisConfigPanel 的 "min_confidence" 变量，默认 60
-    let min_confidence: u8 = template_vars
-        .as_deref()
-        .and_then(|vars| vars.iter().find(|v| v.name == "min_confidence"))
-        .and_then(|v| v.value.as_f64())
-        .map(|n| n.clamp(0.0, 100.0) as u8)
-        .unwrap_or(0);
 
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
@@ -1173,6 +1848,12 @@ async fn run_stock_workflow_inner(
                         {
                             tracing::error!("[DB] Cancelled 状态更新失败: {e}");
                         }
+                        // 重跑取消：清理临时行，旧数据不受影响
+                        if override_target_for_spawn.is_some() {
+                            let _ = stock_analyses::Entity::delete_by_id(aid.as_str())
+                                .exec(&db)
+                                .await;
+                        }
                     },
                     axagent_rt_workflow::workflow_engine::WorkflowStatus::Failed => {
                         tracing::warn!(%wf_id, status=?wf_status, "工作流以 Failed 状态结束，保存部分结果");
@@ -1244,6 +1925,17 @@ async fn run_stock_workflow_inner(
                         {
                             tracing::error!("[DB] Failed 状态下保存分析结果失败: {e}");
                         }
+                        // 重跑（Failed 有部分结果）：删旧行，更新临时行 ID 到 override id
+                        if let Some(ref old_id) = override_target_for_spawn {
+                            let _ = stock_analyses::Entity::delete_by_id(old_id.as_str())
+                                .exec(&db)
+                                .await;
+                            let _ = stock_analyses::Entity::update_many()
+                                .col_expr(stock_analyses::Column::Id, Expr::value(old_id.as_str()))
+                                .filter(stock_analyses::Column::Id.eq(&aid))
+                                .exec(&db)
+                                .await;
+                        }
                     },
                     _ => {
                         if let Err(e) = app_h.emit(
@@ -1259,32 +1951,78 @@ async fn run_stock_workflow_inner(
                         // 修复"决策信息缺失"误报:优先从 portfolio-mgr 节点本身
                         // 提取决策(见 extract_decision_json 注释),回退到 wf.output。
                         let decision_json = extract_decision_json(&result);
+                        // V40 修复:计算 LLM 决策(trader)与公式决策(portfolio-mgr)的一致性分数
+                        // V50 升级: 返回 AgreementBreakdown，包含分维度诊断
+                        let llm_dj_agr = extract_llm_decision_json(&result);
+                        let agreement_breakdown = compute_decision_agreement(
+                            decision_json.as_deref(),
+                            llm_dj_agr.as_deref(),
+                        );
+                        // V50: 预计算分歧诊断文本（供 reasoning 追加和 UI 展示）
+                        let disagreement_note = agreement_breakdown.as_ref().map(|ab| {
+                            if ab.total >= 60 {
+                                format!("🤝双视角一致:{}分", ab.total)
+                            } else if ab.total >= 40 {
+                                format!("⚠️双视角部分一致:{}分", ab.total)
+                            } else {
+                                format!(
+                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={})",
+                                    ab.total, ab.formula_action, ab.llm_action,
+                                    ab.action_score as i32, ab.position_score as i32,
+                                    ab.confidence_score as i32
+                                )
+                            }
+                        });
+                        // V50: 将一致性诊断 + 调整后置信度嵌入 decision_json
+                        let decision_json = decision_json.map(|dj| {
+                            if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&dj) {
+                                if let Some(obj) = v.as_object_mut() {
+                                    if let Some(ref ab) = agreement_breakdown {
+                                        // 向后兼容: formulaLlmAgreement = 总分
+                                        obj.insert(
+                                            "formulaLlmAgreement".into(),
+                                            serde_json::json!(ab.total),
+                                        );
+                                        // V50: 完整诊断结构体
+                                        obj.insert("agreementBreakdown".into(), serde_json::json!({
+                                            "total": ab.total,
+                                            "actionOk": ab.action_ok,
+                                            "actionNote": ab.action_note,
+                                            "formulaAction": ab.formula_action,
+                                            "llmAction": ab.llm_action,
+                                            "positionGap": ab.position_gap,
+                                            "confidenceGap": ab.confidence_gap,
+                                            "conflictType": ab.conflict_type,
+                                        }));
+                                        // V50: 置信度调制 — 一致时 boost, 分歧时 penalty
+                                        let formula_conf = obj.get("confidence")
+                                            .and_then(|c| c.as_f64())
+                                            .unwrap_or(50.0);
+                                        let factor = 1.0 + (ab.total as f64 - 50.0) / 100.0;
+                                        let adj = (formula_conf * factor).min(100.0).max(0.0);
+                                        obj.insert(
+                                            "adjustedConfidence".into(),
+                                            serde_json::json!((adj * 10.0).round() / 10.0),
+                                        );
+                                    }
+                                }
+                                v.to_string()
+                            } else {
+                                dj
+                            }
+                        });
                         let (
-                            mut action,
+                            action,
                             position_pct,
-                            mut reasoning,
+                            reasoning,
                             time_horizon,
                             expected_holding_days,
                         ) = extract_decision_fields(&decision_json);
-                        // Level 1: min_confidence 过滤 — 若 LLM 自报置信度低于阈值，
-                        // 将 action 覆盖为 "uncertain" 并标注在 reasoning 中
-                        if min_confidence > 0 {
-                            if let Some(conf) = decision_json
-                                .as_ref()
-                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                                .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
-                            {
-                                if conf < min_confidence as f64 {
-                                    let orig_action = action.clone().unwrap_or_default();
-                                    let orig_reason = reasoning.clone().unwrap_or_default();
-                                    action = Some("uncertain".to_string());
-                                    reasoning = Some(format!(
-                                        "置信度 {:.0} 低于阈值 {min_confidence}，建议观望。原分析: {}\n原动作: {}",
-                                        conf, orig_reason, orig_action
-                                    ));
-                                }
-                            }
-                        }
+                        // V50: reasoning 末尾追加双视角分歧诊断
+                        let reasoning = match (reasoning, disagreement_note) {
+                            (Some(r), Some(note)) => Some(format!("{} | {}", r, note)),
+                            (r, _) => r,
+                        };
                         // 克隆决策字段供 Memory RAG 索引（原值将被 DB 写入消费）
                         let mem_action = action.clone();
                         let mem_reasoning = reasoning.clone();
@@ -1374,6 +2112,17 @@ async fn run_stock_workflow_inner(
                                 .await;
                             }
                         }
+                        // 重跑成功：删旧行，更新临时行 ID 到 override id（保持前端 URL 稳定）
+                        if let Some(ref old_id) = override_target_for_spawn {
+                            let _ = stock_analyses::Entity::delete_by_id(old_id.as_str())
+                                .exec(&db)
+                                .await;
+                            let _ = stock_analyses::Entity::update_many()
+                                .col_expr(stock_analyses::Column::Id, Expr::value(old_id.as_str()))
+                                .filter(stock_analyses::Column::Id.eq(&aid))
+                                .exec(&db)
+                                .await;
+                        }
                     },
                 }
             },
@@ -1393,6 +2142,12 @@ async fn run_stock_workflow_inner(
                     .await
                 {
                     tracing::error!("[DB] run_workflow Err 状态更新失败: {db_e}");
+                }
+                // 重跑工作流引擎错误：清理临时行，旧数据不受影响
+                if override_target_for_spawn.is_some() {
+                    let _ = stock_analyses::Entity::delete_by_id(aid.as_str())
+                        .exec(&db)
+                        .await;
                 }
             },
         }}).await  // with_degradation_log
@@ -3031,6 +3786,13 @@ pub async fn run_serenity_screening(
     });
 
     // 4. 运行（支持 as-of 时间截断）
+    // 注入模板变量（ref_*_code 等行业基线参数，来自 UI 可编辑的 Variables）
+    let serenity_vars: Option<Vec<axagent_harness::workflow_types::Variable>> =
+        loaded.variables.map(|vars| {
+            vars.into_iter()
+                .filter(|v| v.name.starts_with("ref_") || v.name.starts_with("serenity_"))
+                .collect()
+        });
     let opts = RunOptions {
         max_concurrent,
         step_timeout,
@@ -3038,6 +3800,7 @@ pub async fn run_serenity_screening(
         input: None,
         input_schema: loaded.input_schema.clone(),
         output_schema: loaded.output_schema.clone(),
+        variables: serenity_vars,
         dry_run: false,
         tool_permissions: Some(Arc::new(ToolPermissions {
             strict_mode: true,
@@ -3121,29 +3884,48 @@ pub async fn run_serenity_screening(
             // 校验：过滤缺少 stock_code 的残缺候选，避免前端渲染空白卡片
             let mut candidate_array: Vec<serde_json::Value> = Vec::new();
             let mut dropped_count = 0;
+            let mut exit_now_count = 0;
             if let Some(arr) = raw_candidate_array.as_array() {
                 for c in arr {
                     let has_code = c
                         .get("stock_code")
                         .and_then(|v| v.as_str())
                         .is_some_and(|s| !s.is_empty());
-                    if has_code {
-                        candidate_array.push(c.clone());
-                    } else {
+                    if !has_code {
                         dropped_count += 1;
                         tracing::warn!(
                             "[serenity] 丢弃残缺候选（无 stock_code）: {}",
                             serde_json::to_string(c).unwrap_or_default()
                         );
+                        continue;
                     }
+                    // 自动剔除 exit_now 候选（LLM 可能违反 prompt 规则仍然输出）
+                    let is_exit_now = c
+                        .get("exit_signals")
+                        .and_then(|es| es.get("overall_exit_urgency"))
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s == "exit_now");
+                    if is_exit_now {
+                        exit_now_count += 1;
+                        tracing::warn!(
+                            "[serenity] 自动剔除 exit_now 候选（{}）: {}",
+                            c["stock_code"].as_str().unwrap_or("?"),
+                            c["exit_signals"]["overall_exit_urgency"]
+                                .as_str()
+                                .unwrap_or("exit_now"),
+                        );
+                        continue;
+                    }
+                    candidate_array.push(c.clone());
                 }
             }
-            if dropped_count > 0 || candidate_array.is_empty() {
+            if dropped_count > 0 || exit_now_count > 0 || candidate_array.is_empty() {
                 tracing::warn!(
-                    "[serenity] 候选校验: 总量={}, 有效={}, 丢弃(无stock_code)={}, candidates原始keys={:?}",
+                    "[serenity] 候选校验: 总量={}, 有效={}, 丢弃(无stock_code)={}, 剔除(exit_now)={}, candidates原始keys={:?}",
                     raw_candidate_array.as_array().map_or(0, |a| a.len()),
                     candidate_array.len(),
                     dropped_count,
+                    exit_now_count,
                     raw_candidate_array
                         .as_array()
                         .and_then(|a| a.first())
@@ -3254,20 +4036,10 @@ pub async fn run_serenity_screening(
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
 
-            // 先 emit completed 事件，确保持久化失败不会阻断前端通知
-            let _ = app_h.emit(
-                "serenity-screening-completed",
-                serde_json::json!({
-                    "workflowId": wf_id_ret,
-                    "status": "completed",
-                    "result": candidates,
-                    "candidates": candidate_array,
-                    "trends": trends_list,
-                    "emptyReason": empty_reason,
-                }),
-            );
-
-            // 持久化 Serenity 候选到 reco_picks 表（style="serenity"）
+            // ── 持久化 Serenity 候选到 reco_picks 表（style="serenity"）──
+            // 先持久化再 emit 事件，确保数据一致性
+            let mut persistence_success = true;
+            let mut persistence_detail = String::new();
             // best-effort：失败只记日志，不影响返回结果
             {
                 let db = state.harness.db();
@@ -3278,28 +4050,45 @@ pub async fn run_serenity_screening(
                 let ts_ms = chrono::Utc::now().timestamp_millis();
                 // candidates 可能是 { candidates: [...] } 对象、{name, arguments: {candidates: [...]}} 格式、
                 // 也可能是原始数组
-                let candidate_list: Vec<&serde_json::Value> = candidates
-                    .as_object()
-                    .and_then(|obj| {
-                        // 优先顶层 candidates
-                        obj.get("candidates")
-                            .or_else(|| {
-                                // 兼容 tool_json 格式: {name, arguments: {candidates: [...]}}
-                                obj.get("arguments").and_then(|a| a.get("candidates"))
-                            })
-                            .and_then(|v| v.as_array())
-                    })
-                    .or_else(|| candidates.as_array())
-                    .map(|arr| arr.iter().collect())
-                    .unwrap_or_default();
+                // 优先使用已经过校验(过滤缺 stock_code + exit_now)的 candidate_array
+                let candidate_list: Vec<&serde_json::Value> =
+                    if let Some(arr) = candidate_array.as_array() {
+                        if !arr.is_empty() {
+                            arr.iter().collect()
+                        } else {
+                            // 兜底：从 candidates 中提取
+                            candidates
+                                .as_object()
+                                .and_then(|obj| {
+                                    obj.get("candidates")
+                                        .or_else(|| {
+                                            obj.get("arguments").and_then(|a| a.get("candidates"))
+                                        })
+                                        .and_then(|v| v.as_array())
+                                })
+                                .or_else(|| candidates.as_array())
+                                .map(|arr| arr.iter().collect())
+                                .unwrap_or_default()
+                        }
+                    } else {
+                        Vec::new()
+                    };
                 let mut detail_cache: std::collections::HashMap<String, serde_json::Value> =
                     std::collections::HashMap::new();
                 let mut serenity_seed: Vec<(String, String, Option<String>)> = Vec::new();
+                // 去重：同一 stock_code 只保留第一个（置信度最高的）候选
+                let mut seen_codes: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
                 for (i, c) in candidate_list.iter().enumerate() {
                     let code = c["stock_code"].as_str().unwrap_or("");
                     let name = c["stock_name"].as_str().unwrap_or("");
                     let conf = c["confidence"].as_i64().unwrap_or(50) as i32;
                     if code.is_empty() {
+                        continue;
+                    }
+                    // 去重：跳过已处理的 code
+                    if !seen_codes.insert(code.to_string()) {
+                        tracing::debug!("[serenity] 跳过重复候选（{}）: 保留首次出现", code,);
                         continue;
                     }
                     // 构造完整 RecoPick JSON（与 types.rs 中 camelCase 一致）
@@ -3344,6 +4133,8 @@ pub async fn run_serenity_screening(
                     };
                     if let Err(e) = pick.insert(db).await {
                         tracing::warn!("[serenity] 写入 reco_picks 失败 ({}): {e}", code);
+                        persistence_success = false;
+                        persistence_detail = format!("写入 {} 失败: {}", code, e);
                     }
                     // 构建全量数据缓存
                     detail_cache.insert(
@@ -3368,6 +4159,32 @@ pub async fn run_serenity_screening(
                     axagent_stock_analysis::recommender::set_serenity_candidate_cache(detail_cache);
                 }
             }
+
+            // 持久化完成后 emit completed 事件
+            let persistence_status = if persistence_success {
+                "completed"
+            } else {
+                "partial_failure"
+            };
+            if !persistence_success {
+                tracing::warn!("[serenity] 持久化部分失败: {}", persistence_detail,);
+            }
+            let _ = app_h.emit(
+                "serenity-screening-completed",
+                serde_json::json!({
+                    "workflowId": wf_id_ret,
+                    "status": persistence_status,
+                    "result": candidates,
+                    "candidates": candidate_array,
+                    "trends": trends_list,
+                    "emptyReason": empty_reason,
+                    "persistenceError": if persistence_success {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(persistence_detail)
+                    },
+                }),
+            );
 
             // wrap array candidates for frontend
             let result_val = if candidates.is_array() {
@@ -3895,7 +4712,9 @@ pub async fn delete_serenity_pick(state: State<'_, AppState>, id: String) -> Res
     pick.delete(db)
         .await
         .map_err(|e| format!("删除候选记录失败: {e}"))?;
-    tracing::info!("[serenity] 已删除候选记录: {id}");
+    // 同步清空 Serenity 全局缓存，避免下次荐股仍包含已删除的候选
+    axagent_stock_analysis::recommender::clear_serenity_candidate_cache();
+    tracing::info!("[serenity] 已删除候选记录: {id}，Serenity 缓存已同步清空");
     Ok(())
 }
 
@@ -4456,4 +5275,91 @@ pub async fn export_md_to_pptx(
         .ok_or_else(|| "ExportPptx 工具未注册".to_string())?;
     let result = tool.call(input, &ctx).await.map_err(|e| e.to_string())?;
     Ok(result.content)
+}
+
+/// 记录用户对决策的信任选择（公式 vs LLM），存储到 decision_json.userTrustDecision。
+#[tauri::command]
+pub async fn record_decision_trust(
+    state: State<'_, AppState>,
+    analysis_id: String,
+    trust_model: String,
+) -> Result<serde_json::Value, String> {
+    use sea_orm::sea_query::Expr;
+
+    let db = state.harness.db();
+    // 查原始记录获取 current decision_json
+    let original = stock_analyses::Entity::find_by_id(&analysis_id)
+        .one(db)
+        .await
+        .map_err(|e| format!("查询分析记录失败: {e}"))?
+        .ok_or_else(|| format!("分析记录不存在: {analysis_id}"))?;
+
+    let mut dj: serde_json::Value = original
+        .decision_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = dj.as_object_mut() {
+        obj.insert("userTrustDecision".into(), serde_json::json!(trust_model));
+    }
+
+    stock_analyses::Entity::update_many()
+        .col_expr(stock_analyses::Column::DecisionJson, Expr::value(dj.to_string()))
+        .filter(stock_analyses::Column::Id.eq(&analysis_id))
+        .exec(db)
+        .await
+        .map_err(|e| format!("更新分析记录失败: {e}"))?;
+
+    tracing::warn!("[record_decision_trust] analysis_id={analysis_id}, trust_model={trust_model}");
+    Ok(serde_json::json!({ "success": true, "trust_model": trust_model }))
+}
+
+/// 查询决策回测分析：返回所有有 outcome 的分析记录的比较数据。
+#[tauri::command]
+pub async fn query_decision_backtest(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    use sea_orm::QueryFilter;
+    use sea_orm::QueryOrder;
+
+    let db = state.harness.db();
+    let records = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Outcome.is_not_null())
+        .filter(stock_analyses::Column::DecisionAction.is_not_null())
+        .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
+        .all(db)
+        .await
+        .map_err(|e| format!("查询失败: {e}"))?;
+
+    let limit = limit.unwrap_or(100).min(500) as usize;
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for r in records.iter().take(limit) {
+        let formula_action = r.decision_action.as_deref().unwrap_or("");
+        let outcome_str = r.outcome.as_deref().unwrap_or("");
+        let llm_action: Option<String> = r
+            .llm_decision_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| {
+                v.get("action")
+                    .or_else(|| v.get("stance"))
+                    .and_then(|a| a.as_str().map(String::from))
+            });
+        results.push(serde_json::json!({
+            "stockCode": r.stock_code,
+            "stockName": r.stock_name,
+            "analysisDate": r.analysis_date,
+            "formulaAction": formula_action,
+            "llmAction": llm_action,
+            "outcome": outcome_str,
+            "decisionConfidence": r.decision_json.as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| v.get("confidence").and_then(|c| c.as_f64())),
+            "userTrustDecision": r.decision_json.as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| v.get("userTrustDecision").and_then(|t| t.as_str().map(String::from))),
+        }));
+    }
+    Ok(results)
 }

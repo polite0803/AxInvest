@@ -7,6 +7,13 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 function computeRiskScore(text: string): number {
+  // 统一提取报告文本，忽略 VERDICT 标签和 JSON 语法噪音
+  const clean = text
+    .replace(/<!--\s*VERDICT\s*:\s*\{[^}]*\}\s*-->/gi, "")
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/[{}\[\]"\\,:\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   const high = [
     "高风险",
     "重大风险",
@@ -22,11 +29,11 @@ function computeRiskScore(text: string): number {
   ];
   const mid = ["风险", "谨慎", "关注", "波动", "压力", "挑战", "不确定性", "潜在", "下行", "回落"];
   let score = 40;
-  for (const w of high) { score += (text.match(new RegExp(w, "g")) || []).length * 8; }
-  for (const w of mid) { score += (text.match(new RegExp(w, "g")) || []).length * 3; }
-  if (text.length > 500) { score += 5; }
-  if (text.length > 1000) { score += 5; }
-  if (text.length > 2000) { score += 5; }
+  for (const w of high) { score += (clean.match(new RegExp(w, "g")) || []).length * 8; }
+  for (const w of mid) { score += (clean.match(new RegExp(w, "g")) || []).length * 3; }
+  if (clean.length > 500) { score += 5; }
+  if (clean.length > 1000) { score += 5; }
+  if (clean.length > 2000) { score += 5; }
   return Math.min(100, Math.max(5, score));
 }
 
@@ -49,8 +56,11 @@ const LABEL_KEY_MAP: Record<string, string> = {
   "risk-agg": "stockAnalysis.workflow.riskAggregation",
   "risk-con": "stockAnalysis.workflow.riskConservative",
   "risk-neu": "stockAnalysis.workflow.riskNeutral",
-  "research-mgr": "stockAnalysis.workflow.researchManager",
-  "comprehensive": "stockAnalysis.workflow.comprehensive",
+  "research-mgr": "stockAnalysis.risk.researchManager",
+  "comprehensive": "stockAnalysis.risk.comprehensive",
+  "risk-aggregated": "stockAnalysis.workflow.riskAggregation",
+  "risk-level": "stockAnalysis.workflow.riskLevel",
+  "risk-convergence": "stockAnalysis.workflow.riskConvergence",
 };
 
 function useGetLabel() {

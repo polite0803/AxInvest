@@ -51,7 +51,13 @@ impl TrendStrategy {
             Period::Long => read_f64(vars, "trend_long_kline_limit", 300.0) as u32,
         };
         let klines = client.get_klines(code, "daily", kline_limit).await.ok()?;
-        let min_kline_len = read_f64(vars, "trend_min_kline_len", 30.0) as usize;
+        // 修复 V51：min_kline_len 按周期差异化，避免 UltraShort 拉取 20 根却要求 30 根的矛盾
+        let min_kline_len = match self.period {
+            Period::UltraShort => read_f64(vars, "trend_ultra_short_min_kline_len", 15.0) as usize,
+            Period::Short => read_f64(vars, "trend_short_min_kline_len", 30.0) as usize,
+            Period::Mid => read_f64(vars, "trend_mid_min_kline_len", 60.0) as usize,
+            Period::Long => read_f64(vars, "trend_long_min_kline_len", 120.0) as usize,
+        };
         if klines.len() < min_kline_len {
             return None;
         }
@@ -237,7 +243,7 @@ impl TrendStrategy {
             holding_days: self.period.default_holding_days(),
             confidence: conf,
             reasons,
-            risk_notes: vec!["大盘破 20 日均线 -10%".to_string()],
+            risk_notes: vec!["个股回调 / 跌破短期均线风险".to_string()],
             secondary_styles: vec![],
             synthetic: false,
         })

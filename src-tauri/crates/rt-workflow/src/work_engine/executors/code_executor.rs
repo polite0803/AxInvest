@@ -45,6 +45,9 @@ fn execute_rhai_directly(
     use rhai::{Engine, Scope};
 
     let mut engine = Engine::new();
+    // 提升表达式复杂度上限：瓶颈计算脚本有复杂嵌套 map + 大量条件判断链
+    // 默认 max_expr_depths(128,128) 在某些 Rhai 版本中对长 if 链 + map 字面量不够
+    engine.set_max_expr_depths(1024, 1024);
     // Rhai 无内建 clamp，portfolio-mgr.rhai 等脚本依赖
     engine.register_fn("clamp", |value: f64, min: f64, max: f64| -> f64 {
         if value < min {
@@ -55,8 +58,33 @@ fn execute_rhai_directly(
             value
         }
     });
+    // Rhai 原生 Array 无 join 方法，portfolio-mgr.rhai 中 data_gaps.join(", ") 依赖此函数
+    engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
+        arr.iter()
+            .map(|item| item.to_string())
+            .collect::<Vec<_>>()
+            .join(sep)
+    });
+    // V48: JSON 字符串解析 — bottleneck-calc.rhai 需要解析 Agent tool_call 输出中的
+    // 嵌套 JSON（如 arguments.content 是 JSON 字符串），Rhai 原生不支持 JSON 解析。
+    engine.register_fn("json_parse", |s: &str| -> rhai::Dynamic {
+        match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(v) => json_value_to_dynamic(&v),
+            Err(e) => {
+                tracing::warn!("[code_executor] json_parse 失败: {e}, input={}", &s[..s.len().min(200)]);
+                rhai::Dynamic::UNIT
+            }
+        }
+    });
     let mut scope = Scope::new();
     let mut input_params_snapshot = serde_json::Map::new();
+
+    // V49 诊断：input_mapping 是否为空（空则所有变量丢失）
+    tracing::error!(
+        "[code_executor V49] input_mapping entries={}, keys={:?}",
+        input_mapping.len(),
+        input_mapping.keys().collect::<Vec<_>>()
+    );
 
     // 将 input_mapping 的值注入 Rhai scope
     for (target_key, source_key) in input_mapping {
@@ -64,43 +92,26 @@ fn execute_rhai_directly(
         // 记录解析值的快照（Phase 5: What-If 回测参数持久化）
         let snapshot_value = value.clone().unwrap_or(Value::Null);
         input_params_snapshot.insert(target_key.clone(), snapshot_value);
-        // 将 Value 转换为 Rhai 动态类型；解析失败时推入 ()（单元值/空）
-        match &value {
-            Some(Value::Null) | None => {
-                let _ = scope.push_constant(target_key.as_str(), ());
-            },
-            Some(Value::Bool(b)) => {
-                let _ = scope.push_constant(target_key.as_str(), *b);
-            },
+        // V49: 统一转为 Dynamic 再 push_constant，避免 push_dynamic 在 v1.25 中静默失败
+        let dyn_val = match &value {
+            Some(Value::Null) | None => rhai::Dynamic::UNIT,
+            Some(Value::Bool(b)) => rhai::Dynamic::from(*b),
             Some(Value::Number(n)) => {
-                let val = if let Some(f) = n.as_f64() {
-                    f
-                } else if let Some(i) = n.as_i64() {
-                    i as f64
-                } else if let Some(u) = n.as_u64() {
-                    u as f64
-                } else {
-                    0.0_f64
-                };
-                let _ = scope.push_constant(target_key.as_str(), val);
+                if let Some(f) = n.as_f64() { rhai::Dynamic::from(f) }
+                else if let Some(i) = n.as_i64() { rhai::Dynamic::from(i as f64) }
+                else if let Some(u) = n.as_u64() { rhai::Dynamic::from(u as f64) }
+                else { rhai::Dynamic::from(0.0_f64) }
             },
-            Some(Value::String(s)) => {
-                let _ = scope.push_constant(target_key.as_str(), s.clone());
-            },
-            Some(Value::Array(arr)) => {
-                let rhai_arr: rhai::Array = arr.iter().map(json_value_to_dynamic).collect();
-                let dyn_arr: rhai::Dynamic = rhai_arr.into();
-                scope.push_dynamic(target_key.as_str(), dyn_arr);
-            },
-            Some(Value::Object(obj)) => {
-                let mut map = rhai::Map::new();
-                for (k, v) in obj {
-                    map.insert(k.clone().into(), json_value_to_dynamic(v));
-                }
-                scope.push_dynamic(target_key.as_str(), map.into());
-            },
-        }
+            Some(Value::String(s)) => rhai::Dynamic::from(s.clone()),
+            Some(v) => json_value_to_dynamic(v),
+        };
+        scope.push_constant(target_key.as_str(), dyn_val);
     }
+    // V29 诊断：记录所有 input_mapping resolve 结果，精确定位哪个变量解析失败
+    tracing::warn!(
+        "[code_executor] input_mapping snapshot: {}",
+        serde_json::to_string(&input_params_snapshot).unwrap_or_default()
+    );
 
     // 执行脚本，期望返回一个 map
     let result: rhai::Dynamic = engine.eval_with_scope(&mut scope, code).map_err(|e| {
@@ -213,10 +224,10 @@ impl NodeExecutorTrait for CodeExecutor {
                 context.variables.keys().take(10).collect::<Vec<_>>(),
                 super::resolve_var_path("t-scoring.result.totalScore", &context.variables),
                 super::resolve_var_path(
-                    "debate-convergence.params.consensus_score",
+                    "debate-convergence.content.consensus_score",
                     &context.variables
                 ),
-                super::resolve_var_path("a-catalyst.params.catalyst_level", &context.variables),
+                super::resolve_var_path("a-catalyst.content.catalyst_level", &context.variables),
             );
             let (result, input_params) = execute_rhai_directly(
                 &code_node.config.code,
@@ -265,7 +276,9 @@ impl NodeExecutorTrait for CodeExecutor {
                 "status": "code_ready",
                 "language": code_node.config.language,
                 "code_lines": code_lines,
-                "code_preview": &code_node.config.code[..code_node.config.code.len().min(500)],
+                // V37 修复: 按 char 边界取前缀，避免 .len().min(500) 落在多字节 UTF-8
+                // 字符中间导致 panic
+                "code_preview": code_node.config.code.chars().take(500).collect::<String>(),
                 "node_id": node.base_id(),
             }),
             output_var: Some(code_node.config.output_var.clone()),

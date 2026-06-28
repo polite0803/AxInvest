@@ -39,7 +39,25 @@ use crate::recommender::strategies::{
 use crate::recommender::strategy::PerCodeLocks;
 
 /// Serenity 工作流产出的候选股，供 SerenityStrategy 读取
+/// 自带 TTL（1h），避免 workflow 长时间不运行时使用过期候选。
 static SERENITY_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+
+/// Serenity 缓存写入时间戳，用于 TTL 检查
+static SERENITY_CACHE_TIME: LazyLock<RwLock<Option<Instant>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// Serenity 缓存 TTL：1 小时
+const SERENITY_CACHE_TTL: Duration = Duration::from_secs(3600);
+
+/// 检查 Serenity 缓存是否过期
+fn is_serenity_cache_fresh() -> bool {
+    if let Ok(guard) = SERENITY_CACHE_TIME.read() {
+        if let Some(ts) = *guard {
+            return ts.elapsed() < SERENITY_CACHE_TTL;
+        }
+    }
+    false
+}
 
 /// 设置 serenity 候选种子（由 run_serenity_screening 命令写入）
 pub fn set_serenity_seed(seed: Vec<SeedItem>) {
@@ -47,10 +65,16 @@ pub fn set_serenity_seed(seed: Vec<SeedItem>) {
     if let Ok(mut guard) = SERENITY_SEED.write() {
         *guard = seed;
     }
+    if let Ok(mut guard) = SERENITY_CACHE_TIME.write() {
+        *guard = Some(Instant::now());
+    }
 }
 
-/// 读取 serenity 候选种子
+/// 读取 serenity 候选种子（缓存过期返回空）
 pub fn get_serenity_seed() -> Vec<SeedItem> {
+    if !is_serenity_cache_fresh() {
+        return Vec::new();
+    }
     SERENITY_SEED.read().map(|g| g.clone()).unwrap_or_default()
 }
 
@@ -65,19 +89,31 @@ pub fn set_serenity_candidate_cache(cache: HashMap<String, serde_json::Value>) {
     if let Ok(mut guard) = SERENITY_CANDIDATE_CACHE.write() {
         *guard = cache;
     }
+    if let Ok(mut guard) = SERENITY_CACHE_TIME.write() {
+        *guard = Some(Instant::now());
+    }
 }
 
-/// 读取单个候选的全量数据
+/// 读取单个候选的全量数据（缓存过期返回 None）
 pub fn get_serenity_candidate_detail(code: &str) -> Option<serde_json::Value> {
+    if !is_serenity_cache_fresh() {
+        return None;
+    }
     SERENITY_CANDIDATE_CACHE
         .read()
         .ok()
         .and_then(|g| g.get(code).cloned())
 }
 
-/// 清空候选全量数据缓存
+/// 清空候选全量数据缓存（同时清时间戳）
 pub fn clear_serenity_candidate_cache() {
     if let Ok(mut guard) = SERENITY_CANDIDATE_CACHE.write() {
+        guard.clear();
+    }
+    if let Ok(mut guard) = SERENITY_CACHE_TIME.write() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = SERENITY_SEED.write() {
         guard.clear();
     }
 }
@@ -240,22 +276,22 @@ fn cache_get(period: Period) -> Option<RecoResponse> {
 
 fn cache_put(period: Period, resp: RecoResponse) {
     let suffix = as_of::cache_suffix();
-    // 空结果不缓存，避免"零时延返回空"的误导体验
-    let all_empty = resp.picks.values().all(|v| v.is_empty());
-    if all_empty {
-        return;
-    }
+    // 空结果也缓存（同 60s TTL），避免 vendor 故障时每次请求都全量扫描 vendor
+    // 旧逻辑跳过了空结果的缓存，导致 vendor 故障期间形成
+    // "请求→扫描→空→不缓存→请求"的死循环。
     let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
     g.insert((period, suffix), (resp, Instant::now()));
 }
 
 /// 主动失效缓存（设置页保存 vendor 后调用）
 ///
-/// 同时清 vendor 启用集合缓存 + 推荐结果缓存，保证下次调用立即反映新 vendor 状态
+/// 同时清 vendor 启用集合缓存 + 推荐结果缓存 + Serenity 候选缓存，
+/// 保证下次调用立即反映新 vendor 状态和干净的候选池
 pub fn invalidate_cache() {
     let mut g = RESULT_CACHE.write().unwrap_or_else(|e| e.into_inner());
     g.clear();
     clear_cached_vendors();
+    clear_serenity_candidate_cache();
 }
 
 // ── 公开入口 ──
@@ -297,9 +333,15 @@ pub async fn recommend_stocks(
     // 2. seed pool + 流动性过滤
     let mut seed = build_seed_pool(&client).await;
     let raw_seed_pool_size = seed.len();
+    tracing::info!("[recommender] period={:?}, raw_seed_pool_size={}", period, raw_seed_pool_size);
     // 保留 raw_seed 给 WatchlistStrategy（它只依赖 quote，不依赖 K 线）
     let raw_seed = seed.clone();
     seed = liquidity_filter_and_truncate(client.clone(), seed).await;
+    tracing::info!(
+        "[recommender] after liquidity filter, seed={}, raw_seed={}",
+        seed.len(),
+        raw_seed.len()
+    );
 
     // 流动性过滤兜底：若 vendor 拿不到 60 日 K 线 / 全部不达标，过滤后池子可能
     // 全空。这种情况下 4 个主策略（trend/value/capital/reversion）会直接跳过。
@@ -470,9 +512,24 @@ pub async fn recommend_stocks(
     for mut picks in results.into_iter().flatten() {
         all_picks.append(&mut picks);
     }
+    // 诊断日志 V52：扫描完成后输出各策略的出票数
+    {
+        let mut counts: std::collections::BTreeMap<types::Style, usize> =
+            std::collections::BTreeMap::new();
+        for p in &all_picks {
+            *counts.entry(p.style).or_insert(0) += 1;
+        }
+        tracing::info!(
+            "[recommender] period={:?}, raw_picks={}, by_style={:?}",
+            period,
+            all_picks.len(),
+            counts
+        );
+    }
 
     // 6. 去重
     dedup_and_merge(&mut all_picks);
+    tracing::info!("[recommender] after dedup, picks={}", all_picks.len());
 
     // P3-1: drop picks whose numeric fields are NaN/inf — these would render as "NaN" in JSON.
     all_picks.retain(|p| {
@@ -483,6 +540,7 @@ pub async fn recommend_stocks(
             && !p.target_price.is_nan()
             && !p.position_pct.is_nan()
     });
+    tracing::info!("[recommender] after NaN filter, picks={}", all_picks.len());
 
     // P3-2: drop picks whose target_price is already below current price
     // (no upside left — the BUY thesis is dead). Frontend should also visually
@@ -492,15 +550,25 @@ pub async fn recommend_stocks(
         // 允许 ≤0.5% 的轻微容差，避免价格微抖时被误杀
         p.target_price >= p.price * 0.995
     });
+    tracing::info!("[recommender] after target<price filter, picks={}", all_picks.len());
 
     // P3-3: drop picks below user-configured min_confidence
     // (reco_min_confidence from StockAnalysisConfigPanel, 0 = no filter)
     if reco_cfg.min_confidence > 0 {
+        tracing::info!(
+            "[recommender] before confidence filter (min={}), picks={}",
+            reco_cfg.min_confidence,
+            all_picks.len()
+        );
         all_picks.retain(|p| p.confidence >= reco_cfg.min_confidence);
+        tracing::info!("[recommender] after confidence filter, picks={}", all_picks.len());
     }
 
     // 7. 按风格分组 + 限 10
     let mut by_style = group_by_style_and_trim(&mut all_picks, 10);
+    for (style, picks) in &by_style {
+        tracing::info!("[recommender] final bucket: style={:?}, picks={}", style, picks.len());
+    }
 
     // 8. 数据稀疏兜底：5 个 style 桶里若有空，且 raw_seed 非空，用 get_quote 拉
     //    基础行情 emit 合成 picks 填入对应 style 桶。解决"只有 Watchlist 有 10 条，
@@ -537,6 +605,11 @@ pub async fn recommend_stocks(
             .await;
             let mut tagged: Vec<types::RecoPick> = synthetic;
             tagged.truncate(10);
+            tracing::info!(
+                "[recommender] style={:?} bucket was empty, filled with {} synthetic picks",
+                style,
+                tagged.len()
+            );
             by_style.insert(style, tagged);
         }
     }
@@ -598,7 +671,7 @@ mod tests {
             secondary_styles: vec![],
             synthetic: false,
         };
-        let mut picks = std::collections::HashMap::new();
+        let mut picks = std::collections::BTreeMap::new();
         picks.insert(Style::Trend, vec![pick]);
         RecoResponse {
             period,
@@ -681,7 +754,7 @@ mod tests {
     fn reco_response_serializes_asof_fields() {
         let resp = RecoResponse {
             period: Period::Mid,
-            picks: std::collections::HashMap::new(),
+            picks: std::collections::BTreeMap::new(),
             disabled_styles: vec![],
             degraded_styles: vec![],
             degraded_reasons: std::collections::HashMap::new(),
@@ -699,7 +772,7 @@ mod tests {
     fn reco_response_live_omits_asof_field() {
         let resp = RecoResponse {
             period: Period::Mid,
-            picks: std::collections::HashMap::new(),
+            picks: std::collections::BTreeMap::new(),
             disabled_styles: vec![],
             degraded_styles: vec![],
             degraded_reasons: std::collections::HashMap::new(),

@@ -61,7 +61,7 @@ function isValidPastDate(s: string): boolean {
   const t = new Date(s + "T00:00:00");
   if (isNaN(t.getTime())) { return false; }
   // 拒绝未来日期（与后端 AsOfContext::new 一致）
-  return s < todayIso();
+  return s <= todayIso();
 }
 
 export const useTimeAnchorStore = create<TimeAnchorState>()(

@@ -207,7 +207,8 @@ export function RecoHistoryModal() {
               dataIndex: "period",
               key: "period",
               render: (v: string) => {
-                const periodKey = `stockAnalysis.period${v.charAt(0).toUpperCase() + v.slice(1)}`;
+                const camel = v.replace(/(_[a-z])/g, (m) => m[1].toUpperCase());
+                const periodKey = `stockAnalysis.period${camel.charAt(0).toUpperCase() + camel.slice(1)}`;
                 return (
                   <Tag className="text-[10px] m-0">
                     {t(periodKey)}
@@ -227,7 +228,11 @@ export function RecoHistoryModal() {
               key: "styles",
               render: (v: string) => (
                 <div className="flex gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                  {v.split(",").map((s) => <Tag key={s} className="text-[10px] m-0">{s}</Tag>)}
+                  {v.split(",").map((s) => (
+                    <Tag key={s} color={STYLE_COLOR[s]} className="text-[10px] m-0">
+                      {t(`stockAnalysis.recommendation.style${s.charAt(0).toUpperCase() + s.slice(1)}`)}
+                    </Tag>
+                  ))}
                 </div>
               ),
             },
@@ -273,7 +278,7 @@ export function RecoHistoryModal() {
                 label: (
                   <div className="flex items-center gap-2">
                     <Tag color={STYLE_COLOR[style] ?? "default"} className="m-0 text-xs">
-                      {style}
+                      {t(`stockAnalysis.recommendation.style${style.charAt(0).toUpperCase() + style.slice(1)}`)}
                     </Tag>
                     <span className="text-xs text-gray-500">
                       ({items.length})

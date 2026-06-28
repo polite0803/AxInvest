@@ -1,3 +1,4 @@
+import { extractLlmField } from "@/lib/agentOutput";
 import { invoke } from "@/lib/invoke";
 import { exportAnalysisReport } from "@/lib/stock-analysis-export";
 import type { ExportData, ExportFormat } from "@/lib/stock-analysis-export";
@@ -6,7 +7,7 @@ import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
-import { App, Button, Card, Dropdown, Modal, Tag } from "antd";
+import { App, Button, Card, Dropdown, Modal, Tag, Tooltip } from "antd";
 import NodeRenderer from "markstream-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -60,21 +61,15 @@ export function DecisionBanner() {
   // 解析 LLM stance + summary 用于 banner 展示
   const llmStance = useMemo(() => {
     if (!llmDecisionJson) { return null; }
-    try {
-      const j = JSON.parse(llmDecisionJson);
-      return j.stance ?? null;
-    } catch {
-      return null;
-    }
+    return (extractLlmField(llmDecisionJson, "action") as string | null)
+      ?? (extractLlmField(llmDecisionJson, "stance") as string | null)
+      ?? null;
   }, [llmDecisionJson]);
   const llmSummary = useMemo(() => {
     if (!llmDecisionJson) { return null; }
-    try {
-      const j = JSON.parse(llmDecisionJson);
-      return j.summary ?? null;
-    } catch {
-      return null;
-    }
+    return (extractLlmField(llmDecisionJson, "reasoning") as string | null)
+      ?? (extractLlmField(llmDecisionJson, "summary") as string | null)
+      ?? null;
   }, [llmDecisionJson]);
   // timeline-jump 高亮：被 evidence 指向时短暂加 ring 样式
   const highlightedPanel = useStockAnalysisStore((s) => s.highlightedPanel);
@@ -83,6 +78,8 @@ export function DecisionBanner() {
   const [adding, setAdding] = useState(false);
   const [watchlisted, setWatchlisted] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // V50+: 分歧时内联展开双视角对比（替代跳 tab）
+  const [showInlineComparison, setShowInlineComparison] = useState(false);
   // 快速交易录入 ref（替代 getElementById，防止多实例 ID 冲突）
   const tradePriceRef = useRef<HTMLInputElement>(null);
   const tradeQtyRef = useRef<HTMLInputElement>(null);
@@ -252,7 +249,7 @@ export function DecisionBanner() {
                 {t("stockAnalysis.loadAnalysisFailed")}
               </div>
               <div
-                className="text-xs mb-2"
+                className="text-sm mb-2"
                 style={{ color: "var(--muted)", wordBreak: "break-all" }}
               >
                 {error}
@@ -294,7 +291,7 @@ export function DecisionBanner() {
             <div className="text-sm font-semibold mb-1">
               {t("stockAnalysis.decisionMissing")}
             </div>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.decisionMissingHint")}
             </div>
             {stockCode
@@ -333,7 +330,7 @@ export function DecisionBanner() {
                   >
                     {t("stockAnalysis.searchStock")}
                   </Button>
-                  <span className="text-xs" style={{ color: "var(--muted)" }}>
+                  <span className="text-sm" style={{ color: "var(--muted)" }}>
                     {t("stockAnalysis.reAnalyzeNeedCodeHint")}
                   </span>
                 </div>
@@ -346,8 +343,11 @@ export function DecisionBanner() {
 
   // TypeScript 在此之后已将 decision 收窄为 StockDecision (non-null)
 
-  // ── 决策 vs 分析师共识矛盾检测 ──
-  const isContradictory = (() => {
+  // ── 矛盾检测 ──
+  // 1. 后端检测：trader 输出自相矛盾（action 与 targetPrice 方向冲突）
+  // 2. 前端检测：决策 action 与分析师共识矛盾
+  const isBackendContradictory = !!decision?.isContradictory;
+  const isConsensusContradictory = (() => {
     if (!analystReports || Object.keys(analystReports).length < 3 || !decision) { return false; }
     const consensus = computeStockConsensus(analystReports, undefined, decision.timeHorizon);
     const isBullishAction = decision.action === "BUY" || decision.action === "INCREASE";
@@ -356,6 +356,7 @@ export function DecisionBanner() {
     if (isBearishAction && (consensus.consensus === "bullish" || consensus.consensus === "divided")) { return true; }
     return false;
   })();
+  const isContradictory = isBackendContradictory || isConsensusContradictory;
 
   const confidencePct = Math.round(decision.confidence ?? 0);
   const meterColor = confidencePct >= 70
@@ -388,37 +389,62 @@ export function DecisionBanner() {
       <Card
         id="decision-banner-top"
         size="small"
-        title={
-          <div className="flex items-center gap-2">
-            <span>{t("stockAnalysis.finalDecision")}</span>
-            <Tag color={getActionColor(decision.action)}>
-              {actionLabel(decision.action)}
-            </Tag>
-            {asOfDate && (
-              <Tag color="purple" title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}>
-                ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+        title={decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmStance
+          ? (
+            /* 分歧时：双决策并列标题 */
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm">{t("stockAnalysis.dualViewDisagreementTitle")}</span>
+              <Tag color={getActionColor(decision.action)}>
+                {t("stockAnalysis.formula")} {actionLabel(decision.action)}
               </Tag>
-            )}
-            {isContradictory && (
-              <Tag color="orange">
-                ⚠️ {t("stockAnalysis.contradiction")}
+              <span className="text-sm" style={{ color: "var(--muted)" }}>vs</span>
+              <Tag color={getActionColor(llmStance)}>
+                LLM {t(getActionTKey(llmStance))}
               </Tag>
-            )}
-            {decision.timeHorizon && (
-              <Tag color="geekblue">
-                {t(`stockAnalysis.timeHorizon${
-                  decision.timeHorizon === "ultra_short"
-                    ? "UltraShort"
-                    : decision.timeHorizon === "short"
-                    ? "Short"
-                    : decision.timeHorizon === "mid"
-                    ? "Mid"
-                    : "Long"
-                }`)}
+              {asOfDate && (
+                <Tag color="purple" title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}>
+                  ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+                </Tag>
+              )}
+              {isContradictory && (
+                <Tag color="orange">
+                  ⚠️ {t("stockAnalysis.contradiction")}
+                </Tag>
+              )}
+            </div>
+          )
+          : (
+            /* 一致或无LLM时：原单决策标题 */
+            <div className="flex items-center gap-2">
+              <span>{t("stockAnalysis.finalDecision")}</span>
+              <Tag color={getActionColor(decision.action)}>
+                {actionLabel(decision.action)}
               </Tag>
-            )}
-          </div>
-        }
+              {asOfDate && (
+                <Tag color="purple" title={t("timeTravel.replayBadge.tooltip", { date: asOfDate })}>
+                  ⏪ {t("timeTravel.pageAnchor.untilDate", { date: asOfDate })}
+                </Tag>
+              )}
+              {isContradictory && (
+                <Tag color="orange">
+                  ⚠️ {t("stockAnalysis.contradiction")}
+                </Tag>
+              )}
+              {decision.timeHorizon && (
+                <Tag color="geekblue">
+                  {t(`stockAnalysis.timeHorizon${
+                    decision.timeHorizon === "ultra_short"
+                      ? "UltraShort"
+                      : decision.timeHorizon === "short"
+                      ? "Short"
+                      : decision.timeHorizon === "mid"
+                      ? "Mid"
+                      : "Long"
+                  }`)}
+                </Tag>
+              )}
+            </div>
+          )}
         extra={
           <Button
             type="text"
@@ -427,7 +453,7 @@ export function DecisionBanner() {
             onClick={() => setExpanded(true)}
           />
         }
-        styles={{ body: { padding: "6px 12px" } }}
+        styles={{ body: { padding: "12px 18px" } }}
         style={{
           borderLeft: "4px solid var(--accent)",
           ...(highlightedPanel === "decision"
@@ -437,17 +463,32 @@ export function DecisionBanner() {
       >
         {/* 置信度条：数字 + 定性标签 + 共识上下文 */}
         <div className="mb-2">
-          <div className="flex justify-between items-center text-xs mb-1">
+          <div className="flex justify-between items-center text-sm mb-1">
             <div className="flex items-center gap-1.5">
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
               <span
                 className="font-mono font-semibold"
-                style={{ color: meterColor, fontSize: 15 }}
+                style={{ color: meterColor, fontSize: 18 }}
               >
                 {confidencePct}%
               </span>
+              {/* V50: 双视角一致性调制后的置信度 */}
+              {decision.adjustedConfidence != null
+                && Math.abs(decision.adjustedConfidence - confidencePct) > 3 && (
+                <span
+                  className="font-mono font-semibold text-sm ml-0.5"
+                  style={{
+                    color: decision.adjustedConfidence > confidencePct
+                      ? "#10b981"
+                      : "#ef4444",
+                    opacity: 0.85,
+                  }}
+                >
+                  →{Math.round(decision.adjustedConfidence)}%
+                </span>
+              )}
               <span
-                className="text-[10px] px-1.5 py-px rounded font-medium"
+                className="text-sm px-1.5 py-px rounded font-medium"
                 style={{
                   background: `${confidenceLabelColor}18`,
                   color: confidenceLabelColor,
@@ -460,7 +501,7 @@ export function DecisionBanner() {
             {/* 共识分数：当 dual view 分数可用时展示，帮助用户理解低置信原因 */}
             {decisionAgreementScore !== null && (
               <span
-                className="text-[10px]"
+                className="text-sm"
                 style={{ color: "var(--muted)" }}
               >
                 📊 {t("stockAnalysis.consensusAbbr")} {decisionAgreementScore}/100
@@ -483,9 +524,122 @@ export function DecisionBanner() {
           </div>
         </div>
 
+        {/* V50+: 分歧时内联双视角对比卡片（紧凑版） */}
+        {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmStance && (
+          <div
+            className="mb-2 p-1.5 rounded space-y-1"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold" style={{ color: "#7c3aed" }}>
+                📊 {t("stockAnalysis.dualViewComparisonTitle")}
+              </span>
+              <span
+                className="text-sm font-mono px-1 py-px rounded"
+                style={{ background: "rgba(239,68,68,0.10)", color: "#ef4444" }}
+              >
+                {decisionAgreementScore}/100
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 text-sm">
+              {/* 公式视角 */}
+              <div
+                className="rounded px-1.5 py-1 space-y-0.5"
+                style={{ background: "rgba(37,99,235,0.05)", borderLeft: "2px solid #2563eb" }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium" style={{ color: "#2563eb" }}>{t("stockAnalysis.formula")}</span>
+                  <Tag
+                    color={getActionColor(decision.action)}
+                    style={{ fontSize: 12, lineHeight: "20px", height: 20, paddingInline: 6 }}
+                  >
+                    {actionLabel(decision.action)}
+                  </Tag>
+                </div>
+                <div className="font-mono flex gap-2" style={{ color: "var(--color-text-secondary)" }}>
+                  <span>
+                    置信 <b>{confidencePct}%</b>
+                  </span>
+                  <span>|</span>
+                  <span>
+                    仓位 <b>{decision.positionPct}%</b>
+                  </span>
+                </div>
+                {decision.reasoning && (
+                  <div
+                    className="line-clamp-1"
+                    style={{ color: "var(--muted)", fontSize: "12px" }}
+                    title={cleanToolCallTags(decision.reasoning) ?? ""}
+                  >
+                    {cleanToolCallTags(decision.reasoning)?.slice(0, 50)}
+                    {(cleanToolCallTags(decision.reasoning)?.length ?? 0) > 50 ? "…" : ""}
+                  </div>
+                )}
+              </div>
+              {/* LLM 视角 */}
+              <div
+                className="rounded px-1.5 py-1 space-y-0.5"
+                style={{ background: "rgba(124,58,237,0.05)", borderLeft: "2px solid #7c3aed" }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium" style={{ color: "#7c3aed" }}>LLM</span>
+                  <div className="flex items-center gap-1">
+                    <Tag
+                      color={getActionColor(llmStance)}
+                      style={{ fontSize: 12, lineHeight: "20px", height: 20, paddingInline: 6 }}
+                    >
+                      {t(getActionTKey(llmStance))}
+                    </Tag>
+                    {(() => {
+                      const llmConf = extractLlmField(llmDecisionJson, "confidence") as number | null;
+                      if (llmConf != null && Math.round(llmConf) > confidencePct) {
+                        return (
+                          <span
+                            className="text-sm px-0.5 rounded font-medium"
+                            style={{ background: "rgba(16,185,129,0.15)", color: "#10b981" }}
+                          >
+                            ✓ {t("stockAnalysis.recommended")}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                </div>
+                <div className="font-mono flex gap-2" style={{ color: "var(--color-text-secondary)" }}>
+                  <span>
+                    置信{" "}
+                    <b>
+                      {(() => {
+                        const c = extractLlmField(llmDecisionJson, "confidence") as number | null;
+                        return c != null ? `${Math.round(c)}%` : "—";
+                      })()}
+                    </b>
+                  </span>
+                  <span>|</span>
+                  <span>
+                    仓位{" "}
+                    <b>
+                      {(() => {
+                        const p = extractLlmField(llmDecisionJson, "positionPct") as number | null;
+                        return p != null ? `${Math.round(p)}%` : "—";
+                      })()}
+                    </b>
+                  </span>
+                </div>
+                {llmSummary && (
+                  <div className="line-clamp-1" style={{ color: "var(--muted)", fontSize: "12px" }} title={llmSummary}>
+                    {llmSummary.slice(0, 50)}…
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Reasoning: collapsed in banner, detailed in Modal via expand button */}
         <div
-          className="text-xs mb-2 p-2 rounded cursor-pointer hover:opacity-80 transition-opacity"
+          className="text-sm mb-2 p-2 rounded cursor-pointer hover:opacity-80 transition-opacity"
           style={{ background: "var(--surface)" }}
           onClick={() => setExpanded(true)}
           role="button"
@@ -502,7 +656,7 @@ export function DecisionBanner() {
                   {cleanToolCallTags(decision.reasoning!)?.slice(0, 120)}
                   {cleanToolCallTags(decision.reasoning!)!.length > 120 ? "…" : ""}
                 </span>
-                <span className="ml-1 text-[10px]" style={{ color: "var(--accent)" }}>
+                <span className="ml-1 text-sm" style={{ color: "var(--accent)" }}>
                   ▶ {t("stockAnalysis.showDetail")}
                 </span>
               </>
@@ -513,7 +667,7 @@ export function DecisionBanner() {
         {/* [Phase 2 step 10] 分歧时 LLM 对比标注 */}
         {decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold && llmSummary && (
           <div
-            className="text-xs mb-2 p-2 rounded"
+            className="text-sm mb-2 p-2 rounded"
             style={{ background: "rgba(124, 58, 237, 0.08)", borderLeft: "3px solid #7c3aed" }}
           >
             <span className="font-medium" style={{ color: "#7c3aed" }}>
@@ -529,7 +683,7 @@ export function DecisionBanner() {
         <div className="grid gap-1.5 mb-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
           {decision.targetPrice && (
             <span
-              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
+              className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</span>
@@ -538,7 +692,7 @@ export function DecisionBanner() {
           )}
           {decision.stopLoss && (
             <span
-              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
+              className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--sa-red)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
@@ -546,7 +700,7 @@ export function DecisionBanner() {
             </span>
           )}
           <span
-            className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
+            className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
             style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
           >
             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</span>
@@ -554,7 +708,7 @@ export function DecisionBanner() {
           </span>
           {upside != null && (
             <span
-              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
+              className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{
                 background: "var(--surface)",
                 color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)",
@@ -565,7 +719,7 @@ export function DecisionBanner() {
             </span>
           )}
           <span
-            className="text-xs px-2 py-1 rounded flex items-center justify-between"
+            className="text-sm px-2 py-1 rounded flex items-center justify-between"
             style={{ background: "var(--surface)", color: getRiskColor(decision.riskLevel) }}
           >
             <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</span>
@@ -574,21 +728,21 @@ export function DecisionBanner() {
           {/* P0-1: 证据质量门控显示 */}
           {stockCodeEvidence && stockCodeEvidence.holdGate && (
             <span
-              className="text-xs px-2 py-1 rounded flex items-center justify-between"
+              className="text-sm px-2 py-1 rounded flex items-center justify-between"
               style={{
                 background: "var(--surface)",
                 color: stockCodeEvidence.holdGate.holdAllowed ? "var(--sa-blue)" : "var(--sa-amber)",
               }}
             >
               <span style={{ color: "var(--muted)" }}>门控</span>
-              <span className="font-semibold text-[10px]">
+              <span className="font-semibold text-sm">
                 {stockCodeEvidence.holdGate.holdAllowed ? "✅ HOLD" : "🎯 强制方向"}
               </span>
             </span>
           )}
           {stockCodeEvidence && (
             <span
-              className="text-xs px-2 py-1 rounded flex items-center justify-between font-mono"
+              className="text-sm px-2 py-1 rounded flex items-center justify-between font-mono"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>证据分</span>
@@ -601,7 +755,7 @@ export function DecisionBanner() {
           )}
           {decision.expectedHoldingDays && (
             <span
-              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
+              className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedHoldingDaysLabel")}</span>
@@ -612,7 +766,7 @@ export function DecisionBanner() {
           )}
           {decision.targetTimeframe && (
             <span
-              className="text-xs px-2 py-1 rounded font-mono flex items-center justify-between"
+              className="text-sm px-2 py-1 rounded font-mono flex items-center justify-between"
               style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
             >
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetTimeframe")}</span>
@@ -628,7 +782,7 @@ export function DecisionBanner() {
               className="flex items-center gap-2 p-1.5 mt-1.5 rounded"
               style={{ background: "var(--surface)" }}
             >
-              <span className="text-xs whitespace-nowrap" style={{ color: "var(--muted)" }}>
+              <span className="text-sm whitespace-nowrap" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.trade.quickRecord")}
               </span>
               <input
@@ -636,7 +790,7 @@ export function DecisionBanner() {
                 placeholder={t("trade.price")}
                 defaultValue={decision.targetPrice ?? undefined}
                 ref={tradePriceRef}
-                className="text-xs"
+                className="text-sm"
                 style={{
                   width: 70,
                   padding: "2px 6px",
@@ -651,7 +805,7 @@ export function DecisionBanner() {
                 placeholder={t("trade.quantity")}
                 defaultValue={100}
                 ref={tradeQtyRef}
-                className="text-xs"
+                className="text-sm"
                 style={{
                   width: 60,
                   padding: "2px 6px",
@@ -664,7 +818,7 @@ export function DecisionBanner() {
               <Button
                 size="small"
                 type="primary"
-                style={{ fontSize: 11, lineHeight: "18px", height: 22, padding: "0 8px" }}
+                style={{ fontSize: 12, lineHeight: "20px", height: 24, padding: "0 8px" }}
                 onClick={async () => {
                   const price = parseFloat(tradePriceRef.current?.value ?? "0");
                   const qty = parseInt(tradeQtyRef.current?.value ?? "100", 10);
@@ -716,6 +870,19 @@ export function DecisionBanner() {
               >
                 {t("stockAnalysis.reAnalyze")}
               </Button>
+              <Tooltip title={t("stockAnalysis.rerunDecisionHint")}>
+                <Button
+                  size="small"
+                  icon={<span>⚡</span>}
+                  onClick={() => {
+                    if (analysisId) {
+                      useStockAnalysisStore.getState().rerunDecision(analysisId);
+                    }
+                  }}
+                >
+                  {t("stockAnalysis.rerunDecision")}
+                </Button>
+              </Tooltip>
               <Button size="small" icon={<span>💬</span>} onClick={handleAskAI}>
                 {t("stockAnalysis.askAI")}
               </Button>
@@ -752,11 +919,15 @@ export function DecisionBanner() {
               : "rgba(239, 68, 68, 0.1)",
           }}
           onClick={() => {
-            // 用事件总线通知 StockAnalysisPage 切换 tab
-            window.dispatchEvent(new CustomEvent("switch-tab", { detail: "decision-comparison" }));
+            // V50+: 分歧时内联展开对比面板，一致时跳转 tab 查看详情
+            if (decisionAgreementScore !== null && decisionAgreementScore < disagreementThreshold) {
+              setShowInlineComparison(!showInlineComparison);
+            } else {
+              window.dispatchEvent(new CustomEvent("switch-tab", { detail: "decision-comparison" }));
+            }
           }}
         >
-          <span className="text-[11px]" style={{ color: "var(--muted)" }}>
+          <span className="text-sm" style={{ color: "var(--muted)" }}>
             📊 {t("stockAnalysis.dualViewConsistency")}
           </span>
           <span
@@ -773,9 +944,9 @@ export function DecisionBanner() {
           </span>
           {llmStance && (
             <>
-              <span className="text-[11px]" style={{ color: "var(--muted)" }}>·</span>
+              <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
               <span
-                className="px-1.5 rounded text-[10px] font-medium"
+                className="px-1.5 rounded text-sm font-medium"
                 style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
               >
                 LLM: {llmStance}
@@ -783,13 +954,119 @@ export function DecisionBanner() {
             </>
           )}
           {decisionAgreementScore < disagreementThreshold && (
-            <span className="text-[10px]" style={{ color: "#ef4444" }}>
+            <span className="text-sm" style={{ color: "#ef4444" }}>
               ⚠️ {t("stockAnalysis.dualViewDisagreement")}
             </span>
           )}
         </div>
       )}
 
+      {/* V50+: 内联展开完整双视角对比面板（紧凑版） */}
+      {showInlineComparison && decisionAgreementScore !== null && (
+        <div
+          className="mt-1.5 p-1.5 rounded space-y-1"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold" style={{ color: "#7c3aed" }}>
+              📊 {t("stockAnalysis.fullComparisonTitle")}
+            </span>
+            <button
+              className="text-sm hover:opacity-70"
+              style={{ color: "var(--muted)", border: "none", background: "none", padding: 0, cursor: "pointer" }}
+              onClick={() => setShowInlineComparison(false)}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 text-sm">
+            {/* 公式列 */}
+            <div
+              className="rounded px-1.5 py-1 space-y-0.5"
+              style={{ background: "rgba(37,99,235,0.05)", borderLeft: "2px solid #2563eb" }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-medium" style={{ color: "#2563eb" }}>{t("dualView.decision.formula")}</span>
+                {decision?.action
+                  ? <Tag color={getActionColor(decision.action)}>{t(getActionTKey(decision.action ?? ""))}</Tag>
+                  : <span style={{ color: "var(--muted)" }}>—</span>}
+              </div>
+              <div className="font-mono flex gap-2" style={{ color: "var(--color-text-secondary)" }}>
+                <span>
+                  置信 <b>{confidencePct}%</b>
+                </span>
+                <span>|</span>
+                <span>
+                  仓位 <b>{decision ? `${decision.positionPct}%` : "—"}</b>
+                </span>
+              </div>
+              {decision?.reasoning && (
+                <div className="line-clamp-2" style={{ color: "var(--muted)", fontSize: "12px" }}>
+                  {decision.reasoning.slice(0, 120)}
+                  {decision.reasoning.length > 120 ? "…" : ""}
+                </div>
+              )}
+            </div>
+            {/* LLM 列 */}
+            <div
+              className="rounded px-1.5 py-1 space-y-0.5"
+              style={{ background: "rgba(124,58,237,0.05)", borderLeft: "2px solid #7c3aed" }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-medium" style={{ color: "#7c3aed" }}>LLM</span>
+                {llmStance
+                  ? <Tag color={getActionColor(llmStance)}>{t(getActionTKey(llmStance))}</Tag>
+                  : <span style={{ color: "var(--muted)" }}>—</span>}
+              </div>
+              <div className="font-mono flex gap-2" style={{ color: "var(--color-text-secondary)" }}>
+                <span>
+                  置信{" "}
+                  <b>
+                    {(() => {
+                      const c = extractLlmField(llmDecisionJson, "confidence") as number | null;
+                      return c != null ? `${Math.round(c)}%` : "—";
+                    })()}
+                  </b>
+                </span>
+                <span>|</span>
+                <span>
+                  仓位{" "}
+                  <b>
+                    {(() => {
+                      const p = extractLlmField(llmDecisionJson, "positionPct") as number | null;
+                      return p != null ? `${Math.round(p)}%` : "—";
+                    })()}
+                  </b>
+                </span>
+              </div>
+              {llmSummary && (
+                <div className="line-clamp-2" style={{ color: "var(--muted)", fontSize: "12px" }}>
+                  {llmSummary.slice(0, 120)}
+                  {llmSummary.length > 120 ? "…" : ""}
+                </div>
+              )}
+            </div>
+          </div>
+          {/* 分歧诊断（单行内联） */}
+          {decision?.agreementBreakdown && decisionAgreementScore < 80 && (
+            <div
+              className="flex gap-2 text-sm pt-0.5"
+              style={{ borderTop: "1px solid var(--border)", color: "var(--muted)" }}
+            >
+              <span>
+                {decision.agreementBreakdown.actionNote === "opposite" ? "✗方向相反" : "⚠分歧"}
+                ({decision.agreementBreakdown.formulaAction} vs {decision.agreementBreakdown.llmAction})
+              </span>
+              {decision.agreementBreakdown.positionGap != null && (
+                <span>仓位差{Math.round(decision.agreementBreakdown.positionGap)}%</span>
+              )}
+              {decision.agreementBreakdown.confidenceGap != null && (
+                <span>置信差{Math.round(decision.agreementBreakdown.confidenceGap)}%</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <Modal
         title={
           <div className="flex items-center gap-2">
@@ -821,8 +1098,23 @@ export function DecisionBanner() {
               >
                 {confidencePct}%
               </span>
+              {/* V50: 双视角一致性调制后的置信度 */}
+              {decision.adjustedConfidence != null
+                && Math.abs(decision.adjustedConfidence - confidencePct) > 3 && (
+                <span
+                  className="font-mono font-semibold text-sm ml-0.5"
+                  style={{
+                    color: decision.adjustedConfidence > confidencePct
+                      ? "#10b981"
+                      : "#ef4444",
+                    opacity: 0.85,
+                  }}
+                >
+                  →{Math.round(decision.adjustedConfidence)}%
+                </span>
+              )}
               <span
-                className="text-xs px-2 py-0.5 rounded font-medium"
+                className="text-sm px-2 py-0.5 rounded font-medium"
                 style={{
                   background: `${confidenceLabelColor}18`,
                   color: confidenceLabelColor,
@@ -834,7 +1126,7 @@ export function DecisionBanner() {
             </div>
             {decisionAgreementScore !== null && (
               <span
-                className="text-xs"
+                className="text-sm"
                 style={{ color: "var(--muted)" }}
               >
                 📊 {t("stockAnalysis.consensusAbbr")} {decisionAgreementScore}/100
@@ -863,25 +1155,25 @@ export function DecisionBanner() {
         >
           {decision.targetPrice && (
             <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</div>
+              <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</div>
               <div className="text-lg font-semibold font-mono">¥{decision.targetPrice}</div>
             </div>
           )}
           {decision.stopLoss && (
             <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</div>
+              <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</div>
               <div className="text-lg font-semibold font-mono" style={{ color: "var(--sa-red)" }}>
                 ¥{decision.stopLoss}
               </div>
             </div>
           )}
           <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</div>
             <div className="text-lg font-semibold font-mono">{decision.positionPct}%</div>
           </div>
           {upside != null && (
             <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
-              <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedUpside")}</div>
+              <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.expectedUpside")}</div>
               <div
                 className="text-lg font-semibold font-mono"
                 style={{ color: upside >= 0 ? "var(--sa-green)" : "var(--sa-red)" }}
@@ -892,7 +1184,7 @@ export function DecisionBanner() {
             </div>
           )}
           <div className="text-center p-3 rounded" style={{ background: "var(--surface)" }}>
-            <div className="text-xs" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
+            <div className="text-sm" style={{ color: "var(--muted)" }}>{t("stockAnalysis.riskLevel")}</div>
             <div
               className="text-lg font-semibold"
               style={{

@@ -1690,6 +1690,124 @@ fn start_cron_scheduler(state: &AppState) {
             return;
         }
 
+        // ── 分支 6：智能荐股定时任务 ──
+        if job.task_type.as_deref() == Some("stock-recommendation") {
+            let store = cron_store.clone();
+            let client = astock_client.clone();
+            let database = db.clone();
+            let job_id = job.id.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+
+                let cfg = crate::commands::recommendation_cron::RecoCronConfig::from_json(&prompt);
+                let config = match cfg {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let err_msg = format!("解析荐股 cron 配置失败: {e}");
+                        tracing::error!("[CronScheduler] {err_msg}");
+                        let _ = store
+                            .record_run(
+                                &job_id,
+                                axagent_runtime_core::TaskRunResult {
+                                    success: false,
+                                    output: None,
+                                    error: Some(err_msg),
+                                    duration_ms: 0,
+                                    executed_at: started,
+                                },
+                            )
+                            .await;
+                        if !recurring {
+                            let _ = store
+                                .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                                .await;
+                        }
+                        return;
+                    },
+                };
+
+                // 读取 workflow template 变量
+                use sea_orm::EntityTrait;
+                let template = axagent_core::entity::workflow_template::Entity::find_by_id(
+                    "stock-analysis",
+                )
+                .one(&database)
+                .await;
+                let vars: Vec<(String, serde_json::Value)> = match template {
+                    Ok(Some(ref t)) => {
+                        if let Some(ref raw) = t.variables {
+                            match serde_json::from_str::<Vec<axagent_harness::workflow_types::Variable>>(raw) {
+                                Ok(vs) => vs.into_iter().map(|v| (v.name, v.value)).collect(),
+                                Err(_) => Vec::new(),
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    },
+                    _ => Vec::new(),
+                };
+
+                let mut total_picks = 0usize;
+                let mut success = true;
+                let mut errors = Vec::new();
+
+                for period in &config.periods {
+                    let client = std::sync::Arc::clone(&client);
+                    let result = axagent_stock_analysis::recommender::recommend_stocks(
+                        client,
+                        *period,
+                        &vars,
+                    )
+                    .await;
+
+                    match result {
+                        Ok(mut resp) => {
+                            if config.min_confidence > 0 {
+                                resp.picks.retain(|_, picks| {
+                                    picks.retain(|p| p.confidence >= config.min_confidence);
+                                    !picks.is_empty()
+                                });
+                            }
+                            for picks in resp.picks.values_mut() {
+                                picks.truncate(config.top_n);
+                            }
+                            let count: usize = resp.picks.values().map(|v| v.len()).sum();
+                            total_picks += count;
+                        },
+                        Err(e) => {
+                            let err_msg = format!("荐股周期 {:?} 扫描失败: {e}", period);
+                            tracing::warn!("[CronScheduler] {err_msg}");
+                            errors.push(err_msg);
+                            success = false;
+                        },
+                    }
+                }
+
+                let output_json = serde_json::json!({
+                    "picks": total_picks,
+                    "success": success,
+                    "errors": errors,
+                    "periods": config.periods.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
+                });
+                let run_result = axagent_runtime_core::TaskRunResult {
+                    success,
+                    output: Some(output_json.to_string()),
+                    error: if errors.is_empty() { None } else { Some(errors.join("; ")) },
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                let _ = store.record_run(&job_id, run_result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+
         // ── 分支 3：工作流模板任务 ──
         if let Some(ref wf_id) = job.workflow_id {
             let engine = work_engine.clone();

@@ -26,13 +26,17 @@ pub mod vendor_health;
 pub mod vendors;
 
 use chrono::Local;
+use futures::future::BoxFuture;
+use moka::future::Cache as MokaCache;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::as_of_capability::AsOfCapability;
 use crate::gate::DomainGate;
+use crate::vendor_health::{VendorHealthConfig, VendorHealthTracker};
 pub use error::DataError;
 pub use types::*;
 // R3: 估值带（暴露在 crate 根，方便 commands 端直接 `axagent_astock_data::ValuationBand`）
@@ -44,6 +48,7 @@ use vendors::cninfo::CninfoVendor;
 use vendors::eastmoney::EastMoneyVendor;
 use vendors::iwencai::IwencaiVendor;
 use vendors::mootdx::MootdxVendor;
+use vendors::neodata::NeoDataVendor;
 use vendors::sina::SinaVendor;
 use vendors::tencent::TencentVendor;
 use vendors::ths::ThsVendor;
@@ -181,6 +186,7 @@ impl VendorRouting {
                 "sina".into(),
                 "xueqiu".into(),
                 "eastmoney".into(),
+                "neodata".into(), // 末位兜底（美股/港股）
             ],
             klines: vec![
                 "tencent".into(),
@@ -194,6 +200,7 @@ impl VendorRouting {
                 "browser_eastmoney".into(),
                 "xueqiu".into(),
                 "akshare".into(),
+                "neodata".into(), // 末位兜底
             ],
             // 注意(2026-06): xueqiu 的 stock_timeline.json 被阿里云 WAF 拦截,
             // 无有效 token 或非浏览器环境时返回 WAF 挑战页面(HTML)而非 JSON。
@@ -207,6 +214,7 @@ impl VendorRouting {
                 "browser_eastmoney".into(),
                 "ths".into(),
                 "akshare".into(),
+                "neodata".into(), // 末位兜底（docData 文章）
             ],
             money_flow: vec![
                 "tencent".into(),
@@ -217,8 +225,8 @@ impl VendorRouting {
             ],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
-            search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into()],
-            search_news: vec!["eastmoney".into(), "akshare".into()],
+            search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into(), "neodata".into()],
+            search_news: vec!["eastmoney".into(), "akshare".into(), "neodata".into()],
             margin: vec!["eastmoney".into(), "baidu_stock".into()],
             north_bound: vec!["eastmoney".into(), "baidu_stock".into()],
             sector: vec![
@@ -226,6 +234,7 @@ impl VendorRouting {
                 "ths".into(),
                 "baidu_stock".into(),
                 "iwencai".into(),
+                "neodata".into(),  // 末位兜底（自然语言查询行业归属）
             ],
             shareholder_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             dividend: vec!["eastmoney".into(), "baidu_stock".into()],
@@ -234,14 +243,14 @@ impl VendorRouting {
             concept_blocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
             announcements: vec!["cninfo".into(), "eastmoney".into()],
             market_dragon_tiger: vec!["ths".into(), "eastmoney".into(), "baidu_stock".into()],
-            hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
-            industry_ranking: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into()],
-            cls_flash: vec!["eastmoney".into(), "akshare".into()],
+            hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into(), "neodata".into()],
+            industry_ranking: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into(), "neodata".into()],
+            cls_flash: vec!["eastmoney".into(), "akshare".into(), "neodata".into()],
             north_bound_flow: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into()],
             block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             institutional_visits: vec!["eastmoney".into()],
-            index_quotes: vec!["eastmoney".into(), "tencent".into()],
-            peers: vec!["eastmoney".into()],
+            index_quotes: vec!["eastmoney".into(), "tencent".into(), "neodata".into()],
+            peers: vec!["eastmoney".into(), "neodata".into()],  // neodata 末位兜底
             option_pcr: vec!["eastmoney".into()],
             // P2-4 修复: 在 replay 模式下, 把 3 个核心方法切到对历史日期支持最好的 vendor。
             // 依据 as_of_capability.rs:
@@ -276,7 +285,12 @@ pub struct AStockClient {
     routing: VendorRouting,
     gate: DomainGate,
     http: reqwest::Client,
-    cache: RwLock<HashMap<String, (i64, String)>>,
+    /// C1 修复: 用 moka L1 替换手工 HashMap + LRU，支持自动容量管理和 TTL
+    cache: MokaCache<String, (i64, String)>,
+    /// V40 修复: vendor 健康追踪器 — 连续失败 3 次自动降级，5 分钟后恢复。
+    /// 在 get_quote/get_klines/get_financials 调用路径中根据返回结果
+    /// 调用 record_success/record_failure 更新状态。
+    pub health_tracker: Arc<VendorHealthTracker>,
     /// 缺陷 D 修复:可选 L2 磁盘缓存(spec §3.2)。
     /// 启动时注入,None 表示走纯 L1 内存模式(向后兼容)。
     l2: Option<Arc<disk_cache::DiskCache>>,
@@ -286,6 +300,8 @@ pub struct AStockClient {
     pub iwencai_key: RwLock<String>,
     /// 雪球 token 共享引用（前端设置页写入，vendor 自动读取）
     pub xq_token: Option<Arc<RwLock<String>>>,
+    /// NeoData token 共享引用（前端设置页写入，vendor 自动读取）
+    pub neodata_token: Option<Arc<RwLock<String>>>,
     /// P6:本地新闻语料库 sink(None 表示不写库,as-of 模式 search_news 降级)
     /// 通过 with_news_archive_sink() 注入。
     news_archive_sink: Option<Arc<dyn NewsArchiveSink>>,
@@ -297,8 +313,8 @@ pub struct AStockClient {
 impl AStockClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .cookie_store(true)
             .pool_max_idle_per_host(32)
@@ -313,11 +329,17 @@ impl AStockClient {
             routing: VendorRouting::default_routing(),
             gate: DomainGate::new(),
             http: http.clone(),
-            cache: RwLock::new(HashMap::new()),
+            // C1: moka L1 缓存 — 1h 空闲过期,4096 条上限
+            cache: MokaCache::builder()
+                .max_capacity(4096)
+                .time_to_idle(Duration::from_secs(3600))
+                .build(),
+            health_tracker: Arc::new(VendorHealthTracker::new(VendorHealthConfig::default())),
             l2: None,             // 默认不开启 L2,调用方通过 with_l2_cache 注入
             daily_snapshot: None, // P5:默认不开启,调用方通过 with_daily_snapshot_cache 注入
             iwencai_key: RwLock::new(String::new()),
             xq_token: None,
+            neodata_token: None,
             news_archive_sink: None, // P6:默认不写入,调用方通过 with_news_archive_sink 注入
             browser_fetcher: None,   // 浏览器 fetch 通过 with_browser_fetcher() 注入
         };
@@ -344,6 +366,15 @@ impl AStockClient {
         client.register_vendor("akshare", Box::new(AkshareVendor { http: http.clone() }));
         client.register_vendor("mootdx", Box::new(MootdxVendor::new()));
         client.register_vendor("browser_eastmoney", Box::new(BrowserEastMoneyVendor::new()));
+        // NeoData Financial Search — 末位 fallback vendor，覆盖美股/宏观/外汇/期货等
+        let neodata_token = Arc::new(RwLock::new(String::new()));
+        client.neodata_token = Some(neodata_token.clone());
+        client.register_vendor(
+            "neodata",
+            Box::new(NeoDataVendor {
+                token: neodata_token,
+            }),
+        );
         // 雪球数据源（始终注册，token 通过共享 Arc 运行时注入）
         let xq_token = Arc::new(RwLock::new(String::new()));
         client.xq_token = Some(xq_token.clone());
@@ -409,69 +440,49 @@ impl AStockClient {
         &self.http
     }
 
+    /// C1 修复: 用 moka L1 替换手工 HashMap
+    /// - L1: moka, 自动写入时 TTL + 1h idle
+    /// - L2: 可选的 DiskCache(JSON 文件, 如配置)
+    /// - 返回前检查 per-entry 过期(expires_at), 过期则移除并返回 None
     async fn cache_get(&self, key: &str) -> Option<String> {
-        // 1) L1 内存
-        {
-            let cache = self.cache.read().await;
-            if let Some((expiry, val)) = cache.get(key) {
-                if *expiry > chrono::Utc::now().timestamp() {
-                    return Some(val.clone());
-                }
+        // 1) L1 moka
+        if let Some((expires_at, val)) = self.cache.get(key).await {
+            if expires_at > chrono::Utc::now().timestamp() {
+                return Some(val);
             }
+            // 已过期: moka 自动 tidle 会清理, 这里直接忽略
         }
-        // 2) L2 磁盘(缺陷 D 修复)
+        // 2) L2 磁盘
         if let Some(l2) = &self.l2 {
             if let Some(val) = l2.get(key) {
-                // 写回 L1 (避免下次又走 L2)
-                self.cache_set_internal(key, val.clone(), 3600).await;
+                let expires_at = chrono::Utc::now().timestamp() + 3600;
+                self.cache
+                    .insert(key.to_string(), (expires_at, val.clone()))
+                    .await;
                 return Some(val);
             }
         }
         None
     }
 
-    /// 写 L1 + L2(对外 API,带 replay TTL cap)。
-    const MAX_CACHE_SIZE: usize = 1000;
-
+    /// 写 L1(moka) + L2(DiskCache, 如配置), 带 replay TTL cap。
+    /// C1 修复: 用 moka 替代手工 HashMap, 不再有 cache_set_internal。
     async fn cache_set(&self, key: String, value: String, ttl_secs: i64) {
-        // spec §5.1: replay 模式下历史数据是定值,TTL cap 到 1h 避免内存无限增长;
+        // spec §5.1: replay 模式下历史数据是定值, TTL cap 到 1h 避免内存无限增长;
         // live 模式保持调用方设定的精细 TTL(60s/300s/3600s/86400s 各异)。
         let ttl_secs = if crate::as_of::is_asof_active() {
             ttl_secs.min(3600)
         } else {
             ttl_secs
         };
-        self.cache_set_internal(&key, value.clone(), ttl_secs).await;
-        // L2 同样写(缺陷 D 修复)
+        let expires_at = chrono::Utc::now().timestamp() + ttl_secs;
+        self.cache
+            .insert(key.clone(), (expires_at, value.clone()))
+            .await;
+        // L2 同样写
         if let Some(l2) = &self.l2 {
             l2.set(key, value, ttl_secs);
         }
-    }
-
-    /// 内部:仅写 L1,不做 TTL cap(被 cache_get 写回 L1 时用)。
-    async fn cache_set_internal(&self, key: &str, value: String, ttl_secs: i64) {
-        let mut cache = self.cache.write().await;
-        if cache.len() >= Self::MAX_CACHE_SIZE {
-            let now = chrono::Utc::now().timestamp();
-            cache.retain(|_, (expiry, _)| *expiry > now);
-            if cache.len() >= Self::MAX_CACHE_SIZE {
-                let keys_to_remove: Vec<String> = {
-                    let mut entries: Vec<_> = cache.iter().collect();
-                    entries.sort_by_key(|(_, (expiry, _))| *expiry);
-                    let to_remove = (Self::MAX_CACHE_SIZE / 10).max(1);
-                    entries
-                        .into_iter()
-                        .take(to_remove)
-                        .map(|(k, _)| k.clone())
-                        .collect()
-                };
-                for key in keys_to_remove {
-                    cache.remove(&key);
-                }
-            }
-        }
-        let expiry = chrono::Utc::now().timestamp() + ttl_secs;
-        cache.insert(key.to_string(), (expiry, value));
     }
 
     /// 生成 L1 cache key；自动包含当前 AsOf 后缀以避免 live/replay 互相污染
@@ -519,10 +530,32 @@ impl AStockClient {
         let ctx = crate::as_of::current_as_of()
             .expect("is_asof_active_for(Structured) 为真时 current_as_of 必为 Some");
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
-        klines
+        let before = klines.len();
+        let filtered: Vec<KLine> = klines
             .into_iter()
             .filter(|k| k.date.as_str() <= cutoff.as_str())
-            .collect()
+            .collect();
+        let truncated = before - filtered.len();
+        if truncated > 0 {
+            tracing::warn!(
+                "[asof] 截断 {} 条 K 线（截止日={}，原始={}，保留={}）",
+                truncated,
+                cutoff,
+                before,
+                filtered.len()
+            );
+            crate::as_of::record_degradation(
+                "astock-data",
+                "truncate_klines_by_asof",
+                &format!(
+                    "截断 {} 条 K 线（保留 {} 条，截止日={}）",
+                    truncated,
+                    filtered.len(),
+                    cutoff
+                ),
+            );
+        }
+        filtered
     }
 
     /// 按当前 AsOfContext 截断 News：保留 publish_time 日期 <= as_of_date 的项。
@@ -764,6 +797,150 @@ impl AStockClient {
             .map(|(_, v)| v.as_ref())
     }
 
+    // ── H1 修复: 通用 vendor 遍历 + 健康追踪 + 指数退避重试 ──
+
+    /// 通用 vendor 遍历 + 健康追踪 + 指数退避重试
+    ///
+    /// 对 vendor_names 按健康状态排序，逐个调用 fetch_fn 获取数据。
+    /// - fetch_fn 返回 Ok → 自动 record_success，立刻返回结果
+    /// - fetch_fn 返回 Err → 自动 record_failure，尝试下一个 vendor
+    /// - 全部失败后等待指数退避重试（最多 max_retries-1 次额外重试）
+    ///
+    /// fetch_fn 内部应完成：vendor 方法调用 → 质量检查 → 缓存写入（如有）。
+    /// 通过闭包捕获额外参数（如 period/limit/adj_type）。
+    async fn try_vendors_retry<T, F>(
+        &self,
+        stock_code: &str,
+        route_key: &str,
+        vendor_names: &[String],
+        max_retries: u32,
+        fetch_fn: F,
+    ) -> Result<T, DataError>
+    where
+        T: Send + 'static,
+        for<'a> F: Fn(&'a str, &'a dyn StockVendor) -> BoxFuture<'a, Result<T, DataError>>,
+    {
+        let vendor_names_list: Vec<String> = vendor_names.iter().map(|n| n.to_string()).collect();
+        let mut retry_count = 0u32;
+
+        loop {
+            let mut last_err = None;
+
+            // 健康过滤：排除已降级的 vendor
+            let healthy_names = self
+                .health_tracker
+                .try_vendors(&vendor_names_list)
+                .await
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>();
+
+            // V48 修复: 所有 vendor 均降级时不回退完整列表
+            // 原逻辑"回退完整列表→重试已降级 vendor→再失败→再降级"形成无效重试循环。
+            // 修正: 首次尝试允许完整列表兜底一次；重试时所有 vendor 仍降级则直接返回错误。
+            let names_to_try: &[String] = if healthy_names.is_empty() {
+                if retry_count > 0 {
+                    // 已重试过，所有 vendor 仍然降级 → 放弃，不再无意义重试
+                    tracing::warn!(
+                        "[health] {} {} 所有 vendor 已降级（第{}次重试后），放弃",
+                        route_key,
+                        stock_code,
+                        retry_count
+                    );
+                    return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                        vendor: "all".into(),
+                        message: format!(
+                            "{route_key} {stock_code} 所有数据源均不可用（全部 vendor 已降级）"
+                        ),
+                    }));
+                }
+                // 首次尝试: 允许完整列表兜底（健康状态可能过时）
+                tracing::warn!(
+                    "[health] {} {} 所有 vendor 已降级，首次尝试回退完整列表",
+                    route_key,
+                    stock_code
+                );
+                &vendor_names_list
+            } else {
+                &healthy_names
+            };
+
+            for name in names_to_try {
+                if let Some(vendor) = self.find_vendor(name) {
+                    let _guard = self.gate.acquire(name).await;
+                    match fetch_fn(name, vendor).await {
+                        Ok(result) => {
+                            self.health_tracker.record_success(name).await;
+                            return Ok(result);
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "[降级] {} {} {} 失败: {}",
+                                route_key,
+                                stock_code,
+                                name,
+                                e
+                            );
+                            // 限流(429)单独处理：不增加连续失败计数（避免"限流→降级→
+                            // 降级后 vendor 列表縮短→剩余 vendor 压力更大→更多 429"的恶性循环）
+                            match &e {
+                                DataError::RateLimited { .. } => {
+                                    tracing::warn!(
+                                        "[降级] {} {} {} 被限流(429)，不触发 vendor 降级",
+                                        route_key, stock_code, name
+                                    );
+                                },
+                                _ => {
+                                    self.health_tracker
+                                        .record_failure(name, &e.to_string())
+                                        .await;
+                                },
+                            }
+                            last_err = Some(e);
+                        },
+                    }
+                }
+            }
+
+            if retry_count < max_retries && last_err.is_some() {
+                // V54: 若可用的 vendor 数量 ≤ 2（即数据源单一或大部分已降级），
+                // 跳过重试。因为：1-2 个 vendor 全部首次尝试失败几乎不可能是瞬态问题
+                // （API 接口变更 / 数据为空），重试只是浪费 1s+3s 的退避延迟。
+                //
+                // 日志中常见案例：
+                //   dragon_tiger 仅 eastmoney/baidu_stock 2 家 vendor，
+                //   eastmoney 返回 "HTTP request failed: error decoding response body"，
+                //   这是 eastmoney 接口变动或反爬升级的持续故障，重试无意义。
+                if names_to_try.len() <= 2 {
+                    tracing::warn!(
+                        "[retry-skip] {} {} 仅有 {} 个 vendor 且全部首次失败，跳过重试（预期为持续故障）",
+                        route_key, stock_code, names_to_try.len()
+                    );
+                    return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                        vendor: "all".into(),
+                        message: format!("{route_key} {stock_code} 所有数据源均不可用"),
+                    }));
+                }
+                retry_count += 1;
+                let delay = (1u64 << retry_count) - 1; // 指数退避: 1s, 3s
+                tracing::warn!(
+                    "[retry] {} {} 所有源失败，{}s 后第 {} 次重试整条链",
+                    route_key,
+                    stock_code,
+                    delay,
+                    retry_count
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                continue;
+            }
+
+            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                vendor: "all".into(),
+                message: format!("{route_key} {stock_code} 所有数据源均不可用"),
+            }));
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // As-Of dispatch helpers (vendor trait 大重构 P0 §2.2)
     //
@@ -796,6 +973,7 @@ impl AStockClient {
         call: Fut,
     ) -> Option<T>
     where
+        T: serde::de::DeserializeOwned,
         Fut: std::future::Future<Output = Result<T, DataError>>,
     {
         if !crate::as_of::is_asof_active() {
@@ -818,11 +996,23 @@ impl AStockClient {
                 }
             },
             AsOfCapability::NoHistoricalSemantic => {
-                // Phase 5: 查本地 SQLite 缓存;Phase 1-4 暂不实现
+                // 先查每日快照缓存（如已配置）
+                if let Some(ctx) = crate::as_of::current_as_of() {
+                    let date = ctx.as_string();
+                    if let Some(cached) = self.try_daily_snapshot(method_name, &date) {
+                        match serde_json::from_str::<T>(&cached) {
+                            Ok(v) => return Some(v),
+                            Err(e) => tracing::warn!(
+                                "[asof] daily_snapshot 反序列化失败({method_name}/{date}): {e}"
+                            ),
+                        }
+                    }
+                }
+                // 缓存未命中：记录降级
                 crate::as_of::record_degradation(
                     vendor_name,
                     method_name,
-                    "no historical semantic;本地缓存待 P5 启用",
+                    "no historical semantic;无每日快照缓存",
                 );
                 None
             },
@@ -926,15 +1116,26 @@ impl AStockClient {
                     match ks_result {
                         Ok(ks) if !ks.is_empty() => {
                             if let Some(mut q) = Self::quote_from_klines(stock_code, &ks) {
-                                if let Ok(fins) = self.get_financials(stock_code).await {
-                                    if let Some(latest) = fins.into_iter().next() {
-                                        if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
-                                            q.pe = Some(q.price / eps);
+                                // 非阻塞填充 PE/PB — 超时或失败不影响行情立即返回
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_secs(2),
+                                    self.get_financials(stock_code),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(fins)) => {
+                                        if let Some(latest) = fins.into_iter().next() {
+                                            if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
+                                                q.pe = Some(q.price / eps);
+                                            }
+                                            if let Some(bps) = latest.bps.filter(|&v| v > 0.0) {
+                                                q.pb = Some(q.price / bps);
+                                            }
                                         }
-                                        if let Some(bps) = latest.bps.filter(|&v| v > 0.0) {
-                                            q.pb = Some(q.price / bps);
-                                        }
-                                    }
+                                    },
+                                    _ => tracing::trace!(
+                                        "[asof] PE/PB 填充跳过（get_financials 超时或失败）"
+                                    ),
                                 }
                                 return Ok(q);
                             }
@@ -981,54 +1182,37 @@ impl AStockClient {
             }
         }
 
-        // 路由级重试：所有源失败后等待 2s 重试整条链一次
-        let mut retry_remaining = 1u32;
-        loop {
-            let mut last_err = None;
-            for name in self.routing.vendors_for("quote", &self.routing.quote) {
-                if let Some(vendor) = self.find_vendor(name) {
-                    let _guard = self.gate.acquire(name).await;
-                    match vendor.get_quote(stock_code).await {
-                        Ok(result) => {
-                            // 质量检查：price>0 且 name 非空（Tencent/Mootdx 可能返回空名）
-                            if result.price <= 0.0 || result.name.is_empty() {
-                                tracing::warn!(
-                                    "[降级] {} 行情数据质量不足 (price={}, name='{}')，尝试下一源",
-                                    name,
-                                    result.price,
-                                    result.name
-                                );
-                                last_err = Some(DataError::VendorError {
-                                    vendor: name.clone(),
-                                    message: format!(
-                                        "行情数据质量不足: price={}, name='{}'",
-                                        result.price, result.name
-                                    ),
-                                });
-                                continue;
-                            }
-                            let json = serde_json::to_string(&result).unwrap_or_default();
-                            self.cache_set(cache_key, json, 30).await;
-                            return Ok(result);
-                        },
-                        Err(e) => {
-                            tracing::warn!("[降级] {} 行情失败: {}", name, e);
-                            last_err = Some(e);
-                        },
+        // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
+        let vendor_names: Vec<String> = self
+            .routing
+            .vendors_for("quote", &self.routing.quote)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        let result = self
+            .try_vendors_retry(stock_code, "quote", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_quote(&sc).await?;
+                    // 质量检查：price>0 且 name 非空
+                    if result.price <= 0.0 || result.name.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: format!(
+                                "行情数据质量不足: price={}, name='{}'",
+                                result.price, result.name
+                            ),
+                        });
                     }
-                }
-            }
-            if retry_remaining > 0 && last_err.is_some() {
-                retry_remaining -= 1;
-                tracing::warn!("[retry] {} 所有行情源失败，1s 后重试整条链", stock_code);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
-                vendor: "all".into(),
-                message: "所有行情数据源均不可用".into(),
-            }));
-        }
+                    Ok(result)
+                })
+            })
+            .await?;
+
+        let json = serde_json::to_string(&result).unwrap_or_default();
+        self.cache_set(cache_key, json, 30).await;
+        Ok(result)
     }
 
     pub async fn get_klines(
@@ -1067,66 +1251,55 @@ impl AStockClient {
             }
         }
 
-        // 路由级重试：所有源失败后等待 2s 重试整条链一次。
-        // as-of 模式下使用 vendors_for("klines") 按 per-mode 顺序路由，
-        // 并对 NativeDateParam vendor 调 _with_asof 精确传 end=YYYYMMDD。
-        let kline_names: Vec<String> = self
+        // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("klines", &self.routing.klines)
-            .clone();
-        let mut retry_remaining = 1u32;
-        loop {
-            let mut last_err = None;
-            for name in &kline_names {
-                if let Some(vendor) = self.find_vendor(name) {
-                    let _guard = self.gate.acquire(name).await;
-                    let cap = self.vendor_asof_capability(name, "get_klines");
-                    let kline_fut = match cap {
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        let period_owned = period.to_string();
+        let result = self
+            .try_vendors_retry(stock_code, "klines", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                let period = period_owned.clone();
+                Box::pin(async move {
+                    let cap = vendor.asof_capability("get_klines");
+                    let klines = match cap {
                         AsOfCapability::NativeDateParam if crate::as_of::is_asof_active() => {
-                            vendor.get_klines_with_asof(stock_code, period, fetch_limit, _adj_type)
+                            vendor
+                                .get_klines_with_asof(&sc, &period, fetch_limit, _adj_type)
+                                .await?
                         },
-                        _ => vendor.get_klines(stock_code, period, fetch_limit, _adj_type),
+                        _ => {
+                            vendor
+                                .get_klines(&sc, &period, fetch_limit, _adj_type)
+                                .await?
+                        },
                     };
-                    match kline_fut.await {
-                        Ok(result) if !result.is_empty() => {
-                            let result = Self::truncate_klines_by_asof(result);
-                            if result.is_empty() {
-                                tracing::warn!(
-                                    "{}",
-                                    if crate::as_of::is_asof_active() {
-                                        format!("[asof] {} K线全部晚于截止日，尝试下一源", name)
-                                    } else {
-                                        format!("[vendor] {} K线返回空，尝试下一源", name)
-                                    }
-                                );
-                                continue;
-                            }
-                            let json = serde_json::to_string(&result).unwrap_or_default();
-                            self.cache_set(cache_key, json, 300).await;
-                            let start = result.len().saturating_sub(limit as usize);
-                            return Ok(result[start..].to_vec());
-                        },
-                        Ok(_) => {
-                            tracing::warn!("[降级] {} K线返回空，尝试下一源", name);
-                        },
-                        Err(e) => {
-                            tracing::warn!("[降级] {} K线失败: {}", name, e);
-                            last_err = Some(e);
-                        },
+                    if klines.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "K线返回空".into(),
+                        });
                     }
-                }
-            }
-            if retry_remaining > 0 && last_err.is_some() {
-                retry_remaining -= 1;
-                tracing::warn!("[retry] {} K线所有源失败，1s 后重试整条链", stock_code);
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                continue;
-            }
-            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
-                vendor: "all".into(),
-                message: "所有K线数据源均不可用".into(),
-            }));
-        }
+                    let truncated = Self::truncate_klines_by_asof(klines);
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "K线全部晚于截止日或返回空".into(),
+                        });
+                    }
+                    Ok(truncated)
+                })
+            })
+            .await?;
+
+        let json = serde_json::to_string(&result).unwrap_or_default();
+        self.cache_set(cache_key, json, 300).await;
+        let start = result.len().saturating_sub(limit as usize);
+        Ok(result[start..].to_vec())
     }
 
     /// 财报披露日历 (R3-B 接口, 暂为 stub)
@@ -1156,65 +1329,49 @@ impl AStockClient {
                 }
             }
         }
-        // 路由级重试：所有源失败后等待 2s 重试整条链一次
-        let mut retry_remaining = 1u32;
-        #[allow(unused_assignments)]
-        let mut last_err: Option<DataError> = None;
-        loop {
-            last_err = None;
-            for name in &self.routing.financials {
-                if let Some(vendor) = self.find_vendor(name) {
-                    match vendor.get_financials(stock_code).await {
-                        Ok(result) if !result.is_empty() => {
-                            let result = Self::truncate_financials_by_asof(result);
-                            // 注意: 不在此处做 has_valid_data 过滤 — 即使记录字段全空，
-                            // 也让下游 precheck 或 C-fallback 自行处理，避免误杀。
-                            if result.is_empty() {
-                                tracing::warn!(
-                                    "{}",
-                                    if crate::as_of::is_asof_active() {
-                                        format!("[asof] {} 财报全部晚于截止日，尝试下一源", name)
-                                    } else {
-                                        format!("[vendor] {} 财报返回空，尝试下一源", name)
-                                    }
-                                );
-                                continue;
-                            }
-                            let cache_key = Self::cache_key_for("financials", stock_code);
-                            let json = serde_json::to_string(&result).unwrap_or_default();
-                            self.cache_set(cache_key, json, 3600).await;
-                            return Ok(result);
-                        },
-                        Ok(_) => {
-                            tracing::warn!("[降级] {} 财务数据返回空，尝试下一源", name);
-                        },
-                        Err(e) => {
-                            tracing::warn!("[降级] {} 财务数据失败: {}", name, e);
-                            last_err = Some(e);
-                        },
+        // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
+        let vendor_names: Vec<String> = self
+            .routing
+            .financials
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "financials", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_financials(&sc).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "财务数据返回空".into(),
+                        });
                     }
-                }
-            }
-            if let Some(ref e) = last_err {
-                if retry_remaining > 0 {
-                    retry_remaining -= 1;
-                    tracing::warn!(
-                        "[retry] {} 财务数据所有源失败 (last: {})，1s 后重试整条链",
-                        stock_code,
-                        e
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    continue;
-                }
-            }
-            break;
+                    let truncated = Self::truncate_financials_by_asof(result);
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "财报全部晚于截止日或返回空".into(),
+                        });
+                    }
+                    Ok(truncated)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("financials", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => {
+                // C: fallback — 全部数据源失败时返回行业均值估计值
+                tracing::warn!("[C-fallback] 为 {stock_code} 使用行业估算财务数据");
+                Ok(vec![FinancialReport::estimated(stock_code)])
+            },
         }
-        if let Some(e) = last_err {
-            tracing::warn!("所有财务数据源均失败 (last: {e})");
-        }
-        // C: fallback — 全部数据源失败时返回行业均值估计值
-        tracing::warn!("[C-fallback] 为 {stock_code} 使用行业估算财务数据");
-        Ok(vec![FinancialReport::estimated(stock_code)])
     }
 
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
@@ -1226,56 +1383,56 @@ impl AStockClient {
                 }
             }
         }
-        let mut last_err = None;
+        // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
         let news_names: Vec<String> = self.routing.vendors_for("news", &self.routing.news).clone();
-        for name in &news_names {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_news(stock_code, limit).await {
-                    Ok(result) if !result.is_empty() => {
-                        let result = Self::truncate_news_by_asof(result);
-                        if result.is_empty() {
-                            tracing::warn!(
-                                "{}",
-                                if crate::as_of::is_asof_active() {
-                                    format!("[asof] {} 新闻全部晚于截止日，尝试下一源", name)
-                                } else {
-                                    format!("[vendor] {} 新闻返回空，尝试下一源", name)
-                                }
-                            );
-                            continue;
-                        }
-                        let cache_key =
-                            Self::cache_key_for("news", &format!("{stock_code}:{limit}"));
-                        let json = serde_json::to_string(&result).unwrap_or_default();
-                        self.cache_set(cache_key, json, 300).await;
-                        // P6:自动 upsert 到 news_archive(无关缓存命中/降级,
-                        // 任何 vendor 返回的非空结果都入本地语料库)
-                        if let Some(sink) = &self.news_archive_sink {
-                            let filtered: Vec<NewsItem> = result
-                                .iter()
-                                .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
-                                .cloned()
-                                .collect();
-                            if !filtered.is_empty() {
-                                sink.upsert(name, Some(stock_code), None, &filtered).await;
-                            }
-                        }
-                        return Ok(result);
-                    },
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} 新闻返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 新闻失败: {}", name, e);
-                        last_err = Some(e);
-                    },
+        let sc = stock_code.to_string();
+        let limit_owned = limit;
+        match self
+            .try_vendors_retry(stock_code, "news", &news_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_news(&sc, limit_owned).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "新闻返回空".into(),
+                        });
+                    }
+                    let truncated = Self::truncate_news_by_asof(result);
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "新闻全部晚于截止日".into(),
+                        });
+                    }
+                    Ok(truncated)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("news", &format!("{stock_code}:{limit}"));
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 300).await;
+                // P6:自动 upsert 到 news_archive(无关缓存命中/降级,
+                // 任何 vendor 返回的非空结果都入本地语料库)
+                if let Some(sink) = &self.news_archive_sink {
+                    let filtered: Vec<NewsItem> = result
+                        .iter()
+                        .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
+                        .cloned()
+                        .collect();
+                    if !filtered.is_empty() {
+                        sink.upsert("news", Some(stock_code), None, &filtered).await;
+                    }
                 }
-            }
+                Ok(result)
+            },
+            Err(_) => {
+                tracing::warn!("所有新闻源均失败");
+                Ok(vec![])
+            },
         }
-        if let Some(e) = last_err {
-            tracing::warn!("所有新闻源均失败 (last: {e})");
-        }
-        Ok(vec![])
     }
 
     pub async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
@@ -1319,29 +1476,38 @@ impl AStockClient {
                 }
             }
         }
-        for name in self
+        // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("money_flow", &self.routing.money_flow)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "money_flow", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    match vendor.get_money_flow(&sc).await {
+                        Ok(Some(result)) => Ok(result),
+                        Ok(None) => Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "资金流向返回空".into(),
+                        }),
+                        Err(e) => Err(e),
+                    }
+                })
+            })
+            .await
         {
-            if let Some(vendor) = self.find_vendor(name) {
-                let _guard = self.gate.acquire(name).await;
-                match vendor.get_money_flow(stock_code).await {
-                    Ok(Some(result)) => {
-                        let cache_key = Self::cache_key_for("money_flow", stock_code);
-                        let json = serde_json::to_string(&Some(result.clone())).unwrap_or_default();
-                        self.cache_set(cache_key, json, 60).await;
-                        return Ok(Some(result));
-                    },
-                    Ok(None) => {
-                        tracing::debug!("[降级] {} 资金流向返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 资金流向失败: {}", name, e);
-                    },
-                }
-            }
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("money_flow", stock_code);
+                let json = serde_json::to_string(&Some(result.clone())).unwrap_or_default();
+                self.cache_set(cache_key, json, 60).await;
+                Ok(Some(result))
+            },
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn get_dragon_tiger(
@@ -1356,30 +1522,39 @@ impl AStockClient {
                 }
             }
         }
-        for name in &self.routing.dragon_tiger {
-            if let Some(vendor) = self.find_vendor(name) {
-                let _guard = self.gate.acquire(name).await;
-                if let Ok(result) = vendor.get_dragon_tiger(stock_code).await {
-                    let result = Self::truncate_dragon_tiger_by_asof(result);
-                    if result.is_empty() {
-                        tracing::warn!(
-                            "{}",
-                            if crate::as_of::is_asof_active() {
-                                format!("[asof] {} 龙虎榜全部晚于截止日，尝试下一源", name)
-                            } else {
-                                format!("[vendor] {} 龙虎榜返回空，尝试下一源", name)
-                            }
-                        );
-                        continue;
+        // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
+        let vendor_names: Vec<String> = self
+            .routing
+            .dragon_tiger
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "dragon_tiger", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_dragon_tiger(&sc).await?;
+                    let truncated = Self::truncate_dragon_tiger_by_asof(result);
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "龙虎榜数据为空".into(),
+                        });
                     }
-                    let cache_key = Self::cache_key_for("dragon_tiger", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
-                    self.cache_set(cache_key, json, 3600).await;
-                    return Ok(result);
-                }
-            }
+                    Ok(truncated)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("dragon_tiger", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_lockup_schedule(
@@ -1394,18 +1569,33 @@ impl AStockClient {
                 }
             }
         }
-        for name in &self.routing.lockup {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_lockup_schedule(stock_code).await {
+        let vendor_names: Vec<String> = self.routing.lockup.iter().map(|n| n.to_string()).collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "lockup", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_lockup_schedule(&sc).await?;
                     let truncated = Self::truncate_lockup_by_asof(result);
-                    let cache_key = Self::cache_key_for("lockup", stock_code);
-                    let json = serde_json::to_string(&truncated).unwrap_or_default();
-                    self.cache_set(cache_key, json, 86400).await;
-                    return Ok(truncated);
-                }
-            }
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "限售解禁数据为空".into(),
+                        });
+                    }
+                    Ok(truncated)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("lockup", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 86400).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
@@ -1429,14 +1619,28 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in &self.routing.search {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.search_stock(keyword).await {
-                    return Ok(result);
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self.routing.search.iter().map(|n| n.to_string()).collect();
+        let kw = keyword.to_string();
+        match self
+            .try_vendors_retry(keyword, "search_stock", &vendor_names, 2, |_, vendor| {
+                let kw = kw.clone();
+                Box::pin(async move {
+                    let result = vendor.search_stock(&kw).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "__search__".into(),
+                            message: "搜索无结果".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     /// 按关键词搜索新闻（用于验证 CapEx/催化剂/行业趋势）
@@ -1485,34 +1689,46 @@ impl AStockClient {
             return Ok(vec![]);
         }
         // live 模式:走 vendor + 自动 upsert
-        for name in &self.routing.search_news {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.search_news(keyword, limit).await {
-                    Ok(result) if !result.is_empty() => {
-                        if let Some(sink) = &self.news_archive_sink {
-                            // 只 upsert 能解析出 publish_time 的项,避免把"未知时间"
-                            // 的噪声数据灌入语料库(as-of 模式需要可靠的时间截断)
-                            let filtered: Vec<NewsItem> = result
-                                .iter()
-                                .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
-                                .cloned()
-                                .collect();
-                            if !filtered.is_empty() {
-                                sink.upsert(name, None, Some(keyword), &filtered).await;
-                            }
-                        }
-                        return Ok(result);
-                    },
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} search_news 返回空,尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} search_news 失败: {}", name, e);
-                    },
+        let vendor_names: Vec<String> = self
+            .routing
+            .search_news
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let kw = keyword.to_string();
+        let limit_owned = limit;
+        match self
+            .try_vendors_retry(keyword, "search_news", &vendor_names, 2, |name, vendor| {
+                let kw = kw.clone();
+                Box::pin(async move {
+                    let result = vendor.search_news(&kw, limit_owned).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "新闻搜索无结果".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                if let Some(sink) = &self.news_archive_sink {
+                    let filtered: Vec<NewsItem> = result
+                        .iter()
+                        .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
+                        .cloned()
+                        .collect();
+                    if !filtered.is_empty() {
+                        sink.upsert("search_news", None, Some(keyword), &filtered)
+                            .await;
+                    }
                 }
-            }
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {
@@ -1576,17 +1792,32 @@ impl AStockClient {
                 }
             }
         }
-        for name in &self.routing.margin {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_margin_data(stock_code).await {
-                    let cache_key = Self::cache_key_for("margin", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
-                    self.cache_set(cache_key, json, 300).await;
-                    return Ok(result);
-                }
-            }
+        let vendor_names: Vec<String> = self.routing.margin.iter().map(|n| n.to_string()).collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "margin", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    match vendor.get_margin_data(&sc).await {
+                        Ok(Some(r)) => Ok(r),
+                        Ok(None) => Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "融资融券数据为空".into(),
+                        }),
+                        Err(e) => Err(e),
+                    }
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("margin", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 300).await;
+                Ok(Some(result))
+            },
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn get_north_bound_holding(
@@ -1631,17 +1862,37 @@ impl AStockClient {
                 }
             }
         }
-        for name in &self.routing.north_bound {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_north_bound_holding(stock_code).await {
-                    let cache_key = Self::cache_key_for("north_bound", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
-                    self.cache_set(cache_key, json, 300).await;
-                    return Ok(result);
-                }
-            }
+        let vendor_names: Vec<String> = self
+            .routing
+            .north_bound
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "north_bound", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    match vendor.get_north_bound_holding(&sc).await {
+                        Ok(Some(r)) => Ok(r),
+                        Ok(None) => Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "北向资金持仓数据为空".into(),
+                        }),
+                        Err(e) => Err(e),
+                    }
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("north_bound", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 300).await;
+                Ok(Some(result))
+            },
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn get_sector_info(&self, stock_code: &str) -> Result<Option<SectorInfo>, DataError> {
@@ -1687,49 +1938,102 @@ impl AStockClient {
             );
             return Ok(None);
         }
-        for name in &self.routing.sector {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_sector_info(stock_code).await {
-                    return Ok(result);
-                }
-            }
+        let vendor_names: Vec<String> = self.routing.sector.iter().map(|n| n.to_string()).collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "sector", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    vendor
+                        .get_sector_info(&sc)
+                        .await?
+                        .ok_or_else(|| DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "行业分类数据为空".into(),
+                        })
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(Some(result)),
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn get_shareholder_trades(
         &self,
         stock_code: &str,
     ) -> Result<Vec<ShareholderTrade>, DataError> {
-        for name in self
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("shareholder_trades", &self.routing.shareholder_trades)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(
+                stock_code,
+                "shareholder_trades",
+                &vendor_names,
+                2,
+                |name, vendor| {
+                    let sc = sc.clone();
+                    Box::pin(async move {
+                        let result = vendor.get_shareholder_trades(&sc).await?;
+                        let truncated = Self::truncate_shareholder_trades_by_asof(result);
+                        if truncated.is_empty() {
+                            return Err(DataError::VendorError {
+                                vendor: name.to_string(),
+                                message: "股东增减持数据为空".into(),
+                            });
+                        }
+                        Ok(truncated)
+                    })
+                },
+            )
+            .await
         {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_shareholder_trades(stock_code).await {
-                    let result = Self::truncate_shareholder_trades_by_asof(result);
-                    let cache_key = Self::cache_key_for("shareholder_trades", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
-                    self.cache_set(cache_key, json, 3600).await;
-                    return Ok(result);
-                }
-            }
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("shareholder_trades", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_dividend_records(
         &self,
         stock_code: &str,
     ) -> Result<Vec<DividendRecord>, DataError> {
-        for name in &self.routing.dividend {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_dividend_records(stock_code).await {
-                    return Ok(result);
-                }
-            }
+        let vendor_names: Vec<String> = self
+            .routing
+            .dividend
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "dividend", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_dividend_records(&sc).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "分红数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_research_reports(
@@ -1776,20 +2080,37 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in self
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("research_reports", &self.routing.research_reports)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "research_reports", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_research_reports(&sc).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "研报数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
         {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_research_reports(stock_code).await {
-                    let cache_key = Self::cache_key_for("research_reports", stock_code);
-                    let json = serde_json::to_string(&result).unwrap_or_default();
-                    self.cache_set(cache_key, json, 3600).await;
-                    return Ok(result);
-                }
-            }
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("research_reports", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_consensus_eps(
@@ -1848,33 +2169,49 @@ impl AStockClient {
             );
             return Ok(None);
         }
-        for name in self
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("consensus_eps", &self.routing.consensus_eps)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "consensus_eps", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    match vendor.get_consensus_eps(&sc).await {
+                        Ok(Some(r)) => Ok(r),
+                        Ok(None) => Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "一致预期数据为空".into(),
+                        }),
+                        Err(e) => Err(e),
+                    }
+                })
+            })
+            .await
         {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_consensus_eps(stock_code).await {
-                    return Ok(result);
-                }
-            }
+            Ok(result) => Ok(Some(result)),
+            Err(_) => {
+                // C: consensus_eps fallback — 基于挂牌板块的估算值
+                tracing::warn!("[C-fallback] consensus_eps 全部失败，为 {stock_code} 使用估算值");
+                let eps_est = match detect_market_type(stock_code) {
+                    "star" | "chinext" => 0.40,
+                    "bj" => 0.25,
+                    _ => 0.55,
+                };
+                let this_year = Local::now().format("%Y").to_string();
+                Ok(Some(ConsensusEPS {
+                    stock_code: stock_code.to_string(),
+                    consensus_eps: Some(eps_est),
+                    consensus_target_price: None,
+                    rating_avg: None,
+                    rating_count: None,
+                    year: this_year,
+                }))
+            },
         }
-        // C: consensus_eps fallback — 返回基于挂牌板块的估算一致预期
-        tracing::warn!("[C-fallback] consensus_eps 全部失败，为 {stock_code} 使用估算值");
-        let market_type = detect_market_type(stock_code);
-        let eps_est: f64 = match market_type {
-            "star" | "chinext" => 0.40,
-            "bj" => 0.25,
-            _ => 0.55,
-        };
-        let this_year = Local::now().format("%Y").to_string();
-        Ok(Some(ConsensusEPS {
-            stock_code: stock_code.to_string(),
-            consensus_eps: Some(eps_est),
-            consensus_target_price: None,
-            rating_avg: None,
-            rating_count: None,
-            year: this_year,
-        }))
     }
 
     pub async fn get_concept_blocks(
@@ -1931,63 +2268,93 @@ impl AStockClient {
             );
             return Ok(None);
         }
-        for name in &self.routing.concept_blocks {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_concept_blocks(stock_code).await {
-                    return Ok(result);
-                }
-            }
+        let vendor_names: Vec<String> = self
+            .routing
+            .concept_blocks
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "concept_blocks", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    vendor
+                        .get_concept_blocks(&sc)
+                        .await?
+                        .ok_or_else(|| DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "概念板块数据为空".into(),
+                        })
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(Some(result)),
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn get_announcements(
         &self,
         stock_code: &str,
     ) -> Result<Vec<Announcement>, DataError> {
-        let announce_names: Vec<String> = self
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("announcements", &self.routing.announcements)
             .clone();
-        for name in &announce_names {
-            if let Some(vendor) = self.find_vendor(name) {
-                let cap = self.vendor_asof_capability(name, "get_announcements");
-                let announce_fut = match cap {
-                    AsOfCapability::NativeDateParam if crate::as_of::is_asof_active() => {
-                        vendor.get_announcements_with_asof(stock_code)
-                    },
-                    _ => vendor.get_announcements(stock_code),
-                };
-                match announce_fut.await {
-                    Ok(result) => {
-                        if !result.is_empty() {
-                            // NativeDateParam vendor 的 _with_asof 已按日期过滤，无需再截断；
-                            // Fallthrough vendor 仍需要截断
-                            let result = match cap {
-                                AsOfCapability::NativeDateParam
-                                    if crate::as_of::is_asof_active() =>
-                                {
-                                    result
-                                },
-                                _ => Self::truncate_announcements_by_asof(result),
-                            };
-                            if result.is_empty() {
-                                continue;
-                            }
-                            let cache_key = Self::cache_key_for("announcements", stock_code);
-                            let json = serde_json::to_string(&result).unwrap_or_default();
-                            self.cache_set(cache_key, json, 3600).await;
-                            return Ok(result);
-                        }
-                        tracing::warn!("[降级] {} 公告返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 公告获取失败: {}", name, e);
-                    },
+        // 缓存检查
+        {
+            let cache_key = Self::cache_key_for("announcements", stock_code);
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Vec<Announcement>>(&cached) {
+                    return Ok(data);
                 }
             }
         }
-        Ok(vec![])
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "announcements", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let cap = vendor.asof_capability("get_announcements");
+                    let result = match cap {
+                        AsOfCapability::NativeDateParam if crate::as_of::is_asof_active() => {
+                            vendor.get_announcements_with_asof(&sc).await?
+                        },
+                        _ => vendor.get_announcements(&sc).await?,
+                    };
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "公告数据为空".into(),
+                        });
+                    }
+                    let truncated = match cap {
+                        AsOfCapability::NativeDateParam if crate::as_of::is_asof_active() => {
+                            result // NativeDateParam 已按日期过滤
+                        },
+                        _ => Self::truncate_announcements_by_asof(result),
+                    };
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "公告均在截止日后".into(),
+                        });
+                    }
+                    Ok(truncated)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("announcements", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
+        }
     }
 
     pub async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
@@ -2027,17 +2394,30 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in self
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("market_dragon_tiger", &self.routing.market_dragon_tiger)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        match self
+            .try_vendors_retry("", "market_dragon_tiger", &vendor_names, 2, |_, vendor| {
+                Box::pin(async move {
+                    let result = vendor.get_market_dragon_tiger().await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "__market__".into(),
+                            message: "全市场龙虎榜数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
         {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_market_dragon_tiger().await {
-                    return Ok(result);
-                }
-            }
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
@@ -2091,14 +2471,31 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in &self.routing.hot_stocks {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_hot_stocks().await {
-                    return Ok(result);
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .hot_stocks
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        match self
+            .try_vendors_retry("", "hot_stocks", &vendor_names, 2, |_, vendor| {
+                Box::pin(async move {
+                    let result = vendor.get_hot_stocks().await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "__market__".into(),
+                            message: "热门股数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
@@ -2152,14 +2549,31 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in &self.routing.industry_ranking {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_industry_ranking().await {
-                    return Ok(result);
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .industry_ranking
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        match self
+            .try_vendors_retry("", "industry_ranking", &vendor_names, 2, |_, vendor| {
+                Box::pin(async move {
+                    let result = vendor.get_industry_ranking().await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "__market__".into(),
+                            message: "行业排名数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
@@ -2206,83 +2620,160 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in &self.routing.cls_flash {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_cls_flash().await {
-                    return Ok(result);
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .cls_flash
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        match self
+            .try_vendors_retry("", "cls_flash", &vendor_names, 2, |_, vendor| {
+                Box::pin(async move {
+                    let result = vendor.get_cls_flash().await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "__market__".into(),
+                            message: "快讯数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_north_bound_flow(&self) -> Result<Option<NorthBoundFlow>, DataError> {
-        for name in self
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
             .routing
             .vendors_for("north_bound_flow", &self.routing.north_bound_flow)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        match self
+            .try_vendors_retry("", "north_bound_flow", &vendor_names, 2, |_, vendor| {
+                Box::pin(async move {
+                    vendor
+                        .get_north_bound_flow()
+                        .await?
+                        .ok_or_else(|| DataError::VendorError {
+                            vendor: "__market__".into(),
+                            message: "北向资金流向数据为空".into(),
+                        })
+                })
+            })
+            .await
         {
-            if let Some(vendor) = self.find_vendor(name) {
-                if let Ok(result) = vendor.get_north_bound_flow().await {
-                    let result = Self::truncate_north_bound_flow_by_asof(result);
+            Ok(result) => {
+                // 混合 as-of 模式下截断
+                let result = Self::truncate_north_bound_flow_by_asof(Some(result));
+                if let Some(ref r) = result {
                     let cache_key = Self::cache_key_for("north_bound_flow", "market");
-                    if let Some(ref r) = result {
-                        let json = serde_json::to_string(r).unwrap_or_default();
-                        self.cache_set(cache_key, json, 300).await;
-                    }
-                    return Ok(result);
+                    let json = serde_json::to_string(r).unwrap_or_default();
+                    self.cache_set(cache_key, json, 300).await;
                 }
-            }
+                Ok(result)
+            },
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn get_block_trades(&self, stock_code: &str) -> Result<Vec<BlockTrade>, DataError> {
-        for name in &self.routing.block_trades {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_block_trades(stock_code).await {
-                    Ok(result) if !result.is_empty() => {
-                        let result = Self::truncate_block_trades_by_asof(result);
-                        let cache_key = Self::cache_key_for("block_trades", stock_code);
-                        let json = serde_json::to_string(&result).unwrap_or_default();
-                        self.cache_set(cache_key, json, 3600).await;
-                        return Ok(result);
-                    },
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} 大宗交易返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 大宗交易失败: {}", name, e);
-                    },
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .block_trades
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "block_trades", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_block_trades(&sc).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "大宗交易数据为空".into(),
+                        });
+                    }
+                    let truncated = Self::truncate_block_trades_by_asof(result);
+                    if truncated.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "大宗交易均在截止日后".into(),
+                        });
+                    }
+                    Ok(truncated)
+                })
+            })
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("block_trades", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_institutional_visits(
         &self,
         stock_code: &str,
     ) -> Result<Vec<InstitutionalVisit>, DataError> {
-        for name in &self.routing.institutional_visits {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_institutional_visits(stock_code).await {
-                    Ok(result) if !result.is_empty() => {
-                        let result = Self::truncate_institutional_visits_by_asof(result);
-                        let cache_key = Self::cache_key_for("institutional_visits", stock_code);
-                        let json = serde_json::to_string(&result).unwrap_or_default();
-                        self.cache_set(cache_key, json, 3600).await;
-                        return Ok(result);
-                    },
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} 机构调研返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 机构调研失败: {}", name, e);
-                    },
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .institutional_visits
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(
+                stock_code,
+                "institutional_visits",
+                &vendor_names,
+                2,
+                |name, vendor| {
+                    let sc = sc.clone();
+                    Box::pin(async move {
+                        let result = vendor.get_institutional_visits(&sc).await?;
+                        if result.is_empty() {
+                            return Err(DataError::VendorError {
+                                vendor: name.to_string(),
+                                message: "机构调研数据为空".into(),
+                            });
+                        }
+                        let truncated = Self::truncate_institutional_visits_by_asof(result);
+                        if truncated.is_empty() {
+                            return Err(DataError::VendorError {
+                                vendor: name.to_string(),
+                                message: "机构调研均在截止日后".into(),
+                            });
+                        }
+                        Ok(truncated)
+                    })
+                },
+            )
+            .await
+        {
+            Ok(result) => {
+                let cache_key = Self::cache_key_for("institutional_visits", stock_code);
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                self.cache_set(cache_key, json, 3600).await;
+                Ok(result)
+            },
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     /// 筹码面分析数据聚合：一次调用获取解禁 + 增减持 + 大宗交易
@@ -2316,20 +2807,31 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in &self.routing.index_quotes {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_index_quotes().await {
-                    Ok(result) if !result.is_empty() => return Ok(result),
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} 指数行情返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 指数行情失败: {}", name, e);
-                    },
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .index_quotes
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        match self
+            .try_vendors_retry("", "index_quotes", &vendor_names, 2, |_, vendor| {
+                Box::pin(async move {
+                    let result = vendor.get_index_quotes().await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "__market__".into(),
+                            message: "指数行情数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
@@ -2372,20 +2874,33 @@ impl AStockClient {
             );
             return Ok(vec![]);
         }
-        for name in self.routing.vendors_for("peers", &self.routing.peers) {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_peers(stock_code).await {
-                    Ok(result) if !result.is_empty() => return Ok(result),
-                    Ok(_) => {
-                        tracing::warn!("[降级] {} 同行对比返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 同行对比失败: {}", name, e);
-                    },
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .vendors_for("peers", &self.routing.peers)
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "peers", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let result = vendor.get_peers(&sc).await?;
+                    if result.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "同行对比数据为空".into(),
+                        });
+                    }
+                    Ok(result)
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Ok(vec![]),
         }
-        Ok(vec![])
     }
 
     pub async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
@@ -2426,20 +2941,33 @@ impl AStockClient {
             );
             return Ok(None);
         }
-        for name in &self.routing.option_pcr {
-            if let Some(vendor) = self.find_vendor(name) {
-                match vendor.get_option_pcr(stock_code).await {
-                    Ok(Some(result)) => return Ok(Some(result)),
-                    Ok(None) => {
-                        tracing::warn!("[降级] {} 期权PCR返回空，尝试下一源", name);
-                    },
-                    Err(e) => {
-                        tracing::warn!("[降级] {} 期权PCR失败: {}", name, e);
-                    },
-                }
-            }
+        // ── live 模式 ──
+        let vendor_names: Vec<String> = self
+            .routing
+            .option_pcr
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let sc = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "option_pcr", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    match vendor.get_option_pcr(&sc).await {
+                        Ok(Some(r)) => Ok(r),
+                        Ok(None) => Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "期权PCR数据为空".into(),
+                        }),
+                        Err(e) => Err(e),
+                    }
+                })
+            })
+            .await
+        {
+            Ok(result) => Ok(Some(result)),
+            Err(_) => Ok(None),
         }
-        Ok(None)
     }
 
     pub async fn fetch_market_data(&self) -> Result<MarketRawData, DataError> {

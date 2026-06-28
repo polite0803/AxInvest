@@ -2,10 +2,44 @@ import { getSignalColor } from "@/lib/stock-analysis-utils";
 import { useSettingsStore } from "@/stores";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
-import NodeRenderer from "markstream-react";
+import NodeRenderer, { setCustomComponents } from "markstream-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
+
+// ── 自定义段落渲染：用 <div> 替代 <p> ─────────────────────────
+// 解决 React DOM 嵌套警告：<div> cannot be a descendant of <p>
+// markstream-react FallbackComponent 对未知内联节点类型渲染 <div>，
+// 在 <p> 内渲染 <div> 违反 HTML 规范。
+// 这里用官方 API 全局注册一个段落组件，用 <div> 包裹内容而非 <p>，
+// 同时复用库自身的子节点渲染管线，无需修改 node_modules。
+let customParagraphRegistered = false;
+
+function registerCustomParagraph() {
+  if (customParagraphRegistered) { return; }
+  customParagraphRegistered = true;
+
+  const CustomParagraph: React.FC<{
+    node: any;
+    ctx?: any;
+    renderNode?: any;
+    indexKey?: React.Key;
+  }> = ({ node, ctx, renderNode, indexKey }) => {
+    if (!ctx || !renderNode || !node?.children?.length) {
+      return <div dir="auto" className="paragraph-node" />;
+    }
+
+    const children = node.children.map((child: any, i: number) =>
+      renderNode(child, `${String(indexKey ?? "paragraph")}-${i}`, ctx)
+    );
+
+    return <div dir="auto" className="paragraph-node">{children}</div>;
+  };
+
+  setCustomComponents({ paragraph: CustomParagraph });
+}
+
+registerCustomParagraph();
 
 interface Props {
   expertId: string;

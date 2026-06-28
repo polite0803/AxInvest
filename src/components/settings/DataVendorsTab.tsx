@@ -144,6 +144,25 @@ const VENDORS: VendorDef[] = [
     helpUrl: "https://xueqiu.com/",
     helpText: "登录雪球后 F12 → Cookie 中取 xq_a_token",
   },
+  {
+    key: "vendor_neodata",
+    enName: "neodata",
+    name: "NeoData",
+    desc: "美股/宏观/外汇",
+    capabilities: [
+      "quote",
+      "financials",
+      "news",
+      "search",
+      "sector",
+      "cls_flash",
+      "industry_ranking",
+      "index_quotes",
+      "hot_stocks",
+    ],
+    requiresKey: true,
+    helpText: "点击「通过 WorkBuddy 连接」按钮，然后在 WorkBuddy 中输入「刷新 NeoData token」即可自动获取",
+  },
 ];
 
 /** 工具 → Vendor 路由映射（固定 + 暴露） */
@@ -245,6 +264,7 @@ export function DataVendorsTab() {
   const [vendorValues, setVendorValues] = useState<Record<string, boolean>>({});
   const [iwencaiKey, setIwencaiKey] = useState("");
   const [xueqiuToken, setXueqiuToken] = useState("");
+  const [neodataToken, setNeodataToken] = useState("");
   const [health, setHealth] = useState<Record<string, HealthStatus>>({});
   const [checkingAll, setCheckingAll] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -270,16 +290,22 @@ export function DataVendorsTab() {
         const vals: Record<string, boolean> = {};
         let key = "";
         let xqToken = "";
+        let ndToken = "";
         for (const v of vars) {
-          if (v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token") {
+          if (
+            v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token"
+            && v.name !== "vendor_neodata_token"
+          ) {
             vals[v.name] = !!v.value;
           }
           if (v.name === "vendor_iwencai_key") { key = typeof v.value === "string" ? v.value : ""; }
           if (v.name === "vendor_xueqiu_token") { xqToken = typeof v.value === "string" ? v.value : ""; }
+          if (v.name === "vendor_neodata_token") { ndToken = typeof v.value === "string" ? v.value : ""; }
         }
         setVendorValues(vals);
         setIwencaiKey(key);
         setXueqiuToken(xqToken);
+        setNeodataToken(ndToken);
         setLoaded(true);
       })
       .catch(() => {
@@ -320,6 +346,14 @@ export function DataVendorsTab() {
         name: "vendor_xueqiu_token",
         var_type: "string",
         value: xueqiuToken,
+        is_secret: true,
+      });
+      const neodataExisting = varMap.get("vendor_neodata_token");
+      varMap.set("vendor_neodata_token", {
+        ...(neodataExisting && typeof neodataExisting === "object" ? neodataExisting : {}),
+        name: "vendor_neodata_token",
+        var_type: "string",
+        value: neodataToken,
         is_secret: true,
       });
       const merged = Array.from(varMap.values());
@@ -374,6 +408,7 @@ export function DataVendorsTab() {
       "akshare",
       "mootdx",
       "xueqiu",
+      "neodata",
     ];
     for (const n of names) { setHealth((prev) => ({ ...prev, [n]: "pending" })); }
     for (const n of names) { await checkOne(n); }
@@ -485,6 +520,27 @@ export function DataVendorsTab() {
                     value={xueqiuToken}
                     onChange={(e) => setXueqiuToken(e.target.value)}
                   />
+                )}
+                {v.key === "vendor_neodata" && (
+                  <>
+                    <Input.Password
+                      style={{ width: 180 }}
+                      size="small"
+                      placeholder={t("stockAnalysis.settings.vendors.apiKey")}
+                      value={neodataToken}
+                      onChange={(e) => setNeodataToken(e.target.value)}
+                    />
+                    <Button
+                      size="small"
+                      type="primary"
+                      ghost
+                      onClick={() => {
+                        message.info("请在 WorkBuddy 对话中输入「刷新 NeoData token」自动完成连接");
+                      }}
+                    >
+                      🔗 通过 WorkBuddy 连接
+                    </Button>
+                  </>
                 )}
                 <Button size="small" onClick={() => checkOne(v.enName)}>
                   {t("stockAnalysis.settings.check")}

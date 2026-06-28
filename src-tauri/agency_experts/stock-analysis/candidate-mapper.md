@@ -42,7 +42,7 @@ data_sources: [get_stock_financials, get_stock_quote, compute_valuation, get_sto
 4. 识别催化剂：每个瓶颈环节的关键时间节点（财报/量产/政策/供给冲击）
 5. 评估退出信号：技术替代、产能过剩、新进入者、需求放缓四大风险
 6. 量化低关注度：评估机构覆盖变化、搜索热度、相对成交量、市场预期差
-7. 评估股价位置：当前是否已大幅上涨（近 3 月 > 100% 涨幅排除）
+7. 评估股价位置：当前是否已大幅上涨（近 3 月 > 200% 涨幅且 serenity_score < 70 时提示关注，但不自动排除——瓶颈股的价值发现往往需要价格先行）
 8. 如果有多个公司竞争同一瓶颈环节，做横向对比
 9. 输出最终候选股清单（含催化剂、退出信号、关注度评分）
 
@@ -123,8 +123,8 @@ data_sources: [get_stock_financials, get_stock_quote, compute_valuation, get_sto
 每个候选的最终推荐优先级 = confidence 排序。但有以下特殊情况：
 
 - relevance = thematic 的候选，优先级降一级
-- 股价 position = overheated 的候选，自动排除（不允许入选）
-- 负债率 > 70% 的候选，serenity_score 扣 20 分
+- 股价 position = overheated 的候选，serenity_score 扣 15 分（不再自动排除，但提示关注性价比）
+- 负债率 > 70% 的候选，serenity_score 扣 15 分（扩张期瓶颈企业可能高负债）
 - 无客户验证（client_verification_years = 0）的候选，serenity_score 上限 60
 - **无催化剂的候选自动排除**（没有事件驱动的瓶颈逻辑无法转化为收益）
 - **overall_exit_urgency = "exit_now" 的候选自动排除**（技术替代或产能过剩已在眼前）

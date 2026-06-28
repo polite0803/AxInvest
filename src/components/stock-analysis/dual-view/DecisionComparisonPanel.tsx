@@ -1,23 +1,16 @@
 /**
- * DecisionComparisonPanel — 双视角决策对比的完整面板版
+ * DecisionComparisonPanel — 双视角决策对比的紧凑面板版
  *
- * 方案 D 双向并存:展示"LLM 视角 vs 公式视角"完整对比。
- * 挂在 `<DualViewRenderer id="decision-comparison" />` 出口。
- *
- * 字段对比:
- *   - action(必显示,差异高亮)
- *   - positionPct(差异 ≤ 5pct 视为一致)
- *   - confidence(差异 ≤ 10 视为一致)
- *   - timeHorizon
- *   - reasoning(完整推理文本对比)
- *
- * 一致性:
- *   - 顶部 0-100 圆环 + 解读文案
- *   - ≥ 80 高一致(绿) / 40-79 中(黄) / < 40 分歧(红)
- *   - < 40 时提示"建议人工复核"
+ * 紧凑设计原则：
+ *   - 标题 + 一致性分数同行（色条+数字，无圆环）
+ *   - 公式/LLM 双列并排卡片，每列内: action tag + conf% | pos% 单行
+ *   - reasoning 截断 80 字符单行，点击展开完整
+ *   - 分歧诊断用 Tooltip 内联（不另占卡片空间）
+ *   - 总高度控制在 ~140px 以内
  */
-import { Empty, Progress, Tag } from "antd";
-import { useMemo } from "react";
+import { getActionTKey } from "@/lib/stock-analysis-utils";
+import { Empty, Tag, Tooltip } from "antd";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CompactDecisionShape } from "./CompactDecisionComparison";
 
@@ -49,179 +42,234 @@ function agreementLevel(score: number): "high" | "mid" | "low" {
   return "low";
 }
 
-function progressStrokeColor(score: number): string {
-  const level = agreementLevel(score);
-  if (level === "high") { return "#10b981"; }
-  if (level === "mid") { return "#f59e0b"; }
-  return "#ef4444";
-}
-
-/** 数字格式化:undefined/null → "—", 否则保留 0 位小数 */
+/** 数字格式化 */
 function fmtNum(v: number | null | undefined, suffix = ""): string {
   if (typeof v !== "number" || !Number.isFinite(v)) { return "—"; }
   return `${v.toFixed(0)}${suffix}`;
 }
 
+/** 截断文本 */
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) { return text; }
+  return text.slice(0, maxLen) + "…";
+}
+
 export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) {
   const { t } = useTranslation();
+  const [expandedReasoning, setExpandedReasoning] = useState(false);
   const view = useMemo(() => normalize(data), [data]);
 
   const hasLlm = view.llmDecisionAction != null
     && view.llmDecisionAction !== ""
     && view.llmDecisionAction !== "null";
   const agreement = typeof view.decisionAgreementScore === "number" ? view.decisionAgreementScore : null;
-  const actionsMatch = hasLlm
-    && normalizeAction(view.decisionAction) === normalizeAction(view.llmDecisionAction);
-  const positionMatch = typeof view.decisionPositionPct === "number"
-    && typeof view.llmDecisionPositionPct === "number"
-    && Math.abs(view.decisionPositionPct - view.llmDecisionPositionPct) <= 5;
 
-  // LLM 视角完全不可用 → 回退显示公式决策单视角
+  // LLM 不可用 → 紧凑回退
   if (!hasLlm && agreement === null) {
-    // 即使公式决策也存在不足时显示空状态
     const hasFormula = view.decisionAction != null && view.decisionAction !== "" && view.decisionAction !== "null";
     if (!hasFormula) {
       return (
-        <div className="decision-comparison-panel p-4">
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("dualView.decision.llmUnavailableHint")}
-          />
+        <div className="decision-comparison-panel p-2">
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("dualView.decision.llmUnavailableHint")} />
         </div>
       );
     }
-    // 有公式决策但无 LLM 双视角 → 降级显示公式决策单列
     return (
-      <div className="decision-comparison-panel p-3 space-y-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Tag color="warning">{t("stockAnalysis.llmViewUnavailable")}</Tag>
-          <span className="text-xs" style={{ color: "var(--muted)" }}>
-            {t("stockAnalysis.formulaFallbackHint")}
+      <div className="decision-comparison-panel p-2 space-y-1 text-sm">
+        <Tag color="warning">{t("stockAnalysis.llmViewUnavailable")}</Tag>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <span style={{ color: "var(--muted)" }}>{t("dualView.decision.action")}</span>
+          <span>
+            <Tag color={actionTagColor(view.decisionAction)}>{t(getActionTKey(view.decisionAction ?? ""))}</Tag>
           </span>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-[12px]">
-          <div className="font-semibold" style={{ color: "var(--muted)" }}>{t("dualView.decision.field")}</div>
-          <div className="font-semibold text-center" style={{ color: "#2563eb" }}>
-            {t("dualView.decision.formula")}
-          </div>
-          <div>{t("dualView.decision.action")}</div>
-          <div className="text-center">
-            <Tag color={actionTagColor(view.decisionAction)}>{view.decisionAction}</Tag>
-          </div>
-          <div>{t("dualView.decision.positionPct")}</div>
-          <div className="text-center font-mono">{fmtNum(view.decisionPositionPct, "%")}</div>
-          <div>{t("dualView.decision.confidence")}</div>
-          <div className="text-center font-mono">{fmtNum(view.confidence, "")}</div>
-          <div>{t("dualView.decision.reasoning")}</div>
-          <div className="text-[11px] whitespace-pre-wrap">{view.llmDecisionReasoning || view.decisionAction}</div>
+          <span style={{ color: "var(--muted)" }}>{t("dualView.decision.confidence")}</span>
+          <span className="font-mono">{fmtNum(view.confidence)}</span>
         </div>
       </div>
     );
   }
 
   const level = agreement !== null ? agreementLevel(agreement) : null;
-  const hintKey = level === "high"
-    ? "highAgreementHint"
-    : level === "low"
-    ? "lowAgreementHint"
-    : "midAgreementHint";
+  const agreeColor = level === "high" ? "#10b981" : level === "mid" ? "#f59e0b" : "#ef4444";
+  const agreeBg = level === "high"
+    ? "rgba(16,185,129,0.10)"
+    : level === "mid"
+    ? "rgba(245,158,11,0.10)"
+    : "rgba(239,68,68,0.10)";
+
+  const REASON_MAX = expandedReasoning ? 500 : 80;
+  const formulaReasoning = view.decisionReasoning || "";
+  const llmReasoning = view.llmDecisionReasoning || "";
 
   return (
-    <div className="decision-comparison-panel p-3 space-y-3">
-      {/* 顶部:标题 + 一致性分数 */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="text-sm font-semibold">{t("dualView.decision.title")}</div>
-        {agreement !== null && (
-          <div className="flex items-center gap-2">
-            <Progress
-              type="circle"
-              percent={agreement}
-              size={48}
-              strokeColor={progressStrokeColor(agreement)}
-              format={(p) => <span className="text-[12px] font-mono">{p}</span>}
-            />
-            <div className="text-[11px]" style={{ color: "var(--muted)" }}>
-              <div>{t(`dualView.decision.${hintKey}`)}</div>
-              {level === "low" && (
-                <div className="text-[10px] mt-0.5" style={{ color: "#ef4444" }}>
-                  {t("dualView.decision.reviewRecommended")}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 对比表格 */}
-      <div className="grid grid-cols-3 gap-2 text-[12px]">
-        <div className="font-semibold" style={{ color: "var(--muted)" }}>{t("dualView.decision.field")}</div>
-        <div className="font-semibold text-center" style={{ color: "#2563eb" }}>
-          {t("dualView.decision.formula")}
-        </div>
-        <div className="font-semibold text-center" style={{ color: "#7c3aed" }}>
-          {t("dualView.decision.llm")}
-        </div>
-
-        {/* action */}
-        <div>{t("dualView.decision.action")}</div>
-        <div className="text-center">
-          {view.decisionAction
-            ? <Tag color={actionTagColor(view.decisionAction)}>{view.decisionAction}</Tag>
-            : <span style={{ color: "var(--muted)" }}>—</span>}
-        </div>
-        <div className="text-center">
-          {hasLlm
-            ? (
-              <Tag
-                color={actionTagColor(view.llmDecisionAction)}
-                style={actionsMatch ? { borderColor: "#10b981" } : undefined}
-              >
-                {view.llmDecisionAction}
-              </Tag>
-            )
-            : <span style={{ color: "var(--muted)" }}>—</span>}
-        </div>
-
-        {/* positionPct */}
-        <div>{t("dualView.decision.positionPct")}</div>
-        <div className="text-center font-mono">{fmtNum(view.decisionPositionPct, "%")}</div>
-        <div
-          className="text-center font-mono"
-          style={positionMatch ? { color: "#10b981" } : undefined}
-        >
-          {fmtNum(view.llmDecisionPositionPct, "%")}
-        </div>
-
-        {/* confidence */}
-        <div>{t("dualView.decision.confidence")}</div>
-        <div className="text-center font-mono">{fmtNum(view.confidence)}</div>
-        <div className="text-center font-mono">{fmtNum(view.llmConfidence)}</div>
-
-        {/* reasoning(只在两边都非空时显示) */}
-        {view.llmDecisionReasoning && (
-          <>
-            <div className="pt-1">{t("dualView.decision.reasoning")}</div>
-            <div
-              className="pt-1 text-[11px]"
-              style={{ color: "var(--color-text-secondary)" }}
+    <div className="decision-comparison-panel p-2 space-y-1.5 text-sm">
+      {/* ═══ 第1行：标题 + 一致性色条 + 分歧诊断(Tooltip) + 展开按钮 ═══ */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold">{t("dualView.decision.title")}</span>
+          {agreement !== null && (
+            <span
+              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-sm font-mono font-medium"
+              style={{ background: agreeBg, color: agreeColor }}
             >
-              {t("dualView.decision.formulaReasoningOmitted")}
-            </div>
-            <div className="pt-1 text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
-              {view.llmDecisionReasoning}
-            </div>
-          </>
+              {agreement}
+              <span className="opacity-60">/100</span>
+            </span>
+          )}
+          {/* 分歧诊断 — 内联 Tooltip，悬停查看详情 */}
+          {view.agreementBreakdown && agreement !== null && agreement < 80 && (
+            <Tooltip
+              title={
+                <div className="text-sm space-y-0.5">
+                  <div>
+                    {t("dualView.decision.action")}: {view.agreementBreakdown.actionNote === "opposite"
+                      ? "✗ 相反"
+                      : view.agreementBreakdown.actionNote === "same_direction"
+                      ? "≈ 同向"
+                      : "⚠ 分歧"} ({view.agreementBreakdown.formulaAction} vs {view.agreementBreakdown.llmAction})
+                  </div>
+                  {view.agreementBreakdown.positionGap != null && (
+                    <div>
+                      {t("dualView.decision.positionPct")}: 差 {Math.round(view.agreementBreakdown.positionGap)}%
+                    </div>
+                  )}
+                  {view.agreementBreakdown.confidenceGap != null && (
+                    <div>
+                      {t("dualView.decision.confidence")}: 差 {Math.round(view.agreementBreakdown.confidenceGap)}%
+                    </div>
+                  )}
+                </div>
+              }
+            >
+              <span
+                className="cursor-help px-1 py-0.5 rounded text-sm underline decoration-dotted"
+                style={{ color: "#ef4444", opacity: 0.85 }}
+              >
+                ⚠{view.agreementBreakdown.actionNote === "opposite"
+                  ? ` ${t("dualView.decision.reviewRecommended")}`
+                  : ""}
+              </span>
+            </Tooltip>
+          )}
+        </div>
+        {/* reasoning 超长时显示展开按钮 */}
+        {!expandedReasoning && (formulaReasoning.length > 80 || llmReasoning.length > 80) && (
+          <button
+            className="text-sm hover:opacity-70 transition-opacity"
+            style={{
+              color: "var(--accent, #6366f1)",
+              border: "none",
+              background: "none",
+              padding: 0,
+              cursor: "pointer",
+            }}
+            onClick={() => setExpandedReasoning(true)}
+          >
+            {t("stockAnalysis.showDetail")} ▸
+          </button>
         )}
       </div>
 
-      {/* LLM 不可用但 agreement 存在:解释来源 */}
+      {/* ═══ 第2行：双列对比卡片（公式 | LLM）═══ */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* ── 公式列 ── */}
+        <div
+          className="rounded-md p-1.5 space-y-1"
+          style={{ background: "rgba(37,99,235,0.05)", border: "1px solid rgba(37,99,235,0.10)" }}
+        >
+          <div className="flex items-center justify-between">
+            <span
+              className="text-sm font-medium px-1 py-px rounded"
+              style={{ background: "rgba(37,99,235,0.10)", color: "#2563eb" }}
+            >
+              {t("dualView.decision.formula")}
+            </span>
+            {view.decisionAction
+              ? <Tag color={actionTagColor(view.decisionAction)}>{t(getActionTKey(view.decisionAction ?? ""))}</Tag>
+              : <span style={{ color: "var(--muted)" }}>—</span>}
+          </div>
+          <div className="flex items-center gap-1.5 font-mono text-sm">
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              置信 <b style={{ fontSize: "13px" }}>{fmtNum(view.confidence)}%</b>
+            </span>
+            <span style={{ color: "var(--muted)", opacity: 0.4 }}>|</span>
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              仓位 <b style={{ fontSize: "13px" }}>{fmtNum(view.decisionPositionPct, "%")}</b>
+            </span>
+          </div>
+          {formulaReasoning && (
+            <div
+              className="leading-tight cursor-pointer hover:opacity-70 transition-opacity line-clamp-1"
+              style={{ color: "var(--color-text-secondary)", fontSize: "12px" }}
+              onClick={() => setExpandedReasoning(!expandedReasoning)}
+              title={expandedReasoning ? "" : formulaReasoning}
+            >
+              {truncate(formulaReasoning, REASON_MAX)}
+            </div>
+          )}
+        </div>
+
+        {/* ── LLM 列 ── */}
+        <div
+          className="rounded-md p-1.5 space-y-1"
+          style={{ background: "rgba(124,58,237,0.05)", border: "1px solid rgba(124,58,237,0.10)" }}
+        >
+          <div className="flex items-center justify-between">
+            <span
+              className="text-sm font-medium px-1 py-px rounded"
+              style={{ background: "rgba(124,58,237,0.10)", color: "#7c3aed" }}
+            >
+              {t("dualView.decision.llm")}
+            </span>
+            {hasLlm
+              ? (
+                <Tag color={actionTagColor(view.llmDecisionAction)}>
+                  {t(getActionTKey(view.llmDecisionAction ?? ""))}
+                </Tag>
+              )
+              : <span style={{ color: "var(--muted)" }}>—</span>}
+          </div>
+          <div className="flex items-center gap-1.5 font-mono text-sm">
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              置信 <b style={{ fontSize: "13px" }}>{fmtNum(view.llmConfidence)}%</b>
+            </span>
+            <span style={{ color: "var(--muted)", opacity: 0.4 }}>|</span>
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              仓位 <b style={{ fontSize: "13px" }}>{fmtNum(view.llmDecisionPositionPct, "%")}</b>
+            </span>
+          </div>
+          {llmReasoning && (
+            <div
+              className="leading-tight cursor-pointer hover:opacity-70 transition-opacity line-clamp-1"
+              style={{ color: "var(--color-text-secondary)", fontSize: "12px" }}
+              onClick={() => setExpandedReasoning(!expandedReasoning)}
+              title={expandedReasoning ? "" : llmReasoning}
+            >
+              {truncate(llmReasoning, REASON_MAX)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* LLM 缺失提示 */}
       {!hasLlm && agreement !== null && (
         <div
-          className="text-[11px] italic px-2 py-1 rounded"
-          style={{ background: "var(--bg-soft, #f5f5f5)", color: "var(--muted)" }}
+          className="text-sm italic px-1.5 py-0.5 rounded"
+          style={{ background: "var(--surface)", color: "var(--muted)" }}
         >
           {t("dualView.decision.llmMissingHint", { score: agreement })}
         </div>
+      )}
+
+      {/* 收起按钮 */}
+      {expandedReasoning && (
+        <button
+          className="text-sm hover:opacity-70 transition-opacity"
+          style={{ color: "var(--muted)", border: "none", background: "none", padding: 0, cursor: "pointer" }}
+          onClick={() => setExpandedReasoning(false)}
+        >
+          ▾ {t("collapseComparison") ?? "收起"}
+        </button>
       )}
     </div>
   );

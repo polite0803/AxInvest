@@ -2585,7 +2585,7 @@ pub async fn delete_portfolio_scan_cron(
 #[tauri::command]
 pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
     // 对需要 token/密钥的 vendor，先从数据库加载凭据到内存
-    if vendor == "xueqiu" || vendor == "iwencai" {
+    if vendor == "xueqiu" || vendor == "iwencai" || vendor == "neodata" {
         let template =
             axagent_core::entity::workflow_template::Entity::find_by_id("stock-analysis")
                 .one(state.harness.db())
@@ -2610,6 +2610,15 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
                         }
                     }
                 }
+                if name == "vendor_neodata_token" {
+                    if let serde_json::Value::String(token) = value {
+                        if !token.is_empty() {
+                            if let Some(ref nd) = state.astock_client.neodata_token {
+                                *nd.write().await = token.clone();
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2619,6 +2628,64 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
         .check_vendor_health(&vendor)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 将 NeoData token 保存到 Python 脚本缓存文件
+///
+/// 调用 WorkBuddy 的 connect_cloud_service 获取新 token 后，
+/// 由前端或自动化流程触发此命令将 token 写入脚本缓存。
+/// 后续所有 NeoData 查询自动使用该 token（无需在设置页手动粘贴）。
+#[tauri::command]
+pub async fn save_neodata_token(state: State<'_, AppState>, token: String) -> Result<(), String> {
+    if token.is_empty() {
+        return Err("NeoData token 不能为空".into());
+    }
+    // 1) 写入 Python 脚本缓存
+    axagent_astock_data::vendors::neodata::save_token_to_cache(&token)
+        .await
+        .map_err(|e| format!("保存 NeoData token 到脚本缓存失败: {e}"))?;
+
+    // 2) 同时写入共享内存（立即生效，无需重启）
+    if let Some(ref nd) = state.astock_client.neodata_token {
+        *nd.write().await = token.clone();
+    }
+
+    // 3) 持久化到数据库（设置页下次加载时自动读取）
+    use axagent_core::entity::workflow_template;
+    use sea_orm::EntityTrait;
+    if let Some(t) = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(state.harness.db())
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        let mut vars = t.variables
+            .as_ref()
+            .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
+            .unwrap_or_default();
+        let token_val = serde_json::json!({
+            "name": "vendor_neodata_token",
+            "is_secret": true,
+            "defaultValue": null,
+            "value": token,
+            "type": "string",
+        });
+        // 替换或新增
+        if let Some(pos) = vars.iter().position(|v| v.get("name").and_then(|n| n.as_str()) == Some("vendor_neodata_token")) {
+            vars[pos] = token_val;
+        } else {
+            vars.push(token_val);
+        }
+        let json_str = serde_json::to_string(&vars).unwrap_or_default();
+        use sea_orm::ActiveModelTrait;
+        use axagent_core::entity::workflow_template::ActiveModel;
+        let mut am: ActiveModel = t.into();
+        am.variables = sea_orm::ActiveValue::Set(Some(json_str));
+        am.update(state.harness.db())
+            .await
+            .map_err(|e| format!("持久化 NeoData token 失败: {e}"))?;
+    }
+
+    Ok(())
 }
 
 /// 执行每日快照采集：遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 DiskCache
@@ -2891,11 +2958,11 @@ pub async fn get_cached_recommendation(
     }
 
     // 3) 反序列化 + 按 style 分组
-    use std::collections::HashMap;
-    let mut picks_map: HashMap<
+    use std::collections::{BTreeMap, HashMap};
+    let mut picks_map: BTreeMap<
         axagent_stock_analysis::recommender::Style,
         Vec<axagent_stock_analysis::recommender::RecoPick>,
-    > = HashMap::new();
+    > = BTreeMap::new();
 
     for row in &rows {
         let Some(ref pd) = row.pick_data else {

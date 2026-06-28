@@ -1,5 +1,4 @@
 pub use axagent_harness::market_data::{KLine, StockQuote, StockSearchResult};
-use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 /// 判断A股市场类型
@@ -95,7 +94,8 @@ impl FinancialReport {
 
     /// 创建行业均值估算的财务报告（所有 API 数据源均失败时的 fallback）
     pub fn estimated(stock_code: &str) -> Self {
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        // 优先使用 as-of 上下文时间，避免时间泄露
+        let today = crate::as_of::current_date_or_now();
         let market_type = detect_market_type(stock_code);
         let (eps, bps, roe, debt_ratio, gross_margin, net_margin) = match market_type {
             "star" | "chinext" => (0.35, 5.0, 6.0, 35.0, 35.0, 8.0),

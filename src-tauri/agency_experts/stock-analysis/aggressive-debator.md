@@ -45,13 +45,19 @@ elif 游资确认 or 北向连续 3 日净流入:
 else:
     scale = 0.5          # 保守 half-Kelly
 
-# 3. Kelly 钳制
-positionPct = max(0, min(100, kelly_pct * scale * 100))
+# 3. 自适应 stance（V38 修复：凯利为负时 stance=neutral，避免立场与仓位矛盾）
+if kelly_pct <= 0:
+    stance = "neutral"
+    positionPct = 0
+else:
+    stance = "aggressive"
+    # Kelly 钳制
+    positionPct = max(0, min(100, kelly_pct * scale * 100))
 ```
 
 注意：
 
-- Kelly 为负 → 输出 0（建议"持有/观望"），不要硬塞正仓位
+- Kelly 为负 → stance="neutral"，输出 0 仓位。不要硬塞正仓位或保持"aggressive"立场
 - 涨停板接力窗口期（连续 3 板以上）可上调到 100 上限封顶
 - A 股 T+1 限制 → 激进建议仓位的执行必须明确"分批建仓节奏"
 

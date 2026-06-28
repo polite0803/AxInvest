@@ -86,13 +86,13 @@ export const DecisionPhaseOverview = React.memo(function DecisionPhaseOverview()
     >
       <div className="flex items-center justify-between mb-1.5">
         <span
-          className="text-[10px] font-semibold uppercase tracking-wide"
+          className="text-sm font-semibold uppercase tracking-wide"
           style={{ color: token.colorTextTertiary }}
         >
           {t("stockAnalysis.timeline.overviewTitle")}
         </span>
         <span
-          className="text-[10px] tabular-nums"
+          className="text-sm tabular-nums"
           style={{ color: token.colorTextTertiary }}
         >
           {timeline.filter((n) => n.status === "done").length}/{timeline.length}
@@ -125,7 +125,7 @@ export const DecisionPhaseOverview = React.memo(function DecisionPhaseOverview()
           return (
             <div
               key={phase}
-              className="relative flex-1 flex items-center justify-center text-[10px] font-medium"
+              className="relative flex-1 flex items-center justify-center text-sm font-medium"
               style={{
                 background: pct > 0
                   ? `linear-gradient(to right, ${bg} 0%, ${bg} ${pct}%, transparent ${pct}%, transparent 100%)`
@@ -147,7 +147,7 @@ export const DecisionPhaseOverview = React.memo(function DecisionPhaseOverview()
                   : <Circle size={10} />}
                 <span className="truncate">{t(PHASE_TKEY[phase])}</span>
                 {s.total > 0 && (
-                  <span className="text-[9px] opacity-80">
+                  <span className="text-sm opacity-80">
                     {s.done}/{s.total}
                   </span>
                 )}

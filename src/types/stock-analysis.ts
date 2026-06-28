@@ -117,6 +117,26 @@ export interface StockDecision {
   expectedHoldingDays?: number | null;
   /** 目标价预期实现时间框架: "1d" | "1w" | "1m" | "3m" | "6m" */
   targetTimeframe?: string | null;
+  /** 后端检测到的 trader 输出自相矛盾（action 与 targetPrice 方向冲突）*/
+  isContradictory?: boolean;
+  /** V40 修复: quality-gate 判定 D/F 时，该决策来自 quality-fallback 降级路径 */
+  isFallback?: boolean;
+  /** V50: 双视角一致性调制后的置信度（受 agreement_factor 影响） */
+  adjustedConfidence?: number;
+  /** V50: 双视角一致性分维度诊断 */
+  agreementBreakdown?: AgreementBreakdown;
+}
+
+/** V50: 双视角一致性分维度诊断结果 */
+export interface AgreementBreakdown {
+  total: number;
+  actionOk: boolean;
+  actionNote: string;
+  formulaAction: string;
+  llmAction: string;
+  positionGap: number | null;
+  confidenceGap: number | null;
+  conflictType: string;
 }
 
 export interface AnalysisSummary {

@@ -1202,4 +1202,21 @@ impl ProviderAdapter for OpenAIAdapter {
             dimensions,
         })
     }
+
+    /// OpenAI 兼容适配器 — 提供模型级行为提示
+    ///
+    /// agnes-2.0-flash 等通过 OpenAI 兼容 API 调用的模型具有特殊行为：
+    /// - 工具调用后返回空 content（`tool_call_empty_content`）
+    /// - 有时输出 XML 格式工具调用（`tool_call_xml_inline`）
+    fn get_behavior_hints(&self, model_name: &str) -> axagent_harness::types::BehaviorHints {
+        let model_lower = model_name.to_lowercase();
+        if model_lower.contains("agnes") {
+            axagent_harness::types::BehaviorHints {
+                tool_call_empty_content: true,
+                tool_call_xml_inline: true,
+            }
+        } else {
+            axagent_harness::types::BehaviorHints::default()
+        }
+    }
 }

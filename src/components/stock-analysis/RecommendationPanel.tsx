@@ -17,6 +17,7 @@ import type {
 import { Alert, Button, Card, Checkbox, Collapse, Empty, message, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { RecoHistoryModal } from "./RecoHistoryModal";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -61,9 +62,6 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const { t, i18n } = useTranslation();
   const { openDataSourceSettings: ctxOpenSettings } = useStockAnalysisPage();
   const openDataSourceSettings = onOpenDataSourceSettings ?? ctxOpenSettings ?? noop;
-  const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
-  const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
-  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const anchorMode = useTimeAnchorStore((s) => s.mode);
 
@@ -251,12 +249,6 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCache();
   }, [period, loadCache, triggerBacktest]);
-
-  const handleAnalyze = async (code: string) => {
-    await getStockQuote(code);
-    await getStockKline(code, "daily", 120);
-    startAnalysis(code);
-  };
 
   // P0-1: 批量加载所有 picks 的最近分析结果。
   // Bug 7 修复: 该函数已合并进 load() 内部,避免 useEffect 和 onClick
@@ -521,7 +513,6 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                         renderItem={(p) => (
                           <PickRow
                             pick={p}
-                            onAnalyze={handleAnalyze}
                             latestAnalysis={latestAnalyses[p.stockCode] ?? null}
                           />
                         )}
@@ -615,13 +606,13 @@ function CrossCheckBadge({
 }
 
 function PickRow(
-  { pick, onAnalyze, latestAnalysis }: {
+  { pick, latestAnalysis }: {
     pick: RecoPick;
-    onAnalyze: (code: string) => void;
     latestAnalysis: LatestAnalysisSummary | null;
   },
 ) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   // 读荐股 ↔ 分析师交叉验证缓存（仅当该股已有最近一次工作流结果时存在）
   const stockCodeConsensus = useStockAnalysisStore((s) => s.stockCodeConsensus);
   const consensus = stockCodeConsensus[pick.stockCode];
@@ -765,7 +756,7 @@ function PickRow(
     >
       <List.Item
         style={{ cursor: "pointer", padding: "4px 0" }}
-        onClick={() => onAnalyze(pick.stockCode)}
+        onClick={() => navigate(`/stock-analysis?code=${pick.stockCode}`, { replace: true })}
       >
         {content}
       </List.Item>

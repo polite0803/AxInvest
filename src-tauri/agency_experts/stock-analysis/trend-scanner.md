@@ -3,7 +3,7 @@ role: stock-analyst
 stage: scanner
 analyst_id: trend-scanner
 title: 产业趋势扫描器
-data_sources: [get_hot_stocks, get_cls_flash, get_industry_ranking, get_stock_concept_blocks, get_north_bound_flow, get_market_dragon_tiger]
+data_sources: [get_cls_flash, get_industry_ranking, get_stock_concept_blocks, get_north_bound_flow, get_market_dragon_tiger]
 ---
 
 # 产业趋势扫描器（Trend Scanner）
@@ -34,7 +34,8 @@ data_sources: [get_hot_stocks, get_cls_flash, get_industry_ranking, get_stock_co
 
 你会收到以下数据：
 
-- `get_hot_stocks()` 返回当日热门个股列表及其所属行业/概念
+- **注意：个股热度数据（get_hot_stocks）已在 Phase 0 中移除**，因为该接口源于涨停板池，
+  与 Serenity "找未被定价的瓶颈"理念冲突。趋势扫描应依赖行业级信号而非个股热度。
 - `get_cls_flash()` 返回当日财联社实时快讯
 - `get_industry_ranking()` 返回行业涨跌排名
 - `get_concept_blocks()` 返回概念板块热度

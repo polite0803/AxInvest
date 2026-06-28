@@ -277,6 +277,13 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     ? Number(source.expectedHoldingDays)
     : (source.expected_holding_days != null ? Number(source.expected_holding_days) : null);
   const targetTimeframe = String(source.targetTimeframe ?? source.target_timeframe ?? "") || null;
+  // V50: 传递双视角验证字段
+  const adjustedConfidence = source.adjustedConfidence != null
+    ? Number(source.adjustedConfidence)
+    : undefined;
+  const agreementBreakdown = source.agreementBreakdown != null
+    ? (source.agreementBreakdown as StockDecision["agreementBreakdown"])
+    : undefined;
   return {
     action,
     positionPct: isNaN(positionPct) ? 0 : positionPct,
@@ -288,6 +295,8 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     timeHorizon: timeHorizon || null,
     expectedHoldingDays: expectedHoldingDays != null && !isNaN(expectedHoldingDays) ? expectedHoldingDays : null,
     targetTimeframe: targetTimeframe || null,
+    adjustedConfidence,
+    agreementBreakdown,
   };
 }
 
@@ -401,4 +410,35 @@ export function tryParseDecision(text: string): StockDecision | null {
     } catch { /* try next */ }
   }
   return null;
+}
+
+/**
+ * 从 LLM 决策 JSON 中提取指定字段值，兼容两种存储格式：
+ * 1. 新版（纯决策 JSON）：{"action":"买入","positionPct":50,...}
+ * 2. 旧版（AgentNode 包装）：{"role":"trader","content":"{\"action\":\"买入\",...}","node_id":"..."}
+ *
+ * 在旧版格式中，先从顶层 JSON 取 field；取不到且存在 content 字符串时，
+ * 递归解析 content 内部 JSON 再取一次。
+ */
+export function extractLlmField(llmDecisionJson: string | null, field: string): unknown {
+  if (!llmDecisionJson) { return null; }
+  try {
+    const parsed = JSON.parse(llmDecisionJson);
+    // 直接取 field
+    if (parsed[field] !== undefined && parsed[field] !== null) {
+      return parsed[field];
+    }
+    // 兼容旧版 AgentNode 包装：content 字段里才是真正的 LLM 输出
+    if (typeof parsed.content === "string" && parsed.content.length > 0) {
+      try {
+        const inner = JSON.parse(parsed.content);
+        if (inner[field] !== undefined && inner[field] !== null) {
+          return inner[field];
+        }
+      } catch { /* inner parse failed, not AgentNode format */ }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }

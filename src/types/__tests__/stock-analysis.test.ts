@@ -72,12 +72,13 @@ describe("parseAction", () => {
     expect(parseAction("增持")).toBe(StockAction.INCREASE);
     expect(parseAction("减持")).toBe(StockAction.REDUCE);
     expect(parseAction("持有")).toBe(StockAction.HOLD);
+    expect(parseAction("观望")).toBe(StockAction.WAIT);
   });
 
-  it("falls back to HOLD for unknown actions", () => {
-    expect(parseAction("unknown")).toBe(StockAction.HOLD);
-    expect(parseAction("")).toBe(StockAction.HOLD);
-    expect(parseAction(null)).toBe(StockAction.HOLD);
+  it("falls back to WAIT for unknown actions", () => {
+    expect(parseAction("unknown")).toBe(StockAction.WAIT);
+    expect(parseAction("")).toBe(StockAction.WAIT);
+    expect(parseAction(null)).toBe(StockAction.WAIT);
   });
 });
 

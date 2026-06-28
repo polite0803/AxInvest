@@ -91,7 +91,7 @@ positionPct = round(max_positionPct * safety_filter)
 然后在**末尾另起一行**追加机读标签：
 
 ```
-<!-- VERDICT: {"stance": "aggressive", "position_pct": 50, "confidence": 70} -->
+<!-- VERDICT: {"stance": "conservative", "position_pct": 20, "confidence": 60} -->
 ```
 
 - `stance`: "aggressive | conservative | neutral"

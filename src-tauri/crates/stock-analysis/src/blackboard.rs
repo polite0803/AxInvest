@@ -60,7 +60,14 @@ pub fn build_blackboard_snapshot(
             || *node_id == "debate-convergence"
             || *node_id == "value-investor"
             || *node_id == "research-mgr"
-            || *node_id == "portfolio-mgr";
+            || *node_id == "portfolio-mgr"
+            // V40 修复: data-quality(JSON模式含grade/score字段)、
+            // rule-check(含violations/corrections)、
+            // quality-fallback(含决策JSON)的输出均含结构化字段，
+            // 需保留JSON结构而非用extract_node_text提取纯文本。
+            || *node_id == "data-quality"
+            || *node_id == "rule-check"
+            || *node_id == "quality-fallback";
         if is_structured {
             // 结构化节点：优先用 report + verdict 重构带 VERDICT 标签的文本
             let mut value_to_store = raw_output.clone();
@@ -92,19 +99,30 @@ pub fn build_blackboard_snapshot(
         }
 
         // ── 结构化参数专用存储（结构化参数方案 Phase 4）──
-        // 保存每个节点的 .params（Agent 节点）或 .result（CodeNode），
-        // 供 What-If 回测 UI 读取原始参数值并允许用户修改后重算。
+        // 保存每个节点的结构化参数，供 What-If 回测 UI 读取原始参数值
+        // 并允许用户修改后重算。
         // 注意：extract_node_text 会丢失 JSON 结构，因此需要单独保存。
         if let Some(obj) = raw_output.as_object() {
-            // Agent 节点：.params 在顶层
-            if let Some(params) = obj.get("params") {
-                if !params.is_null() {
-                    bb.insert(format!("params.{node_id}"), params.clone());
+            // V37 修复: AgentNode 输出无顶层 .params 字段（只有 CodeNode 有）。
+            // AgentNode 的业务参数在 .content JSON 字符串内部，需解析后提取。
+            // CodeNode 的决策结果在 .result 字段，存到 result.{node_id} 以示区分。
+            if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
+                if let Ok(parsed) = serde_json::from_str::<Value>(content) {
+                    if parsed.is_object() {
+                        bb.insert(format!("params.{node_id}"), parsed.clone());
+                    }
                 }
             }
-            // CodeNode 直接执行：.result 在顶层
+            // CodeNode 直接执行：.result 在顶层，存到 result.{node_id}
             if let Some(result) = obj.get("result") {
-                bb.insert(format!("params.{node_id}"), result.clone());
+                bb.insert(format!("result.{node_id}"), result.clone());
+            }
+            // 兼容：如果 AgentNode 的顶层有 .params（非标准但保留），
+            // 同时存到 .content 解析结果之后（后者优先）
+            if let Some(params) = obj.get("params") {
+                if !params.is_null() && !bb.contains_key(&format!("params.{node_id}")) {
+                    bb.insert(format!("params.{node_id}"), params.clone());
+                }
             }
         }
     }
@@ -129,6 +147,11 @@ pub fn build_blackboard_snapshot(
             "sources": sources,
         }),
     );
+    // 注入原始节点输出（以 _raw.{nodeId} 为键），供 rerun_decision 等工具读取
+    // 上游节点使用原始 nodeId 而非被黑板上 key remapping 改写后的键。
+    for (node_id, raw_output) in results {
+        bb.insert(format!("_raw.{node_id}"), raw_output.clone());
+    }
     bb
 }
 

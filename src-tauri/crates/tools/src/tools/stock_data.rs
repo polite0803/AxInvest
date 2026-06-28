@@ -1,6 +1,6 @@
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult};
 use async_trait::async_trait;
-use axagent_astock_data::AStockClient;
+use axagent_astock_data::{AStockClient, KLine};
 use chrono::Local;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -706,6 +706,7 @@ impl Tool for ComputeScoringTool {
         let result = json!({
             "stockCode": code,
             "stockName": quote.name,
+            "currentPrice": quote.price,
             "latestDate": indicators.latest_date,
             "totalScore": (total_score * 10.0).round() / 10.0,
             "rating": rating,
@@ -728,6 +729,452 @@ impl Tool for ComputeScoringTool {
                 "source": "tencent|eastmoney",
                 "warnings": Value::Array(warnings)
             },
+            // P1/P2: 因子回测 + 市场状态分类
+            "factor_backtest": compute_factor_backtest_stats(&klines, 5, 60),
+            "market_regime": compute_market_regime(&klines),
+        });
+        Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
+    }
+}
+
+// ── P1: 因子回测 ──
+
+/// 计算 Pearson 相关系数作为信息系数（IC）。
+/// V38 修复：旧实现用 (wr - 0.5) * 2.0，这只是胜率的线性变换，不是真正的信息系数。
+/// 正确的 IC 应度量因子信号与未来收益的线性相关性。
+fn pearson_ic(sig_vals: &[f64], ret_vals: &[f64]) -> f64 {
+    let n = sig_vals.len();
+    if n < 5 {
+        return 0.0;
+    }
+    let mean_sig = sig_vals.iter().sum::<f64>() / n as f64;
+    let mean_ret = ret_vals.iter().sum::<f64>() / n as f64;
+    let mut cov = 0.0;
+    let mut var_sig = 0.0;
+    let mut var_ret = 0.0;
+    for i in 0..n {
+        let ds = sig_vals[i] - mean_sig;
+        let dr = ret_vals[i] - mean_ret;
+        cov += ds * dr;
+        var_sig += ds * ds;
+        var_ret += dr * dr;
+    }
+    if var_sig == 0.0 || var_ret == 0.0 {
+        return 0.0;
+    }
+    (cov / (var_sig * var_ret).sqrt()).clamp(-1.0, 1.0)
+}
+
+/// 在历史 K 线数据上回测各技术因子的预测能力。
+/// 对每个有效时间窗口计算因子信号与后续 N 日涨跌幅，用 Pearson 相关系数作为 IC。
+/// V38 修复：扣除预估交易成本（手续费+印花税+滑点≈0.3%），避免短期回测虚高。
+fn compute_factor_backtest_stats(klines: &[KLine], forecast: usize, lookback: usize) -> Value {
+    let n = klines.len();
+    if n < lookback + forecast + 5 {
+        return json!({"error":"数据不足","windows":0});
+    }
+    let cost_pct = 0.003; // 交易成本：手续费0.025% + 印花税0.1% + 滑点0.175%
+    let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
+    let mut all_sigs: Vec<Vec<f64>> = Vec::new();
+    let mut all_rets: Vec<f64> = Vec::new();
+    for t in lookback..n - forecast {
+        let window = &klines[t - lookback..t];
+        let ind = axagent_astock_data::indicators::compute_indicators("", window);
+        let raw_ret = (closes[t + forecast] - closes[t]) / closes[t];
+        // 扣除交易成本：买入和卖出各一次，共 2*cost_pct
+        let forward_ret = raw_ret - 2.0 * cost_pct;
+        all_sigs.push(vec![
+            match ind.ma_alignment.as_str() {
+                "多头排列" => 1.0,
+                "弱多头" => 0.5,
+                "空头排列" => -1.0,
+                _ => 0.0,
+            },
+            match ind.macd_signal.as_str() {
+                "金叉" => 1.0,
+                "多头运行" => 0.5,
+                "死叉" => -1.0,
+                "空头运行" => -0.5,
+                _ => 0.0,
+            },
+            match ind.volume_signal.as_str() {
+                "放量突破" | "放量上涨" => 1.0,
+                "缩量回调" => 0.3,
+                "放量下跌" => -1.0,
+                _ => 0.0,
+            },
+            if ind.rsi6 > 70.0 {
+                -0.3
+            } else if ind.rsi6 > 60.0 {
+                0.3
+            } else if ind.rsi6 > 40.0 {
+                0.5
+            } else if ind.rsi6 > 30.0 {
+                0.2
+            } else {
+                -0.5
+            },
+            if ind.bias_ma5 > 5.0 {
+                -0.5
+            } else if ind.bias_ma5 > 2.0 {
+                0.3
+            } else if ind.bias_ma5 > -2.0 {
+                0.5
+            } else if ind.bias_ma5 > -5.0 {
+                0.2
+            } else {
+                0.5
+            },
+        ]);
+        all_rets.push(forward_ret);
+    }
+    let names = ["trend", "macd", "volume", "rsi", "bias"];
+    let mut factors = serde_json::Map::new();
+    let mut total_abs_ic = 0.0_f64;
+    for (i, name) in names.iter().enumerate() {
+        let mut sig_vals: Vec<f64> = Vec::new();
+        let mut ret_vals: Vec<f64> = Vec::new();
+        for (sig_vec, ret) in all_sigs.iter().zip(all_rets.iter()) {
+            let sig = sig_vec[i];
+            if sig.abs() < 0.01 {
+                continue;
+            }
+            sig_vals.push(sig);
+            ret_vals.push(*ret);
+        }
+        let wr = if !ret_vals.is_empty() {
+            let correct = sig_vals
+                .iter()
+                .zip(ret_vals.iter())
+                .filter(|&(s, r)| (*s > 0.0 && *r > 0.0) || (*s < 0.0 && *r < 0.0))
+                .count();
+            correct as f64 / ret_vals.len() as f64
+        } else {
+            0.5
+        };
+        let ic = pearson_ic(&sig_vals, &ret_vals);
+        total_abs_ic += ic.abs();
+        factors.insert(
+            (*name).to_string(),
+            json!({"win_rate": (wr*1000.0).round()/1000.0,
+                   "ic": (ic*100.0).round()/100.0,
+                   "samples": ret_vals.len()}),
+        );
+    }
+    // 归一化权重
+    for name in names.iter() {
+        if let Some(entry) = factors.get_mut(*name) {
+            let ic_abs = entry["ic"].as_f64().unwrap_or(0.0).abs();
+            let w = if total_abs_ic > 0.01 {
+                ic_abs / total_abs_ic
+            } else {
+                0.2
+            };
+            if let Some(obj) = entry.as_object_mut() {
+                obj.insert("weight".into(), json!((w * 100.0).round() / 100.0));
+            }
+        }
+    }
+    json!({"factors": factors, "windows": all_sigs.len(), "forecast_days": forecast})
+}
+
+// ── P2: 市场状态分类 ──
+
+/// 基于最近 60 日 K 线判断市场状态，输出先验概率。
+/// V38 修复: 增加波动率维度；调整 prior 更接近 A 股现实（牛市上涨概率≈65%，熊市下跌概率≈60%）；
+///          "弱多头"不再视为牛市（仅短期偏多，不改变 prior）。
+fn compute_market_regime(klines: &[KLine]) -> Value {
+    let n = klines.len();
+    if n < 60 {
+        return json!({"state":"neutral","prior":0.50,"reason":"数据不足"});
+    }
+    let ind = axagent_astock_data::indicators::compute_indicators("", &klines[n - 60..]);
+    let ma_alignment = ind.ma_alignment.as_str();
+    let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
+
+    // 波动率：最近20日收益率标准差
+    let (volatility, vol_str) = if closes.len() >= 20 {
+        let c = &closes[closes.len() - 21..];
+        let returns: Vec<f64> = c.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
+        let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+        let variance =
+            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
+        let std_dev = variance.sqrt();
+        let vs = if std_dev > 0.04 {
+            "high"
+        } else if std_dev < 0.02 {
+            "low"
+        } else {
+            "normal"
+        };
+        (std_dev, vs.to_string())
+    } else {
+        (0.0, "normal".to_string())
+    };
+
+    let (state, prior, reason) = match ma_alignment {
+        "多头排列" => {
+            if volatility > 0.04 {
+                ("bull_high_vol", 0.60, "上升趋势（高波动预警）")
+            } else {
+                ("bull", 0.65, "中长期上升趋势")
+            }
+        },
+        "弱多头" => ("neutral", 0.50, "短期偏多，方向不明确"),
+        "空头排列" => {
+            if volatility > 0.04 {
+                ("bear_high_vol", 0.40, "下降趋势（高波动加速）")
+            } else {
+                ("bear", 0.40, "中长期下降趋势")
+            }
+        },
+        _ => ("neutral", 0.50, "震荡趋势"),
+    };
+    json!({"state": state, "prior": prior, "reason": reason,
+           "ma_alignment": ma_alignment, "volatility": vol_str, "vol_value": (volatility*1000.0).round()/10.0})
+}
+
+/// 因子回测工具——用历史 K 线回测各技术因子的预测能力。
+///
+/// 工作原理：
+/// 1. 对 120 日 K 线进行滑动窗口分析
+/// 2. 每个时间窗口计算因子信号 + 后续 N 日涨跌幅
+/// 3. 统计每个因子的胜率、信息系数(IC)
+/// 4. 输出数据驱动的因子权重 + 市场状态分类
+///
+/// 输出结构：
+/// ```json
+/// {
+///   "factors": {
+///     "trend":      { "win_rate": 0.55, "ic": 0.12, "weight": 0.25 },
+///     "macd":       { "win_rate": 0.52, "ic": 0.08, "weight": 0.20 },
+///     "volume":     { ... },
+///     "rsi":        { ... },
+///     "bias":       { ... },
+///   },
+///   "market_regime": { "state": "bull", "prior": 0.55, "reason": "上升趋势" },
+///   "backtest": { "windows": 85, "forecast_days": 5, "avg_return": 0.002 }
+/// }
+/// ```
+pub struct FactorBacktestTool {
+    pub client: Arc<AStockClient>,
+}
+impl FactorBacktestTool {
+    pub fn new(c: Arc<AStockClient>) -> Self {
+        Self { client: c }
+    }
+}
+#[async_trait]
+impl Tool for FactorBacktestTool {
+    fn name(&self) -> &str {
+        "compute_factor_backtest"
+    }
+    fn description(&self) -> &str {
+        "因子回测：用历史K线回测各因子预测能力，输出胜率/IC/权重 + 市场状态"
+    }
+    fn input_schema(&self) -> Value {
+        json!({"type":"object","properties":{
+            "stock_code":{"type":"string","description":"6位股票代码"},
+            "forecast_days":{"type":"integer","description":"预测天数(默认5)","default":5},
+            "lookback_days":{"type":"integer","description":"因子计算回溯天数(默认60)","default":60}
+        },"required":["stock_code"]})
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Finance
+    }
+
+    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let code = input["stock_code"]
+            .as_str()
+            .ok_or_else(|| te("stock_code不能为空".into()))?;
+        let forecast = input
+            .get("forecast_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(5)
+            .clamp(1, 60) as usize;
+        let lookback = input
+            .get("lookback_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(60)
+            .clamp(20, 120) as usize;
+
+        let klines = self
+            .client
+            .get_klines(code, "daily", 120)
+            .await
+            .map_err(|e| te(e.to_string()))?;
+        if klines.len() < lookback + forecast + 5 {
+            return Ok(ToolResult::success(format!(
+                r#"{{"error":"K线数据不足，需要至少{}条"}}"#,
+                lookback + forecast + 5
+            )));
+        }
+
+        // 提取收盘价序列
+        let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
+        let n = closes.len();
+        let mut signals: Vec<(Vec<f64>, f64)> = Vec::new(); // (因子信号向量, forward_return)
+
+        // 对每个有效时间窗口计算信号
+        for t in lookback..n - forecast {
+            let window = &klines[t - lookback..t];
+            let ind = axagent_astock_data::indicators::compute_indicators(code, window);
+            let forward_ret = (closes[t + forecast] - closes[t]) / closes[t];
+
+            // 5 个因子信号
+            let trend_sig = match ind.ma_alignment.as_str() {
+                "多头排列" => 1.0,
+                "弱多头" => 0.5,
+                "空头排列" => -1.0,
+                "弱空头-ish" => -0.5,
+                _ => 0.0,
+            };
+            let macd_sig = match ind.macd_signal.as_str() {
+                "金叉" => 1.0,
+                "多头运行" => 0.5,
+                "死叉" => -1.0,
+                "空头运行" => -0.5,
+                _ => 0.0,
+            };
+            let vol_sig = match ind.volume_signal.as_str() {
+                "放量突破" | "放量上涨" => 1.0,
+                "缩量回调" => 0.3,
+                "放量下跌" => -1.0,
+                _ => 0.0,
+            };
+            let rsi_sig = if ind.rsi6 > 70.0 {
+                -0.3
+            } else if ind.rsi6 > 60.0 {
+                0.3
+            } else if ind.rsi6 > 40.0 {
+                0.5
+            } else if ind.rsi6 > 30.0 {
+                0.2
+            } else {
+                -0.5
+            };
+            let bias_sig = if ind.bias_ma5 > 5.0 {
+                -0.5
+            }
+            // 乖离过大→回调
+            else if ind.bias_ma5 > 2.0 {
+                0.3
+            } else if ind.bias_ma5 > -2.0 {
+                0.5
+            }
+            // 合理区间
+            else if ind.bias_ma5 > -5.0 {
+                0.2
+            } else {
+                0.5
+            }; // 超跌反弹
+
+            signals.push((vec![trend_sig, macd_sig, vol_sig, rsi_sig, bias_sig], forward_ret));
+        }
+
+        // 统计每个因子的预测能力
+        fn compute_stats(signals: &[(Vec<f64>, f64)], factor_idx: usize) -> Value {
+            let mut correct = 0usize;
+            let mut total = 0usize;
+            let mut sig_vals: Vec<f64> = Vec::new();
+            let mut ret_vals: Vec<f64> = Vec::new();
+            for (sigs, ret) in signals {
+                let sig = sigs[factor_idx];
+                if sig.abs() < 0.01 {
+                    continue;
+                } // 忽略中性信号
+                total += 1;
+                if (sig > 0.0 && *ret > 0.0) || (sig < 0.0 && *ret < 0.0) {
+                    correct += 1;
+                }
+                sig_vals.push(sig);
+                ret_vals.push(*ret);
+            }
+            let win_rate = if total > 0 {
+                correct as f64 / total as f64
+            } else {
+                0.5
+            };
+            // V38 修复: 改用 Pearson 相关系数作为 IC，旧实现 (wr-0.5)*2.0 只是胜率线性变换
+            let ic = pearson_ic(&sig_vals, &ret_vals);
+            json!({"win_rate": (win_rate * 1000.0).round() / 1000.0,
+                   "ic": (ic * 100.0).round() / 100.0,
+                   "samples": total})
+        }
+
+        let factor_names = ["trend", "macd", "volume", "rsi", "bias"];
+        let mut factor_results: Vec<Value> = Vec::new();
+        let mut total_abs_ic = 0.0_f64;
+        for (i, name) in factor_names.iter().enumerate() {
+            let stats = compute_stats(&signals, i);
+            let ic = stats["ic"].as_f64().unwrap_or(0.0).abs();
+            total_abs_ic += ic;
+            factor_results.push(json!({ "name": name, "stats": stats }));
+        }
+        // 计算归一化权重
+        let mut factors_map = serde_json::Map::new();
+        for (i, name) in factor_names.iter().enumerate() {
+            let stats = &factor_results[i]["stats"];
+            let ic_abs = stats["ic"].as_f64().unwrap_or(0.0).abs();
+            let weight = if total_abs_ic > 0.01 {
+                ic_abs / total_abs_ic
+            } else {
+                0.2
+            };
+            let mut entry = stats.clone();
+            entry
+                .as_object_mut()
+                .unwrap()
+                .insert("weight".into(), json!((weight * 100.0).round() / 100.0));
+            factors_map.insert((*name).to_string(), entry);
+        }
+
+        // 市场状态分类：用最近 20 日趋势信号 + 波动率
+        let trend_sig_vals: Vec<f64> = signals.iter().map(|(s, _)| s[0]).collect();
+        let recent_trend = trend_sig_vals
+            .iter()
+            .rev()
+            .take(20)
+            .filter(|&&s| s > 0.0)
+            .count();
+        let recent_trend_neg = trend_sig_vals
+            .iter()
+            .rev()
+            .take(20)
+            .filter(|&&s| s < 0.0)
+            .count();
+        // 波动率：最近 20 个 forward_return 的标准差
+        let recent_rets: Vec<f64> = signals.iter().rev().take(20).map(|(_, r)| *r).collect();
+        let mean_r = recent_rets.iter().sum::<f64>() / recent_rets.len().max(1) as f64;
+        let variance = recent_rets
+            .iter()
+            .map(|r| (r - mean_r).powi(2))
+            .sum::<f64>()
+            / recent_rets.len().max(1) as f64;
+        let vol_std = variance.sqrt();
+        let (regime, prior, reason) = if recent_trend >= 14 {
+            if vol_std > 0.04 {
+                ("bull", 0.60, "上升趋势（高波动预警）")
+            } else {
+                ("bull", 0.65, "上升趋势明显")
+            }
+        } else if recent_trend_neg >= 14 {
+            if vol_std > 0.04 {
+                ("bear", 0.38, "下降趋势加速")
+            } else {
+                ("bear", 0.40, "下降趋势明显")
+            }
+        } else {
+            ("neutral", 0.50, "震荡趋势")
+        };
+
+        let result = json!({
+            "stock_code": code,
+            "factors": factors_map,
+            "market_regime": { "state": regime, "prior": prior, "reason": reason,
+                "recent_bull_windows": format!("{}/20", recent_trend) },
+            "backtest": { "windows": signals.len(), "forecast_days": forecast,
+                "lookback_days": lookback },
         });
         Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
     }
@@ -950,7 +1397,7 @@ impl Tool for ComputeValuationTool {
             "currentPrice": current_price,
             "dcf": {
                 "intrinsicValue": (dcf_value * 100.0).round() / 100.0,
-                "upsidePct": (dcf_upside * 100.0).round() / 100.0 / 100.0,
+                "upsidePct": (dcf_upside * 100.0).round() / 100.0,  // dcf_upside 已是百分比(25.5=25.5%), 只保留2位小数
                 "assumptions": {
                     "eps": eps,
                     "highGrowthRate": dcf_growth_rate,
@@ -962,7 +1409,7 @@ impl Tool for ComputeValuationTool {
             },
             "graham": {
                 "intrinsicValue": (graham_value * 100.0).round() / 100.0,
-                "upsidePct": (graham_upside * 100.0).round() / 100.0 / 100.0,
+                "upsidePct": (graham_upside * 100.0).round() / 100.0,  // graham_upside 已是百分比, 只保留2位小数
                 "formula": "sqrt(22.5 * EPS * BPS)",
                 "eps": eps,
                 "bps": bps,
@@ -1007,10 +1454,10 @@ impl Tool for ComputeRiskTool {
         "compute_portfolio_risk"
     }
     fn description(&self) -> &str {
-        "组合风险指标：集中度/分散度/行业暴露"
+        "组合风险指标：集中度/分散度/行业暴露；单股时计算波动率/VaR/最大回撤/夏普比率"
     }
     fn input_schema(&self) -> Value {
-        json!({"type":"object","properties":{"stock_codes":{"type":"string","description":"逗号分隔的股票代码列表"},"weights":{"type":"string","description":"逗号分隔的持仓权重(0-1)，不填则等权"}},"required":["stock_codes"]})
+        json!({"type":"object","properties":{"stock_codes":{"type":"string","description":"逗号分隔的股票代码列表（单只时计算单股风险画像:波动率/VaR/最大回撤/夏普）"},"weights":{"type":"string","description":"逗号分隔的持仓权重(0-1)，不填则等权"}},"required":["stock_codes"]})
     }
     fn category(&self) -> ToolCategory {
         ToolCategory::Finance
@@ -1128,8 +1575,105 @@ impl Tool for ComputeRiskTool {
             "集中风险"
         };
 
-        let result = json!({
+    let result = if codes.len() == 1 {
+        // ── V50: 单股模式 — 计算真实风险指标 ──
+        // 当只有一只股票时，组合级指标（HHI/分散度/行业暴露）无意义，
+        // 改为计算波动率、VaR、最大回撤、夏普比率等单股风险指标。
+        let stock_code = codes[0];
+        let klines = self.client.get_klines(stock_code, "daily", 252).await.unwrap_or_default();
+        let prices: Vec<f64> = klines.iter().map(|k| k.close).filter(|&p| p > 0.0).collect();
+
+        // 获取财务数据（用于基本面风险维度）
+        let financials = self.client.get_financials(stock_code).await.unwrap_or_default();
+        let latest_financial = financials.first();  // 取最新一期财报
+        let roe_ttm = latest_financial.and_then(|f| f.roe).unwrap_or(0.0);
+        let gross_margin_pct = latest_financial.and_then(|f| f.gross_margin).unwrap_or(0.0);
+        let debt_ratio_pct = latest_financial.and_then(|f| f.debt_ratio).unwrap_or(0.0);
+        let revenue_growth_yoy = latest_financial.and_then(|f| f.revenue_yoy).unwrap_or(0.0);
+
+        // PE(TTM) 从实时行情获取（StockQuote.pe 字段）
+        let pe_ttm = positions.first()
+            .map(|(q, _)| q.pe.unwrap_or(0.0))
+            .unwrap_or(0.0);
+        
+        let (annual_vol, var_95, max_dd, sharpe) = if prices.len() >= 20 {
+            // 日收益率
+            let returns: Vec<f64> = prices.windows(2)
+                .map(|w| (w[1] - w[0]) / w[0])
+                .filter(|r| r.is_finite())
+                .collect();
+            
+            // 年化波动率
+            let n = returns.len() as f64;
+            let mean = returns.iter().sum::<f64>() / n;
+            let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
+            let daily_vol = variance.sqrt();
+            let annual_vol = daily_vol * 252.0_f64.sqrt();
+            
+            // VaR 95%（历史模拟法）
+            let mut sorted = returns.to_vec();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let idx = ((1.0 - 0.95) * n).ceil() as usize;
+            let var_95 = sorted.get(idx.min(sorted.len() - 1)).copied().unwrap_or(0.0);
+            
+            // 最大回撤
+            let mut peak = prices[0];
+            let mut max_dd: f64 = 0.0;
+            for &p in &prices {
+                if p > peak { peak = p; }
+                if peak > 0.0 { max_dd = max_dd.max((peak - p) / peak); }
+            }
+            
+            // 夏普比率（年化，无风险利率假设 2%）
+            let risk_free_annual = 0.02;
+            let risk_free_daily = risk_free_annual / 252.0;
+            let excess_mean = returns.iter().map(|r| r - risk_free_daily).sum::<f64>() / n;
+            let sharpe = if daily_vol > 0.0 { excess_mean / daily_vol * 252.0_f64.sqrt() } else { 0.0 };
+            
+            (
+                (annual_vol * 100.0 * 100.0).round() / 100.0,   // 百分比
+                (var_95 * 100.0 * 100.0).round() / 100.0,       // 百分比
+                (max_dd * 100.0 * 100.0).round() / 100.0,       // 百分比
+                (sharpe * 100.0).round() / 100.0
+            )
+        } else {
+            (0.0, 0.0, 0.0, 0.0)
+        };
+        
+        let stock_name: &str = positions.first().map(|(q, _)| q.name.as_str()).unwrap_or("");
+        
+        json!({
+            "stockCount": 1,
+            "singleStockRisk": true,
+            "stock": { "code": stock_code, "name": stock_name, "price": positions.first().map(|(q, _)| q.price).unwrap_or(0.0) },
+            "stockRiskProfile": {
+                "annualizedVolatilityPct": annual_vol,
+                "valueAtRisk95Pct": var_95,
+                "maxDrawdownPct": max_dd,
+                "sharpeRatio": sharpe,
+                "dataDays": prices.len(),
+                "klineDays": klines.len(),
+                "roeTTMPct": (roe_ttm * 100.0).round() / 100.0,
+                "grossMarginPct": (gross_margin_pct * 100.0).round() / 100.0,
+                "debtRatioPct": (debt_ratio_pct * 100.0).round() / 100.0,
+                "revenueGrowthYoYPct": (revenue_growth_yoy * 100.0).round() / 100.0,
+                "peTTM": pe_ttm,
+            },
+            "concentration": { "hhi": 1.0, "effectiveN": 1.0, "label": "单股(组合指标不适用)" },
+            "diversification": { "effectiveStocks": 1.0, "label": "单股" },
+            "sectorExposure": sector_map.into_iter().map(|(k, v)| json!({"sector": k, "weight": (v * 100.0).round() / 100.0})).collect::<Vec<_>>(),
+            "maxSectorConcentration": { "sector": max_sector_name, "weightPct": (max_sector_concentration * 100.0).round() / 100.0 },
+            "positions": positions.iter().zip(norm_weights.iter()).map(|((q, _), w)| json!({
+                "code": q.code, "name": q.name, "price": q.price,
+                "changePct": q.change_pct, "weightPct": (*w * 100.0).round() / 100.0,
+            })).collect::<Vec<_>>(),
+            "credibility": { "dataCompleteness": 100.0, "dataFreshness": "realtime", "source": "tencent|eastmoney", "warnings": Value::Array(r_warnings) }
+        })
+    } else {
+        // ── 多股模式 — 原有组合风险指标 ──
+        json!({
             "stockCount": positions.len(),
+            "singleStockRisk": false,
             "concentration": {
                 "hhi": (hhi * 10000.0).round() / 10000.0,
                 "effectiveN": (effective_n * 100.0).round() / 100.0,
@@ -1145,11 +1689,8 @@ impl Tool for ComputeRiskTool {
                 "weightPct": (max_sector_concentration * 100.0).round() / 100.0,
             },
             "positions": positions.iter().zip(norm_weights.iter()).map(|((q, _), w)| json!({
-                "code": q.code,
-                "name": q.name,
-                "price": q.price,
-                "changePct": q.change_pct,
-                "weightPct": (*w * 100.0).round() / 100.0,
+                "code": q.code, "name": q.name, "price": q.price,
+                "changePct": q.change_pct, "weightPct": (*w * 100.0).round() / 100.0,
             })).collect::<Vec<_>>(),
             "credibility": {
                 "dataCompleteness": if requested_count > 0 { (loaded_count as f64 / requested_count as f64) * 100.0 } else { 0.0 },
@@ -1157,8 +1698,9 @@ impl Tool for ComputeRiskTool {
                 "source": "tencent|eastmoney",
                 "warnings": Value::Array(r_warnings)
             },
-        });
-        Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
+        })
+    };
+    Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
     }
 }
 

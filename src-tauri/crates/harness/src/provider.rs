@@ -217,6 +217,18 @@ pub trait ProviderAdapter: Send + Sync {
             "update_job_schedule is not supported by this provider".to_string(),
         ))
     }
+
+    /// 返回当前模型/适配器的运行时行为提示。
+    ///
+    /// 不同模型在处理工具调用和输出格式上存在差异（例如 agnes-2.0-flash
+    /// 在工具调用后返回空 content，以及输出 XML 格式工具调用）。
+    /// Adapter 可根据 model_name 返回对应的行为提示，执行器据此调整策略。
+    ///
+    /// 默认实现返回 `BehaviorHints::default()`（无特殊行为），
+    /// 绝大多数标准模型不需要覆盖此方法。
+    fn get_behavior_hints(&self, _model_name: &str) -> BehaviorHints {
+        BehaviorHints::default()
+    }
 }
 
 /// 每次 LLM 调用携带的上下文信息

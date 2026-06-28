@@ -10,6 +10,7 @@
  * - LLM 决策可用时:两行(公式 / LLM 各一行),底部一致性分数
  * - LLM 不可用时:一行占位 + 灰条"LLM 视角不可用"
  */
+import { getActionTKey } from "@/lib/stock-analysis-utils";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -18,12 +19,27 @@ export interface CompactDecisionShape {
   decisionAction?: string | null;
   decisionPositionPct?: number | null;
   confidence?: number | null;
+  /** V50: 双视角一致性调制后的置信度 */
+  adjustedConfidence?: number | null;
+  /** 公式决策推理文本（用于展示公式 reasoning） */
+  decisionReasoning?: string | null;
   llmDecisionAction?: string | null;
   llmDecisionPositionPct?: number | null;
   llmConfidence?: number | null;
   /** LLM 决策推理文本(用于 panel 完整版展示) */
   llmDecisionReasoning?: string | null;
   decisionAgreementScore?: number | null;
+  /** V50: 双视角一致性分维度诊断 */
+  agreementBreakdown?: {
+    total: number;
+    actionOk: boolean;
+    actionNote: string;
+    formulaAction: string;
+    llmAction: string;
+    positionGap: number | null;
+    confidenceGap: number | null;
+    conflictType: string;
+  } | null;
 }
 
 interface CompactDecisionComparisonProps {
@@ -63,13 +79,13 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
     && normalizeAction(view.decisionAction) === normalizeAction(view.llmDecisionAction);
 
   return (
-    <div className="space-y-1.5 text-[12px]">
+    <div className="space-y-1.5 text-sm">
       {/* 一致性色条 + 分数 */}
       <div className="flex items-center gap-2">
         <span style={{ color: "var(--muted)" }}>{t("dualView.decision.title")}</span>
         {agreement !== null && (
           <div
-            className="flex items-center gap-1 px-1.5 rounded text-[10px] font-mono"
+            className="flex items-center gap-1 px-1.5 rounded text-sm font-mono"
             style={{
               background: agreement >= 60
                 ? "rgba(16, 185, 129, 0.12)"
@@ -92,19 +108,19 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
       {/* 公式行 */}
       <div className="flex items-center gap-1.5">
         <span
-          className="px-1 rounded text-[9px] font-medium"
+          className="px-1 rounded text-sm font-medium"
           style={{ background: "var(--sa-blue-bg, #dbeafe)", color: "#2563eb" }}
         >
           {t("dualView.decision.formulaBadge")}
         </span>
         <span
-          className="font-mono text-[11px] font-semibold"
+          className="font-mono text-sm font-semibold"
           style={{ color: actionColor(view.decisionAction) }}
         >
-          {view.decisionAction ?? "—"}
+          {view.decisionAction ? t(getActionTKey(view.decisionAction)) : "—"}
         </span>
         {typeof view.decisionPositionPct === "number" && (
-          <span className="text-[10px] font-mono" style={{ color: "var(--muted)" }}>
+          <span className="text-sm font-mono" style={{ color: "var(--muted)" }}>
             {view.decisionPositionPct.toFixed(0)}%
           </span>
         )}
@@ -115,25 +131,25 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
         ? (
           <div className="flex items-center gap-1.5">
             <span
-              className="px-1 rounded text-[9px] font-medium"
+              className="px-1 rounded text-sm font-medium"
               style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
             >
               {t("dualView.decision.llmBadge")}
             </span>
             <span
-              className="font-mono text-[11px] font-semibold"
+              className="font-mono text-sm font-semibold"
               style={{ color: actionColor(view.llmDecisionAction) }}
             >
-              {view.llmDecisionAction}
+              {t(getActionTKey(view.llmDecisionAction ?? ""))}
             </span>
             {typeof view.llmDecisionPositionPct === "number" && (
-              <span className="text-[10px] font-mono" style={{ color: "var(--muted)" }}>
+              <span className="text-sm font-mono" style={{ color: "var(--muted)" }}>
                 {view.llmDecisionPositionPct.toFixed(0)}%
               </span>
             )}
             {actionsMatch && (
               <span
-                className="text-[9px] px-1 rounded"
+                className="text-sm px-1 rounded"
                 style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}
               >
                 ✓
@@ -147,14 +163,26 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
             style={{ color: "var(--muted)" }}
           >
             <span
-              className="px-1 rounded text-[9px] font-medium"
+              className="px-1 rounded text-sm font-medium"
               style={{ background: "var(--sa-purple-bg, #ede9fe)", color: "#7c3aed" }}
             >
               {t("dualView.decision.llmBadge")}
             </span>
-            <span className="text-[10px]">{t("dualView.decision.llmUnavailable")}</span>
+            <span className="text-sm">{t("dualView.decision.llmUnavailable")}</span>
           </div>
         )}
+      {/* V50: 分歧诊断摘要（仅低一致时显示） */}
+      {agreement !== null && agreement < 60 && view.agreementBreakdown && (
+        <div className="text-sm" style={{ color: "#ef4444", opacity: 0.85 }}>
+          {view.agreementBreakdown.actionNote === "opposite"
+            ? `⚠ ${view.agreementBreakdown.formulaAction} ≠ ${view.agreementBreakdown.llmAction}（方向相反）`
+            : `⚠ 分歧（${
+              view.agreementBreakdown.conflictType === "opposite_direction"
+                ? "方向冲突"
+                : view.agreementBreakdown.conflictType
+            }）`}
+        </div>
+      )}
     </div>
   );
 }

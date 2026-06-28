@@ -8,7 +8,6 @@ import {
   type TrendInfo,
   useSerenityStore,
 } from "@/stores/feature/serenityStore";
-import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import {
   AlertOutlined,
@@ -28,7 +27,9 @@ import {
   Button,
   Card,
   Checkbox,
+  Collapse,
   Empty,
+  InputNumber,
   message,
   Modal,
   Progress,
@@ -40,6 +41,7 @@ import {
 } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 const { Text, Title } = Typography;
 
@@ -265,7 +267,6 @@ function summarizeOutput(output: unknown): string {
 }
 
 export function SerenityScreeningPanel() {
-  const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const {
     running,
     setRunning,
@@ -290,6 +291,7 @@ export function SerenityScreeningPanel() {
     setEmptyReason,
   } = useSerenityStore();
   const { t } = useTranslation();
+  const navigate = useNavigate();
 
   // 用于在 handleRun 启动前注册监听器，确保不漏事件
   const unlistenStepRef = useRef<(() => void) | null>(null);
@@ -348,6 +350,35 @@ export function SerenityScreeningPanel() {
       createdAt: string;
     } | null
   >(null);
+
+  // ── 估值过滤设置 ──
+  const [serenitySettingsOpen, setSerenitySettingsOpen] = useState(false);
+  const [serenityVars, setSerenityVars] = useState<Record<string, number>>({});
+  useEffect(() => {
+    invoke<{ variables: Array<{ name: string; value: unknown }> }>(
+      "get_template_by_version",
+      { id: "serenity-screening", version: 6 },
+    ).then((tpl) => {
+      if (!tpl) { return; }
+      const map: Record<string, number> = {};
+      for (const v of tpl.variables) {
+        if (v.name.startsWith("serenity_")) {
+          map[v.name.replace("serenity_", "")] = Number(v.value) || 0;
+        }
+      }
+      setSerenityVars(map);
+    }).catch(() => {});
+  }, []);
+  const handleSerenityVarChange = useCallback(async (key: string, value: number) => {
+    setSerenityVars((prev) => ({ ...prev, [key]: value }));
+    try {
+      await invoke("apply_update_variable", {
+        templateId: "serenity-screening",
+        name: `serenity_${key}`,
+        value,
+      });
+    } catch { /* ignore */ }
+  }, []);
 
   // 组件卸载时清理监听
   useEffect(() => {
@@ -528,13 +559,6 @@ export function SerenityScreeningPanel() {
     t,
   ]);
 
-  const handleAnalyze = useCallback(
-    (code: string) => {
-      if (code) { startAnalysis(code); }
-    },
-    [startAnalysis],
-  );
-
   /** 打开瓶颈掘金历史详情 */
   const openSerenityDetail = useCallback(
     async (row: { generatedAt: string; stockCount: number; createdAt: string }) => {
@@ -693,6 +717,112 @@ export function SerenityScreeningPanel() {
           </Button>
         </div>
       </div>
+
+      {/* 过滤参数设置 */}
+      <Card
+        size="small"
+        className="w-full"
+        title={
+          <div
+            className="flex items-center gap-2 cursor-pointer text-sm"
+            onClick={() => setSerenitySettingsOpen(!serenitySettingsOpen)}
+          >
+            <span>{serenitySettingsOpen ? "▼" : "▶"} {t("serenityPanel.settings")}</span>
+          </div>
+        }
+      >
+        {serenitySettingsOpen && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">PE 上限</Text>
+              <InputNumber
+                size="small"
+                min={0}
+                max={1000}
+                value={serenityVars.max_pe ?? 100}
+                onChange={(v) => handleSerenityVarChange("max_pe", v ?? 100)}
+                className="w-24"
+                suffix="倍"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">PB 上限</Text>
+              <InputNumber
+                size="small"
+                min={0}
+                max={100}
+                value={serenityVars.max_pb ?? 10}
+                onChange={(v) => handleSerenityVarChange("max_pb", v ?? 10)}
+                className="w-24"
+                suffix="倍"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">近3月涨幅上限</Text>
+              <InputNumber
+                size="small"
+                min={0}
+                max={500}
+                value={serenityVars.max_3m_gain_pct ?? 30}
+                onChange={(v) => handleSerenityVarChange("max_3m_gain_pct", v ?? 30)}
+                className="w-24"
+                suffix="%"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">近12月涨幅上限</Text>
+              <InputNumber
+                size="small"
+                min={0}
+                max={500}
+                value={serenityVars.max_12m_gain_pct ?? 100}
+                onChange={(v) => handleSerenityVarChange("max_12m_gain_pct", v ?? 100)}
+                className="w-24"
+                suffix="%"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">毛利率下限</Text>
+              <InputNumber
+                size="small"
+                min={0}
+                max={100}
+                value={serenityVars.min_gross_margin ?? 25}
+                onChange={(v) => handleSerenityVarChange("min_gross_margin", v ?? 25)}
+                className="w-24"
+                suffix="%"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">负债率上限</Text>
+              <InputNumber
+                size="small"
+                min={0}
+                max={100}
+                value={serenityVars.max_debt_ratio ?? 60}
+                onChange={(v) => handleSerenityVarChange("max_debt_ratio", v ?? 60)}
+                className="w-24"
+                suffix="%"
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <Text type="secondary">高增长豁免阈值</Text>
+              <InputNumber
+                size="small"
+                min={10}
+                max={200}
+                value={serenityVars.growth_exempt_pct ?? 50}
+                onChange={(v) => handleSerenityVarChange("growth_exempt_pct", v ?? 50)}
+                className="w-24"
+                suffix="%"
+              />
+            </div>
+            <div className="col-span-2 text-xs text-gray-400 mt-1">
+              PE超上限但营收增速≥此值时豁免，保护高增长标的不被误杀
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* 进度状态 */}
       {running && (
@@ -902,7 +1032,7 @@ export function SerenityScreeningPanel() {
                 size="small"
                 hoverable
                 className="w-full"
-                onClick={() => handleAnalyze(code)}
+                onClick={() => navigate(`/stock-analysis?code=${code}`, { replace: true })}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex flex-col gap-1">
@@ -1303,7 +1433,7 @@ export function SerenityScreeningPanel() {
                   className="w-full"
                   onClick={() => {
                     setSerenityDetailOpen(false);
-                    handleAnalyze(item.stockCode);
+                    navigate(`/stock-analysis?code=${item.stockCode}`, { replace: true });
                   }}
                 >
                   <div className="flex items-center justify-between">

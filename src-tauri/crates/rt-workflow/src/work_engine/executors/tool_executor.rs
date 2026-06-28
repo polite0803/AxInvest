@@ -74,6 +74,14 @@ impl NodeExecutorTrait for ToolExecutor {
                     acc
                 });
 
+        // 日志：打印解析后的参数
+        tracing::info!(
+            node_id = %node.base_id(),
+            tool_name = %tool_node.config.tool_name,
+            resolved_args = %serde_json::to_string(&resolved_args).unwrap_or_default(),
+            "ToolExecutor: 解析后的工具参数"
+        );
+
         // ── 注入模板参数：将 workflow template variables 作为 _template_vars
         //    传递给工具函数，使 scoring/valuation/indicator 等层面可以
         //    读取用户在设置面板中配置的参数（权重、阈值、周期等）。

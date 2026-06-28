@@ -240,6 +240,14 @@ pub fn current_as_of() -> Option<AsOfContext> {
     peek_global_asof()
 }
 
+/// 获取 as-of 日期作为 YYYY-MM-DD 字符串，无 as-of 时返回系统当前日期
+pub fn current_date_or_now() -> String {
+    match current_as_of() {
+        Some(ctx) => ctx.as_of_date.format("%Y-%m-%d").to_string(),
+        None => Local::now().format("%Y-%m-%d").to_string(),
+    }
+}
+
 /// 判断当前是否处于时间旅行模式
 pub fn is_asof_active() -> bool {
     current_as_of().is_some()

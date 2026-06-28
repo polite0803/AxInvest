@@ -3,7 +3,28 @@ use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// 全局惰性预热标志 — 进程生命周期只做一次预热
+static WARMED_UP: AtomicBool = AtomicBool::new(false);
+static WARMUP_URL: &str = "https://www.eastmoney.com/";
+
+async fn ensure_warmed_up(fetcher: &dyn BrowserHttpFetch) {
+    if WARMED_UP.load(Ordering::Relaxed) {
+        return;
+    }
+    match fetcher.fetch_text(WARMUP_URL).await {
+        Ok(_) => {
+            tracing::debug!("[browser_eastmoney] 预热成功({WARMUP_URL})");
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            WARMED_UP.store(true, Ordering::Relaxed);
+        },
+        Err(e) => {
+            tracing::warn!("[browser_eastmoney] 预热失败({WARMUP_URL}): {e}，继续原始请求");
+        },
+    }
+}
 
 /// HTTP fetch 能力抽象的 trait（Harness 架构：依赖倒置，注入而非直接依赖 axagent-kit）
 ///
@@ -68,18 +89,8 @@ async fn browser_fetch(
         message: "browser fetcher not configured".into(),
     })?;
 
-    // ── 预热：先导航到东方财富首页，设置浏览器指纹 & cookies ──
-    let warmup_url = "https://www.eastmoney.com/";
-    match f.fetch_text(warmup_url).await {
-        Ok(_) => {
-            tracing::debug!("[browser_eastmoney] 预热成功({warmup_url})");
-            // 等待 JS 指纹脚本执行 & cookies 设置完成
-            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
-        },
-        Err(e) => {
-            tracing::warn!("[browser_eastmoney] 预热失败({warmup_url}): {e}，继续原始请求");
-        },
-    }
+    // ── 惰性预热：仅首次请求执行，后续跳过 ──
+    ensure_warmed_up(f.as_ref()).await;
 
     let result = f
         .fetch_text(url)

@@ -74,7 +74,7 @@ positionPct = max(0, min(100, positionPct))
 然后在**末尾另起一行**追加机读标签：
 
 ```
-<!-- VERDICT: {"stance": "aggressive", "position_pct": 50, "confidence": 70} -->
+<!-- VERDICT: {"stance": "neutral", "position_pct": 35, "confidence": 65} -->
 ```
 
 - `stance`: "aggressive | conservative | neutral"

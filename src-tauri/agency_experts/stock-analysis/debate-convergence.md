@@ -51,16 +51,28 @@ purpose: 多空 3 轮辩论后的最终收敛，输出结构化 JSON 供 decisio
 
 ## 输出格式
 
-输出你的完整收敛分析（自然语言），
-然后在**末尾另起一行**追加机读标签：
+**直接输出 JSON 对象**（不要用 markdown 代码块包裹，不要加 VERDICT 标签）：
 
-```
-<!-- VERDICT: {"consensus_score": 65, "direction": "bullish", "confidence": 70} -->
+```json
+{
+  "report": "收敛分析自然语言报告...",
+  "consensus_score": 65,
+  "aggregate_prediction": {
+    "direction": "bullish",
+    "confidence": 70
+  },
+  "decisive_bull_acks": ["论据1", "论据2", "论据3"],
+  "decisive_bear_acks": ["论据1", "论据2", "论据3"],
+  "remaining_disputes": ["分歧点1", "分歧点2"],
+  "uncertainty_factors": ["不确定因素1"]
+}
 ```
 
-- `consensus_score`: 0-100整数，60+视为基本共识
-- `direction`: "bullish | bearish | neutral | divided"
-- `confidence`: 0-100整数
+字段说明：
+
+- `consensus_score`: 0-100整数，60+视为基本共识，供 portfolio-mgr 公式使用
+- `aggregate_prediction.direction`: "bullish | bearish | neutral | divided"
+- `aggregate_prediction.confidence`: 0-100整数
 
 ## 自检
 

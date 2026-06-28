@@ -1,8 +1,14 @@
 import i18n from "@/i18n";
-import { extractContent, extractDecision, normalizeDecision, tryParseDecision } from "@/lib/agentOutput";
+import {
+  extractContent,
+  extractDecision,
+  extractLlmField,
+  normalizeDecision,
+  tryParseDecision,
+} from "@/lib/agentOutput";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
-import { computeStockConsensus } from "@/lib/stock-analysis-utils";
+import { computeStockConsensus, parseAction, parseRiskLevel } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -57,14 +63,15 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       const bearKey = stepId === "bull-researcher" ? "bear-researcher" : `bear-r${round}`;
       const bullContent = output;
       const bearContent = extractContent(results[bearKey] ?? "");
-      // 阶段 1 防御: 只 push 双方都有非空内容的 round，避免"暂无数据"误导。
-      // 单边空可能是 LLM 失败/超时,整轮不显示更清晰。
-      if (bullContent.trim().length > 0 && bearContent.trim().length > 0) {
-        debateRounds.push({ round, bull: bullContent, bear: bearContent });
-      }
+      // 允许单边数据:单边空可能是 LLM 失败/超时,仍展示已有数据而非静默丢弃。
+      debateRounds.push({
+        round,
+        bull: bullContent,
+        bear: bearContent,
+      });
     } else if (stepId === "bear-researcher" || (stepId.startsWith("bear-r") && stepId !== "bear-researcher")) {
       continue;
-    } else if (stepId.startsWith("risk-") || stepId === "research-mgr") {
+    } else if ((stepId.startsWith("risk-") && stepId !== "risk-aggregated") || stepId === "research-mgr") {
       riskAssessments[stepId] = output;
     } else if (stepId === "trader") {
       analystReports["investment-plan"] = output;
@@ -73,6 +80,17 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       // 让调用方决定如何处理缺失决策。
       const parsed = extractDecision(raw);
       if (parsed) { decision = parsed; }
+    } else if (stepId === "quality-fallback") {
+      // V40 修复: quality-gate 判定 D/F 时，降级决策由 quality-fallback 节点生成。
+      // 如果 portfolio-mgr 决策为空（降级路径），用 quality-fallback 的保守决策替代。
+      // quality-fallback 输出格式: {"action":"持有/减持/卖出","positionPct":0-20,"reasoning":"..."}
+      if (!decision) {
+        const fallbackParsed = extractDecision(raw);
+        if (fallbackParsed) {
+          fallbackParsed.isFallback = true; // 标记为降级决策
+          decision = fallbackParsed;
+        }
+      }
     } else if (stepId === "value-investor") {
       // 巴菲特框架评估（与 risk-evaluator 并行，在辩论之后运行）
       valueAssessments[stepId] = output;
@@ -332,6 +350,7 @@ interface StockAnalysisState {
     stockCode: string,
     options?: { replaceAnalysisId?: string },
   ) => Promise<void>;
+  rerunDecision: (analysisId: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
   getDryRun: () => Promise<boolean>;
   fetchHistory: (limit?: number, offset?: number) => Promise<void>;
@@ -772,6 +791,28 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   },
 
   loadAnalysis: async (analysisId: string) => {
+    // ── 清除旧分析状态，避免切换分析时残留旧数据 ──
+    // 当从一条历史分析切换到另一条时，如果新记录 blackboardSnapshot 为 null，
+    // 旧的分析师报告/辩论回合/风险评估等不会自动清除，导致 UI 显示的是上一个股票的数据。
+    set({
+      analystReports: {},
+      debateRounds: [],
+      riskAssessments: {},
+      valueAssessments: {},
+      ruleCheckResults: {},
+      dataQualitySummary: "",
+      rawData: {},
+      decision: null,
+      timeline: [],
+      violations: [],
+      error: null,
+      failedNodes: [],
+      failedNodeErrors: {},
+      dataWarnings: undefined,
+      llmDecisionJson: null,
+      decisionAgreementScore: null,
+    });
+
     const record = await invoke<
       AnalysisSummary & {
         decisionJson: string | null;
@@ -810,8 +851,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     // 如果是 replay 分析且有 asOfDate，同步设置全局时间锚点，
     // 确保后续 getStockQuote / getStockKline 拉取的是分析时刻的数据而非当前实时数据
     console.log("[loadAnalysis] record:", { analysisKind: record.analysisKind, asOfDate: record.asOfDate });
-    // 始终用 as_of_date 设置时间锚点（live 模式也保存了分析日期）
-    if (record.asOfDate) {
+    // 只对 replay 分析切换时间锚点，live 分析保持当前模式
+    if (record.analysisKind === "replay" && record.asOfDate) {
       useTimeAnchorStore.getState().enterReplay(record.asOfDate);
     } else {
       useTimeAnchorStore.getState().enterLive(false);
@@ -844,41 +885,76 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     let decisionAgreementScore: number | null = null;
     if (record.llmDecisionJson) {
       llmDecisionJson = record.llmDecisionJson;
-      // 一致性分数: 对比公式决策 action/positionPct/confidence 与 LLM 决策 stance/positionPct/confidence
+      // 调试: 确认 record.llmDecisionJson 的实际值和前 200 字符
+      console.log("[loadAnalysis] llmDecisionJson exists, first 200 chars:", record.llmDecisionJson.slice(0, 200));
+      console.log("[loadAnalysis] decisionJson exists:", !!record.decisionJson);
+      // V40 修复:
+      // 1. 后端 compute_decision_agreement 已在 workflow 完成时计算并嵌入
+      //    decision_json.formulaLlmAgreement，优先使用该值。
+      // 2. 旧记录无此字段时，前端自行计算（从 action 而非 stance 读取）。
       try {
-        const dj = record.decisionJson ? JSON.parse(record.decisionJson) : null;
-        const lj = JSON.parse(record.llmDecisionJson);
-        const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
-        // action 一致性 (50分)
-        const fa = dj?.action ? norm(String(dj.action)) : null;
-        const la = lj.stance ? norm(String(lj.stance)) : null;
-        let actionScore = 25;
-        if (fa && la) {
+        // 优先取后端预计算的一致性分数
+        const djParsed = record.decisionJson ? JSON.parse(record.decisionJson) : null;
+        console.log("[loadAnalysis] djParsed.formulaLlmAgreement:", djParsed?.formulaLlmAgreement);
+        if (djParsed?.formulaLlmAgreement != null) {
+          decisionAgreementScore = Math.round(Number(djParsed.formulaLlmAgreement));
+        } else {
+          // V41 修复: 用 extractLlmField 解析 llmDecisionJson，兼容 AgentNode 包装格式
+          // 旧代码直接用 JSON.parse(record.llmDecisionJson) 取 lj.action，
+          // 但旧记录存储的是 {role, content: '{...}', node_id} 格式，lj.action 为 undefined。
+          const ljAction = extractLlmField(llmDecisionJson, "action") as string | null;
+          const ljStance = extractLlmField(llmDecisionJson, "stance") as string | null;
+          const ljPositionPct = extractLlmField(llmDecisionJson, "positionPct") as number | null;
+          const ljConfidence = extractLlmField(llmDecisionJson, "confidence") as number | null;
+          console.log(
+            "[loadAnalysis] llm fields - action:",
+            ljAction,
+            "positionPct:",
+            ljPositionPct,
+            "confidence:",
+            ljConfidence,
+          );
+          // 后端未预计算时，前端自己算（兼容旧记录）
+          // V45 修复: action 一致性评分精细化, 与后端 compute_decision_agreement 保持一致
+          const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
+          // action 一致性 (50分)
+          const fa = djParsed?.action ? norm(String(djParsed.action)) : null;
+          const laRaw = ljAction ?? ljStance;
+          const la = laRaw ? norm(laRaw) : null;
           const isBuy = (s: string) => s.includes("买") || s.includes("增持");
           const isSell = (s: string) => s.includes("卖") || s.includes("减持");
-          if (fa === la) { actionScore = 50; }
-          else if (isBuy(fa) && isBuy(la)) { actionScore = 40; }
-          else if (isSell(fa) && isSell(la)) { actionScore = 40; }
-          else if (!isBuy(fa) && !isSell(fa) && !isBuy(la) && !isSell(la)) { actionScore = 40; }
-          else { actionScore = 0; }
+          const isHold = (s: string) => s === "持有";
+          const isWatch = (s: string) => s === "观望";
+          const isUncertain = (s: string) => s.includes("不确定") || s.includes("未知");
+          let actionScore = 25;
+          if (fa && la) {
+            if (fa === la) { actionScore = 50; }
+            else if (isBuy(fa) && isBuy(la)) { actionScore = 35; }
+            else if (isSell(fa) && isSell(la)) { actionScore = 35; }
+            else if ((isHold(fa) && isWatch(la)) || (isHold(la) && isWatch(fa))) { actionScore = 15; }
+            else if ((isHold(fa) || isWatch(fa)) && isUncertain(la)) { actionScore = 5; }
+            else if ((isHold(la) || isWatch(la)) && isUncertain(fa)) { actionScore = 5; }
+            else if (isWatch(fa) && isUncertain(la) || isWatch(la) && isUncertain(fa)) { actionScore = 10; }
+            else { actionScore = 0; }
+          }
+          // positionPct 一致性 (30分)
+          const fp = typeof djParsed?.positionPct === "number" ? djParsed.positionPct : null;
+          const lp = ljPositionPct;
+          let posScore = 15;
+          if (fp !== null && lp !== null) {
+            const diff = Math.abs(fp - lp);
+            posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
+          }
+          // confidence 一致性 (20分)
+          const fc = typeof djParsed?.confidence === "number" ? djParsed.confidence : null;
+          const lc = ljConfidence;
+          let confScore = 10;
+          if (fc !== null && lc !== null) {
+            const diff = Math.abs(fc - lc);
+            confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
+          }
+          decisionAgreementScore = Math.round(actionScore + posScore + confScore);
         }
-        // positionPct 一致性 (30分)
-        const fp = typeof dj?.positionPct === "number" ? dj.positionPct : null;
-        const lp = typeof lj.positionPct === "number" ? lj.positionPct : null;
-        let posScore = 15;
-        if (fp !== null && lp !== null) {
-          const diff = Math.abs(fp - lp);
-          posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
-        }
-        // confidence 一致性 (20分)
-        const fc = typeof dj?.confidence === "number" ? dj.confidence : null;
-        const lc = typeof lj.confidence === "number" ? lj.confidence : null;
-        let confScore = 10;
-        if (fc !== null && lc !== null) {
-          const diff = Math.abs(fc - lc);
-          confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
-        }
-        decisionAgreementScore = Math.round(actionScore + posScore + confScore);
       } catch (e) {
         console.warn("[StockAnalysis] Failed to compute agreement score:", e);
       }
@@ -948,10 +1024,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
               // value 是 AgentResult 包装,extractContent 取 content 字段。
               const bullContent = extractContent(value);
               const bearContent = extractContent(snap[bearKey]);
-              // 阶段 1 防御: 只 push 双方都有非空内容的 round，避免"暂无数据"误导。
-              if (bullContent.trim().length > 0 && bearContent.trim().length > 0) {
-                debates.push({ round, bull: bullContent, bear: bearContent });
-              }
+              // 允许单边数据:如果一方为空可能是 LLM 失败/超时/存储异常,
+              // 仍展示已有内容而非静默丢弃(同 live 模式 parseWorkflowResults 行为)
+              debates.push({
+                round,
+                bull: bullContent,
+                bear: bearContent,
+              });
             }
           }
           // ── 汇总节点 agg-risk：result 是数组,每个子元素是独立 AgentResult 包装
@@ -976,8 +1055,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             // 不再保留 agg-risk 本身,避免重复渲染
             continue;
           }
-          // ── 风险子节点：risk-agg / risk-con / risk-neu ──
-          if (/^risk-(agg|con|neu)$/.test(key)) {
+          // ── 风险子节点：所有 risk-* 前缀节点（排除 aggregator 原始输出 risk-aggregated） ──
+          // live 模式 routeNodeOutput(nodeId.startsWith("risk-")) 会捕获所有 risk-* 节点，
+          // 这里必须匹配同样的集合，否则 risk-level 在回放时丢失。
+          // risk-aggregated 是 agg-risk AggregatorNode 的 output_var，原始 JSON 含 result 数组
+          // 与子节点数据重复，排除避免污染雷达图（已被 line 988 的 agg-risk 展开替代）。
+          if (/^risk-/.test(key) && key !== "risk-aggregated") {
             risks[key] = extractContent(value);
           }
           // ── 投资组合经理输出 ──
@@ -988,6 +1071,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           if (key === "raw-data" && !raws["combined"]) {
             raws["combined"] = String(value);
           }
+        }
+        // Debug: 输出 snapshot 中辩论/风险键及其内容长度，帮助诊断回放数据缺失
+        if (import.meta.env.DEV) {
+          const debateKeys = Object.keys(snap).filter(k => /^bull-r\d+$/.test(k) || /^bear-r\d+$/.test(k));
+          const riskKeys = Object.keys(snap).filter(k => /^risk-/.test(k) || k === "research-mgr");
+          console.debug(
+            `[StockAnalysis] loadAnalysis debateKeys=${JSON.stringify(debateKeys)} riskKeys=${
+              JSON.stringify(riskKeys)
+            }`,
+          );
         }
         // 后端 snapshot 由 HashMap 序列化,键的迭代顺序是 hash 顺序而非插入顺序,
         // bull-r1/bull-r2/bull-r3 三个键在 JSON 字符串里可能是 3/1/2 这种乱序。
@@ -1013,6 +1106,38 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       } catch (e) {
         console.error("[StockAnalysis] Failed to restore blackboard snapshot:", e);
       }
+    }
+  },
+
+  rerunDecision: async (analysisId: string) => {
+    try {
+      set({ status: "loading", progressMessage: i18n.t("stockAnalysis.rerunDecision"), dataWarnings: [] });
+      const result = await invoke<{ analysis_id: string; decision: Record<string, unknown> }>(
+        "rerun_decision",
+        { analysisId },
+      );
+      // 从返回的 decision 中提取关键字段
+      const d = result.decision;
+      // 必须走 parseAction/parseRiskLevel 映射（后端 Rhai 输出中文"增持"/"中风险"）
+      // 直接 String() + as 断言会绕过中文→英文枚举映射，导致 UI 显示"不确定"
+      const action = parseAction(d.action);
+      const riskLevel = parseRiskLevel(d.riskLevel);
+      const decision: StockDecision = {
+        action,
+        positionPct: Number(d.positionPct ?? 0),
+        confidence: Number(d.confidence ?? 0),
+        riskLevel,
+        stopLoss: Number(d.stopLossPct ?? 0),
+        targetPrice: null,
+        reasoning: String(d.reasoning ?? ""),
+        timeHorizon: String(d.timeHorizon ?? "mid"),
+        expectedHoldingDays: Number(d.expectedHoldingDays ?? 0),
+        targetTimeframe: String(d.targetTimeframe ?? "1m"),
+      };
+      set({ decision, status: "completed", error: null, dataWarnings: [] });
+    } catch (e) {
+      console.error("[StockAnalysis] rerunDecision failed:", e);
+      set({ status: "error", error: String(e) });
     }
   },
 
@@ -1574,15 +1699,110 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
         // 增量合并 workflow-step-done 已填充的数据，避免覆盖实时进度
         const s = get();
+        // 辩论轮次合并: streaming 数据 (workflow-step-done) 与批量结果 (workflow-completed)
+        // 可能因事件到达顺序不一致而不同步。merge: 保留两边的数据,解析轮次补充流轮次的空缺。
+        const mergedDebateRounds = [...s.debateRounds];
+        for (const pr of parsed.debateRounds) {
+          const existing = mergedDebateRounds.find((mr) => mr.round === pr.round);
+          if (existing) {
+            // 不覆盖已有的流式数据(更完整),仅补充空隙
+            if (!existing.bull && pr.bull) { existing.bull = pr.bull; }
+            if (!existing.bear && pr.bear) { existing.bear = pr.bear; }
+          } else {
+            mergedDebateRounds.push(pr);
+          }
+        }
+
+        // V40 修复: 从 worklow 结果中提取 LLM 决策 JSON（trader 节点），
+        // 避免 llmDecisionJson 在实时分析完成后一直为 null，
+        // 导致 DecisionComparisonPanel 显示"LLM视角不可用"。
+        let llmDecisionJson: string | null = null;
+        let decisionAgreementScore: number | null = null;
+        const traderRaw = results["trader"];
+        // V41 修复: 兼容 results["trader"] 的三种可能格式：
+        //   1. AgentNode 包装: {role:"trader", content:"{...}"} → 取 .content
+        //   2. 纯 JSON 字符串: "{\"action\":\"买入\",...}"      → 直接用
+        //   3. 纯 JSON 对象: {action:"买入",...}              → JSON.stringify
+        if (traderRaw) {
+          if (typeof traderRaw === "string") {
+            // 格式2: 纯 JSON 字符串
+            llmDecisionJson = traderRaw;
+          } else if (typeof traderRaw === "object") {
+            const traderObj = traderRaw as Record<string, unknown>;
+            const content = traderObj.content;
+            if (typeof content === "string" && content.length > 0) {
+              // 格式1: AgentNode 包装，content 是内层 JSON 字符串
+              llmDecisionJson = content;
+            } else if (content && typeof content === "object") {
+              llmDecisionJson = JSON.stringify(content);
+            } else {
+              // 格式3 (兜底): traderRaw 本身就是决策对象
+              llmDecisionJson = JSON.stringify(traderRaw);
+            }
+          }
+        }
+        // 调试日志: 验证 results["trader"] 的实际格式
+        console.log(
+          "[workflow-completed] traderRaw type:",
+          typeof traderRaw,
+          traderRaw ? Object.keys(traderRaw as object).join(",") : "null/undefined",
+        );
+        console.log("[workflow-completed] llmDecisionJson:", llmDecisionJson);
+        // 用同一份 llmDecisionJson 计算一致性分数
+        if (llmDecisionJson && decision) {
+          try {
+            const fj = decision as unknown as Record<string, unknown>;
+            const lj = JSON.parse(llmDecisionJson);
+            const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
+            const fa = fj.action ? norm(String(fj.action)) : null;
+            const la = (lj.action ?? lj.stance) ? norm(String(lj.action ?? lj.stance)) : null;
+            let actionScore = 25;
+            if (fa && la) {
+              const isBuy = (s: string) => s.includes("买") || s.includes("增持");
+              const isSell = (s: string) => s.includes("卖") || s.includes("减持");
+              const isHold = (s: string) => s === "持有";
+              const isWatch = (s: string) => s === "观望";
+              const isUncertain = (s: string) => s.includes("不确定") || s.includes("未知");
+              if (fa === la) { actionScore = 50; }
+              else if (isBuy(fa) && isBuy(la)) { actionScore = 35; }
+              else if (isSell(fa) && isSell(la)) { actionScore = 35; }
+              else if ((isHold(fa) && isWatch(la)) || (isHold(la) && isWatch(fa))) { actionScore = 15; }
+              else if ((isHold(fa) || isWatch(fa)) && isUncertain(la)) { actionScore = 5; }
+              else if ((isHold(la) || isWatch(la)) && isUncertain(fa)) { actionScore = 5; }
+              else if (isWatch(fa) && isUncertain(la) || isWatch(la) && isUncertain(fa)) { actionScore = 10; }
+              else { actionScore = 0; }
+            }
+            const fp = typeof fj.positionPct === "number" ? fj.positionPct : null;
+            const lp = typeof lj.positionPct === "number" ? lj.positionPct : null;
+            let posScore = 15;
+            if (fp !== null && lp !== null) {
+              const diff = Math.abs(fp - lp);
+              posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
+            }
+            const fc = typeof fj.confidence === "number" ? fj.confidence : null;
+            const lc = typeof lj.confidence === "number" ? lj.confidence : null;
+            let confScore = 10;
+            if (fc !== null && lc !== null) {
+              const diff = Math.abs(fc - lc);
+              confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
+            }
+            decisionAgreementScore = Math.round(actionScore + posScore + confScore);
+          } catch (e) {
+            console.warn("[StockAnalysis] Failed to compute LLM agreement:", e);
+          }
+        }
+
         set({
           analystReports: { ...s.analystReports, ...parsed.analystReports },
-          debateRounds: parsed.debateRounds.length > 0 ? parsed.debateRounds : s.debateRounds,
+          debateRounds: mergedDebateRounds,
           riskAssessments: { ...s.riskAssessments, ...parsed.riskAssessments },
           valueAssessments: { ...s.valueAssessments, ...parsed.valueAssessments },
           ruleCheckResults: { ...s.ruleCheckResults, ...parsed.ruleCheckResults },
           dataQualitySummary: parsed.dataQualitySummary || s.dataQualitySummary,
           rawData: { ...s.rawData, ...parsed.rawData },
           decision,
+          llmDecisionJson,
+          decisionAgreementScore,
           status: "completed",
           progressMessage: i18n.t("stockAnalysis.progress.completed"),
           progressPct: 100,

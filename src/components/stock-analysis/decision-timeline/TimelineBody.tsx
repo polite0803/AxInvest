@@ -58,11 +58,11 @@ export function PhaseSection({ phase, nodes }: PhaseSectionProps) {
 
       <button
         type="button"
-        className="flex items-center gap-2 text-xs font-semibold w-full text-left"
+        className="flex items-center gap-2 text-sm font-semibold w-full text-left"
         onClick={() => setCollapsed(!collapsed)}
         style={{ color: "var(--color-text)" }}
       >
-        <span className="text-[10px]" style={{ color: "var(--muted)" }}>
+        <span className="text-sm" style={{ color: "var(--muted)" }}>
           {collapsed ? "▶" : "▼"}
         </span>
         <span>{t(PHASE_TKEY[phase])}</span>
@@ -76,7 +76,7 @@ export function PhaseSection({ phase, nodes }: PhaseSectionProps) {
         <div className="mt-1 space-y-1.5">
           {nodes.length === 0
             ? (
-              <div className="text-[11px] italic" style={{ color: "var(--muted)" }}>
+              <div className="text-sm italic" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.timeline.empty")}
               </div>
             )

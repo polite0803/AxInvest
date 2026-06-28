@@ -107,7 +107,7 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
 /// 流动性过滤：日均成交额 ≥ 1 亿；排除 ST / 上市 < 60 日
 /// 截断到 200
 ///
-/// 用 `FuturesUnordered` 并发（最多 8 并发），避免串行 200 只导致整体超时
+/// 用 `FuturesUnordered` 并发（最多 8 并发），避免串行导致整体超时
 pub async fn liquidity_filter_and_truncate(
     client: Arc<AStockClient>,
     seed: Vec<SeedItem>,
@@ -115,7 +115,7 @@ pub async fn liquidity_filter_and_truncate(
     use futures::stream::{FuturesUnordered, StreamExt};
     use tokio::sync::Semaphore;
 
-    let sem = Arc::new(Semaphore::new(3));
+    let sem = Arc::new(Semaphore::new(8));
     let mut tasks: FuturesUnordered<_> = FuturesUnordered::new();
 
     for item in seed {
@@ -143,13 +143,23 @@ async fn filter_one(client: &AStockClient, item: SeedItem) -> Option<SeedItem> {
     let (code, name, sector) = item;
     // 行情数据必须可获取，否则无法交易（quote 走 tencent 路由，通常稳定）
     // 加一次轻量重试：瞬断场景下避免大量标的被误过滤
-    let quote = match client.get_quote(&code).await {
-        Ok(q) => q,
-        Err(_) => {
-            // 短暂等待后重试一次
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            client.get_quote(&code).await.ok()?
+    // 用 tokio::time::timeout 包裹，避免单个标的长时间阻塞整个过滤阶段
+    let quote = match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        async {
+            match client.get_quote(&code).await {
+                Ok(q) => Some(q),
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    client.get_quote(&code).await.ok()
+                },
+            }
         },
+    )
+    .await
+    {
+        Ok(Some(q)) => q,
+        _ => return None, // 超时或两次失败都跳过
     };
     if quote.is_st {
         return None;
@@ -170,20 +180,31 @@ const VENDOR_TTL: Duration = Duration::from_secs(300);
 
 /// 通过 `get_workflow_template` 读 `vendor_*` 变量，返回启用的 vendor 集合
 ///
-/// 此函数依赖 AppState 提供的 `harness.db()`；调用方传入 db handle
+/// 使用白名单模式：只解析已知的 vendor 名称，排除 `vendor_xueqiu_token` / `vendor_neodata_token` 等凭据变量
+static KNOWN_VENDORS: &[&str] = &[
+    "tencent", "eastmoney", "sina", "ths", "cninfo",
+    "baidu_stock", "iwencai", "akshare", "mootdx", "xueqiu", "neodata",
+];
 pub fn load_enabled_vendors_from_template(
     template_vars: &[(String, serde_json::Value)],
 ) -> HashSet<String> {
     let mut set = HashSet::new();
     for (name, value) in template_vars {
-        if name.starts_with("vendor_") && name != "vendor_iwencai_key" {
-            if let Some(v) = value.as_str() {
-                if !v.is_empty() {
-                    set.insert(name.trim_start_matches("vendor_").to_string());
-                }
-            } else if value.as_bool().unwrap_or(false) {
-                set.insert(name.trim_start_matches("vendor_").to_string());
-            }
+        if !name.starts_with("vendor_") {
+            continue;
+        }
+        let vendor_name = name.trim_start_matches("vendor_");
+        // 白名单：仅当在已知 vendor 列表中才处理
+        if !KNOWN_VENDORS.contains(&vendor_name) {
+            continue;
+        }
+        let enabled = if let Some(v) = value.as_str() {
+            !v.is_empty()
+        } else {
+            value.as_bool().unwrap_or(false)
+        };
+        if enabled {
+            set.insert(vendor_name.to_string());
         }
     }
     set

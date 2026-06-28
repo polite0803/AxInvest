@@ -481,8 +481,8 @@ async fn seed_stock_analysis_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_harness::workflow_types::{
-        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, Branch, CodeNode,
-        CodeNodeConfig, DebateNode, DebateNodeConfig, EdgeType, EndNode, EndNodeConfig,
+        AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, BackoffType, Branch,
+        CodeNode, CodeNodeConfig, DebateNode, DebateNodeConfig, EdgeType, EndNode, EndNodeConfig,
         ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode, LlmClassifierNodeConfig,
         MergeStrategy, NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode,
         ParallelNode, ParallelNodeConfig, Position, RetryConfig, RetryPolicy, StorageNode,
@@ -494,131 +494,8 @@ async fn seed_stock_analysis_workflow_template(
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "stock-analysis";
-    // v15: 修复风险评估 Agent（aggressive/conservative/neutral-debator）缺少
-    //   context_sources 的问题。之前 3 个风险评估节点没有配置 context_sources，
-    //   LLM 看不到上游 9 个分析师报告和辩论结果，没有分析素材，
-    //   因此不会主动调用工具，输出空泛结论。
-    //   现在注入所有分析师报告、辩论结果、技术指标，让风险评估有依据。
-    // v16: 三处关键修复 —— 解决 v15 引入的 "a-* 节点全部 '暂无数据'" 灾难。
-    //   1) inline prefix 回退:line 1201 删掉 {{stock_code}}/{{stock_name}} Slot,
-    //      仅保留任务标题和 5 条重要原则。stock_code/stock_name 改由 expert .md
-    //      prompt 头部 {{stock_code}} / {{stock_name}} primacy 锚点注入。
-    //   2) R1/R2/R3 多空辩手统一用 bull_tools(基础数据工具集)—— 之前 R2/R3
-    //      走 PROFILE_TOOLS(compute_scoring/valuation 计算工具),没有上游数据
-    //      节点,LLM 工具调用返回空,导致 R2/R3 输出空。
-    //   3) seed UPSERT 已存在覆盖 DB agency_experts.system_prompt—— v16 重新
-    //      种子化会用 .md 新内容覆盖 v15 写的有问题 prompt。
-    // v15: 批量给所有 9 个 stock-analyst + 6 个 debater + 3 个 risk-debator +
-    //   1 个 convergence 头部补 {{stock_code}}/{{stock_name}} primacy 锚点
-    //   (前次 v14 只补 lockup-watcher.md,其他 18 个 prompt 仍有同根因风险:
-    //   LLM 在数据稀疏节点(工具返回空)幻觉/编造"信息缺失")。
-    //   用户已报 research-analyst 复现 lockup-watcher 茅台 bug,本次一次性修完。
-    //   注:v15 同时在 inline prefix 加了 {{stock_code}}/{{stock_name}} Slot,
-    //   但这条改动导致 a-* 节点 render_prompt 失败、所有 Agent 节点 "暂无数据",
-    //   v16 已回退 inline prefix 部分,只保留 .md 头部 stock_code 段。
-    // v14: 修复 Agent inline system_prompt 中 {{stock_code}}/{{stock_name}} 占位符
-    //   被 Rust format! 字符串字面量二次转义为单大括号 {stock_code} 的 bug——
-    //   compile_prompt 只识别 {{...}} 双大括号,单大括号被当静态文本。
-    //   LLM 在 lockup-watcher 等数据稀疏节点(工具返回空)因此会幻觉成训练数据
-    //   最常见的 A 股(贵州茅台 600519)。修复:把字符串字面量写成 {{{{...}}}}
-    //   (4 个大括号),format! 后实际产出 {{...}} 双大括号被 render_prompt 识别替换。
-    //   同时给 lockup-watcher.md 头部补 {{stock_code}}/{{stock_name}} primacy 锚点。
-    // v13: 修复 tool_def_map 缺失 7 个筹码面/基本面工具定义
-    //   （get_stock_lockup/get_stock_shareholder_trades/get_stock_margin_data 等），
-    //   导致 LLM 看不到这些工具。同时更新 lockup-watcher 的 PROFILE_TOOLS
-    //   和 t-lockup-data 前置工具，让筹码面分析师能获取真正的解禁/增减持数据。
-    //   修改 system_prompt 禁止 LLM 使用"工具调用失败"等负面措辞。
-    //   注:此条注释是前人预留,实际 v13 并未 bump 生效,见 v14。
-    // v12: 修改 Agent system_prompt 使用 {{stock_code}}/{{stock_name}} 模板语法，
-    //   让 LLM 在 system_prompt 中直接看到目标股票代码，减少工具调用时遗漏参数。
-    //   同时修复 tool_def_map 中缺失 get_stock_peers/get_research_reports 等
-    //   工具定义，导致 Agent 暴露给 LLM 的工具列表不完整。
-    // v11: 为所有 AgentNodeConfig 添加 input_mapping 字段，自动将 stock_code/stock_name
-    //   注入 system_prompt。之前 v10 模板中 Agent 节点没有 input_mapping，导致 LLM
-    //   不知道目标股票代码，所有分析师输出为空或"请提供股票代码"。
-    // v10: input_var 从 "t-risk.result" 改为 "t-risk"。
-    //   之前 v8/v9 尝试用 "t-risk.result" 定位工具包裹层的 result 字段，
-    //   但用户反馈仍 VALIDATION_FAILED。观察 v9 新增的可用 key 列表日志
-    //   后发现，运行时 context.variables["t-risk"] 在某些场景下不存在。
-    //   v10 改用 "t-risk"（整个工具输出 JSON 对象），
-    //   让 value_to_input_text 走 pretty JSON 序列化，LLM 直接看到
-    //   tool_name/result/truncated 全貌，不再依赖深层字段下钻。
-    // v16: 修复 R2 辩论节点（bull-r2/bear-r2）无数据输出。
-    //   R2 节点只有 search_stock 一个工具，LLM 若不调用工具则产出空泛；
-    //   同时未设置 output_mode: Json，LLM 输出格式不固定，前端解析失败。
-    //   现在给 R2 与 R1/R3 相同工具集，并强制 JSON 输出。
-    // v17: value-investor 节点设置 output_mode: Json，
-    //   同时 prompt 改为直接输出 JSON（不再用代码块包裹），
-    //   彻底解决前端解析失败导致显示原始 JSON 的问题。
-    // v18: 修复 portfolio-manager confidence 公式（consensus_split 项归一化，所有输入统一到 0-1 * 权重）。
-    //   修复 data-quality 节点 context_sources 缺少 t-scoring/t-valuation/t-risk，
-    //   导致 data-quality-inspector 无法读取工具 credibility 元数据，工具可信度分始终缺失。
-    // v19: 修复情绪类数据工具（get_news JSONP 解析 bug + t-sentiment-data 调用错误工具）。
-    //   修复 trader 节点输出纯文本导致前端无法解析（改为 JSON 输出）。
-    // v19: 修复情绪类数据工具（get_news JSONP 解析 bug + t-sentiment-data 调用错误工具）。
-    //   修复 trader 节点输出纯文本导致前端无法解析（改为 JSON 输出）。
-    // v20: 全面布局与连接修复
-    //   F-1  3×3 网格重排 trigger/p-analysts/9 组 tool+agent,消除重叠
-    //   F-2  tool 节点 title 由硬编码"获取数据"改为 tool_assignments 中已声明的描述
-    //   F-3  p-risk-assess / t-risk 同名,分别改名为"三档风险评估分组"/"组合风险计算"
-    //   F-5  raw-data aggregator 补 e-raw-data-portfolio-mgr 显式出边
-    //   F-6  data-quality 注释明确"context_sources 消费"为预期设计
-    //   F-8  a-hot-money / a-lockup / a-research 与 tool_assignments 索引错位修正
-    //   F-9  trigger_config.enabled: false → true(启用 schedule)
-    //   F-10 反思复盘 trigger_config: None → Manual + as_of_date 必填参数
-    // v22: stock-analysis 模板补充 actual_outcome / reflection_depth 变量声明，
-    //   portfolio-manager 的 {{actual_outcome}} 在正常分析时为 ""（正常模式），
-    //   在反思复盘时 runtime variables 覆盖为实际走势结果。此前仅 reflection 模板声明了
-    //   这两个变量，导致 quality-fallback 节点渲染 portfolio-manager 时报 VARIABLE_NOT_FOUND。
-    // v23: 修复 seed 系列"已存在则跳过"的静默跳过 bug。
-    //   原逻辑: 启动时如果 DB 里已有同名 record,所有 seed 函数直接 continue / return,
-    //   导致 .md 文件改动 / PROFILE_TOOLS 改动 / 新增 expert (bull-r3/bear-r3)
-    //   全部不写库,前端看到的还是上一次启动的旧内容。
-    //   现改为 UPSERT + 工作流模板 bump 版本号,确保每次启动同步代码 → DB。
-    // stock-analysis 模板版本管理从 v1 开始。v8: 工作流结构重整，移除 code_node.type。
-    // v9: max_concurrent=12→5, agent_timeout_secs=300→120, AgentExecutor 加 60s stream 超时
-    // v24: bump → v10。修改:
-    //   - 辩论循环 round_num==3 改用 bull-r3/bear-r3 专家 (专属最终反驳型 prompt)
-    //   - R1/R3 节点 output_mode: Text → Json (与 R2 对齐,前端能 parse)
-    //   - t-research-data 调 get_stock_research_reports, t-catalyst-data 调 get_stock_announcements
-    //     (修 MCP 工具名错配)
-    //   - PROFILE_TOOLS / tool_def_map 修 6 处工具名前缀 (add get_stock_ 前缀)
-    //   - a-sentiment / a-policy / a-hot-money / a-catalyst 工具补全覆盖 data_sources
-    //   - debate-convergence.md 区分 R1/R2/R3 轮次性质与读取优先级
-    // 历史版本演进:
-    //   v1-v9: 初始辩论/R1-R3 prompt 加载
-    //   v10:   R1/R3 节点 output_mode: Text → Json + t-research/t-catalyst MCP 工具名修复
-    //   v11:   尝试 bump,因前端 R3 字段未配 + String(plainObject) → "[object Object]" bug
-    //          仍未落地,实际未生效
-    //   v12:   P0 关键修复:
-    //          - R1/R2/R3 多方/空方统一走 PROFILE_TOOLS 路径(消除 R1 bear_tools
-    //            全是计算类工具需要上游数据的"工具集错配"陷阱)
-    //          - 之前 R1 bear-an 漏 OutputMode::Json(对称多方 R1)
-    //          - 前端 String(plainObject) → "[object Object]" → JSON.stringify 修复
-    //          - DebatePanel R3 字段 hasContent 判断 + R3View 组件
-    //          - lib.rs get_news code→name 翻译层(东方财富 keyword 期待中文名)
-    // v14 实际修复:
-    //   - Agent inline system_prompt 的 {{stock_code}}/{{stock_name}} 占位符
-    //     Rust format! 二次转义 bug 修复 (line 1180 改 {{{{stock_code}}}} 等)
-    //   - lockup-watcher.md 头部补 {{stock_code}}/{{stock_name}} primacy 锚点
-    //     (防止数据稀疏节点 LLM 幻觉成贵州茅台等训练数据常见 A 股)
-    // v15: 注释预留,实际从未 bump 生效,跳过避免版本号空转
-    // 之前所有节点配置改动后,DB 里 workflow_template 仍是旧版,新代码不生效,
-    // 必须 bump 版本号强制重新种子化。
-    // v17: 辩论子节点 (bull-r1..r3 / bear-r1..r3) 加 1 次重试 + 180s 超时。
-    //   修复辩论链雪崩:LLM 偶发超时/429 时 max_retries=0 会让整链死,bear-r1
-    //   拿不到 bull-r1 上下文则 R2/R3 全部"暂无数据"。
-    // v19: 风险辩论收敛: agg-risk 之后新增 risk-convergence 节点,
-    //   三方风控辩论分歧分析+综合裁决(P1-3)
-    // v20: p-analysts 容器加伪边绕过前端"死分支"校验；
-    //   quality-fallback 用专属 expert 替代 value-investor 占位；
-    //   risk-evaluator 节点设置 max_retries=1 规避瞬时 500 错误
-    // v21: 辩论节点 max_tokens 8192 → 16384，防止 JSON 截断
-    // v22: 全部 agent 节点 max_tokens 默认 8192 → 32768
-    // v23: agent 节点 max_retries 从 1 提升到 2（LLM JSON 异常 + provider 瞬断重试）
-    //      所有 agent prompt 补全授权声明防止模型拒绝回答
-    // v24: 移除辩论 R1/R2/R3 / research-mgr / risk-convergence 的 OutputMode::Json
-    //      这些节点的 prompt 使用自由文本 + VERDICT 标签格式,Json 模式导致 strict_mode 误判
+
+    // v42: V42 风险重构 — posterior 不再截断，用 risk_bias 左移 action 阈值 + 仓位上限
     const TEMPLATE_VERSION: i32 = 1;
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
@@ -1262,10 +1139,12 @@ async fn seed_stock_analysis_workflow_template(
                 position: Position { x, y },
                 retry: RetryConfig {
                     enabled: true,
-                    max_retries: 2, // provider 间歇不可用 + JSON 格式偶发异常
-                    ..Default::default()
+                    max_retries: 3, // v24: 从 2 提升到 3，GLM-5.1 429 限流可持续 30s+
+                    base_delay_ms: 3000, // v24: 从 1000 提升到 3000，避免短退避对限流无效
+                    max_delay_ms: 60000, // v24: 从 30000 提升到 60000
+                    backoff_type: BackoffType::Exponential,
                 },
-                timeout: Some(300),
+                timeout: Some(600), // V40: 与 step_timeout=600s 对齐，为多轮工具调用保留余量
                 enabled: true,
                 parent_id: parent_id.map(String::from),
                 compensation: None,
@@ -1304,12 +1183,7 @@ async fn seed_stock_analysis_workflow_template(
                 rag_source_ids: vec![],
                 model_role: None,
                 consistency_check: None,
-                hallucination_guard: Some(
-                    axagent_harness::hallucination_guard::HallucinationGuardConfig {
-                        enabled: true,
-                        ..Default::default()
-                    },
-                ),
+                hallucination_guard: None,
                 stream_chunk_timeout_secs: Some(300),
             },
         })
@@ -1502,6 +1376,10 @@ async fn seed_stock_analysis_workflow_template(
                 Some(2)
             };
             a.config.model_role = Some("stock-analyst".into());
+            // a-catalyst 改用 Json 输出模式，prompt 已改为纯 JSON 格式
+            if *id == "a-catalyst" {
+                a.config.output_mode = OutputMode::Json;
+            }
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| **k == **_expert)
@@ -1829,15 +1707,21 @@ async fn seed_stock_analysis_workflow_template(
         );
         if let WorkflowNode::Agent(ref mut a) = dc {
             // 动态构建 context_sources：根据实际辩论轮数引用所有辩手输出
+            // 同时包含全部分析师报告，因为 input_mapping 通过 build_analyst_input_mapping
+            // 注入了 10 个分析师的 bull_score/bear_score/consensus_score 结构化字段，
+            // 追加分析师节点到 context_sources 确保 context_sources 覆盖 input_mapping 引用。
             let mut ctx: Vec<String> = Vec::new();
             for r in 1..=debate_max_rounds {
                 ctx.push(format!("bull-r{r}"));
                 ctx.push(format!("bear-r{r}"));
             }
+            for aid in &a_ids {
+                ctx.push(aid.to_string());
+            }
             a.config.context_sources = ctx;
             a.config.model_role = Some("debater".into());
             a.config.max_tool_rounds = Some(1);
-            a.config.output_mode = OutputMode::Text; // prompt(debate-convergence.md)要求 VERDICT 标签格式，必须用 Text 模式
+            a.config.output_mode = OutputMode::Json; // 输出结构化 JSON，确保 consensus_score / aggregate_prediction 被 input_mapping 解析
             a.config.input_mapping = build_analyst_input_mapping(&a_ids);
         }
         nodes.push(dc);
@@ -1864,6 +1748,8 @@ async fn seed_stock_analysis_workflow_template(
             ];
             a.config.model_role = Some("stock-analyst".into());
             a.config.max_tool_rounds = Some(2);
+            // value-investor 改用 Json 输出模式，prompt 已从 VERDICT 标签改为纯 JSON 格式
+            a.config.output_mode = OutputMode::Json;
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| *k == "value-investor")
@@ -1882,6 +1768,9 @@ async fn seed_stock_analysis_workflow_template(
         }
         nodes.push(vi);
         edges.push(edge("e-debate-value-investor", &last_debate_node, vi_id));
+        // value-investor 的 context_sources 中 debate-convergence 需要显式边，
+        // 否则只在 bear-r3 完成后就调度，debate-convergence 还没跑完
+        edges.push(edge("e-convergence-value-investor", "debate-convergence", vi_id));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1959,6 +1848,19 @@ async fn seed_stock_analysis_workflow_template(
         &format!("bear-r{debate_max_rounds}"),
         "p-risk-assess",
     ));
+    // risk 节点的 context_sources 中 bull-r3/t-scoring/t-valuation/debate-convergence
+    // 需要显式边等待；否则 bear-r3 完成后就调度，但缺少边连接的节点输出
+    // 不会进入 deps_results/exec_ctx.variables，导致 context_sources 报 ERROR。
+    // 注：t-valuation 虽已可到达（链 bear-r3→t-scoring→t-valuation），但无直接边
+    // 则 bull-r3/t-scoring 的输出不进入变量池。
+    edges.push(edge(
+        "e-bull-r3-p-risk-assess",
+        &format!("bull-r{debate_max_rounds}"),
+        "p-risk-assess",
+    ));
+    edges.push(edge("e-scoring-p-risk-assess", "t-scoring", "p-risk-assess"));
+    edges.push(edge("e-valuation-p-risk-assess", "t-valuation", "p-risk-assess"));
+    edges.push(edge("e-convergence-p-risk-assess", "debate-convergence", "p-risk-assess"));
 
     for (i, (rid, rtitle, rexpert, rtools)) in [
         (
@@ -2035,9 +1937,12 @@ async fn seed_stock_analysis_workflow_template(
             a.config.input_mapping = {
                 let mut m = build_analyst_input_mapping(&a_ids);
                 // 注入辩论收敛的 consensus_score 供 Kelly 公式使用
+                // 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
+                // resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻，
+                // 因此必须用 .content.field 路径访问 AgentNode 业务字段。
                 m.insert(
                     "consensus_score".to_string(),
-                    "debate-convergence.params.consensus_score".to_string(),
+                    "debate-convergence.content.consensus_score".to_string(),
                 );
                 m
             };
@@ -2173,8 +2078,8 @@ async fn seed_stock_analysis_workflow_template(
     }
     // F-5: 显式出边到 portfolio-mgr，让上游 validate_workflow 的"data_blackhole"
     //      规则不再误报，同时让画布上能看到 raw-data → portfolio-mgr 的连线。
-    //      注意：portfolio-mgr.config.context_sources 仍保留 "raw-data"，不影响
-    //      数据读取路径，只补一条调度提示边。
+    //      注意：portfolio-mgr 已改为 CodeNode，不设 context_sources，
+    //      raw-data 通过显式边 e-raw-data-portfolio-mgr 确保调度依赖。
     edges.push(edge("e-raw-data-portfolio-mgr", "raw-data", "portfolio-mgr"));
 
     // ── LlmClassifierNode: 风险等级分类 ──
@@ -2194,15 +2099,62 @@ async fn seed_stock_analysis_workflow_template(
             compensation: None,
         },
         config: LlmClassifierNodeConfig {
-            categories: vec!["低风险".into(), "中风险".into(), "高风险".into()],
-            prompt: "根据技术评分、估值计算和风险评估的输出结果，判断该股票的整体风险等级。\
-                     低风险：评分>70、估值合理、风险指标正常；\
-                     中风险：评分40-70或部分指标异常；\
-                     高风险：评分<40或多个风险指标触发"
+            categories: vec![
+                "低风险".into(),
+                "中风险".into(),
+                "高风险".into(),
+                // V38 修复: 增加"极高风险"档位（退市/造假/流动性危机），
+                // 与 portfolio-mgr.rhai 的 D1 修复（极高风险→立即卖出清仓）对齐
+                "极高风险".into(),
+            ],
+            prompt: "你是专业风险分析师。根据以下单股风险画像数据，\
+                     判断该股票的整体风险等级。\
+                     \n\n## 数据解读指南\
+                     \n### 量化指标（权重60%）\
+                     \n- annualizedVolatilityPct: 年化波动率，<25%低 25-40%正常 40-60%偏高 >60%高\
+                     \n- valueAtRisk95Pct: 日收益率95%VaR（百分数），如-3.5表示95%概率单日跌幅不超过3.5%\
+                     \n- maxDrawdownPct: 历史最大回撤（百分数），<30%正常 30-50%偏高 >50%深\
+                     \n- sharpeRatio: 夏普比率，>1优秀 0-1正常 <0偏弱\
+                     \n\
+                     \n### 基本面指标（权重40%）\
+                     \n- roeTTMPct: ROE(TTM)，>15%优秀 10-15%良好 5-10%一般 <5%偏弱\
+                     \n- grossMarginPct: 毛利率，>40%优秀 20-40%正常 <20%偏低\
+                     \n- debtRatioPct: 资产负债率，<30%低 30-50%正常 50-70%偏高 >70%高\
+                     \n- revenueGrowthYoYPct: 营收增速(YoY)，>20%高 10-20%正常 0-10%偏低 <0萎缩\
+                     \n- peTTM: 市盈率(TTM)，<0亏损 0-15低 15-30正常 30-50偏高 >50高\
+                     \n\
+                     \n\n## 等级判定标准（综合量化+基本面）\
+                     \n### 极高风险（任一满足即判定）\
+                     \n- 存在退市/ST/*ST标识\
+                     \n- 资产负债率>85% 且 营收增速<0（财务困境）\
+                     \n- 年化波动率>80% 且 夏普比率<-2（剧烈波动+持续亏损）\
+                     \n\
+                     \n### 高风险（综合评分≤40分）\
+                     \n- 量化指标：波动率>50% 或 夏普<0 或 回撤>50%\
+                     \n- 基本面：ROE<5% 或 毛利率<15% 或 负债率>70%\
+                     \n- 量化高风险 且 基本面无亮点（ROE<10% 且 营收增速<10%）\
+                     \n\
+                     \n### 中风险（综合评分40-70分）\
+                     \n- 量化指标：波动率25-50% 或 夏普0-1 或 回撤30-50%\
+                     \n- 基本面：ROE 5-15% 且 负债率<70% 且 营收增速>0\
+                     \n- 量化中风险 或 基本面中等但量化低风险\
+                     \n\
+                     \n### 低风险（综合评分≥70分）\
+                     \n- 量化指标：波动率<25% 且 夏普>1 且 回撤<30%\
+                     \n- 基本面：ROE>15% 且 毛利率>30% 且 负债率<50% 且 营收增速>10%\
+                     \n- 量化低风险 且 基本面无风险点\
+                     \n\
+                     \n\n## 评分规则\
+                     \n1. 先分别计算量化得分（0-100）和基本面得分（0-100）\
+                     \n2. 量化得分根据波动率/夏普/回撤计算，基本面得分根据ROE/毛利率/负债率/营收增速计算\
+                     \n3. 综合得分 = 量化得分×60% + 基本面得分×40%\
+                     \n4. 根据综合得分映射到风险等级\
+                     \n\
+                     \n\n## 输入数据\n{input_text}\n\n请仅输出分类结果（低风险/中风险/高风险/极高风险）、综合得分（0-100）以及简短理由。"
                 .into(),
             model: None,
-            // v10: input_var 从 "t-risk.result" 改为 "t-risk"，使用完整工具输出
-            // 让 LLM 直接读取 tool_name/result/truncated 全貌，不再依赖深层字段下钻
+            // V50 修复: t-risk 现在对单股输出 stockRiskProfile（波动率/VaR/最大回撤/夏普），
+            // 不再是旧版的组合级 HHI/集中度。分类器基于真实风险指标做判断。
             input_var: "t-risk".into(),
             output_var: "risk-level".into(),
             confidence_threshold: None,
@@ -2258,7 +2210,7 @@ async fn seed_stock_analysis_workflow_template(
     //       或 orphan,可考虑给节点加 kind="context_sink" 标记让校验跳过。
     {
         let dq_id = "data-quality";
-        let dq_title = "数据质量评估：覆盖度、字数、占位检测，输出 A/B/C/D/F 等级";
+        let dq_title = "数据质量评估：覆盖度、字数、占位检测，输出 JSON 格式 grade/score";
         let dq_y = 3300.0;
         let mut dq = agent(dq_id, dq_title, "data-quality-inspector", None, 840.0, dq_y);
         if let WorkflowNode::Agent(ref mut a) = dq {
@@ -2282,32 +2234,37 @@ async fn seed_stock_analysis_workflow_template(
             // ── 结构化参数注入（结构化参数方案 Phase 2）──
             // 注入各分析师的 confidence 结构化值，使 DQI 可直接判断
             // "信心低迷（confidence < 30）" 条件，无需从文本中重新提取。
+            //
+            // 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
+            // resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻，
+            // 因此必须用 `.content.field` 路径访问业务字段。
             a.config.input_mapping = [
-                ("mk_confidence", "a-market-analyst.params.confidence"),
-                ("sent_confidence", "a-sentiment.params.confidence"),
-                ("news_confidence", "a-news.params.confidence"),
-                ("fund_confidence", "a-fundamentals.params.confidence"),
-                ("pol_confidence", "a-policy.params.confidence"),
-                ("hm_confidence", "a-hot-money.params.confidence"),
-                ("lk_confidence", "a-lockup.params.confidence"),
-                ("res_confidence", "a-research.params.confidence"),
-                ("sec_confidence", "a-sector.params.confidence"),
-                ("cat_confidence", "a-catalyst.params.confidence"),
+                ("mk_confidence", "a-market-analyst.content.confidence"),
+                ("sent_confidence", "a-sentiment.content.confidence"),
+                ("news_confidence", "a-news.content.confidence"),
+                ("fund_confidence", "a-fundamentals.content.confidence"),
+                ("pol_confidence", "a-policy.content.confidence"),
+                ("hm_confidence", "a-hot-money.content.confidence"),
+                ("lk_confidence", "a-lockup.content.confidence"),
+                ("res_confidence", "a-research.content.confidence"),
+                ("sec_confidence", "a-sector.content.confidence"),
+                ("cat_confidence", "a-catalyst.content.confidence"),
                 // 注入各分析师的 if_data_gaps 布尔值，无需扫描全文检查缺失项
-                ("mk_data_gaps", "a-market-analyst.params.if_data_gaps"),
-                ("sent_data_gaps", "a-sentiment.params.if_data_gaps"),
-                ("news_data_gaps", "a-news.params.if_data_gaps"),
-                ("fund_data_gaps", "a-fundamentals.params.if_data_gaps"),
-                ("pol_data_gaps", "a-policy.params.if_data_gaps"),
-                ("hm_data_gaps", "a-hot-money.params.if_data_gaps"),
-                ("lk_data_gaps", "a-lockup.params.if_data_gaps"),
-                ("res_data_gaps", "a-research.params.if_data_gaps"),
-                ("sec_data_gaps", "a-sector.params.if_data_gaps"),
-                ("cat_data_gaps", "a-catalyst.params.if_data_gaps"),
+                ("mk_data_gaps", "a-market-analyst.content.if_data_gaps"),
+                ("sent_data_gaps", "a-sentiment.content.if_data_gaps"),
+                ("news_data_gaps", "a-news.content.if_data_gaps"),
+                ("fund_data_gaps", "a-fundamentals.content.if_data_gaps"),
+                ("pol_data_gaps", "a-policy.content.if_data_gaps"),
+                ("hm_data_gaps", "a-hot-money.content.if_data_gaps"),
+                ("lk_data_gaps", "a-lockup.content.if_data_gaps"),
+                ("res_data_gaps", "a-research.content.if_data_gaps"),
+                ("sec_data_gaps", "a-sector.content.if_data_gaps"),
+                ("cat_data_gaps", "a-catalyst.content.if_data_gaps"),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
+            a.config.output_mode = OutputMode::Json; // V36: 改为 JSON 输出模式，确保 grade/score 被 resolve_var_path 正确解析
             a.config.model_role = Some("stock-analyst".into());
             let tool_names = PROFILE_TOOLS
                 .iter()
@@ -2341,18 +2298,36 @@ async fn seed_stock_analysis_workflow_template(
             "t-scoring".into(),
             "t-valuation".into(),
             "t-risk".into(),
+            // V29 修复: 改为引用三档风险评估的原始 AgentNode，而非聚合后的数组
+            // AggregatorNode strategy="all" 的 result 是数组，无法用对象字段路径导航，
+            // 因此 research-mgr 直接消费三个原始风险辩手的输出
+            "risk-agg".into(),
+            "risk-con".into(),
+            "risk-neu".into(),
             "risk-aggregated".into(),
             "risk-level".into(),
+            // V29 修复: input_mapping 引用 debate-convergence，需在 context_sources 中声明
+            "debate-convergence".into(),
         ];
         // ── 结构化参数注入（结构化参数方案 Phase 2）──
-        // 注入风险聚合的结构化评分，使 research-mgr 可在 system_prompt 中
+        // 注入风险的结构化评分，使 research-mgr 可在 system_prompt 中
         // 直接使用 risk_level 等值，无需从文本中重新提取。
+        //
+        // 路径规则（V29 修复）：
+        // - LlmClassifierNode: {category, model, ...} → 直接 .category
+        // - AgentNode: {role, content: <json_string>, ...} → .content.field
+        //   （resolve_var_path 遇到 Value::String 会自动 from_str 解析后再下钻）
+        // - AggregatorNode strategy="all": result 是数组，不支持对象字段路径导航，
+        //   改为直接引用原始 AgentNode 的 .content.position_pct
         a.config.input_mapping = [
-            ("overall_risk", "risk-level.params.overall_risk"),
-            ("agg_risk_pos", "risk-aggregated.params.aggressive_pct"),
-            ("cons_risk_pos", "risk-aggregated.params.conservative_pct"),
-            ("neut_risk_pos", "risk-aggregated.params.neutral_pct"),
-            ("consensus_score", "debate-convergence.params.consensus_score"),
+            // LlmClassifierNode 输出 {category, model, ...}
+            ("overall_risk", "risk-level.category"),
+            // 三档风险辩手输出 {stance, position_pct, confidence, ...}，包裹在 content JSON 字符串中
+            ("agg_risk_pos", "risk-agg.content.position_pct"),
+            ("cons_risk_pos", "risk-con.content.position_pct"),
+            ("neut_risk_pos", "risk-neu.content.position_pct"),
+            // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
+            ("consensus_score", "debate-convergence.content.consensus_score"),
             ("stock_lessons", "stock_lessons"),
         ]
         .into_iter()
@@ -2401,8 +2376,11 @@ async fn seed_stock_analysis_workflow_template(
         3900.0,
     );
     if let WorkflowNode::Agent(ref mut a) = trader {
-        a.config.context_sources = vec!["research-mgr".into()];
+        // V29 修复: input_mapping 引用 debate-convergence，需在 context_sources 中声明
+        // （显式依赖原则：input_mapping 引用的上游节点应有 context_sources 或显式边）
+        a.config.context_sources = vec!["research-mgr".into(), "debate-convergence".into()];
         a.config.model_role = Some("trader".into());
+        a.config.output_mode = OutputMode::Json;
         a.config.tools = vec![
             td_quote.clone(),
             td_kline.clone(),
@@ -2419,7 +2397,7 @@ async fn seed_stock_analysis_workflow_template(
             format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
         a.config.max_tool_rounds = Some(3);
         a.config.input_mapping = [
-            ("consensus_score", "debate-convergence.params.consensus_score"),
+            ("consensus_score", "debate-convergence.content.consensus_score"),
             ("stock_lessons", "stock_lessons"),
         ]
         .into_iter()
@@ -2459,26 +2437,38 @@ async fn seed_stock_analysis_workflow_template(
             tool_name: None,
             execute_directly: true,
             input_mapping: [
+                // ToolNode 输出包裹在 {tool_name, result: <json_string>, ...} 中
                 ("totalScore", "t-scoring.result.totalScore"),
-                ("dqi_score", "data-quality.params.score"),
-                ("overall_risk", "risk-level.params.overall_risk"),
-                ("catalyst_level", "a-catalyst.params.catalyst_level"),
-                ("institutional_trace", "a-catalyst.params.institutional_trace"),
-                ("consensusScore", "debate-convergence.params.consensus_score"),
-                ("trader_time_horizon", "trader.params.timeHorizon"),
-                ("trader_holding_days", "trader.params.expectedHoldingDays"),
-                (
-                    "aggregate_direction",
-                    "debate-convergence.params.aggregate_prediction.direction",
-                ),
-                (
-                    "aggregate_confidence",
-                    "debate-convergence.params.aggregate_prediction.confidence",
-                ),
-                // 可选 Bayesian/回测变量：无对应上游节点，resolve 返回 None → safe_num() 走默认值
-                ("market_regime", ""),
-                ("signal_quality_win_rate", ""),
-                ("signal_quality_sample_count", ""),
+                // AgentNode 输出包裹在 {role, content: <json_string>, ...} 中
+                // V29 修复: data-quality 是 AgentNode，无 .result 字段，必须走 .content.
+                ("dqi_score", "data-quality.content.score"),
+                // P1/P2: 因子回测数据（compute_scoring 工具附加输出）
+                ("factor_weights", "t-scoring.result.factor_backtest.factors"),
+                ("market_regime_prior", "t-scoring.result.market_regime.prior"),
+                ("market_regime_state", "t-scoring.result.market_regime.state"),
+                // LlmClassifierNode 输出 {category, model, ...}
+                ("overall_risk", "risk-level.category"),
+                // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
+                ("catalyst_level", "a-catalyst.content.catalyst_level"),
+                ("consensusScore", "debate-convergence.content.consensus_score"),
+                // trader Json 模式输出：{action, targetPrice, stopLoss, ...}
+                ("trader_action", "trader.content.action"),
+                // currentPrice: 从 t-scoring 工具节点（get_stock_quote）获取，可靠数据源。
+                // 不用 trader.content.currentPrice，因为 LLM 不一定输出该字段。
+                ("current_price", "t-scoring.result.currentPrice"),
+                ("trader_target_price", "trader.content.targetPrice"),
+                ("trader_stop_loss", "trader.content.stopLoss"),
+                ("trader_time_horizon", "trader.content.timeHorizon"),
+                ("trader_holding_days", "trader.content.expectedHoldingDays"),
+                // V50 修复: 接入 risk-convergence 的三方风险分歧度
+                // 避免该 LLM 节点（约5-10s）的输出被浪费
+                ("risk_disagreement", "risk-convergence.content.disagreement_score"),
+                // V51 新增: 估值因子数据源
+                // t-valuation 输出 DCF/格雷厄姆上行空间，用于 f5_signal 估值因子
+                ("valuation_dcf_upside", "t-valuation.result.dcf.upsidePct"),
+                ("valuation_graham_upside", "t-valuation.result.graham.upsidePct"),
+                ("valuation_fscore", "t-valuation.result.fScore.score"),
+                ("valuation_moat", "t-valuation.result.moat.label"),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -2494,8 +2484,17 @@ async fn seed_stock_analysis_workflow_template(
         "debate-convergence",
         "portfolio-mgr",
     ));
+    // V29 修复: debate-convergence → research-mgr / trader 显式边
+    // research-mgr 和 trader 的 input_mapping 引用 debate-convergence.content.consensus_score，
+    // 加显式边确保共识分数在节点执行前就绪（符合显式依赖原则）
+    edges.push(edge("e-debate-convergence-research-mgr", "debate-convergence", "research-mgr"));
+    edges.push(edge("e-debate-convergence-trader", "debate-convergence", "trader"));
     // data-quality → portfolio-mgr: 显式边确保 dqi_score 在 Rhai 公式执行前就绪
     edges.push(edge("e-data-quality-portfolio-mgr", "data-quality", "portfolio-mgr"));
+    // V50 修复: risk-convergence → portfolio-mgr 显式边
+    // risk-convergence 的三方分歧度(disagreement_score)已被加入 input_mapping，
+    // 需要显式边确保在执行 portfolio-mgr 前就绪
+    edges.push(edge("e-risk-convergence-portfolio-mgr", "risk-convergence", "portfolio-mgr"));
 
     // ── P3 (real-nodes): rule-check 规则检查 Agent ──
     // 在 portfolio-mgr 完成后启动，对照硬性规则阈值（RSI/乖离率/止损/放量下跌/空头排列）
@@ -2537,8 +2536,8 @@ async fn seed_stock_analysis_workflow_template(
     }
 
     // ── SwitchNode: 数据质量门禁 ──
-    // 检查 data-quality Agent 的输出等级（A/B/C/D/F），C 级以上继续，D/F 走降级路径。
-    // data-quality 输出为文本，包含质量等级标签如 "A", "B", "C" 等。
+    // 检查 data-quality Agent 的 JSON 输出中的 grade 字段（A/B/C/D/F），C 级以上继续，D/F 走降级路径。
+    // data-quality 输出为 JSON 格式，resolve_var_path 导航到 content.grade 提取等级。
     nodes.push(WorkflowNode::Switch(SwitchNode {
         base: WorkflowNodeBase {
             id: "quality-gate".into(),
@@ -2555,7 +2554,10 @@ async fn seed_stock_analysis_workflow_template(
             compensation: None,
         },
         config: SwitchNodeConfig {
-            input_var: "data-quality.params.grade".into(),
+            // V36 修复: data-quality 已改为 JSON 模式，输出包裹在 {role, content: <json_string>} 中，
+            // resolve_var_path 自动解析 JSON 字符串后导航到 grade 字段。
+            // 不能用 .params.grade — params 不是 AgentNode 输出的顶层字段。
+            input_var: "data-quality.content.grade".into(),
             cases: vec![SwitchCase {
                 value: "_value == \"A\" || _value == \"B\" || _value == \"C\"".into(),
                 label: "acceptable".into(),
@@ -4490,18 +4492,22 @@ fn role_id_to_display(id: &str) -> String {
     }
 }
 
-/// 构建分析师 params 的 input_mapping：为每个分析师注入 bull_score/bear_score/consensus_score
+/// 构建分析师 input_mapping：为每个分析师注入 bull_score/bear_score/consensus_score
 /// 例如 a-market-analyst → 【market_bull_score】:75 【market_bear_score】:25
+///
+/// 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
+/// resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻，
+/// 因此必须用 `.content.field` 路径访问 AgentNode 业务字段。
 fn build_analyst_input_mapping(a_ids: &[&str]) -> std::collections::HashMap<String, String> {
     use std::collections::HashMap;
     let mut map = HashMap::new();
     for aid in a_ids {
         // a-market-analyst → market, a-sentiment → sentiment, etc.
         let prefix = aid.strip_prefix("a-").unwrap_or(aid);
-        map.insert(format!("{prefix}_bull_score"), format!("{aid}.params.bull_score"));
-        map.insert(format!("{prefix}_bear_score"), format!("{aid}.params.bear_score"));
+        map.insert(format!("{prefix}_bull_score"), format!("{aid}.content.bull_score"));
+        map.insert(format!("{prefix}_bear_score"), format!("{aid}.content.bear_score"));
         // consensus_score = bull - bear（聚合分数）
-        map.insert(format!("{prefix}_consensus"), format!("{aid}.params.consensus_score"));
+        map.insert(format!("{prefix}_consensus"), format!("{aid}.content.consensus_score"));
     }
     // 为所有辩论/风险节点注入历史反思教训
     map.insert("stock_lessons".into(), "stock_lessons".into());
@@ -4697,7 +4703,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     max_retries: 2,
                     ..Default::default()
                 },
-                timeout: Some(300),
+                timeout: Some(600), // V40: 与 step_timeout=600s 对齐
                 enabled: true,
                 parent_id: None,
                 compensation: None,
@@ -4759,12 +4765,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 rag_source_ids: vec![],
                 model_role: Some("decision-maker".into()),
                 consistency_check: None,
-                hallucination_guard: Some(
-                    axagent_harness::hallucination_guard::HallucinationGuardConfig {
-                        enabled: true,
-                        ..Default::default()
-                    },
-                ),
+                hallucination_guard: None,
                 stream_chunk_timeout_secs: Some(300),
             },
         }),
@@ -4960,7 +4961,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
 /// 创建 Serenity 瓶颈筛选工作流模板（serenity-screening）。
 ///
 /// ── Phase 0: 趋势扫描 ──
-///   t-hot-stocks / t-industry-rank / t-cls-flash / t-concept / t-northbound
+///   t-industry-rank / t-cls-flash / t-concept / t-northbound
 ///   → a-trend-scanner (LLM Agent, 输出 2-3 个趋势)
 ///
 /// ── Phase 1: 并行瓶颈分析（对每个趋势）──
@@ -4982,15 +4983,16 @@ async fn seed_serenity_screening_workflow_template(
 ) -> Result<(), String> {
     use axagent_core::entity::workflow_template;
     use axagent_harness::workflow_types::{
-        AgentNode, AgentNodeConfig, EdgeType, JsonSchema, JsonSchemaProperty, OutputMode, Position,
-        RetryConfig, StorageNode, StorageNodeConfig, ToolDef, ToolNode, ToolNodeConfig,
+        AgentNode, AgentNodeConfig, CodeNode, CodeNodeConfig, EdgeType, JsonSchema,
+        JsonSchemaProperty, OutputMode, Position, RetryConfig, ToolDef, ToolNode, ToolNodeConfig,
         TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge, WorkflowNode,
         WorkflowNodeBase,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
-    const TEMPLATE_VERSION: i32 = 1;
+    // 每次修改 Rhai 脚本或节点拓扑后+1，强制模板重新写入
+    const TEMPLATE_VERSION: i32 = 9;  // v9: cls-risk-level prompt 增加基本面维度(ROE/毛利率/负债率/营收增速)并放宽阈值
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -5013,11 +5015,6 @@ async fn seed_serenity_screening_workflow_template(
     let now = chrono::Utc::now().timestamp_millis();
 
     // ── ToolDef 定义 ──
-    let td_hot = ToolDef {
-        name: "get_hot_stocks".into(),
-        description: Some("获取市场热门股".into()),
-        parameters: None,
-    };
     let td_industry = ToolDef {
         name: "get_industry_ranking".into(),
         description: Some("获取行业涨跌排名".into()),
@@ -5367,8 +5364,29 @@ async fn seed_serenity_screening_workflow_template(
         }),
     };
 
+    // 搜索股票代码工具（借助 NeoDataVendor 末位路由覆盖全球供应链公司）
+    let td_search_stock = ToolDef {
+        name: "search_stock".into(),
+        description: Some("搜索股票代码：输入公司中文名/英文名，返回6位A股代码或港股(如00700.HK)/美股(如TSM.US)代码".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "keyword".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("公司名称（支持中英文，如\"台积电\"、\"NVIDIA\"、\"三星电子\"）".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["keyword".into()]),
+            items: None,
+        }),
+    };
+
     let tool_defs: Vec<ToolDef> = vec![
-        td_hot,
         td_industry,
         td_cls,
         td_concept,
@@ -5380,6 +5398,7 @@ async fn seed_serenity_screening_workflow_template(
         td_serenity_news,
         td_serenity_research,
         td_search_news,
+        td_search_stock,
         td_attention,
         td_industry_pos,
         td_exit,
@@ -5459,17 +5478,12 @@ async fn seed_serenity_screening_workflow_template(
                 exposed_tools: vec![],
                 output_mode: OutputMode::Json,
                 agent_profile_id: Some(format!("stock-{expert_id}")),
-                max_tool_rounds: None,
+                max_tool_rounds: Some(8),
                 execution_mode: None,
                 rag_source_ids: vec![],
                 model_role: None,
                 consistency_check: None,
-                hallucination_guard: Some(
-                    axagent_harness::hallucination_guard::HallucinationGuardConfig {
-                        enabled: true,
-                        ..Default::default()
-                    },
-                ),
+                hallucination_guard: None,
                 stream_chunk_timeout_secs: Some(300),
             },
         })
@@ -5515,7 +5529,6 @@ async fn seed_serenity_screening_workflow_template(
 
     // ── Phase 0: 数据采集工具（并行） ──
     let t_names = [
-        ("t-hot-stocks", "市场热门股", "get_hot_stocks", "t-hot-stocks", 40.0, 80.0),
         (
             "t-industry-rank",
             "行业排名",
@@ -5537,7 +5550,7 @@ async fn seed_serenity_screening_workflow_template(
     // 强约束输出：必须且只能输出一个 tool_json 代码块，无任何前后文。
     // tool_json 块由项目 IR Normalizer 直接解析为 ContentBlock::ToolUse。
     let trend_scanner_prompt = "你的任务：识别当前A股市场最具潜力的 2-3 个产业方向。\
-         上游会提供实时市场数据（热门股、行业排名、快讯、北向资金）。\
+         上游会提供实时市场数据（行业排名、快讯、北向资金）。\
          \n\n\
          **关于数据可用性的重要说明**：上游数据源标记为\"无可用记录\"或返回空是正常的——\
          这表示实时数据接口暂时不可用或盘前无数据。此时你应**完全基于你的训练知识**来工作。\
@@ -5593,13 +5606,64 @@ async fn seed_serenity_screening_workflow_template(
         edges.push(edge(&format!("e-{tid}-a-trend-scanner"), tid, "a-trend-scanner"));
     }
 
+    // ── Phase 0b: 行业财务基线数据（并行拉取，供 CodeNode 做行业对比）──
+    // 使用固定的行业代表股，调用 compute_industry_position 获取行业对比数据。
+    // 这些数据不依赖 LLM，每次运行都拉取真实财务指标。
+    // 注意：stock_code 从模板变量中读取，可通过 UI 调整代表股。
+    let baseline_stocks = [
+        // 第一行：4 个基线
+        ("t-baseline-semi", "半导体基线", "ref_semi_code", 40.0, 130.0),
+        ("t-baseline-battery", "电池基线", "ref_battery_code", 240.0, 130.0),
+        ("t-baseline-chem", "化工基线", "ref_chem_code", 440.0, 130.0),
+        ("t-baseline-med", "医药基线", "ref_med_code", 640.0, 130.0),
+        // 第二行：3 个基线
+        ("t-baseline-aero", "军工基线", "ref_aero_code", 140.0, 210.0),
+        (
+            "t-baseline-consumer-elec",
+            "消费电子基线",
+            "ref_consumer_elec_code",
+            340.0,
+            210.0,
+        ),
+        ("t-baseline-auto", "汽车基线", "ref_auto_code", 540.0, 210.0),
+    ];
+    for (id, title, var_name, x, y) in &baseline_stocks {
+        let mut input_map = std::collections::HashMap::new();
+        input_map.insert("stock_code".to_string(), var_name.to_string());
+        nodes.push(WorkflowNode::Tool(ToolNode {
+            base: WorkflowNodeBase {
+                id: id.to_string(),
+                title: title.to_string(),
+                description: Some(format!("行业财务基线: {title}")),
+                position: Position { x: *x, y: *y },
+                retry: RetryConfig::default(),
+                timeout: Some(30),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: ToolNodeConfig {
+                tool_name: "compute_industry_position".into(),
+                input_mapping: input_map,
+                output_var: id.to_string(),
+            },
+        }));
+        edges.push(edge(&format!("e-trigger-{id}"), "trigger", id));
+    }
+
     // ── Phase 1: 对每个趋势拆解产业链+瓶颈鉴定 ──
-    // 使用 3 个并行的 chain-decomposer + 3 个 chokepoint-identifier
-    let trend_names = ["trend1", "trend2", "trend3"];
-    let trend_x_positions = [100.0, 340.0, 580.0];
+    // 使用 5 个并行的 chain-decomposer + 5 个 chokepoint-identifier
+    // 每个槽位对应一个趋势索引（0-4）。trend-scanner 通常输出 2-5 个趋势，
+    // prompt 已处理"趋势不存在"的情况（返回空 chain_nodes）。
+    let trend_names = ["trend1", "trend2", "trend3", "trend4", "trend5"];
+    let trend_x_positions = [60.0, 220.0, 380.0, 540.0, 700.0];
 
     for (i, tn) in trend_names.iter().enumerate() {
         let decomposer_id = format!("a-chain-{tn}");
+        let code_node_id = format!("c-bottleneck-{tn}");
+        let chokepoint_id = format!("a-chokepoint-{tn}");
+
+        // ── chain-decomposer: Agent 产业链拆解（更新 prompt 要求获取财务数据）──
         let decomposer_prompt = format!(
             "你的任务：对上游 a-trend-scanner 输出的趋势 #{i} 进行产业链拆解。\
              将产业从上到下拆解为 5-8 个关键环节，标注每个环节的供应商数量、技术壁垒、扩产周期。\
@@ -5610,6 +5674,18 @@ async fn seed_serenity_screening_workflow_template(
              3. 标注 bottleneck_potential（high/medium/low）及理由。\n\
              4. **额外标注每个环节的需求验证信息**：直接下游厂商是谁、最终需求驱动方、是否有已公开的\
              订单/合同负债/CapEx 支撑。\n\
+             5. **【尽量】调用工具获取真实财务数据，无法获取时基于训练知识合理估算**。\
+             对于 chain_nodes 中的代表性公司，你 **尽量**：\
+             ① 用 search_stock 搜索公司中文名/英文名得到股票代码\
+                （A 股返回 6 位代码；美股如 TSM.US；港股如 00700.HK）；\
+             ② A 股公司用 get_stock_financials 获取真实财务数据；\
+             ③ 用 compute_industry_position 获取行业竞争地位对比（毛利率/ROE/负债率排名）；\
+             将结果嵌入对应 chain_node 的 financial_data 字段：\
+             {{\"gross_margin\": 45.0, \"revenue_growth_yoy\": 25.0, \"debt_ratio\": 35.0, \
+             \"roe\": 12.0, \"rnd_ratio\": 15.0, \"capex_dep_ratio\": 3.5}}。\
+             非 A 股公司（如 NVIDIA、台积电）仅能获取行情数据（股价/PE/PB），财务数据标为 null。\
+             如果工具调用超时或返回空，基于行业常识填入合理估算值，并在 financial_data 中标注 estimated。\
+             **最终 JSON 中 financial_data 为 null 的 chain_node 将被下游标记为\"无数据支撑\"**。\n\
              \n\n\
              重要：如果上游输出的 trends 数组为空或 trend #{i} 不存在，\
              不要输出自然语言拒绝。直接返回空 chain_nodes 数组的 JSON：\
@@ -5630,6 +5706,8 @@ async fn seed_serenity_screening_workflow_template(
              \"global_supplier_count\": 3, \"tech_barrier\": \"high\",\
              \"expansion_cycle_months\": 24, \"bottleneck_potential\": \"high\",\
              \"bottleneck_rationale\": \"...\",\
+             \"financial_data\": {{\"gross_margin\": 45.0, \"revenue_growth_yoy\": 25.0, \
+             \"debt_ratio\": 35.0, \"roe\": 12.0, \"rnd_ratio\": 15.0, \"capex_dep_ratio\": 3.5}},\
              \"demand_validation\": {{\"direct_downstream\": \"直接下游厂商\",\
              \"final_demand_driver\": \"最终需求驱动方\", \"demand_certainty\": \"high | medium | low\",\
              \"evidence\": \"关键证据，如英伟达 FY2025 CapEx $80B\",\
@@ -5651,11 +5729,77 @@ async fn seed_serenity_screening_workflow_template(
             &decomposer_id,
         ));
 
-        // chokepoint-identifier 接在 chain-decomposer 之后
-        let chokepoint_id = format!("a-chokepoint-{tn}");
+        // ── bottleneck-calc: CodeNode 客观指标计算（接收产业链分析 + 行业排名 + 行业基线数据）──
+        let bottleneck_code = include_str!("bottleneck-calc.rhai").to_string();
+        let mut bc_input_mapping = std::collections::HashMap::new();
+        bc_input_mapping.insert("chain_analysis".to_string(), format!("{decomposer_id}.content"));
+        // 注入 t-industry-rank 的真实行业排名数据（含各行业涨跌幅/资金流向/领涨股）
+        bc_input_mapping
+            .insert("industry_ranking".to_string(), "t-industry-rank.result".to_string());
+        // 注入 7 个行业基线 ToolNode 的结果（compute_industry_position 数据）
+        // 让 CodeNode 能对 chain_node 做行业财务对比
+        bc_input_mapping.insert("baseline_semi".to_string(), "t-baseline-semi.result".to_string());
+        bc_input_mapping
+            .insert("baseline_battery".to_string(), "t-baseline-battery.result".to_string());
+        bc_input_mapping.insert("baseline_chem".to_string(), "t-baseline-chem.result".to_string());
+        bc_input_mapping.insert("baseline_med".to_string(), "t-baseline-med.result".to_string());
+        bc_input_mapping.insert("baseline_aero".to_string(), "t-baseline-aero.result".to_string());
+        bc_input_mapping.insert(
+            "baseline_consumer_elec".to_string(),
+            "t-baseline-consumer-elec.result".to_string(),
+        );
+        bc_input_mapping.insert("baseline_auto".to_string(), "t-baseline-auto.result".to_string());
+        nodes.push(WorkflowNode::Code(CodeNode {
+            base: WorkflowNodeBase {
+                id: code_node_id.clone(),
+                title: format!("瓶颈指标计算 #{i}"),
+                description: Some("基于产业链数据和财务数据计算客观瓶颈指标".into()),
+                position: Position {
+                    x: trend_x_positions[i] + 20.0,
+                    y: 360.0,
+                },
+                retry: RetryConfig::default(),
+                timeout: Some(30),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+            },
+            config: CodeNodeConfig {
+                language: "rhai".into(),
+                code: bottleneck_code,
+                output_var: code_node_id.clone(),
+                tool_name: None,
+                execute_directly: true,
+                input_mapping: bc_input_mapping,
+            },
+        }));
+        edges.push(edge(
+            &format!("e-{decomposer_id}-{code_node_id}"),
+            &decomposer_id,
+            &code_node_id,
+        ));
+
+        // ── chokepoint-identifier: Agent 瓶颈鉴定（基于客观指标 + 产业链分析）──
         let chokepoint_prompt = format!(
             "你的任务：对上游产业链拆解结果（trend #{i}）进行瓶颈验证。\
-             从供给刚性、需求弹性、不可替代性三个维度量化评分。\
+             你将收到三份输入：产业链拆解详情、客观瓶颈指标、数据可信度标签。\
+             \n\n\
+             核心原则：\n\
+             1. **客观指标优先**：下游 c-bottleneck-{tn} 节点已基于可用数据计算出各维度客观评分。\
+             你的三力评分必须以 result.computed_nodes 中的数字为基准，\
+             而非从零编造。\n\
+             2. 数据可信度标签（data_reliability）决定你调整评分的自由度：\n\
+                - partially_verified = 有真实财务数据支撑，直接继承客观评分\n\
+                - industry_inferred = 无个股财务数据，但有行业排名真实数据交叉验证（涨跌幅/资金流向），\
+             行业动量可作为需求信号的佐证\n\
+                - llm_estimated = 数据不足，基于 LLM 估算，评分须保守压低\n\
+                - insufficient = 严重不足，标记为不确定\n\
+             3. **如果 has_financial_data = true 的环节**，其 financial_comps 字段包含\
+             基于 get_stock_financials 真实数据的多维度评分（gross_margin / revenue_growth / \
+             roe / rnd / capex），这是最可靠的信号来源。\n\
+             4. **强制工具验证**：对最终候选的 A 股公司，你必须调用 compute_industry_position \
+             获取行业竞争地位对比（毛利率/ROE/负债率行业排名），将结果用于验证瓶颈判断。\
+             同时调用 search_news 搜索关键证据（CapEx/订单/产能新闻）。\n\
              \n\n\
              核心要求：\n\
              1. composite_score >= 80 才是真正的瓶颈（三力评分都 >= 70）。\n\
@@ -5689,11 +5833,18 @@ async fn seed_serenity_screening_workflow_template(
             &format!("瓶颈鉴定 #{i}"),
             "chokepoint-identifier",
             &chokepoint_prompt,
-            vec![&decomposer_id],
+            vec![&decomposer_id, &code_node_id],
             std::collections::HashMap::new(),
             trend_x_positions[i],
-            420.0,
+            500.0,
         ));
+        edges.push(edge(
+            &format!("e-{code_node_id}-{chokepoint_id}"),
+            &code_node_id,
+            &chokepoint_id,
+        ));
+        // 增加从 chain-decomposer 到 chokepoint-identifier 的直接边，
+        // 确保 deps_results 包含 decomposer 输出供 resolve_var_path 结构化访问
         edges.push(edge(
             &format!("e-{decomposer_id}-{chokepoint_id}"),
             &decomposer_id,
@@ -5723,9 +5874,10 @@ async fn seed_serenity_screening_workflow_template(
          exit_now 的候选直接排除。\n\
          7. **低关注度量化**：评估机构覆盖变化、搜索热度、相对交易量、市场预期差。\
          关注度越低弹性越大，attention_score > 70 扣分。\n\
-         8. **需求确定性验证**：检查上级节点提供的 demand_validation/demand_evidence，\
-         确保需求由 CapEx/订单/政策硬证据支撑而非 LLM 推测。\
-         使用 search_news 工具搜索关键词验证，如搜索\"英伟达 CapEx\"确认需求真实性。无硬证据扣 20 分。\n\
+         8. **需求确定性验证**：上游 chain-decomposer 和 chokepoint-identifier 已提供\
+         demand_validation 和 verified_bottleneck 数据。利用这些数据结合 search_news 工具\
+         搜索关键词验证（如搜索\"英伟达 CapEx\"确认需求真实性），确保持续需求由 CapEx/订单/\
+         政策硬证据支撑而非 LLM 推测。无硬证据扣 20 分。\n\
          9. 每个候选必须给出具体的 serenity_score 和风险提示。\n\
         10. **输出数量**：输出 3-5 个最优质的候选公司，宁缺毋滥。\
         若某个瓶颈趋势下所有公司都不符合标准，不要强行输出。\
@@ -5756,56 +5908,212 @@ async fn seed_serenity_screening_workflow_template(
          \"search_heat\": \"冷门 | 正常 | 热门\",\
          \"relative_volume\": \"低于均值 N% | 正常 | 高于均值 N%\",\
          \"consensus_gap\": \"明显低估 | 合理 | 高估\", \"attention_score\": 30}}], \"summary\": \"...\"}";
+    // context_sources: 提供趋势上下文 + 完整产业链拆解 + 瓶颈验证结果
+    let mapper_ctx: Vec<&str> = vec![
+        "a-trend-scanner",
+        "a-chain-trend1", "a-chain-trend2", "a-chain-trend3",
+        "a-chain-trend4", "a-chain-trend5",
+        "a-chokepoint-trend1", "a-chokepoint-trend2", "a-chokepoint-trend3",
+        "a-chokepoint-trend4", "a-chokepoint-trend5",
+    ];
     nodes.push(agent_node(
         "a-candidate-mapper",
         "候选公司筛选",
         "candidate-mapper",
         mapper_prompt,
-        vec![
-            "a-chokepoint-trend1",
-            "a-chokepoint-trend2",
-            "a-chokepoint-trend3",
-        ],
+        mapper_ctx,
         std::collections::HashMap::new(),
         340.0,
         660.0,
     ));
+    // 为所有 context_sources 节点添加直接边
     for tn in &trend_names {
         let cid = format!("a-chokepoint-{tn}");
         edges.push(edge(&format!("e-{cid}-a-candidate-mapper"), &cid, "a-candidate-mapper"));
     }
+    // trend-scanner → candidate-mapper
+    edges.push(edge(
+        "e-a-trend-scanner-a-candidate-mapper",
+        "a-trend-scanner",
+        "a-candidate-mapper",
+    ));
+    // chain-decomposers → candidate-mapper
+    for tn in &trend_names {
+        let did = format!("a-chain-{tn}");
+        edges.push(edge(&format!("e-{did}-a-candidate-mapper"), &did, "a-candidate-mapper"));
+    }
 
-    // ── StorageNode: 持久化候选结果 ──
-    nodes.push(WorkflowNode::Storage(StorageNode {
-        base: WorkflowNodeBase {
-            id: "s-save-candidates".into(),
-            title: "保存候选结果".into(),
-            description: Some("将 Serenity 筛选结果持久化到 serenity_candidate_pool 表".into()),
-            position: Position { x: 340.0, y: 780.0 },
-            retry: RetryConfig::default(),
-            timeout: Some(30),
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-        },
-        config: StorageNodeConfig {
-            backend: "sqlite".into(),
-            operation: "insert".into(),
-            input_var: "a-candidate-mapper".into(),
-            collection: "serenity_candidates".into(),
-            key_var: None,
-            output_var: "s-save-candidates-result".into(),
-        },
-    }));
-    edges.push(edge("e-a-candidate-mapper-s-save", "a-candidate-mapper", "s-save-candidates"));
+    // ── 候选持久化 ──
+    // 注：StorageNode 不再需要 → run_serenity_screening() 中 Rust 代码已通过
+    // reco_picks::ActiveModel 实体完成持久化（含完整性校验、种子同步、全量数据缓存）
+    // 此处保持干净，不为 workflow 引入虚假节点。
+
+    // ── 为所有 AgentNode 按角色配置工具 ──
+    // agent_node 闭包中 tools/exposed_tools 为空，需要从 tool_defs 中注入。
+    // 按角色分配工具集：避免 LLM 调用不相关的工具浪费 token。
+    let tool_def_map: std::collections::HashMap<&str, &ToolDef> =
+        tool_defs.iter().map(|td| (td.name.as_str(), td)).collect();
+    let resolve_tools = |names: &[&str]| -> Vec<ToolDef> {
+        names
+            .iter()
+            .filter_map(|name| tool_def_map.get(name).cloned())
+            .cloned()
+            .collect()
+    };
+    // 数据集工具（Phase 0）：可供趋势扫描器调用获取行业级数据
+    let phase0_tools = &[
+        "get_industry_ranking", "get_cls_flash", "get_stock_concept_blocks",
+        "get_north_bound_flow", "get_market_dragon_tiger",
+    ];
+    // 产业链分析工具（Phase 1）：供 chain-decomposer / chokepoint-identifier 调用
+    let chain_tools = &[
+        "search_stock", "get_stock_financials", "get_stock_quote",
+        "get_stock_institutional_visits", "compute_industry_position",
+    ];
+    // 候选筛选工具（Phase 2）：供 candidate-mapper 全功能调用
+    let candidate_tools = &[
+        "search_stock", "get_stock_financials", "get_stock_quote",
+        "get_stock_institutional_visits", "get_stock_news",
+        "get_stock_research_reports", "search_news", "compute_attention_score",
+        "compute_industry_position", "check_exit_signals",
+    ];
+    // 后处理工具（回馈闭环）
+    for node in &mut nodes {
+        if let WorkflowNode::Agent(a) = node {
+            let tools = match a.config.agent_profile_id.as_deref() {
+                Some("stock-trend-scanner") => resolve_tools(phase0_tools),
+                Some("stock-chain-decomposer" | "stock-chokepoint-identifier") => {
+                    resolve_tools(chain_tools)
+                },
+                Some("stock-candidate-mapper") => {
+                    // 候选映射器需要完整上下文：链分析 + 候选筛选
+                    let mut t = resolve_tools(chain_tools);
+                    t.extend(resolve_tools(candidate_tools));
+                    t
+                },
+                // 兜底：给予基本查询工具
+                _ => resolve_tools(&["search_stock", "get_stock_quote"]),
+            };
+            a.config.tools = tools;
+        }
+    }
 
     // ── 序列化 ──
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| format!("序列化节点失败: {e}"))?;
     let edges_json = serde_json::to_string(&edges).map_err(|e| format!("序列化边失败: {e}"))?;
 
-    // ── Variables ──
-    let variables_json = serde_json::to_string(&Vec::<Variable>::new())
-        .map_err(|e| format!("序列化变量失败: {e}"))?;
+    // ── Variables（用户可调整的参数字段）──
+    // ref_*_code 为行业财务基线 ToolNode 使用的代表股代码，可通过 UI 修改
+    let serenity_vars = vec![
+        Variable {
+            name: "ref_semi_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("002371"),
+            description: Some("行业财务基线参考 - 半导体设备代表股代码（北方华创）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "ref_battery_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("300750"),
+            description: Some("行业财务基线参考 - 电池/新能源代表股代码（宁德时代）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "ref_chem_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("600309"),
+            description: Some("行业财务基线参考 - 化工/材料代表股代码（万华化学）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "ref_med_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("300760"),
+            description: Some("行业财务基线参考 - 医药器械代表股代码（迈瑞医疗）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "ref_aero_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("600760"),
+            description: Some("行业财务基线参考 - 军工航天代表股代码（中航沈飞）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "ref_consumer_elec_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("002475"),
+            description: Some("行业财务基线参考 - 消费电子代表股代码（立讯精密）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "ref_auto_code".into(),
+            var_type: "string".into(),
+            value: serde_json::json!("002594"),
+            description: Some("行业财务基线参考 - 汽车零部件代表股代码（比亚迪）".into()),
+            is_secret: false,
+        },
+        // ── V6 新增：估值过滤参数（可在前端 Serenity 设置Tab中调整）──
+        Variable {
+            name: "serenity_max_pe".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(100.0),
+            description: Some("PE 上限：PE(TTM) 超过此值的候选直接排除（默认100）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_max_pb".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(10.0),
+            description: Some("PB 上限：市净率超过此值的候选直接排除（默认10）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_max_3m_gain_pct".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(80.0),
+            description: Some("近3月涨幅上限(%)：超过此值的候选排除，只拦短期飞过头的标的（默认80%）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_max_12m_gain_pct".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(300.0),
+            description: Some("近12月涨幅上限(%)：超过此值的候选排除，只拦长期飞过头的标的（默认300%）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_min_gross_margin".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(30.0),
+            description: Some("毛利率下限(%)：低于此值且评分<80时排除（默认30%，瓶颈股早期可能微利）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_max_debt_ratio".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(70.0),
+            description: Some("负债率上限(%)：高于此值且评分<85时排除（默认70%，扩张期瓶颈企业可能高负债）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_growth_exempt_pct".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(50.0),
+            description: Some("高增长豁免阈值(%)：营收增速超过此值时PE超标可豁免（PEG<2即可放行，默认50%）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "serenity_min_revenue_growth".into(),
+            var_type: "float".into(),
+            value: serde_json::json!(5.0),
+            description: Some("营收增速下限(%)：低于此值且评分<85时排除（默认5%，成熟瓶颈可能增速不高）".into()),
+            is_secret: false,
+        },
+    ];
+    let variables_json =
+        serde_json::to_string(&serenity_vars).map_err(|e| format!("序列化变量失败: {e}"))?;
 
     // ── Tags ──
     let tags_json = serde_json::to_string(&["serenity", "bottleneck", "screening"])

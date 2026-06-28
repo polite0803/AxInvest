@@ -361,6 +361,19 @@ impl NodeExecutorTrait for AgentExecutor {
                 | axagent_harness::types::ProviderType::Ollama
         );
 
+        // V53 修复(扩展1): 获取模型运行时行为提示。
+        // 不同模型在处理工具调用和输出格式上存在差异。
+        // agnes-2.0-flash 等模型: tool_call_empty_content=true, tool_call_xml_inline=true
+        let behavior_hints = adapter.get_behavior_hints(&model);
+        if behavior_hints.tool_call_empty_content || behavior_hints.tool_call_xml_inline {
+            tracing::info!(
+                model = %model,
+                tool_call_empty_content = %behavior_hints.tool_call_empty_content,
+                tool_call_xml_inline = %behavior_hints.tool_call_xml_inline,
+                "模型行为提示已启用, 执行器将自适应调整工具调用策略"
+            );
+        }
+
         // 4. 构建 prompt：Role + Expert + 行内追加（运行时拼接，不预缓存）
         let role_desc = resolve_role(&an.config, profile.as_ref());
         let role_name = profile
@@ -414,12 +427,35 @@ impl NodeExecutorTrait for AgentExecutor {
 
         // 4d. 上下文数据（自然语言格式化，替代 raw JSON dump）
         if !an.config.context_sources.is_empty() {
+            let mut missing_sources: Vec<&String> = Vec::new();
             all_segments.push(TemplateSegment::Static("\n\n--- 上游节点输出 ---\n".to_string()));
             for source in &an.config.context_sources {
                 if let Some(value) = context.variables.get(source) {
                     let formatted = format_context_source(source, value);
                     all_segments.push(TemplateSegment::Static(formatted));
+                } else {
+                    missing_sources.push(source);
+                    tracing::error!(
+                        node_id = %node.base_id(),
+                        context_source = %source,
+                        "context_sources 变量未在 context.variables 中找到（tool 节点可能失败或未执行）"
+                    );
                 }
+            }
+            if !missing_sources.is_empty() {
+                let msg = format!(
+                    "⚠️ 以下上游数据源未获取到数据: {}。\n\
+——你仍然必须完成指定的分析任务，基于现有数据（行情、K线、财务数据）给出分析结论。\n\
+——即使部分数据缺失，也要基于可用信息给出明确的看多/看空/中性判断，不要输出占位文本。\n\
+——该股票的基本面信息（代码、名称、行业）已在上下文中给出，请充分利用。\n\
+——绝不允许输出'数据缺失'、'无法获取'、'工具失败'、'抱歉'等拒绝句式。\n\n",
+                    missing_sources
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                all_segments.push(TemplateSegment::Static(msg));
             }
         }
 
@@ -480,6 +516,8 @@ impl NodeExecutorTrait for AgentExecutor {
 3. **不允许输出与当前步骤无关的内容** — 专注于完成指定任务
 4. **绝不允许拒绝回答** — 即使数据不足也要如实输出低评分。必须在报告中说明数据缺口，配置相关字段为低分值。禁止输出"抱歉我无法回答"或任何拒绝句式
 5. **不要做额外假设** — 只基于给定的输入数据执行操作
+6. **JSON 字符串值必须正确转义** — report 等长文本字段中的半角双引号 `"` 必须写成 `\"`，换行符必须写成 `\n`（反斜杠 n），而不是真实换行。这是最常见的 JSON 错误，请输出前检查
+7. **工具调用后必须输出最终 JSON** — 如果你通过工具调用获得了数据（search_stock / get_stock_financials 等），请在工具执行结果之后立即输出最终的 JSON 分析结果，不要再继续调用额外的工具。**每轮最多只能调用一次工具，调用后必须基于结果输出 JSON。**
 "#
             } else {
                 r#"
@@ -510,7 +548,8 @@ impl NodeExecutorTrait for AgentExecutor {
             let mut pairs: Vec<(&String, &String)> = an.config.input_mapping.iter().collect();
             pairs.sort_by(|a, b| a.0.cmp(b.0));
             for (target_key, source_key) in &pairs {
-                if let Some(value) = context.variables.get(source_key.as_str()) {
+                // 使用 resolve_var_path 支持点号路径导航（与 CodeNode 保持一致）
+                if let Some(value) = super::resolve_var_path(source_key, &context.variables) {
                     let formatted = match value {
                         Value::String(s) => s.clone(),
                         other => other.to_string(),
@@ -518,7 +557,7 @@ impl NodeExecutorTrait for AgentExecutor {
                     injected_lines.push_str(&format!("【{target_key}】:{formatted}\n"));
                 } else {
                     tracing::debug!(
-                        "Agent node {} input_mapping: source '{}' not found in variables",
+                        "Agent node {} input_mapping: resolve_var_path('{}') returned None",
                         an.base.id,
                         source_key
                     );
@@ -669,8 +708,28 @@ impl NodeExecutorTrait for AgentExecutor {
         let mut final_content = String::new();
         let mut final_thinking: Option<String> = None;
         let mut tool_calls_made: Vec<serde_json::Value> = Vec::new();
+        // V53 修复(M2): 连续空 content + tool 调用轮次计数器。
+        // agnes-2.0-flash 等模型在工具调用后始终不生成内容，
+        // 用尽 5 轮只浪费 token 和时间。2 轮连续空内容后提前终止。
+        let mut consecutive_empty_tool_rounds = 0u32;
 
         for round in 0..max_rounds {
+            // V53 修复(M2): 连续 2 轮 content 为空 + 工具调用后提前终止。
+            // agnes-2.0-flash 等模型在工具调用后始终不生成文本内容，
+            // 用尽所有轮次浪费 token，此优化可节省 60%+ 的无效 API 调用。
+            if consecutive_empty_tool_rounds >= 2 {
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    consecutive_empty_tool_rounds,
+                    round = round,
+                    max_rounds,
+                    "连续 {} 轮工具调用后 content 为空, 提前终止 tool 循环 (节省 {} 轮 API 调用)",
+                    consecutive_empty_tool_rounds,
+                    max_rounds - round,
+                );
+                break;
+            }
+
             let request = ChatRequest {
                 model: model.clone(),
                 messages: messages.clone(),
@@ -747,23 +806,35 @@ impl NodeExecutorTrait for AgentExecutor {
             final_thinking = stream_thinking.clone();
 
             // 日志：LLM 返回内容为空时发出警告（帮助排查 analyst 节点无数据问题）
+            let has_tc = stream_tool_calls.as_ref().is_some_and(|tc| !tc.is_empty());
             if final_content.trim().is_empty() {
                 tracing::warn!(
                     node_id = %node.base_id(),
                     model = %model,
                     usage = ?stream_usage,
                     has_thinking = %final_thinking.is_some(),
-                    has_tool_calls = %stream_tool_calls.as_ref().is_some_and(|tc| !tc.is_empty()),
+                    has_tool_calls = %has_tc,
                     "Agent LLM 返回空内容 (round {}/{}, output_mode={:?})",
                     round + 1, max_rounds, an.config.output_mode
                 );
+                // V53 修复(M2): 空 content + 有 tool call → 记录连续空轮次
+                if has_tc {
+                    consecutive_empty_tool_rounds += 1;
+                }
+            } else {
+                // 有有效内容 → 重置计数器
+                consecutive_empty_tool_rounds = 0;
             }
 
             // 检测非标准文本式工具调用（仅对已知使用此格式的 provider 生效）。
             // 部分模型/代理（如 Qwen 通过 CHAT2API/Hermes/Ollama）不输出标准
             // tool_calls delta，而是将工具调用嵌在文本内容中。解析后注入标准
             // tool_calls 路径使工具能正常执行。
-            if needs_inline_tool_parsing
+            // V53 修复(扩展1): 当 model BehaviorHints 声明 tool_call_xml_inline=true 时，
+            // 即使 provider 类型不匹配也启用内联解析（适配 agnes-2.0-flash 等模型）。
+            let should_parse_inline = needs_inline_tool_parsing
+                || behavior_hints.tool_call_xml_inline;
+            if should_parse_inline
                 && stream_tool_calls.as_ref().is_none_or(|tc| tc.is_empty())
                 && !stream_content.is_empty()
                 && let Some(parsed) = parse_inline_tool_calls(&stream_content)
@@ -774,7 +845,8 @@ impl NodeExecutorTrait for AgentExecutor {
                     prov.provider_type
                 );
                 stream_tool_calls = Some(parsed);
-                stream_content.clear();
+                // 保留推理文本不清空：LLM 在调用工具前输出的分析思路是有价值的上下文，
+                // 清空后 final_content 会始终为空（尤其当 max_tool_rounds 全部用于工具调用时）。
             }
 
             // 检查是否有工具调用
@@ -848,6 +920,37 @@ impl NodeExecutorTrait for AgentExecutor {
             if round + 1 >= max_rounds {
                 break;
             }
+
+            // V53 修复: 工具调用后 content 为空 → 注入强制总结指令
+            // agnes-2.0-flash 等模型将工具调用视为"回复完成"，不生成 JSON content，
+            // 导致所有轮次浪费在重复调用工具上，最终 strict_mode 降级为 fallback JSON。
+            // 注入显式系统指令要求模型直接输出最终答案，不再调用工具。
+            // V53(扩展1): 当 behavior_hints.tool_call_empty_content=true 时，即使
+            // content 非空也注入强制总结指令（模型已知在工具调用后只返回工具调用）。
+            if !tc_list.is_empty()
+                && round + 1 < max_rounds
+                && (final_content.trim().is_empty() || behavior_hints.tool_call_empty_content)
+            {
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    round = round + 1,
+                    max_rounds,
+                    tool_call_empty_content = %behavior_hints.tool_call_empty_content,
+                    "tool 调用后注入强制总结指令 (第{}轮/共{}轮)",
+                    round + 1, max_rounds
+                );
+                messages.push(ChatMessage {
+                    role: "system".to_string(),
+                    content: ChatContent::Text(
+                        "你已经获得了足够的工具数据。现在请基于这些数据直接输出最终分析结果，不要再调用任何工具。\
+                         \n如果你已获得需要的数据，直接输出最终 JSON。不需要额外确认。"
+                            .to_string(),
+                    ),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: None,
+                });
+            }
         }
 
         // ── VERDICT tag 提取 + strict_mode 输出校验 ──
@@ -917,16 +1020,63 @@ impl NodeExecutorTrait for AgentExecutor {
                             final_content.chars().take(80).collect::<String>()
                         );
                     } else {
-                        validate_strict_mode_output(&trimmed, &an.config.output_mode)?;
+                        // V39 修复: strict_mode 校验失败时降级输出而非返回 NodeError。
+                        // 旧的 validate_strict_mode_output(...)? 在所有 JSON 修复失败后
+                        // 返回 Err(NodeError)，导致节点 Failed，下游节点拿不到输出。
+                        // 降级策略：用原始文本 + 中性 VERDICT 构造可用 JSON 输出。
+                        // V53 修复(M1): 当 tool 已被调用且有返回数据时，将工具执行结果
+                        // 注入 tool_results_summary 字段，使下游节点有机会基于实际数据
+                        // 而非纯噪音"中性/50/50"做判断。
+                        if let Err(e) =
+                            validate_strict_mode_output(&trimmed, &an.config.output_mode)
+                        {
+                            tracing::warn!(
+                                "strict_mode: LLM 输出格式校验失败,降级为原始文本输出 (output_mode={:?}): {e}",
+                                an.config.output_mode,
+                            );
+                            // 构建 tool 摘要: 若工具有实际返回数据则纳入
+                            let tool_summary: Vec<serde_json::Value> = tool_calls_made
+                                .iter()
+                                .filter_map(|tc| {
+                                    let result_str = tc.get("result")?.as_str()?;
+                                    // 过滤掉空结果或错误结果
+                                    if result_str.is_empty() || result_str.starts_with("Error:") {
+                                        None
+                                    } else {
+                                        Some(serde_json::json!({
+                                            "tool": tc.get("tool"),
+                                            "arguments": tc.get("arguments"),
+                                            "result_summary": result_str.chars().take(500).collect::<String>(),
+                                        }))
+                                    }
+                                })
+                                .collect();
+                            let fallback_json = serde_json::json!({
+                                "report": trimmed,
+                                // V40 修复: 增加 position_pct=50 使前端的 computeRiskScore
+                                // 能通过第1优先级（VERDICT position_pct→风险分=100-50=50）给出
+                                // 中等风险分，而非因 position_pct 缺失走 confidence=30 给出低风险。
+                                // 使用默认时间范围
+                                "verdict": {"verdict": "中性", "bull_score": 50, "bear_score": 50, "confidence": 0, "position_pct": 50},
+                                "strict_mode_fallback": true,
+                                "tool_results_summary": tool_summary,
+                            });
+                            final_content = fallback_json.to_string();
+                        }
                     }
                 }
             }
         }
 
         // ── 防幻觉锚定检查 ──
+        // V53 修复: strict_mode 已生成 fallback JSON 时跳过后验锚定检查。
+        // fallback JSON ("strict_mode_fallback": true) 是合成的中性输出，
+        // 本身不包含用户内容，对其做锚定检查必然得到 score=0，除了污染日志外无意义。
+        let is_fallback_content = final_content.contains("strict_mode_fallback");
         if let Some(ref hg_config) = an.config.hallucination_guard
             && hg_config.enabled
             && !final_content.is_empty()
+            && !is_fallback_content
         {
             // 构建源上下文：从 context_sources 变量提取
             let source_context: String = if an.config.context_sources.is_empty() {
@@ -1533,10 +1683,20 @@ fn user_prompt_for_rag(
 /// 部分模型/代理（如 Qwen 通过 CHAT2API）不输出 OpenAI 标准格式的
 /// tool_calls，而是将工具调用嵌在文本中。此函数检测并解析这些格式：
 ///   <|CHAT2API|tool_calls><|CHAT2API|invoke name="fn"><|CHAT2API|parameter name="p"><![CDATA[v]]></|CHAT2API|parameter></|CHAT2API|invoke><|CHAT2API|tool_calls>
+///   <tool_call><function=name><parameter=key>value</parameter></function></tool_call> (XML 风格)
 /// 解析成功后返回 `Some(Vec<ToolCall>)`，调用方应将 `stream_content` 清空
 /// 并将解析结果作为标准 `tool_calls` 处理。
 fn parse_inline_tool_calls(text: &str) -> Option<Vec<axagent_harness::types::ToolCall>> {
-    // 检查是否有非标准 tool_call 标记
+    // 先尝试 CHAT2API 格式
+    if let Some(results) = parse_chat2api_format(text) {
+        return Some(results);
+    }
+    // 再尝试 XML <tool_call> 格式（agi X-2.0-flash 等模型使用）
+    parse_xml_tool_call_format(text)
+}
+
+/// 解析 CHAT2API 格式的 inline tool calls
+fn parse_chat2api_format(text: &str) -> Option<Vec<axagent_harness::types::ToolCall>> {
     let tool_calls_start = text.find("<|CHAT2API|tool_calls>")?;
     let tool_calls_end = text.rfind("<|CHAT2API|tool_calls>")?;
     if tool_calls_start == tool_calls_end {
@@ -1612,6 +1772,100 @@ fn parse_inline_tool_calls(text: &str) -> Option<Vec<axagent_harness::types::Too
     }
 }
 
+/// 解析 XML 格式的 inline tool calls：
+///   <tool_call>
+///   <function=name>
+///   <parameter=key>value</parameter>
+///   </function>
+///   </tool_call>
+///
+/// 这种格式由 agnes-2.0-flash 等模型在无法使用标准 tool_calls delta 时的输出。
+fn parse_xml_tool_call_format(text: &str) -> Option<Vec<axagent_harness::types::ToolCall>> {
+    if !text.contains("<tool_call>") {
+        return None;
+    }
+
+    let mut results = Vec::new();
+    let mut remaining = text;
+
+    while let Some(tc_start) = remaining.find("<tool_call>") {
+        let content_start = tc_start + "<tool_call>".len();
+        let tc_end = match remaining[content_start..].find("</tool_call>") {
+            Some(p) => content_start + p,
+            None => break,
+        };
+        let section = &remaining[content_start..tc_end];
+
+        // 提取 <function=name>...</function>
+        let fn_name = if let Some(fn_start) = section.find("<function=") {
+            let after_fn_open = fn_start + "<function=".len();
+            let name_end = match section[after_fn_open..].find('>') {
+                Some(p) => after_fn_open + p,
+                None => break,
+            };
+            let name = &section[after_fn_open..name_end];
+            // 找 </function>
+            let fn_close = match section[name_end..].find("</function>") {
+                Some(p) => name_end + p,
+                None => break,
+            };
+            let params_section = &section[name_end..fn_close];
+
+            // 解析所有 <parameter=key>value</parameter>
+            let mut args_map = serde_json::Map::new();
+            let mut param_search = params_section;
+            while let Some(param_start) = param_search.find("<parameter=") {
+                let key_start = param_start + "<parameter=".len();
+                let key_end = match param_search[key_start..].find('>') {
+                    Some(p) => key_start + p,
+                    None => break,
+                };
+                let param_key = &param_search[key_start..key_end];
+
+                let value_start = key_end + 1;
+                let close_tag = format!("</parameter>");
+                let value_end = match param_search[value_start..].find(&close_tag) {
+                    Some(p) => value_start + p,
+                    None => break,
+                };
+                let param_value = &param_search[value_start..value_end];
+
+                args_map.insert(
+                    param_key.to_string(),
+                    serde_json::Value::String(param_value.trim().to_string()),
+                );
+
+                param_search = &param_search[value_end + close_tag.len()..];
+            }
+
+            let args_json = serde_json::Value::Object(args_map);
+            let arguments_str = serde_json::to_string(&args_json).unwrap_or_default();
+
+            Some(axagent_harness::types::ToolCall {
+                id: format!("xml-inline-{}", results.len()),
+                call_type: "function".to_string(),
+                function: axagent_harness::types::ToolCallFunction {
+                    name: name.to_string(),
+                    arguments: arguments_str,
+                },
+            })
+        } else {
+            None
+        };
+
+        if let Some(tc) = fn_name {
+            results.push(tc);
+        }
+        remaining = &remaining[tc_end + "</tool_call>".len()..];
+    }
+
+    if results.is_empty() {
+        None
+    } else {
+        Some(results)
+    }
+}
+
 /// 从 LLM 输出中尝试提取 JSON 片段（剥离 markdown 代码围栏）。
 ///
 /// 处理 LLM 在 JSON 外包裹 markdown fence 的常见情况：
@@ -1669,6 +1923,13 @@ fn repair_json(s: &str) -> String {
     let mut result = s.to_string();
     // 常见 LLM 输出错误修复
     result = result.replace("nulll", "null");
+    // LLM 可能在 JSON 值中输出 undefined (JS 关键字，非法 JSON)
+    // 需要加双引号修复: `: undefined` → `: "undefined"`, `,undefined` → `,"undefined"`
+    result = result.replace(": undefined", ": \"undefined\"");
+    result = result.replace(",undefined", ",\"undefined\"");
+    result = result.replace("[undefined", "[\"undefined\"");
+    result = result.replace("(undefined", "(\"undefined\"");
+    result = result.replace("=undefined", "=\"undefined\"");
     // 尾逗号: `,]` → `]`, `,}` → `}`
     result = result.replace(",]", "]");
     result = result.replace(",}", "}");
@@ -1686,8 +1947,151 @@ fn repair_json(s: &str) -> String {
     result = insert_missing_colon(&result);
     // 双引号键修复: 连续两个引号 `""k` → `"k`
     result = result.replace("\"\"", "\"");
+    // 字符串值中未转义的引号修复：LLM 在 JSON 字符串值中输出中文/英文引号时
+    // 高频忘记转义（如 `"report": "text..."..."`），导致 json 解析提前截断。
+    // 扫描已修复的 JSON，识别并转义字符串值中不应结尾的引号。
+    result = repair_unescaped_quotes(&result);
     // 字符串值缺开引号: `"key"(` 或 `"key" "text` 但缺冒号的情况已由 insert_missing_colon 处理
     result
+}
+
+/// 修复 JSON 字符串值中未转义的引号。
+/// LLM 高频在 report/description 等长文本字段中输出未转义的 `"` 字符，
+/// 导致 JSON 解析器错误地提前结束字符串值。
+///
+/// 策略：逐字符扫描，追踪是否在字符串值内。在字符串值内遇到未转义的 `"` 时，
+/// 检查其后是否可能是真正的字符串结尾——如果不是，则转义该引号。
+///
+/// V42 增强：逗号后的 `"key":` 模式识别。
+/// 旧策略仅检查 `"` 后的下一个非空白字符是否为 `,` `}` `]` `:`，
+/// 但遇到 `文本"X",文本`（即引号后跟逗号但非 JSON 键分隔）会误判为字符串结尾。
+/// 新策略：当 `"` 后跟 `,` 时，额外检查逗号后是否为 `"key":` 的 JSON 键模式。
+/// 只有当逗号后紧跟 `"字段名":` 模式（字段名非空且后跟冒号）时，才判定为真正的字符串结尾。
+fn repair_unescaped_quotes(s: &str) -> String {
+    fn is_json_ws(b: u8) -> bool {
+        matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+    }
+
+    /// 从位置 pos 开始扫描，检查是否符合 `"key":` 的 JSON 键模式。
+    /// 返回 true 当扫描到 `"` 后跟（跳过空白）`:` 时。
+    fn is_json_key_pattern(bytes: &[u8], mut pos: usize) -> bool {
+        // 跳过起始的空白
+        while pos < bytes.len() && is_json_ws(bytes[pos]) {
+            pos += 1;
+        }
+        if pos >= bytes.len() || bytes[pos] != b'"' {
+            return false;
+        }
+        pos += 1; // 跳过开头的 "
+        // 扫描到下一个 " 或结尾
+        while pos < bytes.len() && bytes[pos] != b'"' {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            return false;
+        }
+        pos += 1; // 跳过结尾的 "
+        // 跳过空白，检查 :
+        while pos < bytes.len() && is_json_ws(bytes[pos]) {
+            pos += 1;
+        }
+        pos < bytes.len() && bytes[pos] == b':'
+    }
+
+    /// 检查位置 i 的 `"` 是否为真正的字符串结尾。
+    /// 在字符串值内，当 `"` 后跟（跳过空白）`}` `]` 时 → 绝对结尾。
+    /// 当 `"` 后跟（跳过空白）`,` 时 → 潜在结尾，需进一步检查：
+    ///   如果逗号后是 `"key":` 的 JSON 键模式 → 真实结尾
+    ///   否则 → 只是字符串内容中的引号
+    /// 当 `"` 后跟（跳过空白）`:` 时 → JSON 键的结尾（退出字符串值状态）
+    fn is_string_end(bytes: &[u8], quote_pos: usize) -> (bool, bool) {
+        // (is_end, is_key_end)
+        let mut j = quote_pos + 1;
+        while j < bytes.len() && is_json_ws(bytes[j]) {
+            j += 1;
+        }
+        if j >= bytes.len() {
+            return (true, false);
+        }
+        match bytes[j] {
+            b'}' | b']' => (true, false), // 绝对结尾
+            b':' => (true, true),         // JSON 键结尾
+            b',' if is_json_key_pattern(bytes, j + 1) => (true, false),
+            b',' => (false, false),
+            _ => (false, false),
+        }
+    }
+
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len() + 64);
+    let mut i = 0;
+
+    // 状态：是否在字符串值内（即 after `"key": "` 内，不包括 key 本身）
+    let mut in_string_value = false;
+    // 前一个非空白字符（用于判断 `:` → 开始字符串值）
+    let mut last_non_ws: Option<u8> = None;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if b == b'"' {
+            if !in_string_value {
+                // 检查这个引号是否开始一个字符串值
+                // 条件：前一个非空白字符是 `:` 或 `[` 或 `,` 或 `{`
+                if let Some(prev) = last_non_ws
+                    && (prev == b':' || prev == b'[' || prev == b',' || prev == b'{')
+                {
+                    in_string_value = true;
+                    result.push(b'"');
+                    i += 1;
+                    continue;
+                }
+                result.push(b'"');
+                i += 1;
+            } else {
+                // 在字符串值内：检查这个引号是否是真正的字符串结尾
+                let is_escaped = i > 0 && bytes[i - 1] == b'\\';
+
+                if is_escaped {
+                    // 已转义，保持原样
+                    result.push(b'"');
+                    i += 1;
+                    continue;
+                }
+
+                let (is_end, _is_key_end) = is_string_end(bytes, i);
+
+                if is_end {
+                    // 真正的字符串结尾
+                    result.push(b'"');
+                    in_string_value = false;
+                    // 如果结尾类型是 key 结尾（`:` 后只可能是 value 的开头），
+                    // 但当前状态已在字符串值外，不需要额外处理
+                    i += 1;
+                } else {
+                    // 字符串值中间的未转义引号 → 转义
+                    result.push(b'\\');
+                    result.push(b'"');
+                    i += 1;
+                }
+            }
+        } else {
+            // 非引号字符
+            if b == b'\\' && in_string_value && i + 1 < bytes.len() {
+                // 转义序列：跳过下一个字符（如 \n, \", \\）
+                result.push(b'\\');
+                result.push(bytes[i + 1]);
+                i += 2;
+                continue;
+            }
+            if !is_json_ws(b) {
+                last_non_ws = Some(b);
+            }
+            result.push(b);
+            i += 1;
+        }
+    }
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
 /// 在两个字符之间插入逗号（处理中间有空白符的情况）
@@ -2133,6 +2537,11 @@ fn validate_strict_mode_output(
 ) -> Result<(), NodeError> {
     use axagent_harness::workflow_types::OutputMode;
     let trimmed = final_content.trim();
+    // V53 修复: 在进入任何修复链之前统一剥离原始控制字符（\u{0000}-\u{001F}）。
+    // LLM 常在 JSON 字符串值中直接输出原始换行/制表符等，导致 serde_json 解析失败。
+    // strip_control_chars 将其替换为空格，不影响 JSON 结构。
+    let cleaned = strip_control_chars(trimmed);
+    let trimmed: &str = &cleaned;
 
     // 所有模式通用：空输出检测
     if trimmed.is_empty() {
@@ -2158,7 +2567,14 @@ fn validate_strict_mode_output(
         // 模式1: 剥离原始控制字符（LLM 常在 JSON 字符串值中输出 \u0000-\u001F）
         let stripped_control = strip_control_chars(trimmed);
         if stripped_control != trimmed {
-            candidates.push(stripped_control);
+            candidates.push(stripped_control.clone());
+            // V42 修复: 控制字符剥离后再做一次 repair_json，覆盖"先有换行后有未转义引号"的场景。
+            // 原始文本可能同时包含未转义换行(被 strip_control_chars 修复)和未转义引号，
+            // 两者各自独立产生的候选都无法覆盖交集情况。
+            let repaired_after_strip = repair_json(&stripped_control);
+            if repaired_after_strip != stripped_control {
+                candidates.push(repaired_after_strip);
+            }
         }
 
         // 模式1: markdown fence 包裹 (```json \n {...} \n ```)

@@ -147,10 +147,14 @@ fn row_from_job(j: &CronJob) -> RecommendationCronRow {
         top_n: 5,
     });
     let last_picks_count = j.last_result.as_ref().and_then(|r| {
-        r.output
-            .as_deref()
-            .and_then(|s| s.strip_prefix("picks="))
-            .and_then(|s| s.parse::<usize>().ok())
+        r.output.as_deref().and_then(|s| {
+            // 试 JSON 解析：{"picks": 15}
+            serde_json::from_str::<serde_json::Value>(s)
+                .ok()
+                .and_then(|v| v["picks"].as_u64().map(|n| n as usize))
+                // 兼容旧格式：picks=15
+                .or_else(|| s.strip_prefix("picks=").and_then(|s| s.parse::<usize>().ok()))
+        })
     });
     RecommendationCronRow {
         id: j.id.clone(),
@@ -167,6 +171,7 @@ fn row_from_job(j: &CronJob) -> RecommendationCronRow {
 }
 
 /// 提取 cron job 中的 config（供 [services] cron executor 调用）
+#[allow(dead_code)]
 pub fn extract_reco_config(j: &CronJob) -> Option<RecoCronConfig> {
     if j.task_type.as_deref() != Some("stock-recommendation") {
         return None;
@@ -175,6 +180,7 @@ pub fn extract_reco_config(j: &CronJob) -> Option<RecoCronConfig> {
 }
 
 /// 构造推送 payload：把 picks 数量写入 output 字段（前端展示用）
+#[allow(dead_code)]
 pub fn picks_to_run_output(picks: &[RecoPick]) -> String {
-    format!("picks={}", picks.len())
+    serde_json::json!({"picks": picks.len()}).to_string()
 }

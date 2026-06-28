@@ -357,6 +357,7 @@ pub mod cninfo;
 pub mod eastmoney;
 pub mod iwencai;
 pub mod mootdx;
+pub mod neodata;
 pub mod sina;
 pub mod tencent;
 pub mod ths;

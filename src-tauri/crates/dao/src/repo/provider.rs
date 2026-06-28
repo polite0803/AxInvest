@@ -209,8 +209,38 @@ pub async fn resolve_model_for_node(
     let (prov, key, default_model) = resolve_project_default(db).await?;
     let model = node_model
         .or(session_model)
-        .unwrap_or(&default_model)
-        .to_string();
+        .map(|m| m.trim().to_string())
+        .unwrap_or(default_model.clone());
+
+    // V40 修复: 当节点指定了模型（node_model）但未指定 provider_id 时，
+    // 检查默认 provider 的模型列表是否支持该模型。若不支持，遍历所有
+    // enabled provider 查找第一个支持该模型的 provider，避免用不兼容的
+    // provider 调用导致 API 错误（如用 ollama 调用 gpt-4o）。
+    if node_model.is_some() {
+        let default_supports = prov
+            .models
+            .iter()
+            .any(|m| m.enabled && m.model_id.trim().eq_ignore_ascii_case(model.trim()));
+        if !default_supports {
+            let all_providers = list_providers(db).await.map_err(|e| e.to_string())?;
+            if let Some(matching) = all_providers.into_iter().find(|p| {
+                p.enabled
+                    && p.models
+                        .iter()
+                        .any(|m| m.enabled && m.model_id.trim().eq_ignore_ascii_case(model.trim()))
+            }) {
+                let mk = matching
+                    .keys
+                    .iter()
+                    .find(|k| k.enabled)
+                    .cloned()
+                    .ok_or_else(|| format!("provider '{}' 无可用 API key", matching.id))?;
+                return Ok((matching, mk, model));
+            }
+            // 未找到匹配 provider，返回默认 provider 的错误由 API 调用层报错
+        }
+    }
+
     Ok((prov, key, model))
 }
 

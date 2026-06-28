@@ -16,7 +16,7 @@ function NodeBadge({ name }: { name: string }) {
   const initial = name.trim().charAt(0).toUpperCase() || "?";
   return (
     <div
-      className="flex items-center justify-center rounded-full text-[10px] font-bold text-white shrink-0"
+      className="flex items-center justify-center rounded-full text-sm font-bold text-white shrink-0"
       style={{
         width: 22,
         height: 22,
@@ -37,7 +37,7 @@ function EvidenceChip({ evidence: ev }: { evidence: EvidenceRef }) {
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded cursor-pointer border"
+      className="inline-flex items-center gap-1 text-sm px-1.5 py-0.5 rounded cursor-pointer border"
       style={{
         background: "var(--surface)",
         borderColor: "var(--border)",
@@ -132,7 +132,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
 
   return (
     <div
-      className="rounded border text-[11px] relative"
+      className="rounded border text-sm relative"
       style={{
         background: "var(--surface)",
         borderColor: node.status === "failed" || violationCount > 0 ? "var(--sa-red)" : "var(--border)",
@@ -165,7 +165,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
                 alignItems: "center",
                 padding: "1px 6px",
                 borderRadius: 8,
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: 700,
                 background: "rgba(239, 68, 68, 0.12)",
                 color: "var(--sa-red, #ef4444)",
@@ -186,7 +186,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
         <div className="px-2 pb-2 space-y-1.5">
           {node.summary && (
             <div
-              className="text-[11px] leading-relaxed"
+              className="text-sm leading-relaxed"
               style={{ color: "var(--color-text-secondary)" }}
             >
               {summaryNodes}
@@ -199,7 +199,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
               style={{
                 margin: 0,
                 paddingLeft: 16,
-                fontSize: 10,
+                fontSize: 12,
                 color: "var(--sa-red, #ef4444)",
               }}
             >
@@ -221,7 +221,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
           )}
 
           {node.confidence > 0 && (
-            <div className="flex items-center gap-1.5 text-[10px]">
+            <div className="flex items-center gap-1.5 text-sm">
               <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
               <div
                 className="flex-1 rounded-full overflow-hidden"
@@ -248,7 +248,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
           <div className="flex gap-1 pt-0.5">
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border"
+              className="inline-flex items-center gap-1 text-sm px-1.5 py-0.5 rounded border"
               style={{
                 background: "transparent",
                 borderColor: "var(--border)",
@@ -260,7 +260,7 @@ export function TimelineNodeCard({ node }: TimelineNodeCardProps) {
                 navigate(`/?refTimeline=${encodeURIComponent(node.id)}`);
               }}
             >
-              <Send size={9} />
+              <Send size={12} />
               {t("stockAnalysis.timeline.sendToChat")}
             </button>
           </div>

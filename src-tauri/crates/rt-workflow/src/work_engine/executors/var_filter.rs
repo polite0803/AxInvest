@@ -69,6 +69,11 @@ pub fn collect_data_vars(variables: &HashMap<String, Value>) -> Vec<(&String, &V
 /// 1. `a-market-analyst.params.bull_score` → 点号路径，逐层导航 JSON 嵌套
 /// 2. `stock_code` → 无点号，直接按 key 查找（完全兼容旧行为）
 ///
+/// 支持自动解析 JSON 字符串字段：当导航到某层时遇到 `Value::String` 且内容为
+/// 合法 JSON 对象/数组，自动 `from_str` 解析后再继续下钻。这修复了 ToolNode
+/// 的 `result` 字段和 AgentNode 的 `content` 字段（均为 JSON 字符串）无法
+/// 通过 `.` 路径访问内部字段的问题。
+///
 /// 实现逻辑与 tool_executor/condition_executor 中的同名函数保持一致。
 pub fn resolve_var_path(path: &str, variables: &HashMap<String, Value>) -> Option<Value> {
     if path.is_empty() {
@@ -79,7 +84,24 @@ pub fn resolve_var_path(path: &str, variables: &HashMap<String, Value>) -> Optio
     if let Some(root) = variables.get(parts[0]) {
         let mut current = root.clone();
         for part in &parts[1..] {
+            // 如果当前值是 JSON 字符串，尝试解析后再导航
+            // 修复：ToolNode/AgentNode 的 result/content 字段是序列化 JSON 字符串
+            if let Value::String(s) = &current
+                && let Ok(parsed) = serde_json::from_str::<Value>(s)
+            {
+                current = parsed;
+            }
             current = current.get(part)?.clone();
+        }
+        // V48 修复：路径终点如果是 JSON 对象/数组字符串，也自动解析
+        // 仅对 { 或 [ 开头的字符串尝试解析（跳过纯数字/普通文本），
+        // 避免误将 "600036" 等股票代码解析为 JSON 数字。
+        if let Value::String(s) = &current
+            && !s.is_empty()
+            && (s.as_bytes()[0] == b'{' || s.as_bytes()[0] == b'[')
+            && let Ok(parsed) = serde_json::from_str::<Value>(s)
+        {
+            return Some(parsed);
         }
         return Some(current);
     }
@@ -261,5 +283,122 @@ mod tests {
         let result = extract_json_params(text).unwrap();
         assert_eq!(result["sentiment"], json!("bullish"));
         assert_eq!(result["confidence"], json!(0.8));
+    }
+
+    // ── JSON 字符串自动解析测试（修复：ToolNode/AgentNode 包裹结构）──
+
+    #[test]
+    fn resolve_var_path_auto_parse_tool_node_result_field() {
+        // 模拟 ToolNode 输出：result 字段是 JSON 字符串
+        let mut vars = HashMap::new();
+        vars.insert(
+            "t-scoring".into(),
+            json!({
+                "tool_name": "compute_scoring",
+                "result": r#"{"totalScore":65.5,"rating":"推荐","dimensions":{"trend":{"score":80}}}"#,
+                "is_error": false,
+                "node_id": "t-scoring"
+            }),
+        );
+        // 路径导航：进入 result 字符串后自动解析，再取 totalScore
+        assert_eq!(resolve_var_path("t-scoring.result.totalScore", &vars), Some(json!(65.5)));
+        // 多层导航：result → dimensions → trend → score
+        assert_eq!(
+            resolve_var_path("t-scoring.result.dimensions.trend.score", &vars),
+            Some(json!(80))
+        );
+    }
+
+    #[test]
+    fn resolve_var_path_auto_parse_agent_node_content_field() {
+        // 模拟 AgentNode Json 模式输出：content 字段是 JSON 字符串
+        let mut vars = HashMap::new();
+        vars.insert(
+            "debate-convergence".into(),
+            json!({
+                "role": "debater",
+                "content": r#"{"consensus_score":65,"aggregate_prediction":{"direction":"bullish","confidence":0.7}}"#,
+                "node_id": "debate-convergence"
+            }),
+        );
+        // 路径导航：进入 content 字符串后自动解析，再取 consensus_score
+        assert_eq!(
+            resolve_var_path("debate-convergence.content.consensus_score", &vars),
+            Some(json!(65))
+        );
+        // 深层嵌套：aggregate_prediction.direction
+        assert_eq!(
+            resolve_var_path("debate-convergence.content.aggregate_prediction.direction", &vars),
+            Some(json!("bullish"))
+        );
+    }
+
+    #[test]
+    fn resolve_var_path_json_string_not_valid_does_not_crash() {
+        // 字符串内容不是合法 JSON → 不应 panic，应返回 None
+        let mut vars = HashMap::new();
+        vars.insert(
+            "trader".into(),
+            json!({
+                "content": "这是一个纯文本分析的交易方案，不是 JSON",
+                "node_id": "trader"
+            }),
+        );
+        assert_eq!(resolve_var_path("trader.content.timeHorizon", &vars), None);
+    }
+
+    #[test]
+    fn resolve_var_path_auto_parse_llm_classifier_node() {
+        // LlmClassifierNode 输出已经是直接 JSON 对象，字符串无嵌套
+        let mut vars = HashMap::new();
+        vars.insert(
+            "risk-level".into(),
+            json!({
+                "category": "中风险",
+                "model": "gpt-4",
+                "node_id": "cls-risk-level"
+            }),
+        );
+        assert_eq!(resolve_var_path("risk-level.category", &vars), Some(json!("中风险")));
+    }
+
+    #[test]
+    fn resolve_var_path_old_flat_paths_still_work() {
+        // 旧路径（无 .result. / .content.）应保持向后兼容
+        let mut vars = HashMap::new();
+        vars.insert("stock_code".into(), json!("600036"));
+        assert_eq!(resolve_var_path("stock_code", &vars), Some(json!("600036")));
+    }
+
+    #[test]
+    fn resolve_var_path_v48_auto_parse_final_json_string() {
+        // V48: 路径终点是 JSON 字符串时也应自动解析
+        // 例如 t-baseline-semi.result 应返回解析后的对象，而非原始字符串
+        let mut vars = HashMap::new();
+        vars.insert(
+            "t-baseline".into(),
+            json!({
+                "tool_name": "compute_industry_position",
+                "result": r#"{"sector":"半导体","competitive_position":{"gross_margin_pct":45.0}}"#,
+                "node_id": "t-baseline"
+            }),
+        );
+        // 路径 = "t-baseline.result" → 应返回解析后的 map，非 JSON 字符串
+        let result = resolve_var_path("t-baseline.result", &vars);
+        assert!(result.is_some());
+        let val = result.unwrap();
+        assert!(val.is_object(), "应返回 Object，而非: {val:?}");
+        assert_eq!(val["sector"], json!("半导体"));
+        assert_eq!(val["competitive_position"]["gross_margin_pct"], json!(45.0));
+
+        // 同时验证非 JSON 字符串不受影响
+        vars.insert(
+            "note".into(),
+            json!({"text": "普通文本"}),
+        );
+        assert_eq!(
+            resolve_var_path("note.text", &vars),
+            Some(json!("普通文本"))
+        );
     }
 }

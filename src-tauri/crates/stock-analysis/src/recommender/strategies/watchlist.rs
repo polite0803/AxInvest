@@ -192,7 +192,9 @@ impl RecommendStrategy for WatchlistStrategy {
 
     async fn scan(&self, ctx: &RecoContext<'_>) -> Result<Vec<RecoPick>, String> {
         let mut picks = Vec::new();
-        for (code, name, sector) in ctx.seed {
+        // Watchlist 仅作为 fallback，扫描前 30 只即可满足 10 个 pick 上限
+        // 限制扫描范围减少冗余 quote API 调用，降低 vendor 压力
+        for (code, name, sector) in ctx.seed.iter().take(30) {
             let _g = ctx.per_code_locks.lock_for(code).await;
             if let Some(p) = self
                 .scan_one(ctx.client, code, name, sector.clone(), ctx.vars)
@@ -236,7 +238,8 @@ pub async fn emit_synthetic_picks(
     vars: &HashMap<String, Value>,
 ) -> Vec<RecoPick> {
     let mut picks = Vec::new();
-    for (code, name, sector) in raw_seed {
+    // 合成兜底只需前 30 只即可满足 10 个 pick 上限
+    for (code, name, sector) in raw_seed.iter().take(30) {
         let _g = per_code_locks.lock_for(code).await;
         if let Some(p) =
             scan_synthetic_one(client.as_ref(), code, name, sector.clone(), style, period, vars)

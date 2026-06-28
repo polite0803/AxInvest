@@ -52,7 +52,7 @@ impl CapitalStrategy {
         // 量价信号：最近 5 日平均量 / 20 日平均量 > 阈值
         let volumes_5: Vec<f64> = klines.iter().rev().take(5).map(|k| k.amount).collect();
         let avg_vol_5 = volumes_5.iter().sum::<f64>() / volumes_5.len() as f64;
-        let avg_vol_20: f64 = klines.iter().take(20).map(|k| k.amount).sum::<f64>() / 20.0;
+        let avg_vol_20: f64 = klines.iter().rev().take(20).map(|k| k.amount).sum::<f64>() / 20.0;
         let vol_ratio = if avg_vol_20 > 0.0 {
             avg_vol_5 / avg_vol_20
         } else {
@@ -289,7 +289,7 @@ impl CapitalStrategy {
             read_f64(vars, "cap_conf_signal", 0.7),
             read_f64(vars, "cap_conf_direction", 0.7),
             read_f64(vars, "cap_conf_market", 0.0),
-            read_f64(vars, "cap_conf_base", 1.0),
+            1.0, // turnover_anomaly: 资金驱动策略无量比数据（有 money_flow），默认无惩罚
         );
         let position = calc_position(base_position, conf, self.period);
 

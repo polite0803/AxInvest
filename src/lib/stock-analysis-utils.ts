@@ -99,6 +99,7 @@ export const StockAction = {
   HOLD: "HOLD",
   REDUCE: "REDUCE",
   SELL: "SELL",
+  WAIT: "WAIT",
   UNCERTAIN: "UNCERTAIN",
 } as const;
 
@@ -113,7 +114,8 @@ export const STOCK_ACTION_LABELS: Record<string, StockActionType> = {
   "卖出": StockAction.SELL,
   "不确定": StockAction.UNCERTAIN,
   "无法判断": StockAction.UNCERTAIN,
-  "观望": StockAction.HOLD,
+  "观望": StockAction.WAIT,
+  "等待": StockAction.WAIT,
   "减仓": StockAction.REDUCE,
   "加仓": StockAction.INCREASE,
   "看多": StockAction.BUY,
@@ -156,7 +158,7 @@ export function parseAction(raw: unknown): StockActionType {
       if (raw.includes(label)) { return action; }
     }
   }
-  return StockAction.HOLD;
+  return StockAction.WAIT;
 }
 
 /** 解析股票风险等级（兼容英文/中文/大小写） */
@@ -188,13 +190,16 @@ export function getActionColor(action: string): "red" | "green" | "orange" | "bl
       return "blue";
     case StockAction.UNCERTAIN:
       return "default";
+    case StockAction.WAIT:
+      return "default";
     default:
       return "default";
   }
 }
 
 export function getActionTKey(action: string): string {
-  switch (action) {
+  const normalized = parseAction(action); // 中文"卖出"→"SELL"，统一后再查表
+  switch (normalized) {
     case StockAction.BUY:
       return "stockAnalysis.actionBuy";
     case StockAction.INCREASE:
@@ -205,6 +210,8 @@ export function getActionTKey(action: string): string {
       return "stockAnalysis.actionReduce";
     case StockAction.SELL:
       return "stockAnalysis.actionSell";
+    case StockAction.WAIT:
+      return "stockAnalysis.actionWait";
     default:
       return "stockAnalysis.actionUncertain";
   }
@@ -226,13 +233,14 @@ export function getRiskColor(level: string): string {
 }
 
 export function getRiskTKey(level: string): string {
+  const normalized = parseRiskLevel(level); // "高风险"→"HIGH"，统一后再查表
   const map: Record<string, string> = {
-    HIGH: "stockAnalysis.riskHigh",
-    MID: "stockAnalysis.riskMid",
-    LOW: "stockAnalysis.riskLow",
-    EXTREME: "stockAnalysis.riskExtreme",
+    [StockRiskLevel.HIGH]: "stockAnalysis.riskHigh",
+    [StockRiskLevel.MID]: "stockAnalysis.riskMid",
+    [StockRiskLevel.LOW]: "stockAnalysis.riskLow",
+    [StockRiskLevel.EXTREME]: "stockAnalysis.riskExtreme",
   };
-  return map[level] ?? "stockAnalysis.riskMid";
+  return map[normalized] ?? "stockAnalysis.riskMid";
 }
 
 export function getSignalColor(signal: string): "green" | "red" | "blue" {
@@ -641,6 +649,14 @@ export async function computeEvidenceDrivenConsensus(
   historicalWeights?: Record<string, number> | null,
   updatedAt?: number,
 ): Promise<StockConsensus & { evidenceReport?: EvidenceWeightReport }> {
+  // marketRegime 缺失时提供默认值（避免后端校验失败）
+  const defaultRegime: MarketRegimeInfo = marketRegime ?? {
+    regime: "neutral",
+    confidence: 0.5,
+    volatility: "medium",
+    description: "未知市场环境（默认值）",
+  };
+
   try {
     // 构建分析师输入
     const analysts: AnalystInput[] = Object.entries(reports).map(([analystId, text]) => {
@@ -656,7 +672,7 @@ export async function computeEvidenceDrivenConsensus(
     });
 
     const request: EvidenceWeightRequest = {
-      marketRegime,
+      marketRegime: defaultRegime,
       timeHorizon: timeHorizon ?? "mid",
       analysts,
       historicalWeights: historicalWeights ?? null,

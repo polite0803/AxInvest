@@ -19,6 +19,7 @@ const CAPACITIES: &[(&str, usize)] = &[
     ("sina", 5),        // 新浪财经
     ("iwencai", 3),     // 问财：需 API Key
     ("cninfo", 3),      // 巨潮资讯
+    ("neodata", 3),     // NeoData API
 ];
 
 /// Per-Vendor 并发门控

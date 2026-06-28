@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 风格
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Style {
     /// 趋势跟踪
@@ -127,7 +127,8 @@ pub struct RecoPick {
 pub struct RecoResponse {
     pub period: Period,
     /// 按风格分组的 picks，每组 ≤ 10
-    pub picks: std::collections::HashMap<Style, Vec<RecoPick>>,
+    /// 使用 BTreeMap 确保序列化到 JSON 时 key 保持 Style 判别式顺序
+    pub picks: std::collections::BTreeMap<Style, Vec<RecoPick>>,
     /// 被 vendor 缺失禁用的风格（live 模式下由 vendor 状态决定）
     pub disabled_styles: Vec<Style>,
     /// 被时间锚定 / as-of 截断降级的风格（spec §8）

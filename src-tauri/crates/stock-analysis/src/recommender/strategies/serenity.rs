@@ -42,70 +42,109 @@ impl SerenityStrategy {
     ) -> Option<RecoPick> {
         // 0. 读取 Serenity 全量诊断数据（由 workflow 填入缓存）
         let detail = super::super::get_serenity_candidate_detail(code);
-        let serenity_score = detail
-            .as_ref()
-            .and_then(|d| d["serenity_score"].as_f64())
-            .unwrap_or(0.0);
-        let catalysts = detail
-            .as_ref()
-            .and_then(|d| d["catalysts"].as_array())
-            .cloned()
-            .unwrap_or_default();
-        let exit_signals = detail
-            .as_ref()
-            .and_then(|d| d["exit_signals"].as_object())
-            .cloned()
-            .unwrap_or_default();
-        let _attention_metrics = detail
-            .as_ref()
-            .and_then(|d| d["attention_metrics"].as_object())
-            .cloned()
-            .unwrap_or_default();
+        // V53: 如果没有 serenity 缓存数据（非 workflow 候选股），跳过整个 scan_one
+        // 避免对全 seed pool 190+ 只无候选数据的股票发送 financials/quote/klines 请求
+        let detail = match detail {
+            Some(d) => d,
+            None => {
+                tracing::trace!("{code}: 无 serenity 候选数据，跳过");
+                return None;
+            },
+        };
+        let serenity_score = detail["serenity_score"].as_f64().unwrap_or(0.0);
+        let catalysts = detail["catalysts"].as_array().cloned().unwrap_or_default();
+        let exit_signals = detail["exit_signals"].as_object().cloned().unwrap_or_default();
+        let _attention_metrics = detail["attention_metrics"].as_object().cloned().unwrap_or_default();
 
         // 1. 获取财务数据验证护城河
         let financials = client.get_financials(code).await.ok()?;
         let latest = financials.first()?;
 
-        // 2. 毛利率校验（上下文感知：高 serenity_score 可豁免部分硬门槛）
-        let base_gross_margin = read_f64(vars, "serenity_min_gross_margin", 50.0);
-        // 评分 >= 80 时门槛降为 40%，>= 90 时降为 35%
-        let gross_margin = if serenity_score >= 90.0 {
-            base_gross_margin.min(35.0)
-        } else if serenity_score >= 80.0 {
-            base_gross_margin.min(40.0)
-        } else {
-            base_gross_margin
-        };
+        // 2. 毛利率校验（上下文感知：瓶颈股早期可能微利，门槛不宜过高）
+        // 默认 30%（可调），评分 >= 80 时豁免毛利率检查
+        let min_gross_margin = read_f64(vars, "serenity_min_gross_margin", 30.0);
         let gm = latest.gross_margin.unwrap_or(0.0);
-        if gm < gross_margin {
+        if gm < min_gross_margin && serenity_score < 80.0 {
+            tracing::info!("{code}: 毛利率 {gm:.1}% < {min_gross_margin}%, 因毛利率过低排除 (serenity_score={serenity_score:.0})");
             return None;
         }
 
-        // 3. 负债率校验（同样上下文感知）
-        let base_max_debt = read_f64(vars, "serenity_max_debt_ratio", 60.0);
-        let max_debt = if serenity_score >= 85.0 {
-            base_max_debt.max(70.0) // 高评分候选放宽到 70%
-        } else {
-            base_max_debt
-        };
+        // 3. 负债率校验（扩张期瓶颈企业可能高负债，默认 70%（可调））
+        let max_debt_ratio = read_f64(vars, "serenity_max_debt_ratio", 70.0);
         let dr = latest.debt_ratio?;
-        if dr > max_debt {
+        if dr > max_debt_ratio && serenity_score < 85.0 {
+            tracing::info!("{code}: 负债率 {dr:.1}% > {max_debt_ratio}%, 因负债率过高排除");
             return None;
         }
 
-        // 4. 营收增速校验（上下文感知）
-        let base_min_rev_growth = read_f64(vars, "serenity_min_revenue_growth", 10.0);
-        let min_rev_growth = if serenity_score >= 85.0 {
-            base_min_rev_growth.min(5.0) // 高评分候选放宽到 5%
-        } else {
-            base_min_rev_growth
-        };
+        // 4. 营收增速校验（成熟瓶颈可能增速不高，默认 5%（可调），评分 >= 85 时豁免）
+        let min_rev_growth = read_f64(vars, "serenity_min_revenue_growth", 5.0);
         let rev_growth = latest.revenue_yoy.unwrap_or(0.0);
-        if rev_growth < min_rev_growth {
+        if rev_growth < min_rev_growth && serenity_score < 85.0 {
+            tracing::info!("{code}: 营收增速 {rev_growth:.1}% < {min_rev_growth}%, 因增速过低排除 (serenity_score={serenity_score:.0})");
             return None;
         }
 
-        // === 价值捕获深层验证 ===
+        // ── V6 新增: 估值过滤器（PE/PB/涨幅上限，可在前端 Serenity 设置Tab中调整）──
+
+        // 5. 获取行情（提前获取用于估值过滤）
+        let quote = client.get_quote(code).await.ok()?;
+        let price = quote.price;
+
+        // 5a. PE 上限过滤（高增长豁免：营收增速≥阈值时跳过PE检查）
+        let max_pe = read_f64(vars, "serenity_max_pe", 100.0);
+        if let Some(pe) = quote.pe {
+            if pe > max_pe && serenity_score < 85.0 {
+                let growth_exempt_pct = read_f64(vars, "serenity_growth_exempt_pct", 50.0);
+                // 高增长标的PE常偏高，营收增速超过阈值时豁免PE检查
+                if rev_growth < growth_exempt_pct {
+                    tracing::info!(
+                        "{code}: PE={pe:.1} > {max_pe} 且增长率={rev_growth:.1}%<{growth_exempt_pct}%, 因估值过高排除"
+                    );
+                    return None;
+                }
+                // PE高但增速也高，放行（用户可调 growth_exempt_pct 控制松紧）
+            }
+        }
+
+        // 5b. PB 上限过滤
+        let max_pb = read_f64(vars, "serenity_max_pb", 10.0);
+        if let Some(pb) = quote.pb {
+            if pb > max_pb && serenity_score < 85.0 {
+                tracing::info!("{code}: PB={pb:.1} > {max_pb}, 因估值过高排除");
+                return None;
+            }
+        }
+
+        // 5c. 近3月涨幅过滤（基于K线数据）
+        let max_3m_gain = read_f64(vars, "serenity_max_3m_gain_pct", 80.0);
+        let max_12m_gain = read_f64(vars, "serenity_max_12m_gain_pct", 300.0);
+
+        if let Ok(klines) = client.get_klines_with_adj(code, "daily", 252, None).await {
+            let latest_close = klines.last().map(|k| k.close).unwrap_or(price);
+            // 近3月（约63个交易日）
+            let k3m_idx = klines.len().saturating_sub(63);
+            let k3m_close = klines.get(k3m_idx).map(|k| k.close);
+            if let (Some(close_3m_back), true) = (k3m_close, latest_close > 0.0 && serenity_score < 85.0) {
+                let gain_3m = (latest_close - close_3m_back) / close_3m_back * 100.0;
+                if gain_3m > max_3m_gain {
+                    tracing::info!("{code}: 近3月涨幅 {gain_3m:.0}% > {max_3m_gain}%, 因短期涨幅过大排除");
+                    return None;
+                }
+            }
+            // 近12月（约252个交易日）
+            if let Some(first) = klines.first() {
+                if first.close > 0.0 && latest_close > 0.0 && serenity_score < 85.0 {
+                    let gain_12m = (latest_close - first.close) / first.close * 100.0;
+                    if gain_12m > max_12m_gain {
+                        tracing::info!("{code}: 近12月涨幅 {gain_12m:.0}% > {max_12m_gain}%, 因长期涨幅过大排除");
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // ── 估值过滤结束 ──
 
         // 5a. ROIC 近似（ROE > 15% 为强信号）
         let roe = latest.roe.unwrap_or(0.0);
@@ -132,9 +171,7 @@ impl SerenityStrategy {
             true
         };
 
-        // 6. 行情数据
-        let quote = client.get_quote(code).await.ok()?;
-        let price = quote.price;
+        // 6. 目标价与止损计算
 
         let target_mult = read_f64(vars, "serenity_target_mult", 1.30);
         let stop_mult = read_f64(vars, "serenity_stop_mult", 0.80);
@@ -191,9 +228,9 @@ impl SerenityStrategy {
         // 构建 reasons（含 workflow 诊断信息）
         let mut reasons = vec![
             format!("确定性财务验证通过"),
-            format!("毛利率 {:.1}% > {}% 门槛", gm, gross_margin),
+            format!("毛利率 {:.1}% > {}% 门槛", gm, min_gross_margin),
             format!("营收同比增速 {:.1}% > {}% 门槛", rev_growth, min_rev_growth),
-            format!("负债率 {:.1}% < {}% 上限", dr, max_debt),
+            format!("负债率 {:.1}% < {}% 上限", dr, max_debt_ratio),
         ];
         if serenity_score > 0.0 {
             reasons.push(format!("瓶颈分析评分: {:.0}/100", serenity_score));
@@ -220,7 +257,7 @@ impl SerenityStrategy {
             "建议作为投资组合的弹性增强部分，而非全部".to_string(),
         ];
         // workflow 诊断的主风险
-        if let Some(primary_risk) = detail.as_ref().and_then(|d| d["primary_risk"].as_str()) {
+        if let Some(primary_risk) = detail["primary_risk"].as_str() {
             if !primary_risk.is_empty() {
                 risk_notes.push(format!("工作流诊断风险: {}", primary_risk));
             }

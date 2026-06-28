@@ -296,8 +296,10 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
       "risk-agg": "stockAnalysis.workflow.riskAggregation",
       "risk-con": "stockAnalysis.workflow.riskConservative",
       "risk-neu": "stockAnalysis.workflow.riskNeutral",
-      "research-mgr": "stockAnalysis.workflow.researchManager",
+      "research-mgr": "stockAnalysis.risk.researchManager",
       "risk-level": "stockAnalysis.workflow.riskLevel",
+      "risk-aggregated": "stockAnalysis.workflow.riskAggregation",
+      "risk-convergence": "stockAnalysis.workflow.riskConvergence",
     };
     const i18nKey = RISK_LABEL_MAP[riskKey];
     const riskName = i18nKey

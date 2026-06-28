@@ -8,6 +8,52 @@ import { cleanToolCallTags } from "./utils";
 
 type Consensus = "bullish" | "bearish" | "neutral" | "divided";
 
+/**
+ * 从报告中提取结构化多空分数（与 AnalystReportCard 同源）
+ * 优先解析 <!-- VERDICT: {bull_score, bear_score} --> 格式
+ * 回退到 classifySentiment 关键词匹配
+ */
+function extractBullBearScores(report: string): { bull: number; bear: number } | null {
+  // 1) 尝试 VERDICT JSON 格式（与 AnalystReportCard.tryParseVerdictFormat 一致）
+  const verdictIdx = report.indexOf("<!-- VERDICT:");
+  if (verdictIdx !== -1) {
+    try {
+      const jsonStr = report.slice(verdictIdx + "<!-- VERDICT:".length);
+      const jsonEnd = jsonStr.indexOf("-->");
+      if (jsonEnd !== -1) {
+        const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
+        const bull = meta.bull_score ?? meta.strength_score ?? null;
+        const bear = meta.bear_score ?? null;
+        if (typeof bull === "number" || typeof bear === "number") {
+          return {
+            bull: typeof bull === "number" ? (bull > 1 ? bull : bull * 100) : 0,
+            bear: typeof bear === "number" ? (bear > 1 ? bear : bear * 100) : 0,
+          };
+        }
+        // 有 stance/verdict 字段但没有分数 → 用 stance 判断
+        const stance = String(meta.verdict ?? meta.stance ?? "").toLowerCase();
+        if (/看多|买入|增持|做多|看涨|bull/i.test(stance)) { return { bull: 60, bear: 0 }; }
+        if (/看空|卖出|减持|做空|看跌|bear/i.test(stance)) { return { bull: 0, bear: 60 }; }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 2) 尝试直接从文本正则匹配 bull_score/bear_score
+  try {
+    const bullMatch = report.match(/"bull_score"\s*:\s*(\d+(?:\.\d+)?)/);
+    const bearMatch = report.match(/"bear_score"\s*:\s*(\d+(?:\.\d+)?)/);
+    if (bullMatch || bearMatch) {
+      return {
+        bull: bullMatch ? parseFloat(bullMatch[1]) : 0,
+        bear: bearMatch ? parseFloat(bearMatch[1]) : 0,
+      };
+    }
+  } catch { /* ignore */ }
+
+  // 3) 无结构化数据 → 返回 null，调用方用 classifySentiment fallback
+  return null;
+}
+
 /** 根据多空比例推共识：
  *  - 一方 > 65% → 共识看多 / 共识看空
  *  - 双方都有且 35-65% → 分歧
@@ -32,7 +78,7 @@ export function AnalystReportGrid() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
 
-  // Aggregate sentiment from reports (clean tool_call tags first)
+  // Aggregate sentiment from reports — 优先用结构化 bull_score/bear_score（与单个分析师卡片一致）
   const sentiment = useMemo(() => {
     const entries = Object.values(analystReports);
     let bullish = 0;
@@ -40,10 +86,20 @@ export function AnalystReportGrid() {
     let neutral = 0;
     for (const rawReport of entries) {
       const report = cleanToolCallTags(rawReport);
-      const sentiment = classifySentiment(report);
-      if (sentiment === "bullish") { bullish++; }
-      else if (sentiment === "bearish") { bearish++; }
-      else { neutral++; }
+      // 先尝试提取结构化分数（与 AnalystReportCard 同源）
+      const scores = extractBullBearScores(report);
+      if (scores) {
+        // 有结构化分数：用多空对比判断方向
+        if (scores.bull > scores.bear * 1.2) { bullish++; }
+        else if (scores.bear > scores.bull * 1.2) { bearish++; }
+        else { neutral++; } // 接近 → 中性/分歧
+      } else {
+        // 无结构化数据：回退到关键词匹配
+        const s = classifySentiment(report);
+        if (s === "bullish") { bullish++; }
+        else if (s === "bearish") { bearish++; }
+        else { neutral++; }
+      }
     }
     const total = bullish + bearish + neutral;
     return { bullish, bearish, neutral, total };

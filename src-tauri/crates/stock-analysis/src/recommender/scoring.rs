@@ -1,7 +1,7 @@
 //! 智能荐股 — 置信度、仓位、去重、缓存
 
 use crate::recommender::types::{Period, RecoPick, Style};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::RwLock;
 
 /// 自适应评分权重（初始值为默认值，可通过回测/反思反馈调优）
@@ -173,8 +173,8 @@ pub fn dedup_and_merge(picks: &mut Vec<RecoPick>) {
 pub fn group_by_style_and_trim(
     picks: &mut Vec<RecoPick>,
     per_style_limit: usize,
-) -> HashMap<Style, Vec<RecoPick>> {
-    let mut by_style: HashMap<Style, Vec<RecoPick>> = HashMap::new();
+) -> BTreeMap<Style, Vec<RecoPick>> {
+    let mut by_style: BTreeMap<Style, Vec<RecoPick>> = BTreeMap::new();
     for p in picks.drain(..) {
         by_style.entry(p.style).or_default().push(p);
     }

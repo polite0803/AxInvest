@@ -207,7 +207,7 @@ impl ValueStrategy {
             read_f64(vars, "val_conf_signal", 0.7),
             read_f64(vars, "val_conf_direction", 0.6),
             read_f64(vars, "val_conf_market", 0.0),
-            read_f64(vars, "val_conf_base", 1.0),
+            1.0, // turnover_anomaly: 价值策略无量比数据，默认无惩罚
         );
         let position = calc_position(base_position, conf, self.period);
 

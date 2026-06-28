@@ -251,6 +251,25 @@ pub struct ModelParamOverrides {
     pub request_delay_ms: Option<u64>,
 }
 
+// ── 模型行为提示（运行时适配） ──
+
+/// 模型运行时行为的提示信息，供执行器根据具体模型自适应调整策略。
+///
+/// 不同模型在处理工具调用和输出格式上存在差异。Adapter 可根据
+/// model_name 返回对应的行为提示，执行器据此调整调用策略，
+/// 避免对标准模型（GPT/Claude）产生副作用。
+#[derive(Debug, Clone, Default)]
+pub struct BehaviorHints {
+    /// 当模型倾向于只返回工具调用（无文本内容）时设为 true。
+    /// 例如 agnes-2.0-flash 将工具调用视为"回复完成"，不生成分析文本。
+    /// 设为 true 后，执行器会在每轮工具调用后注入强制总结指令。
+    pub tool_call_empty_content: bool,
+    /// 当模型将工具调用以 XML 格式嵌入文本内容中输出时设为 true。
+    /// 例如 `<tool_call><function=name>...</function></tool_call>` 格式。
+    /// 设为 true 后，执行器启用内联 XML 解析将文本转为标准 tool_calls。
+    pub tool_call_xml_inline: bool,
+}
+
 // === Conversation & Message ===
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

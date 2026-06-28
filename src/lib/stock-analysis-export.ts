@@ -233,6 +233,9 @@ export function buildMarkdownReport(data: ExportData): string {
       "risk-con": "保守型",
       "risk-neu": "中性",
       "risk-aggregated": "聚合风险",
+      "risk-level": "风险等级",
+      "risk-convergence": "风险收敛",
+      "research-mgr": "研究经理",
     };
     for (const key of riskKeys) {
       const raw = data.riskAssessments[key];

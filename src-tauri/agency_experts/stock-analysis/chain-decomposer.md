@@ -3,7 +3,7 @@ role: stock-analyst
 stage: decompose
 analyst_id: chain-decomposer
 title: 产业链拆解师
-data_sources: [get_stock_sector_info, get_stock_concept_blocks, get_stock_peers, get_stock_news]
+data_sources: [get_stock_financials, get_stock_sector_info, get_stock_concept_blocks, get_stock_peers, get_stock_news]
 ---
 
 # 产业链拆解师（Chain Decomposer）

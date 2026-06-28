@@ -17,6 +17,7 @@ function looksLikeJson(text: string): boolean {
 /**
  * 尝试从风险报告 JSON 中提取可读 Markdown 文本
  * 支持 a-risk / trader / portfolio-manager 等多种输出结构
+ * 支持 strict_mode 嵌套格式：{"report":"...","verdict":{"stance":"aggressive","position_pct":50,"confidence":70}}
  */
 function extractReadableFromRiskReport(report: string): string {
   const cleaned = cleanToolCallTags(report);
@@ -28,26 +29,33 @@ function extractReadableFromRiskReport(report: string): string {
     const parsed = JSON.parse(trimmed);
     if (typeof parsed !== "object" || parsed === null) { return cleaned; }
 
+    // strict_mode 嵌套 verdict：从 parsed.verdict 提升字段到顶层
+    const v = parsed.verdict && typeof parsed.verdict === "object" && !Array.isArray(parsed.verdict)
+      ? { ...parsed, ...parsed.verdict }
+      : parsed;
+
     const parts: string[] = [];
 
-    // 1. 立场/风格
-    if (typeof parsed.stance === "string") {
-      parts.push(`**立场**: ${parsed.stance}`);
+    // 1. 立场/风格（支持顶层 + verdict 嵌套）
+    if (typeof v.stance === "string") {
+      parts.push(`**立场**: ${v.stance}`);
     }
 
-    // 2. 仓位/头寸
-    if (typeof parsed.positionPct === "number") {
-      parts.push(`**建议仓位**: ${parsed.positionPct}%`);
+    // 2. 仓位/头寸（支持 positionPct / position_pct）
+    const posPct = v.positionPct ?? v.position_pct;
+    if (typeof posPct === "number") {
+      parts.push(`**建议仓位**: ${posPct}%`);
     }
 
     // 3. 信心度
-    if (typeof parsed.confidence === "number") {
-      parts.push(`**信心度**: ${parsed.confidence}%`);
+    if (typeof v.confidence === "number") {
+      parts.push(`**信心度**: ${v.confidence}%`);
     }
 
-    // 4. 风险等级
-    if (typeof parsed.riskLevel === "string") {
-      parts.push(`**风险等级**: ${parsed.riskLevel}`);
+    // 4. 风险等级（支持 riskLevel / risk_level / converged_risk_level）
+    const riskLevel = v.riskLevel ?? v.risk_level ?? v.converged_risk_level;
+    if (typeof riskLevel === "string") {
+      parts.push(`**风险等级**: ${riskLevel}`);
     }
 
     // 5. 摘要/分析/推理
@@ -177,6 +185,7 @@ const RISK_COLORS: Record<string, string> = {
   "comprehensive": "oklch(60% 0.16 290)",
   "risk-aggregated": "oklch(55% 0.20 28)",
   "risk-level": "oklch(55% 0.18 45)",
+  "risk-convergence": "oklch(55% 0.16 200)",
 };
 
 /** 风险类型 → i18n key（键名对齐 riskAssessments 实际节点 ID） */
@@ -191,54 +200,132 @@ const RISK_LABEL_KEYS: Record<string, string> = {
   "risk-level": "stockAnalysis.riskLevel",
 };
 
-/** 从风险评估文本中计算 0-100 的量化风险分 */
-// 预编译正则，避免每次调用重复创建
+/** 从风险评估文本中计算 0-100 的量化风险分
+ *
+ * 优先级：
+ *  1. VERDICT JSON 中的 position_pct → 风险分 = 100 - position_pct
+ *     （仓位越高→认为风险越可控→风险分越低，体现激进/保守差异化）
+ *  2. VERDICT JSON 中的 confidence → 直接作为评估强度分
+ *  3. fallback：关键词匹配（仅当前两者都没有时）
+ *
+ * 这修复了旧版全部维度返回 100 的 bug：
+ *   旧逻辑用基准分40 + "风险"关键词频率匹配，LLM 风险评估师的输出
+ *   天然包含大量"风险"词汇（这是它们的职责），导致所有维度全部溢出100。
+ */
+const VERDICT_RE = /<!--\s*VERDICT\s*:\s*(\{[^}]*\})\s*-->/i;
+
+/** 尝试从文本中提取 VERDICT JSON 的指定字段 */
+function extractVerdictField(text: string, field: string): number | null {
+  // 1. 先尝试从 strict_mode JSON 的嵌套 verdict 中提取
+  if (field === "position_pct" || field === "converged_position_pct" || field === "confidence") {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const verdict = parsed.verdict;
+        if (verdict && typeof verdict === "object" && !Array.isArray(verdict)) {
+          // field 直接匹配
+          if (typeof verdict[field] === "number") { return Math.round(verdict[field]); }
+          // position_pct 未找到 → 查 converged_position_pct（risk-convergence 节点）
+          if (field === "position_pct" && typeof verdict.converged_position_pct === "number") {
+            return Math.round(verdict.converged_position_pct);
+          }
+        }
+      }
+    } catch {
+      /* 不是合法 JSON，继续下一方案 */
+    }
+  }
+
+  // 2. 尝试从 <!-- VERDICT: {...} --> HTML 注释中提取（旧格式）
+  const m = text.match(VERDICT_RE);
+  if (!m?.[1]) { return null; }
+  try {
+    const v = JSON.parse(m[1]);
+    if (typeof v[field] === "number") { return Math.round(v[field]); }
+  } catch { /* 不是合法 JSON */ }
+  return null;
+}
+
+// 预编译正则：fallback 关键词匹配（仅在无 VERDICT 时使用）
 const HIGH_RISK_PATTERNS = [
-  { re: /高风险/g, score: 8 },
-  { re: /重大风险/g, score: 8 },
-  { re: /严重/g, score: 8 },
-  { re: /危机/g, score: 8 },
-  { re: /暴跌/g, score: 8 },
-  { re: /崩盘/g, score: 8 },
-  { re: /预警/g, score: 8 },
-  { re: /危险/g, score: 8 },
-  { re: /不确定(?!性)/g, score: 5 },
-  { re: /大幅下/g, score: 8 },
-  { re: /极度/g, score: 6 },
+  { re: /高风险/g, score: 6 },
+  { re: /重大风险/g, score: 6 },
+  { re: /严重/g, score: 6 },
+  { re: /危机/g, score: 6 },
+  { re: /暴跌/g, score: 6 },
+  { re: /崩盘/g, score: 6 },
+  { re: /预警/g, score: 5 },
+  { re: /危险/g, score: 5 },
+  { re: /不确定(?!性)/g, score: 3 },
+  { re: /大幅下/g, score: 6 },
+  { re: /极度/g, score: 4 },
 ];
 const MID_RISK_PATTERNS = [
-  { re: /(?:无|没有|不|低|较[小低]|可控)\s*风险/g, score: -5 }, // 否定风险词 → 减分
+  { re: /(?:无|没有|不|低|较[小低]|可控)\s*风险/g, score: -4 },
   {
     re:
       /(?:^|[^无没有不低较可控])\s*风险(?:较[高大]|水涨|加剧|上升|显著|突出|加大的|极高的|加大的|较大|高|大|显|剧|隐患|因素|敞口|暴露)/g,
-    score: 5,
+    score: 3,
   },
-  { re: /(?<!无|没有|不|低|较[小低]|可控)风险(?!较[小低]|不[大高]|可控|较低|很小|不大)/g, score: 3 },
-  { re: /谨慎/g, score: 3 },
+  { re: /(?<!无|没有|不|低|较[小低]|可控)风险(?!较[小低]|不[大高]|可控|较低|很小|不大)/g, score: 1 },
+  { re: /谨慎/g, score: 2 },
   { re: /关注/g, score: 1 },
-  { re: /波动/g, score: 3 },
-  { re: /压力/g, score: 3 },
-  { re: /挑战/g, score: 2 },
-  { re: /不确定性/g, score: 4 },
-  { re: /潜在/g, score: 2 },
-  { re: /下行/g, score: 4 },
-  { re: /回落/g, score: 2 },
+  { re: /波动/g, score: 2 },
+  { re: /压力/g, score: 2 },
+  { re: /挑战/g, score: 1 },
+  { re: /不确定性/g, score: 3 },
+  { re: /潜在/g, score: 1 },
+  { re: /下行/g, score: 3 },
+  { re: /回落/g, score: 1 },
 ];
+
 function computeRiskScore(text: string): number {
-  let score = 40; // 基准
+  // ── 第 1 优先级：VERDICT confidence ──
+  // 三个评估师的 confidence 反映其评估的确定性，跨立场语义一致。
+  // 高 confidence → 风险感知明确 → 无论激进/保守都说明有倾向性判断。
+  // V50 修复: 之前用 position_pct 作为首要指标，但 position_pct 在三方评估师中
+  //   语义不一致（激进派=收益导向仓位，保守派=安全边际仓位），
+  //   confidence 在所有评估师中含义统一（对判断的确定程度）。
+  const conf = extractVerdictField(text, "confidence");
+  if (conf !== null && conf >= 0 && conf <= 100) {
+    return Math.max(5, Math.min(100, conf));
+  }
+
+  // ── 第 2 优先级：VERDICT position_pct 反转 ──
+  // 保守派给低仓位(20)→风险分高(80)；激进派给高仓位(70)→风险分低(30)
+  // 注意：position_pct 在三方语义不完全一致，仅作副优先级
+  const posPct = extractVerdictField(text, "position_pct");
+  if (posPct !== null && posPct >= 0 && posPct <= 100) {
+    return Math.max(5, Math.min(100, 100 - posPct));
+  }
+
+  // ── fallback：关键词匹配（无 VERDICT 时的降级方案）──
+  const cleanText = text
+    .replace(/<!--\s*VERDICT\s*:\s*\{[^}]*\}\s*-->/gi, "")
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/[{}\[\]"\\,:\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // 空文本或极短文本 → 低分
+  if (cleanText.length < 20) { return 15; }
+
+  let score = 25; // 基准分（旧版 40 太高，容易溢出）
   for (const { re, score: s } of HIGH_RISK_PATTERNS) {
-    const matches = text.match(re);
+    const matches = cleanText.match(re);
     score += (matches?.length ?? 0) * s;
   }
   for (const { re, score: s } of MID_RISK_PATTERNS) {
-    const matches = text.match(re);
+    const matches = cleanText.match(re);
     score += (matches?.length ?? 0) * s;
   }
-  // 文本越长风险披露越充分 → 评分略增
-  if (text.length > 2000) { score += 5; }
-  else if (text.length > 1000) { score += 3; }
-  else if (text.length > 500) { score += 2; }
-  return Math.min(100, Math.max(5, score));
+  // 文本长度加分（适度）
+  if (cleanText.length > 2000) { score += 3; }
+  else if (cleanText.length > 1000) { score += 2; }
+  else if (cleanText.length > 500) { score += 1; }
+  // M1 修复：fallback 封顶 75，避免关键词累加逼近 100 产生误判
+  // 正常路径（VERDICT 存在时）走前两个优先级，该上限不影响正常打分
+  return Math.min(75, Math.max(5, score));
 }
 
 /** 把风险评估条目序列化为可分享的 Markdown 文档 */
@@ -469,7 +556,8 @@ export function RiskMatrix() {
 
   if (Object.keys(riskAssessments).length === 0) { return null; }
 
-  const entries = Object.entries(riskAssessments);
+  const entries = Object.entries(riskAssessments)
+    .filter(([type]) => type !== "risk-aggregated" && type !== "agg-risk");
 
   return (
     <>

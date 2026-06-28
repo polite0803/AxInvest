@@ -1,6 +1,7 @@
 import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
+import { extractLlmField } from "@/lib/agentOutput";
 import { invoke } from "@/lib/invoke";
 import { classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
@@ -44,47 +45,18 @@ function DecisionComparisonTabContent() {
     decisionAction: store.decision?.action,
     decisionPositionPct: store.decision?.positionPct,
     confidence: store.decision?.confidence,
-    llmDecisionAction: store.llmDecisionJson
-      ? (() => {
-        try {
-          const j = JSON.parse(store.llmDecisionJson);
-          return j.stance;
-        } catch {
-          return null;
-        }
-      })()
-      : null,
-    llmDecisionPositionPct: store.llmDecisionJson
-      ? (() => {
-        try {
-          const j = JSON.parse(store.llmDecisionJson);
-          return j.positionPct;
-        } catch {
-          return null;
-        }
-      })()
-      : null,
-    llmConfidence: store.llmDecisionJson
-      ? (() => {
-        try {
-          const j = JSON.parse(store.llmDecisionJson);
-          return j.confidence;
-        } catch {
-          return null;
-        }
-      })()
-      : null,
-    llmDecisionReasoning: store.llmDecisionJson
-      ? (() => {
-        try {
-          const j = JSON.parse(store.llmDecisionJson);
-          return j.summary;
-        } catch {
-          return null;
-        }
-      })()
-      : null,
+    adjustedConfidence: store.decision?.adjustedConfidence ?? null,
+    decisionReasoning: store.decision?.reasoning ?? null,
+    llmDecisionAction: (extractLlmField(store.llmDecisionJson, "action") as string | null)
+      ?? (extractLlmField(store.llmDecisionJson, "stance") as string | null)
+      ?? null,
+    llmDecisionPositionPct: (extractLlmField(store.llmDecisionJson, "positionPct") as number | null) ?? null,
+    llmConfidence: (extractLlmField(store.llmDecisionJson, "confidence") as number | null) ?? null,
+    llmDecisionReasoning: (extractLlmField(store.llmDecisionJson, "reasoning") as string | null)
+      ?? (extractLlmField(store.llmDecisionJson, "summary") as string | null)
+      ?? null,
     decisionAgreementScore: store.decisionAgreementScore,
+    agreementBreakdown: store.decision?.agreementBreakdown ?? null,
   };
   return <DualViewRenderer id="decision-comparison" data={dualViewData} defaultMode="panel" />;
 }
@@ -179,7 +151,18 @@ export function StockAnalysisPage() {
     let cancelled = false;
     const code = searchParams.get("code");
     if (code) {
-      getStockQuote(code);
+      // 立即把 code 写入 searchKeyword，让 StockSearchBar 输入框显示股票代码
+      useStockAnalysisStore.setState({ searchKeyword: code });
+      getStockQuote(code).then(() => {
+        if (cancelled) { return; }
+        // getStockQuote 完成后，stockName 已写入 store，把 searchKeyword 更新为 "名称(code)" 格式
+        const { stockCode, stockName } = useStockAnalysisStore.getState();
+        if (stockCode) {
+          useStockAnalysisStore.setState({
+            searchKeyword: stockName ? `${stockName} (${stockCode})` : stockCode,
+          });
+        }
+      });
       const kp = PERIOD_MAP[klinePeriod] ?? PERIOD_MAP["6m"];
       getStockKline(code, kp.period, kp.limit).then(() => {
         if (cancelled) { return; }
@@ -728,15 +711,39 @@ function AnalystConsensusBar() {
   const total = reports.length;
   if (total === 0) { return null; }
 
-  // Use classifySentiment (same logic as AnalystReportGrid) to ensure consistency
+  // 与 AnalystReportGrid 一致：优先用结构化 bull_score/bear_score
   let bull = 0;
   let bear = 0;
   let neutral = 0;
-  for (const text of reports) {
-    const s = classifySentiment(text);
-    if (s === "bullish") { bull++; }
-    else if (s === "bearish") { bear++; }
-    else { neutral++; }
+  for (const rawReport of reports) {
+    const report = rawReport.replace(/<\/?tool_call[^>]*>/g, "");
+    // 尝试 VERDICT JSON
+    const vIdx = report.indexOf("<!-- VERDICT:");
+    let scores: { bull: number; bear: number } | null = null;
+    if (vIdx !== -1) {
+      try {
+        const js = report.slice(vIdx + "<!-- VERDICT:".length);
+        const je = js.indexOf("-->");
+        if (je !== -1) {
+          const m = JSON.parse(js.slice(0, je).trim());
+          const b = m.bull_score ?? m.strength_score ?? null;
+          const br = m.bear_score ?? null;
+          if (typeof b === "number" || typeof br === "number") {
+            scores = { bull: b ?? 0, bear: br ?? 0 };
+          }
+        }
+      } catch { /* ignore */ }
+    }
+    if (scores) {
+      if (scores.bull > scores.bear * 1.2) { bull++; }
+      else if (scores.bear > scores.bull * 1.2) { bear++; }
+      else { neutral++; }
+    } else {
+      const s = classifySentiment(report);
+      if (s === "bullish") { bull++; }
+      else if (s === "bearish") { bear++; }
+      else { neutral++; }
+    }
   }
 
   return (

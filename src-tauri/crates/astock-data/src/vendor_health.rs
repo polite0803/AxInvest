@@ -272,7 +272,7 @@ mod tests {
     #[tokio::test]
     async fn degraded_vendor_filtered() {
         let tracker = VendorHealthTracker::new(VendorHealthConfig::default());
-        for _ in 0..3 {
+        for _ in 0..8 {
             tracker.record_failure("bad-vendor", "timeout").await;
         }
         let healthy = tracker

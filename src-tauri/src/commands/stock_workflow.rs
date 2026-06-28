@@ -651,7 +651,7 @@ fn compute_decision_agreement(
     // 计算无 f7 版本的 action 一致性评分
     // P0: 比较 formula(no-f7) vs LLM action（当 LLM 有 action 时）
     // P3: 当 LLM 无 action 时，回退到 formula(no-f7) vs formula(full) — trader 影响度
-    let f7_compare_target = l_action.as_deref().or_else(|| f_action.as_deref());
+    let f7_compare_target = l_action.as_deref().or(f_action.as_deref());
     let f7_free_action_score =
         match (f7_free_action.as_deref().map(norm), f7_compare_target.map(norm)) {
             (Some(a), Some(b)) if a == b => Some(50.0),

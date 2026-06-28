@@ -38,11 +38,10 @@ describe("timeAnchorHelpers", () => {
     expect(isValidPastDate(s)).toBe(true);
   });
 
-  it("isValidPastDate rejects today", () => {
+  it("isValidPastDate accepts today", () => {
     const today = todayIso();
-    // today 严格 < today 是 false（包含等于），应被拒绝
-    expect(today < today).toBe(false);
-    expect(isValidPastDate(today)).toBe(false);
+    // today <= today 为 true（包括等于），允许用户选择当天
+    expect(isValidPastDate(today)).toBe(true);
   });
 
   it("isValidPastDate rejects future date", () => {

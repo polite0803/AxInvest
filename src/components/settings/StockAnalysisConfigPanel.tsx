@@ -91,6 +91,14 @@ function getDefaultVariables(): Variable[] {
   b("screener_turnover_rate_min", 0, "换手率下限 (%)，0=不限", "number");
   b("screener_rsi_oversold", false, "选股时要求 RSI 超卖 (<30)", "boolean");
   b("screener_rsi_overbought", false, "选股时要求 RSI 超买 (>70)", "boolean");
+  // 行业财务基线参考股票代码（stock_analysis_setup 中 t-baseline-* 节点使用）
+  b("ref_semi_code", "002371", "半导体基线参考代码（北方华创）", "string");
+  b("ref_battery_code", "300750", "电池基线参考代码（宁德时代）", "string");
+  b("ref_chem_code", "600309", "化工基线参考代码（万华化学）", "string");
+  b("ref_med_code", "688981", "医药基线参考代码（中芯国际）", "string");
+  b("ref_aero_code", "600760", "军工基线参考代码（中航沈飞）", "string");
+  b("ref_consumer_elec_code", "002475", "消费电子基线参考代码（立讯精密）", "string");
+  b("ref_auto_code", "600104", "汽车基线参考代码（上汽集团）", "string");
   // 信号检测（signals.rs detect_ma_cross / detect_breakout）
   b("signal_ma_fast", 5, "MA 金叉检测快线周期 (3-30)", "number");
   b("signal_ma_slow", 20, "MA 金叉检测慢线周期 (10-120)", "number");
@@ -433,6 +441,13 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "screener_turnover_rate_min",
           "screener_rsi_oversold",
           "screener_rsi_overbought",
+          "ref_semi_code",
+          "ref_battery_code",
+          "ref_chem_code",
+          "ref_med_code",
+          "ref_aero_code",
+          "ref_consumer_elec_code",
+          "ref_auto_code",
         ]),
       },
       {

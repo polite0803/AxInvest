@@ -2611,7 +2611,9 @@ impl AStockClient {
         {
             Ok(result) => Ok(result),
             Err(e) => {
-                tracing::warn!("[get_industry_ranking] 所有 vendor 均不可用, 返回空列表. 详细: {e}");
+                tracing::warn!(
+                    "[get_industry_ranking] 所有 vendor 均不可用, 返回空列表. 详细: {e}"
+                );
                 Ok(vec![])
             },
         }

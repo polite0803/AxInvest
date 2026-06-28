@@ -199,9 +199,7 @@ fn extract_name(text: &str) -> Option<String> {
         if let Some(pos) = text.find(prefix) {
             let start = pos + prefix.len();
             let name_part = &text[start..];
-            let end = name_part
-                .find(['\n', '\r'])
-                .unwrap_or(name_part.len());
+            let end = name_part.find(['\n', '\r']).unwrap_or(name_part.len());
             let name = name_part[..end].trim();
             if !name.is_empty() {
                 return Some(name.to_string());

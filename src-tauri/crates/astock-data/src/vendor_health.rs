@@ -80,7 +80,10 @@ impl VendorHealth {
     /// 只读计算窗口内有效失败数（不需要 &mut self，用于 read-lock 路径）
     fn window_failure_count(&self, now: i64) -> usize {
         let cutoff = now - (FAILURE_WINDOW_SECS as i64 * 1000);
-        self.window_failures.iter().filter(|&&ts| ts >= cutoff).count()
+        self.window_failures
+            .iter()
+            .filter(|&&ts| ts >= cutoff)
+            .count()
     }
 }
 
@@ -109,7 +112,7 @@ pub struct VendorHealthConfig {
 impl Default for VendorHealthConfig {
     fn default() -> Self {
         Self {
-            degraded_threshold: 8, // 30s 窗口内 8 次失败才降级，burst 免疫
+            degraded_threshold: 8,       // 30s 窗口内 8 次失败才降级，burst 免疫
             recovery_interval_secs: 300, // 兜底恢复间隔（窗口老化的同时仍保留此兜底）
             track_fallback_path: true,
         }
@@ -167,7 +170,9 @@ impl VendorHealthTracker {
 
         // 窗口失败数回落后自动恢复
         let window_count = entry.prune_window(now);
-        if entry.status == VendorStatus::Degraded && (window_count as u32) < self.config.degraded_threshold {
+        if entry.status == VendorStatus::Degraded
+            && (window_count as u32) < self.config.degraded_threshold
+        {
             entry.status = VendorStatus::Healthy;
             warn!(
                 "[VendorHealth] {} 自动恢复（窗口失败数 {} < 阈值 {}）",
@@ -192,7 +197,9 @@ impl VendorHealthTracker {
         entry.window_failures.push_back(now);
         let window_count = entry.prune_window(now);
 
-        if entry.status == VendorStatus::Healthy && (window_count as u32) >= self.config.degraded_threshold {
+        if entry.status == VendorStatus::Healthy
+            && (window_count as u32) >= self.config.degraded_threshold
+        {
             entry.status = VendorStatus::Degraded;
             warn!(
                 "[VendorHealth] {} 30s 窗口内失败 {} 次（共 {} 次），已降级。最后错误: {}",

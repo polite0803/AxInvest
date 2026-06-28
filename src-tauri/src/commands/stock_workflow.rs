@@ -442,7 +442,6 @@ fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
     }
 }
 
-
 /// 双视角一致性诊断结果
 ///
 /// V50 升级: compute_decision_agreement 不再只返回 0-100 总分,
@@ -567,7 +566,7 @@ fn compute_decision_agreement(
     let is_hold = |s: &str| s == "持有";
     let is_watch = |s: &str| s == "观望";
     let is_uncertain = |s: &str| s.contains("不确定") || s.contains("未知");
-    let action_score: f64 = match (f_action, l_action.clone()) {
+    let action_score: f64 = match (f_action.clone(), l_action.clone()) {
         (Some(a), Some(b)) if a == b => 50.0,
         (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => 35.0,
         (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => 35.0,
@@ -626,8 +625,66 @@ fn compute_decision_agreement(
 
     let total = (action_score + pos_score + conf_score).round() as i32;
 
+    // ── P0: 从公式决策中提取 f7_free 信息（消除自指悖论）──
+    let f7_free_info = fj.get("f7_free").and_then(|v| {
+        if v.is_object() {
+            let obj = v.as_object()?;
+            let f7_weight = obj.get("f7_weight").and_then(|w| w.as_f64())?;
+            let total_weight = obj.get("total_weight").and_then(|w| w.as_f64())?;
+            let f7_weight_pct = if total_weight > 0.0 {
+                Some((f7_weight / total_weight * 100.0 * 10.0).round() / 10.0)
+            } else {
+                None
+            };
+            let posterior = obj.get("posterior").and_then(|p| p.as_f64());
+            let action = obj
+                .get("action")
+                .and_then(|a| a.as_str().map(|s| s.to_string()));
+            Some((f7_weight_pct, posterior, action))
+        } else {
+            None
+        }
+    });
+    let (f7_weight_pct, f7_free_posterior, f7_free_action) =
+        f7_free_info.unwrap_or((None, None, None));
+
+    // 计算无 f7 版本的 action 一致性评分
+    // P0: 比较 formula(no-f7) vs LLM action（当 LLM 有 action 时）
+    // P3: 当 LLM 无 action 时，回退到 formula(no-f7) vs formula(full) — trader 影响度
+    let f7_compare_target = l_action.as_deref().or_else(|| f_action.as_deref());
+    let f7_free_action_score =
+        match (f7_free_action.as_deref().map(norm), f7_compare_target.map(norm)) {
+            (Some(a), Some(b)) if a == b => Some(50.0),
+            (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => Some(35.0),
+            (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => Some(35.0),
+            (Some(a), Some(b))
+                if (is_hold(&a) && is_watch(&b)) || (is_hold(&b) && is_watch(&a)) =>
+            {
+                Some(15.0)
+            },
+            (Some(a), Some(b)) if (is_hold(&a) || is_watch(&a)) && is_uncertain(&b) => Some(5.0),
+            (Some(a), Some(b)) if (is_hold(&b) || is_watch(&b)) && is_uncertain(&a) => Some(5.0),
+            (Some(a), Some(b))
+                if is_watch(&a) && is_uncertain(&b) || is_watch(&b) && is_uncertain(&a) =>
+            {
+                Some(10.0)
+            },
+            (Some(_), Some(_)) => Some(0.0),
+            _ => None,
+        };
+
     // ── V50: 冲突类型分类 ──
-    let conflict_type: &str = if action_score >= 45.0 && pos_score >= 25.0 && conf_score >= 18.0 {
+    // P3: 新增 f7_influence 类型 — trader 不输出 action，用 formula(no-f7) vs formula(full)
+    //     衡量 trader 信息对公式的影响度
+    let conflict_type: &str = if l_action.is_none() {
+        // P3: 无 LLM action, 用 f7_free_action_score 区间判断 influence 程度
+        match f7_free_action_score {
+            Some(s) if s >= 45.0 => "f7_low_influence", // trader 信息对公式影响小
+            Some(s) if s >= 35.0 => "f7_moderate_influence", // trader 信息有中等影响
+            Some(s) if s >= 20.0 => "f7_high_influence", // trader 信息大幅改变公式输出
+            _ => "f7_dominant",                         // trader 信息主导公式决策
+        }
+    } else if action_score >= 45.0 && pos_score >= 25.0 && conf_score >= 18.0 {
         "all_agree"
     } else if action_score == 0.0 {
         "opposite_direction"
@@ -653,35 +710,6 @@ fn compute_decision_agreement(
         "opposite"
     } else {
         "missing_one_side"
-    };
-
-    // ── P0: 从公式决策中提取 f7_free 信息（消除自指悖论）──
-    let f7_free_info = fj.get("f7_free").and_then(|v| {
-        if v.is_object() {
-            let obj = v.as_object()?;
-            let f7_weight = obj.get("f7_weight").and_then(|w| w.as_f64())?;
-            let total_weight = obj.get("total_weight").and_then(|w| w.as_f64())?;
-            let f7_weight_pct = if total_weight > 0.0 {
-                Some((f7_weight / total_weight * 100.0 * 10.0).round() / 10.0)
-            } else { None };
-            let posterior = obj.get("posterior").and_then(|p| p.as_f64());
-            let action = obj.get("action").and_then(|a| a.as_str().map(|s| s.to_string()));
-            Some((f7_weight_pct, posterior, action))
-        } else { None }
-    });
-    let (f7_weight_pct, f7_free_posterior, f7_free_action) = f7_free_info.unwrap_or((None, None, None));
-
-    // 计算无 f7 版本的 action 一致性评分
-    let f7_free_action_score = match (f7_free_action.as_deref().map(norm), l_action.clone()) {
-        (Some(a), Some(b)) if a == b => Some(50.0),
-        (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => Some(35.0),
-        (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => Some(35.0),
-        (Some(a), Some(b)) if (is_hold(&a) && is_watch(&b)) || (is_hold(&b) && is_watch(&a)) => Some(15.0),
-        (Some(a), Some(b)) if (is_hold(&a) || is_watch(&a)) && is_uncertain(&b) => Some(5.0),
-        (Some(a), Some(b)) if (is_hold(&b) || is_watch(&b)) && is_uncertain(&a) => Some(5.0),
-        (Some(a), Some(b)) if is_watch(&a) && is_uncertain(&b) || is_watch(&b) && is_uncertain(&a) => Some(10.0),
-        (Some(_), Some(_)) => Some(0.0),
-        _ => None,
     };
 
     Some(AgreementBreakdown {
@@ -1959,7 +1987,23 @@ async fn run_stock_workflow_inner(
                             let f7_note = ab.f7_weight_pct.map(|pct|
                                 format!(" [f7污染{}%]", pct)
                             ).unwrap_or_default();
-                            if ab.total >= 60 {
+                            // P3: trader 不输出 action, 改用 trader 影响度评分
+                            if ab.conflict_type.starts_with("f7_") {
+                                let inf_level = match ab.conflict_type.as_str() {
+                                    "f7_low_influence" => "低",
+                                    "f7_moderate_influence" => "中",
+                                    "f7_high_influence" => "高",
+                                    "f7_dominant" => "主导",
+                                    _ => "?",
+                                };
+                                format!(
+                                    "📊trader影响:{} (公式{} vs 无f7{},分={}){}",
+                                    inf_level, ab.formula_action,
+                                    ab.f7_free_action.as_deref().unwrap_or("?"),
+                                    ab.f7_free_action_score.unwrap_or(0.0) as i32,
+                                    f7_note,
+                                )
+                            } else if ab.total >= 60 {
                                 format!("🤝双视角一致:{}分{}", ab.total, f7_note)
                             } else if ab.total >= 40 {
                                 format!("⚠️双视角部分一致:{}分{}", ab.total, f7_note)

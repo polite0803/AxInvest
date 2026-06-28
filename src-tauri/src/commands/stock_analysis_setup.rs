@@ -4992,7 +4992,7 @@ async fn seed_serenity_screening_workflow_template(
 
     const TEMPLATE_ID: &str = "serenity-screening";
     // 每次修改 Rhai 脚本或节点拓扑后+1，强制模板重新写入
-    const TEMPLATE_VERSION: i32 = 9;  // v9: cls-risk-level prompt 增加基本面维度(ROE/毛利率/负债率/营收增速)并放宽阈值
+    const TEMPLATE_VERSION: i32 = 9; // v9: cls-risk-level prompt 增加基本面维度(ROE/毛利率/负债率/营收增速)并放宽阈值
 
     // 检查模板是否已存在且是最新版本
     if let Some(existing) = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -5911,10 +5911,16 @@ async fn seed_serenity_screening_workflow_template(
     // context_sources: 提供趋势上下文 + 完整产业链拆解 + 瓶颈验证结果
     let mapper_ctx: Vec<&str> = vec![
         "a-trend-scanner",
-        "a-chain-trend1", "a-chain-trend2", "a-chain-trend3",
-        "a-chain-trend4", "a-chain-trend5",
-        "a-chokepoint-trend1", "a-chokepoint-trend2", "a-chokepoint-trend3",
-        "a-chokepoint-trend4", "a-chokepoint-trend5",
+        "a-chain-trend1",
+        "a-chain-trend2",
+        "a-chain-trend3",
+        "a-chain-trend4",
+        "a-chain-trend5",
+        "a-chokepoint-trend1",
+        "a-chokepoint-trend2",
+        "a-chokepoint-trend3",
+        "a-chokepoint-trend4",
+        "a-chokepoint-trend5",
     ];
     nodes.push(agent_node(
         "a-candidate-mapper",
@@ -5962,20 +5968,32 @@ async fn seed_serenity_screening_workflow_template(
     };
     // 数据集工具（Phase 0）：可供趋势扫描器调用获取行业级数据
     let phase0_tools = &[
-        "get_industry_ranking", "get_cls_flash", "get_stock_concept_blocks",
-        "get_north_bound_flow", "get_market_dragon_tiger",
+        "get_industry_ranking",
+        "get_cls_flash",
+        "get_stock_concept_blocks",
+        "get_north_bound_flow",
+        "get_market_dragon_tiger",
     ];
     // 产业链分析工具（Phase 1）：供 chain-decomposer / chokepoint-identifier 调用
     let chain_tools = &[
-        "search_stock", "get_stock_financials", "get_stock_quote",
-        "get_stock_institutional_visits", "compute_industry_position",
+        "search_stock",
+        "get_stock_financials",
+        "get_stock_quote",
+        "get_stock_institutional_visits",
+        "compute_industry_position",
     ];
     // 候选筛选工具（Phase 2）：供 candidate-mapper 全功能调用
     let candidate_tools = &[
-        "search_stock", "get_stock_financials", "get_stock_quote",
-        "get_stock_institutional_visits", "get_stock_news",
-        "get_stock_research_reports", "search_news", "compute_attention_score",
-        "compute_industry_position", "check_exit_signals",
+        "search_stock",
+        "get_stock_financials",
+        "get_stock_quote",
+        "get_stock_institutional_visits",
+        "get_stock_news",
+        "get_stock_research_reports",
+        "search_news",
+        "compute_attention_score",
+        "compute_industry_position",
+        "check_exit_signals",
     ];
     // 后处理工具（回馈闭环）
     for node in &mut nodes {
@@ -6073,42 +6091,56 @@ async fn seed_serenity_screening_workflow_template(
             name: "serenity_max_3m_gain_pct".into(),
             var_type: "float".into(),
             value: serde_json::json!(80.0),
-            description: Some("近3月涨幅上限(%)：超过此值的候选排除，只拦短期飞过头的标的（默认80%）".into()),
+            description: Some(
+                "近3月涨幅上限(%)：超过此值的候选排除，只拦短期飞过头的标的（默认80%）".into(),
+            ),
             is_secret: false,
         },
         Variable {
             name: "serenity_max_12m_gain_pct".into(),
             var_type: "float".into(),
             value: serde_json::json!(300.0),
-            description: Some("近12月涨幅上限(%)：超过此值的候选排除，只拦长期飞过头的标的（默认300%）".into()),
+            description: Some(
+                "近12月涨幅上限(%)：超过此值的候选排除，只拦长期飞过头的标的（默认300%）".into(),
+            ),
             is_secret: false,
         },
         Variable {
             name: "serenity_min_gross_margin".into(),
             var_type: "float".into(),
             value: serde_json::json!(30.0),
-            description: Some("毛利率下限(%)：低于此值且评分<80时排除（默认30%，瓶颈股早期可能微利）".into()),
+            description: Some(
+                "毛利率下限(%)：低于此值且评分<80时排除（默认30%，瓶颈股早期可能微利）".into(),
+            ),
             is_secret: false,
         },
         Variable {
             name: "serenity_max_debt_ratio".into(),
             var_type: "float".into(),
             value: serde_json::json!(70.0),
-            description: Some("负债率上限(%)：高于此值且评分<85时排除（默认70%，扩张期瓶颈企业可能高负债）".into()),
+            description: Some(
+                "负债率上限(%)：高于此值且评分<85时排除（默认70%，扩张期瓶颈企业可能高负债）"
+                    .into(),
+            ),
             is_secret: false,
         },
         Variable {
             name: "serenity_growth_exempt_pct".into(),
             var_type: "float".into(),
             value: serde_json::json!(50.0),
-            description: Some("高增长豁免阈值(%)：营收增速超过此值时PE超标可豁免（PEG<2即可放行，默认50%）".into()),
+            description: Some(
+                "高增长豁免阈值(%)：营收增速超过此值时PE超标可豁免（PEG<2即可放行，默认50%）"
+                    .into(),
+            ),
             is_secret: false,
         },
         Variable {
             name: "serenity_min_revenue_growth".into(),
             var_type: "float".into(),
             value: serde_json::json!(5.0),
-            description: Some("营收增速下限(%)：低于此值且评分<85时排除（默认5%，成熟瓶颈可能增速不高）".into()),
+            description: Some(
+                "营收增速下限(%)：低于此值且评分<85时排除（默认5%，成熟瓶颈可能增速不高）".into(),
+            ),
             is_secret: false,
         },
     ];

@@ -144,18 +144,15 @@ async fn filter_one(client: &AStockClient, item: SeedItem) -> Option<SeedItem> {
     // 行情数据必须可获取，否则无法交易（quote 走 tencent 路由，通常稳定）
     // 加一次轻量重试：瞬断场景下避免大量标的被误过滤
     // 用 tokio::time::timeout 包裹，避免单个标的长时间阻塞整个过滤阶段
-    let quote = match tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        async {
-            match client.get_quote(&code).await {
-                Ok(q) => Some(q),
-                Err(_) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                    client.get_quote(&code).await.ok()
-                },
-            }
-        },
-    )
+    let quote = match tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        match client.get_quote(&code).await {
+            Ok(q) => Some(q),
+            Err(_) => {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                client.get_quote(&code).await.ok()
+            },
+        }
+    })
     .await
     {
         Ok(Some(q)) => q,
@@ -182,8 +179,17 @@ const VENDOR_TTL: Duration = Duration::from_secs(300);
 ///
 /// 使用白名单模式：只解析已知的 vendor 名称，排除 `vendor_xueqiu_token` / `vendor_neodata_token` 等凭据变量
 static KNOWN_VENDORS: &[&str] = &[
-    "tencent", "eastmoney", "sina", "ths", "cninfo",
-    "baidu_stock", "iwencai", "akshare", "mootdx", "xueqiu", "neodata",
+    "tencent",
+    "eastmoney",
+    "sina",
+    "ths",
+    "cninfo",
+    "baidu_stock",
+    "iwencai",
+    "akshare",
+    "mootdx",
+    "xueqiu",
+    "neodata",
 ];
 pub fn load_enabled_vendors_from_template(
     template_vars: &[(String, serde_json::Value)],

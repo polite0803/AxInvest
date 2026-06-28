@@ -1575,132 +1575,160 @@ impl Tool for ComputeRiskTool {
             "集中风险"
         };
 
-    let result = if codes.len() == 1 {
-        // ── V50: 单股模式 — 计算真实风险指标 ──
-        // 当只有一只股票时，组合级指标（HHI/分散度/行业暴露）无意义，
-        // 改为计算波动率、VaR、最大回撤、夏普比率等单股风险指标。
-        let stock_code = codes[0];
-        let klines = self.client.get_klines(stock_code, "daily", 252).await.unwrap_or_default();
-        let prices: Vec<f64> = klines.iter().map(|k| k.close).filter(|&p| p > 0.0).collect();
-
-        // 获取财务数据（用于基本面风险维度）
-        let financials = self.client.get_financials(stock_code).await.unwrap_or_default();
-        let latest_financial = financials.first();  // 取最新一期财报
-        let roe_ttm = latest_financial.and_then(|f| f.roe).unwrap_or(0.0);
-        let gross_margin_pct = latest_financial.and_then(|f| f.gross_margin).unwrap_or(0.0);
-        let debt_ratio_pct = latest_financial.and_then(|f| f.debt_ratio).unwrap_or(0.0);
-        let revenue_growth_yoy = latest_financial.and_then(|f| f.revenue_yoy).unwrap_or(0.0);
-
-        // PE(TTM) 从实时行情获取（StockQuote.pe 字段）
-        let pe_ttm = positions.first()
-            .map(|(q, _)| q.pe.unwrap_or(0.0))
-            .unwrap_or(0.0);
-        
-        let (annual_vol, var_95, max_dd, sharpe) = if prices.len() >= 20 {
-            // 日收益率
-            let returns: Vec<f64> = prices.windows(2)
-                .map(|w| (w[1] - w[0]) / w[0])
-                .filter(|r| r.is_finite())
+        let result = if codes.len() == 1 {
+            // ── V50: 单股模式 — 计算真实风险指标 ──
+            // 当只有一只股票时，组合级指标（HHI/分散度/行业暴露）无意义，
+            // 改为计算波动率、VaR、最大回撤、夏普比率等单股风险指标。
+            let stock_code = codes[0];
+            let klines = self
+                .client
+                .get_klines(stock_code, "daily", 252)
+                .await
+                .unwrap_or_default();
+            let prices: Vec<f64> = klines
+                .iter()
+                .map(|k| k.close)
+                .filter(|&p| p > 0.0)
                 .collect();
-            
-            // 年化波动率
-            let n = returns.len() as f64;
-            let mean = returns.iter().sum::<f64>() / n;
-            let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
-            let daily_vol = variance.sqrt();
-            let annual_vol = daily_vol * 252.0_f64.sqrt();
-            
-            // VaR 95%（历史模拟法）
-            let mut sorted = returns.to_vec();
-            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let idx = ((1.0 - 0.95) * n).ceil() as usize;
-            let var_95 = sorted.get(idx.min(sorted.len() - 1)).copied().unwrap_or(0.0);
-            
-            // 最大回撤
-            let mut peak = prices[0];
-            let mut max_dd: f64 = 0.0;
-            for &p in &prices {
-                if p > peak { peak = p; }
-                if peak > 0.0 { max_dd = max_dd.max((peak - p) / peak); }
-            }
-            
-            // 夏普比率（年化，无风险利率假设 2%）
-            let risk_free_annual = 0.02;
-            let risk_free_daily = risk_free_annual / 252.0;
-            let excess_mean = returns.iter().map(|r| r - risk_free_daily).sum::<f64>() / n;
-            let sharpe = if daily_vol > 0.0 { excess_mean / daily_vol * 252.0_f64.sqrt() } else { 0.0 };
-            
-            (
-                (annual_vol * 100.0 * 100.0).round() / 100.0,   // 百分比
-                (var_95 * 100.0 * 100.0).round() / 100.0,       // 百分比
-                (max_dd * 100.0 * 100.0).round() / 100.0,       // 百分比
-                (sharpe * 100.0).round() / 100.0
-            )
+
+            // 获取财务数据（用于基本面风险维度）
+            let financials = self
+                .client
+                .get_financials(stock_code)
+                .await
+                .unwrap_or_default();
+            let latest_financial = financials.first(); // 取最新一期财报
+            let roe_ttm = latest_financial.and_then(|f| f.roe).unwrap_or(0.0);
+            let gross_margin_pct = latest_financial.and_then(|f| f.gross_margin).unwrap_or(0.0);
+            let debt_ratio_pct = latest_financial.and_then(|f| f.debt_ratio).unwrap_or(0.0);
+            let revenue_growth_yoy = latest_financial.and_then(|f| f.revenue_yoy).unwrap_or(0.0);
+
+            // PE(TTM) 从实时行情获取（StockQuote.pe 字段）
+            let pe_ttm = positions
+                .first()
+                .map(|(q, _)| q.pe.unwrap_or(0.0))
+                .unwrap_or(0.0);
+
+            let (annual_vol, var_95, max_dd, sharpe) = if prices.len() >= 20 {
+                // 日收益率
+                let returns: Vec<f64> = prices
+                    .windows(2)
+                    .map(|w| (w[1] - w[0]) / w[0])
+                    .filter(|r| r.is_finite())
+                    .collect();
+
+                // 年化波动率
+                let n = returns.len() as f64;
+                let mean = returns.iter().sum::<f64>() / n;
+                let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
+                let daily_vol = variance.sqrt();
+                let annual_vol = daily_vol * 252.0_f64.sqrt();
+
+                // VaR 95%（历史模拟法）
+                let mut sorted = returns.to_vec();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let idx = ((1.0 - 0.95) * n).ceil() as usize;
+                let var_95 = sorted
+                    .get(idx.min(sorted.len() - 1))
+                    .copied()
+                    .unwrap_or(0.0);
+
+                // 最大回撤
+                let mut peak = prices[0];
+                let mut max_dd: f64 = 0.0;
+                for &p in &prices {
+                    if p > peak {
+                        peak = p;
+                    }
+                    if peak > 0.0 {
+                        max_dd = max_dd.max((peak - p) / peak);
+                    }
+                }
+
+                // 夏普比率（年化，无风险利率假设 2%）
+                let risk_free_annual = 0.02;
+                let risk_free_daily = risk_free_annual / 252.0;
+                let excess_mean = returns.iter().map(|r| r - risk_free_daily).sum::<f64>() / n;
+                let sharpe = if daily_vol > 0.0 {
+                    excess_mean / daily_vol * 252.0_f64.sqrt()
+                } else {
+                    0.0
+                };
+
+                (
+                    (annual_vol * 100.0 * 100.0).round() / 100.0, // 百分比
+                    (var_95 * 100.0 * 100.0).round() / 100.0,     // 百分比
+                    (max_dd * 100.0 * 100.0).round() / 100.0,     // 百分比
+                    (sharpe * 100.0).round() / 100.0,
+                )
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            };
+
+            let stock_name: &str = positions
+                .first()
+                .map(|(q, _)| q.name.as_str())
+                .unwrap_or("");
+
+            json!({
+                "stockCount": 1,
+                "singleStockRisk": true,
+                "stock": { "code": stock_code, "name": stock_name, "price": positions.first().map(|(q, _)| q.price).unwrap_or(0.0) },
+                "stockRiskProfile": {
+                    "annualizedVolatilityPct": annual_vol,
+                    "valueAtRisk95Pct": var_95,
+                    "maxDrawdownPct": max_dd,
+                    "sharpeRatio": sharpe,
+                    "dataDays": prices.len(),
+                    "klineDays": klines.len(),
+                    "roeTTMPct": (roe_ttm * 100.0).round() / 100.0,
+                    "grossMarginPct": (gross_margin_pct * 100.0).round() / 100.0,
+                    "debtRatioPct": (debt_ratio_pct * 100.0).round() / 100.0,
+                    "revenueGrowthYoYPct": (revenue_growth_yoy * 100.0).round() / 100.0,
+                    "peTTM": pe_ttm,
+                },
+                "concentration": { "hhi": 1.0, "effectiveN": 1.0, "label": "单股(组合指标不适用)" },
+                "diversification": { "effectiveStocks": 1.0, "label": "单股" },
+                "sectorExposure": sector_map.into_iter().map(|(k, v)| json!({"sector": k, "weight": (v * 100.0).round() / 100.0})).collect::<Vec<_>>(),
+                "maxSectorConcentration": { "sector": max_sector_name, "weightPct": (max_sector_concentration * 100.0).round() / 100.0 },
+                "positions": positions.iter().zip(norm_weights.iter()).map(|((q, _), w)| json!({
+                    "code": q.code, "name": q.name, "price": q.price,
+                    "changePct": q.change_pct, "weightPct": (*w * 100.0).round() / 100.0,
+                })).collect::<Vec<_>>(),
+                "credibility": { "dataCompleteness": 100.0, "dataFreshness": "realtime", "source": "tencent|eastmoney", "warnings": Value::Array(r_warnings) }
+            })
         } else {
-            (0.0, 0.0, 0.0, 0.0)
+            // ── 多股模式 — 原有组合风险指标 ──
+            json!({
+                "stockCount": positions.len(),
+                "singleStockRisk": false,
+                "concentration": {
+                    "hhi": (hhi * 10000.0).round() / 10000.0,
+                    "effectiveN": (effective_n * 100.0).round() / 100.0,
+                    "label": concentration_label,
+                },
+                "diversification": {
+                    "effectiveStocks": (effective_n * 100.0).round() / 100.0,
+                    "label": diversification_label,
+                },
+                "sectorExposure": sector_map.into_iter().map(|(k, v)| json!({"sector": k, "weight": (v * 100.0).round() / 100.0})).collect::<Vec<_>>(),
+                "maxSectorConcentration": {
+                    "sector": max_sector_name,
+                    "weightPct": (max_sector_concentration * 100.0).round() / 100.0,
+                },
+                "positions": positions.iter().zip(norm_weights.iter()).map(|((q, _), w)| json!({
+                    "code": q.code, "name": q.name, "price": q.price,
+                    "changePct": q.change_pct, "weightPct": (*w * 100.0).round() / 100.0,
+                })).collect::<Vec<_>>(),
+                "credibility": {
+                    "dataCompleteness": if requested_count > 0 { (loaded_count as f64 / requested_count as f64) * 100.0 } else { 0.0 },
+                    "dataFreshness": "realtime",
+                    "source": "tencent|eastmoney",
+                    "warnings": Value::Array(r_warnings)
+                },
+            })
         };
-        
-        let stock_name: &str = positions.first().map(|(q, _)| q.name.as_str()).unwrap_or("");
-        
-        json!({
-            "stockCount": 1,
-            "singleStockRisk": true,
-            "stock": { "code": stock_code, "name": stock_name, "price": positions.first().map(|(q, _)| q.price).unwrap_or(0.0) },
-            "stockRiskProfile": {
-                "annualizedVolatilityPct": annual_vol,
-                "valueAtRisk95Pct": var_95,
-                "maxDrawdownPct": max_dd,
-                "sharpeRatio": sharpe,
-                "dataDays": prices.len(),
-                "klineDays": klines.len(),
-                "roeTTMPct": (roe_ttm * 100.0).round() / 100.0,
-                "grossMarginPct": (gross_margin_pct * 100.0).round() / 100.0,
-                "debtRatioPct": (debt_ratio_pct * 100.0).round() / 100.0,
-                "revenueGrowthYoYPct": (revenue_growth_yoy * 100.0).round() / 100.0,
-                "peTTM": pe_ttm,
-            },
-            "concentration": { "hhi": 1.0, "effectiveN": 1.0, "label": "单股(组合指标不适用)" },
-            "diversification": { "effectiveStocks": 1.0, "label": "单股" },
-            "sectorExposure": sector_map.into_iter().map(|(k, v)| json!({"sector": k, "weight": (v * 100.0).round() / 100.0})).collect::<Vec<_>>(),
-            "maxSectorConcentration": { "sector": max_sector_name, "weightPct": (max_sector_concentration * 100.0).round() / 100.0 },
-            "positions": positions.iter().zip(norm_weights.iter()).map(|((q, _), w)| json!({
-                "code": q.code, "name": q.name, "price": q.price,
-                "changePct": q.change_pct, "weightPct": (*w * 100.0).round() / 100.0,
-            })).collect::<Vec<_>>(),
-            "credibility": { "dataCompleteness": 100.0, "dataFreshness": "realtime", "source": "tencent|eastmoney", "warnings": Value::Array(r_warnings) }
-        })
-    } else {
-        // ── 多股模式 — 原有组合风险指标 ──
-        json!({
-            "stockCount": positions.len(),
-            "singleStockRisk": false,
-            "concentration": {
-                "hhi": (hhi * 10000.0).round() / 10000.0,
-                "effectiveN": (effective_n * 100.0).round() / 100.0,
-                "label": concentration_label,
-            },
-            "diversification": {
-                "effectiveStocks": (effective_n * 100.0).round() / 100.0,
-                "label": diversification_label,
-            },
-            "sectorExposure": sector_map.into_iter().map(|(k, v)| json!({"sector": k, "weight": (v * 100.0).round() / 100.0})).collect::<Vec<_>>(),
-            "maxSectorConcentration": {
-                "sector": max_sector_name,
-                "weightPct": (max_sector_concentration * 100.0).round() / 100.0,
-            },
-            "positions": positions.iter().zip(norm_weights.iter()).map(|((q, _), w)| json!({
-                "code": q.code, "name": q.name, "price": q.price,
-                "changePct": q.change_pct, "weightPct": (*w * 100.0).round() / 100.0,
-            })).collect::<Vec<_>>(),
-            "credibility": {
-                "dataCompleteness": if requested_count > 0 { (loaded_count as f64 / requested_count as f64) * 100.0 } else { 0.0 },
-                "dataFreshness": "realtime",
-                "source": "tencent|eastmoney",
-                "warnings": Value::Array(r_warnings)
-            },
-        })
-    };
-    Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
+        Ok(ToolResult::success(serde_json::to_string(&result).unwrap_or_default()))
     }
 }
 

@@ -43,8 +43,7 @@ use crate::recommender::strategy::PerCodeLocks;
 static SERENITY_SEED: LazyLock<RwLock<Vec<SeedItem>>> = LazyLock::new(|| RwLock::new(Vec::new()));
 
 /// Serenity 缓存写入时间戳，用于 TTL 检查
-static SERENITY_CACHE_TIME: LazyLock<RwLock<Option<Instant>>> =
-    LazyLock::new(|| RwLock::new(None));
+static SERENITY_CACHE_TIME: LazyLock<RwLock<Option<Instant>>> = LazyLock::new(|| RwLock::new(None));
 
 /// Serenity 缓存 TTL：1 小时
 const SERENITY_CACHE_TTL: Duration = Duration::from_secs(3600);

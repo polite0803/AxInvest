@@ -225,7 +225,12 @@ impl VendorRouting {
             ],
             dragon_tiger: vec!["eastmoney".into(), "baidu_stock".into()],
             lockup: vec!["eastmoney".into(), "baidu_stock".into()],
-            search: vec!["eastmoney".into(), "iwencai".into(), "baidu_stock".into(), "neodata".into()],
+            search: vec![
+                "eastmoney".into(),
+                "iwencai".into(),
+                "baidu_stock".into(),
+                "neodata".into(),
+            ],
             search_news: vec!["eastmoney".into(), "akshare".into(), "neodata".into()],
             margin: vec!["eastmoney".into(), "baidu_stock".into()],
             north_bound: vec!["eastmoney".into(), "baidu_stock".into()],
@@ -234,7 +239,7 @@ impl VendorRouting {
                 "ths".into(),
                 "baidu_stock".into(),
                 "iwencai".into(),
-                "neodata".into(),  // 末位兜底（自然语言查询行业归属）
+                "neodata".into(), // 末位兜底（自然语言查询行业归属）
             ],
             shareholder_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             dividend: vec!["eastmoney".into(), "baidu_stock".into()],
@@ -243,14 +248,24 @@ impl VendorRouting {
             concept_blocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into()],
             announcements: vec!["cninfo".into(), "eastmoney".into()],
             market_dragon_tiger: vec!["ths".into(), "eastmoney".into(), "baidu_stock".into()],
-            hot_stocks: vec!["ths".into(), "baidu_stock".into(), "iwencai".into(), "neodata".into()],
-            industry_ranking: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into(), "neodata".into()],
+            hot_stocks: vec![
+                "ths".into(),
+                "baidu_stock".into(),
+                "iwencai".into(),
+                "neodata".into(),
+            ],
+            industry_ranking: vec![
+                "eastmoney".into(),
+                "ths".into(),
+                "baidu_stock".into(),
+                "neodata".into(),
+            ],
             cls_flash: vec!["eastmoney".into(), "akshare".into(), "neodata".into()],
             north_bound_flow: vec!["eastmoney".into(), "ths".into(), "baidu_stock".into()],
             block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
             institutional_visits: vec!["eastmoney".into()],
             index_quotes: vec!["eastmoney".into(), "tencent".into(), "neodata".into()],
-            peers: vec!["eastmoney".into(), "neodata".into()],  // neodata 末位兜底
+            peers: vec!["eastmoney".into(), "neodata".into()], // neodata 末位兜底
             option_pcr: vec!["eastmoney".into()],
             // P2-4 修复: 在 replay 模式下, 把 3 个核心方法切到对历史日期支持最好的 vendor。
             // 依据 as_of_capability.rs:
@@ -887,7 +902,9 @@ impl AStockClient {
                                 DataError::RateLimited { .. } => {
                                     tracing::warn!(
                                         "[降级] {} {} {} 被限流(429)，不触发 vendor 降级",
-                                        route_key, stock_code, name
+                                        route_key,
+                                        stock_code,
+                                        name
                                     );
                                 },
                                 _ => {

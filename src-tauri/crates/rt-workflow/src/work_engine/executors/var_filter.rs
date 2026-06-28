@@ -392,13 +392,7 @@ mod tests {
         assert_eq!(val["competitive_position"]["gross_margin_pct"], json!(45.0));
 
         // 同时验证非 JSON 字符串不受影响
-        vars.insert(
-            "note".into(),
-            json!({"text": "普通文本"}),
-        );
-        assert_eq!(
-            resolve_var_path("note.text", &vars),
-            Some(json!("普通文本"))
-        );
+        vars.insert("note".into(), json!({"text": "普通文本"}));
+        assert_eq!(resolve_var_path("note.text", &vars), Some(json!("普通文本")));
     }
 }

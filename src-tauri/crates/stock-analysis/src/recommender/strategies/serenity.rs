@@ -53,8 +53,14 @@ impl SerenityStrategy {
         };
         let serenity_score = detail["serenity_score"].as_f64().unwrap_or(0.0);
         let catalysts = detail["catalysts"].as_array().cloned().unwrap_or_default();
-        let exit_signals = detail["exit_signals"].as_object().cloned().unwrap_or_default();
-        let _attention_metrics = detail["attention_metrics"].as_object().cloned().unwrap_or_default();
+        let exit_signals = detail["exit_signals"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let _attention_metrics = detail["attention_metrics"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
 
         // 1. 获取财务数据验证护城河
         let financials = client.get_financials(code).await.ok()?;
@@ -125,10 +131,14 @@ impl SerenityStrategy {
             // 近3月（约63个交易日）
             let k3m_idx = klines.len().saturating_sub(63);
             let k3m_close = klines.get(k3m_idx).map(|k| k.close);
-            if let (Some(close_3m_back), true) = (k3m_close, latest_close > 0.0 && serenity_score < 85.0) {
+            if let (Some(close_3m_back), true) =
+                (k3m_close, latest_close > 0.0 && serenity_score < 85.0)
+            {
                 let gain_3m = (latest_close - close_3m_back) / close_3m_back * 100.0;
                 if gain_3m > max_3m_gain {
-                    tracing::info!("{code}: 近3月涨幅 {gain_3m:.0}% > {max_3m_gain}%, 因短期涨幅过大排除");
+                    tracing::info!(
+                        "{code}: 近3月涨幅 {gain_3m:.0}% > {max_3m_gain}%, 因短期涨幅过大排除"
+                    );
                     return None;
                 }
             }

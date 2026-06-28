@@ -2658,7 +2658,8 @@ pub async fn save_neodata_token(state: State<'_, AppState>, token: String) -> Re
         .await
         .map_err(|e| e.to_string())?
     {
-        let mut vars = t.variables
+        let mut vars = t
+            .variables
             .as_ref()
             .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
             .unwrap_or_default();
@@ -2670,14 +2671,17 @@ pub async fn save_neodata_token(state: State<'_, AppState>, token: String) -> Re
             "type": "string",
         });
         // 替换或新增
-        if let Some(pos) = vars.iter().position(|v| v.get("name").and_then(|n| n.as_str()) == Some("vendor_neodata_token")) {
+        if let Some(pos) = vars
+            .iter()
+            .position(|v| v.get("name").and_then(|n| n.as_str()) == Some("vendor_neodata_token"))
+        {
             vars[pos] = token_val;
         } else {
             vars.push(token_val);
         }
         let json_str = serde_json::to_string(&vars).unwrap_or_default();
-        use sea_orm::ActiveModelTrait;
         use axagent_core::entity::workflow_template::ActiveModel;
+        use sea_orm::ActiveModelTrait;
         let mut am: ActiveModel = t.into();
         am.variables = sea_orm::ActiveValue::Set(Some(json_str));
         am.update(state.harness.db())

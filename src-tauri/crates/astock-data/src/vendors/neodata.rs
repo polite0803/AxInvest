@@ -47,11 +47,10 @@ async fn neodata_query(query: &str, token: Option<&str>) -> Result<Value, DataEr
             cmd.arg("--token").arg(t);
         }
     }
-    let output = cmd.output().await
-        .map_err(|e| DataError::VendorError {
-            vendor: "neodata".into(),
-            message: format!("Python 执行失败: {e}"),
-        })?;
+    let output = cmd.output().await.map_err(|e| DataError::VendorError {
+        vendor: "neodata".into(),
+        message: format!("Python 执行失败: {e}"),
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -72,9 +71,12 @@ async fn neodata_query(query: &str, token: Option<&str>) -> Result<Value, DataEr
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let json: Value = serde_json::from_str(&stdout).map_err(|e| DataError::ParseError(format!(
-        "NeoData JSON 解析失败: {e}, raw={}", &stdout.chars().take(500).collect::<String>()
-    )))?;
+    let json: Value = serde_json::from_str(&stdout).map_err(|e| {
+        DataError::ParseError(format!(
+            "NeoData JSON 解析失败: {e}, raw={}",
+            &stdout.chars().take(500).collect::<String>()
+        ))
+    })?;
 
     // 检查错误码
     if let Some(code) = json["code"].as_str() {
@@ -83,13 +85,19 @@ async fn neodata_query(query: &str, token: Option<&str>) -> Result<Value, DataEr
             "1001" | "1006" => {
                 return Err(DataError::VendorError {
                     vendor: "neodata".into(),
-                    message: format!("NeoData 未命中意图: {}", json["msg"].as_str().unwrap_or("unknown")),
+                    message: format!(
+                        "NeoData 未命中意图: {}",
+                        json["msg"].as_str().unwrap_or("unknown")
+                    ),
                 });
             },
             _ => {
                 return Err(DataError::VendorError {
                     vendor: "neodata".into(),
-                    message: format!("NeoData 错误: code={code}, msg={}", json["msg"].as_str().unwrap_or("")),
+                    message: format!(
+                        "NeoData 错误: code={code}, msg={}",
+                        json["msg"].as_str().unwrap_or("")
+                    ),
                 });
             },
         }
@@ -173,7 +181,9 @@ fn extract_code(text: &str) -> Option<String> {
         if let Some(pos) = text.find(prefix) {
             let start = pos + prefix.len();
             let code_part = &text[start..];
-            let end = code_part.find(|c: char| !c.is_alphanumeric() && c != '.' && c != '-').unwrap_or(code_part.len());
+            let end = code_part
+                .find(|c: char| !c.is_alphanumeric() && c != '.' && c != '-')
+                .unwrap_or(code_part.len());
             let code = code_part[..end].trim();
             if !code.is_empty() {
                 return Some(code.to_string());
@@ -189,7 +199,9 @@ fn extract_name(text: &str) -> Option<String> {
         if let Some(pos) = text.find(prefix) {
             let start = pos + prefix.len();
             let name_part = &text[start..];
-            let end = name_part.find(|c: char| c == '\n' || c == '\r').unwrap_or(name_part.len());
+            let end = name_part
+                .find(|c: char| c == '\n' || c == '\r')
+                .unwrap_or(name_part.len());
             let name = name_part[..end].trim();
             if !name.is_empty() {
                 return Some(name.to_string());
@@ -230,10 +242,7 @@ impl NeoDataVendor {
                 .as_array()
                 .map(|a| a.iter().filter_map(|i| i["type"].as_str()).collect())
                 .unwrap_or_default();
-            tracing::warn!(
-                "[neodata] 未找到 type={data_type}，可用类型: {:?}",
-                types
-            );
+            tracing::warn!("[neodata] 未找到 type={data_type}，可用类型: {:?}", types);
             DataError::VendorError {
                 vendor: "neodata".into(),
                 message: format!("NeoData 未返回 {data_type} 数据"),
@@ -249,13 +258,21 @@ impl StockVendor for NeoDataVendor {
         let text = self.query_content(&query, "basic_info").await?;
         let pairs = parse_kv_text(&text);
 
-        let price = kv_f64(&pairs, "最新价").or_else(|| kv_f64(&pairs, "价格")).unwrap_or(0.0);
+        let price = kv_f64(&pairs, "最新价")
+            .or_else(|| kv_f64(&pairs, "价格"))
+            .unwrap_or(0.0);
         let pre_close = kv_f64(&pairs, "昨收").unwrap_or(0.0);
-        let open = kv_f64(&pairs, "今开").or_else(|| kv_f64(&pairs, "开盘")).unwrap_or(0.0);
+        let open = kv_f64(&pairs, "今开")
+            .or_else(|| kv_f64(&pairs, "开盘"))
+            .unwrap_or(0.0);
         let high = kv_f64(&pairs, "最高").unwrap_or(0.0);
         let low = kv_f64(&pairs, "最低").unwrap_or(0.0);
-        let change_pct = kv_f64(&pairs, "涨跌幅").or_else(|| kv_f64(&pairs, "涨跌")).unwrap_or(0.0);
-        let volume = kv_f64(&pairs, "成交量").or_else(|| kv_f64(&pairs, "成交")).unwrap_or(0.0);
+        let change_pct = kv_f64(&pairs, "涨跌幅")
+            .or_else(|| kv_f64(&pairs, "涨跌"))
+            .unwrap_or(0.0);
+        let volume = kv_f64(&pairs, "成交量")
+            .or_else(|| kv_f64(&pairs, "成交"))
+            .unwrap_or(0.0);
         let amount = kv_f64(&pairs, "成交额").unwrap_or(0.0);
         let turnover_rate = kv_f64(&pairs, "换手率");
         let pe = kv_f64(&pairs, "PE").or_else(|| kv_f64(&pairs, "市盈率"));
@@ -415,10 +432,7 @@ impl StockVendor for NeoDataVendor {
                     let number_part = &line[pos..];
                     let parts: Vec<&str> = number_part.split_whitespace().collect();
                     if parts.len() >= 2 {
-                        let change_pct = parts[1]
-                            .replace('%', "")
-                            .parse::<f64>()
-                            .unwrap_or(0.0);
+                        let change_pct = parts[1].replace('%', "").parse::<f64>().unwrap_or(0.0);
                         stocks.push(HotStock {
                             stock_code: parts[0].to_string(),
                             stock_name: line[..pos].trim().to_string(),
@@ -434,7 +448,10 @@ impl StockVendor for NeoDataVendor {
         // 也尝试从 docData 提取热点板块信息
         if stocks.is_empty() {
             if let Some(content) = extract_api_content(&json, "hot_sector") {
-                tracing::debug!("[neodata] 热门板块数据: {}", content.chars().take(200).collect::<String>());
+                tracing::debug!(
+                    "[neodata] 热门板块数据: {}",
+                    content.chars().take(200).collect::<String>()
+                );
             }
         }
 
@@ -455,16 +472,18 @@ impl StockVendor for NeoDataVendor {
         if let Some(content) = extract_api_content(&json, "sector_rank") {
             for line in content.lines() {
                 let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed.starts_with("【") || trimmed.starts_with("排名") {
+                if trimmed.is_empty() || trimmed.starts_with("【") || trimmed.starts_with("排名")
+                {
                     continue;
                 }
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    let change_pct = parts.last()
+                    let change_pct = parts
+                        .last()
                         .and_then(|s| s.replace('%', "").parse::<f64>().ok())
                         .unwrap_or(0.0);
                     let name = if parts.len() > 2 {
-                        parts[..parts.len()-1].join(" ")
+                        parts[..parts.len() - 1].join(" ")
                     } else {
                         parts[0].to_string()
                     };
@@ -498,8 +517,12 @@ impl StockVendor for NeoDataVendor {
         for line in text.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
-                let price = parts.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-                let change_pct = parts.last()
+                let price = parts
+                    .get(1)
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let change_pct = parts
+                    .last()
                     .and_then(|s| s.replace('%', "").parse::<f64>().ok())
                     .unwrap_or(0.0);
                 indices.push(IndexQuote {
@@ -592,8 +615,19 @@ impl StockVendor for NeoDataVendor {
                 if let Some(docs) = group["docList"].as_array() {
                     for doc in docs {
                         if let Some(title) = doc["title"].as_str() {
-                            for kw in &["半导体", "新能源", "医药", "军工", "汽车", "化工",
-                                         "消费电子", "AI", "光伏", "风电", "机器人"] {
+                            for kw in &[
+                                "半导体",
+                                "新能源",
+                                "医药",
+                                "军工",
+                                "汽车",
+                                "化工",
+                                "消费电子",
+                                "AI",
+                                "光伏",
+                                "风电",
+                                "机器人",
+                            ] {
                                 if title.contains(kw) {
                                     return Ok(Some(SectorInfo {
                                         stock_code: stock_code.to_string(),
@@ -610,7 +644,7 @@ impl StockVendor for NeoDataVendor {
                 }
             }
         }
-        Ok(None)  // 无法确定行业
+        Ok(None) // 无法确定行业
     }
 
     // ── 必须实现的 trait 方法（返回空，由上游 vendor 兜底） ──
@@ -635,7 +669,10 @@ impl StockVendor for NeoDataVendor {
         })
     }
 
-    async fn get_dragon_tiger(&self, _stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
+    async fn get_dragon_tiger(
+        &self,
+        _stock_code: &str,
+    ) -> Result<Vec<DragonTigerEntry>, DataError> {
         Err(DataError::VendorError {
             vendor: "neodata".into(),
             message: "NeoData 不提供龙虎榜数据".into(),
@@ -695,7 +732,8 @@ mod tests {
 
     #[test]
     fn test_parse_kv_text() {
-        let text = "【行情数据】\n股票名称:贵州茅台\n股票代码:600519\n最新价:1800.00\n涨跌幅:+0.56%";
+        let text =
+            "【行情数据】\n股票名称:贵州茅台\n股票代码:600519\n最新价:1800.00\n涨跌幅:+0.56%";
         let pairs = parse_kv_text(text);
         assert_eq!(kv_str(&pairs, "股票名称"), Some("贵州茅台"));
         assert_eq!(kv_str(&pairs, "股票代码"), Some("600519"));
@@ -712,9 +750,6 @@ mod tests {
 
     #[test]
     fn test_extract_name() {
-        assert_eq!(
-            extract_name("股票名称:贵州茅台").as_deref(),
-            Some("贵州茅台")
-        );
+        assert_eq!(extract_name("股票名称:贵州茅台").as_deref(), Some("贵州茅台"));
     }
 }

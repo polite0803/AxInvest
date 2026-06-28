@@ -832,8 +832,8 @@ impl NodeExecutorTrait for AgentExecutor {
             // tool_calls 路径使工具能正常执行。
             // V53 修复(扩展1): 当 model BehaviorHints 声明 tool_call_xml_inline=true 时，
             // 即使 provider 类型不匹配也启用内联解析（适配 agnes-2.0-flash 等模型）。
-            let should_parse_inline = needs_inline_tool_parsing
-                || behavior_hints.tool_call_xml_inline;
+            let should_parse_inline =
+                needs_inline_tool_parsing || behavior_hints.tool_call_xml_inline;
             if should_parse_inline
                 && stream_tool_calls.as_ref().is_none_or(|tc| tc.is_empty())
                 && !stream_content.is_empty()

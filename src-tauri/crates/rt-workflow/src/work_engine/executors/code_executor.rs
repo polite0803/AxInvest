@@ -71,9 +71,12 @@ fn execute_rhai_directly(
         match serde_json::from_str::<serde_json::Value>(s) {
             Ok(v) => json_value_to_dynamic(&v),
             Err(e) => {
-                tracing::warn!("[code_executor] json_parse 失败: {e}, input={}", &s[..s.len().min(200)]);
+                tracing::warn!(
+                    "[code_executor] json_parse 失败: {e}, input={}",
+                    &s[..s.len().min(200)]
+                );
                 rhai::Dynamic::UNIT
-            }
+            },
         }
     });
     let mut scope = Scope::new();
@@ -97,10 +100,15 @@ fn execute_rhai_directly(
             Some(Value::Null) | None => rhai::Dynamic::UNIT,
             Some(Value::Bool(b)) => rhai::Dynamic::from(*b),
             Some(Value::Number(n)) => {
-                if let Some(f) = n.as_f64() { rhai::Dynamic::from(f) }
-                else if let Some(i) = n.as_i64() { rhai::Dynamic::from(i as f64) }
-                else if let Some(u) = n.as_u64() { rhai::Dynamic::from(u as f64) }
-                else { rhai::Dynamic::from(0.0_f64) }
+                if let Some(f) = n.as_f64() {
+                    rhai::Dynamic::from(f)
+                } else if let Some(i) = n.as_i64() {
+                    rhai::Dynamic::from(i as f64)
+                } else if let Some(u) = n.as_u64() {
+                    rhai::Dynamic::from(u as f64)
+                } else {
+                    rhai::Dynamic::from(0.0_f64)
+                }
             },
             Some(Value::String(s)) => rhai::Dynamic::from(s.clone()),
             Some(v) => json_value_to_dynamic(v),

@@ -59,7 +59,7 @@ pub struct VendorHealthConfig {
 impl Default for VendorHealthConfig {
     fn default() -> Self {
         Self {
-            degraded_threshold: 8,       // P1.5-3: 从 3 提升到 8 — 荐股批量请求下避免 burst 误降级
+            degraded_threshold: 8, // P1.5-3: 从 3 提升到 8 — 荐股批量请求下避免 burst 误降级
             recovery_interval_secs: 300, // 5 分钟
             track_fallback_path: true,
         }

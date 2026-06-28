@@ -1823,7 +1823,7 @@ fn parse_xml_tool_call_format(text: &str) -> Option<Vec<axagent_harness::types::
                 let param_key = &param_search[key_start..key_end];
 
                 let value_start = key_end + 1;
-                let close_tag = format!("</parameter>");
+                let close_tag = "</parameter>".to_string();
                 let value_end = match param_search[value_start..].find(&close_tag) {
                     Some(p) => value_start + p,
                     None => break,

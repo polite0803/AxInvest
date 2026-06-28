@@ -162,7 +162,7 @@ fn kv_f64(pairs: &[(String, String)], key: &str) -> Option<f64> {
         .find(|(k, _v)| k.contains(key))
         .and_then(|(_, v)| {
             // 处理 "+0.56%" 格式
-            let cleaned = v.replace('%', "").replace(',', "");
+            let cleaned = v.replace(['%', ','], "");
             cleaned.parse::<f64>().ok()
         })
 }
@@ -200,7 +200,7 @@ fn extract_name(text: &str) -> Option<String> {
             let start = pos + prefix.len();
             let name_part = &text[start..];
             let end = name_part
-                .find(|c: char| c == '\n' || c == '\r')
+                .find(['\n', '\r'])
                 .unwrap_or(name_part.len());
             let name = name_part[..end].trim();
             if !name.is_empty() {
@@ -511,7 +511,7 @@ impl StockVendor for NeoDataVendor {
 
     async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
         let query = "A股主要指数最新行情 上证 深证 创业板";
-        let text = self.query_content(&query, "index_market").await?;
+        let text = self.query_content(query, "index_market").await?;
 
         let mut indices = Vec::new();
         for line in text.lines() {

@@ -1,8 +1,8 @@
 {
   "version": "1",
   "generated": "2026-06-17",
-  "total_entries": 657,
-  "total_files": 657,
+  "total_entries": 663,
+  "total_files": 663,
   "entries": [
     {
       "file": "askAI",
@@ -3943,6 +3943,42 @@
     {
       "file": "src/components/stock-analysis/ScheduledAnalysisPanel.tsx",
       "lines": "37,38,39,40,80,121,143,153,169,189,196,210,232,253,263,272,282,295,299,305,320,324,341,351,360,363,369",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/DecisionBanner.tsx",
+      "lines": "561,565,611,621,737,739,748,750,751,752,996,1000,1023,1033,1057,1061,1064",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/dual-view/CompactDecisionComparison.tsx",
+      "lines": "65,66,178,179,181",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/components/stock-analysis/dual-view/DecisionComparisonPanel.tsx",
+      "lines": "34,35,126,128,129,133,138,193,197,234,238,271",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/lib/stock-analysis-export.ts",
+      "lines": "236,237,238,253,266,273,278,289,290,291,347,362",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/lib/stock-analysis-utils.ts",
+      "lines": "248,249,332,333,342,343,344,353,354,368,369,370,460,461,462,463,481,657",
+      "reason": "硬编码中文字符串",
+      "phase": 3
+    },
+    {
+      "file": "src/types/__tests__/stock-analysis.test.ts",
+      "lines": "75,89,95,99",
       "reason": "硬编码中文字符串",
       "phase": 3
     }

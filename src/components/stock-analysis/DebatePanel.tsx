@@ -228,7 +228,7 @@ function extractReadableDebateText(text: string): string {
     .replace(/```json\s*[\s\S]*?\s*```/g, "")
     .replace(/\{\s*["']?[a-zA-Z_]+["']?\s*:/g, "")
     .replace(/["']?[a-zA-Z_]+["']?\s*:\s*["']?/g, "")
-    .replace(/[{}\[\]",]/g, " ")
+    .replace(/[{}[\]",]/g, " ")
     .replace(/\{\{[^}]+\}\}/g, "[未解析变量]")
     .replace(/[ \t]+/g, " ") // 仅折叠水平空白，保留换行
     .replace(/\n{3,}/g, "\n\n") // 合并连续空行为双换行

@@ -303,7 +303,7 @@ function computeRiskScore(text: string): number {
   const cleanText = text
     .replace(/<!--\s*VERDICT\s*:\s*\{[^}]*\}\s*-->/gi, "")
     .replace(/```json[\s\S]*?```/g, "")
-    .replace(/[{}\[\]"\\,:\s]+/g, " ")
+    .replace(/[{}[\]"\\,:\s]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 

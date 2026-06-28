@@ -383,7 +383,7 @@ export function DataVendorsTab() {
     } finally {
       setSaving(false);
     }
-  }, [vendorValues, iwencaiKey, xueqiuToken, t, message]);
+  }, [vendorValues, iwencaiKey, xueqiuToken, neodataToken, t, message]);
 
   const checkOne = useCallback(async (vendorName: string) => {
     setHealth((prev) => ({ ...prev, [vendorName]: "pending" }));

@@ -3,6 +3,7 @@ import { useSettingsStore } from "@/stores";
 import { ExpandOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
 import NodeRenderer, { setCustomComponents } from "markstream-react";
+import type { RenderContext, RenderNodeFn } from "markstream-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
@@ -20,17 +21,18 @@ function registerCustomParagraph() {
   customParagraphRegistered = true;
 
   const CustomParagraph: React.FC<{
-    node: any;
-    ctx?: any;
-    renderNode?: any;
+    node: Record<string, unknown>;
+    ctx?: RenderContext;
+    renderNode?: RenderNodeFn;
     indexKey?: React.Key;
   }> = ({ node, ctx, renderNode, indexKey }) => {
     if (!ctx || !renderNode || !node?.children?.length) {
       return <div dir="auto" className="paragraph-node" />;
     }
 
-    const children = node.children.map((child: any, i: number) =>
-      renderNode(child, `${String(indexKey ?? "paragraph")}-${i}`, ctx)
+    const children = (node.children as Array<Record<string, unknown>>).map(
+      (child: Record<string, unknown>, i: number) =>
+        renderNode(child as Parameters<RenderNodeFn>[0], `${String(indexKey ?? "paragraph")}-${i}`, ctx),
     );
 
     return <div dir="auto" className="paragraph-node">{children}</div>;

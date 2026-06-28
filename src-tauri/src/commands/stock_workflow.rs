@@ -1999,7 +1999,7 @@ async fn run_stock_workflow_inner(
                                             .and_then(|c| c.as_f64())
                                             .unwrap_or(50.0);
                                         let factor = 1.0 + (ab.total as f64 - 50.0) / 100.0;
-                                        let adj = (formula_conf * factor).min(100.0).max(0.0);
+                                        let adj = (formula_conf * factor).clamp(0.0, 100.0);
                                         obj.insert(
                                             "adjustedConfidence".into(),
                                             serde_json::json!((adj * 10.0).round() / 10.0),

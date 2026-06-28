@@ -2376,9 +2376,17 @@ async fn seed_stock_analysis_workflow_template(
         3900.0,
     );
     if let WorkflowNode::Agent(ref mut a) = trader {
-        // V29 修复: input_mapping 引用 debate-convergence，需在 context_sources 中声明
-        // （显式依赖原则：input_mapping 引用的上游节点应有 context_sources 或显式边）
-        a.config.context_sources = vec!["research-mgr".into(), "debate-convergence".into()];
+        // P2 修复: 扩展 context_sources 覆盖所有 input_mapping 引用的上游节点
+        // （显式依赖原则：input_mapping 引用的上游节点必须有关联边或 context_sources）
+        // t-scoring: factor_weights 因子权重 | risk-convergence: risk_disagreement 风险分歧度
+        // data-quality: dqi_score 数据质量
+        a.config.context_sources = vec![
+            "research-mgr".into(),
+            "debate-convergence".into(),
+            "t-scoring".into(),
+            "risk-convergence".into(),
+            "data-quality".into(),
+        ];
         a.config.model_role = Some("trader".into());
         a.config.output_mode = OutputMode::Json;
         a.config.tools = vec![
@@ -2399,6 +2407,19 @@ async fn seed_stock_analysis_workflow_template(
         a.config.input_mapping = [
             ("consensus_score", "debate-convergence.content.consensus_score"),
             ("stock_lessons", "stock_lessons"),
+            // P1 修复: 注入标准参考价，确保 trader 与 portfolio-mgr 使用相同的 currentPrice
+            // 避免 trader 自行调用 get_stock_quote 获取的实时价与 t-scoring 缓存的 currentPrice
+            // 不一致导致的系统性分歧。
+            ("reference_price", "t-scoring.result.currentPrice"),
+            // P2 修复: 注入因子权重，使 trader 知道哪些因子在公式中权重更高
+            // factor_weights 是 JSON 对象 {trend:{weight}, macd:{weight}, ...}
+            ("factor_weights", "t-scoring.result.factor_backtest.factors"),
+            // P2 修复: 注入风险分歧度，使 trader 知道三位风险评估师的分歧程度
+            // 分歧高(>50)时 trader 应避免过度自信
+            ("risk_disagreement", "risk-convergence.content.disagreement_score"),
+            // P2 修复: 注入数据质量评分，使 trader 知道当前数据覆盖度
+            // dqi_score 0-100，低分时 trader 应保守操作
+            ("dqi_score", "data-quality.content.score"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -2406,6 +2427,13 @@ async fn seed_stock_analysis_workflow_template(
     }
     nodes.push(trader);
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
+    // P2 修复: 为 trader 新增的 input_mapping 入口加显式边
+    // t-scoring → trader: 因子权重和参考价
+    edges.push(edge("e-t-scoring-trader-p2", "t-scoring", "trader"));
+    // risk-convergence → trader: 风险分歧度
+    edges.push(edge("e-risk-convergence-trader-p2", "risk-convergence", "trader"));
+    // data-quality → trader: 数据质量评分
+    edges.push(edge("e-data-quality-trader-p2", "data-quality", "trader"));
 
     // portfolio-mgr: 最终决策 — 确定性计算（CodeNode + Rhai）
     // ── 结构化参数方案 Phase 3 ──

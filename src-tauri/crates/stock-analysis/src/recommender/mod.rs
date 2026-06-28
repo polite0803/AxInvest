@@ -309,16 +309,44 @@ pub async fn recommend_stocks(
         return Ok(cached);
     }
 
-    // 快速健康检查：探测 K 线数据源是否可用
-    match client.get_klines("000001", "daily", 5).await {
-        Ok(ref k) if k.len() >= 2 => { /* K 线源正常 */ },
-        Ok(_) => {
-            tracing::warn!("[recommender] K 线数据返回不足，数据源可能异常");
-        },
-        Err(e) => {
-            tracing::warn!("[recommender] K 线数据源不可用: {e}");
-            // 不阻塞执行，让下游降级逻辑自行处理
-        },
+    // ── 前置健康探测 ──
+    // 同时探测 quote 和 K 线，两者都失败时直接短路，避免 200 次无效 API 调用
+    let quote_probe = client.get_quote("000001").await;
+    let kline_probe = client.get_klines("000001", "daily", 5).await;
+
+    let quote_ok = quote_probe.is_ok();
+    let kline_ok = kline_probe.as_ref().is_ok_and(|k| k.len() >= 2);
+
+    if !quote_ok && !kline_ok {
+        let quote_err = quote_probe.err().map(|e| e.to_string());
+        let kline_err = kline_probe.err().map(|e| e.to_string());
+        let detail = format!(
+            "行情与K线数据源均不可用 (quote: {}, klines: {})，跳过荐股扫描",
+            quote_err.as_deref().unwrap_or("返回异常"),
+            kline_err.as_deref().unwrap_or("返回不足(<2条)"),
+        );
+        tracing::warn!("[recommender] {detail}");
+        let resp = RecoResponse {
+            period,
+            picks: std::collections::BTreeMap::new(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: std::collections::HashMap::new(),
+            generated_at: chrono::Utc::now().timestamp_millis(),
+            raw_seed_pool_size: 0,
+            as_of_date: None,
+            mode: "live".to_string(),
+            error_detail: Some(detail),
+        };
+        cache_put(period, resp.clone());
+        return Ok(resp);
+    }
+
+    if !kline_ok {
+        tracing::warn!("[recommender] K 线数据源当前不可用, 趋势/资金/超跌策略将跳过");
+    }
+    if !quote_ok {
+        tracing::warn!("[recommender] 行情数据源当前不可用, Watchlist/Synthetic 兜底将跳过");
     }
 
     // 1. 预热 enabled-vendors 缓存（settings 页保存 vendor 时需要 invalid 这个缓存
@@ -639,6 +667,7 @@ pub async fn recommend_stocks(
             .as_ref()
             .map(|c| c.source.to_string())
             .unwrap_or_else(|| "live".to_string()),
+        error_detail: None,
     };
     cache_put(period, resp.clone());
     Ok(resp)
@@ -682,6 +711,7 @@ mod tests {
             raw_seed_pool_size: 1,
             as_of_date: None,
             mode: mode.to_string(),
+            error_detail: None,
         }
     }
 
@@ -761,6 +791,7 @@ mod tests {
             raw_seed_pool_size: 50,
             as_of_date: Some("2026-06-01".into()),
             mode: "user_replay".into(),
+            error_detail: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains("\"asOfDate\":\"2026-06-01\""));
@@ -779,6 +810,7 @@ mod tests {
             raw_seed_pool_size: 50,
             as_of_date: None,
             mode: "live".into(),
+            error_detail: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(!s.contains("asOfDate"), "as_of_date should be skipped when None");

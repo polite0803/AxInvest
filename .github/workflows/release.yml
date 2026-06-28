@@ -439,6 +439,14 @@ jobs:
         with:
           targets: ${{ matrix.abi == 'arm64-v8a' && 'aarch64-linux-android' || matrix.abi == 'armeabi-v7a' && 'armv7-linux-androideabi' || 'x86_64-linux-android' }}
 
+      - name: Free disk space (Android build needs ~8GB free)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go /opt/hostedtoolcache/Python 2>/dev/null || true
+          sudo apt-get clean
+          docker system prune -af --volumes 2>/dev/null || true
+          cargo clean 2>/dev/null || true
+          df -h
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:

@@ -152,4 +152,9 @@ pub struct RecoResponse {
     pub as_of_date: Option<String>,
     /// 模式标签：live / replay / backtest_sweep
     pub mode: String,
+    /// 数据获取错误详情。当 recommed_stocks 前置健康探测失败或全部 vendor 不可用时
+    /// 填充此字段，前端据此显示具体错误文本而非泛化的"连接失败"。
+    /// None = 正常执行（即使 picks 为空）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<String>,
 }

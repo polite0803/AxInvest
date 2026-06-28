@@ -74,23 +74,45 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
     let mut out: Vec<SeedItem> = Vec::new();
 
     // 1. 热门个股
-    if let Ok(hot) = client.get_hot_stocks().await {
-        for h in hot.iter().take(30) {
-            if seen.insert(h.stock_code.clone()) {
-                out.push((h.stock_code.clone(), h.stock_name.clone(), h.sector.clone()));
-            }
-        }
-    }
-
-    // 2. 行业排名龙头（扩大到20个行业）
-    if let Ok(industries) = client.get_industry_ranking().await {
-        for ind in industries.iter().take(20) {
-            if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
-                if seen.insert(code.clone()) {
-                    out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
+    let hot_succeeded = match client.get_hot_stocks().await {
+        Ok(hot) => {
+            for h in hot.iter().take(30) {
+                if seen.insert(h.stock_code.clone()) {
+                    out.push((h.stock_code.clone(), h.stock_name.clone(), h.sector.clone()));
                 }
             }
-        }
+            true
+        },
+        Err(e) => {
+            tracing::warn!("[seed_pool] get_hot_stocks 失败: {e}");
+            false
+        },
+    };
+
+    // 2. 行业排名龙头（扩大到20个行业）
+    let industry_succeeded = match client.get_industry_ranking().await {
+        Ok(industries) => {
+            for ind in industries.iter().take(20) {
+                if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
+                    if seen.insert(code.clone()) {
+                        out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
+                    }
+                }
+            }
+            true
+        },
+        Err(e) => {
+            tracing::warn!("[seed_pool] get_industry_ranking 失败: {e}");
+            false
+        },
+    };
+
+    // 诊断日志：两个数据源都失败时，种子池仅靠 FALLBACK_STOCKS 兜底
+    if !hot_succeeded && !industry_succeeded {
+        tracing::warn!(
+            "[seed_pool] hot_stocks 和 industry_ranking 均失败, 种子池仅靠 {} 只 FALLBACK_STOCKS 兜底",
+            FALLBACK_STOCKS.len()
+        );
     }
 
     // 3. 冷门补全：始终混入 FALLBACK_STOCKS 中未被前两个源覆盖的标的

@@ -428,15 +428,9 @@ fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
         serde_json::Value::Object(obj) => {
             if let Some(content_str) = obj.get("content").and_then(|v| v.as_str()) {
                 // 解析 content 内层 JSON 字符串为 JSON 对象，再序列化
-                if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(content_str) {
-                    // V46 修复: 标准化 LLM 输出的 action 字段
-                    // trader prompt 规定 action ∈ {买入,增持,持有,减持,卖出,观望},
-                    // 但 LLM 可能输出"不确定""未知"等非标准值（尤其是当数据矛盾时
-                    // LLM 选择输出"不确定"作为逃逸）。
-                    // 通过白名单强制映射, 防止 DB 和 UI 出现非标准值。
-                    // 注意: 不修改 targetPrice/stopLoss/confidence 等数值字段,
-                    // 它们错误时 portfolio-mgr 的 sanity 预检会兜底。
-                    normalize_llm_action(&mut parsed);
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content_str) {
+                    // P3 修复: trader 不再输出 action/positionPct, 专注执行参数。
+                    // 不调用 normalize_llm_action（方向由 portfolio-mgr 公式处理）。
                     return serde_json::to_string(&parsed).ok();
                 }
                 // 解析失败时回退：返回原始 content 字符串
@@ -448,50 +442,6 @@ fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
     }
 }
 
-/// 标准化 LLM 输出的 action 字段, 映射非标准值到标准值。
-///
-/// 标准值: 买入, 增持, 持有, 减持, 卖出, 观望
-/// 非标准值映射规则:
-///   "不确定" / "未知" / "? " / "" → "观望" (无判断 → 不操作)
-///   "回避" / "远离" / "清仓" / "止损" → "卖出" (明确看空 → 卖出)
-///   "卖" / "sell" → "卖出", "买" / "buy" → "买入"
-///   "减" → "减持"
-fn normalize_llm_action(parsed: &mut serde_json::Value) {
-    let obj = match parsed.as_object_mut() {
-        Some(o) => o,
-        None => return,
-    };
-    let action = match obj.get("action").and_then(|v| v.as_str()) {
-        Some(a) => a,
-        None => return,
-    };
-    let trimmed = action.trim();
-    // 已在标准白名单中 → 不处理
-    const STANDARD: &[&str] = &["买入", "增持", "持有", "减持", "卖出", "观望"];
-    if STANDARD.contains(&trimmed) {
-        return;
-    }
-    // V46 映射表: 把 LLM 可能输出的所有非标准值映射到标准值
-    let normalized: &str = match trimmed {
-        // 无判断 → 观望
-        "不确定" | "未知" | "?" | "??" | "" | "无法判断" | "无法确定" => "观望",
-        // 明确看空 → 卖出
-        "回避" | "远离" | "清仓" | "止损" | "割肉" | "离场" => "卖出",
-        // 近义词映射
-        "卖" | "sell" | "做空" | "空" => "卖出",
-        "买" | "buy" | "做多" | "多" => "买入",
-        "减" => "减持",
-        "增" | "加" => "增持",
-        "持" => "持有",
-        "观" => "观望",
-        // 兜底: 其他未知值 → 观望（保守操作）
-        _ => {
-            tracing::warn!("[normalize_llm_action] 未知 action 值 {:?}, 兜底映射为观望", trimmed);
-            "观望"
-        },
-    };
-    obj.insert("action".to_string(), serde_json::Value::String(normalized.to_string()));
-}
 
 /// 双视角一致性诊断结果
 ///
@@ -500,6 +450,9 @@ fn normalize_llm_action(parsed: &mut serde_json::Value) {
 ///   - 决定 confidence 调制幅度
 ///   - 生成分歧诊断 reasoning 文本
 ///   - 判断是否触发人工复核
+///
+/// P0 修复: 新增 f7 自指污染标记字段，标注公式决策中 trader 因子(f7)的参与程度，
+/// 帮助识别"公式已含 trader 观点"导致一致性虚高或逻辑矛盾。
 struct AgreementBreakdown {
     /// 总分 0-100
     total: i32,
@@ -523,6 +476,15 @@ struct AgreementBreakdown {
     confidence_gap: Option<f64>,
     /// 冲突类型: all_agree / opposite_direction / action_divergence / position_gap / confidence_gap
     conflict_type: String,
+    // ── P0: f7 自指污染标记 ──
+    /// 公式决策中 f7（trader 因子）权重占总权重百分比。None=无 f7 数据。
+    f7_weight_pct: Option<f64>,
+    /// 排除 f7 后的"纯净"后验值（0~1）。None=无 f7 数据。
+    f7_free_posterior: Option<f64>,
+    /// 排除 f7 后的"纯净"action。None=无 f7 数据。
+    f7_free_action: Option<String>,
+    /// 无 f7 版本的 action 一致性原始分 (满分 50，与主 action_score 相同语义)
+    f7_free_action_score: Option<f64>,
 }
 
 /// 计算公式决策与 LLM 决策的一致性分数（0-100）。
@@ -605,7 +567,7 @@ fn compute_decision_agreement(
     let is_hold = |s: &str| s == "持有";
     let is_watch = |s: &str| s == "观望";
     let is_uncertain = |s: &str| s.contains("不确定") || s.contains("未知");
-    let action_score: f64 = match (f_action, l_action) {
+    let action_score: f64 = match (f_action, l_action.clone()) {
         (Some(a), Some(b)) if a == b => 50.0,
         (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => 35.0,
         (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => 35.0,
@@ -693,6 +655,35 @@ fn compute_decision_agreement(
         "missing_one_side"
     };
 
+    // ── P0: 从公式决策中提取 f7_free 信息（消除自指悖论）──
+    let f7_free_info = fj.get("f7_free").and_then(|v| {
+        if v.is_object() {
+            let obj = v.as_object()?;
+            let f7_weight = obj.get("f7_weight").and_then(|w| w.as_f64())?;
+            let total_weight = obj.get("total_weight").and_then(|w| w.as_f64())?;
+            let f7_weight_pct = if total_weight > 0.0 {
+                Some((f7_weight / total_weight * 100.0 * 10.0).round() / 10.0)
+            } else { None };
+            let posterior = obj.get("posterior").and_then(|p| p.as_f64());
+            let action = obj.get("action").and_then(|a| a.as_str().map(|s| s.to_string()));
+            Some((f7_weight_pct, posterior, action))
+        } else { None }
+    });
+    let (f7_weight_pct, f7_free_posterior, f7_free_action) = f7_free_info.unwrap_or((None, None, None));
+
+    // 计算无 f7 版本的 action 一致性评分
+    let f7_free_action_score = match (f7_free_action.as_deref().map(norm), l_action.clone()) {
+        (Some(a), Some(b)) if a == b => Some(50.0),
+        (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => Some(35.0),
+        (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => Some(35.0),
+        (Some(a), Some(b)) if (is_hold(&a) && is_watch(&b)) || (is_hold(&b) && is_watch(&a)) => Some(15.0),
+        (Some(a), Some(b)) if (is_hold(&a) || is_watch(&a)) && is_uncertain(&b) => Some(5.0),
+        (Some(a), Some(b)) if (is_hold(&b) || is_watch(&b)) && is_uncertain(&a) => Some(5.0),
+        (Some(a), Some(b)) if is_watch(&a) && is_uncertain(&b) || is_watch(&b) && is_uncertain(&a) => Some(10.0),
+        (Some(_), Some(_)) => Some(0.0),
+        _ => None,
+    };
+
     Some(AgreementBreakdown {
         total,
         action_score,
@@ -705,6 +696,10 @@ fn compute_decision_agreement(
         confidence_score: conf_score,
         confidence_gap: conf_gap,
         conflict_type: conflict_type.to_string(),
+        f7_weight_pct,
+        f7_free_posterior,
+        f7_free_action,
+        f7_free_action_score,
     })
 }
 
@@ -1960,16 +1955,27 @@ async fn run_stock_workflow_inner(
                         );
                         // V50: 预计算分歧诊断文本（供 reasoning 追加和 UI 展示）
                         let disagreement_note = agreement_breakdown.as_ref().map(|ab| {
+                            // P0: 存在 f7 自指时标注污染程度
+                            let f7_note = ab.f7_weight_pct.map(|pct|
+                                format!(" [f7污染{}%]", pct)
+                            ).unwrap_or_default();
                             if ab.total >= 60 {
-                                format!("🤝双视角一致:{}分", ab.total)
+                                format!("🤝双视角一致:{}分{}", ab.total, f7_note)
                             } else if ab.total >= 40 {
-                                format!("⚠️双视角部分一致:{}分", ab.total)
+                                format!("⚠️双视角部分一致:{}分{}", ab.total, f7_note)
                             } else {
+                                // P0: f7 纯净版 action 一致性对比
+                                let f7_free_note = match (ab.f7_free_action.as_deref(), ab.f7_free_action_score) {
+                                    (Some(fa), Some(fs)) if *fa != ab.formula_action =>
+                                        format!("(无f7={}/{})", fa, fs as i32),
+                                    _ => String::new(),
+                                };
                                 format!(
-                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={})",
+                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={}){}{}",
                                     ab.total, ab.formula_action, ab.llm_action,
                                     ab.action_score as i32, ab.position_score as i32,
-                                    ab.confidence_score as i32
+                                    ab.confidence_score as i32,
+                                    f7_note, f7_free_note
                                 )
                             }
                         });
@@ -1993,6 +1999,11 @@ async fn run_stock_workflow_inner(
                                             "positionGap": ab.position_gap,
                                             "confidenceGap": ab.confidence_gap,
                                             "conflictType": ab.conflict_type,
+                                            // P0: f7 自指污染标记
+                                            "f7WeightPct": ab.f7_weight_pct,
+                                            "f7FreePosterior": ab.f7_free_posterior,
+                                            "f7FreeAction": ab.f7_free_action,
+                                            "f7FreeActionScore": ab.f7_free_action_score,
                                         }));
                                         // V50: 置信度调制 — 一致时 boost, 分歧时 penalty
                                         let formula_conf = obj.get("confidence")

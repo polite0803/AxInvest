@@ -3007,6 +3007,7 @@ pub async fn get_cached_recommendation(
         raw_seed_pool_size,
         as_of_date: None,
         mode: "cached".to_string(),
+        error_detail: None,
     }))
 }
 

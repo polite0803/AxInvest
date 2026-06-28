@@ -2496,22 +2496,34 @@ impl AStockClient {
             .map(|n| n.to_string())
             .collect();
         match self
-            .try_vendors_retry("", "hot_stocks", &vendor_names, 2, |_, vendor| {
+            .try_vendors_retry("", "hot_stocks", &vendor_names, 2, |name, vendor| {
                 Box::pin(async move {
-                    let result = vendor.get_hot_stocks().await?;
-                    if result.is_empty() {
-                        return Err(DataError::VendorError {
-                            vendor: "__market__".into(),
-                            message: "热门股数据为空".into(),
-                        });
+                    match vendor.get_hot_stocks().await {
+                        Ok(result) => {
+                            if result.is_empty() {
+                                tracing::warn!("[get_hot_stocks] vendor {name} 返回空数据");
+                                Err(DataError::VendorError {
+                                    vendor: "__market__".into(),
+                                    message: format!("{name} 热门股数据为空"),
+                                })
+                            } else {
+                                Ok(result)
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!("[get_hot_stocks] vendor {name} 失败: {e}");
+                            Err(e)
+                        },
                     }
-                    Ok(result)
                 })
             })
             .await
         {
             Ok(result) => Ok(result),
-            Err(_) => Ok(vec![]),
+            Err(e) => {
+                tracing::warn!("[get_hot_stocks] 所有 vendor 均不可用, 返回空列表. 详细: {e}");
+                Ok(vec![])
+            },
         }
     }
 
@@ -2574,22 +2586,34 @@ impl AStockClient {
             .map(|n| n.to_string())
             .collect();
         match self
-            .try_vendors_retry("", "industry_ranking", &vendor_names, 2, |_, vendor| {
+            .try_vendors_retry("", "industry_ranking", &vendor_names, 2, |name, vendor| {
                 Box::pin(async move {
-                    let result = vendor.get_industry_ranking().await?;
-                    if result.is_empty() {
-                        return Err(DataError::VendorError {
-                            vendor: "__market__".into(),
-                            message: "行业排名数据为空".into(),
-                        });
+                    match vendor.get_industry_ranking().await {
+                        Ok(result) => {
+                            if result.is_empty() {
+                                tracing::warn!("[get_industry_ranking] vendor {name} 返回空数据");
+                                Err(DataError::VendorError {
+                                    vendor: "__market__".into(),
+                                    message: format!("{name} 行业排名数据为空"),
+                                })
+                            } else {
+                                Ok(result)
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!("[get_industry_ranking] vendor {name} 失败: {e}");
+                            Err(e)
+                        },
                     }
-                    Ok(result)
                 })
             })
             .await
         {
             Ok(result) => Ok(result),
-            Err(_) => Ok(vec![]),
+            Err(e) => {
+                tracing::warn!("[get_industry_ranking] 所有 vendor 均不可用, 返回空列表. 详细: {e}");
+                Ok(vec![])
+            },
         }
     }
 

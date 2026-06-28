@@ -317,6 +317,8 @@ export interface RecoResponse {
   asOfDate?: string;
   /** 模式标签: live / replay / backtest_sweep — 后端 spec §8 注入,必填 */
   mode: string;
+  /** 数据获取错误详情(picks 为空时的具体原因)。后端填充,前端据此显示具体错误文本而非泛化的"连接失败" */
+  errorDetail?: string;
 }
 
 // ── 决策时间线类型 ──

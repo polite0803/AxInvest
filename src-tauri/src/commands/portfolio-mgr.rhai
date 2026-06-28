@@ -245,6 +245,28 @@ let evidence_scale = if total_weight < 0.3 {
 	let raw_val = prior + avg_signal * evidence_scale;
 	let posterior = clamp(if raw_val > posterior_cap { posterior_cap } else { raw_val }, 0.0, 1.0);
 
+	// ── 无 f7 版本 posterior（消除自指悖论）──
+	// P0 修复: portfolio-mgr 决策以 0.30 权重吸收 trader 观点后，又与 trader 比较
+	// 一致性，导致 compute_decision_agreement 陷入逻辑循环。
+	// 此版本排除 f7 影响，用于"纯净"双视角比较（无 f7 公式 vs LLM trader）。
+	// 注意: 不加 trader 否决（f7 < -0.5 封顶），因为那是基于 f7 自身的自指约束。
+	let total_weight_no_f7 = total_weight - f7_weight;
+	let weighted_signal_no_f7 = weighted_signal - f7_weight * f7_signal;
+	let avg_signal_no_f7 = if total_weight_no_f7 > 0.0 {
+	    weighted_signal_no_f7 / total_weight_no_f7
+	} else { 0.0 };
+	let evidence_scale_no_f7 = if total_weight_no_f7 < 0.3 {
+	    0.15
+	} else {
+	    clamp(0.20 + total_weight_no_f7 * 0.25, 0.20, 0.50)
+	};
+	let raw_val_no_f7 = prior + avg_signal_no_f7 * evidence_scale_no_f7;
+	// 不加 trader 否决（自指），不加权重坍缩兜底（那是 full 版本的事）
+	let posterior_no_f7 = clamp(raw_val_no_f7, 0.0, 1.0);
+	let f7_weight_pct = if total_weight > 0.0 {
+	    (f7_weight / total_weight * 100.0 * 10.0).round() / 10.0
+	} else { 0.0 };
+
 	// ── V42+V44: 风险的多维度处理 ──
 	// 风险有两个独立维度, 分别处理:
 	//   维度1 (方向): 风险作为看空因子 → f4_signal 在贝叶斯里拉低 posterior (已做)
@@ -264,6 +286,15 @@ let evidence_scale = if total_weight < 0.3 {
 	    }
 	} else { 0.0 };
 	let effective_posterior = clamp(posterior + risk_bias, 0.0, 1.0);
+
+	// ── 无 f7 版本 effective_posterior 与 action（消除自指）──
+	let effective_posterior_no_f7 = clamp(posterior_no_f7 + risk_bias, 0.0, 1.0);
+	let f7_free_action = if effective_posterior_no_f7 >= 0.63 { "买入" }
+	    else if effective_posterior_no_f7 >= 0.53 { "增持" }
+	    else if effective_posterior_no_f7 >= 0.48 { "持有" }
+	    else if effective_posterior_no_f7 >= 0.38 { "观望" }
+	    else if effective_posterior_no_f7 >= 0.30 { "减持" }
+	    else { "卖出" };
 
 	// ── V47 修复: 凯利赔率使用标准盈亏比 ──
 	// 旧: odds = targetPrice / stopLoss（仅看两个绝对价格比值，忽略 currentPrice）
@@ -508,5 +539,13 @@ let disagreement_note = if present(risk_disagreement) && risk_disagreement > 50 
         "avgSignal": (avg_signal*100.0).round()/100.0,
         "activeFactors": total_weight, "totalWeight": total_weight,
     },
-    "computation_logs": `prior=${prior}${prior_src} post=${(posterior*100.0).round()/100.0} sig=${(avg_signal*100.0).round()/10.0} w=${total_weight} odds=${(odds*10.0).round()/10.0} k=${(kelly_raw*1000.0).round()/1000.0} pos=${position_pct}`
+    "computation_logs": `prior=${prior}${prior_src} post=${(posterior*100.0).round()/100.0} sig=${(avg_signal*100.0).round()/10.0} w=${total_weight} odds=${(odds*10.0).round()/10.0} k=${(kelly_raw*1000.0).round()/1000.0} pos=${position_pct}`,
+    "f7_free": #{
+        "posterior": posterior_no_f7,
+        "action": f7_free_action,
+        "effective_posterior": effective_posterior_no_f7,
+        "f7_weight": f7_weight,
+        "total_weight": total_weight,
+        "f7_weight_pct": f7_weight_pct,
+    }
 }

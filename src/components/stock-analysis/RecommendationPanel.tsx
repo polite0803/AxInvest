@@ -69,6 +69,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [data, setData] = useState<RecoResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [generatedAtText, setGeneratedAtText] = useState<string>("");
   // 显示策略：挂载 + 切 period 时优先读缓存(上一次的荐股结果),
   // 只有用户点击"刷新"按钮才走 recommend_stocks 拉新数据
@@ -132,12 +133,17 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     const myToken = ++reqTokenRef.current;
     setLoading(true);
     setEmptyKind(null);
+    setErrorDetail(null);
     try {
       const r = await invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
       if (myToken !== reqTokenRef.current) { return; }
       if (!r || !r.picks || Object.keys(r.picks).length === 0) {
         setData(r ?? null);
-        if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
+        if (r?.errorDetail) {
+          // 后端主动检测到数据源不可用并返回了具体错误原因
+          setErrorDetail(r.errorDetail);
+          setEmptyKind("noData");
+        } else if (r && r.disabledStyles && r.disabledStyles.length >= 4) {
           setEmptyKind("vendorDisabled");
         } else {
           setEmptyKind("noData");
@@ -181,6 +187,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       console.error("[RecommendationPanel] load failed:", e);
       if (myToken !== reqTokenRef.current) { return; }
       setData(null);
+      setErrorDetail(null);
       setEmptyKind("connectionFailed");
     }
     if (myToken === reqTokenRef.current) { setLoading(false); }
@@ -206,12 +213,16 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     const myToken = ++reqTokenRef.current;
     setLoading(true);
     setEmptyKind(null);
+    setErrorDetail(null);
     try {
       const r = await invoke<RecoResponse | null>("get_cached_recommendation", { period });
       if (myToken !== reqTokenRef.current) { return; }
       if (!r || !r.picks || Object.keys(r.picks).length === 0) {
         setData(r ?? null);
         // 缓存为空时区分文案,提示用户点"刷新"重新拉取
+        if (r?.errorDetail) {
+          setErrorDetail(r.errorDetail);
+        }
         setEmptyKind("noData");
         setIsCached(false);
         setLoading(false);
@@ -230,6 +241,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       console.error("[RecommendationPanel] loadCache failed:", e);
       if (myToken !== reqTokenRef.current) { return; }
       setData(null);
+      setErrorDetail(null);
       setIsCached(false);
       setEmptyKind("connectionFailed");
     }
@@ -399,6 +411,25 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                   date: asOfDate,
                 })}
               </span>
+            }
+          />
+        )}
+
+        {/* 数据可用性错误详情：后端返回 errorDetail 时显示具体原因 */}
+        {errorDetail && (
+          <Alert
+            type="warning"
+            showIcon
+            className="!text-xs !mb-2"
+            message={
+              <span className="text-xs">
+                ⚠ {t("stockAnalysis.settings.panels.noData")} — {errorDetail}
+              </span>
+            }
+            action={
+              <Button size="small" type="link" onClick={openDataSourceSettings}>
+                {t("stockAnalysis.recommendation.openSettings")}
+              </Button>
             }
           />
         )}

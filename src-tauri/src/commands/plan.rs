@@ -335,7 +335,8 @@ async fn generate_plan_via_llm(
 
     // Parse JSON from response
     let plan_json = extract_json_from_text(&response.content).map_err(|e| {
-        let preview = &response.content[..200.min(response.content.len())];
+        // 按字节截取需对齐 UTF-8 字符边界：LLM 响应含中文时裸切片会 panic
+        let preview = axagent_harness::util_fns::truncate_to_char_boundary(&response.content, 200);
         format!("Failed to parse plan JSON: {}. Raw response: {}", e, preview)
     })?;
 

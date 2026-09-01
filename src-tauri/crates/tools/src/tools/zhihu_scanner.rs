@@ -1,8 +1,16 @@
 //! 知乎扫描器
-//! 通过公开 API 采集知乎上的技术需求和痛点讨论
-//! 主要数据源：知乎问答、文章
+//!
+//! 采集知乎问答/文章中的技术需求与痛点讨论。
+//!
+//! ## 合规约束
+//!
+//! 原实现伪装 Chrome UA + 伪造 `Referer` 抓取 `www.zhihu.com` 搜索页 HTML。
+//! 现改为官方开放平台端点 `api.zhihu.com`：
+//! - 未配置 `ZHIHU_API_TOKEN` 时直接跳过，不发起任何请求；
+//! - 使用真实 UA，不伪造浏览器指纹。
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// 知乎扫描器
@@ -16,46 +24,35 @@ pub struct ZhihuScanner {
 
 impl ZhihuScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let api_token = std::env::var("ZHIHU_API_TOKEN").ok();
-        Self { http, api_token, base_url: "https://www.zhihu.com".to_string() }
+        Self { http, api_token, base_url: "https://api.zhihu.com".to_string() }
     }
 
     /// 从配置创建
     pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         Self {
             http,
             api_token,
-            base_url: base_url.unwrap_or_else(|| "https://www.zhihu.com".to_string()),
+            base_url: base_url.unwrap_or_else(|| "https://api.zhihu.com".to_string()),
         }
     }
 
     /// 构建搜索 URL
     fn build_search_url(&self, query: &str) -> String {
-        let encoded_query = query.replace(' ', "%20");
+        let encoded_query = scanner_common::encode_query(query);
         format!("{}/search?q={}&type=content", self.base_url, encoded_query)
     }
 
-    /// 构建请求头（模拟浏览器访问）
+    /// 构建请求头（真实身份 + Bearer 认证）
+    ///
+    /// 原实现伪造 Chrome UA 与 `Referer` 以绕过站点反爬，已移除。
     fn build_headers(&self) -> reqwest::header::HeaderMap {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::USER_AGENT,
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap(),
-        );
-        headers.insert(
-            reqwest::header::ACCEPT,
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8".parse().unwrap(),
-        );
-        headers.insert(reqwest::header::REFERER, "https://www.zhihu.com/".parse().unwrap());
-        if let Some(ref token) = self.api_token {
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
-            );
-        }
-        headers
+        scanner_common::build_headers(
+            self.api_token.as_deref(),
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
     }
 
     /// 中文技术痛点关键词
@@ -175,17 +172,9 @@ impl ZhihuScanner {
     fn extract_summary(title: &str, excerpt: Option<&str>) -> String {
         if let Some(desc) = excerpt {
             let combined = format!("{} - {}", title, desc);
-            if combined.len() > 200 {
-                format!("{}...", &combined[..200])
-            } else {
-                combined
-            }
+            scanner_common::truncate_chars(&combined, 200)
         } else {
-            if title.len() > 150 {
-                format!("{}...", &title[..150])
-            } else {
-                title.to_string()
-            }
+            scanner_common::truncate_chars(title, 150)
         }
     }
 }
@@ -198,14 +187,21 @@ impl Default for ZhihuScanner {
 
 #[async_trait]
 impl MarketplaceScanner for ZhihuScanner {
-    fn platform(&self) -> &'static str {
-        "zhihu"
+    fn platform(&self) -> String {
+        "zhihu".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
         if q.is_empty() {
             return Ok(Vec::new());
         }
+
+        // 合规门禁：无官方凭证直接跳过，绝不退化为页面/内部接口抓取
+        scanner_common::require_official_api_credential(
+            "zhihu",
+            self.api_token.as_deref(),
+            &self.base_url,
+        )?;
 
         let url = self.build_search_url(q);
         let headers = self.build_headers();
@@ -240,11 +236,7 @@ impl MarketplaceScanner for ZhihuScanner {
                         }
 
                         // 提取标题（假设前部分是标题）
-                        let title = if trimmed.len() > 80 {
-                            format!("{}...", &trimmed[..80])
-                        } else {
-                            trimmed.to_string()
-                        };
+                        let title = scanner_common::truncate_chars(trimmed, 80);
 
                         let summary = Self::extract_summary(&title, None);
 

@@ -30,6 +30,14 @@ export const builtinNavItems: NavItem[] = [
     path: BUILTIN_PAGE_PATH.chat,
     isPlugin: false,
   },
+  // ── 自动化域（automation）：OPC 需求发现 ──
+  {
+    key: "demand-discovery",
+    icon: <Icon icon="fluent:target-20-filled" size={17} />,
+    labelKey: "opc.demand.pageTitle",
+    path: BUILTIN_PAGE_PATH["demand-discovery"],
+    isPlugin: false,
+  },
 ];
 
 /** 按标准域过滤内置导航项 */

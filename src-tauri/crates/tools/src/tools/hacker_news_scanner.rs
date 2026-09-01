@@ -176,8 +176,8 @@ impl Default for HackerNewsScanner {
 
 #[async_trait]
 impl MarketplaceScanner for HackerNewsScanner {
-    fn platform(&self) -> &'static str {
-        "hackernews"
+    fn platform(&self) -> String {
+        "hackernews".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -217,16 +217,13 @@ impl MarketplaceScanner for HackerNewsScanner {
                     continue;
                 }
 
-                let url = item["url"]
-                    .as_str()
-                    .unwrap_or_else(|| {
+                let url = match item["url"].as_str() {
+                    Some(u) => u.to_string(),
+                    None => {
                         let item_id = item["id"].as_u64().unwrap_or(id);
-                        Box::leak(
-                            format!("https://news.ycombinator.com/item?id={}", item_id)
-                                .into_boxed_str(),
-                        )
-                    })
-                    .to_string();
+                        format!("https://news.ycombinator.com/item?id={}", item_id)
+                    },
+                };
 
                 let score = item["score"].as_i64().unwrap_or(0);
 

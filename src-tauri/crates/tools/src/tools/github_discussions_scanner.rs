@@ -2,6 +2,7 @@
 //! 通过 GitHub Search API 采集 Discussions 中的需求线索
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 use std::collections::HashSet;
 
@@ -13,14 +14,14 @@ pub struct GitHubDiscussionsScanner {
 
 impl GitHubDiscussionsScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let github_token = std::env::var("GITHUB_TOKEN").ok();
         Self { http, github_token }
     }
 
     /// 构建搜索 URL
     fn build_search_url(&self, query: &str) -> String {
-        let encoded_query = query.replace(' ', "+");
+        let encoded_query = scanner_common::encode_query(query);
         format!(
             "https://api.github.com/search/issues?q={}+type:discussion&sort=reactions&order=desc&per_page=30",
             encoded_query
@@ -147,8 +148,8 @@ impl Default for GitHubDiscussionsScanner {
 
 #[async_trait]
 impl MarketplaceScanner for GitHubDiscussionsScanner {
-    fn platform(&self) -> &'static str {
-        "github_discussion"
+    fn platform(&self) -> String {
+        "github_discussion".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

@@ -1,7 +1,17 @@
-//! Twitter 扫描器
-//! 通过公开 API 或轻量级代理采集 Twitter/X 上的 AI 相关讨论和趋势
+//! Twitter / X 扫描器
+//!
+//! 通过 **Twitter API v2** (`GET /2/tweets/search/recent`) 采集 AI 相关讨论与趋势信号。
+//!
+//! ## 合规约束
+//!
+//! 原实现把 `base_url` 指向第三方 Nitter 镜像并逐行扫描 HTML 找关键词，
+//! 这既是规避官方访问途径，也会把页面里的 JS/CSS 当成正文。现已改为：
+//! - 只请求官方 API 端点，响应按 JSON 解析；
+//! - 未配置 `TWITTER_BEARER_TOKEN` 时直接跳过，不发起任何请求；
+//! - 使用真实 UA，不伪造浏览器指纹。
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// Twitter 扫描器
@@ -15,35 +25,28 @@ pub struct TwitterScanner {
 
 impl TwitterScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
-        let api_token = std::env::var("TWITTER_BEARER_TOKEN").ok();
-        // 为了演示，这里使用一个公开的 Nitter 实例作为备用数据源
-        // 实际生产中应优先使用官方 API
-        let base_url = "https://nitter.net".to_string();
-        Self { http, api_token, base_url }
+        Self::with_token(std::env::var("TWITTER_BEARER_TOKEN").ok())
     }
 
-    /// 构建搜索 URL
-    fn build_search_url(&self, query: &str, _max_results: u32) -> String {
-        let encoded_query = query.replace(' ', "+");
-        // 这里演示如何使用 Nitter 搜索。实际应用中应调用 Twitter v2 API
-        format!("{}/search?f=tweets&q={}&since=&until=&near=", self.base_url, encoded_query)
+    /// 携带官方 API 凭证构造
+    pub fn with_token(api_token: Option<String>) -> Self {
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
+        Self { http, api_token, base_url: "https://api.twitter.com/2".to_string() }
     }
 
-    /// 构建请求头
+    /// 构建搜索 URL（Twitter API v2 recent search）
+    fn build_search_url(&self, query: &str, max_results: u32) -> String {
+        let encoded_query = scanner_common::encode_query(query);
+        let max_results = max_results.clamp(10, 100);
+        format!(
+            "{}/tweets/search/recent?query={}&max_results={}&tweet.fields=public_metrics,created_at",
+            self.base_url, encoded_query, max_results
+        )
+    }
+
+    /// 构建请求头（真实身份 + Bearer 认证）
     fn build_headers(&self) -> reqwest::header::HeaderMap {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::USER_AGENT,
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap(),
-        );
-        if let Some(ref token) = self.api_token {
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
-            );
-        }
-        headers
+        scanner_common::build_headers(self.api_token.as_deref(), "application/json")
     }
 
     /// AI/技术趋势关键词
@@ -146,11 +149,7 @@ impl TwitterScanner {
     /// 从推文中提取核心需求描述
     fn extract_summary(tweet_text: &str) -> String {
         let text = tweet_text.replace('\n', " ").trim().to_string();
-        if text.len() > 150 {
-            format!("{}...", &text[..150])
-        } else {
-            text
-        }
+        scanner_common::truncate_chars(&text, 150)
     }
 }
 
@@ -162,8 +161,8 @@ impl Default for TwitterScanner {
 
 #[async_trait]
 impl MarketplaceScanner for TwitterScanner {
-    fn platform(&self) -> &'static str {
-        "twitter"
+    fn platform(&self) -> String {
+        "twitter".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -171,14 +170,17 @@ impl MarketplaceScanner for TwitterScanner {
             return Ok(Vec::new());
         }
 
+        // 合规门禁：无 Bearer Token 直接跳过，绝不退化为 Nitter 镜像抓取
+        scanner_common::require_official_api_credential(
+            "twitter",
+            self.api_token.as_deref(),
+            &self.base_url,
+        )?;
+
         let url = self.build_search_url(q, 20);
         let headers = self.build_headers();
 
         tracing::info!(query = q, "[TwitterScanner] 发起搜索请求");
-
-        // 注意：在真实生产环境中，这里应该使用 Twitter v2 API (`https://api.twitter.com/2/tweets/search/recent`)
-        // 并解析 JSON 响应。当前的实现演示了处理逻辑，针对 Nitter HTML 解析或 fallback 逻辑。
-        // 为了保证在无网络或非官方环境下也能正常测试，我们先尝试请求，失败则返回空结果。
 
         let response = self.http.get(&url).headers(headers).send().await;
 
@@ -186,32 +188,45 @@ impl MarketplaceScanner for TwitterScanner {
 
         match response {
             Ok(resp) if resp.status().is_success() => {
-                // 在真实场景中，这里应解析 `resp.json::<TwitterResponse>().await` 并提取 tweets
-                // 为了保持代码的健壮性，我们假设可能解析失败
-                if let Ok(text) = resp.text().await {
-                    // 简单的 HTML/JSON 解析示例：查找可能包含需求信号的文本块
-                    // 这只是一个占位逻辑，实际应由专门的解析器处理
-                    for line in text.lines() {
-                        if let Some(signals) = Self::extract_signals(line) {
-                            let summary = Self::extract_summary(line);
-                            let url = self.base_url.clone(); // 实际上应提取 tweet URL
+                // Twitter v2 返回 JSON：{ "data": [ { id, text, public_metrics } ] }
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    let Some(tweets) = scanner_common::pick_items(&body, &["data"]) else {
+                        tracing::debug!("[TwitterScanner] 响应中无 data 数组，跳过");
+                        return Ok(leads);
+                    };
 
-                            leads.push(RawLead {
-                                platform: "twitter".to_string(),
-                                title: format!("Twitter Signal: {}", signals.join(", ")),
-                                description: summary,
-                                url,
-                                price_text: None,
-                                contact: None,
-                                contact_email: None,
-                                contact_phone: None,
-                                snapshot: serde_json::json!({
-                                    "source": "twitter_scanner",
-                                    "signals": signals,
-                                    "raw_text": line,
-                                }),
-                            });
+                    for tweet in tweets {
+                        let text = scanner_common::pick_str(tweet, &["text"]).unwrap_or_default();
+                        if text.is_empty() {
+                            continue;
                         }
+                        let Some(signals) = Self::extract_signals(text) else {
+                            continue;
+                        };
+
+                        let tweet_id = scanner_common::pick_str(tweet, &["id"]).unwrap_or("");
+                        let metrics = tweet.get("public_metrics").cloned().unwrap_or_default();
+
+                        leads.push(RawLead {
+                            platform: "twitter".to_string(),
+                            title: format!("Twitter Signal: {}", signals.join(", ")),
+                            description: Self::extract_summary(text),
+                            url: if tweet_id.is_empty() {
+                                self.base_url.clone()
+                            } else {
+                                format!("https://twitter.com/i/web/status/{}", tweet_id)
+                            },
+                            price_text: None,
+                            contact: None,
+                            contact_email: None,
+                            contact_phone: None,
+                            snapshot: serde_json::json!({
+                                "source": "twitter_scanner",
+                                "signals": signals,
+                                "raw_text": text,
+                                "public_metrics": metrics,
+                            }),
+                        });
                     }
                 }
             },

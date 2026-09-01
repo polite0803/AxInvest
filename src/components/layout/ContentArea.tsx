@@ -35,6 +35,9 @@ const LazyDynamicPageViewer = lazy(() =>
   import("@/pages/DynamicPageViewer").then((m) => ({ default: m.DynamicPageViewer }))
 );
 const LazyDomainHubPage = lazy(() => import("@/pages/DomainHubPage").then((m) => ({ default: m.DomainHubPage })));
+const LazyDemandDiscoveryPage = lazy(() =>
+  import("@/pages/DemandDiscoveryPage").then((m) => ({ default: m.DemandDiscoveryPage }))
+);
 
 function PageLoader() {
   return (
@@ -136,6 +139,14 @@ export const ContentArea = memo(function ContentArea() {
           <Route path={BUILTIN_PAGE_PATH.knowledge} element={redirectToChat("knowledge")} />
           <Route path={BUILTIN_PAGE_PATH.multiAgent} element={redirectToChat("multiAgent")} />
           <Route path={BUILTIN_PAGE_PATH.marketplace} element={redirectToChat("workflow")} />
+          <Route
+            path={BUILTIN_PAGE_PATH["demand-discovery"]}
+            element={
+              <PageContextProvider page="demand-discovery">
+                <SafeLazyPage Page={LazyDemandDiscoveryPage} />
+              </PageContextProvider>
+            }
+          />
           <Route
             path={BUILTIN_PAGE_PATH.memory}
             element={

@@ -24,7 +24,6 @@ mod batch;
 mod coevolution;
 mod compactor;
 mod constitution;
-mod context;
 mod context_predictor;
 mod dream_consolidation;
 mod dream_data_provider;
@@ -97,8 +96,6 @@ pub use compactor::{
 pub use constitution::{
     ConstitutionConfig, ConstitutionalRule, ImmutableConstitution, ViolationSeverity,
 };
-
-pub use context::{ContextAssembler, TokenBudget};
 
 pub use context_predictor::{ContextFeatures, ContextPredictor, PredictionResult};
 

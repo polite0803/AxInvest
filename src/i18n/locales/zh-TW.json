@@ -2748,7 +2748,6 @@
     "WORKFLOW_PLAN_NOT_FOUND": "工作流程計畫未找到",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "套用工作流程反思失敗",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "工作流程反思演化失敗",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接縫未註冊（反思/進化/優化服務不可用）",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "無效的工作流程反思記錄",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "工作流程反思失敗",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "工作流程反思建議失敗",
@@ -2885,7 +2884,8 @@
     "proxyTestFailed": "代理測試失敗",
     "message": "錯誤",
     "STOCK_SETUP_INTERNAL": "Stock setup internal error",
-    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error"
+    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接縫未註冊（反思/進化/優化服務不可用）"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -13430,7 +13430,8 @@
       "opportunityLevel": {
         "high": "High Value",
         "medium": "Medium Value",
-        "low": "Low Value"
+        "low": "Low Value",
+        "very_high": "極高價值"
       },
       "demandType": {
         "tool_software": "Tool Software",
@@ -13440,6 +13441,10 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "unknown": "未知",
+        "operations": "營運",
+        "enterprise_service": "企業服務",
+        "outsourcing": "外包",
         "finance": "Finance",
         "other": "Other"
       },
@@ -13472,7 +13477,40 @@
         "failed": "Failed"
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
-      "formCronPromptPlaceholder": "Describe the scheduled task objective..."
+      "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "pageTitle": "需求發現",
+      "minScore": "最低商業價值分",
+      "scanning": "掃描中…",
+      "statScanned": "掃描",
+      "statEvaluated": "評估",
+      "statSaved": "新入庫",
+      "statHighValue": "高價值",
+      "neverSynced": "從未同步",
+      "openSource": "查看原文",
+      "formId": "平台識別碼",
+      "formIdTip": "與內建掃描器一致（如 reddit）；留空自動產生",
+      "formNameRequired": "請輸入平台名稱",
+      "loadFailed": "載入失敗: {{error}}",
+      "scanFailed": "掃描失敗: {{error}}",
+      "saveFailed": "儲存失敗: {{error}}",
+      "deleteFailed": "刪除失敗: {{error}}",
+      "platformStatus": {
+        "idle": "閒置",
+        "ok": "正常",
+        "error": "異常"
+      },
+      "platformType": {
+        "api": "官方 API",
+        "scanner": "內建掃描器",
+        "mock": "模擬資料",
+        "manual": "人工輸入"
+      },
+      "statRefreshed": "刷新",
+      "scanPolicyTitle": "掃描策略",
+      "scanRetryBackoffMs": "重試退避基數（毫秒）",
+      "policySaved": "掃描策略已儲存",
+      "policyLoadFailed": "掃描策略載入失敗: {{error}}",
+      "policySaveFailed": "掃描策略儲存失敗: {{error}}"
     }
   },
   "demandDiscovery": {

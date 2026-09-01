@@ -246,11 +246,11 @@ pub async fn wiki_notes_create(
             note_id: note.id.clone(),
             operation: "create".to_string(),
             before_snippet: None,
-            after_snippet: Some(if note.content.len() > 500 {
-                note.content[..500].to_string()
-            } else {
-                note.content.clone()
-            }),
+            // 按字节截取需对齐 UTF-8 字符边界，否则中文内容 panic（每字 3 字节）
+            after_snippet: Some(
+                axagent_harness::util_fns::truncate_to_char_boundary(&note.content, 500)
+                    .to_string(),
+            ),
             reason: None,
             quality_score: None,
             created_at: chrono::Utc::now().timestamp_millis(),

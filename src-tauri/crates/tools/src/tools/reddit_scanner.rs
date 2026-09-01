@@ -73,8 +73,8 @@ impl Default for RedditScanner {
 
 #[async_trait]
 impl MarketplaceScanner for RedditScanner {
-    fn platform(&self) -> &'static str {
-        "reddit"
+    fn platform(&self) -> String {
+        "reddit".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

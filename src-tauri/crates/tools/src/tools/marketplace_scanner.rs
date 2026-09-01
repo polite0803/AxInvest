@@ -21,6 +21,7 @@ use crate::tools::linkedin_scanner::LinkedInScanner;
 use crate::tools::package_ecosystem_scanner::PackageEcosystemScanner;
 use crate::tools::product_hunt_scanner::ProductHuntScanner;
 use crate::tools::reddit_scanner::RedditScanner;
+use crate::tools::scan_policy::ScanPolicy;
 use crate::tools::stackoverflow_scanner::StackOverflowScanner;
 use crate::tools::twitter_scanner::TwitterScanner;
 use crate::tools::upwork_scanner::UpworkScanner;
@@ -28,7 +29,11 @@ use crate::tools::xianyu_scanner::XianyuScanner;
 use crate::tools::zhihu_scanner::ZhihuScanner;
 use crate::tools::zhubajie_scanner::ZhubajieScanner;
 use async_trait::async_trait;
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 // ── 内联评估类型（原 axagent-analysis-engine::opc::evaluator 精简版） ──
 
@@ -48,6 +53,25 @@ pub enum DemandType {
     EnterpriseService,
     Outsourcing,
     Consulting,
+}
+
+impl DemandType {
+    /// snake_case 标识（与 serde 序列化一致），用于落库与跨层传递
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::ToolSoftware => "tool_software",
+            Self::ContentCreation => "content_creation",
+            Self::Design => "design",
+            Self::Development => "development",
+            Self::Operations => "operations",
+            Self::Marketing => "marketing",
+            Self::Education => "education",
+            Self::EnterpriseService => "enterprise_service",
+            Self::Outsourcing => "outsourcing",
+            Self::Consulting => "consulting",
+        }
+    }
 }
 
 /// 价格区间
@@ -88,44 +112,324 @@ impl DemandEvaluation {
             _ => "low",
         }
     }
+
+    /// 痛点强度分（持久化用）
+    pub fn pain_score(&self) -> f64 {
+        self.pain_score
+    }
+
+    /// 市场空白度分（持久化用）
+    pub fn market_gap_score(&self) -> f64 {
+        self.market_gap_score
+    }
+
+    /// 商业价值综合分（持久化用）
+    pub fn commercial_value_score(&self) -> f64 {
+        self.commercial_value_score
+    }
+
+    /// 评估置信度（持久化用）
+    pub fn confidence(&self) -> f64 {
+        self.confidence
+    }
+
+    /// 需求类型（持久化用）
+    pub fn demand_type(&self) -> &DemandType {
+        &self.demand_type
+    }
 }
 
-/// 简化版需求评估：基于关键词密度返回启发式评分
+// ── 评分引擎 ──────────────────────────────────────────────────
+//
+// 旧实现有两个硬伤，导致 `opportunity_level()` 的 `very_high` 档永远不可达：
+//   1. `pain_score` 被 clamp 到 90、`market_gap_score` 硬编码 50，
+//      加权后上限 = 90×0.5 + 50×0.5 = 70 < 80（`very_high` 门槛）；
+//   2. `market_gap_score` 不看竞争情况、`budget`/热度完全不参与评分。
+//
+// 现改为多因子加权，各因子均归一化到 0-100，权重合计 1.0。
+
+/// 痛点强度权重
+const W_PAIN: f64 = 0.35;
+/// 市场空白度权重
+const W_MARKET_GAP: f64 = 0.20;
+/// 预算/商业价值权重
+const W_BUDGET: f64 = 0.25;
+/// 社区热度权重
+const W_ENGAGEMENT: f64 = 0.20;
+
+/// 痛点关键词
+///
+/// 必须去重：旧实现里 `"urgent"` 出现两次，`filter().count()` 会把它算两遍。
+const PAIN_KEYWORDS: &[&str] = &[
+    "urgent",
+    "critical",
+    "frustrated",
+    "painful",
+    "deadline",
+    "asap",
+    "急需",
+    "痛点",
+    "麻烦",
+    "困难",
+    "求助",
+    "崩溃",
+    "卡住",
+];
+
+/// 命中多少个痛点关键词算「饱和」
+const PAIN_SATURATION_HITS: f64 = 3.0;
+/// 预算归一化上限（人民币）；对数曲线，10 万元视为饱和
+const BUDGET_SATURATION: f64 = 100_000.0;
+/// 热度归一化上限（互动量）；1000 次互动视为饱和
+const ENGAGEMENT_SATURATION: f64 = 1_000.0;
+/// 无预算信息时的预算分（中性偏保守，不假设高价）
+const BUDGET_FALLBACK_SCORE: f64 = 40.0;
+/// 无热度信息时的热度分（无证据即给低分，不虚高）
+const ENGAGEMENT_FALLBACK_SCORE: f64 = 20.0;
+
+/// 热度字段名候选（各平台命名不一）
+const ENGAGEMENT_KEYS: &[&str] = &[
+    "score",
+    "points",
+    "ups",
+    "likes",
+    "views",
+    "comments",
+    "num_comments",
+    "reactions",
+    "heat",
+    "hot",
+    "votes",
+    "阅读",
+    "点赞",
+    "评论",
+    "浏览",
+    "热度",
+];
+
+/// 痛点强度评分（0-100）
+///
+/// 命中数达到 [`PAIN_SATURATION_HITS`] 即饱和，避免靠堆砌关键词刷分。
+fn score_pain(text: &str) -> f64 {
+    let hits = PAIN_KEYWORDS.iter().filter(|k| text.contains(*k)).count() as f64;
+    (hits / PAIN_SATURATION_HITS).min(1.0) * 100.0
+}
+
+/// 市场空白度评分（0-100）
+///
+/// 已有解决方案越多，空白越小；无数据时取中位。
+fn score_market_gap(known_competitors: Option<u32>) -> f64 {
+    match known_competitors {
+        Some(n) => (100.0 - n.min(10) as f64 * 10.0).max(0.0),
+        None => 50.0,
+    }
+}
+
+/// 预算评分（0-100）与价格区间
+///
+/// 对数归一化：1 万元 ≈ 66 分，10 万元及以上 = 100 分，避免线性尺度下
+/// 少数天价需求把分值拉爆。
+fn score_budget(lead: &DemandLead) -> (f64, Option<PriceRange>) {
+    let upper = match (lead.budget_min, lead.budget_max) {
+        (Some(min), Some(max)) => Some(min.max(max)),
+        (Some(v), None) | (None, Some(v)) => Some(v),
+        (None, None) => None,
+    };
+
+    let Some(upper) = upper.filter(|v| v.is_finite() && *v > 0.0) else {
+        return (BUDGET_FALLBACK_SCORE, None);
+    };
+
+    let score = ((1.0 + upper).ln() / (1.0 + BUDGET_SATURATION).ln() * 100.0).clamp(0.0, 100.0);
+    let range = PriceRange {
+        min: lead.budget_min.unwrap_or(0.0),
+        max: lead.budget_max.unwrap_or(upper),
+        currency: lead.budget_currency.clone(),
+        confidence: 0.5,
+    };
+    (score, Some(range))
+}
+
+/// 社区热度评分（0-100）
+///
+/// 从 `raw_snapshot` 中按 [`ENGAGEMENT_KEYS`] 找最大互动量，对数归一化。
+fn score_engagement(snapshot: &serde_json::Value) -> f64 {
+    let peak = collect_engagement_numbers(snapshot, 0).into_iter().fold(0.0, f64::max);
+    if peak <= 0.0 {
+        return ENGAGEMENT_FALLBACK_SCORE;
+    }
+    ((1.0 + peak).ln() / (1.0 + ENGAGEMENT_SATURATION).ln() * 100.0).clamp(0.0, 100.0)
+}
+
+/// 递归收集热度数值（最多下钻两层，避免遍历整个快照）
+fn collect_engagement_numbers(value: &serde_json::Value, depth: usize) -> Vec<f64> {
+    if depth > 2 {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map {
+                // clippy::collapsible_if — 合并为单层条件
+                if ENGAGEMENT_KEYS.contains(&key.as_str())
+                    && let Some(n) = val.as_f64()
+                {
+                    found.push(n);
+                }
+                found.extend(collect_engagement_numbers(val, depth + 1));
+            }
+        },
+        serde_json::Value::Array(items) => {
+            for item in items {
+                found.extend(collect_engagement_numbers(item, depth + 1));
+            }
+        },
+        _ => {},
+    }
+    found
+}
+
+/// 按平台名返回内置扫描器实例
+///
+/// 平台名与各扫描器 `platform()` 返回值一致；无匹配时返回 `None`，
+/// 由调用方决定回退策略（如手动补录）。
+fn builtin_scanner_for(platform: &str) -> Option<Box<dyn MarketplaceScanner>> {
+    use super::{
+        arxiv_scanner::ArxivScanner, csdn_scanner::CsdnScanner, dribbble_scanner::DribbbleScanner,
+        github_discussions_scanner::GitHubDiscussionsScanner,
+        github_issue_scanner::GitHubIssueScanner, hacker_news_scanner::HackerNewsScanner,
+        huggingface_scanner::HuggingFaceScanner, linkedin_scanner::LinkedInScanner,
+        package_ecosystem_scanner::PackageEcosystemScanner,
+        product_hunt_scanner::ProductHuntScanner, reddit_scanner::RedditScanner,
+        stackoverflow_scanner::StackOverflowScanner, twitter_scanner::TwitterScanner,
+        upwork_scanner::UpworkScanner, xianyu_scanner::XianyuScanner, zhihu_scanner::ZhihuScanner,
+        zhubajie_scanner::ZhubajieScanner,
+    };
+    let scanner: Box<dyn MarketplaceScanner> = match platform {
+        "arxiv" => Box::new(ArxivScanner::new()),
+        "csdn" => Box::new(CsdnScanner::csdn()),
+        "juejin" => Box::new(CsdnScanner::juejin()),
+        "dribbble" => Box::new(DribbbleScanner::new()),
+        "github_issue" => Box::new(GitHubIssueScanner::new()),
+        "github_discussion" => Box::new(GitHubDiscussionsScanner::new()),
+        "hackernews" => Box::new(HackerNewsScanner::new()),
+        "huggingface" => Box::new(HuggingFaceScanner::new()),
+        "linkedin" => Box::new(LinkedInScanner::new()),
+        "package_ecosystem" => Box::new(PackageEcosystemScanner::new()),
+        "producthunt" => Box::new(ProductHuntScanner::new()),
+        "reddit" => Box::new(RedditScanner::new()),
+        "stackoverflow" => Box::new(StackOverflowScanner::new()),
+        "twitter" => Box::new(TwitterScanner::new()),
+        "upwork" => Box::new(UpworkScanner::new()),
+        "xianyu" => Box::new(XianyuScanner::new()),
+        "zhihu" => Box::new(ZhihuScanner::new()),
+        "zhubajie" => Box::new(ZhubajieScanner::new()),
+        _ => return None,
+    };
+    Some(scanner)
+}
+
+/// 需求类型分类（关键词启发式）
+fn classify_demand(text: &str) -> DemandType {
+    let rules: &[(DemandType, &[&str])] = &[
+        (DemandType::Outsourcing, &["外包", "outsourc", "freelance", "兼职", "接单"]),
+        (DemandType::Design, &["设计", "design", "logo", "ui", "ux", "插画"]),
+        (DemandType::Development, &["开发", "develop", "程序", "小程序", "app", "网站", "code"]),
+        (DemandType::ToolSoftware, &["工具", "tool", "软件", "software", "saas", "插件"]),
+        (DemandType::ContentCreation, &["文案", "content", "视频", "剪辑", "写作", "writing"]),
+        (DemandType::Marketing, &["营销", "marketing", "推广", "seo", "增长", "growth"]),
+        (DemandType::Operations, &["运营", "operation", "客服", "运维"]),
+        (DemandType::Education, &["培训", "教育", "课程", "education", "教学"]),
+        (DemandType::EnterpriseService, &["企业", "enterprise", "erp", "crm", "数字化"]),
+        (DemandType::Consulting, &["咨询", "consult", "顾问", "方案"]),
+    ];
+    for (demand_type, keywords) in rules {
+        if keywords.iter().any(|k| text.contains(k)) {
+            return demand_type.clone();
+        }
+    }
+    DemandType::Unknown
+}
+
+/// 评估单条需求线索
+///
+/// 综合痛点、市场空白、预算、热度四个因子加权得出商业价值分（0-100）。
+pub fn evaluate_lead(lead: &DemandLead) -> DemandEvaluation {
+    evaluate_lead_with_competitors(lead, None)
+}
+
+/// 评估单条需求线索（可指定已知竞品数量）
+pub fn evaluate_lead_with_competitors(
+    lead: &DemandLead,
+    known_competitors: Option<u32>,
+) -> DemandEvaluation {
+    let text = format!("{} {}", lead.title, lead.description).to_lowercase();
+
+    let pain_score = score_pain(&text);
+    let market_gap_score = score_market_gap(known_competitors);
+    let (budget_score, price_range) = score_budget(lead);
+    let engagement_score = score_engagement(&lead.raw_snapshot);
+
+    let commercial_value_score = (pain_score * W_PAIN
+        + market_gap_score * W_MARKET_GAP
+        + budget_score * W_BUDGET
+        + engagement_score * W_ENGAGEMENT)
+        .round()
+        .clamp(0.0, 100.0);
+
+    // 置信度：拿到的信号越多越可信
+    let mut confidence: f64 = 0.2;
+    if price_range.is_some() {
+        confidence += 0.3;
+    }
+    if engagement_score != ENGAGEMENT_FALLBACK_SCORE {
+        confidence += 0.2;
+    }
+    if pain_score > 0.0 {
+        confidence += 0.2;
+    }
+
+    DemandEvaluation {
+        demand_id: lead.id.clone(),
+        pain_score,
+        existing_solutions: known_competitors.unwrap_or(0),
+        market_gap_score,
+        commercial_value_score,
+        confidence: confidence.clamp(0.1, 0.9),
+        demand_type: classify_demand(&text),
+        extracted_price_range: price_range,
+        // 与「我们能力的契合度」需要能力画像才能计算，当前无输入源，保持中性
+        market_fit_score: 50.0,
+    }
+}
+
+/// 兼容旧签名：按 (id, 标题, 描述, 已知竞品数) 评估
+///
+/// 无 [`DemandLead`] 时使用；有完整线索时应优先调用 [`evaluate_lead`]，
+/// 否则预算与热度因子会退化为兜底值。
 fn evaluate_demand_value(
     demand_id: &str,
     title: &str,
     description: &str,
-    _known_competitors: Option<u32>,
+    known_competitors: Option<u32>,
 ) -> DemandEvaluation {
-    let text = format!("{} {}", title, description).to_lowercase();
-    let pain_keywords = [
-        "urgent",
-        "critical",
-        "frustrated",
-        "painful",
-        "deadline",
-        "urgent",
-        "急需",
-        "痛点",
-        "麻烦",
-        "困难",
-    ];
-    let pain_hits = pain_keywords.iter().filter(|k| text.contains(*k)).count() as f64;
-    let pain_score = (pain_hits * 20.0).clamp(10.0, 90.0);
-    let market_gap_score = 50.0; // 无真实评估引擎时取中位
-    let commercial_value_score = (pain_score * 0.5 + market_gap_score * 0.5).round();
-
-    DemandEvaluation {
-        demand_id: demand_id.to_string(),
-        pain_score,
-        existing_solutions: 0,
-        market_gap_score,
-        commercial_value_score,
-        confidence: 0.3,
-        demand_type: DemandType::Unknown,
-        extracted_price_range: None,
-        market_fit_score: 50.0,
-    }
+    let lead = DemandLead {
+        id: demand_id.to_string(),
+        platform: "unknown".to_string(),
+        title: title.to_string(),
+        description: description.to_string(),
+        budget_min: None,
+        budget_max: None,
+        budget_currency: "CNY".to_string(),
+        contact_name: None,
+        contact_email: None,
+        contact_phone: None,
+        source_url: None,
+        raw_snapshot: serde_json::Value::Null,
+        status: "new".to_string(),
+        confidence: 0.0,
+    };
+    evaluate_lead_with_competitors(&lead, known_competitors)
 }
 
 // ── DTO 定义 ──────────────────────────────────────────────────
@@ -219,7 +523,10 @@ impl EvaluatedDemandLead {
 #[async_trait]
 pub trait MarketplaceScanner: Send + Sync {
     /// 平台标识（如 "xianyu" / "zhubajie"）
-    fn platform(&self) -> &'static str;
+    ///
+    /// 返回 `String` 而非 `&'static str`：平台名可能来自运行时配置，
+    /// 用静态生命周期会逼迫实现方 `Box::leak` 堆内存（原实现有 3 处泄漏）。
+    fn platform(&self) -> String;
 
     /// 按关键词搜索需求线索（通过官方 API）
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String>;
@@ -227,16 +534,158 @@ pub trait MarketplaceScanner: Send + Sync {
 
 // ── 聚合扫描器 ────────────────────────────────────────────────
 
+/// 单平台一轮扫描的结果
+///
+/// 并发扫描下需要把「失败」与「跳过」显式带回来，供上层统计与回写同步状态；
+/// 旧实现只在 warn 日志里丢一句，调用方无法区分「该平台挂了」和「该平台没数据」。
+#[derive(Debug, Clone)]
+pub struct PlatformScanResult {
+    /// 平台标识
+    pub platform: String,
+    /// 扫到的线索（已转为 `DemandLead`）
+    pub leads: Vec<DemandLead>,
+    /// 失败原因；`None` 表示成功
+    pub error: Option<String>,
+    /// 实际尝试次数（含首次）
+    pub attempts: u32,
+    /// 合规跳过：未配置官方 API 凭证，主动放弃而非失败
+    pub compliance_skipped: bool,
+}
+
+/// 单平台一轮「扫描 + 评估」的结果
+#[derive(Debug, Clone)]
+pub struct PlatformEvaluatedResult {
+    /// 平台标识
+    pub platform: String,
+    /// 已评估的线索
+    pub leads: Vec<EvaluatedDemandLead>,
+    /// 失败原因；`None` 表示成功
+    pub error: Option<String>,
+    /// 实际尝试次数（含首次）
+    pub attempts: u32,
+    /// 合规跳过：未配置官方 API 凭证
+    pub compliance_skipped: bool,
+}
+
+/// 全局速率闸门
+///
+/// 用「预约下一个可用时刻」而非「持锁睡眠」实现：拿到时刻后立即放锁再睡，
+/// 这样并发度不会被限流器压成 1。
+struct RateGate {
+    min_interval: Option<Duration>,
+    next_available: Mutex<Instant>,
+}
+
+impl RateGate {
+    fn new(min_interval: Option<Duration>) -> Self {
+        Self { min_interval, next_available: Mutex::new(Instant::now()) }
+    }
+
+    async fn wait(&self) {
+        let Some(interval) = self.min_interval else {
+            return;
+        };
+        let start = {
+            let mut guard = self.next_available.lock().await;
+            let now = Instant::now();
+            let slot = (*guard).max(now);
+            *guard = slot + interval;
+            slot
+        };
+        if let Some(delay) = start.checked_duration_since(Instant::now())
+            && !delay.is_zero()
+        {
+            tokio::time::sleep(delay).await;
+        }
+    }
+}
+
+/// 带超时与指数退避重试的单平台搜索
+///
+/// 返回 `(线索, 失败原因, 尝试次数, 是否合规跳过)`。
+/// 合规跳过（无官方 API 凭证）**不重试**——重试只会放大无效日志与等待。
+async fn search_with_retry(
+    scanner: &(dyn MarketplaceScanner + Sync),
+    q: &str,
+    policy: &ScanPolicy,
+) -> (Vec<DemandLead>, Option<String>, u32, bool) {
+    let mut attempts: u32 = 0;
+    loop {
+        attempts += 1;
+        match tokio::time::timeout(policy.timeout(), scanner.search(q)).await {
+            Ok(Ok(raw)) => {
+                return (
+                    raw.into_iter().map(DemandLead::new_from_raw).collect(),
+                    None,
+                    attempts,
+                    false,
+                );
+            },
+            Ok(Err(e)) => {
+                if e == crate::tools::scanner_common::NO_CREDENTIAL_SKIP_REASON {
+                    return (Vec::new(), None, attempts, true);
+                }
+                if attempts > policy.retry_max {
+                    return (Vec::new(), Some(e), attempts, false);
+                }
+                tracing::warn!(
+                    platform = scanner.platform(),
+                    attempt = attempts,
+                    error = %e,
+                    "[search_with_retry] 扫描失败，准备重试"
+                );
+            },
+            Err(_) => {
+                let msg = format!("扫描超时（{}s）", policy.timeout().as_secs());
+                if attempts > policy.retry_max {
+                    return (Vec::new(), Some(msg), attempts, false);
+                }
+                tracing::warn!(
+                    platform = scanner.platform(),
+                    attempt = attempts,
+                    "[search_with_retry] 扫描超时，准备重试"
+                );
+            },
+        }
+        tokio::time::sleep(policy.retry_backoff(attempts)).await;
+    }
+}
+
 /// 多平台聚合扫描器
 pub struct AggregateMarketplaceScanner {
     scanners: Vec<Box<dyn MarketplaceScanner>>,
     /// 记录被禁用的平台名称
     disabled_platforms: std::collections::HashSet<String>,
+    /// 扫描策略（并发 / 限流 / 重试 / 超时）
+    policy: ScanPolicy,
 }
 
 impl AggregateMarketplaceScanner {
     pub fn new() -> Self {
-        Self { scanners: Vec::new(), disabled_platforms: std::collections::HashSet::new() }
+        Self {
+            scanners: Vec::new(),
+            disabled_platforms: std::collections::HashSet::new(),
+            policy: ScanPolicy::default(),
+        }
+    }
+
+    /// 以指定策略构造（默认策略见 [`ScanPolicy::default`]）
+    pub fn with_policy(policy: ScanPolicy) -> Self {
+        Self {
+            scanners: Vec::new(),
+            disabled_platforms: std::collections::HashSet::new(),
+            policy: policy.normalized(),
+        }
+    }
+
+    /// 覆盖扫描策略
+    pub fn set_policy(&mut self, policy: ScanPolicy) {
+        self.policy = policy.normalized();
+    }
+
+    /// 当前生效的扫描策略
+    pub fn policy(&self) -> &ScanPolicy {
+        &self.policy
     }
 
     pub fn add_scanner(&mut self, scanner: Box<dyn MarketplaceScanner>) {
@@ -265,7 +714,7 @@ impl AggregateMarketplaceScanner {
         self.scanners
             .iter()
             .map(|s| {
-                let p = s.platform().to_string();
+                let p = s.platform();
                 let enabled = !self.disabled_platforms.contains(&p);
                 (p, enabled)
             })
@@ -276,6 +725,7 @@ impl AggregateMarketplaceScanner {
     ///
     /// `platform_type` 对应三种连接器：
     /// - `"api"` → `ApiMarketplaceScanner`（官方 API，需配置 API Token）
+    /// - `"scanner"` → 按平台名路由到对应的内置平台扫描器（详见 [`builtin_scanner_for`]）
     /// - `"mock"` → `MockMarketplaceScanner`（模拟数据，用于测试）
     /// - `"manual"` / 其他 → `ManualMarketplaceScanner`（手动补录）
     pub fn add_platform(
@@ -289,6 +739,18 @@ impl AggregateMarketplaceScanner {
             "api" => {
                 self.add_scanner(Box::new(ApiMarketplaceScanner::new(platform, base_url, config)));
             },
+            "scanner" => match builtin_scanner_for(platform) {
+                Some(s) => self.add_scanner(s),
+                None => {
+                    tracing::warn!(
+                        platform = platform,
+                        "[AggregateMarketplaceScanner] 无内置扫描器，回退为手动补录"
+                    );
+                    self.add_scanner(Box::new(ManualMarketplaceScanner::new(
+                        platform, base_url, config,
+                    )));
+                },
+            },
             "mock" => {
                 self.add_scanner(Box::new(MockMarketplaceScanner::new(platform)));
             },
@@ -297,55 +759,128 @@ impl AggregateMarketplaceScanner {
         }
     }
 
-    pub async fn search_all(&self, q: &str) -> Result<Vec<DemandLead>, String> {
-        let mut leads: Vec<DemandLead> = Vec::new();
-        for scanner in &self.scanners {
-            let platform = scanner.platform();
-            if !self.is_scanner_enabled(platform) {
-                tracing::debug!(
-                    platform = platform,
-                    "[AggregateMarketplaceScanner] 扫描器已禁用，跳过"
-                );
-                continue;
-            }
+    /// 并发扫描全部启用的平台
+    ///
+    /// 行为由 [`ScanPolicy`] 驱动：
+    /// - `concurrency` → `buffer_unordered` 的并发上限（原来是串行 `for` 循环）
+    /// - `rate_limit_per_min` → 全局最小请求间隔闸门
+    /// - `retry_max` / `retry_backoff_ms` → 指数退避重试
+    /// - `timeout_secs` → 单平台单次请求超时
+    ///
+    /// 被禁用（`disable_scanner`）的平台直接跳过，不占用并发与限流额度。
+    pub async fn scan_platforms(&self, q: &str) -> Vec<PlatformScanResult> {
+        // normalized() 按值接收 self，&self 方法里需先 clone 字段
+        let policy = self.policy.clone().normalized();
+        let concurrency = policy.concurrency();
+        let gate = Arc::new(RateGate::new(policy.min_request_interval()));
 
-            match scanner.search(q).await {
-                Ok(raw) => {
-                    for r in raw {
-                        leads.push(DemandLead::new_from_raw(r));
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(
-                        platform = platform,
-                        error = %e,
-                        "[AggregateMarketplaceScanner] 扫描器失败，跳过"
+        let enabled: Vec<&Box<dyn MarketplaceScanner>> = self
+            .scanners
+            .iter()
+            .filter(|s| {
+                let enabled = self.is_scanner_enabled(&s.platform());
+                if !enabled {
+                    tracing::debug!(
+                        platform = s.platform(),
+                        "[AggregateMarketplaceScanner] 扫描器已禁用，跳过"
                     );
-                },
+                }
+                enabled
+            })
+            .collect();
+
+        // 用显式 for 循环构造 future，而不是 `.map(|scanner| async move { .. })`。
+        // edition 2024 下 `map` 闭包的参数是引用类型时会被推断成高阶生命周期（HRTB），
+        // 但 async block 捕获的是**固定**生命周期的 `&Box<dyn MarketplaceScanner>`，两者
+        // 不匹配 → `implementation of FnOnce is not general enough`（仅 lib test 构建触发，
+        // `cargo check` / `clippy` 反而不报）。去掉闭包后借用直接进 async block，问题消失。
+        let mut tasks = Vec::with_capacity(enabled.len());
+        for scanner in enabled {
+            let gate = Arc::clone(&gate);
+            let policy = policy.clone();
+            let q = q.to_string();
+            tasks.push(async move {
+                gate.wait().await;
+                let (leads, error, attempts, compliance_skipped) =
+                    search_with_retry(scanner.as_ref(), &q, &policy).await;
+                if let Some(e) = &error {
+                    tracing::warn!(
+                        platform = scanner.platform(),
+                        attempts = attempts,
+                        error = %e,
+                        "[AggregateMarketplaceScanner] 扫描器最终失败，跳过"
+                    );
+                }
+                PlatformScanResult {
+                    platform: scanner.platform(),
+                    leads,
+                    error,
+                    attempts,
+                    compliance_skipped,
+                }
+            });
+        }
+
+        stream::iter(tasks).buffer_unordered(concurrency).collect().await
+    }
+
+    /// 扫描全部启用平台并汇总线索（不区分来源成败）
+    ///
+    /// 结果按 `max_leads_per_scan` 截断。需要逐平台成败明细时改用 [`Self::scan_platforms`]。
+    pub async fn search_all(&self, q: &str) -> Result<Vec<DemandLead>, String> {
+        let limit = self.policy.max_leads_per_scan;
+        let mut leads: Vec<DemandLead> = Vec::new();
+        for result in self.scan_platforms(q).await {
+            for lead in result.leads {
+                if leads.len() >= limit {
+                    return Ok(leads);
+                }
+                leads.push(lead);
             }
         }
         Ok(leads)
+    }
+
+    /// 逐平台「扫描 + 评估」，保留每个平台的成败明细
+    ///
+    /// 命令层需要它来做两件 `search_and_evaluate` 做不到的事：
+    /// 1. 回写**单个平台**的同步状态（成功 / 失败 / 合规跳过）
+    /// 2. 区分「该平台挂了」与「该平台确实没数据」
+    pub async fn scan_and_evaluate_platforms(&self, q: &str) -> Vec<PlatformEvaluatedResult> {
+        self.scan_platforms(q)
+            .await
+            .into_iter()
+            .map(|r| PlatformEvaluatedResult {
+                platform: r.platform,
+                leads: r
+                    .leads
+                    .into_iter()
+                    .map(|lead| {
+                        let (id, title, desc) = lead.to_evaluation_input();
+                        let evaluation = evaluate_demand_value(&id, &title, &desc, None);
+                        EvaluatedDemandLead::new(lead, evaluation)
+                    })
+                    .collect(),
+                error: r.error,
+                attempts: r.attempts,
+                compliance_skipped: r.compliance_skipped,
+            })
+            .collect()
     }
 
     /// 搜索需求线索并执行价值评估
     ///
     /// 完整流水线：扫描 → 评估 → 筛选高价值 → 排序
     pub async fn search_and_evaluate(&self, q: &str) -> Result<Vec<EvaluatedDemandLead>, String> {
-        let leads = self.search_all(q).await?;
-
-        let mut evaluated: Vec<EvaluatedDemandLead> = leads
-            .into_iter()
-            .map(|lead| {
-                let (id, title, desc) = lead.to_evaluation_input();
-                let evaluation = evaluate_demand_value(&id, &title, &desc, None);
-                EvaluatedDemandLead::new(lead, evaluation)
-            })
-            .collect();
+        let limit = self.policy.max_leads_per_scan;
+        let mut evaluated: Vec<EvaluatedDemandLead> =
+            self.scan_and_evaluate_platforms(q).await.into_iter().flat_map(|r| r.leads).collect();
 
         // 按价值分排序
         evaluated.sort_by(|a, b| {
             b.value_score().partial_cmp(&a.value_score()).unwrap_or(std::cmp::Ordering::Equal)
         });
+        evaluated.truncate(limit);
 
         Ok(evaluated)
     }
@@ -438,7 +973,7 @@ impl Default for AggregateMarketplaceScanner {
 /// | `data_wrapper` | 数据包装字段（如 `data`、`results`） | `"data"` |
 /// | `timeout_sec` | 请求超时（秒） | `10` |
 pub struct ApiMarketplaceScanner {
-    platform: &'static str,
+    platform: String,
     base_url: String,
     api_token: String,
     auth_type: String,
@@ -454,9 +989,8 @@ pub struct ApiMarketplaceScanner {
 
 impl ApiMarketplaceScanner {
     pub fn new(platform: &str, base_url: Option<&str>, config: &serde_json::Value) -> Self {
-        let platform_static: &'static str = Box::leak(platform.to_string().into_boxed_str());
         Self {
-            platform: platform_static,
+            platform: platform.to_string(),
             base_url: base_url
                 .map(|u| u.to_string())
                 .unwrap_or_else(|| "https://api.example.com".to_string()),
@@ -518,8 +1052,8 @@ impl ApiMarketplaceScanner {
 
 #[async_trait]
 impl MarketplaceScanner for ApiMarketplaceScanner {
-    fn platform(&self) -> &'static str {
-        self.platform
+    fn platform(&self) -> String {
+        self.platform.clone()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -694,20 +1228,19 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
 
 /// Mock 平台连接器（用于测试和演示，返回固定的模拟数据）
 pub struct MockMarketplaceScanner {
-    platform: &'static str,
+    platform: String,
 }
 
 impl MockMarketplaceScanner {
     pub fn new(platform: &str) -> Self {
-        let platform_static: &'static str = Box::leak(platform.to_string().into_boxed_str());
-        Self { platform: platform_static }
+        Self { platform: platform.to_string() }
     }
 }
 
 #[async_trait]
 impl MarketplaceScanner for MockMarketplaceScanner {
-    fn platform(&self) -> &'static str {
-        self.platform
+    fn platform(&self) -> String {
+        self.platform.clone()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -770,21 +1303,20 @@ impl MarketplaceScanner for MockMarketplaceScanner {
 /// 当平台暂未接入官方 API 时，使用此连接器返回空结果，
 /// 引导用户通过 `opc_create_lead` 手动录入需求线索。
 pub struct ManualMarketplaceScanner {
-    platform: &'static str,
+    platform: String,
     base_url: Option<String>,
 }
 
 impl ManualMarketplaceScanner {
     pub fn new(platform: &str, base_url: Option<&str>, _config: &serde_json::Value) -> Self {
-        let platform_static: &'static str = Box::leak(platform.to_string().into_boxed_str());
-        Self { platform: platform_static, base_url: base_url.map(|u| u.to_string()) }
+        Self { platform: platform.to_string(), base_url: base_url.map(|u| u.to_string()) }
     }
 }
 
 #[async_trait]
 impl MarketplaceScanner for ManualMarketplaceScanner {
-    fn platform(&self) -> &'static str {
-        self.platform
+    fn platform(&self) -> String {
+        self.platform.clone()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -1040,11 +1572,19 @@ mod tests {
         let mut scanner = AggregateMarketplaceScanner::new();
         scanner.add_scanner(Box::new(MockMarketplaceScanner::new("test")));
 
+        let all = scanner.search_and_evaluate("test").await.unwrap();
+        assert!(!all.is_empty());
+
         let results = scanner.search_high_value("test", 0.0).await.unwrap();
-        assert!(!results.is_empty(), "阈值为0时应返回所有结果");
+        assert_eq!(results.len(), all.len(), "阈值为0时应返回所有结果");
+
+        // 过滤语义：value_score >= min_score
+        let max_score = all.iter().fold(0.0_f64, |m, e| m.max(e.value_score()));
+        let results = scanner.search_high_value("test", max_score).await.unwrap();
+        assert!(!results.is_empty(), "阈值等于最高分时应至少保留该条");
 
         let results = scanner.search_high_value("test", 100.0).await.unwrap();
-        assert!(results.is_empty(), "阈值为100时应无结果");
+        assert!(results.is_empty(), "阈值为100时应无结果（模拟数据达不到满分）");
     }
 
     #[test]

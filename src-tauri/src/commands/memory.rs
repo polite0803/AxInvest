@@ -467,11 +467,11 @@ pub async fn search_memory(
                 memory_id: result.id.clone(),
                 access_type: "search".to_string(),
                 query: Some(query.clone()),
-                content_snippet: if result.content.len() > 500 {
-                    Some(result.content[..500].to_string())
-                } else {
-                    Some(result.content.clone())
-                },
+                // 按字节截取需对齐 UTF-8 字符边界，否则中文内容 panic（每字 3 字节）
+                content_snippet: Some(
+                    axagent_harness::util_fns::truncate_to_char_boundary(&result.content, 500)
+                        .to_string(),
+                ),
                 hit: true,
                 created_at: chrono::Utc::now().timestamp_millis(),
             };

@@ -8,6 +8,8 @@ use axagent_crypto::decrypt_key;
 use axagent_harness::types::provider_model::ProviderType;
 use axagent_harness::types::settings_chat::ChatContent;
 use axagent_harness::types::{ChatMessage, ChatRequest};
+use axagent_harness::util_fns::truncate_to_char_boundary;
+use sea_orm::EntityTrait;
 use tauri::State;
 
 #[agent_command(domain = skills, safety = Safe, call_mode = StateInput, description = "使用AI分析技能前端配置")]
@@ -35,12 +37,14 @@ pub async fn skill_analyze_frontend(
     let skill_dir = plugin.metadata.root.ok_or_else(|| "Skill has no root dir".to_string())?;
     let raw_content = collect_skill_content(&skill_dir);
 
-    let max_content_len = 8000;
-    let skill_content = if raw_content.len() > max_content_len {
+    // UTF-8 安全截断：`&raw_content[..8000]` 按字节切片，中文技能（每字 3 字节）几乎必然
+    // 落在字符中间 → `byte index N is not a char boundary` panic。复用 harness 已有工具对齐边界。
+    const MAX_CONTENT_LEN: usize = 8000;
+    let skill_content = if raw_content.len() > MAX_CONTENT_LEN {
         format!(
             "{}...(内容已截断，总长度 {} 字符)",
-            &raw_content[..max_content_len],
-            raw_content.len()
+            truncate_to_char_boundary(&raw_content, MAX_CONTENT_LEN),
+            raw_content.chars().count()
         )
     } else {
         raw_content
@@ -424,4 +428,48 @@ pub fn skill_read_asset(name: String, file_name: String) -> Result<String, Error
             crate::commands::error::ErrorCategory::Unrecoverable,
         )
     })
+}
+
+/// 技能执行统计（单条）。
+///
+/// 数据源：`trajectory_skills` 表的既有聚合字段（usage_count / success_rate /
+/// avg_execution_time_ms），不做实时明细聚合。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillExecutionStat {
+    pub name: String,
+    pub success_rate: f64,
+    pub avg_execution_time_ms: i64,
+    pub total_usages: i64,
+    pub successful_usages: i64,
+    /// 后端暂无质量分数据源，返回 null，前端按 ?? 0.5 兜底。
+    pub quality_score: Option<f64>,
+    /// trajectory_skills 表无 last_used_at 列，恒为 null。
+    pub last_used_at: Option<String>,
+}
+
+/// 获取技能执行统计（SK-P0-4 / SK-P1-2 落地）。
+#[agent_command(domain = skills, safety = Safe, call_mode = StateOnly, description = "获取技能执行统计")]
+#[tauri::command]
+pub async fn get_skill_execution_stats(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<SkillExecutionStat>, String> {
+    let db = app_state.harness.db();
+    let rows = axagent_entities::trajectory_skills::Entity::find()
+        .all(db)
+        .await
+        .map_err(|e| format!("Failed to load skill stats: {}", e))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| SkillExecutionStat {
+            successful_usages: (r.success_rate * r.usage_count as f64).round() as i64,
+            name: r.name,
+            success_rate: r.success_rate,
+            avg_execution_time_ms: r.avg_execution_time_ms,
+            total_usages: r.usage_count as i64,
+            quality_score: None,
+            last_used_at: None,
+        })
+        .collect())
 }

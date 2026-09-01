@@ -4,6 +4,7 @@ use crate::commands::agent::payloads::AgentContextPayload;
 use crate::commands::error::ErrorResponse;
 use crate::commands::spawn_guard::catch_unwind_logged;
 use axagent_harness::types::settings_chat::ChatTool;
+use axagent_harness::util_fns::estimate_tokens;
 use axagent_providers::ProviderAdapter;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -11,13 +12,29 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::warn;
 
-/// Load the content of enabled skills from the file system based on conversation scenario.
-/// Returns a list of (skill_name, content_string) pairs filtered by scenario and enabled_skill_ids.
-pub(super) async fn load_enabled_skill_contents(
+/// 技能目录条目（渐进式披露 · 索引层）
+///
+/// 只携带 LLM 判断"是否需要这个能力"所需的最小元数据，**不含正文**。
+/// 完整 SOP 由 LLM 按需调用 `SkillView` 工具获取（定义层）。
+#[derive(Debug, Clone)]
+pub(super) struct SkillCatalogEntry {
+    /// 技能名（同时是 `SkillView` 的调用参数）
+    pub name: String,
+    /// 一句话描述；插件未声明时回退技能名，保证目录行可读
+    pub description: String,
+}
+
+/// 索引层：构建可用技能目录（名称 + 一句话描述），**零文件 I/O**。
+///
+/// 与已删除的 `load_enabled_skill_contents` 的关键差异：
+/// - 不读取技能目录下任何 md 文件（旧实现把全文拼进 system prompt，曾观测到 5MB+ 撑爆 context）
+/// - 过滤逻辑（disabled / enabled_skill_ids / scenario）保持完全不变
+/// - 正文改由 LLM 按需调 `SkillView` 加载 → 渐进式披露的定义层
+pub(super) async fn load_enabled_skill_catalog(
     app_state: &AppState,
     scenario: Option<&str>,
     enabled_skill_ids: &[String],
-) -> Vec<(String, String)> {
+) -> Vec<SkillCatalogEntry> {
     let disabled = match axagent_dao::repo::skill::get_disabled_skills(app_state.harness.db()).await
     {
         Ok(d) => d,
@@ -46,10 +63,10 @@ pub(super) async fn load_enabled_skill_contents(
         Ok(skills) => skills,
         Err(_) => return Vec::new(),
     };
-    let skill_scenarios: std::collections::HashMap<String, Vec<String>> =
+    let skill_scenarios: HashMap<String, Vec<String>> =
         all_skills.into_iter().map(|s| (s.name.clone(), s.scenarios)).collect();
 
-    let mut results = Vec::new();
+    let mut catalog = Vec::new();
 
     for plugin in plugins {
         if disabled.contains(&plugin.metadata.name) {
@@ -72,67 +89,20 @@ pub(super) async fn load_enabled_skill_contents(
             }
         }
 
-        let Some(root) = &plugin.metadata.root else {
-            continue;
+        // 索引层只取元数据，不做任何文件读取 —— 这是与旧实现（全文注入）的核心差异。
+        // 注意：`plugin.metadata.description` 为空时回退技能名，避免出现无意义的空目录行。
+        let description = plugin.metadata.description.trim();
+        let description = if description.is_empty() {
+            skill_name.clone()
+        } else {
+            description.to_string()
         };
-
-        // 只收根目录的 SKILL.md（或 README.md），不递归子目录 — 子目录里的辅助文档/参考资料/示例不进 system prompt
-        // 加 32KB/skill 硬上限 — 防止 AxAgent 自己的 skill SKILL.md 巨无霸（之前发现 4MB+ 的）
-        const SKILL_MAX_SIZE: usize = 32 * 1024;
-        let mut contents = String::new();
-        if let Ok(entries) = std::fs::read_dir(root) {
-            let mut root_files: Vec<_> = entries
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md")))
-                .map(|e| e.path())
-                .collect();
-            // 优先 SKILL.md，然后 README.md，其他 md 排在最后
-            root_files.sort_by(|a, b| {
-                let pa = a.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                let pb = b.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                let rank = |name: &str| -> u8 {
-                    let lower = name.to_lowercase();
-                    if lower.starts_with("skill") {
-                        0
-                    } else if lower.starts_with("readme") {
-                        1
-                    } else {
-                        2
-                    }
-                };
-                rank(pa).cmp(&rank(pb))
-            });
-            for md_path in root_files {
-                if let Ok(text) = std::fs::read_to_string(&md_path) {
-                    if !contents.is_empty() {
-                        contents.push_str("\n\n---\n\n");
-                    }
-                    // 截断：单 skill 超过上限时，保留开头（指令部分通常在前）
-                    if contents.len() + text.len() > SKILL_MAX_SIZE {
-                        let remaining = SKILL_MAX_SIZE.saturating_sub(contents.len());
-                        if remaining > 100 {
-                            contents.push_str(&text[..remaining]);
-                            contents.push_str("\n\n... [truncated]");
-                        }
-                        break;
-                    }
-                    contents.push_str(&text);
-                }
-            }
-        }
-
-        if !contents.is_empty() {
-            tracing::info!(
-                target: "axagent.skills",
-                "load skill_content: name={} bytes={}",
-                plugin.metadata.name,
-                contents.len()
-            );
-            results.push((plugin.metadata.name.clone(), contents));
-        }
+        catalog.push(SkillCatalogEntry { name: skill_name.clone(), description });
     }
 
-    results
+    // 稳定排序，保证同一会话内目录顺序一致（便于 LLM 复用与日志比对）
+    catalog.sort_by(|a, b| a.name.cmp(&b.name));
+    catalog
 }
 
 /// Load ChatTool definitions and skill data from enabled skills for Agent tool calling.
@@ -646,7 +616,8 @@ pub(super) fn build_agent_system_prompt(
     profile_prompt: Option<&str>,
     user_custom_prompt: Option<&str>,
     rag_context: Option<&[String]>,
-    skills: &[(String, String)],
+    // 技能目录（索引层条目），非全文
+    skills: &[SkillCatalogEntry],
     working_memory: Option<&str>,
     nudge_messages: Option<&[String]>,
     insight_messages: Option<&[String]>,
@@ -739,16 +710,40 @@ pub(super) fn build_agent_system_prompt(
         }
     }
 
-    // Inject enabled skill contents into the system prompt with boundary markers
+    // 渐进式披露 · 索引层：只注入技能目录（名称 + 一句话描述），正文按需由 SkillView 加载。
+    // 旧实现在此拼接技能全文（曾观测到 5MB+ 撑爆 context）；现整段受 token_budget::SKILLS 约束。
     if !skills.is_empty() {
-        let mut skill_section = String::from(
-            "<enabled-skills>\n# Available Skills\n\nThe following skills are enabled and loaded. Follow their instructions when the user's request matches the skill's purpose.\n",
-        );
-        for (name, content) in skills {
-            skill_section.push_str(&format!("\n## Skill: {}\n\n{}\n", name, content));
+        let header = "<available-skills>\n# Available Skills (index)\n\nThe following skills are \
+                      available. This is a catalog only — full instructions are NOT loaded.\nWhen a \
+                      request matches a skill, call the `SkillView` tool with that skill's name to \
+                      load its full instructions, then follow them.\n";
+        let footer = "</available-skills>";
+        let budget = crate::context_manager::token_budget::SKILLS;
+
+        let mut used = estimate_tokens(header) + estimate_tokens(footer);
+        let mut lines: Vec<String> = Vec::with_capacity(skills.len());
+        let mut omitted = 0usize;
+        for entry in skills {
+            let line = format!("- **{}**: {}", entry.name, entry.description);
+            let cost = estimate_tokens(&line);
+            if used + cost > budget {
+                omitted = skills.len() - lines.len();
+                break;
+            }
+            used += cost;
+            lines.push(line);
         }
-        skill_section.push_str("\n</enabled-skills>");
-        prompts.push(skill_section);
+
+        let mut section = header.to_string();
+        section.push_str(&lines.join("\n"));
+        if omitted > 0 {
+            section.push_str(&format!(
+                "\n- ... 另有 {omitted} 个技能未列入（超出索引预算），可用 DiscoverSkills 按关键词搜索"
+            ));
+        }
+        section.push('\n');
+        section.push_str(footer);
+        prompts.push(section);
     }
 
     // Inject nudge messages — proactive suggestions from the closed-loop learning system
@@ -845,5 +840,141 @@ pub(super) fn build_agent_system_prompt(
         }
     }
 
+    // 渐进式披露 · 路由精化结果（认知编排 → 定义层的桥）
+    // cognitive.rs 路由命中能力后，把 capability_id + 名称/描述/执行模式写入 routing_hint；
+    // 此处作为独立 slot 注入，让 agent 直接按该能力执行，不必重新做能力发现。
+    if let Some(ctx) = agent_context
+        && let Some(hint) = &ctx.routing_hint
+        && !hint.trim().is_empty()
+    {
+        prompts.push(format!(
+            "<routing-hint>\n# Routed Capability\n\nThe cognitive orchestrator has already selected \
+             the following capability for this request. Load and use it directly — do not re-run \
+             capability discovery:\n\n{}\n</routing-hint>",
+            hint.trim()
+        ));
+    }
+
     prompts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(name: &str, description: &str) -> SkillCatalogEntry {
+        SkillCatalogEntry { name: name.to_string(), description: description.to_string() }
+    }
+
+    /// 只喂技能目录（和可选的 agent_context），其余 slot 全传 None
+    fn prompt_with(
+        skills: &[SkillCatalogEntry],
+        agent_context: Option<&AgentContextPayload>,
+    ) -> Vec<String> {
+        build_agent_system_prompt(
+            None,
+            None,
+            None,
+            None,
+            skills,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            agent_context,
+        )
+    }
+
+    fn catalog_section(prompts: &[String]) -> Option<&String> {
+        prompts.iter().find(|p| p.contains("<available-skills>"))
+    }
+
+    #[test]
+    fn catalog_section_is_index_only() {
+        let prompts = prompt_with(&[entry("demo-skill", "干某件事的一句话说明")], None);
+        let section = catalog_section(&prompts).expect("目录段应存在");
+
+        // 索引层三要素：目录标记、条目行、按需加载指引
+        assert!(section.contains("**demo-skill**: 干某件事的一句话说明"));
+        assert!(section.contains("SkillView"), "必须告诉 LLM 用 SkillView 加载正文");
+        assert!(section.contains("</available-skills>"));
+
+        // 不得退回旧的全文注入形态
+        assert!(!section.contains("<enabled-skills>"));
+        assert!(!prompts.iter().any(|p| p.contains("<enabled-skills>")));
+    }
+
+    #[test]
+    fn empty_catalog_emits_no_section() {
+        let prompts = prompt_with(&[], None);
+        assert!(catalog_section(&prompts).is_none());
+    }
+
+    #[test]
+    fn catalog_respects_token_budget() {
+        // 每条 ≈ 38 token（15 ASCII + 50 CJK），200 条 ≈ 7600 > SKILLS(5000)，必然触发截断
+        let long_desc = "描".repeat(50);
+        let skills: Vec<_> = (0..200).map(|i| entry(&format!("skill-{i}"), &long_desc)).collect();
+
+        let prompts = prompt_with(&skills, None);
+        let section = catalog_section(&prompts).expect("目录段应存在");
+
+        assert!(section.contains("未列入"), "超预算时应提示被省略的条目数");
+        // 预算硬约束：整段 token 不得显著越过预算（余量留给"未列入"提示行）
+        let budget = crate::context_manager::token_budget::SKILLS;
+        assert!(
+            estimate_tokens(section) <= budget + 100,
+            "目录段 token 数越过预算：{} > {}",
+            estimate_tokens(section),
+            budget + 100
+        );
+        // 截断后仍应有条目留下，而不是整段清空
+        assert!(section.contains("**skill-0**"));
+    }
+
+    #[test]
+    fn small_catalog_not_truncated() {
+        let skills: Vec<_> = (0..5).map(|i| entry(&format!("skill-{i}"), "简短说明")).collect();
+        let prompts = prompt_with(&skills, None);
+        let section = catalog_section(&prompts).expect("目录段应存在");
+
+        assert!(!section.contains("未列入"), "未超预算时不应出现省略提示");
+        for i in 0..5 {
+            assert!(section.contains(&format!("**skill-{i}**")), "第 {i} 条应完整保留");
+        }
+    }
+
+    #[test]
+    fn routing_hint_slot_rendered_when_present() {
+        let ctx = AgentContextPayload {
+            routing_hint: Some("capability:stock-pick".to_string()),
+            ..Default::default()
+        };
+        let prompts = prompt_with(&[], Some(&ctx));
+        let joined = prompts.join("\n");
+
+        assert!(joined.contains("<routing-hint>"));
+        assert!(joined.contains("capability:stock-pick"));
+        assert!(joined.contains("</routing-hint>"));
+    }
+
+    #[test]
+    fn routing_hint_blank_or_absent_skips_slot() {
+        // 空白 hint 不应渲染
+        let blank =
+            AgentContextPayload { routing_hint: Some("   \n  ".to_string()), ..Default::default() };
+        assert!(!prompt_with(&[], Some(&blank)).iter().any(|p| p.contains("<routing-hint>")));
+
+        // 无 agent_context 不应渲染
+        assert!(!prompt_with(&[], None).iter().any(|p| p.contains("<routing-hint>")));
+
+        // hint 为 None 不应渲染
+        let none_hint = AgentContextPayload { routing_hint: None, ..Default::default() };
+        assert!(!prompt_with(&[], Some(&none_hint)).iter().any(|p| p.contains("<routing-hint>")));
+    }
 }

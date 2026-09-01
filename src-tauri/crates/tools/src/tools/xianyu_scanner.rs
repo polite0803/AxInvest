@@ -1,7 +1,17 @@
 //! 闲鱼扫描器
-//! 通过公开 API 或轻量级代理采集闲鱼平台的二手需求线索
+//!
+//! 采集闲鱼平台的二手/定制需求线索。
+//!
+//! ## 合规约束
+//!
+//! 闲鱼未对外开放检索 API。原实现伪装 Chrome UA 直接抓取搜索页 HTML，
+//! 属于规避站点反爬措施。现改为：
+//! - 未配置 `XIANYU_API_TOKEN` 时直接跳过，不发起任何请求；
+//! - 使用真实 UA，不伪造浏览器指纹；
+//! - 如已获得官方授权，可通过 `with_config` 注入 token 与 API 端点。
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// 闲鱼扫描器
@@ -15,48 +25,36 @@ pub struct XianyuScanner {
 
 impl XianyuScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let api_token = std::env::var("XIANYU_API_TOKEN").ok();
-        Self { http, api_token, base_url: "https://www.goofish.com".to_string() }
+        Self { http, api_token, base_url: "https://api.goofish.com".to_string() }
     }
 
     /// 从配置创建
     pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         Self {
             http,
             api_token,
-            base_url: base_url.unwrap_or_else(|| "https://www.goofish.com".to_string()),
+            base_url: base_url.unwrap_or_else(|| "https://api.goofish.com".to_string()),
         }
     }
 
     /// 构建搜索 URL
     fn build_search_url(&self, query: &str) -> String {
         // 简单的 URL 编码：空格转为 +，其他保持原样
-        let encoded_query = query.replace(' ', "+");
+        let encoded_query = scanner_common::encode_query(query);
         format!("{}/search?q={}", self.base_url, encoded_query)
     }
 
-    /// 构建请求头
+    /// 构建请求头（真实身份 + Bearer 认证）
+    ///
+    /// 原实现伪造 Chrome UA 与 `Referer` 以绕过站点反爬，已移除。
     fn build_headers(&self) -> reqwest::header::HeaderMap {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::USER_AGENT,
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap(),
-        );
-        headers.insert(
-            reqwest::header::ACCEPT,
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-                .parse()
-                .unwrap(),
-        );
-        if let Some(ref token) = self.api_token {
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", token).parse().unwrap(),
-            );
-        }
-        headers
+        scanner_common::build_headers(
+            self.api_token.as_deref(),
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        )
     }
 
     /// 闲鱼需求分类（二手交易中可能转化为需求的品类）
@@ -232,11 +230,7 @@ impl XianyuScanner {
             format!("{} - {}", title, description)
         };
 
-        if combined.len() > 150 {
-            format!("{}...", &combined[..150])
-        } else {
-            combined
-        }
+        scanner_common::truncate_chars(&combined, 150)
     }
 }
 
@@ -248,14 +242,21 @@ impl Default for XianyuScanner {
 
 #[async_trait]
 impl MarketplaceScanner for XianyuScanner {
-    fn platform(&self) -> &'static str {
-        "xianyu"
+    fn platform(&self) -> String {
+        "xianyu".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
         if q.is_empty() {
             return Ok(Vec::new());
         }
+
+        // 合规门禁：无官方凭证直接跳过，绝不退化为页面/内部接口抓取
+        scanner_common::require_official_api_credential(
+            "xianyu",
+            self.api_token.as_deref(),
+            &self.base_url,
+        )?;
 
         let url = self.build_search_url(q);
         let headers = self.build_headers();
@@ -287,11 +288,7 @@ impl MarketplaceScanner for XianyuScanner {
 
                             leads.push(RawLead {
                                 platform: "xianyu".to_string(),
-                                title: if trimmed.len() > 80 {
-                                    format!("{}...", &trimmed[..80])
-                                } else {
-                                    trimmed.to_string()
-                                },
+                                title: scanner_common::truncate_chars(trimmed, 80),
                                 description: summary,
                                 url: url.clone(),
                                 price_text: price,

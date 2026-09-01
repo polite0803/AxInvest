@@ -118,7 +118,11 @@ fn extract_json(text: &str) -> Result<String, String> {
             }
         }
     }
-    Err(format!("无法从响应中提取 JSON: {}", &text[..200.min(text.len())]))
+    // 按字节截取需对齐 UTF-8 字符边界：响应含中文时裸切片会 panic
+    Err(format!(
+        "无法从响应中提取 JSON: {}",
+        axagent_harness::util_fns::truncate_to_char_boundary(&text, 200)
+    ))
 }
 
 /// 构建研究提示词里的系统提示
@@ -237,10 +241,10 @@ pub async fn generate_research_report(
         transcript.push_str(&format!("{}: {}\n\n", role_str, msg.content));
     }
 
-    // 限制长度避免 token 溢出
-    if transcript.len() > 30000 {
-        transcript = transcript[..30000].to_string();
-    }
+    // 限制长度避免 token 溢出。
+    // 按字节截取需对齐 UTF-8 字符边界，否则中文内容 panic（每字 3 字节）
+    transcript =
+        axagent_harness::util_fns::truncate_to_char_boundary(&transcript, 30_000).to_string();
 
     let system_prompt = research_system_prompt(&topic);
 

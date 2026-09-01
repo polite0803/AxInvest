@@ -90,6 +90,18 @@ npm run bump          # 版本号升级
 __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 ```
 
+### ⚠️ 前端 lint 走 oxlint，不是 ESLint
+
+项目已升级到 **TypeScript 7.0.2**，而 `typescript-eslint` 最新版（8.69.0）的 peerDeps 限定
+`typescript: ">=4.8.4 <6.1.0"`，**不支持 TS 7**。因此 `eslint` 一启动就崩溃（退出码 2，报
+`typescript-eslint does not support TS 7.0`）。
+
+- `npm run lint:eslint` → **oxlint**（与 `.github/workflows/ci.yml:75` 完全一致，CI 也是这个）
+- `npm run lint:eslint:legacy` → 原 ESLint 命令，**当前环境必然失败**，保留仅为
+  typescript-eslint 支持 TS 7 后能原地恢复
+
+不要在 ESLint 报错上浪费时间排查，它不是代码问题，是工具链版本不兼容。
+
 ## 禁区（必须遵守）
 
 ### 前端

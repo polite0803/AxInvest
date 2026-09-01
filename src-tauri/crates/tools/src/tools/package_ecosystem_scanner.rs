@@ -2,6 +2,7 @@
 //! 通过 PyPI 和 npm API 采集包下载量和采用率信号
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// 包生态扫描器
@@ -11,7 +12,7 @@ pub struct PackageEcosystemScanner {
 
 impl PackageEcosystemScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         Self { http }
     }
 
@@ -205,8 +206,8 @@ impl Default for PackageEcosystemScanner {
 
 #[async_trait]
 impl MarketplaceScanner for PackageEcosystemScanner {
-    fn platform(&self) -> &'static str {
-        "package_ecosystem"
+    fn platform(&self) -> String {
+        "package_ecosystem".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

@@ -2,6 +2,7 @@
 //! 通过 HuggingFace API 采集模型和应用的需求信号
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// HuggingFace 扫描器
@@ -12,7 +13,7 @@ pub struct HuggingFaceScanner {
 
 impl HuggingFaceScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let api_token = std::env::var("HF_API_TOKEN").ok();
         Self { http, api_token }
     }
@@ -162,8 +163,8 @@ impl Default for HuggingFaceScanner {
 
 #[async_trait]
 impl MarketplaceScanner for HuggingFaceScanner {
-    fn platform(&self) -> &'static str {
-        "huggingface"
+    fn platform(&self) -> String {
+        "huggingface".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

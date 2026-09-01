@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // === Paired Types (全局同步字段对) ===
+export * from "./opc";
 export * from "./paired";
 
 // === Model Selection System ===
@@ -832,6 +833,7 @@ export type BuiltinPageKey =
   | "dashboard"
   | "knowledge"
   | "memory"
+  | "demand-discovery"
   | "link"
   | "gateway"
   | "files"
@@ -1164,6 +1166,19 @@ export interface SkillInstallMeta {
   commit?: string;
   installedAt: string;
   installedVia?: string;
+}
+
+/** 技能执行统计（后端 get_skill_execution_stats，源自 trajectory_skills 表聚合字段） */
+export interface SkillExecutionStat {
+  name: string;
+  successRate: number;
+  avgExecutionTimeMs: number;
+  totalUsages: number;
+  successfulUsages: number;
+  /** 后端暂无数据源，恒为 null，前端按 0.5 兜底 */
+  qualityScore: number | null;
+  /** trajectory_skills 表无此列，恒为 null */
+  lastUsedAt?: string | null;
 }
 
 export interface MarketplaceSkill {

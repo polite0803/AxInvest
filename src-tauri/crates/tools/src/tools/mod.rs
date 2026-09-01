@@ -58,6 +58,8 @@ pub mod reddit_scanner;
 pub mod repl;
 pub mod rpc;
 pub mod save_as_workflow;
+pub mod scan_policy;
+pub mod scanner_common;
 pub mod skill;
 pub mod stackoverflow_scanner;
 pub mod storage;

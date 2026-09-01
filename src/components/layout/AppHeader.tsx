@@ -14,6 +14,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/chat": "nav.chat",
   "/knowledge": "nav.knowledge",
   "/memory": "nav.memory",
+  "/demand-discovery": "opc.demand.pageTitle",
   "/gateway": "nav.gateway",
   "/link": "nav.link",
   "/files": "nav.files",

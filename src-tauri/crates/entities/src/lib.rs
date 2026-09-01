@@ -145,4 +145,8 @@ pub mod reading_lists;
 // 叙事结构（v126）—— 文学创作工作流的弧线/交汇点/伏笔持久化
 pub mod narrative_structures;
 
+// OPC 需求发现（v131）—— 平台配置 + 需求线索持久化
+pub mod opc_demand_leads;
+pub mod opc_demand_platforms;
+
 pub use sea_orm;

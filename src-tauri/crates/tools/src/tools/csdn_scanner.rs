@@ -1,8 +1,19 @@
 //! CSDN/掘金扫描器
-//! 通过公开 API 采集国内开发者社区的技术需求和趋势
-//! 主要数据源：CSDN 博客、掘金文章
+//!
+//! 采集国内开发者社区（CSDN 博客、掘金文章）的技术需求与趋势信号。
+//!
+//! ## 合规约束
+//!
+//! `so.csdn.net` / `api.juejin.cn` 均属站点内部接口，并非对外开放的官方 API。
+//! 本连接器因此**默认不开工**：未配置 `api_token` 时直接跳过，且
+//! - 不伪造浏览器 UA；
+//! - 不伪造 `Referer`；
+//! - 不构造 `X-Ca-Timestamp` 等用于绕过网关校验的头部。
+//!
+//! 如需启用，请通过官方开放平台申请凭证后注入 `api_token`。
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// 开发者社区类型
@@ -19,16 +30,23 @@ pub struct CsdnScanner {
     community: DevCommunity,
     /// 基础 URL
     base_url: String,
+    /// 官方开放平台凭证；为 `None` 时本连接器直接跳过（见文件头合规约束）
+    api_token: Option<String>,
 }
 
 impl CsdnScanner {
     pub fn new(community: DevCommunity) -> Self {
-        let http = reqwest::Client::new();
+        Self::with_token(community, None)
+    }
+
+    /// 携带官方 API 凭证构造
+    pub fn with_token(community: DevCommunity, api_token: Option<String>) -> Self {
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let base_url = match community {
             DevCommunity::Csdn => "https://so.csdn.net".to_string(),
             DevCommunity::Juejin => "https://api.juejin.cn".to_string(),
         };
-        Self { http, community, base_url }
+        Self { http, community, base_url, api_token }
     }
 
     /// 创建 CSDN 扫描器
@@ -43,7 +61,7 @@ impl CsdnScanner {
 
     /// 构建搜索 URL
     fn build_search_url(&self, query: &str) -> String {
-        let encoded_query = query.replace(' ', "%20");
+        let encoded_query = scanner_common::encode_query(query);
         match self.community {
             DevCommunity::Csdn => {
                 format!(
@@ -58,26 +76,14 @@ impl CsdnScanner {
     }
 
     /// 构建请求头
+    ///
+    /// 只携带真实身份标识与认证信息。
+    /// 原实现伪造 `Referer` 并构造 `X-Ca-Timestamp`，属于绕过站点网关校验，已移除。
     fn build_headers(&self) -> reqwest::header::HeaderMap {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            reqwest::header::USER_AGENT,
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36".parse().unwrap(),
-        );
-        headers
-            .insert(reqwest::header::ACCEPT, "application/json, text/plain, */*".parse().unwrap());
-
-        match self.community {
-            DevCommunity::Csdn => {
-                headers.insert(reqwest::header::REFERER, "https://so.csdn.net/".parse().unwrap());
-                headers.insert("X-Ca-Timestamp", "1".parse().unwrap());
-            },
-            DevCommunity::Juejin => {
-                headers.insert(reqwest::header::REFERER, "https://juejin.cn/".parse().unwrap());
-            },
-        }
-
-        headers
+        scanner_common::build_headers(
+            self.api_token.as_deref(),
+            "application/json, text/plain, */*",
+        )
     }
 
     /// 技术趋势关键词（从文章标题中提取的趋势信号）
@@ -186,17 +192,9 @@ impl CsdnScanner {
             } else {
                 format!("{} - {}", title, desc)
             };
-            if combined.len() > 200 {
-                format!("{}...", &combined[..200])
-            } else {
-                combined
-            }
+            scanner_common::truncate_chars(&combined, 200)
         } else {
-            if title.len() > 150 {
-                format!("{}...", &title[..150])
-            } else {
-                title.to_string()
-            }
+            scanner_common::truncate_chars(title, 150)
         }
     }
 
@@ -217,8 +215,8 @@ impl Default for CsdnScanner {
 
 #[async_trait]
 impl MarketplaceScanner for CsdnScanner {
-    fn platform(&self) -> &'static str {
-        self.platform_name()
+    fn platform(&self) -> String {
+        self.platform_name().to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -226,9 +224,16 @@ impl MarketplaceScanner for CsdnScanner {
             return Ok(Vec::new());
         }
 
+        let platform = self.platform_name();
+        // 合规门禁：无官方凭证直接跳过，绝不退化为页面/内部接口抓取
+        scanner_common::require_official_api_credential(
+            platform,
+            self.api_token.as_deref(),
+            &self.base_url,
+        )?;
+
         let url = self.build_search_url(q);
         let headers = self.build_headers();
-        let platform = self.platform_name();
 
         tracing::info!(
             query = q,
@@ -263,11 +268,7 @@ impl MarketplaceScanner for CsdnScanner {
                             continue;
                         }
 
-                        let title = if trimmed.len() > 80 {
-                            format!("{}...", &trimmed[..80])
-                        } else {
-                            trimmed.to_string()
-                        };
+                        let title = scanner_common::truncate_chars(trimmed, 80);
 
                         let summary = Self::extract_summary(&title, None);
 

@@ -33,6 +33,22 @@ const SCAN_DIRS = [
 const ALLOWED_EXCEPTIONS = new Set<string>([
   // 内部错误类型，不跨 FFI 边界
   "src-tauri/crates/harness/src/session_log_invariant.rs::InvariantViolation",
+
+  // ── harness 层纯 Rust 内部流转类型，不过 IPC（前端无对应 TS 类型、未出现在任何 Tauri 命令签名）──
+  // 判定依据：grep 前端 src/types/ 无定义 && grep src-tauri/src/commands/ 无引用。
+  // 注意 route_engine.rs 的 RouteDecision 与 commands/cognitive.rs 的 LastRouteDecision、
+  // commands/smart_router.rs 的 crate::smart_router::RouteDecision 是三个不同的类型，勿混淆。
+  "src-tauri/crates/harness/src/assembly_builder.rs::DefaultAssemblyBuilder",
+  "src-tauri/crates/harness/src/code_verifier.rs::CodeChange",
+  "src-tauri/crates/harness/src/code_verifier.rs::CodeVerificationResult",
+  "src-tauri/crates/harness/src/code_verifier.rs::VerificationIssue",
+  "src-tauri/crates/harness/src/route_engine.rs::RouteDecision",
+  "src-tauri/crates/harness/src/route_engine.rs::HardGateCriteria",
+  "src-tauri/crates/harness/src/route_engine.rs::HardGate",
+  "src-tauri/crates/harness/src/route_engine.rs::RouteContext",
+  "src-tauri/crates/harness/src/route_engine.rs::NodeExecutionResult",
+  "src-tauri/crates/harness/src/route_engine.rs::RouteRule",
+  "src-tauri/crates/harness/src/template_patch.rs::TemplatePatch",
 ]);
 
 // 已知使用手动 rename 的结构体（不需要 rename_all）
@@ -181,11 +197,14 @@ function checkFile(filePath: string): Violation[] {
     if (!structInfo.hasSerialize || !structInfo.hasDeserialize) continue;
 
     // 检查是否在例外列表中
-    const exceptionKey = `${relPath}::${structInfo.name}`;
+    // 路径分隔符统一为正斜杠：Windows 下 path.relative() 产出反斜杠，
+    // 与本表（以及 MANUAL_RENAME_STRUCTS）里书写的正斜杠不匹配，会导致例外静默失效。
+    const normalizedPath = relPath.replace(/\\/g, "/");
+    const exceptionKey = `${normalizedPath}::${structInfo.name}`;
     if (ALLOWED_EXCEPTIONS.has(exceptionKey)) continue;
 
     // 已知使用手动 rename 的结构体
-    const manualRenameKey = `${relPath.split("\\").pop()?.replace(/\\/g, "/")}::${structInfo.name}`;
+    const manualRenameKey = `${normalizedPath.split("/").pop()}::${structInfo.name}`;
     if (MANUAL_RENAME_STRUCTS.has(manualRenameKey)) continue;
 
     // 检查是否已经有 rename_all 或手动 rename

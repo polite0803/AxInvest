@@ -115,8 +115,8 @@ impl Default for GitHubIssueScanner {
 
 #[async_trait]
 impl MarketplaceScanner for GitHubIssueScanner {
-    fn platform(&self) -> &'static str {
-        "github_issue"
+    fn platform(&self) -> String {
+        "github_issue".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

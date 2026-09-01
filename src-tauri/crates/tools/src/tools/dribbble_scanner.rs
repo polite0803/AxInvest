@@ -3,6 +3,7 @@
 //! 设计服务需求是判断创意产业需求的重要指标
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// Dribbble 扫描器
@@ -16,14 +17,14 @@ pub struct DribbbleScanner {
 
 impl DribbbleScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let api_token = std::env::var("DRIBBBLE_API_TOKEN").ok();
         Self { http, api_token, base_url: "https://api.dribbble.com/v1".to_string() }
     }
 
     /// 从配置创建
     pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         Self {
             http,
             api_token,
@@ -33,7 +34,7 @@ impl DribbbleScanner {
 
     /// 构建搜索 URL（Shots API）
     fn build_shots_search_url(&self, query: &str) -> String {
-        let encoded_query = query.replace(' ', "+");
+        let encoded_query = scanner_common::encode_query(query);
         format!("{}/shots?list=recent&tags={}&per_page=20", self.base_url, encoded_query)
     }
 
@@ -213,8 +214,8 @@ impl Default for DribbbleScanner {
 
 #[async_trait]
 impl MarketplaceScanner for DribbbleScanner {
-    fn platform(&self) -> &'static str {
-        "dribbble"
+    fn platform(&self) -> String {
+        "dribbble".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -253,11 +254,7 @@ impl MarketplaceScanner for DribbbleScanner {
                             continue;
                         }
 
-                        let title = if trimmed.len() > 80 {
-                            format!("{}...", &trimmed[..80])
-                        } else {
-                            trimmed.to_string()
-                        };
+                        let title = scanner_common::truncate_chars(trimmed, 80);
 
                         let summary = Self::extract_summary(&title, None, None);
 

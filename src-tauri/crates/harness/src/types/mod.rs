@@ -3,6 +3,7 @@
 
 pub mod conversation;
 pub mod gateway;
+pub mod opc_demand;
 pub mod paper_reading;
 pub mod provider_model;
 pub mod rag_voice_etc;
@@ -11,6 +12,7 @@ pub mod settings_chat;
 
 pub use conversation::*;
 pub use gateway::*;
+pub use opc_demand::*;
 pub use paper_reading::*;
 pub use provider_model::*;
 pub use rag_voice_etc::*;

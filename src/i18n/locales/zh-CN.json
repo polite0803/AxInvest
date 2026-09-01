@@ -2748,7 +2748,6 @@
     "WORKFLOW_PLAN_NOT_FOUND": "工作流计划未找到",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "应用工作流反思失败",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "工作流反思进化失败",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接缝未注册（反思/进化/优化服务不可用）",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "无效的工作流反思记录",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "工作流反思失败",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "工作流反思建议失败",
@@ -2885,7 +2884,8 @@
     "proxyTestFailed": "代理测试失败",
     "message": "错误",
     "STOCK_WORKFLOW_INTERNAL": "股票分析工作流内部错误",
-    "STOCK_SETUP_INTERNAL": "股票模块初始化错误"
+    "STOCK_SETUP_INTERNAL": "股票模块初始化错误",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接缝未注册（反思/进化/优化服务不可用）"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -13419,7 +13419,8 @@
       "opportunityLevel": {
         "high": "高价值",
         "medium": "中价值",
-        "low": "低价值"
+        "low": "低价值",
+        "very_high": "极高价值"
       },
       "demandType": {
         "tool_software": "工具软件",
@@ -13429,6 +13430,10 @@
         "marketing": "营销",
         "consulting": "咨询",
         "education": "教育",
+        "unknown": "未知",
+        "operations": "运营",
+        "enterprise_service": "企业服务",
+        "outsourcing": "外包",
         "finance": "金融",
         "other": "其他"
       },
@@ -13468,7 +13473,40 @@
       "colPlatformPlaceholder": "all",
       "colCronToolsetsPlaceholder": "opc_scanner, opc_evaluator",
       "configDefaultWorkflowName": "需求发现工作流",
-      "configDefaultWorkflowDesc": "需求发现与交付工作流配置"
+      "configDefaultWorkflowDesc": "需求发现与交付工作流配置",
+      "pageTitle": "需求发现",
+      "minScore": "最低商业价值分",
+      "scanning": "扫描中…",
+      "statScanned": "扫描",
+      "statEvaluated": "评估",
+      "statSaved": "新入库",
+      "statHighValue": "高价值",
+      "neverSynced": "从未同步",
+      "openSource": "查看原文",
+      "formId": "平台标识",
+      "formIdTip": "与内置扫描器一致（如 reddit）；留空自动生成",
+      "formNameRequired": "请输入平台名称",
+      "loadFailed": "加载失败: {{error}}",
+      "scanFailed": "扫描失败: {{error}}",
+      "saveFailed": "保存失败: {{error}}",
+      "deleteFailed": "删除失败: {{error}}",
+      "platformStatus": {
+        "idle": "空闲",
+        "ok": "正常",
+        "error": "异常"
+      },
+      "platformType": {
+        "api": "官方 API",
+        "scanner": "内置扫描器",
+        "mock": "模拟数据",
+        "manual": "人工录入"
+      },
+      "statRefreshed": "刷新",
+      "scanPolicyTitle": "扫描策略",
+      "scanRetryBackoffMs": "重试退避基数（毫秒）",
+      "policySaved": "扫描策略已保存",
+      "policyLoadFailed": "扫描策略加载失败: {{error}}",
+      "policySaveFailed": "扫描策略保存失败: {{error}}"
     }
   },
   "demandDiscovery": {

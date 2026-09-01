@@ -36,6 +36,7 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   dashboard: "/dashboard",
   knowledge: "/knowledge",
   memory: "/memory",
+  "demand-discovery": "/demand-discovery",
   link: "/link",
   settings: "/settings",
   workflow: "/workflow",

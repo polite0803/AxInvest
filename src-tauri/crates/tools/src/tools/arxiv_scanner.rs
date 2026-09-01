@@ -2,6 +2,7 @@
 //! 通过 ArXiv API 采集研究论文中的技术趋势和需求信号
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// ArXiv 扫描器
@@ -11,7 +12,7 @@ pub struct ArxivScanner {
 
 impl ArxivScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         Self { http }
     }
 
@@ -214,8 +215,8 @@ impl Default for ArxivScanner {
 
 #[async_trait]
 impl MarketplaceScanner for ArxivScanner {
-    fn platform(&self) -> &'static str {
-        "arxiv"
+    fn platform(&self) -> String {
+        "arxiv".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

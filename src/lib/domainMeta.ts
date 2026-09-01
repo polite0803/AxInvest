@@ -114,6 +114,7 @@ export const NAV_ITEM_DOMAIN_MAP: Readonly<Record<string, CapabilityDomain>> = {
   "finance-analysis": "finance",
   "finance-accounting": "finance",
   // 自动化域
+  "demand-discovery": "automation",
   "automation-operations": "automation",
   "automation-sales": "automation",
   "automation-projects": "automation",

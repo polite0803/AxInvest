@@ -1233,7 +1233,13 @@ pub async fn send_message(
         // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
         // Tool names MUST match the `fn name()` return value of each tool implementation
         let builtin_local_tools: &[(&str, &str)] = &[
-            ("Skill", "加载预注册的 Skill。skill: Skill名称, args: 可选参数。"),
+            // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
+            // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
+            // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
+            (
+                "SkillView",
+                "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
+            ),
             ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
             ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
             (
@@ -1677,7 +1683,13 @@ pub async fn regenerate_message(
         // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
         // Tool names MUST match the `fn name()` return value of each tool implementation
         let builtin_local_tools: &[(&str, &str)] = &[
-            ("Skill", "加载预注册的 Skill。skill: Skill名称, args: 可选参数。"),
+            // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
+            // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
+            // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
+            (
+                "SkillView",
+                "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
+            ),
             ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
             ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
             (
@@ -2126,7 +2138,13 @@ pub async fn regenerate_with_model(
         // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
         // Tool names MUST match the `fn name()` return value of each tool implementation
         let builtin_local_tools: &[(&str, &str)] = &[
-            ("Skill", "加载预注册的 Skill。skill: Skill名称, args: 可选参数。"),
+            // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
+            // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
+            // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
+            (
+                "SkillView",
+                "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
+            ),
             ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
             ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
             (

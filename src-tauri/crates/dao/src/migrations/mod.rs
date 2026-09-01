@@ -47,9 +47,10 @@ pub mod v127_capability_stats;
 pub mod v128_capability_policies;
 pub mod v129_capability_relationships;
 pub mod v130_session_states;
+pub mod v131_opc_demand_discovery;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 130;
+pub const CURRENT_VERSION: i32 = 131;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -236,6 +237,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 130,
         description: "v130_session_states: 创建会话状态表（自然主键 state_key + 冗余 conversation_id/agent_id 双索引），能力按需加载闭环 P0-1——承载 CapabilityLoad 写入、下轮注入读取的解耦点",
         up: |db| Box::pin(v130_session_states::up(db)),
+    },
+    Migration {
+        version: 131,
+        description: "v131_opc_demand_discovery: 创建 OPC 需求发现两张表（平台配置 opc_demand_platforms + 需求线索 opc_demand_leads，(platform, source_url) 唯一去重），补齐扫描器 → 持久化断层（审查 P0-5）",
+        up: |db| Box::pin(v131_opc_demand_discovery::up(db)),
     },
 ];
 

@@ -316,7 +316,11 @@ pub(super) fn collect_skill_content(dir: &Path) -> String {
 }
 
 /// Recursively collect all .md files under a directory, sorted by name.
-pub(crate) fn collect_markdown_files(dir: &Path, depth: u32) -> std::io::Result<Vec<PathBuf>> {
+///
+/// 仅服务于本文件的 `collect_skill_content`（技能详情页 `get_skill` / 安装落库 / AI 分析三条
+/// 用户主动触发的定义层链路）。注意：agent 主链路已改为索引目录 + 按需 `SkillView` 加载，
+/// **禁止**再把它接回 system prompt 构建，否则会退回全量 eager 注入。
+fn collect_markdown_files(dir: &Path, depth: u32) -> std::io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !dir.is_dir() || depth > MAX_RECURSION_DEPTH {
         return Ok(files);

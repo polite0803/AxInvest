@@ -2748,7 +2748,6 @@
     "WORKFLOW_PLAN_NOT_FOUND": "Plan de workflow introuvable",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "Échec de l'application de la réflexion du workflow",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "Échec de l'évolution de la réflexion du workflow",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Jointure de capacité de workflow non enregistrée (réflexion/évolution/optimiseur indisponibles)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "Enregistrement de réflexion de workflow invalide",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "Échec de la réflexion du workflow",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "Échec de la suggestion de réflexion du workflow",
@@ -2885,7 +2884,8 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误"
+    "message": "错误",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Jointure de capacité de workflow non enregistrée (réflexion/évolution/optimiseur indisponibles)"
   },
   "errorBoundary": {
     "copied": "Copié",
@@ -13430,7 +13430,8 @@
       "opportunityLevel": {
         "high": "High Value",
         "medium": "Medium Value",
-        "low": "Low Value"
+        "low": "Low Value",
+        "very_high": "Very high value"
       },
       "demandType": {
         "tool_software": "Tool Software",
@@ -13440,6 +13441,10 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "unknown": "Unknown",
+        "operations": "Operations",
+        "enterprise_service": "Enterprise service",
+        "outsourcing": "Outsourcing",
         "finance": "Finance",
         "other": "Other"
       },
@@ -13472,7 +13477,40 @@
         "failed": "Failed"
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
-      "formCronPromptPlaceholder": "Describe the scheduled task objective..."
+      "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "pageTitle": "Demand Discovery",
+      "minScore": "Min value score",
+      "scanning": "Scanning…",
+      "statScanned": "Scanned",
+      "statEvaluated": "Evaluated",
+      "statSaved": "Saved",
+      "statHighValue": "High value",
+      "neverSynced": "Never synced",
+      "openSource": "Open",
+      "formId": "Platform ID",
+      "formIdTip": "Must match a built-in scanner (e.g. reddit); leave empty to auto-generate",
+      "formNameRequired": "Platform name is required",
+      "loadFailed": "Load failed: {{error}}",
+      "scanFailed": "Scan failed: {{error}}",
+      "saveFailed": "Save failed: {{error}}",
+      "deleteFailed": "Delete failed: {{error}}",
+      "platformStatus": {
+        "idle": "Idle",
+        "ok": "OK",
+        "error": "Error"
+      },
+      "platformType": {
+        "api": "Official API",
+        "scanner": "Built-in scanner",
+        "mock": "Mock data",
+        "manual": "Manual entry"
+      },
+      "statRefreshed": "Refreshed",
+      "scanPolicyTitle": "Scan policy",
+      "scanRetryBackoffMs": "Retry backoff base (ms)",
+      "policySaved": "Scan policy saved",
+      "policyLoadFailed": "Failed to load scan policy: {{error}}",
+      "policySaveFailed": "Failed to save scan policy: {{error}}"
     }
   },
   "demandDiscovery": {

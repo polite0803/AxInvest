@@ -55,7 +55,7 @@ use pricing::{check_token_budget, estimate_cost_usd};
 pub mod skill_execution;
 use skill_execution::{
     SkillExecutionContext, build_agent_system_prompt, execute_skill_sync,
-    load_enabled_skill_contents, load_skill_tools,
+    load_enabled_skill_catalog, load_skill_tools,
 };
 
 /// 渐进式披露 L0 索引层：把能力护照渲染成轻量目录注入系统提示
@@ -1195,23 +1195,23 @@ pub async fn agent_query(
         }
     }
 
-    // Load enabled skills content for system prompt injection
-    // 认知编排执行阶段（execution_mode=Some）跳过 — skills 注入 system prompt 会撑爆 context（曾导致 5MB+）
-    // 认知编排的能力发现走路由层，不走 skills 注入
-    let skill_contents: Vec<(String, String)> = if request.execution_mode.is_some() {
+    // 渐进式披露 · 索引层：加载技能目录（名称 + 一句话描述）注入 system prompt。
+    // 旧实现在此注入技能全文导致 context 撑爆（曾观测 5MB+），并因此加了 execution_mode
+    // 跳过分支——但那会让认知编排阶段技能完全不可见。改为目录后单条仅十几个 token，
+    // 无需再按模式跳过，认知编排阶段同样能看到目录并按需 SkillView。
+    let skill_catalog = load_enabled_skill_catalog(
+        &app_state,
+        conversation_scenario.as_deref(),
+        &enabled_skill_ids,
+    )
+    .await;
+    if !skill_catalog.is_empty() {
         info!(
-            "[agent] execution_mode={:?} — 认知编排执行阶段跳过 skill_contents 加载 (system prompt 注入)",
+            "[agent] skill catalog: {} entries (index-only, mode={:?})",
+            skill_catalog.len(),
             request.execution_mode
         );
-        Vec::new()
-    } else {
-        load_enabled_skill_contents(
-            &app_state,
-            conversation_scenario.as_deref(),
-            &enabled_skill_ids,
-        )
-        .await
-    };
+    }
 
     // Convert enabled skills to ChatTool definitions for Agent to call
     // 被动模式（execution_mode=None）：按会话启用技能加载（全量）
@@ -1832,7 +1832,7 @@ pub async fn agent_query(
         profile_prompt.as_deref(),
         user_custom_prompt.as_deref(),
         rag_context_parts.as_deref(),
-        &skill_contents,
+        &skill_catalog,
         working_memory_text.as_deref(),
         // nudge_messages 通过 runtime.set_nudge_lines 在每次 LLM 调用前动态注入，此处传 None 避免重复
         None,
@@ -2590,8 +2590,11 @@ pub async fn agent_query(
                 let mut trajectory = axagent_trajectory::Trajectory::new(
                     conversation_id.clone(),
                     "default_user".to_string(),
-                    trajectory_input[..trajectory_input.len().min(100)].to_string(),
-                    trajectory_input[..trajectory_input.len().min(200)].to_string(),
+                    // 按字节截取需对齐 UTF-8 字符边界：用户输入含中文时裸切片会 panic
+                    axagent_harness::util_fns::truncate_to_char_boundary(&trajectory_input, 100)
+                        .to_string(),
+                    axagent_harness::util_fns::truncate_to_char_boundary(&trajectory_input, 200)
+                        .to_string(),
                     outcome,
                     (now.timestamp_millis() - start_time.timestamp_millis()).max(0) as u64,
                     steps,

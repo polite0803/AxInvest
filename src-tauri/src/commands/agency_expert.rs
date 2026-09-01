@@ -729,7 +729,8 @@ pub async fn extract_expert_structure(
     })?;
 
     let extracted = extract_json_from_text(&response.content).map_err(|e| {
-        let preview = &response.content[..200.min(response.content.len())];
+        // 按字节截取需对齐 UTF-8 字符边界：LLM 响应含中文时裸切片会 panic
+        let preview = axagent_harness::util_fns::truncate_to_char_boundary(&response.content, 200);
         ErrorResponse::new(expert_err::JSON_PARSE_FAILED)
             .with_detail(format!("JSON解析失败: {}. 响应预览: {}", e, preview))
     })?;

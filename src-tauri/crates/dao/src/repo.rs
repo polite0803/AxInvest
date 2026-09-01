@@ -34,6 +34,7 @@ pub mod mcp_server;
 pub mod memory;
 pub mod message;
 pub mod narrative;
+pub mod opc_demand;
 pub mod paper_overviews;
 pub mod platform_config;
 pub mod program_policy;

@@ -8,19 +8,18 @@
 //!   a `<!-- context-compressed -->` marker is inserted, and subsequent sends use
 //!   the summary + only messages after the marker.
 //!
-//! Token budget management is delegated to `ContextAssembler` from the trajectory crate,
-//! which provides fine-grained budget allocation across working memory, retrieved memories,
-//! skills, nudges, and session history.
+//! Token budget management is done locally via the `token_budget` constants below,
+//! which cap each context component (working memory / retrieved memories / skills /
+//! nudges) before history allocation.
 
 use axagent_harness::types::{ChatContent, ChatMessage};
 use axagent_harness::util_fns::truncate_to_char_boundary;
 use axagent_kit::token_counter;
-use axagent_trajectory::{ContextAssembler, TokenBudget};
 
 /// Fraction of context window that triggers auto-compression (70%).
 const THRESHOLD_RATIO: f64 = 0.70;
 
-/// Token budget allocation constants (aligned with ContextAssembler design).
+/// Token budget allocation constants.
 /// These define the maximum token allocation for each context component.
 pub mod token_budget {
     /// Maximum tokens for the system prompt.
@@ -87,7 +86,7 @@ pub fn should_auto_compress(
 /// Sliding window is applied only when `model_context_window` is `Some`.
 /// When the model has no configured limit, all history messages are included.
 ///
-/// Uses `ContextAssembler`'s `TokenBudget` for budget-aware history allocation,
+/// Uses the `token_budget` constants for budget-aware history allocation,
 /// ensuring consistent token allocation across all context components.
 ///
 /// When `query` is provided, uses relevance-based pruning instead of simple
@@ -136,10 +135,6 @@ pub fn build_context_with_query(
 
     match model_context_window {
         Some(ctx_window) => {
-            // Use ContextAssembler's TokenBudget for consistent budget allocation
-            let budget = TokenBudget { max_tokens: ctx_window, ..TokenBudget::default() };
-            let _assembler = ContextAssembler::with_budget(budget);
-
             // Calculate history budget: total window minus fixed component budgets
             let fixed_overhead = token_budget::SYSTEM_PROMPT
                 + token_budget::WORKING_MEMORY

@@ -2,6 +2,7 @@
 //! 通过 Stack Overflow API 采集技术痛点和需求线索
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// Stack Overflow 扫描器
@@ -12,14 +13,14 @@ pub struct StackOverflowScanner {
 
 impl StackOverflowScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let api_key = std::env::var("SO_API_KEY").ok();
         Self { http, api_key }
     }
 
     /// 构建搜索 URL
     fn build_search_url(&self, query: &str, tags: &[String]) -> String {
-        let query_encoded = query.replace(' ', "%20");
+        let query_encoded = scanner_common::encode_query(query);
         let tags_encoded = tags.join("%20");
         let mut url = format!(
             "https://api.stackexchange.com/2.3/search?order=desc&sort=votes&site=stackoverflow&q={}&tagged={}",
@@ -185,8 +186,8 @@ impl Default for StackOverflowScanner {
 
 #[async_trait]
 impl MarketplaceScanner for StackOverflowScanner {
-    fn platform(&self) -> &'static str {
-        "stackoverflow"
+    fn platform(&self) -> String {
+        "stackoverflow".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

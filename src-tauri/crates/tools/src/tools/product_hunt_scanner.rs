@@ -2,6 +2,7 @@
 //! 通过 ProductHunt API 采集产品发布和需求反馈
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// ProductHunt 扫描器
@@ -12,7 +13,7 @@ pub struct ProductHuntScanner {
 
 impl ProductHuntScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let access_token = std::env::var("PH_ACCESS_TOKEN").ok();
         Self { http, access_token }
     }
@@ -202,8 +203,8 @@ impl Default for ProductHuntScanner {
 
 #[async_trait]
 impl MarketplaceScanner for ProductHuntScanner {
-    fn platform(&self) -> &'static str {
-        "producthunt"
+    fn platform(&self) -> String {
+        "producthunt".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {

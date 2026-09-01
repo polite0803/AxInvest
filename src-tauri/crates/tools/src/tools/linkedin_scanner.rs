@@ -3,6 +3,7 @@
 //! 主要数据源：招聘 JD、公司页面、动态
 
 use super::marketplace_scanner::{MarketplaceScanner, RawLead};
+use crate::tools::scanner_common;
 use async_trait::async_trait;
 
 /// LinkedIn 扫描器
@@ -16,14 +17,14 @@ pub struct LinkedInScanner {
 
 impl LinkedInScanner {
     pub fn new() -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         let api_token = std::env::var("LINKEDIN_API_TOKEN").ok();
         Self { http, api_token, base_url: "https://api.linkedin.com/v2".to_string() }
     }
 
     /// 从配置创建
     pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
-        let http = reqwest::Client::new();
+        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
         Self {
             http,
             api_token,
@@ -33,7 +34,7 @@ impl LinkedInScanner {
 
     /// 构建搜索 URL（Jobs API - 招聘信息是 B2B 需求的核心信号）
     fn build_jobs_search_url(&self, query: &str) -> String {
-        let encoded_query = query.replace(' ', "+");
+        let encoded_query = scanner_common::encode_query(query);
         format!("{}/jobSearch?keywords={}&start=0&count=20", self.base_url, encoded_query)
     }
 
@@ -184,8 +185,8 @@ impl Default for LinkedInScanner {
 
 #[async_trait]
 impl MarketplaceScanner for LinkedInScanner {
-    fn platform(&self) -> &'static str {
-        "linkedin"
+    fn platform(&self) -> String {
+        "linkedin".to_string()
     }
 
     async fn search(&self, q: &str) -> Result<Vec<RawLead>, String> {
@@ -219,11 +220,7 @@ impl MarketplaceScanner for LinkedInScanner {
                         let signals = Self::extract_b2b_signals(trimmed);
                         if !signals.is_empty() {
                             // 从文本中提取可能的职位标题
-                            let title = if trimmed.len() > 100 {
-                                format!("{}...", &trimmed[..100])
-                            } else {
-                                trimmed.to_string()
-                            };
+                            let title = scanner_common::truncate_chars(trimmed, 100);
 
                             let summary = Self::extract_demand_summary(&title, None, None);
 

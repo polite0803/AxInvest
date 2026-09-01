@@ -9,26 +9,17 @@
  */
 
 import { invoke, logIpcError } from "@/lib/invoke";
+import type { SkillExecutionStat } from "@/types";
 import { Card, Col, Progress, Row, Statistic, Typography } from "antd";
 import { Clock, Target, TrendingUp, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-// SK-P1-2: 后端暂未实现 get_skill_execution_stats,定义前端类型
-// TODO: 后端实现后将此类型迁移到 @/types
-interface SkillExecutionStats {
-  name: string;
-  successRate: number;
-  avgExecutionTimeMs: number;
-  totalUsages: number;
-  successfulUsages: number;
-  qualityScore: number;
-  lastUsedAt?: string;
-}
-
 export function SkillStatsPanel() {
   const { t } = useTranslation();
-  const [stats, setStats] = useState<SkillExecutionStats[]>([]);
+  // 合并兜底后 qualityScore 恒为 number
+  type StatView = SkillExecutionStat & { qualityScore: number };
+  const [stats, setStats] = useState<StatView[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -39,7 +30,7 @@ export function SkillStatsPanel() {
 
     async function load() {
       try {
-        const allStats = await invoke<SkillExecutionStats[]>(
+        const allStats = await invoke<SkillExecutionStat[]>(
           "get_skill_execution_stats",
         );
 
@@ -54,7 +45,7 @@ export function SkillStatsPanel() {
           setStats(merged.sort((a, b) => b.totalUsages - a.totalUsages));
         }
       } catch (e) {
-        // SK-P0-4: 后端未实现该命令,优雅降级显示空状态而非错误
+        // 查询失败时优雅降级显示空状态而非错误
         logIpcError("get_skill_execution_stats")(e);
         if (!cancelled) {
           setStats([]);

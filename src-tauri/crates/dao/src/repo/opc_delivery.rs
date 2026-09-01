@@ -20,9 +20,9 @@ use axagent_harness::util_fns::gen_id;
 fn invoice_from_entity(m: opc_invoices::Model) -> DeliveryInvoiceDto {
     DeliveryInvoiceDto {
         id: m.id,
-        lead_id: m.lead_id,
+        lead_id: m.lead_id.unwrap_or_default(),
         linked_workflow_id: m.linked_workflow_id,
-        title: m.title,
+        title: m.title.unwrap_or_default(),
         amount: m.amount,
         currency: m.currency,
         status: m.status,
@@ -55,9 +55,17 @@ pub async fn create_invoice(
 ) -> Result<DeliveryInvoiceDto> {
     let active = opc_invoices::ActiveModel {
         id: Set(gen_id()),
-        lead_id: Set(lead_id.to_string()),
+        lead_id: Set(Some(lead_id.to_string())),
         linked_workflow_id: Set(linked_workflow_id),
-        title: Set(input.title.clone().unwrap_or_else(|| "未命名发票".to_string())),
+        title: Set(Some(input.title.clone().unwrap_or_else(|| "未命名发票".to_string()))),
+        // 客户账单场景字段留空（交付场景不填）
+        customer_id: Set(None),
+        invoice_number: Set(None),
+        line_items_json: Set(None),
+        subtotal: Set(None),
+        tax_total: Set(None),
+        total: Set(None),
+        due_at: Set(None),
         amount: Set(input.amount.unwrap_or(0.0)),
         currency: Set(input.currency.clone().unwrap_or_else(|| "CNY".to_string())),
         status: Set("draft".to_string()),

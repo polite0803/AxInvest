@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! OPC 交付 — 发票（v134）
+//! OPC 交付 — 发票（v136）
 //!
-//! 一行 = 一张交付发票。由 won 线索开票生成（`opc_create_invoice_from_lead`），
-//! 状态机 `draft → sent → paid` 单向推进；`linked_workflow_id` 溯源到
-//! P2 转化出的交付工作流。多币种并存，汇总按币种分组。
+//! 一张表承载两种场景：
+//! 1. **交付发票**：won 线索开票生成（`opc_create_invoice_from_lead`），
+//!    lead_id 溯源到需求线索；状态机 draft → sent → paid 单向推进。
+//! 2. **客户账单**：analysis-engine 完整 InvoiceService 使用，
+//!    customer_id + invoice_number + line_items_json（行项目 JSON）。
+//!
+//! 两种场景字段互斥为可空：交付场景填 lead_id，客户场景填 customer_id。
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -14,23 +18,40 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    // ── 交付场景字段（可空：客户账单场景不填）──
     /// 来源线索（won）；无外键约束 —— 线索删除不应连带清账
-    pub lead_id: String,
+    pub lead_id: Option<String>,
     /// P2 转化出的交付工作流（可空：人工交付无工作流）
     pub linked_workflow_id: Option<String>,
-    /// 发票标题（默认取线索标题，可改）
-    pub title: String,
-    /// 金额（默认取线索预算上限，可改）；多币种并存，汇总按币种分组
+    /// 交付发票标题（默认取线索标题，可改）
+    pub title: Option<String>,
+    // ── 客户账单场景字段（可空：交付场景不填）──
+    /// 客户 ID（客户账单场景）
+    pub customer_id: Option<String>,
+    /// 发票编号（客户账单场景）
+    pub invoice_number: Option<String>,
+    /// 行项目 JSON（客户账单场景，存 Vec<InvoiceLineItem>）
+    pub line_items_json: Option<String>,
+    /// 小计金额（客户账单场景）
+    pub subtotal: Option<f64>,
+    /// 税额（客户账单场景）
+    pub tax_total: Option<f64>,
+    /// 总额（客户账单场景）
+    pub total: Option<f64>,
+    // ── 通用字段 ──
+    /// 金额（交付场景取线索预算上限，客户场景取 total）
     pub amount: f64,
-    /// 币种（ISO 4217，默认取线索预算币种）
+    /// 币种（ISO 4217，默认 CNY）
     pub currency: String,
-    /// 状态机：draft → sent → paid（单向，同状态幂等）
+    /// 状态机：draft → sent → paid（可扩展 overdue / cancelled / refunded）
     pub status: String,
     /// 标记 sent 的时间戳（秒）
     pub issued_at: Option<i64>,
+    /// 到期时间戳（秒，客户账单场景）
+    pub due_at: Option<i64>,
     /// 标记 paid 的时间戳（秒）
     pub paid_at: Option<i64>,
-    /// 备注（可空）
+    /// 备注
     pub notes: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,

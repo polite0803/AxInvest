@@ -153,4 +153,63 @@ pub mod opc_demand_subscriptions;
 // OPC 交付（v134）—— 发票账本
 pub mod opc_invoices;
 
+// === OPC 完整业务实体（本地独有的 OPC crate 依赖，上游合并时丢失）===
+pub mod opc_automation_rules;
+pub mod opc_blog_posts;
+pub mod opc_capability_gap;
+pub mod opc_contact_submissions;
+pub mod opc_content_assets;
+pub mod opc_customers;
+pub mod opc_delivery;
+pub mod opc_demand_lead;
+pub mod opc_experience_records;
+pub mod opc_follow_up_tasks;
+pub mod opc_industries;
+pub mod opc_kpi_records;
+pub mod opc_landing_pages;
+pub mod opc_market_platform;
+pub mod opc_org_employees;
+pub mod opc_org_roles;
+pub mod opc_orgs;
+pub mod opc_playbooks;
+pub mod opc_projects;
+pub mod opc_publish_schedules;
+pub mod opc_revenue_records;
+pub mod opc_talent_templates;
+pub mod opc_work_items;
+
+// === 股票业务 / 量化分析 / 投资组合实体（上游合并时丢失，cf923b07^ 恢复）===
+pub mod analyst_feedback;
+pub mod business_roles;
+pub mod decision_validations;
+pub mod divergence_logs;
+pub mod earnings_events;
+pub mod financial_snapshots;
+pub mod fund_transfers;
+pub mod lesson_applications;
+pub mod market_mainlines;
+pub mod news_archive;
+pub mod opc_rl_experience;
+pub mod opc_rl_training_stats;
+pub mod paper_portfolios;
+pub mod paper_positions;
+pub mod portfolio_correlation_snapshot;
+pub mod portfolio_holdings;
+pub mod portfolio_metrics_daily;
+pub mod price_alerts;
+pub mod quant_paper_trades;
+pub mod quant_runs;
+pub mod quant_signals;
+pub mod quant_strategies;
+pub mod reco_picks;
+pub mod reflection_lessons;
+pub mod screenshot_diagnoses;
+pub mod stock_analyses;
+pub mod stock_pipeline_runs;
+pub mod stock_reflections;
+pub mod strategy_performance;
+pub mod strategy_weight_history;
+pub mod trades;
+pub mod watchlist_items;
+
 pub use sea_orm;

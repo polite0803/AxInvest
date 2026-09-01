@@ -28,13 +28,20 @@ pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     db.execute_unprepared(
         "CREATE TABLE IF NOT EXISTS opc_invoices (\
          id TEXT NOT NULL PRIMARY KEY, \
-         lead_id TEXT NOT NULL, \
+         lead_id TEXT, \
          linked_workflow_id TEXT, \
-         title TEXT NOT NULL, \
+         title TEXT, \
+         customer_id TEXT, \
+         invoice_number TEXT, \
+         line_items_json TEXT, \
+         subtotal REAL, \
+         tax_total REAL, \
+         total REAL, \
          amount REAL NOT NULL DEFAULT 0, \
          currency TEXT NOT NULL DEFAULT 'CNY', \
          status TEXT NOT NULL DEFAULT 'draft', \
          issued_at BIGINT, \
+         due_at BIGINT, \
          paid_at BIGINT, \
          notes TEXT, \
          created_at BIGINT NOT NULL, \
@@ -49,6 +56,11 @@ pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
 
     db.execute_unprepared(
         "CREATE INDEX IF NOT EXISTS idx_opc_invoices_status ON opc_invoices (status)",
+    )
+    .await?;
+
+    db.execute_unprepared(
+        "CREATE INDEX IF NOT EXISTS idx_opc_invoices_customer ON opc_invoices (customer_id)",
     )
     .await?;
 

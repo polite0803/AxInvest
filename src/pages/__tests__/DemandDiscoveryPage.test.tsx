@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App as AntApp } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -444,6 +444,51 @@ describe(
       await waitFor(() => {
         expect(invokeMock).toHaveBeenCalledWith("opc_ensure_demand_scan_job", {
           cronExpression: "0 */6 * * *",
+        });
+      });
+    });
+
+    it("手动录入：填写必填项保存后调用 opc_create_lead 并刷新列表", async () => {
+      invokeMock.mockImplementation(withDeliveryMocks((cmd: string) => {
+        if (cmd === "opc_list_platforms") {
+          return Promise.resolve(MOCK_PLATFORMS);
+        }
+        if (cmd === "opc_list_leads") {
+          return Promise.resolve(MOCK_LEADS);
+        }
+        if (cmd === "opc_create_lead") {
+          return Promise.resolve({ ...MOCK_LEADS[0], id: "lead-manual-1", platform: "manual" });
+        }
+        return Promise.reject(new Error(`unexpected command: ${cmd}`));
+      }));
+
+      renderPage();
+
+      // 打开手动录入弹窗（工具栏按钮，与表格测量按钮无关）
+      await userEvent.click(screen.getByRole("button", { name: "opc.demand.manualEntry" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText("opc.demand.leadFormTitle")).toBeInTheDocument();
+
+      // 填必填项：弹窗内第 1 个 textbox = 标题，第 2 个 = 描述（TextArea）
+      const textboxes = within(dialog).getAllByRole("textbox");
+      await userEvent.type(textboxes[0], "需要自动周报工具");
+      await userEvent.type(textboxes[1], "每周要读 50+ 篇论文，人工筛选太慢");
+
+      await userEvent.click(within(dialog).getByRole("button", { name: "common.save" }));
+
+      await waitFor(() => {
+        expect(invokeMock).toHaveBeenCalledWith("opc_create_lead", {
+          input: {
+            title: "需要自动周报工具",
+            description: "每周要读 50+ 篇论文，人工筛选太慢",
+            budgetMin: null,
+            budgetMax: null,
+            budgetCurrency: "CNY",
+            contactName: null,
+            contactEmail: null,
+            contactPhone: null,
+            sourceUrl: null,
+          },
         });
       });
     });

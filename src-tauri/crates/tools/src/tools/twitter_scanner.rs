@@ -25,13 +25,26 @@ pub struct TwitterScanner {
 
 impl TwitterScanner {
     pub fn new() -> Self {
-        Self::with_token(std::env::var("TWITTER_BEARER_TOKEN").ok())
+        Self::with_config(None, None)
     }
 
     /// 携带官方 API 凭证构造
     pub fn with_token(api_token: Option<String>) -> Self {
+        Self::with_config(api_token, None)
+    }
+
+    /// 从配置创建（凭证 + 端点透传）
+    ///
+    /// `api_token` 未提供时回退读环境变量（桌面 GUI 进程通常不带环境变量，
+    /// 平台配置里的 token 由路由层经本方法直接注入 —— 凭证三层断链修复）。
+    pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
         let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
-        Self { http, api_token, base_url: "https://api.twitter.com/2".to_string() }
+        let api_token = api_token.or_else(|| std::env::var("TWITTER_BEARER_TOKEN").ok());
+        Self {
+            http,
+            api_token,
+            base_url: base_url.unwrap_or_else(|| "https://api.twitter.com/2".to_string()),
+        }
     }
 
     /// 构建搜索 URL（Twitter API v2 recent search）

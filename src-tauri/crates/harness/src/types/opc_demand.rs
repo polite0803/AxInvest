@@ -95,7 +95,7 @@ pub struct DemandLeadDto {
 pub struct DiscoverLeadsSummary {
     /// 本轮扫到的原始线索总数
     pub total_scanned: u32,
-    /// 完成评估的线索数
+    /// 评估且有产出的线索数（新入库或刷新；窗口内重复跳过的不计）
     pub total_evaluated: u32,
     /// 新入库数（去重后跳过的不计）
     pub total_saved: u32,
@@ -103,13 +103,13 @@ pub struct DiscoverLeadsSummary {
     pub total_refreshed: u32,
     /// 其中高价值（commercial_value_score ≥ 60）数量
     pub high_value_count: u32,
-    /// 高价值线索明细（最多 20 条，全局按分数降序，非本轮独有）
+    /// 本轮高价值线索明细（最多 20 条，按分数降序）
     pub leads: Vec<DemandLeadDto>,
-    /// 本轮实际扫描评估到的线索明细（按分数降序）
+    /// 本轮实际入库/刷新的线索明细（按分数降序）
     ///
-    /// 与 `leads` 区别：`leads` 是全局高价值榜单（前端列表用），`round_leads`
-    /// 只含本轮命中的线索 —— 订阅定时扫描按 `min_score` 过滤推送时必须有
-    /// 本轮口径，否则每个订阅词都会推送到与自己无关的线索。
+    /// 与 `leads` 区别：`leads` 是 `round_leads` 中 ≥60 分的前 20 条摘要，
+    /// `round_leads` 是完整轮次明细 —— 订阅定时扫描按 `min_score` 过滤推送
+    /// 时必须有本轮口径，否则每个订阅词都会推送到与自己无关的线索。
     #[serde(default)]
     pub round_leads: Vec<DemandLeadDto>,
 }
@@ -149,6 +149,24 @@ pub struct SaveDemandSubscriptionInput {
     pub interval_hours: Option<i32>,
     pub min_score: Option<f64>,
     pub platforms: Option<Vec<String>>,
+}
+
+/// 手动补录一条需求线索的输入（P1-4）
+///
+/// 复用扫描管线的评分/去重/联系方式提取逻辑；`platform` 固定为 `manual`。
+/// `title` / `description` 必填；预算字段若填写则覆盖自动提取结果。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDemandLeadInput {
+    pub title: String,
+    pub description: String,
+    pub budget_min: Option<f64>,
+    pub budget_max: Option<f64>,
+    pub budget_currency: Option<String>,
+    pub contact_name: Option<String>,
+    pub contact_email: Option<String>,
+    pub contact_phone: Option<String>,
+    pub source_url: Option<String>,
 }
 
 /// 单个订阅词的扫描结果

@@ -13,8 +13,16 @@ pub struct StackOverflowScanner {
 
 impl StackOverflowScanner {
     pub fn new() -> Self {
+        Self::with_config(None, None)
+    }
+
+    /// 从配置创建（API Key 可选：无 key 时 300 req/day，配置后提升配额）
+    ///
+    /// `api_key` 未提供时回退读环境变量（桌面 GUI 进程通常不带环境变量，
+    /// 平台配置里的 key 由路由层经本方法直接注入 —— 凭证三层断链修复）。
+    pub fn with_config(api_key: Option<String>, _base_url: Option<String>) -> Self {
         let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
-        let api_key = std::env::var("SO_API_KEY").ok();
+        let api_key = api_key.or_else(|| std::env::var("SO_API_KEY").ok());
         Self { http, api_key }
     }
 

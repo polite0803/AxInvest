@@ -722,6 +722,7 @@ macro_rules! register_all_commands {
             commands::opc_delivery::opc_list_invoices,
             commands::opc_delivery::opc_update_invoice_status,
             commands::opc_demand_capability::opc_match_lead_capabilities,
+            commands::opc_demand_discovery::opc_create_lead,
             commands::opc_demand_discovery::opc_delete_platform,
             commands::opc_demand_discovery::opc_discover_and_evaluate_leads,
             commands::opc_demand_discovery::opc_get_scan_policy,

@@ -18,27 +18,29 @@ pub struct GitHubIssueScanner {
 
 impl GitHubIssueScanner {
     pub fn new() -> Self {
-        Self {
-            http: reqwest::Client::builder()
-                .user_agent("AxAgent/1.0 (demand-discovery)")
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .unwrap_or_default(),
-            base_url: "https://api.github.com".to_string(),
-            token: std::env::var("GITHUB_TOKEN").ok(),
-        }
+        Self::with_config(None, None)
     }
 
     /// 带 Token 的构造
     pub fn with_token(token: String) -> Self {
+        Self::with_config(Some(token), None)
+    }
+
+    /// 从配置创建（Token 可选：无 Token 时 GitHub 限流 60 req/h，配置后提升配额）
+    ///
+    /// `token` 未提供时回退读环境变量（桌面 GUI 进程通常不带环境变量，
+    /// 平台配置里的 token 由路由层经本方法直接注入 —— 凭证三层断链修复）。
+    pub fn with_config(token: Option<String>, base_url: Option<String>) -> Self {
+        let http = reqwest::Client::builder()
+            .user_agent("AxAgent/1.0 (demand-discovery)")
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_default();
+        let token = token.or_else(|| std::env::var("GITHUB_TOKEN").ok());
         Self {
-            http: reqwest::Client::builder()
-                .user_agent("AxAgent/1.0 (demand-discovery)")
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .unwrap_or_default(),
-            base_url: "https://api.github.com".to_string(),
-            token: Some(token),
+            http,
+            base_url: base_url.unwrap_or_else(|| "https://api.github.com".to_string()),
+            token,
         }
     }
 

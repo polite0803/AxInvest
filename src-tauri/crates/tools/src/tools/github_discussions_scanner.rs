@@ -14,8 +14,16 @@ pub struct GitHubDiscussionsScanner {
 
 impl GitHubDiscussionsScanner {
     pub fn new() -> Self {
+        Self::with_config(None, None)
+    }
+
+    /// 从配置创建（Token 可选：无 Token 时 GitHub 限流 60 req/h，配置后提升配额）
+    ///
+    /// `token` 未提供时回退读环境变量（桌面 GUI 进程通常不带环境变量，
+    /// 平台配置里的 token 由路由层经本方法直接注入 —— 凭证三层断链修复）。
+    pub fn with_config(github_token: Option<String>, _base_url: Option<String>) -> Self {
         let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
-        let github_token = std::env::var("GITHUB_TOKEN").ok();
+        let github_token = github_token.or_else(|| std::env::var("GITHUB_TOKEN").ok());
         Self { http, github_token }
     }
 

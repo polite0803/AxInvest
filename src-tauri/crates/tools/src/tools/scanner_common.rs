@@ -185,6 +185,224 @@ pub fn pick_items<'a>(
     current.as_array()
 }
 
+// ── 价格解析（P0-2）──────────────────────────────────────────
+
+/// 提取价格文本片段（`¥500` / `￥500` / `1200元` / `500块`）
+///
+/// 自闲鱼扫描器下沉共用：此前只有闲鱼提取价格文本，归一化层又不解析，
+/// 价格在 `DemandLead::new_from_raw` 全链路被丢弃。
+pub fn extract_price_text(text: &str) -> Option<String> {
+    // 尝试匹配 "¥500" 或 "￥500" 格式
+    for prefix in ["¥", "￥"] {
+        if let Some(start) = text.find(prefix) {
+            let after = &text[start + prefix.len()..];
+            let end = after
+                .find(|c: char| !c.is_ascii_digit() && c != '.')
+                .map(|pos| start + prefix.len() + pos)
+                .unwrap_or(text.len());
+            let price_str = &text[start + prefix.len()..end];
+            if !price_str.is_empty() {
+                return Some(format!("{}{}", prefix, price_str));
+            }
+        }
+    }
+
+    // 尝试匹配 "1200元" 或 "500块" 格式（向前回溯连续数字）
+    for suffix in ["元", "块"] {
+        if let Some(end) = text.find(suffix) {
+            let mut chars = text[..end].chars().rev();
+            let mut num_start = end;
+            let mut found_digit = false;
+            for c in chars.by_ref() {
+                if c.is_ascii_digit() || c == '.' {
+                    found_digit = true;
+                    num_start -= c.len_utf8();
+                } else if found_digit {
+                    break;
+                }
+            }
+            if found_digit && num_start < end {
+                let price_num = &text[num_start..end];
+                return Some(format!("{}{}", price_num, suffix));
+            }
+        }
+    }
+
+    None
+}
+
+/// 解析价格文本为预算区间 `(min, max)`
+///
+/// 支持：
+/// - 区间：`"8000-15000元"` / `"20000~30000"` / `"3千到5千"`（分隔符 `-` `–` `~` `～` `到` `至`）
+/// - 单值：`"¥500"` / `"1200元"` / `"2万"` / `"8000"`
+/// - 倍率后缀：`万`/`w` → ×10000，`k`/`千` → ×1000
+///
+/// 无法解析出正数时返回 `None`。
+pub fn parse_price_range(text: &str) -> Option<(f64, f64)> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    /// 数字 token：`(起始字节, 结束字节, 数值)`（数值已应用倍率）
+    struct Token {
+        start: usize,
+        end: usize,
+        value: f64,
+    }
+
+    let bytes = text.as_bytes();
+    let mut tokens: Vec<Token> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+                i += 1;
+            }
+            // 跳过结尾的孤立 '.'（如 "100."）
+            let mut num_end = i;
+            while num_end > start && bytes[num_end - 1] == b'.' {
+                num_end -= 1;
+            }
+            if num_end == start {
+                continue;
+            }
+            let Ok(mut value) = text[start..num_end].parse::<f64>() else {
+                continue;
+            };
+            // 倍率后缀：万/w ×10000，k/千 ×1000（后缀与数字之间允许空白）
+            let mut j = num_end;
+            while j < bytes.len() && bytes[j] == b' ' {
+                j += 1;
+            }
+            let rest = &text[j..];
+            if rest.starts_with('万') || rest.starts_with(['w', 'W']) {
+                value *= 10_000.0;
+            } else if rest.starts_with(['k', 'K']) || rest.starts_with('千') {
+                value *= 1_000.0;
+            }
+            if value.is_finite() && value > 0.0 && value < 1_000_000_000.0 {
+                tokens.push(Token { start, end: num_end, value });
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    /// 两个数字之间是否构成价格区间（隔着空白 / 分隔符 / 货币单位字 / 倍率后缀）
+    fn is_range_separator(s: &str) -> bool {
+        let mut has_sep = false;
+        for c in s.chars() {
+            match c {
+                '-' | '–' | '~' | '～' | '到' | '至' => has_sep = true,
+                // 空白与货币单位字
+                ' ' | '元' | '块' => {},
+                // 倍率后缀（"3千到5千" / "2万-5万" 中残留的后缀字符）
+                '万' | 'w' | 'W' | 'k' | 'K' | '千' => {},
+                _ => return false,
+            }
+        }
+        has_sep
+    }
+
+    match tokens.as_slice() {
+        [] => None,
+        [a, b, ..] if is_range_separator(&text[a.end..b.start]) => {
+            let (min, max) = if a.value <= b.value {
+                (a.value, b.value)
+            } else {
+                (b.value, a.value)
+            };
+            Some((min, max))
+        },
+        [a, ..] => Some((a.value, a.value)),
+    }
+}
+
+// ── 联系方式提取（P0-4）──────────────────────────────────────
+
+/// 从自由文本中提取的联系方式集合
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExtractedContacts {
+    pub email: Option<String>,
+    /// 真实电话号码；微信号**不会**出现在这里（见 [`extract_wechat`]）
+    pub phone: Option<String>,
+    pub wechat: Option<String>,
+}
+
+/// 从自由文本中统一提取联系方式（邮箱 / 电话 / 微信）
+///
+/// 各内置扫描器此前全部硬编码 `contact_*: None`，唯一有提取逻辑的 API
+/// 连接器又因凭证断链跑不起来 → 实际产出零联系方式。所有扫描器的
+/// 归一化入口（`DemandLead::new_from_raw`）统一调用本函数兜底。
+pub fn extract_contacts(text: &str) -> ExtractedContacts {
+    ExtractedContacts {
+        email: extract_email_from_text(text),
+        phone: extract_phone_from_text(text),
+        wechat: extract_wechat(text),
+    }
+}
+
+/// 从文本中提取邮箱地址（标准 `xxx@yyy.zzz` 格式，取第一个）
+pub fn extract_email_from_text(text: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"[\w.+-]+@[\w-]+(\.[\w-]+)+").expect("邮箱正则"));
+    re.find(text).map(|m| m.as_str().to_string())
+}
+
+/// 从文本中提取手机号（中国大陆 11 位 `1[3-9]xxxxxxxxx`，要求独立边界）
+pub fn extract_phone_from_text(text: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    // regex crate 不支持 lookaround，用 \b 数字边界（11 位号码两侧非数字即可命中）
+    let re = RE.get_or_init(|| regex::Regex::new(r"\b(1[3-9]\d{9})\b").expect("手机号正则"));
+    re.captures(text).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+}
+
+/// 从文本中提取微信号
+///
+/// 触发词：`微信` / `微信号` / `weixin` / `vx` / `wx`（大小写不敏感），
+/// 后跟可选 `号` 与 `:` `：` 空白，再接 5-20 位字母开头的微信号标识。
+/// 微信号不是电话，禁止写入 phone 字段（历史 bug：mock 数据把
+/// `"微信: wangzhuren_biz"` 塞进了 contact_phone）。
+pub fn extract_wechat(text: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(?:微信|weixin|vx|wx)\s*号?\s*[:：=]?\s*([A-Za-z][-_A-Za-z0-9]{4,19})",
+        )
+        .expect("微信号正则")
+    });
+    re.captures(text).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+}
+
+// ── 内容指纹（P0-5 去重）────────────────────────────────────
+
+/// 计算线索内容指纹（标题 + 描述归一化后哈希，16 位 hex）
+///
+/// 去重语义修正：旧键 `(platform, source_url)` 在「所有线索指向同一
+/// 搜索页」的平台（闲鱼等）上把一轮 100 条线索压成 1 条。指纹只看
+/// **内容**：同一需求换个链接重发会被识别为重复，同页不同需求各自成立。
+///
+/// 归一化：删除全部空白、小写。内容为空时返回 `None`
+/// （空内容不参与指纹去重，避免不相干的空线索互相吞并）。
+pub fn content_fingerprint(title: &str, description: &str) -> Option<String> {
+    let normalize = |s: &str| {
+        s.chars().filter(|c| !c.is_whitespace()).flat_map(|c| c.to_lowercase()).collect::<String>()
+    };
+    let norm_title = normalize(title);
+    let norm_desc = normalize(description);
+    if norm_title.is_empty() && norm_desc.is_empty() {
+        return None;
+    }
+    let normalized = format!("{norm_title}\n{norm_desc}");
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    normalized.hash(&mut hasher);
+    Some(format!("{:016x}", hasher.finish()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,5 +489,71 @@ mod tests {
         assert_eq!(pick_str(&items[0], &["name", "title"]), Some("t"));
         assert_eq!(pick_f64(&items[0], &["score"]), Some(3.0));
         assert!(pick_items(&v, &["data", "missing"]).is_none());
+    }
+
+    #[test]
+    fn parse_price_range_handles_common_formats() {
+        // 区间（带货币单位字 + 分隔符）
+        assert_eq!(parse_price_range("8000-15000元"), Some((8000.0, 15000.0)));
+        assert_eq!(parse_price_range("20000~30000"), Some((20000.0, 30000.0)));
+        assert_eq!(parse_price_range("3千到5千"), Some((3000.0, 5000.0)));
+        // 单值
+        assert_eq!(parse_price_range("¥500"), Some((500.0, 500.0)));
+        assert_eq!(parse_price_range("价格 1200 元"), Some((1200.0, 1200.0)));
+        // 倍率
+        assert_eq!(parse_price_range("2万"), Some((20000.0, 20000.0)));
+        assert_eq!(parse_price_range("预算50k"), Some((50000.0, 50000.0)));
+        // 无法解析 / 非法输入
+        assert_eq!(parse_price_range(""), None);
+        assert_eq!(parse_price_range("面议"), None);
+    }
+
+    #[test]
+    fn extract_price_text_matches_xianyu_formats() {
+        assert_eq!(extract_price_text("售价1200元"), Some("1200元".to_string()));
+        assert_eq!(extract_price_text("价格：¥500"), Some("¥500".to_string()));
+        assert_eq!(extract_price_text("无价格信息"), None);
+    }
+
+    #[test]
+    fn extract_contacts_covers_email_phone_wechat() {
+        let c = extract_contacts("联系 zhang@example.com 或 13800138000，微信：wang_biz123");
+        assert_eq!(c.email.as_deref(), Some("zhang@example.com"));
+        assert_eq!(c.phone.as_deref(), Some("13800138000"));
+        assert_eq!(c.wechat.as_deref(), Some("wang_biz123"));
+
+        // 无联系信息
+        let c = extract_contacts("普通文本，无任何联系方式");
+        assert_eq!(c, ExtractedContacts::default());
+
+        // vx 触发词（大小写不敏感）
+        let c = extract_contacts("加 vx: Foo_Bar99");
+        assert_eq!(c.wechat.as_deref(), Some("Foo_Bar99"));
+    }
+
+    #[test]
+    fn extract_phone_rejects_non_phone_numbers() {
+        assert!(extract_phone_from_text("订单号 12345678901").is_none(), "12 开头不是手机号");
+        assert!(extract_phone_from_text("号码太短 1380013800").is_none());
+        assert_eq!(extract_phone_from_text("电话 19912345678."), Some("19912345678".to_string()));
+    }
+
+    #[test]
+    fn content_fingerprint_is_stable_and_content_only() {
+        // 空白与大小写归一化
+        assert_eq!(
+            content_fingerprint("求购 相机", "成色好"),
+            content_fingerprint("求购相机", "成色好")
+        );
+        // 内容相同（忽略空白差异）→ 指纹一致，与 URL 无关
+        assert_eq!(
+            content_fingerprint("求购相机", "成色好"),
+            content_fingerprint("求购相机", "成色好")
+        );
+        // 内容不同 → 指纹不同
+        assert_ne!(content_fingerprint("求购", "相机"), content_fingerprint("出售", "相机"));
+        // 空内容 → None
+        assert_eq!(content_fingerprint("", ""), None);
+        assert_eq!(content_fingerprint("   ", "\t"), None);
     }
 }

@@ -83,25 +83,31 @@ fn lead_from_entity(m: opc_demand_leads::Model) -> DemandLeadDto {
 // ── 平台配置 ─────────────────────────────────────────────────
 
 /// 内置默认平台清单（与前端 mock preset 对齐；platform_type 一律 "scanner"）
-pub const DEFAULT_PLATFORMS: &[(&str, &str)] = &[
-    ("reddit", "Reddit"),
-    ("hackernews", "HackerNews"),
-    ("github_issue", "GitHub Issues"),
-    ("github_discussion", "GitHub Discussions"),
-    ("stackoverflow", "StackOverflow"),
-    ("producthunt", "Product Hunt"),
-    ("huggingface", "HuggingFace"),
-    ("package_ecosystem", "Package Ecosystem"),
-    ("arxiv", "arXiv"),
-    ("twitter", "Twitter/X"),
-    ("zhubajie", "猪八戒"),
-    ("xianyu", "闲鱼"),
-    ("linkedin", "LinkedIn"),
-    ("zhihu", "知乎"),
-    ("csdn", "CSDN"),
-    ("juejin", "掘金"),
-    ("dribbble", "Dribbble"),
-    ("upwork", "Upwork"),
+///
+/// 三元组：`(id, name, 默认启用)`。数据源治理（P1-1）：真正默认可用的
+/// 免费源只有 8 个（HN/GitHub×2/SO/arXiv/HF/package_ecosystem + Reddit
+/// 观察名单）；其余 10 个无公开检索 API 或需凭证（Twitter/LinkedIn/CSDN/
+/// 掘金/Dribbble/ProductHunt/Upwork/知乎/猪八戒/闲鱼），默认禁用 ——
+/// 否则每轮各占并发额度并刷"合规跳过"状态。配置了 api_token 后可手动启用。
+pub const DEFAULT_PLATFORMS: &[(&str, &str, bool)] = &[
+    ("reddit", "Reddit", true),
+    ("hackernews", "HackerNews", true),
+    ("github_issue", "GitHub Issues", true),
+    ("github_discussion", "GitHub Discussions", true),
+    ("stackoverflow", "StackOverflow", true),
+    ("producthunt", "Product Hunt", false),
+    ("huggingface", "HuggingFace", true),
+    ("package_ecosystem", "Package Ecosystem", true),
+    ("arxiv", "arXiv", true),
+    ("twitter", "Twitter/X", false),
+    ("zhubajie", "猪八戒", false),
+    ("xianyu", "闲鱼", false),
+    ("linkedin", "LinkedIn", false),
+    ("zhihu", "知乎", false),
+    ("csdn", "CSDN", false),
+    ("juejin", "掘金", false),
+    ("dribbble", "Dribbble", false),
+    ("upwork", "Upwork", false),
 ];
 
 /// 平台表为空时插入内置默认平台（幂等：只在空表时执行）
@@ -111,17 +117,22 @@ pub async fn seed_default_platforms_if_empty(db: &DatabaseConnection) -> Result<
         return Ok(());
     }
     let now = now_ts();
-    for (id, name) in DEFAULT_PLATFORMS {
+    for (id, name, default_enabled) in DEFAULT_PLATFORMS {
         let row = opc_demand_platforms::ActiveModel {
             id: Set(String::from(*id)),
             name: Set(String::from(*name)),
             platform_type: Set("scanner".to_string()),
-            enabled: Set(1),
+            enabled: Set(i32::from(*default_enabled)),
             base_url: Set(None),
-            config_json: Set(
-                serde_json::json!({ "description": format!("{} 扫描器", name), "auto_sync": true })
-                    .to_string(),
-            ),
+            config_json: Set(serde_json::json!({
+                "description": if *default_enabled {
+                    format!("{} 扫描器", name)
+                } else {
+                    format!("{} 扫描器（无公开检索 API 或需官方凭证，配置 Token 后启用）", name)
+                },
+                "auto_sync": true,
+            })
+            .to_string()),
             last_sync_at: Set(None),
             status: Set("idle".to_string()),
             created_at: Set(now),
@@ -236,6 +247,7 @@ pub async fn list_enabled_platforms(db: &DatabaseConnection) -> Result<Vec<Deman
 // ── 需求线索 ─────────────────────────────────────────────────
 
 /// 新线索写入入库参数（扫描 + 评估的结果）
+#[derive(Debug, Clone)]
 pub struct NewLeadRow {
     pub id: String,
     pub platform: String,
@@ -248,6 +260,8 @@ pub struct NewLeadRow {
     pub contact_email: Option<String>,
     pub contact_phone: Option<String>,
     pub source_url: Option<String>,
+    /// 内容指纹（标题+描述归一化哈希，v136）：去重主键
+    pub content_fingerprint: Option<String>,
     pub raw_snapshot: serde_json::Value,
     pub confidence: f64,
     pub pain_score: f64,
@@ -269,53 +283,70 @@ pub enum LeadWriteOutcome {
 
 /// 写入一条线索，按去重时间窗口决定「插入 / 刷新 / 跳过」
 ///
-/// 去重键是**唯一索引** `(platform, source_url)`，所以窗口外再次命中同一条需求时
-/// 不能插入（必然撞唯一约束），只能刷新既有行——这正是
-/// `scanDeduplicateWindowHours` 的语义：窗口内抑制重复曝光，窗口外允许刷新评分。
+/// 去重主键是**唯一索引** `(platform, content_fingerprint)`（v136）：指纹只看
+/// 标题+描述内容，与 URL 无关 —— 同一条需求换个链接重发会被识别，而共享
+/// 同一搜索页 URL 的不同线索（闲鱼等）各自成立。旧键 `(platform, source_url)`
+/// 已废弃（唯一索引随 v136 删除），仅对无指纹的存量/空内容线索做兜底查重。
 ///
-/// - `window_secs = None`：永久去重，只要库里存在同源线索就跳过
+/// 窗口语义（作用于刷新/跳过判定，与键选择无关）：
+/// - `window_secs = None`：永久去重，只要库里存在同指纹线索就跳过
 /// - `window_secs = Some(s)`：仅当既有行的 `created_at` 落在 `[now - s, now]` 内才跳过
 pub async fn upsert_lead_within_window(
     db: &DatabaseConnection,
     row: NewLeadRow,
     window_secs: Option<i64>,
 ) -> Result<LeadWriteOutcome> {
-    if let Some(url) = &row.source_url {
-        let dup = opc_demand_leads::Entity::find()
+    // 去重查找：内容指纹优先（与唯一索引对齐）；无指纹时按 URL 兜底
+    // （存量行指纹为 NULL，兜底可继续抑制明显的同 URL 重复刷新）
+    let dup = if let Some(fp) = &row.content_fingerprint {
+        opc_demand_leads::Entity::find()
+            .filter(opc_demand_leads::Column::Platform.eq(&row.platform))
+            .filter(opc_demand_leads::Column::ContentFingerprint.eq(fp))
+            .one(db)
+            .await?
+    } else if let Some(url) = &row.source_url {
+        opc_demand_leads::Entity::find()
             .filter(opc_demand_leads::Column::Platform.eq(&row.platform))
             .filter(opc_demand_leads::Column::SourceUrl.eq(url))
             .one(db)
-            .await?;
+            .await?
+    } else {
+        None
+    };
 
-        if let Some(existing) = dup {
-            let within_window = match window_secs {
-                None => true,
-                Some(secs) => existing.created_at >= now_ts() - secs,
-            };
-            if within_window {
-                return Ok(LeadWriteOutcome::Skipped);
-            }
-
-            let now = now_ts();
-            let mut am: opc_demand_leads::ActiveModel = existing.into();
-            am.title = Set(row.title);
-            am.description = Set(row.description);
-            am.budget_min = Set(row.budget_min);
-            am.budget_max = Set(row.budget_max);
-            am.budget_currency = Set(row.budget_currency);
-            am.contact_name = Set(row.contact_name);
-            am.contact_email = Set(row.contact_email);
-            am.contact_phone = Set(row.contact_phone);
-            am.confidence = Set(row.confidence);
-            am.pain_score = Set(row.pain_score);
-            am.market_gap_score = Set(row.market_gap_score);
-            am.commercial_value_score = Set(row.commercial_value_score);
-            am.demand_type = Set(row.demand_type);
-            am.raw_snapshot = Set(row.raw_snapshot.to_string());
-            am.updated_at = Set(now);
-            am.update(db).await?;
-            return Ok(LeadWriteOutcome::Refreshed);
+    if let Some(existing) = dup {
+        let within_window = match window_secs {
+            None => true,
+            Some(secs) => existing.created_at >= now_ts() - secs,
+        };
+        if within_window {
+            return Ok(LeadWriteOutcome::Skipped);
         }
+
+        let now = now_ts();
+        let mut am: opc_demand_leads::ActiveModel = existing.into();
+        am.title = Set(row.title);
+        am.description = Set(row.description);
+        am.budget_min = Set(row.budget_min);
+        am.budget_max = Set(row.budget_max);
+        am.budget_currency = Set(row.budget_currency);
+        am.contact_name = Set(row.contact_name);
+        am.contact_email = Set(row.contact_email);
+        am.contact_phone = Set(row.contact_phone);
+        // 指纹线索可能换了落地页 URL，一并刷新
+        if let Some(fp) = row.content_fingerprint {
+            am.content_fingerprint = Set(Some(fp));
+        }
+        am.source_url = Set(row.source_url);
+        am.confidence = Set(row.confidence);
+        am.pain_score = Set(row.pain_score);
+        am.market_gap_score = Set(row.market_gap_score);
+        am.commercial_value_score = Set(row.commercial_value_score);
+        am.demand_type = Set(row.demand_type);
+        am.raw_snapshot = Set(row.raw_snapshot.to_string());
+        am.updated_at = Set(now);
+        am.update(db).await?;
+        return Ok(LeadWriteOutcome::Refreshed);
     }
 
     let now = now_ts();
@@ -331,6 +362,7 @@ pub async fn upsert_lead_within_window(
         contact_email: Set(row.contact_email),
         contact_phone: Set(row.contact_phone),
         source_url: Set(row.source_url),
+        content_fingerprint: Set(row.content_fingerprint),
         raw_snapshot: Set(row.raw_snapshot.to_string()),
         status: Set("new".to_string()),
         confidence: Set(row.confidence),
@@ -345,6 +377,51 @@ pub async fn upsert_lead_within_window(
     };
     am.insert(db).await?;
     Ok(LeadWriteOutcome::Inserted)
+}
+
+/// 手动录入需求线索（P1-4：此前「手动补录」只有提示日志，`opc_create_lead`
+/// 命令与前端入口均不存在）
+///
+/// 复用 [`upsert_lead_within_window`] 的去重语义：窗口内同指纹 → Skipped
+/// （读回既有行返回），窗口外 → Refreshed，全新 → Inserted。始终返回**生效行**
+/// 的 DTO —— 手动重复录入时前端能看到已存在的线索而不是报错。
+pub async fn create_manual_lead(
+    db: &DatabaseConnection,
+    row: NewLeadRow,
+    window_secs: Option<i64>,
+) -> Result<DemandLeadDto> {
+    let outcome = upsert_lead_within_window(db, row.clone(), window_secs).await?;
+    let found = match outcome {
+        LeadWriteOutcome::Inserted => opc_demand_leads::Entity::find_by_id(row.id).one(db).await?,
+        LeadWriteOutcome::Refreshed | LeadWriteOutcome::Skipped => {
+            // 生效行是既有行：按与 upsert 相同的键读回（指纹优先，URL 兜底）
+            let by_fingerprint = if let Some(fp) = &row.content_fingerprint {
+                opc_demand_leads::Entity::find()
+                    .filter(opc_demand_leads::Column::Platform.eq(&row.platform))
+                    .filter(opc_demand_leads::Column::ContentFingerprint.eq(fp))
+                    .one(db)
+                    .await?
+            } else {
+                None
+            };
+            match by_fingerprint {
+                Some(m) => Some(m),
+                None => match &row.source_url {
+                    Some(url) if !url.is_empty() => {
+                        opc_demand_leads::Entity::find()
+                            .filter(opc_demand_leads::Column::Platform.eq(&row.platform))
+                            .filter(opc_demand_leads::Column::SourceUrl.eq(url))
+                            .one(db)
+                            .await?
+                    },
+                    _ => None,
+                },
+            }
+        },
+    };
+    found
+        .map(lead_from_entity)
+        .ok_or_else(|| AxAgentError::Internal("线索入库后无法读回".to_string()))
 }
 
 /// 按商业价值分降序列出线索（可按生命周期状态过滤）
@@ -684,5 +761,54 @@ mod tests {
         // now < last（时钟回拨）→ saturating_sub 归零，不到期，不会 panic
         let last = 1_700_000_000;
         assert!(!is_subscription_due(Some(last), 1, last - 10 * HOUR));
+    }
+
+    /// 手动补录的读回语义：窗口内同指纹重复录入 → 返回既有生效行
+    #[tokio::test]
+    async fn create_manual_lead_returns_existing_row_on_duplicate() {
+        use crate::migrations::{
+            v132_opc_demand_discovery, v133_lead_workflow_link, v136_demand_lead_dedupe_fingerprint,
+        };
+        use sea_orm::Database;
+
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        v132_opc_demand_discovery::up(db.clone()).await.unwrap();
+        v133_lead_workflow_link::up(db.clone()).await.unwrap();
+        v136_demand_lead_dedupe_fingerprint::up(db.clone()).await.unwrap();
+
+        let row = super::NewLeadRow {
+            id: "lead-manual-1".to_string(),
+            platform: "manual".to_string(),
+            title: "需要一个自动周报工具".to_string(),
+            description: "每周要读 50+ 篇论文，人工筛选太慢".to_string(),
+            budget_min: Some(500.0),
+            budget_max: Some(2000.0),
+            budget_currency: "USD".to_string(),
+            contact_name: None,
+            contact_email: None,
+            contact_phone: None,
+            source_url: None,
+            content_fingerprint: Some("fp-abc".to_string()),
+            raw_snapshot: serde_json::json!({ "source": "manual" }),
+            confidence: 0.7,
+            pain_score: 80.0,
+            market_gap_score: 60.0,
+            commercial_value_score: 75.0,
+            demand_type: "content_creation".to_string(),
+        };
+
+        // 首次录入 → Inserted，返回本行
+        let first = super::create_manual_lead(&db, row.clone(), Some(86400)).await.unwrap();
+        assert_eq!(first.id, "lead-manual-1");
+
+        // 窗口内同指纹 → Skipped，读回既有行（id 与原评分不变）
+        let dup = super::NewLeadRow {
+            id: "lead-manual-2".to_string(),
+            commercial_value_score: 66.0,
+            ..row
+        };
+        let second = super::create_manual_lead(&db, dup, Some(86400)).await.unwrap();
+        assert_eq!(second.id, "lead-manual-1");
+        assert!((second.commercial_value_score - 75.0).abs() < f64::EPSILON);
     }
 }

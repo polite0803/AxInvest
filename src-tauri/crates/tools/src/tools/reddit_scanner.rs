@@ -18,7 +18,11 @@ impl RedditScanner {
     pub fn new() -> Self {
         Self {
             http: reqwest::Client::builder()
-                .user_agent("AxAgent/1.0 (demand-discovery)")
+                // Reddit 要求描述性 UA（`<platform>:<app-id>:<version> (by /u/<user>)`），
+                // 泛用 UA 未认证访问 .json 接口会被严格限流/封锁（P1-2）。
+                // 说明：未绑定 Reddit 账号，先用规范格式；若仍 429/403 需注册
+                // 脚本应用走 OAuth。
+                .user_agent("linux:axagent-demand-discovery:v2.9.9 (by /u/axagent_bot)")
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .unwrap_or_default(),
@@ -26,30 +30,25 @@ impl RedditScanner {
     }
 
     /// 检查帖子是否与需求相关
+    ///
+    /// 只保留强需求意图信号。P1-3 修正：`help` / `want` / `build` / `issue` /
+    /// `problem` / `how to` / `recommendation` / `advice` / `suggestion` /
+    /// `can't` 等在 Reddit 帖子中是超高频词，几乎任何帖子都命中，判定形同虚设
+    /// —— 全部移除。
     fn is_demand_related(&self, title: &str, description: &str) -> bool {
         let demand_keywords = [
             "need",
             "looking for",
-            "want",
-            "how to",
-            "problem",
-            "issue",
-            "help",
+            "looking to",
+            "trying to",
             "require",
             "implement",
-            "build",
             "frustrating",
             "difficult",
             "lack",
             "missing",
             "solution",
-            "looking to",
-            "trying to",
-            "can't",
             "doesn't work",
-            "recommendation",
-            "suggestion",
-            "advice",
         ];
         let text = format!("{} {}", title, description).to_lowercase();
         demand_keywords.iter().any(|kw| text.contains(kw))
@@ -189,6 +188,13 @@ mod tests {
         // 不相关
         assert!(!scanner.is_demand_related("Great sunset photo", "My vacation pics"));
         assert!(!scanner.is_demand_related("Happy birthday", "Party time"));
+
+        // P1-3 回归：超高频词（help/want/build/issue/problem/how to/recommendation）
+        // 已移除，含这些词的普通讨论不应再被判定为需求
+        assert!(!scanner.is_demand_related("Help me understand how to use git", ""));
+        assert!(!scanner.is_demand_related("I want to share my new build", ""));
+        assert!(!scanner.is_demand_related("There's an issue with the problem statement", ""));
+        assert!(!scanner.is_demand_related("Recommendation for a good book", ""));
     }
 
     #[tokio::test]

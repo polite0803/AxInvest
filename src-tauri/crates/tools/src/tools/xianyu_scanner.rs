@@ -25,14 +25,16 @@ pub struct XianyuScanner {
 
 impl XianyuScanner {
     pub fn new() -> Self {
-        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
-        let api_token = std::env::var("XIANYU_API_TOKEN").ok();
-        Self { http, api_token, base_url: "https://api.goofish.com".to_string() }
+        Self::with_config(None, None)
     }
 
     /// 从配置创建
+    ///
+    /// `api_token` 未提供时回退读环境变量（桌面 GUI 进程通常不带环境变量，
+    /// 平台配置里的 token 由路由层经本方法直接注入 —— 凭证三层断链修复）。
     pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
         let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
+        let api_token = api_token.or_else(|| std::env::var("XIANYU_API_TOKEN").ok());
         Self {
             http,
             api_token,
@@ -97,13 +99,14 @@ impl XianyuScanner {
         let text = title.to_lowercase();
         let mut patterns = Vec::new();
 
-        // 求购类关键词
+        // 求购类关键词。P1-3 修正：移除单字「求/要/找/换」与「招/聘」——
+        // 单字在中文标题里是超高频误判源（"换电池"、"找到"、"招聘会"）
         let buy_patterns = [
-            ("demand:want_to_buy", vec!["求购", "求", "要", "想收", "找", "求收"]),
-            ("demand:custom_make", vec!["定制", "定做", "定制", "代做", "代开发", "代设计"]),
-            ("demand:service_need", vec!["代练", "代写", "代运营", "代办", "代做", "代设计"]),
-            ("demand:collaboration", vec!["合作", "合伙", "招合伙人", "招", "聘"]),
-            ("demand:swap", vec!["换", "以物换物", "置换"]),
+            ("demand:want_to_buy", vec!["求购", "想收", "求收"]),
+            ("demand:custom_make", vec!["定制", "定做", "代做", "代开发", "代设计"]),
+            ("demand:service_need", vec!["代练", "代写", "代运营", "代办"]),
+            ("demand:collaboration", vec!["合作", "合伙", "招合伙人"]),
+            ("demand:swap", vec!["以物换物", "置换"]),
         ];
 
         for (tag, keywords) in &buy_patterns {
@@ -136,10 +139,11 @@ impl XianyuScanner {
             return false;
         }
 
-        // 检查需求模式
+        // 检查需求模式。P1-3 修正：移除单字「求/换」与弱信号词「需要/帮忙/
+        // 协助/设计/开发/制作/实现」—— 后者在技术类商品描述里几乎必现，
+        // 误判率极高；只保留强需求意图词
         let demand_patterns = [
             "求购",
-            "求",
             "定制",
             "定做",
             "代做",
@@ -152,16 +156,8 @@ impl XianyuScanner {
             "合作",
             "合伙",
             "招合伙人",
-            "换",
             "以物换物",
             "置换",
-            "设计",
-            "开发",
-            "制作",
-            "实现",
-            "帮忙",
-            "协助",
-            "需要",
         ];
 
         if demand_patterns.iter().any(|p| full_text.contains(p)) {
@@ -173,53 +169,10 @@ impl XianyuScanner {
         categories.iter().any(|c| full_text.contains(c))
     }
 
-    /// 提取价格信息
+    /// 提取价格信息（实现下沉到 [`scanner_common::extract_price_text`] 共用，
+    /// 归一化层会进一步解析为预算区间）
     fn extract_price(text: &str) -> Option<String> {
-        // 简化实现：查找常见的价格格式
-        // 匹配 "数字元"、"¥数字"、"￥数字" 等格式
-
-        // 尝试匹配 "¥500" 或 "￥500" 格式
-        for prefix in ["¥", "￥"] {
-            if let Some(start) = text.find(prefix) {
-                let after = &text[start + prefix.len()..];
-                let end = after
-                    .find(|c: char| !c.is_ascii_digit() && c != '.')
-                    .map(|pos| start + prefix.len() + pos)
-                    .unwrap_or(text.len());
-                let price_str = &text[start + prefix.len()..end];
-                if !price_str.is_empty() {
-                    return Some(format!("{}{}", prefix, price_str));
-                }
-            }
-        }
-
-        // 尝试匹配 "1200元" 或 "500块" 格式
-        for suffix in ["元", "块", "毛"] {
-            if let Some(end) = text.find(suffix) {
-                // 使用字符遍历找到前面的连续数字
-                let mut chars = text[..end].chars().rev();
-                let mut num_start = end;
-                let mut found_digit = false;
-
-                for c in chars.by_ref() {
-                    if c.is_ascii_digit() || c == '.' {
-                        found_digit = true;
-                        // 计算这个字符在原始字符串中的起始位置
-                        let char_len = c.len_utf8();
-                        num_start -= char_len;
-                    } else if found_digit {
-                        break;
-                    }
-                }
-
-                if found_digit && num_start < end {
-                    let price_num = &text[num_start..end];
-                    return Some(format!("{}{}", price_num, suffix));
-                }
-            }
-        }
-
-        None
+        scanner_common::extract_price_text(text)
     }
 
     /// 提取核心需求描述
@@ -357,6 +310,11 @@ mod tests {
         // 不相关内容
         assert!(!XianyuScanner::is_demand_related("出售一台手机", ""));
         assert!(!XianyuScanner::is_demand_related("九成新，包邮", ""));
+
+        // P1-3 回归：单字「求/换」与弱信号词已移除，高频误判样本不应命中
+        assert!(!XianyuScanner::is_demand_related("换电池服务，上门安装", ""));
+        assert!(!XianyuScanner::is_demand_related("求折叠桌配件", "")); // "求" 单字不再命中
+        assert!(!XianyuScanner::is_demand_related("程序员自用键盘，成色好", ""));
     }
 
     #[test]

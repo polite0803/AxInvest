@@ -221,7 +221,15 @@ async fn scan_one_subscription(
                 "[opc_demand] 订阅扫描失败"
             );
             // 同样推进到期时间：避免失败订阅在每个 tick 被重试打爆限流
-            let _ = axagent_dao::repo::opc_demand::mark_subscription_scanned(db, &sub.id, 0).await;
+            if let Err(e) =
+                axagent_dao::repo::opc_demand::mark_subscription_scanned(db, &sub.id, 0).await
+            {
+                tracing::warn!(
+                    subscription = %sub.keyword,
+                    error = %e,
+                    "[opc_demand] 失败订阅推进到期时间失败（可能反复重扫）"
+                );
+            }
             SubscriptionScanOutcome {
                 outcome: KeywordScanOutcome {
                     subscription_id: sub.id.clone(),

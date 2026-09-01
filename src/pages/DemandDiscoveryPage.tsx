@@ -10,6 +10,7 @@ import type {
   DemandSubscription,
   DiscoverLeadsSummary,
   LeadCapabilityMatch,
+  SaveDemandLeadInput,
   SaveDemandPlatformInput,
   SaveDemandSubscriptionInput,
   ScanPolicy,
@@ -142,6 +143,8 @@ interface PlatformFormValues {
   name: string;
   platformType: string;
   baseUrl?: string;
+  /** API Token（写入 config_json.api_token，扫描器凭证三层断链修复） */
+  apiToken?: string;
   enabled: boolean;
 }
 
@@ -151,6 +154,19 @@ interface SubscriptionFormValues {
   intervalHours: number;
   minScore: number;
   platforms: string[];
+}
+
+/** 手动补录表单值（P1-4；预算与联系方式均可选） */
+interface LeadFormValues {
+  title: string;
+  description: string;
+  budgetMin?: number;
+  budgetMax?: number;
+  budgetCurrency?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  sourceUrl?: string;
 }
 
 /** 扫描策略单字段：label + 数值输入（增强项 9 的 UI 原子） */
@@ -219,6 +235,11 @@ export function DemandDiscoveryPage() {
   // ── 能力匹配（P3，给「响应」环节做判断依据）─────────────────────────
   const [capMatch, setCapMatch] = useState<LeadCapabilityMatch | null>(null);
   const [capModalOpen, setCapModalOpen] = useState(false);
+
+  // ── 手动补录（P1-4）─────────────────────────────────────────────────
+  const [leadModalOpen, setLeadModalOpen] = useState(false);
+  const [leadSaving, setLeadSaving] = useState(false);
+  const [leadForm] = Form.useForm<LeadFormValues>();
 
   // ── 扫描策略（增强项 9：并发/限流/重试/去重窗口 UI 可配置）───────────
   const [scanPolicy, setScanPolicy] = useState<ScanPolicy | null>(null);
@@ -381,6 +402,7 @@ export function DemandDiscoveryPage() {
       name: "",
       platformType: "scanner",
       baseUrl: undefined,
+      apiToken: undefined,
       enabled: true,
     });
     setModalOpen(true);
@@ -394,6 +416,9 @@ export function DemandDiscoveryPage() {
         name: row.name,
         platformType: row.platformType,
         baseUrl: row.baseUrl ?? undefined,
+        apiToken: typeof row.config?.api_token === "string" && row.config.api_token
+          ? row.config.api_token
+          : undefined,
         enabled: row.enabled,
       });
       setModalOpen(true);
@@ -410,6 +435,11 @@ export function DemandDiscoveryPage() {
       // 后端用空串表达「清空 base_url」，null/undefined 表示「不改」
       baseUrl: values.baseUrl ?? "",
       enabled: values.enabled,
+      // 凭证合并进 config_json（保留既有扩展字段）；空串 = 清除已存 token
+      config: {
+        ...(editing?.config ?? {}),
+        api_token: values.apiToken ?? "",
+      },
     };
     setSaving(true);
     try {
@@ -422,7 +452,7 @@ export function DemandDiscoveryPage() {
     } finally {
       setSaving(false);
     }
-  }, [form, loadPlatforms, message, t]);
+  }, [editing, form, loadPlatforms, message, t]);
 
   const removePlatform = useCallback(
     (row: DemandPlatform) => {
@@ -459,6 +489,39 @@ export function DemandDiscoveryPage() {
     },
     [loadPlatforms, message, t],
   );
+
+  // ── 手动补录（P1-4）─────────────────────────────────────────────────
+  const openCreateLead = useCallback(() => {
+    leadForm.resetFields();
+    leadForm.setFieldsValue({ budgetCurrency: "CNY" });
+    setLeadModalOpen(true);
+  }, [leadForm]);
+
+  const submitLead = useCallback(async () => {
+    const values = await leadForm.validateFields();
+    const input: SaveDemandLeadInput = {
+      title: values.title,
+      description: values.description,
+      budgetMin: values.budgetMin ?? null,
+      budgetMax: values.budgetMax ?? null,
+      budgetCurrency: values.budgetCurrency ?? null,
+      contactName: values.contactName ?? null,
+      contactEmail: values.contactEmail ?? null,
+      contactPhone: values.contactPhone ?? null,
+      sourceUrl: values.sourceUrl ?? null,
+    };
+    setLeadSaving(true);
+    try {
+      await invoke<DemandLead>("opc_create_lead", { input });
+      message.success(t("opc.demand.leadCreated"));
+      setLeadModalOpen(false);
+      await loadLeads();
+    } catch (e) {
+      message.error(t("opc.demand.leadCreateFailed", { error: String(e) }));
+    } finally {
+      setLeadSaving(false);
+    }
+  }, [leadForm, loadLeads, message, t]);
 
   // ── 订阅操作 ────────────────────────────────────────────────────────
   const openCreateSubscription = useCallback(() => {
@@ -1220,6 +1283,7 @@ export function DemandDiscoveryPage() {
                 >
                   {t("opc.demand.btnRefresh")}
                 </Button>
+                <Button onClick={openCreateLead}>{t("opc.demand.manualEntry")}</Button>
               </Flex>
             </Card>
           )}
@@ -1632,6 +1696,16 @@ export function DemandDiscoveryPage() {
           <Form.Item name="baseUrl" label={t("opc.demand.formBaseUrl")}>
             <Input placeholder={t("opc.demand.formBaseUrlPlaceholder")} />
           </Form.Item>
+          <Form.Item
+            name="apiToken"
+            label={t("opc.demand.formApiToken")}
+            extra={t("opc.demand.formApiTokenTip")}
+          >
+            <Input.Password
+              autoComplete="new-password"
+              placeholder={t("opc.demand.formApiTokenPlaceholder")}
+            />
+          </Form.Item>
           <Form.Item name="enabled" label={t("opc.demand.formEnabled")} valuePropName="checked">
             <Switch />
           </Form.Item>
@@ -1682,6 +1756,84 @@ export function DemandDiscoveryPage() {
               allowClear
               options={platforms.map((p) => ({ value: p.id, label: p.name }))}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={leadModalOpen}
+        title={t("opc.demand.manualEntry")}
+        okText={t("common.save")}
+        cancelText={t("common.cancel")}
+        confirmLoading={leadSaving}
+        onOk={() => void submitLead()}
+        onCancel={() => setLeadModalOpen(false)}
+        destroyOnHidden
+        width={640}
+      >
+        <Form<LeadFormValues> form={leadForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="title"
+            label={t("opc.demand.leadFormTitle")}
+            rules={[{ required: true, message: t("opc.demand.leadFormTitleRequired") }]}
+          >
+            <Input placeholder={t("opc.demand.leadFormTitlePlaceholder")} />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label={t("opc.demand.leadFormDescription")}
+            rules={[{ required: true, message: t("opc.demand.leadFormDescriptionRequired") }]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder={t("opc.demand.leadFormDescriptionPlaceholder")}
+            />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="budgetMin" label={t("opc.demand.leadFormBudgetMin")}>
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="budgetMax" label={t("opc.demand.leadFormBudgetMax")}>
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="budgetCurrency"
+                label={t("opc.demand.leadFormBudgetCurrency")}
+                initialValue="CNY"
+              >
+                <Select
+                  options={[
+                    { value: "CNY", label: "CNY (¥)" },
+                    { value: "USD", label: "USD ($)" },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="contactName" label={t("opc.demand.leadFormContactName")}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="contactEmail" label={t("opc.demand.leadFormContactEmail")}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="contactPhone" label={t("opc.demand.leadFormContactPhone")}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="sourceUrl" label={t("opc.demand.leadFormSourceUrl")}>
+            <Input placeholder={t("opc.demand.leadFormSourceUrlPlaceholder")} />
           </Form.Item>
         </Form>
       </Modal>

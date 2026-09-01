@@ -5444,6 +5444,69 @@ async function executeCommand<T>(
       return `mock-exec-${lead.id}-${Date.now()}` as unknown as T;
     }
 
+    // ── OPC 手动补录线索（P1-4）──────────────────────────────────────
+    case "opc_create_lead": {
+      const { input } = (args ?? {}) as { input?: Record<string, unknown> };
+      const title = (typeof input?.title === "string" ? input.title : "").trim();
+      const description = (typeof input?.description === "string" ? input.description : "").trim();
+      if (!title || !description) {
+        throw new Error("title 与 description 不能为空");
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const text = `${title} ${description}`.toLowerCase();
+      // 简化评分：痛点关键词命中数 × 权重，保证与扫描管线「有分」的观感一致
+      const painHits = ["难", "痛点", "慢", "费", "麻烦", "need", "frustrating", "difficult", "lack", "missing"]
+        .filter((k) => text.includes(k)).length;
+      const painScore = Math.min(100, 40 + painHits * 12);
+      const budgetMin = typeof input?.budgetMin === "number" ? input.budgetMin : null;
+      const budgetMax = typeof input?.budgetMax === "number" ? input.budgetMax : null;
+      // 有预算信号 → 预算分高；无预算 → 中性
+      const budgetScore = budgetMin !== null || budgetMax !== null ? 75 : 40;
+      const commercialValueScore = Math.round(painScore * 0.4 + budgetScore * 0.3 + 50 * 0.3);
+      const row: DemandLead = {
+        id: `lead-manual-${now}`,
+        platform: "manual",
+        title,
+        description,
+        budgetMin,
+        budgetMax,
+        budgetCurrency: typeof input?.budgetCurrency === "string" && input.budgetCurrency
+          ? input.budgetCurrency
+          : "CNY",
+        contactName: typeof input?.contactName === "string" && input.contactName
+          ? input.contactName
+          : null,
+        contactEmail: typeof input?.contactEmail === "string" && input.contactEmail
+          ? input.contactEmail
+          : null,
+        contactPhone: typeof input?.contactPhone === "string" && input.contactPhone
+          ? input.contactPhone
+          : null,
+        sourceUrl: typeof input?.sourceUrl === "string" && input.sourceUrl
+          ? input.sourceUrl
+          : null,
+        status: "new",
+        confidence: budgetMin !== null || budgetMax !== null ? 0.7 : 0.4,
+        painScore,
+        marketGapScore: 50,
+        commercialValueScore,
+        opportunityLevel: commercialValueScore >= 80
+          ? "very_high"
+          : commercialValueScore >= 60
+          ? "high"
+          : commercialValueScore >= 40
+          ? "medium"
+          : "low",
+        demandType: "custom_development",
+        linkedWorkflowId: null,
+        implementedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      MOCK_DEMAND_LEADS.push(row);
+      return { ...row } as unknown as T;
+    }
+
     // ── OPC 需求订阅（v133 定时扫描）────────────────────────────────
     case "opc_list_subscriptions":
       return [...MOCK_DEMAND_SUBSCRIPTIONS] as unknown as T;

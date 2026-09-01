@@ -78,7 +78,7 @@ export interface DemandLead {
 export interface DiscoverLeadsSummary {
   /** 本轮扫到的原始线索总数 */
   totalScanned: number;
-  /** 完成评估的线索数 */
+  /** 评估且有产出的线索数（新入库或刷新；窗口内重复跳过的不计） */
   totalEvaluated: number;
   /** 新入库数（去重后跳过的不计） */
   totalSaved: number;
@@ -86,7 +86,7 @@ export interface DiscoverLeadsSummary {
   totalRefreshed: number;
   /** 其中高价值（commercialValueScore ≥ 60）数量 */
   highValueCount: number;
-  /** 高价值线索明细（全局榜单，非本轮独有） */
+  /** 本轮高价值线索明细（最多 20 条，按分数降序） */
   leads: DemandLead[];
   /** 本轮实际扫描评估到的线索明细（订阅推送按此过滤，避免串推） */
   roundLeads: DemandLead[];
@@ -120,6 +120,21 @@ export interface SaveDemandSubscriptionInput {
   intervalHours?: number | null;
   minScore?: number | null;
   platforms?: string[] | null;
+}
+
+/** 手动补录一条需求线索的输入（与后端 SaveDemandLeadInput 对齐） */
+export interface SaveDemandLeadInput {
+  /** 必填 */
+  title: string;
+  /** 必填 */
+  description: string;
+  budgetMin?: number | null;
+  budgetMax?: number | null;
+  budgetCurrency?: string | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  sourceUrl?: string | null;
 }
 
 /** 单个订阅词的扫描结果 */

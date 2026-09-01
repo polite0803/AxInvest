@@ -22,6 +22,7 @@ use crate::tools::package_ecosystem_scanner::PackageEcosystemScanner;
 use crate::tools::product_hunt_scanner::ProductHuntScanner;
 use crate::tools::reddit_scanner::RedditScanner;
 use crate::tools::scan_policy::ScanPolicy;
+use crate::tools::scanner_common;
 use crate::tools::stackoverflow_scanner::StackOverflowScanner;
 use crate::tools::twitter_scanner::TwitterScanner;
 use crate::tools::upwork_scanner::UpworkScanner;
@@ -313,11 +314,33 @@ fn collect_engagement_numbers(value: &serde_json::Value, depth: usize) -> Vec<f6
     found
 }
 
-/// 按平台名返回内置扫描器实例
+/// 从平台配置中提取 API Token（空串视为未配置）
+///
+/// DB `config_json.api_token` 优先；各扫描器的 `with_config` 内部在
+/// token 为 None 时再回退读环境变量。
+fn config_token(config: &serde_json::Value) -> Option<String> {
+    config
+        .get("api_token")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(String::from)
+}
+
+/// 按平台名返回内置扫描器实例（带凭证与端点透传）
 ///
 /// 平台名与各扫描器 `platform()` 返回值一致；无匹配时返回 `None`，
 /// 由调用方决定回退策略（如手动补录）。
-fn builtin_scanner_for(platform: &str) -> Option<Box<dyn MarketplaceScanner>> {
+///
+/// 凭证来源优先级：`config.api_token`（前端平台配置）> 环境变量（各扫描器
+/// `with_config` 内部兜底）。`base_url` 来自 DB 平台配置，覆盖扫描器默认端点。
+/// 此前本函数不接收任何配置，DB/前端配的 token 全被扔掉，桌面 GUI 进程
+/// 几乎不带环境变量 → 11 个需凭证平台永远「合规跳过」。
+fn builtin_scanner_for(
+    platform: &str,
+    base_url: Option<&str>,
+    config: &serde_json::Value,
+) -> Option<Box<dyn MarketplaceScanner>> {
     use super::{
         arxiv_scanner::ArxivScanner, csdn_scanner::CsdnScanner, dribbble_scanner::DribbbleScanner,
         github_discussions_scanner::GitHubDiscussionsScanner,
@@ -329,31 +352,39 @@ fn builtin_scanner_for(platform: &str) -> Option<Box<dyn MarketplaceScanner>> {
         upwork_scanner::UpworkScanner, xianyu_scanner::XianyuScanner, zhihu_scanner::ZhihuScanner,
         zhubajie_scanner::ZhubajieScanner,
     };
+    let token = config_token(config);
+    let base = base_url.map(str::to_string);
     let scanner: Box<dyn MarketplaceScanner> = match platform {
+        // 免费公开 API，无需凭证；端点固定，不透传配置
         "arxiv" => Box::new(ArxivScanner::new()),
+        "hackernews" => Box::new(HackerNewsScanner::new()),
+        "package_ecosystem" => Box::new(PackageEcosystemScanner::new()),
+        "reddit" => Box::new(RedditScanner::new()),
         "csdn" => Box::new(CsdnScanner::csdn()),
         "juejin" => Box::new(CsdnScanner::juejin()),
-        "dribbble" => Box::new(DribbbleScanner::new()),
-        "github_issue" => Box::new(GitHubIssueScanner::new()),
-        "github_discussion" => Box::new(GitHubDiscussionsScanner::new()),
-        "hackernews" => Box::new(HackerNewsScanner::new()),
-        "huggingface" => Box::new(HuggingFaceScanner::new()),
-        "linkedin" => Box::new(LinkedInScanner::new()),
-        "package_ecosystem" => Box::new(PackageEcosystemScanner::new()),
-        "producthunt" => Box::new(ProductHuntScanner::new()),
-        "reddit" => Box::new(RedditScanner::new()),
-        "stackoverflow" => Box::new(StackOverflowScanner::new()),
-        "twitter" => Box::new(TwitterScanner::new()),
-        "upwork" => Box::new(UpworkScanner::new()),
-        "xianyu" => Box::new(XianyuScanner::new()),
-        "zhihu" => Box::new(ZhihuScanner::new()),
-        "zhubajie" => Box::new(ZhubajieScanner::new()),
+        // 可选/必需凭证平台：透传 config token + base_url
+        "dribbble" => Box::new(DribbbleScanner::with_config(token, base)),
+        "github_issue" => Box::new(GitHubIssueScanner::with_config(token, base)),
+        "github_discussion" => Box::new(GitHubDiscussionsScanner::with_config(token, base)),
+        "huggingface" => Box::new(HuggingFaceScanner::with_config(token, base)),
+        "linkedin" => Box::new(LinkedInScanner::with_config(token, base)),
+        "producthunt" => Box::new(ProductHuntScanner::with_config(token, base)),
+        "stackoverflow" => Box::new(StackOverflowScanner::with_config(token, base)),
+        "twitter" => Box::new(TwitterScanner::with_config(token, base)),
+        "upwork" => Box::new(UpworkScanner::with_config(token, base)),
+        "xianyu" => Box::new(XianyuScanner::with_config(token, base)),
+        "zhihu" => Box::new(ZhihuScanner::with_config(token, base)),
+        "zhubajie" => Box::new(ZhubajieScanner::with_config(token, base)),
         _ => return None,
     };
     Some(scanner)
 }
 
 /// 需求类型分类（关键词启发式）
+///
+/// P1-3 修正：旧实现单关键词命中即返回且"外包"排最前，几乎一切含
+/// "开发"的长文本都被错分为 Outsourcing。现在按各类别**命中数**择优，
+/// 平分时保持规则表优先级序。
 fn classify_demand(text: &str) -> DemandType {
     let rules: &[(DemandType, &[&str])] = &[
         (DemandType::Outsourcing, &["外包", "outsourc", "freelance", "兼职", "接单"]),
@@ -367,12 +398,18 @@ fn classify_demand(text: &str) -> DemandType {
         (DemandType::EnterpriseService, &["企业", "enterprise", "erp", "crm", "数字化"]),
         (DemandType::Consulting, &["咨询", "consult", "顾问", "方案"]),
     ];
+    let mut best: Option<(&DemandType, usize)> = None;
     for (demand_type, keywords) in rules {
-        if keywords.iter().any(|k| text.contains(k)) {
-            return demand_type.clone();
+        let hits = keywords.iter().filter(|k| text.contains(*k)).count();
+        if hits == 0 {
+            continue;
+        }
+        match best {
+            Some((_, n)) if n >= hits => {},
+            _ => best = Some((demand_type, hits)),
         }
     }
-    DemandType::Unknown
+    best.map(|(t, _)| t.clone()).unwrap_or(DemandType::Unknown)
 }
 
 /// 评估单条需求线索
@@ -427,35 +464,6 @@ pub fn evaluate_lead_with_competitors(
     }
 }
 
-/// 兼容旧签名：按 (id, 标题, 描述, 已知竞品数) 评估
-///
-/// 无 [`DemandLead`] 时使用；有完整线索时应优先调用 [`evaluate_lead`]，
-/// 否则预算与热度因子会退化为兜底值。
-fn evaluate_demand_value(
-    demand_id: &str,
-    title: &str,
-    description: &str,
-    known_competitors: Option<u32>,
-) -> DemandEvaluation {
-    let lead = DemandLead {
-        id: demand_id.to_string(),
-        platform: "unknown".to_string(),
-        title: title.to_string(),
-        description: description.to_string(),
-        budget_min: None,
-        budget_max: None,
-        budget_currency: "CNY".to_string(),
-        contact_name: None,
-        contact_email: None,
-        contact_phone: None,
-        source_url: None,
-        raw_snapshot: serde_json::Value::Null,
-        status: "new".to_string(),
-        confidence: 0.0,
-    };
-    evaluate_lead_with_competitors(&lead, known_competitors)
-}
-
 // ── DTO 定义 ──────────────────────────────────────────────────
 
 /// 原始线索（平台返回的原始数据，未经归一化）
@@ -489,32 +497,63 @@ pub struct DemandLead {
     pub raw_snapshot: serde_json::Value,
     pub status: String,
     pub confidence: f64,
+    /// 内容指纹（标题+描述归一化哈希）：去重主键。
+    /// 旧键 `(platform, source_url)` 在所有线索共享同一搜索页 URL 的平台
+    /// （闲鱼等）上会把一轮线索压成 1 条 —— 指纹只看内容，与 URL 无关。
+    pub content_fingerprint: Option<String>,
 }
 
 impl DemandLead {
     pub fn new_from_raw(raw: RawLead) -> Self {
         let id = format!("{}_{}", raw.platform, uuid::Uuid::new_v4().simple());
+        // 预算：从价格文本解析（此前恒为 None，预算因子空转 —— P0-2）
+        let (budget_min, budget_max, budget_currency) =
+            parse_budget_info(raw.price_text.as_deref());
+        // 联系方式：结构化字段缺失时对 title+description 兜底提取（此前恒 None —— P0-4）
+        let mut contact_email = raw.contact_email;
+        let mut contact_phone = raw.contact_phone;
+        let mut snapshot = raw.snapshot;
+        if contact_email.is_none() || contact_phone.is_none() {
+            let text = format!("{} {}", raw.title, raw.description);
+            let extracted = scanner_common::extract_contacts(&text);
+            if contact_email.is_none() {
+                contact_email = extracted.email.clone();
+            }
+            if contact_phone.is_none() {
+                contact_phone = extracted.phone.clone();
+            }
+            // 微信号不进 phone 字段（语义污染）：落到快照的 contact_wechat。
+            // 快照为 Null 时升级为空对象（否则 as_object_mut 拿 None，微信丢失）
+            if let Some(wechat) = extracted.wechat {
+                if snapshot.is_null() {
+                    snapshot = serde_json::json!({});
+                }
+                if let Some(obj) = snapshot.as_object_mut() {
+                    obj.entry("contact_wechat".to_string())
+                        .or_insert(serde_json::Value::String(wechat));
+                }
+            }
+        }
+        // 内容指纹：去重键（P0-5）。同一条需求换个 URL 重发也能被识别。
+        // 先于 Self 构造计算 —— title/description 随后 move 进结构体
+        let content_fingerprint = scanner_common::content_fingerprint(&raw.title, &raw.description);
         Self {
             id,
             platform: raw.platform,
             title: raw.title,
             description: raw.description,
-            budget_min: None,
-            budget_max: None,
-            budget_currency: "CNY".to_string(),
+            budget_min,
+            budget_max,
+            budget_currency,
             contact_name: raw.contact,
-            contact_email: raw.contact_email,
-            contact_phone: raw.contact_phone,
+            contact_email,
+            contact_phone,
             source_url: Some(raw.url),
-            raw_snapshot: raw.snapshot,
+            raw_snapshot: snapshot,
             status: "new".to_string(),
             confidence: 0.0,
+            content_fingerprint,
         }
-    }
-
-    /// 将线索转换为评估请求
-    pub fn to_evaluation_input(&self) -> (String, String, String) {
-        (self.id.clone(), self.title.clone(), self.description.clone())
     }
 }
 
@@ -624,6 +663,33 @@ impl RateGate {
     }
 }
 
+/// 进程级共享速率闸门（P1-5）
+///
+/// 闸门必须跨扫描调用共享：订阅扫描逐词新建聚合扫描器，闸门若随扫描器
+/// 重建，N 个订阅词 = N 倍真实请求速率，`rate_limit_per_min` 名存实亡。
+/// 限流保护的是外部 API 配额，进程全局共享才是正确语义；间隔配置变更时
+/// 重建闸门（旧预约时刻作废可接受）。不限速时返回空闸门，不占共享槽。
+/// 共享闸门槽：`(配置的请求间隔, 闸门实例)`
+type SharedGateSlot = Option<(Duration, std::sync::Arc<RateGate>)>;
+static SHARED_RATE_GATE: std::sync::OnceLock<tokio::sync::Mutex<SharedGateSlot>> =
+    std::sync::OnceLock::new();
+
+async fn shared_rate_gate(min_interval: Option<Duration>) -> std::sync::Arc<RateGate> {
+    let Some(interval) = min_interval else {
+        return std::sync::Arc::new(RateGate::new(None));
+    };
+    let cell = SHARED_RATE_GATE.get_or_init(|| tokio::sync::Mutex::new(None));
+    let mut guard = cell.lock().await;
+    match guard.as_ref() {
+        Some((configured, gate)) if *configured == interval => gate.clone(),
+        _ => {
+            let gate = std::sync::Arc::new(RateGate::new(Some(interval)));
+            *guard = Some((interval, gate.clone()));
+            gate
+        },
+    }
+}
+
 /// 带超时与指数退避重试的单平台搜索
 ///
 /// 返回 `(线索, 失败原因, 尝试次数, 是否合规跳过)`。
@@ -648,6 +714,17 @@ async fn search_with_retry(
             Ok(Err(e)) => {
                 if e == crate::tools::scanner_common::NO_CREDENTIAL_SKIP_REASON {
                     return (Vec::new(), None, attempts, true);
+                }
+                // P2-3：非网络类错误（401 配置错误、400 参数错误、JSON 解析
+                // 失败等）结果确定，重试只会放大无效请求 —— 立即失败
+                if !is_network_env_error(&e) {
+                    tracing::warn!(
+                        platform = scanner.platform(),
+                        attempt = attempts,
+                        error = %e,
+                        "[search_with_retry] 非网络类错误，不重试"
+                    );
+                    return (Vec::new(), Some(e), attempts, false);
                 }
                 if attempts > policy.retry_max {
                     return (Vec::new(), Some(e), attempts, false);
@@ -763,7 +840,7 @@ impl AggregateMarketplaceScanner {
             "api" => {
                 self.add_scanner(Box::new(ApiMarketplaceScanner::new(platform, base_url, config)));
             },
-            "scanner" => match builtin_scanner_for(platform) {
+            "scanner" => match builtin_scanner_for(platform, base_url, config) {
                 Some(s) => self.add_scanner(s),
                 None => {
                     tracing::warn!(
@@ -776,7 +853,21 @@ impl AggregateMarketplaceScanner {
                 },
             },
             "mock" => {
-                self.add_scanner(Box::new(MockMarketplaceScanner::new(platform)));
+                // P2-4：mock 连接器只进调试构建，或配置显式 allow_mock ——
+                // 否则误配 "mock" 类型会把 3 条假线索真实入库（占去重键、污染统计）
+                let allowed = cfg!(debug_assertions)
+                    || config.get("allow_mock").and_then(|v| v.as_bool()).unwrap_or(false);
+                if allowed {
+                    self.add_scanner(Box::new(MockMarketplaceScanner::new(platform)));
+                } else {
+                    tracing::warn!(
+                        platform = platform,
+                        "[AggregateMarketplaceScanner] mock 连接器已在生产配置下禁用，回退为手动补录"
+                    );
+                    self.add_scanner(Box::new(ManualMarketplaceScanner::new(
+                        platform, base_url, config,
+                    )));
+                }
             },
             _ => self
                 .add_scanner(Box::new(ManualMarketplaceScanner::new(platform, base_url, config))),
@@ -796,7 +887,8 @@ impl AggregateMarketplaceScanner {
         // normalized() 按值接收 self，&self 方法里需先 clone 字段
         let policy = self.policy.clone().normalized();
         let concurrency = policy.concurrency();
-        let gate = Arc::new(RateGate::new(policy.min_request_interval()));
+        // 共享进程级闸门：多次扫描调用（订阅逐词扫描）共用同一个预约时刻轴
+        let gate = shared_rate_gate(policy.min_request_interval()).await;
 
         let enabled: Vec<&Box<dyn MarketplaceScanner>> = self
             .scanners
@@ -876,12 +968,15 @@ impl AggregateMarketplaceScanner {
             .into_iter()
             .map(|r| PlatformEvaluatedResult {
                 platform: r.platform,
+                // 直接评估完整 lead：预算与热度快照参与评分。
+                // 旧实现走 `to_evaluation_input()` 重建假 lead（budget=None /
+                // snapshot=Null），四因子只有痛点真实生效，全库分数被压到 ≤59，
+                // very_high/high 档与订阅推送（min_score=60）永不可达。
                 leads: r
                     .leads
                     .into_iter()
                     .map(|lead| {
-                        let (id, title, desc) = lead.to_evaluation_input();
-                        let evaluation = evaluate_demand_value(&id, &title, &desc, None);
+                        let evaluation = evaluate_lead(&lead);
                         EvaluatedDemandLead::new(lead, evaluation)
                     })
                     .collect(),
@@ -929,15 +1024,20 @@ impl AggregateMarketplaceScanner {
     }
 
     /// 对已有线索进行批量评估
+    ///
+    /// 与 [`Self::search_and_evaluate`] 行为对齐：结果按价值分降序。
     pub fn evaluate_leads(&self, leads: Vec<DemandLead>) -> Vec<EvaluatedDemandLead> {
-        leads
+        let mut evaluated: Vec<EvaluatedDemandLead> = leads
             .into_iter()
             .map(|lead| {
-                let (id, title, desc) = lead.to_evaluation_input();
-                let evaluation = evaluate_demand_value(&id, &title, &desc, None);
+                let evaluation = evaluate_lead(&lead);
                 EvaluatedDemandLead::new(lead, evaluation)
             })
-            .collect()
+            .collect();
+        evaluated.sort_by(|a, b| {
+            b.value_score().partial_cmp(&a.value_score()).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        evaluated
     }
 }
 
@@ -1101,7 +1201,8 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
             "[ApiMarketplaceScanner] 发起官方 API 请求"
         );
 
-        let resp = if self.http_method == "post" {
+        // P2-6：方法名大小写不敏感（配置写 "POST" 旧实现会静默降级 GET）
+        let resp = if self.http_method.eq_ignore_ascii_case("post") {
             let body = serde_json::json!({
                 &self.query_param: q,
             });
@@ -1113,7 +1214,14 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
                 .await
                 .map_err(|e| format!("POST 请求失败: {}", e))?
         } else {
-            let full_url = format!("{}?{}={}", url, self.query_param, q);
+            // P2-1：查询串必须走 encode_query —— 手拼 "?{}={}" 在 q 含
+            // `&`/`#`/空格时会被截断或注入额外参数
+            let full_url = format!(
+                "{}?{}={}",
+                url,
+                scanner_common::encode_query(&self.query_param),
+                scanner_common::encode_query(q)
+            );
             client
                 .get(&full_url)
                 .header(&auth_key, &auth_value)
@@ -1140,8 +1248,16 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
 
         let body = resp.text().await.map_err(|e| format!("响应体读取失败: {}", e))?;
 
-        let parsed: serde_json::Value =
-            serde_json::from_str(&body).unwrap_or(serde_json::json!([]));
+        // P2-2：解析失败必须报错而非吞成空数组 —— 接口挂了应触发重试与
+        // 平台失败状态，而不是伪装成"没需求"
+        let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+            tracing::warn!(
+                platform = self.platform,
+                error = %e,
+                "[ApiMarketplaceScanner] 响应不是合法 JSON"
+            );
+            format!("响应 JSON 解析失败: {e}")
+        })?;
 
         // 解析响应数据：支持 { "data": [...] } / { "results": [...] } / 直接数组
         let items = if let Some(arr) = parsed.as_array() {
@@ -1185,12 +1301,15 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
                 .unwrap_or("")
                 .to_string();
 
-            let price_text = item
-                .get("price")
-                .and_then(|v| v.as_str())
-                .or_else(|| item.get("budget").and_then(|v| v.as_str()))
-                .or_else(|| item.get("price_text").and_then(|v| v.as_str()))
-                .map(|s| s.to_string());
+            // 提取价格：字符串与数字均接受（数字型 price 此前被 as_str 丢弃）
+            let price_field = |keys: &[&str]| -> Option<String> {
+                keys.iter().find_map(|key| {
+                    item.get(*key).and_then(|v| {
+                        v.as_str().map(str::to_string).or_else(|| v.as_f64().map(|n| n.to_string()))
+                    })
+                })
+            };
+            let price_text = price_field(&["price", "budget", "price_text"]);
 
             let contact = item
                 .get("contact_name")
@@ -1215,15 +1334,27 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
                 .map(|s| s.to_string())
                 .or_else(|| extract_email_from_text(&description));
 
-            // 提取电话：尝试多个常见字段名
+            // 提取电话：只接受真正的电话字段；微信号单独归档到快照的
+            // contact_wechat（旧实现把 wechat 塞进 phone 字段，语义污染）
             let contact_phone = item
                 .get("contact_phone")
                 .and_then(|v| v.as_str())
                 .or_else(|| item.get("phone").and_then(|v| v.as_str()))
                 .or_else(|| item.get("mobile").and_then(|v| v.as_str()))
                 .or_else(|| item.get("tel").and_then(|v| v.as_str()))
-                .or_else(|| item.get("wechat").and_then(|v| v.as_str()))
                 .map(|s| s.to_string());
+
+            let mut snapshot = item.clone();
+            if let Some(wechat) = item
+                .get("wechat")
+                .and_then(|v| v.as_str())
+                .or_else(|| item.get("weixin").and_then(|v| v.as_str()))
+                .filter(|s| !s.trim().is_empty())
+                && let Some(obj) = snapshot.as_object_mut()
+            {
+                obj.entry("contact_wechat".to_string())
+                    .or_insert(serde_json::Value::String(wechat.to_string()));
+            }
 
             leads.push(RawLead {
                 platform: self.platform.to_string(),
@@ -1234,7 +1365,7 @@ impl MarketplaceScanner for ApiMarketplaceScanner {
                 contact,
                 contact_email,
                 contact_phone,
-                snapshot: item.clone(),
+                snapshot,
             });
         }
 
@@ -1302,12 +1433,14 @@ impl MarketplaceScanner for MockMarketplaceScanner {
             RawLead {
                 platform: self.platform.to_string(),
                 title: format!("微信小程序开发 - 预约系统 (关键词: {})", q),
-                description: "开发一个微信小程序，用户可以在线预约服务、查看订单、支付。管理员后台管理预约。".to_string(),
+                // 微信号写在描述文本里，由归一化层提取进快照 contact_wechat，
+                // 不再塞进 phone 字段（微信号不是电话）
+                description: "开发一个微信小程序，用户可以在线预约服务、查看订单、支付。管理员后台管理预约。微信号：wangzhuren_biz".to_string(),
                 url: "https://example.com/lead/3".to_string(),
                 price_text: Some("20000-30000元".to_string()),
                 contact: Some("王主任".to_string()),
                 contact_email: None,
-                contact_phone: Some("微信: wangzhuren_biz".to_string()),
+                contact_phone: None,
                 snapshot: serde_json::json!({
                     "source": "mock",
                     "category": "mini_program",
@@ -1356,80 +1489,45 @@ impl MarketplaceScanner for ManualMarketplaceScanner {
 
 // ── 工具函数 ──────────────────────────────────────────────────
 
+/// 从价格文本解析预算区间与币种
+///
+/// 支持的格式（见 [`scanner_common::parse_price_range`]）：
+/// `"8000-15000元"` / `"¥500"` / `"2万"` / 数字字符串。
+/// 无法解析时预算为 None（评分引擎回退 [`BUDGET_FALLBACK_SCORE`]）。
+fn parse_budget_info(price_text: Option<&str>) -> (Option<f64>, Option<f64>, String) {
+    let Some(text) = price_text.map(str::trim).filter(|t| !t.is_empty()) else {
+        return (None, None, "CNY".to_string());
+    };
+    let currency = if text.contains('$') || text.to_lowercase().contains("usd") {
+        "USD"
+    } else {
+        "CNY"
+    };
+    match scanner_common::parse_price_range(text) {
+        Some((min, max)) => (Some(min), Some(max), currency.to_string()),
+        None => (None, None, "CNY".to_string()),
+    }
+}
+
 /// 从文本中提取邮箱地址
 ///
-/// 使用简单的正则匹配模式，尝试从描述文本中提取邮箱。
-/// 这是一个辅助手段，主要依赖 API 返回的结构化字段。
+/// 简单兜底手段，主要依赖 API 返回的结构化字段。
 fn extract_email_from_text(text: &str) -> Option<String> {
-    // 匹配常见邮箱格式：xxx@yyy.zzz
-    let email_patterns = [
-        // 带 @ 的标准邮箱
-        r"[\w.+-]+@[\w-]+\.[\w.-]+",
-    ];
-
-    for pattern in email_patterns {
-        if let Some(captures) = regex_find(text, pattern) {
-            return Some(captures);
-        }
-    }
-    None
+    scanner_common::extract_email_from_text(text)
 }
 
-/// 简单的正则查找（不依赖 regex crate）
+/// 判断错误是否为网络环境问题（可重试）
 ///
-/// 注意：这里使用简化的字符串匹配，仅作为兜底方案。
-/// 如果需要更完善的正则支持，建议引入 regex crate。
-fn regex_find(text: &str, pattern: &str) -> Option<String> {
-    // 简单实现：检查是否包含 @ 符号的文本
-    if pattern.contains('@') {
-        // 查找包含 @ 的子串
-        let bytes = text.as_bytes();
-        for (i, &byte) in bytes.iter().enumerate() {
-            if byte == b'@' {
-                // 向前找用户名部分
-                let mut start = i;
-                while start > 0
-                    && (bytes[start - 1].is_ascii_alphanumeric()
-                        || bytes[start - 1] == b'.'
-                        || bytes[start - 1] == b'+'
-                        || bytes[start - 1] == b'-'
-                        || bytes[start - 1] == b'_')
-                {
-                    start -= 1;
-                }
-
-                // 向后找域名部分
-                let mut end = i + 1;
-                while end < bytes.len()
-                    && (bytes[end].is_ascii_alphanumeric()
-                        || bytes[end] == b'.'
-                        || bytes[end] == b'-'
-                        || bytes[end] == b'_')
-                {
-                    end += 1;
-                }
-
-                if end > start && end - start > 5 {
-                    // 确保有域名后缀
-                    let email = &text[start..end];
-                    if email.contains('.') {
-                        return Some(email.to_string());
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// 判断错误是否为网络环境问题（网络集成测试专用）
-///
-/// 覆盖两类环境性失败，用于网络集成测试「离线/CI 网络不可达或服务端限流时跳过」：
+/// 覆盖两类环境性失败：
 /// - 网络层错误（连接失败、DNS 解析失败、超时等，来自 reqwest 等）
 /// - HTTP 限流/服务端错误（429 限流、403 拒绝、5xx 临时故障）
 ///
+/// 两个消费方：
+/// - [`search_with_retry`]：仅网络类错误才重试，401/400/参数错误等确定性
+///   失败立即返回，避免放大无效请求（P2-3）
+/// - 网络集成测试：「离线/CI 网络不可达或服务端限流时跳过」
+///
 /// 注意：不匹配 4xx 中的其他错误（如 400），避免掩盖请求构造类的真实逻辑缺陷。
-#[cfg(test)]
 pub(crate) fn is_network_env_error(err: &str) -> bool {
     let err_lower = err.to_lowercase();
 
@@ -1630,6 +1728,7 @@ mod tests {
             raw_snapshot: serde_json::Value::Null,
             status: "new".to_string(),
             confidence: 0.0,
+            content_fingerprint: None,
         }];
 
         let evaluated = scanner.evaluate_leads(leads);
@@ -1654,13 +1753,146 @@ mod tests {
             raw_snapshot: serde_json::Value::Null,
             status: "new".to_string(),
             confidence: 0.0,
+            content_fingerprint: None,
         };
 
-        let evaluation = evaluate_demand_value("test", "Test", "Description", None);
+        let evaluation = evaluate_lead(&lead);
 
         let evaluated = EvaluatedDemandLead::new(lead, evaluation);
         assert!(evaluated.value_score() >= 0.0);
         assert!(!evaluated.opportunity_level().is_empty());
+    }
+
+    /// 回归测试（P0-1）：真实 lead 评估 vs 旧「假 lead」评估分数必须不同。
+    ///
+    /// 旧实现把 lead 拆成 (id, title, desc) 再重建 budget=None / snapshot=Null
+    /// 的假 lead，预算与热度因子恒为兜底值，全库分数被压到 ≤59，
+    /// very_high(≥80)/high(≥60) 档与订阅推送（min_score=60）永不可达。
+    #[test]
+    fn test_evaluate_lead_uses_budget_and_engagement() {
+        let rich_lead = DemandLead {
+            id: "rich".to_string(),
+            platform: "test".to_string(),
+            title: "急需 崩溃 deadline 企业官网开发".to_string(),
+            description: "项目延期，预算 10 万，紧急找团队".to_string(),
+            budget_min: Some(80_000.0),
+            budget_max: Some(100_000.0),
+            budget_currency: "CNY".to_string(),
+            contact_name: None,
+            contact_email: None,
+            contact_phone: None,
+            source_url: None,
+            raw_snapshot: serde_json::json!({ "score": 1000 }),
+            status: "new".to_string(),
+            confidence: 0.0,
+            content_fingerprint: None,
+        };
+        let bare_lead = DemandLead {
+            budget_min: None,
+            budget_max: None,
+            raw_snapshot: serde_json::Value::Null,
+            ..rich_lead.clone()
+        };
+
+        let rich_score = evaluate_lead(&rich_lead).commercial_value_score();
+        let bare_score = evaluate_lead(&bare_lead).commercial_value_score();
+
+        // 预算与热度因子真实生效：富 lead 分数显著高于裸 lead
+        assert!(rich_score > bare_score, "rich={rich_score} 应大于 bare={bare_score}");
+        // 富 lead 应可达到 high 档（≥60）—— 旧实现全库上限 59，永不可达
+        assert!(rich_score >= 60.0, "富 lead 分数 {rich_score} 应达到 high 档(≥60)");
+    }
+
+    /// 回归测试（P0-2）：price_text 在归一化时解析为预算，不再丢弃
+    #[test]
+    fn test_new_from_raw_parses_price_text() {
+        let raw = RawLead {
+            platform: "test".to_string(),
+            title: "定制开发".to_string(),
+            description: "需要一个小程序".to_string(),
+            url: "https://example.com".to_string(),
+            price_text: Some("8000-15000元".to_string()),
+            contact: None,
+            contact_email: None,
+            contact_phone: None,
+            snapshot: serde_json::Value::Null,
+        };
+        let lead = DemandLead::new_from_raw(raw);
+        assert_eq!(lead.budget_min, Some(8000.0));
+        assert_eq!(lead.budget_max, Some(15000.0));
+        assert_eq!(lead.budget_currency, "CNY");
+
+        // 单值价格
+        let raw = RawLead {
+            price_text: Some("¥500".to_string()),
+            ..RawLead {
+                platform: "test".to_string(),
+                title: "t".to_string(),
+                description: String::new(),
+                url: String::new(),
+                price_text: None,
+                contact: None,
+                contact_email: None,
+                contact_phone: None,
+                snapshot: serde_json::Value::Null,
+            }
+        };
+        let lead = DemandLead::new_from_raw(raw);
+        assert_eq!(lead.budget_min, Some(500.0));
+        assert_eq!(lead.budget_max, Some(500.0));
+    }
+
+    /// 回归测试（P0-4）：归一化时对 title+description 兜底提取联系方式；
+    /// 微信号单独归档，不进 phone 字段
+    #[test]
+    fn test_new_from_raw_extracts_contacts() {
+        let raw = RawLead {
+            platform: "test".to_string(),
+            title: "找人做官网".to_string(),
+            description: "请联系 zhang@example.com，电话 13800138000，微信：wang_biz123"
+                .to_string(),
+            url: "https://example.com".to_string(),
+            price_text: None,
+            contact: None,
+            contact_email: None,
+            contact_phone: None,
+            snapshot: serde_json::Value::Null,
+        };
+        let lead = DemandLead::new_from_raw(raw);
+        assert_eq!(lead.contact_email.as_deref(), Some("zhang@example.com"));
+        assert_eq!(lead.contact_phone.as_deref(), Some("13800138000"));
+        let wechat =
+            lead.raw_snapshot.get("contact_wechat").and_then(|v| v.as_str()).unwrap_or_default();
+        assert_eq!(wechat, "wang_biz123");
+    }
+
+    /// 回归测试（P0-5）：相同内容的线索生成稳定指纹，不同内容指纹不同
+    #[test]
+    fn test_new_from_raw_content_fingerprint() {
+        let make = |title: &str, desc: &str, url: &str| {
+            DemandLead::new_from_raw(RawLead {
+                platform: "test".to_string(),
+                title: title.to_string(),
+                description: desc.to_string(),
+                url: url.to_string(),
+                price_text: None,
+                contact: None,
+                contact_email: None,
+                contact_phone: None,
+                snapshot: serde_json::Value::Null,
+            })
+        };
+        // 同内容不同 URL（换链接重发）→ 指纹一致，可被去重
+        let a = make("求购二手相机", "成色好", "https://a.com/1");
+        let b = make("求购二手相机", "成色好", "https://a.com/2");
+        assert_eq!(a.content_fingerprint, b.content_fingerprint);
+        assert!(a.content_fingerprint.is_some());
+        // 不同内容 → 指纹不同
+        let c = make("出售二手相机", "成色好", "https://a.com/1");
+        assert_ne!(a.content_fingerprint, c.content_fingerprint);
+        // 空内容 → 无指纹（不参与去重）
+        let empty = make("", "", "https://a.com/3");
+        assert!(empty.content_fingerprint.is_none());
     }
 
     #[test]
@@ -1705,5 +1937,48 @@ mod tests {
         assert_eq!(lead.contact_name, Some("张三".to_string()));
         assert_eq!(lead.contact_email, Some("zhangsan@example.com".to_string()));
         assert_eq!(lead.contact_phone, Some("13800000000".to_string()));
+    }
+
+    /// P1-3 回归：分类按命中数择优，平分才按规则表优先级
+    #[test]
+    fn test_classify_demand_prefers_most_hits() {
+        use super::{DemandType, classify_demand};
+        // 平分（外包 1 : 开发 1）→ 规则表优先级，Outsourcing 在前
+        assert_eq!(classify_demand("外包开发一套系统"), DemandType::Outsourcing);
+        // 旧实现会把这句错分为 Outsourcing（单关键词短路 + 外包排最前）
+        assert_eq!(classify_demand("定制开发一个小程序"), DemandType::Development);
+        assert_eq!(classify_demand("需要一个 ui 设计和 logo 设计"), DemandType::Design);
+        assert_eq!(classify_demand("全新未拆封商品"), DemandType::Unknown);
+    }
+
+    /// P2-3 回归：非网络类错误不重试，网络类错误重试至 retry_max
+    struct FailingScanner {
+        err: String,
+    }
+
+    #[async_trait::async_trait]
+    impl MarketplaceScanner for FailingScanner {
+        fn platform(&self) -> String {
+            "failing".to_string()
+        }
+        async fn search(&self, _q: &str) -> Result<Vec<RawLead>, String> {
+            Err(self.err.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_search_with_retry_skips_non_network_errors() {
+        let policy = ScanPolicy { retry_max: 2, ..ScanPolicy::default() };
+
+        let s = FailingScanner { err: "API 返回状态码 401: Unauthorized".to_string() };
+        let (leads, err, attempts, skipped) = search_with_retry(&s, "q", &policy).await;
+        assert!(leads.is_empty());
+        assert!(err.is_some());
+        assert!(!skipped);
+        assert_eq!(attempts, 1, "非网络类错误不应重试");
+
+        let s = FailingScanner { err: "API 返回状态码 429: Too Many Requests".to_string() };
+        let (_, _, attempts, _) = search_with_retry(&s, "q", &policy).await;
+        assert_eq!(attempts, 3, "网络类错误应重试至 retry_max（1 次首发 + 2 次重试）");
     }
 }

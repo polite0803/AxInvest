@@ -17,9 +17,12 @@ use crate::AppState;
 use crate::commands::error_code::common as common_err;
 use crate::commands::error_code::opc_setup as opc_setup_err;
 use axagent_harness::types::{
-    DemandLeadDto, DemandPlatform, DiscoverLeadsSummary, SaveDemandPlatformInput,
+    DemandLeadDto, DemandPlatform, DiscoverLeadsSummary, SaveDemandLeadInput,
+    SaveDemandPlatformInput,
 };
-use axagent_tools::tools::marketplace_scanner::{AggregateMarketplaceScanner, EvaluatedDemandLead};
+use axagent_tools::tools::marketplace_scanner::{
+    AggregateMarketplaceScanner, DemandLead, EvaluatedDemandLead, RawLead, evaluate_lead,
+};
 use axagent_tools::tools::scan_policy::{SCAN_POLICY_SETTING_KEY, ScanPolicy};
 use tauri::State;
 
@@ -171,7 +174,7 @@ pub(crate) async fn run_discovery_for_query(
     // 本轮实际评估到的线索 ID（用于回填 round_leads，供订阅按 min_score 推送）
     let mut round_ids: Vec<String> = Vec::new();
 
-    for result in results {
+    'outer: for result in results {
         platform_status.push((
             result.platform.clone(),
             result.error.is_none(),
@@ -188,23 +191,33 @@ pub(crate) async fn run_discovery_for_query(
         }
 
         for evaluated in result.leads {
+            // max_leads 截断必须终止整轮扫描：旧实现只 break 单平台循环，
+            // 后续平台照扫照耗请求配额（P1-5）
             if summary.total_scanned as usize >= max_leads {
-                break;
+                break 'outer;
             }
             summary.total_scanned += 1;
+            // 计数口径（P1-5）：Skipped（窗口内重复）不算评估产出 —— 否则
+            // total_evaluated ≫ 实际入库量，摘要失真；round_leads 只含真实
+            // 入库/刷新的线索，订阅推送也不会把窗口内重复再推一遍。
             match persist_evaluated(db, &evaluated, dedup_window_secs).await? {
                 axagent_dao::repo::opc_demand::LeadWriteOutcome::Inserted => {
                     summary.total_saved += 1;
+                    summary.total_evaluated += 1;
+                    round_ids.push(evaluated.lead.id.clone());
+                    if evaluated.value_score() >= HIGH_VALUE_THRESHOLD {
+                        summary.high_value_count += 1;
+                    }
                 },
                 axagent_dao::repo::opc_demand::LeadWriteOutcome::Refreshed => {
                     summary.total_refreshed += 1;
+                    summary.total_evaluated += 1;
+                    round_ids.push(evaluated.lead.id.clone());
+                    if evaluated.value_score() >= HIGH_VALUE_THRESHOLD {
+                        summary.high_value_count += 1;
+                    }
                 },
                 axagent_dao::repo::opc_demand::LeadWriteOutcome::Skipped => {},
-            }
-            summary.total_evaluated += 1;
-            round_ids.push(evaluated.lead.id.clone());
-            if evaluated.value_score() >= HIGH_VALUE_THRESHOLD {
-                summary.high_value_count += 1;
             }
         }
     }
@@ -216,15 +229,16 @@ pub(crate) async fn run_discovery_for_query(
         axagent_dao::repo::opc_demand::list_leads_by_ids(db, &round_ids).await.map_err(err)?
     };
 
-    // 高价值线索明细
-    summary.leads = axagent_dao::repo::opc_demand::list_leads(
-        db,
-        SUMMARY_LEADS_LIMIT as u64,
-        Some(HIGH_VALUE_THRESHOLD),
-        None,
-    )
-    .await
-    .map_err(err)?;
+    // 高价值明细（P1-6 语义修正）：旧实现回填**全局历史**高价值榜（全表 ≥60
+    // 分查询），本轮 0 命中时摘要也会显示一堆历史线索，误导"本轮扫描很成功"。
+    // 现在直接从本轮 round_leads 过滤，口径与 high_value_count 一致。
+    summary.leads = summary
+        .round_leads
+        .iter()
+        .filter(|l| l.commercial_value_score >= HIGH_VALUE_THRESHOLD)
+        .take(SUMMARY_LEADS_LIMIT)
+        .cloned()
+        .collect();
 
     // 回写平台同步状态（单平台失败不阻断整体结果）
     // 合规跳过不算失败：无凭证是配置状态，不是运行故障。
@@ -264,9 +278,17 @@ async fn persist_evaluated(
     evaluated: &EvaluatedDemandLead,
     dedup_window_secs: Option<i64>,
 ) -> Result<axagent_dao::repo::opc_demand::LeadWriteOutcome, String> {
+    let row = evaluated_to_row(evaluated);
+    axagent_dao::repo::opc_demand::upsert_lead_within_window(db, row, dedup_window_secs)
+        .await
+        .map_err(err)
+}
+
+/// 评估结果 → DAO 写入行（扫描入库与手动补录共用同一字段映射，避免漂移）
+fn evaluated_to_row(evaluated: &EvaluatedDemandLead) -> axagent_dao::repo::opc_demand::NewLeadRow {
     let lead = &evaluated.lead;
     let evaluation = &evaluated.evaluation;
-    let row = axagent_dao::repo::opc_demand::NewLeadRow {
+    axagent_dao::repo::opc_demand::NewLeadRow {
         id: lead.id.clone(),
         platform: lead.platform.clone(),
         title: lead.title.clone(),
@@ -278,16 +300,78 @@ async fn persist_evaluated(
         contact_email: lead.contact_email.clone(),
         contact_phone: lead.contact_phone.clone(),
         source_url: lead.source_url.clone(),
+        content_fingerprint: lead.content_fingerprint.clone(),
         raw_snapshot: lead.raw_snapshot.clone(),
         confidence: evaluation.confidence(),
         pain_score: evaluation.pain_score(),
         market_gap_score: evaluation.market_gap_score(),
         commercial_value_score: evaluation.commercial_value_score(),
         demand_type: evaluation.demand_type().as_str().to_string(),
+    }
+}
+
+/// 手动补录平台的固定 platform 标识
+const MANUAL_PLATFORM: &str = "manual";
+
+/// 手动补录一条需求线索（P1-4）
+///
+/// 复用扫描管线的归一化/评分/去重逻辑：`RawLead → new_from_raw → evaluate_lead
+/// → upsert_lead_within_window`。手动填写的预算与 URL 覆盖自动提取结果；
+/// 去重命中（窗口内同指纹/同 URL）时返回既有生效行而非报错。
+#[tauri::command]
+pub async fn opc_create_lead(
+    state: State<'_, AppState>,
+    input: SaveDemandLeadInput,
+) -> Result<DemandLeadDto, String> {
+    let title = input.title.trim().to_string();
+    let description = input.description.trim().to_string();
+    if title.is_empty() || description.is_empty() {
+        return Err(crate::commands::error::ErrorResponse::err_with_detail(
+            common_err::INVALID_INPUT,
+            "title 与 description 不能为空",
+        ));
+    }
+
+    let db = state.harness.db();
+    let policy = load_scan_policy(db).await?;
+
+    // URL 清洗：空串归一为 None（否则 new_from_raw 会存出 Some("")）
+    let source_url =
+        input.source_url.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+    let raw = RawLead {
+        platform: MANUAL_PLATFORM.to_string(),
+        title,
+        description,
+        url: source_url.clone().unwrap_or_default(),
+        price_text: None, // 手动预算走结构化字段，不走价格文本解析
+        contact: input.contact_name.clone(),
+        contact_email: input.contact_email.clone(),
+        contact_phone: input.contact_phone.clone(),
+        snapshot: serde_json::json!({ "source": "manual" }),
     };
-    axagent_dao::repo::opc_demand::upsert_lead_within_window(db, row, dedup_window_secs)
-        .await
-        .map_err(err)
+    let mut lead = DemandLead::new_from_raw(raw);
+    // 手动填写的预算覆盖自动解析（用户没填的字段保留自动提取结果）
+    if input.budget_min.is_some() || input.budget_max.is_some() {
+        lead.budget_min = input.budget_min;
+        lead.budget_max = input.budget_max;
+    }
+    if let Some(currency) =
+        input.budget_currency.as_deref().map(str::trim).filter(|c| !c.is_empty())
+    {
+        lead.budget_currency = currency.to_string();
+    }
+    lead.source_url = source_url;
+
+    let evaluation = evaluate_lead(&lead);
+    let evaluated = EvaluatedDemandLead { lead, evaluation };
+    axagent_dao::repo::opc_demand::create_manual_lead(
+        db,
+        evaluated_to_row(&evaluated),
+        policy.dedup_window_secs(),
+    )
+    .await
+    .map_err(err)
 }
 
 /// 序列化等内部错误 → 命令层错误串（OPC 设置域错误码 + 技术详情）

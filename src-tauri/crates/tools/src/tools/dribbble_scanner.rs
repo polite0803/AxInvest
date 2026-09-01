@@ -17,14 +17,16 @@ pub struct DribbbleScanner {
 
 impl DribbbleScanner {
     pub fn new() -> Self {
-        let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
-        let api_token = std::env::var("DRIBBBLE_API_TOKEN").ok();
-        Self { http, api_token, base_url: "https://api.dribbble.com/v1".to_string() }
+        Self::with_config(None, None)
     }
 
     /// 从配置创建
+    ///
+    /// `api_token` 未提供时回退读环境变量（桌面 GUI 进程通常不带环境变量，
+    /// 平台配置里的 token 由路由层经本方法直接注入 —— 凭证三层断链修复）。
     pub fn with_config(api_token: Option<String>, base_url: Option<String>) -> Self {
         let http = scanner_common::build_http_client(scanner_common::DEFAULT_TIMEOUT_SECS);
+        let api_token = api_token.or_else(|| std::env::var("DRIBBBLE_API_TOKEN").ok());
         Self {
             http,
             api_token,

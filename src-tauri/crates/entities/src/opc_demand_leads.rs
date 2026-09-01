@@ -6,8 +6,9 @@
 //! commercial_value）落列存储，支持按价值分排序查询；评估在 `axagent_tools`
 //! 的 `marketplace_scanner` 完成，本表只做持久化。
 //!
-//! 去重：`(platform, source_url)` 上的唯一索引（NULL 不参与唯一约束，
-//! 手动补录无 URL 的线索可重复插入）。
+//! 去重（v136）：`(platform, content_fingerprint)` 上的唯一索引（NULL 不参与
+//! 唯一约束，无指纹线索可重复插入）。旧键 `(platform, source_url)` 会在
+//! 所有线索共享同一搜索页 URL 的平台上互相踩踏，已废弃。
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -31,8 +32,10 @@ pub struct Model {
     pub contact_name: Option<String>,
     pub contact_email: Option<String>,
     pub contact_phone: Option<String>,
-    /// 来源 URL（与 platform 组成去重键）
+    /// 来源 URL（展示用；v136 起去重键迁移为内容指纹）
     pub source_url: Option<String>,
+    /// 内容指纹（标题+描述归一化哈希，v136）：去重主键；NULL = 旧数据/空内容不参与
+    pub content_fingerprint: Option<String>,
     /// 平台原始返回数据（JSON 字符串）
     pub raw_snapshot: String,
     /// 生命周期：new / evaluated / contacted / won / lost

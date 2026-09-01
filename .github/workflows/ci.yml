@@ -66,6 +66,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
 
+      # 行尾检查放在最前：纯 Node 实现、不依赖 npm ci，能最快失败，
+      # 避免 CRLF 问题一路走到 dprint（报错信息晦涩）或更后面的编译步骤。
+      - name: Check line endings (LF)
+        run: bash scripts/check-line-endings.sh
+
       - name: Check frontend formatting (dprint)
         run: npm run format:check
 

@@ -16,8 +16,14 @@
     "src-tauri/schema-gen/**/*",
     "src-tauri/crates/**/bindings/**/*",
     "scripts/**/*",
-    "src-tauri/scripts/**/*"
+    "src-tauri/scripts/**/*",
+    "knowledge-sources/**/*"
   ],
+  // 行尾必须与 .gitattributes 的 `* text=auto eol=lf` 一致。
+  // 缺省值为 auto（跟随操作系统），Windows 上会产出 CRLF，与 .gitattributes 冲突，
+  // 导致 `dprint check` 周期性报 "Text differed by line endings"。显式锁死为 lf。
+  // 完整防线见 .editorconfig 顶部注释（编辑器和 git 各管一段，不能只靠这里）。
+  "newLineKind": "lf",
   "typescript": {
     "quoteStyle": "preferDouble",
     "useBraces": "always"

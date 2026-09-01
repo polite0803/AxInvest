@@ -338,12 +338,12 @@ mod tests {
     fn test_build_search_url() {
         let scanner = XianyuScanner::new();
         let url = scanner.build_search_url("设计定制");
-        // 中文直接保留，空格转为 +
-        assert!(url.contains("设计定制"));
+        // 空格编码为 %20（不是 +），中文整体转义
+        scanner_common::assert_url_query_param(&url, "q", "设计定制");
         assert!(url.contains("search"));
 
         let url_with_space = scanner.build_search_url("设计 定制");
-        assert!(url_with_space.contains("设计+定制"));
+        scanner_common::assert_url_query_param(&url_with_space, "q", "设计 定制");
     }
 
     #[test]
@@ -382,7 +382,8 @@ mod tests {
 
         let long_title = "这是一个非常长的标题".repeat(20);
         let summary = XianyuScanner::extract_demand_summary(&long_title, "");
-        assert!(summary.len() <= 153); // 150 + "..."
+        // 截断按**字符**计数（中文 1 字 = 1 字符 = 3 字节），不能用字节长度断言
+        assert_eq!(summary.chars().count(), 153, "应为 150 个字符 + 省略号三点");
         assert!(summary.ends_with("..."));
     }
 

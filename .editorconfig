@@ -1,0 +1,53 @@
+# EditorConfig — https://editorconfig.org
+#
+# 行尾防御的第一层（编辑器保存时生效）。git 只在检出/暂存时生效，dprint 只在被显式调用时
+# 生效，唯有本文件能在每一次保存时兜住。四层防线缺一层，CRLF 就会从某个编辑器漏进来：
+#
+#   1. 保存      → 本文件（.editorconfig）      编辑器自动写 LF
+#   2. 格式化    → dprint.json  newLineKind=lf  `npm run format` 修正
+#   3. 提交      → .gitattributes  * text=auto eol=lf   入库前规范化
+#   4. CI / 钩子 → scripts/check-line-endings.sh        兜底拦截
+#
+# ⚠️ Windows 上若 git config core.autocrlf=true，会在检出时把 LF 转回 CRLF，与本文件冲突。
+#    本仓库以 .gitattributes 的 eol=lf 为准（优先级高于 core.autocrlf），但存量工作区文件
+#    不会被自动重写，需执行 `git add --renormalize .` 一次性对齐。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Rust / Cargo 用 4 空格（与 rustfmt.toml 的 tab_spaces 对齐）
+[*.{rs,toml}]
+indent_size = 4
+
+# Markdown 行尾双空格是硬换行语法，不能裁
+[*.{md,markdown}]
+trim_trailing_whitespace = false
+
+# Windows 批处理 / PowerShell：必须为 CRLF，LF 会导致 cmd.exe 解析异常
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+# 生成物与外部数据源：不介入，避免产生无意义 diff
+[node_modules/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[knowledge-sources/**]
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[src-tauri/target/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset

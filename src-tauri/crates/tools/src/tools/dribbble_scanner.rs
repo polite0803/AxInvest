@@ -312,7 +312,8 @@ mod tests {
     fn test_build_shots_search_url() {
         let scanner = DribbbleScanner::new();
         let url = scanner.build_shots_search_url("ui design");
-        assert!(url.contains("ui+design"));
+        // 空格编码为 %20（不是 +）
+        scanner_common::assert_url_query_param(&url, "tags", "ui design");
         assert!(url.contains("shots"));
     }
 

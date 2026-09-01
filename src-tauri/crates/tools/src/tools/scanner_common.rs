@@ -70,6 +70,24 @@ pub fn encode_query(query: &str) -> String {
     urlencoding::encode(query).into_owned()
 }
 
+/// 测试辅助：断言 URL 中某个查询参数解码后等于原始查询词
+///
+/// [`encode_query`] 做标准百分号编码，中文与空格在 URL 里都是 `%XX` 形式，
+/// 因此**不能**直接断言 `url.contains("中文")` 或 `url.contains("a+b")` —— 明文
+/// 不会出现。各 scanner 的 URL 单测统一走这里：先按参数名取出原始值，再解码比对。
+///
+/// # Panics
+/// 参数缺失、值不是合法百分号编码、或解码结果与 `expected` 不一致时 panic。
+#[cfg(test)]
+pub fn assert_url_query_param(url: &str, param: &str, expected: &str) {
+    let marker = format!("{}=", param);
+    let tail = url.split_once(&marker).unwrap_or_else(|| panic!("URL 缺少 {param} 参数: {url}"));
+    let raw = tail.1.split('&').next().unwrap_or_default();
+    let decoded = urlencoding::decode(raw)
+        .unwrap_or_else(|e| panic!("{param} 参数不是合法的百分号编码: {raw} ({e})"));
+    assert_eq!(decoded, expected, "{param} 参数解码后与原始查询词不一致: {url}");
+}
+
 // ── HTTP 构造 ─────────────────────────────────────────────────
 
 /// 构造带真实身份标识的请求头

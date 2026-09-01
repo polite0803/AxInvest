@@ -294,7 +294,8 @@ mod tests {
     fn test_build_search_url() {
         let scanner = TwitterScanner::new();
         let url = scanner.build_search_url("ai agent", 10);
-        assert!(url.contains("ai+agent"));
+        // 空格编码为 %20（不是 +）
+        scanner_common::assert_url_query_param(&url, "query", "ai agent");
         assert!(url.contains("search"));
     }
 

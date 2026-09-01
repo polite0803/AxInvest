@@ -225,12 +225,12 @@ mod tests {
     fn test_build_search_url() {
         let scanner = ZhubajieScanner::new();
         let url = scanner.build_search_url("小程序开发");
-        // 中文直接保留
-        assert!(url.contains("小程序开发"));
+        // 空格编码为 %20（不是 +），中文整体转义
+        scanner_common::assert_url_query_param(&url, "keyword", "小程序开发");
         assert!(url.contains("search"));
 
         let url_with_space = scanner.build_search_url("小程序 开发");
-        assert!(url_with_space.contains("小程序+开发"));
+        scanner_common::assert_url_query_param(&url_with_space, "keyword", "小程序 开发");
     }
 
     #[test]

@@ -13378,7 +13378,7 @@
         "logLevel": "日誌層級: debug/info/warn/error",
         "enableAnalytics": "啟用分析統計"
       },
-      "formBaseUrlPlaceholder": "https://...",
+      "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
       "colCronTaskTypePlaceholder": "opc-demand-discovery",
       "colPlatformPlaceholder": "all",
@@ -13490,6 +13490,8 @@
       "formId": "平台識別碼",
       "formIdTip": "與內建掃描器一致（如 reddit）；留空自動產生",
       "formNameRequired": "請輸入平台名稱",
+      "formIdPlaceholder": "reddit",
+      "formNamePlaceholder": "Reddit",
       "loadFailed": "載入失敗: {{error}}",
       "scanFailed": "掃描失敗: {{error}}",
       "saveFailed": "儲存失敗: {{error}}",

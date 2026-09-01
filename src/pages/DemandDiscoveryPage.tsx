@@ -593,14 +593,14 @@ export function DemandDiscoveryPage() {
             label={t("opc.demand.formId")}
             extra={editing ? undefined : t("opc.demand.formIdTip")}
           >
-            <Input disabled={editing !== null} placeholder="reddit" />
+            <Input disabled={editing !== null} placeholder={t("opc.demand.formIdPlaceholder")} />
           </Form.Item>
           <Form.Item
             name="name"
             label={t("opc.demand.formName")}
             rules={[{ required: true, message: t("opc.demand.formNameRequired") }]}
           >
-            <Input placeholder="Reddit" />
+            <Input placeholder={t("opc.demand.formNamePlaceholder")} />
           </Form.Item>
           <Form.Item name="platformType" label={t("opc.demand.formPlatformType")} initialValue="scanner">
             <Select
@@ -611,7 +611,7 @@ export function DemandDiscoveryPage() {
             />
           </Form.Item>
           <Form.Item name="baseUrl" label={t("opc.demand.formBaseUrl")}>
-            <Input placeholder="https://www.reddit.com" />
+            <Input placeholder={t("opc.demand.formBaseUrlPlaceholder")} />
           </Form.Item>
           <Form.Item name="enabled" label={t("opc.demand.formEnabled")} valuePropName="checked">
             <Switch />

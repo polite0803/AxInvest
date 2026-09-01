@@ -294,7 +294,9 @@ mod tests {
     fn test_build_search_url() {
         let scanner = ZhihuScanner::new();
         let url = scanner.build_search_url("大模型应用开发");
-        assert!(url.contains("大模型"));
+        // 查询词按 RFC 3986 百分号编码，中文不会以明文出现在 URL 中
+        assert!(!url.contains("大模型"));
+        scanner_common::assert_url_query_param(&url, "q", "大模型应用开发");
         assert!(url.contains("search"));
     }
 

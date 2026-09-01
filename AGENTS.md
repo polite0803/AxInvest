@@ -143,6 +143,14 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 - **新增/修改 DTO 两步必须同步**：① 后端结构体加 `#[serde(rename_all = "camelCase")]`；② 前端 `src/types/` 类型改 camelCase 并同步所有消费方（组件 / store）
 - **命令参数（invoke 传参）同样用 camelCase**：Tauri v2 的 `#[tauri::command]` 宏默认 `rename_all = "camelCase"`，会把 Rust 参数名 `session_id` 校验为 JS 侧键名 `sessionId`，传 snake_case 会直接报 `missing required key sessionId`（IPC 层拒绝，不会进 handler）。因此前端 `invoke()` 传参键名**必须用 camelCase**（如 `sessionId`、`trajectoryId`）。注意：参数名带前导下划线时（`_url`）前导下划线被忽略（JS 侧传 `url`）。DTO 字段名与命令参数名实际是同一套 camelCase 规则。新增 invoke 调用后建议跑 `.workbuddy/tmp/scan_ipc_args.py` 做前后端参数名一致性扫描
 
+14. **行尾统一 LF（唯一例外：Windows 批处理 / PowerShell 必须 CRLF）**：规则：
+
+- **所有文本文件必须 LF**，禁止出现 `\r\n`。唯一例外：`*.bat` / `*.cmd` / `*.ps1` **必须** CRLF（cmd.exe 与 PowerShell 解析依赖，用 LF 会解析异常）
+- **四层防线缺一不可**：① `.editorconfig`（编辑器保存时生效，覆盖最高频的写入点）② `dprint.json` 的 `newLineKind: "lf"`（`npm run format` 修正）③ `.gitattributes` 的 `eol=lf` + pre-commit 钩子（提交时）④ `scripts/check-line-endings.sh`（CI 与本地兜底）。**只改其中一层必然复发** —— 单独改 dprint 或 .gitattributes 都拦不住编辑器保存时写入的 CRLF
+- **排查本地周期性 CRLF 报错**：`dprint check` 报 "Text differed by line endings" 时，先确认 `dprint.json` 有没有 `newLineKind`（缺省值 `auto` 在 Windows 上产出 CRLF，与 `.gitattributes` 的 `eol=lf` 直接冲突）。批量修复：`npm run check:eol -- --fix`
+- **编辑 i18n locale（`src/i18n/locales/*.json`）时必须保序 + 强制 LF**：用 Python `json.dumps(..., ensure_ascii=False, indent=2)` 全量重写可行，但必须以 LF 落盘。这几个文件历史上是 CRLF，且带 `merge=json_merge` driver，出错后排查成本很高
+- **新增文本扩展名时同步三处**：`.gitattributes`（声明 eol）、`scripts/check-line-endings.mjs` 的 `TEXT_EXT` 白名单（不在白名单内就不会被检查）。改动 `.bat`/`.cmd`/`.ps1` 的 CRLF 例外规则时，`.gitattributes` 与该脚本的 Rule 2 **必须同步改**，否则两边打架
+
 ## 后端错误码 i18n 规范（强制）
 
 后端用户可见错误通过**错误码映射**做国际化，而非硬编码字符串。机制：后端返回 `ErrorResponse { code, category, detail, params }`（`src-tauri/src/commands/error.rs` 定义），前端按 `code` 走现有 i18n 翻译层。

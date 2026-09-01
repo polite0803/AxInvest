@@ -75,6 +75,7 @@
     "bump": "node scripts/bump-version.mjs",
     "format": "dprint fmt",
     "format:check": "dprint check",
+    "check:eol": "bash scripts/check-line-endings.sh",
     "lint": "tsc --noEmit",
     "lint:eslint": "oxlint src --max-warnings=0",
     "lint:eslint:legacy": "eslint src --max-warnings=0",
@@ -191,7 +192,7 @@
     "vitest": "^4.1.10"
   },
   "simple-git-hooks": {
-    "pre-commit": "npx dprint check && npx tsc --noEmit && cd src-tauri && cargo fmt --check",
+    "pre-commit": "npm run check:eol && npx dprint check && npx tsc --noEmit && cd src-tauri && cargo fmt --check",
     "pre-push": "npm run ci:check:quick"
   }
 }

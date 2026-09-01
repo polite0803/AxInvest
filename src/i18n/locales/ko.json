@@ -13378,7 +13378,7 @@
         "logLevel": "로그 수준: debug/info/warn/error",
         "enableAnalytics": "분석 활성화"
       },
-      "formBaseUrlPlaceholder": "https://...",
+      "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
       "colCronTaskTypePlaceholder": "opc-demand-discovery",
       "colPlatformPlaceholder": "all",
@@ -13490,6 +13490,8 @@
       "formId": "Platform ID",
       "formIdTip": "Must match a built-in scanner (e.g. reddit); leave empty to auto-generate",
       "formNameRequired": "Platform name is required",
+      "formIdPlaceholder": "reddit",
+      "formNamePlaceholder": "Reddit",
       "loadFailed": "Load failed: {{error}}",
       "scanFailed": "Scan failed: {{error}}",
       "saveFailed": "Save failed: {{error}}",

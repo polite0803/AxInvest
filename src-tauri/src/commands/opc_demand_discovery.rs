@@ -14,6 +14,8 @@
 //! 数据落地在 `axagent_dao::repo::opc_demand`（v131）；策略持久化走通用设置表。
 
 use crate::AppState;
+use crate::commands::error_code::common as common_err;
+use crate::commands::error_code::opc_setup as opc_setup_err;
 use axagent_harness::types::{
     DemandLeadDto, DemandPlatform, DiscoverLeadsSummary, SaveDemandPlatformInput,
 };
@@ -78,7 +80,7 @@ pub async fn opc_save_scan_policy(
     policy: ScanPolicy,
 ) -> Result<ScanPolicy, String> {
     let normalized = policy.normalized();
-    let json = serde_json::to_string(&normalized).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&normalized).map_err(serialize_err)?;
     axagent_dao::repo::settings::set_setting(state.harness.db(), SCAN_POLICY_SETTING_KEY, &json)
         .await
         .map_err(err)?;
@@ -103,7 +105,10 @@ pub async fn opc_discover_and_evaluate_leads(
 ) -> Result<DiscoverLeadsSummary, String> {
     let query = query.trim().to_string();
     if query.is_empty() {
-        return Err("query 不能为空".to_string());
+        return Err(crate::commands::error::ErrorResponse::err_with_detail(
+            common_err::INVALID_INPUT,
+            "query 不能为空",
+        ));
     }
 
     let db = state.harness.db();
@@ -249,6 +254,14 @@ async fn persist_evaluated(
     axagent_dao::repo::opc_demand::upsert_lead_within_window(db, row, dedup_window_secs)
         .await
         .map_err(err)
+}
+
+/// 序列化等内部错误 → 命令层错误串（OPC 设置域错误码 + 技术详情）
+fn serialize_err(e: impl std::fmt::Display) -> String {
+    crate::commands::error::ErrorResponse::err_with_detail(
+        opc_setup_err::INTERNAL,
+        format!("序列化失败: {e}"),
+    )
 }
 
 /// DAO 错误 → 命令层错误串（走错误码映射层）

@@ -5,10 +5,16 @@
 // 后端命令错误必须携带错误码（ErrorResponse）返回，供前端按 error.{CODE} 翻译，
 // 否则该错误在切语言后会退回原始英文串、破坏 i18n。
 //
-// 正确写法：
-//   .map_err(|e| String::from(
-//     crate::commands::error::ErrorResponse::from_error(
-//       e, crate::commands::error::ErrorCategory::Unrecoverable)))
+// 正确写法（按优先级）：
+//   1) 复用已有错误码 + 技术详情（推荐，粒度最细）：
+//      .map_err(|e| crate::commands::error::ErrorResponse::err_with_detail(
+//          crate::commands::error_code::<业务域>::<CODE>, format!("中文上下文: {e}")))?
+//   2) 兜底退化（错误码恒为 COMMON_INTERNAL，仅在你确实没有合适业务码时用）：
+//      .map_err(|e| crate::commands::error::CommandError::from_error(
+//          e, crate::commands::error::ErrorCategory::Unrecoverable))?
+//
+// 优先「复用」而不是新增码：新增错误码必须同步 11 语言 error 段，
+// 否则 check-errorcode-alignment.mjs 会红。改完这两个脚本都要跑。
 //
 // 见 AGENTS.md「后端错误码 i18n 规范（强制）」。
 
@@ -51,7 +57,21 @@ for (const f of files) {
 if (violations > 0) {
   console.error(`\n发现 ${violations} 处裸 map_err(|x| x.to_string())。`);
   console.error(
-    "正确写法：map_err(|e| String::from(crate::commands::error::ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)))",
+    "改法（推荐，复用已有错误码）：",
+  );
+  console.error(
+    "  .map_err(|e| crate::commands::error::ErrorResponse::err_with_detail(",
+  );
+  console.error("      crate::commands::error_code::common::INVALID_INPUT, format!(\"上下文: {e}\")))?",
+  );
+  console.error(
+    "兜底（无合适业务码时，错误码退化为 COMMON_INTERNAL）：",
+  );
+  console.error(
+    "  .map_err(|e| crate::commands::error::CommandError::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable))?",
+  );
+  console.error(
+    "注意：新增错误码须同步 11 语言 error 段，否则 check-errorcode-alignment.mjs 会失败。",
   );
   process.exit(1);
 }

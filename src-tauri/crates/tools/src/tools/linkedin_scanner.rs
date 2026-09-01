@@ -279,7 +279,8 @@ mod tests {
     fn test_build_jobs_search_url() {
         let scanner = LinkedInScanner::new();
         let url = scanner.build_jobs_search_url("AI Engineer");
-        assert!(url.contains("AI+Engineer"));
+        // 空格编码为 %20（不是 +）
+        scanner_common::assert_url_query_param(&url, "keywords", "AI Engineer");
         assert!(url.contains("jobSearch"));
     }
 

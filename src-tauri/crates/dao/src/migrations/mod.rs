@@ -49,9 +49,12 @@ pub mod v129_capability_relationships;
 pub mod v130_session_states;
 pub mod v131_backfill_wiki_graph_source;
 pub mod v132_opc_demand_discovery;
+pub mod v133_lead_workflow_link;
+pub mod v134_demand_subscriptions;
+pub mod v135_opc_invoices;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 132;
+pub const CURRENT_VERSION: i32 = 135;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -248,6 +251,21 @@ const MIGRATIONS: &[Migration] = &[
         version: 132,
         description: "v132_opc_demand_discovery: 创建 OPC 需求发现两张表（平台配置 opc_demand_platforms + 需求线索 opc_demand_leads，(platform, source_url) 唯一去重），补齐扫描器 → 持久化断层",
         up: |db| Box::pin(v132_opc_demand_discovery::up(db)),
+    },
+    Migration {
+        version: 133,
+        description: "v133_lead_workflow_link: 为 opc_demand_leads 添加 linked_workflow_id + implemented_at 两列，建立线索 → 实现工作流转化链路",
+        up: |db| Box::pin(v133_lead_workflow_link::up(db)),
+    },
+    Migration {
+        version: 134,
+        description: "v134_demand_subscriptions: 创建 OPC 需求订阅词表 opc_demand_subscriptions（keyword 唯一 / 扫描间隔 / 推送门槛 / 限定平台），把需求发现从手动单关键词扫描升级为订阅驱动的定时扫描",
+        up: |db| Box::pin(v134_demand_subscriptions::up(db)),
+    },
+    Migration {
+        version: 135,
+        description: "v135_opc_invoices: 创建 OPC 交付发票表 opc_invoices（lead_id 溯源 / draft→sent→paid 状态机 / 多币种金额），把交付环节从 browserMock 幻影落地为真实账本",
+        up: |db| Box::pin(v135_opc_invoices::up(db)),
     },
 ];
 

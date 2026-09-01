@@ -36,7 +36,10 @@ fn state_has_operator(_state: &State<'_, AppState>) -> bool {
 }
 
 /// SECURITY (M6): 5 字段 cron 表达式 + 频率下限（最小 1 分钟一次）。
-fn validate_cron_expression(cron: &str) -> Result<(), String> {
+///
+/// `pub(crate)`：业务模块装配定时任务时复用同一套校验（如
+/// `opc_demand_subscription::opc_ensure_demand_scan_job`），避免校验规则分叉。
+pub(crate) fn validate_cron_expression(cron: &str) -> Result<(), String> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
     if parts.len() != 5 {
         return Err(ErrorResponse::err_with_detail(
@@ -106,7 +109,11 @@ pub struct TaskConfigDto {
     pub run_on_startup: bool,
 }
 
-fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
+/// CronJob → 前端 DTO。
+///
+/// `pub(crate)`：其他 domain 装配的定时任务（如需求订阅扫描）复用同一份
+/// 序列化契约，前端无需为每种任务类型写两套解析。
+pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
     let status = match job.status {
         CronJobStatus::Active => "active",
         CronJobStatus::Paused => "paused",

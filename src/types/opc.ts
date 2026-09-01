@@ -66,6 +66,10 @@ export interface DemandLead {
   opportunityLevel: string;
   /** 需求类型（snake_case 标识） */
   demandType: string;
+  /** 转化生成的实现工作流模板 ID（null = 未转化） */
+  linkedWorkflowId: string | null;
+  /** 首次启动实现工作流执行的时间戳（秒；null = 未执行） */
+  implementedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -82,8 +86,146 @@ export interface DiscoverLeadsSummary {
   totalRefreshed: number;
   /** 其中高价值（commercialValueScore ≥ 60）数量 */
   highValueCount: number;
-  /** 高价值线索明细 */
+  /** 高价值线索明细（全局榜单，非本轮独有） */
   leads: DemandLead[];
+  /** 本轮实际扫描评估到的线索明细（订阅推送按此过滤，避免串推） */
+  roundLeads: DemandLead[];
+}
+
+/** 需求订阅（长期跟踪的关键词） */
+export interface DemandSubscription {
+  id: string;
+  /** 订阅关键词（唯一） */
+  keyword: string;
+  enabled: boolean;
+  /** 扫描间隔（小时） */
+  intervalHours: number;
+  /** 推送门槛：商业价值分低于此值不计入高价值命中 */
+  minScore: number;
+  /** 限定平台 ID 列表；空数组 = 跟随全局启用的平台 */
+  platforms: string[];
+  /** 最近一次扫描时间戳（秒）；null = 从未扫描 */
+  lastScannedAt: number | null;
+  /** 最近一次扫描的高价值命中数 */
+  lastHitCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 保存（新增或更新）需求订阅的输入 */
+export interface SaveDemandSubscriptionInput {
+  id?: string | null;
+  keyword?: string | null;
+  enabled?: boolean | null;
+  intervalHours?: number | null;
+  minScore?: number | null;
+  platforms?: string[] | null;
+}
+
+/** 单个订阅词的扫描结果 */
+export interface KeywordScanOutcome {
+  subscriptionId: string;
+  keyword: string;
+  /** 扫描是否成功 */
+  ok: boolean;
+  /** 失败原因（ok=false 时） */
+  error: string | null;
+  /** 本词命中的高价值线索（已按 minScore 过滤） */
+  hits: DemandLead[];
+}
+
+/** 一轮订阅扫描的汇总 */
+export interface SubscriptionScanSummary {
+  /** 本轮扫描的订阅词数 */
+  scannedSubscriptions: number;
+  /** 新入库线索总数 */
+  totalSaved: number;
+  /** 刷新评分的线索总数 */
+  totalRefreshed: number;
+  /** 命中推送门槛的高价值线索总数 */
+  highValueHits: number;
+  /** 逐词结果 */
+  outcomes: KeywordScanOutcome[];
+}
+
+/** 单条能力的匹配命中项 */
+export interface CapabilityMatchItem {
+  capabilityId: string;
+  name: string;
+  /** 能力类型（tool / workflow / skill / agent / ...） */
+  kind: string;
+  /** 业务域（general / automation / devops / ...） */
+  domain: string;
+  /** 综合检索分 0.0-1.0 */
+  retrievalScore: number;
+  /** 一句话摘要（未声明时为 null） */
+  summary: string | null;
+}
+
+/** 线索的能力匹配结论 */
+export interface LeadCapabilityMatch {
+  leadId: string;
+  /** ready（可直接接）/ partial（部分覆盖）/ missing（能力缺失） */
+  verdict: "ready" | "partial" | "missing";
+  /** 最高检索分 */
+  bestScore: number;
+  /** 命中的能力（按检索分降序） */
+  matches: CapabilityMatchItem[];
+  /** 该需求类型要求的能力域 */
+  requiredDomains: string[];
+  /** 必需域中未被命中的部分 = 缺口 */
+  missingDomains: string[];
+  /** 缺口说明；无缺口时为 null */
+  gapHint: string | null;
+}
+
+/** 交付发票：won 线索的账本行（draft → sent → paid 单向） */
+export interface DeliveryInvoice {
+  id: string;
+  leadId: string;
+  /** P2 转化出的交付工作流（人工交付时为 null） */
+  linkedWorkflowId: string | null;
+  title: string;
+  /** 金额（多币种并存，汇总按币种分组） */
+  amount: number;
+  /** ISO 4217 币种 */
+  currency: string;
+  /** draft / sent / paid */
+  status: "draft" | "sent" | "paid";
+  issuedAt: number | null;
+  paidAt: number | null;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 开票入参：缺省字段由后端从线索元数据自动填充 */
+export interface CreateInvoiceFromLeadInput {
+  title?: string;
+  amount?: number;
+  currency?: string;
+  notes?: string;
+}
+
+/** 单币种的回款小计 */
+export interface RevenueByCurrency {
+  currency: string;
+  /** 已回款（paid）总额 */
+  paidTotal: number;
+  /** 已开出（sent + paid）总额 */
+  issuedTotal: number;
+}
+
+/** 交付环节汇总（转化率只统计，不自动回写评分权重） */
+export interface DeliverySummary {
+  wonLeads: number;
+  /** 非 lost 线索总数（转化率分母） */
+  activeLeads: number;
+  invoiceCount: number;
+  paidCount: number;
+  revenues: RevenueByCurrency[];
+  /** won / active，active 为 0 时为 0 */
+  conversionRate: number;
 }
 
 /** 扫描策略：并发 / 限流 / 重试 / 去重窗口 */

@@ -1951,6 +1951,11 @@ async fn start_cron_scheduler(state: &AppState) {
     let work_engine = state.work_engine.clone();
     let cron_store = state.cron_job_store.clone();
     let sync_db = state.harness.db().clone();
+    // G17 delivery：此前 create_cron_delivery_sink 建好了 sink 却从未接进
+    // executor，导致所有定时任务的 delivery 配置都是死配置。这里接上后，
+    // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
+    let delivery_sink: std::sync::Arc<dyn axagent_harness::cron_delivery::CronDeliverySink> =
+        create_cron_delivery_sink(state);
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
         // 知识源定时刷新：task_type = knowledge_source_fetch_all
@@ -1984,6 +1989,76 @@ async fn start_cron_scheduler(state: &AppState) {
                     result.output
                 );
                 store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+        // 需求订阅扫描：task_type = opc_demand_scan（v133）
+        //
+        // 按订阅词表挑出到期订阅逐个扫描，命中推送门槛的线索才走 delivery ——
+        // 无命中时传 None sink，避免每个 tick 空转轰炸推送渠道。
+        if job.task_type.as_deref()
+            == Some(crate::commands::opc_demand_subscription::SCAN_JOB_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let sink = delivery_sink.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let (result, should_deliver) =
+                    match crate::commands::opc_demand_subscription::run_scan_for_scheduler(&db)
+                        .await
+                    {
+                        Ok((summary, text)) => {
+                            let has_hits = summary.high_value_hits > 0;
+                            tracing::info!(
+                                "[CronScheduler] 需求订阅扫描 '{}' 完成: {} 个订阅, {} 条高价值命中",
+                                job_name,
+                                summary.scanned_subscriptions,
+                                summary.high_value_hits
+                            );
+                            (
+                                axagent_runtime_core::TaskRunResult {
+                                    success: true,
+                                    output: Some(text),
+                                    error: None,
+                                    duration_ms: (axagent_runtime_core::cron_job::now_millis()
+                                        - started)
+                                        as u64,
+                                    executed_at: started,
+                                },
+                                has_hits,
+                            )
+                        },
+                        Err(e) => {
+                            tracing::error!(
+                                "[CronScheduler] 需求订阅扫描 '{}' 失败: {e}",
+                                job_name
+                            );
+                            (
+                                axagent_runtime_core::TaskRunResult {
+                                    success: false,
+                                    output: None,
+                                    error: Some(e),
+                                    duration_ms: (axagent_runtime_core::cron_job::now_millis()
+                                        - started)
+                                        as u64,
+                                    executed_at: started,
+                                },
+                                true,
+                            )
+                        },
+                    };
+                // 无高价值命中 → 不投递（success 但静默）
+                let sink_ref = if should_deliver { Some(sink.as_ref()) } else { None };
+                store.record_run_with_delivery(&job_id, result, sink_ref).await;
                 if !recurring {
                     let _ = store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)

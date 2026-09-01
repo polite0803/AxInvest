@@ -80,7 +80,7 @@ fn create_tray_inner(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("AxAgent")
+        .tooltip("AxInvest")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
                 if let Some(w) = app.get_webview_window("main") {

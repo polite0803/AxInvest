@@ -98,7 +98,7 @@ authors = ["刘小平 <polite0803@outlook.com>"]
 default-run = "axagent"
 edition = "2024"
 license = "AGPL-3.0-only"
-description = "AxAgent - AI Desktop Client"
+description = "AxInvest - AI Desktop Client"
 
 [features]
 default = ["notification", "computer-use"]
@@ -130,6 +130,9 @@ name = "axagent_lib"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
+# 注意：bin 名是 axagent，但 tauri.conf.json 里配了 "mainBinaryName": "AxInvest"，
+# tauri build 会把 target/<triple>/release/axagent.exe 重命名为 AxInvest.exe。
+# CI 打包脚本与交付给用户的 portable 压缩包据此取名 —— 改这里前先看那个配置。
 name = "axagent"
 path = "src/main.rs"
 

@@ -47,6 +47,10 @@ pub struct Model {
     pub commercial_value_score: f64,
     /// 需求类型（snake_case 标识）
     pub demand_type: String,
+    /// 转化生成的实现工作流模板 ID（v132；NULL = 未转化）
+    pub linked_workflow_id: Option<String>,
+    /// 首次启动实现工作流执行的时间戳（秒；NULL = 未执行）
+    pub implemented_at: Option<i64>,
     /// 入库时间戳（秒）
     pub created_at: i64,
     /// 更新时间戳（秒）

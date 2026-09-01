@@ -212,20 +212,57 @@ jobs:
         if: contains(matrix.target, 'windows')
         shell: pwsh
         run: |
-          $exe = "src-tauri/target/${{ matrix.target }}/release/AxInvest.exe"
-          $arch = if ("${{ matrix.target }}" -match "aarch64") { "arm64" } else { "x64" }
-          $zipName = "AxInvest_${{ needs.resolve-tag.outputs.tag }}_windows-${arch}-portable.zip"
-          Compress-Archive -Path $exe -DestinationPath $zipName
+          $target = "${{ matrix.target }}"
+          $version = "${{ needs.resolve-tag.outputs.tag }}"
+          $releaseDir = Join-Path "src-tauri/target" (Join-Path $target "release")
+          $arch = if ($target -match "aarch64") { "arm64" } else { "x64" }
 
-          $msiPath = "src-tauri/target/${{ matrix.target }}/release/bundle/msi"
-          if (Test-Path $msiPath) {
-            cd $msiPath
-            $msiFiles = Get-ChildItem -Filter "*.msi"
-            foreach ($msi in $msiFiles) {
-              $newMsiName = "AxInvest_${{ needs.resolve-tag.outputs.tag }}_windows-${arch}.msi"
-              Rename-Item -Path $msi.Name -NewName $newMsiName
-              Move-Item -Path $newMsiName -Destination "../../$newMsiName"
+          # 主二进制名解析（顺序即优先级）：
+          #   1. AxInvest.exe — tauri.conf.json 的 mainBinaryName 生效时由 tauri CLI 重命名产出
+          #   2. axagent.exe  — cargo [[bin]] name，未设置 mainBinaryName 时的原始产物
+          #   3. AxAgent.exe  — productName（历史/其他配置下的可能名）
+          # 三者都缺失时，退化为扫描 release 目录下体积最大的 .exe，并打印目录便于排查
+          $exe = @("AxInvest.exe", "axagent.exe", "AxAgent.exe") |
+            ForEach-Object { Join-Path $releaseDir $_ } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            $candidate = Get-ChildItem -Path $releaseDir -Filter "*.exe" -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 1MB } |
+              Sort-Object Length -Descending |
+              Select-Object -First 1
+            if (-not $candidate) {
+              Write-Error "No built executable found under: $releaseDir"
+              Get-ChildItem -Path $releaseDir -ErrorAction SilentlyContinue | Format-Table Name, Length
+              exit 1
             }
+            $exe = $candidate.FullName
+          }
+
+          Write-Host "Packaging $exe ($([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB)"
+
+          # portable 压缩包：统一以 AxInvest.exe 交付，解压即可运行
+          $staging = "portable-staging-$arch"
+          $staged = Join-Path $staging "AxInvest.exe"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item -Path $exe -Destination $staged -Force
+          $zipName = "AxInvest_${version}_windows-${arch}-portable.zip"
+          Compress-Archive -Path $staged -DestinationPath $zipName
+          Remove-Item -Recurse -Force $staging
+
+          $msiPath = Join-Path $releaseDir (Join-Path "bundle" "msi")
+          if (Test-Path $msiPath) {
+            $msiFiles = Get-ChildItem -Path $msiPath -Filter "*.msi" -File
+            if ($msiFiles.Count -eq 0) {
+              Write-Warning "MSI directory exists but contains no .msi: $msiPath"
+            }
+            foreach ($msi in $msiFiles) {
+              $newMsiName = "AxInvest_${version}_windows-${arch}.msi"
+              Move-Item -Path $msi.FullName -Destination (Join-Path $releaseDir $newMsiName) -Force
+            }
+          } else {
+            Write-Warning "MSI bundle directory not found: $msiPath (aarch64 cross-build may skip WiX)"
           }
 
       - name: Package Linux x86_64 artifacts

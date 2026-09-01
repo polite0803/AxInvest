@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AxAgent",
+  "productName": "AxInvest",
   "version": "2.9.9",
   "identifier": "top.axagent.desktop",
+  "mainBinaryName": "AxInvest",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -16,7 +17,7 @@
     },
     "windows": [
       {
-        "title": "AxAgent",
+        "title": "AxInvest",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

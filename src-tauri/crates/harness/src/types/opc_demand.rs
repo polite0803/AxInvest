@@ -7,8 +7,8 @@
 //! - [`DemandLeadDto`]：扫描并评估后的需求线索（含评分因子）
 //! - [`DiscoverLeadsSummary`]：一轮「扫描 → 评估 → 持久化」的执行摘要
 //!
-//! 命令层契约见 `commands::opc_demand_discovery`；数据落地见
-//! `axagent_dao::repo::opc_demand`（v131 migration）。
+//! 命令层契约见 `commands::opc_demand_discovery` / `commands::opc_demand_subscription`；
+//! 数据落地见 `axagent_dao::repo::opc_demand`（v131 平台+线索 / v133 订阅）。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -81,6 +81,10 @@ pub struct DemandLeadDto {
     pub opportunity_level: String,
     /// 需求类型（demand_type 小写标识）
     pub demand_type: String,
+    /// 转化生成的实现工作流模板 ID（v132；NULL = 未转化）
+    pub linked_workflow_id: Option<String>,
+    /// 首次启动实现工作流执行的时间戳（秒；NULL = 未执行）
+    pub implemented_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -99,6 +103,188 @@ pub struct DiscoverLeadsSummary {
     pub total_refreshed: u32,
     /// 其中高价值（commercial_value_score ≥ 60）数量
     pub high_value_count: u32,
-    /// 高价值线索明细（最多 20 条）
+    /// 高价值线索明细（最多 20 条，全局按分数降序，非本轮独有）
     pub leads: Vec<DemandLeadDto>,
+    /// 本轮实际扫描评估到的线索明细（按分数降序）
+    ///
+    /// 与 `leads` 区别：`leads` 是全局高价值榜单（前端列表用），`round_leads`
+    /// 只含本轮命中的线索 —— 订阅定时扫描按 `min_score` 过滤推送时必须有
+    /// 本轮口径，否则每个订阅词都会推送到与自己无关的线索。
+    #[serde(default)]
+    pub round_leads: Vec<DemandLeadDto>,
+}
+
+/// 需求订阅（长期跟踪的关键词，v133）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DemandSubscription {
+    pub id: String,
+    /// 订阅关键词（唯一）
+    pub keyword: String,
+    /// 是否启用扫描
+    pub enabled: bool,
+    /// 扫描间隔（小时）
+    pub interval_hours: i32,
+    /// 推送门槛：商业价值分低于此值不计入高价值命中
+    pub min_score: f64,
+    /// 限定平台 ID 列表；空数组 = 跟随全局启用的平台
+    pub platforms: Vec<String>,
+    /// 最近一次扫描时间戳（秒），NULL = 从未扫描
+    pub last_scanned_at: Option<i64>,
+    /// 最近一次扫描的高价值命中数
+    pub last_hit_count: i32,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 保存（新增或更新）需求订阅的输入
+///
+/// `id` 为空表示新增（自动生成 id）；`keyword` 唯一，重复会被 DB 唯一索引拒绝。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDemandSubscriptionInput {
+    pub id: Option<String>,
+    pub keyword: Option<String>,
+    pub enabled: Option<bool>,
+    pub interval_hours: Option<i32>,
+    pub min_score: Option<f64>,
+    pub platforms: Option<Vec<String>>,
+}
+
+/// 单个订阅词的扫描结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeywordScanOutcome {
+    pub subscription_id: String,
+    pub keyword: String,
+    /// 扫描是否成功（平台全部失败时为 false）
+    pub ok: bool,
+    /// 失败原因（ok=false 时）
+    pub error: Option<String>,
+    /// 本词命中的高价值线索（已按 min_score 过滤）
+    pub hits: Vec<DemandLeadDto>,
+}
+
+/// 一轮订阅扫描的汇总（定时任务与手动触发共用）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionScanSummary {
+    /// 本轮扫描的订阅词数
+    pub scanned_subscriptions: u32,
+    /// 新入库线索总数
+    pub total_saved: u32,
+    /// 刷新评分的线索总数
+    pub total_refreshed: u32,
+    /// 命中推送门槛的高价值线索总数
+    pub high_value_hits: u32,
+    /// 逐词结果
+    pub outcomes: Vec<KeywordScanOutcome>,
+}
+
+// ── 能力匹配（v133，需求全链路 P3）──────────────────────────────────
+
+/// 单条能力的匹配命中项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityMatchItem {
+    pub capability_id: String,
+    pub name: String,
+    /// 能力类型（`CapabilityKind::as_str()`）
+    pub kind: String,
+    /// 业务域（`CapabilityDomain::as_str()`）
+    pub domain: String,
+    /// 综合检索分（semantic*0.6 + keyword*0.2 + tag*0.2，0.0-1.0）
+    pub retrieval_score: f64,
+    /// 一句话摘要（渐进式披露 L0，未声明时为 None）
+    pub summary: Option<String>,
+}
+
+/// 线索的能力匹配结论
+///
+/// `verdict` 三档：`ready`（已有能力可直接接）/ `partial`（部分覆盖）/
+/// `missing`（能力库基本没有对应能力）。
+/// `missing_domains` 是需求类型推断出的必需能力域中未被覆盖的部分 —— 即「缺什么」。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadCapabilityMatch {
+    pub lead_id: String,
+    /// ready / partial / missing
+    pub verdict: String,
+    /// 最高检索分（无命中时为 0）
+    pub best_score: f64,
+    /// 命中的能力（按检索分降序）
+    pub matches: Vec<CapabilityMatchItem>,
+    /// 该需求类型要求的能力域（`CapabilityDomain::as_str()`）
+    pub required_domains: Vec<String>,
+    /// required_domains 中未被命中的部分 = 缺口
+    pub missing_domains: Vec<String>,
+    /// 缺口说明（供后续生成补齐工作流用）；无缺口时为 None
+    pub gap_hint: Option<String>,
+}
+
+// ── 交付闭环（P4，v134） ──
+
+/// 交付发票：won 线索的账本行
+///
+/// 状态机 `draft → sent → paid` 单向推进（DAO 层校验，同状态幂等）。
+/// `amount` + `currency` 多币种并存，汇总按币种分组，不假装能换算。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryInvoiceDto {
+    pub id: String,
+    pub lead_id: String,
+    /// P2 转化出的交付工作流（可空：人工交付无工作流）
+    pub linked_workflow_id: Option<String>,
+    pub title: String,
+    pub amount: f64,
+    pub currency: String,
+    /// draft / sent / paid
+    pub status: String,
+    pub issued_at: Option<i64>,
+    pub paid_at: Option<i64>,
+    pub notes: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 开票入参：缺省时从线索元数据自动填充（标题/预算/币种）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateInvoiceFromLeadInput {
+    /// 缺省 = 线索标题
+    pub title: Option<String>,
+    /// 缺省 = 线索预算上限（budget_max），无预算时 0
+    pub amount: Option<f64>,
+    /// 缺省 = 线索预算币种（budget_currency），无预算时 CNY
+    pub currency: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// 单币种的回款小计
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevenueByCurrency {
+    pub currency: String,
+    /// 已回款（paid）总额
+    pub paid_total: f64,
+    /// 已开出（sent + paid）总额
+    pub issued_total: f64,
+}
+
+/// 交付环节汇总（`opc_get_delivery_summary`）
+///
+/// `conversion_rate` = won / (全部线索 − lost)。
+/// 只做统计暴露，不自动回写评分权重 —— 样本量不够时回写是过拟合。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverySummary {
+    /// won 线索数
+    pub won_leads: u32,
+    /// 非 lost 线索总数（分母）
+    pub active_leads: u32,
+    pub invoice_count: u32,
+    pub paid_count: u32,
+    pub revenues: Vec<RevenueByCurrency>,
+    /// won / active，active 为 0 时为 0.0
+    pub conversion_rate: f64,
 }

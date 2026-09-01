@@ -148,5 +148,9 @@ pub mod narrative_structures;
 // OPC 需求发现（v131）—— 平台配置 + 需求线索持久化
 pub mod opc_demand_leads;
 pub mod opc_demand_platforms;
+// OPC 需求发现（v133）—— 订阅词表
+pub mod opc_demand_subscriptions;
+// OPC 交付（v134）—— 发票账本
+pub mod opc_invoices;
 
 pub use sea_orm;

@@ -73,9 +73,30 @@ jobs:
       - name: Package Windows portable (zip)
         shell: pwsh
         run: |
-          $exe = "src-tauri/target/x86_64-pc-windows-msvc/release/AxInvest.exe"
+          # 主二进制名解析：tauri.conf.json 的 mainBinaryName 生效时为 AxInvest.exe，
+          # 否则回退到 cargo [[bin]] name（axagent.exe）。找不到就打印目录再失败，
+          # 避免只在 CI 里留下一句 "path does not exist"。
+          $releaseDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
+          $exe = @("AxInvest.exe", "axagent.exe", "AxAgent.exe") |
+            ForEach-Object { Join-Path $releaseDir $_ } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            Write-Error "No built executable found under: $releaseDir"
+            Get-ChildItem -Path $releaseDir -ErrorAction SilentlyContinue | Format-Table Name, Length
+            exit 1
+          }
+
+          Write-Host "Packaging $exe ($([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB)"
+
+          $staging = "portable-staging-x64"
+          $staged = Join-Path $staging "AxInvest.exe"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item -Path $exe -Destination $staged -Force
           $zipName = "AxInvest_${{ github.ref_name }}_windows-x64-portable.zip"
-          Compress-Archive -Path $exe -DestinationPath $zipName
+          Compress-Archive -Path $staged -DestinationPath $zipName
+          Remove-Item -Recurse -Force $staging
 
       - name: Upload Windows portable to release
         uses: softprops/action-gh-release@v2

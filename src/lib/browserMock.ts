@@ -14,7 +14,9 @@ import type {
   ConversationBranch,
   ConversationCategory,
   CreateSearchProviderInput,
+  DeliveryInvoice,
   DemandLead,
+  DemandSubscription,
   GatewayKey,
   KnowledgeBase,
   KnowledgeDocument,
@@ -243,7 +245,9 @@ let MOCK_DEMAND_LEADS: DemandLead[] = [
     marketGapScore: 64,
     commercialValueScore: 76,
     opportunityLevel: "high",
-    demandType: "content_automation",
+    demandType: "content_creation",
+    linkedWorkflowId: null,
+    implementedAt: null,
     createdAt: 1700000000,
     updatedAt: 1700000000,
   },
@@ -265,7 +269,9 @@ let MOCK_DEMAND_LEADS: DemandLead[] = [
     marketGapScore: 55,
     commercialValueScore: 81,
     opportunityLevel: "very_high",
-    demandType: "custom_software",
+    demandType: "development",
+    linkedWorkflowId: null,
+    implementedAt: null,
     createdAt: 1700000100,
     updatedAt: 1700000100,
   },
@@ -288,9 +294,57 @@ let MOCK_DEMAND_LEADS: DemandLead[] = [
     marketGapScore: 72,
     commercialValueScore: 61,
     opportunityLevel: "high",
-    demandType: "saas_product",
+    demandType: "development",
+    linkedWorkflowId: null,
+    implementedAt: null,
     createdAt: 1700000200,
     updatedAt: 1700000200,
+  },
+];
+
+/** 模拟需求订阅词表（浏览器模式，v133） */
+let MOCK_DEMAND_SUBSCRIPTIONS: DemandSubscription[] = [
+  {
+    id: "sub-selfhosted",
+    keyword: "self-hosted wiki",
+    enabled: true,
+    intervalHours: 6,
+    minScore: 60,
+    platforms: [],
+    lastScannedAt: null,
+    lastHitCount: 0,
+    createdAt: 1700000300,
+    updatedAt: 1700000300,
+  },
+  {
+    id: "sub-invoice",
+    keyword: "invoice automation",
+    enabled: true,
+    intervalHours: 12,
+    minScore: 70,
+    platforms: ["upwork"],
+    lastScannedAt: 1699996400,
+    lastHitCount: 2,
+    createdAt: 1700000400,
+    updatedAt: 1700000400,
+  },
+];
+
+/** 交付发票账本 mock（P4）：预置一张已开出未回款的发票 */
+let MOCK_INVOICES: DeliveryInvoice[] = [
+  {
+    id: "inv-zbj-002",
+    leadId: "lead-zbj-002",
+    linkedWorkflowId: null,
+    title: "跨境电商多店铺库存同步系统",
+    amount: 80000,
+    currency: "CNY",
+    status: "sent",
+    issuedAt: 1700000500,
+    paidAt: null,
+    notes: null,
+    createdAt: 1700000450,
+    updatedAt: 1700000500,
   },
 ];
 
@@ -1441,12 +1495,6 @@ async function executeCommand<T>(
     // ── Settings ──────────────────────────────────────────────────────
     case "get_settings":
       return getStore("settings", DEFAULT_SETTINGS) as T;
-    // 数据源健康仪表盘 — 后端返回 Vec<VendorHealth>，mock 返回空数组
-    case "get_vendor_health_all":
-      return [] as unknown as T;
-    // 管道历史 — 后端返回 Vec<PipelineRun>，mock 返回空数组
-    case "get_pipeline_history":
-      return [] as unknown as T;
     case "save_settings": {
       const settings = (args as { settings?: Partial<Settings> }).settings ?? {};
       const current = getStore<Settings>(
@@ -2635,16 +2683,6 @@ async function executeCommand<T>(
     case "stop_gateway":
       return undefined as T;
 
-    // ── Data management ───────────────────────────────────────────────
-    case "export_data":
-      return { path: "export.json" } as T;
-    case "import_data":
-      return undefined as T;
-    case "clear_data":
-      localStorage.clear();
-      return undefined as T;
-
-    // ── Phase 2: Search Providers ──────────────────────────────────────
     case "list_search_providers":
       return getStore("search_providers", []) as T;
     case "create_search_provider": {
@@ -2850,10 +2888,6 @@ async function executeCommand<T>(
       );
       return undefined as T;
     }
-    case "connect_mcp_server":
-      return { status: "connected" } as T;
-    case "disconnect_mcp_server":
-      return { status: "disconnected" } as T;
     case "list_mcp_tools":
       return [
         { name: "web_search", description: "Search the web", parameters: {} },
@@ -2863,11 +2897,6 @@ async function executeCommand<T>(
           parameters: {},
         },
       ] as T;
-    case "execute_tool":
-      return {
-        success: true,
-        output: `Mock result for tool "${(args as Record<string, unknown>)?.tool_name ?? "unknown"}"`,
-      } as T;
     case "test_mcp_server":
       return { ok: true, error: undefined } as T;
     case "list_tool_executions":
@@ -2992,7 +3021,6 @@ async function executeCommand<T>(
       setStore("knowledge_bases", kbs6);
       return undefined as T;
     }
-    case "query_knowledge":
     case "search_knowledge_base":
       return [] as T;
     case "rebuild_knowledge_index":
@@ -3106,7 +3134,6 @@ async function executeCommand<T>(
       setStore("memory_namespaces", mns5);
       return undefined as T;
     }
-    case "recall_memory":
     case "search_memory":
       return [] as T;
     case "rebuild_memory_index":
@@ -3118,10 +3145,10 @@ async function executeCommand<T>(
         entities: [
           {
             id: "ent_1",
-            name: "AxAgent Project",
+            name: "AxInvest Project",
             entity_type: "project",
             properties: {},
-            aliases: ["AxAgent", "axagent"],
+            aliases: ["AxInvest", "axinvest"],
             mention_count: 12,
             confidence: 0.95,
           },
@@ -3574,9 +3601,6 @@ async function executeCommand<T>(
       return undefined as T;
     }
 
-    // ── Phase 2: Program Policies ─────────────────────────────────────
-    case "list_program_policies":
-      return getStore<ProgramPolicy[]>("program_policies", []) as T;
     case "get_program_policies":
       return getStore<ProgramPolicy[]>("program_policies", []) as T;
     case "save_program_policy": {
@@ -3614,65 +3638,6 @@ async function executeCommand<T>(
       sppList.push(sppNew);
       setStore("program_policies", sppList);
       return sppNew as T;
-    }
-    case "create_program_policy": {
-      const pps = getStore<ProgramPolicy[]>("program_policies", []);
-      const ppInput = args as {
-        programName?: string;
-        allowedProviderIds?: string[];
-        allowedModelIds?: string[];
-      };
-      const pp: ProgramPolicy = {
-        id: genId(),
-        programName: ppInput.programName ?? "",
-        allowedProviderIdsJson: JSON.stringify(
-          ppInput.allowedProviderIds ?? [],
-        ),
-        allowedModelIdsJson: JSON.stringify(ppInput.allowedModelIds ?? []),
-      };
-      pps.push(pp);
-      setStore("program_policies", pps);
-      return pp as T;
-    }
-    case "update_program_policy": {
-      const pps2 = getStore<ProgramPolicy[]>("program_policies", []);
-      const { id, ...ppInput } = args as {
-        id?: string;
-        programName?: string;
-        allowedProviderIds?: string[];
-        allowedModelIds?: string[];
-        defaultProviderId?: string;
-        defaultModelId?: string;
-        rateLimitPerMinute?: number;
-      };
-      const ppi = pps2.findIndex((p) => p.id === id);
-      if (ppi >= 0) {
-        if (ppInput.programName !== undefined) {
-          pps2[ppi].programName = ppInput.programName;
-        }
-        if (ppInput.allowedProviderIds !== undefined) {
-          pps2[ppi].allowedProviderIdsJson = JSON.stringify(
-            ppInput.allowedProviderIds,
-          );
-        }
-        if (ppInput.allowedModelIds !== undefined) {
-          pps2[ppi].allowedModelIdsJson = JSON.stringify(
-            ppInput.allowedModelIds,
-          );
-        }
-        if (ppInput.defaultProviderId !== undefined) {
-          pps2[ppi].defaultProviderId = ppInput.defaultProviderId;
-        }
-        if (ppInput.defaultModelId !== undefined) {
-          pps2[ppi].defaultModelId = ppInput.defaultModelId;
-        }
-        if (ppInput.rateLimitPerMinute !== undefined) {
-          pps2[ppi].rateLimitPerMinute = ppInput.rateLimitPerMinute;
-        }
-        setStore("program_policies", pps2);
-        return pps2[ppi] as T;
-      }
-      return undefined as T;
     }
     case "delete_program_policy": {
       const pps3 = getStore<ProgramPolicy[]>("program_policies", []);
@@ -3759,26 +3724,6 @@ async function executeCommand<T>(
           updated_at: nowTs(),
         },
       ]) as T;
-    case "create_gateway_template": {
-      const gts = getStore<Record<string, unknown>[]>("gateway_templates", []);
-      const gt = {
-        id: genId(),
-        ...(args as Record<string, unknown>),
-        created_at: nowTs(),
-        updated_at: nowTs(),
-      };
-      gts.push(gt);
-      setStore("gateway_templates", gts);
-      return gt as T;
-    }
-    case "delete_gateway_template": {
-      const gts2 = getStore<Record<string, unknown>[]>("gateway_templates", []);
-      setStore(
-        "gateway_templates",
-        gts2.filter((g) => g.id !== (args as Record<string, unknown>)?.id),
-      );
-      return undefined as T;
-    }
     case "copy_gateway_template": {
       const cgtList = getStore<Record<string, unknown>[]>(
         "gateway_templates",
@@ -3790,10 +3735,6 @@ async function executeCommand<T>(
       return (cgtMatch?.content
         ?? "# Gateway Template Configuration\n\nNo template found.") as T;
     }
-    case "apply_gateway_template":
-      return { success: true, applied_at: nowTs() } as T;
-
-    // ── Phase 2: Desktop Integration ──────────────────────────────────
     case "get_desktop_capabilities":
       return [
         { key: "tray", supported: false },
@@ -3814,7 +3755,7 @@ async function executeCommand<T>(
         typeof Notification !== "undefined"
         && Notification.permission === "granted"
       ) {
-        new Notification((args as { title?: string })?.title ?? "AxAgent", {
+        new Notification((args as { title?: string })?.title ?? "AxInvest", {
           body: (args as { body?: string })?.body ?? "",
         });
       }
@@ -3826,12 +3767,6 @@ async function executeCommand<T>(
       return undefined as T;
     case "apply_startup_settings":
       return undefined as T;
-    case "set_tray_actions":
-      return undefined as T;
-    case "handle_protocol_launch":
-      return undefined as T;
-
-    // ── Phase 2: Workspace Snapshot ────────────────────────────────────
     case "get_workspace_snapshot": {
       const convId = (args as Record<string, unknown>)?.conversationId as string;
       const branches = getStore<ConversationBranch[]>(`branches_${convId}`, []);
@@ -3876,7 +3811,7 @@ async function executeCommand<T>(
         {
           name: "superpowers:brainstorming",
           description: "You MUST use this before any creative work",
-          author: "AxAgent",
+          author: "AxInvest",
           version: "1.0.0",
           source: "builtin",
           sourcePath: "builtin://superpowers-brainstorming",
@@ -3891,7 +3826,7 @@ async function executeCommand<T>(
         {
           name: "superpowers:systematic-debugging",
           description: "Use when encountering any bug, test failure, or unexpected behavior",
-          author: "AxAgent",
+          author: "AxInvest",
           version: "1.0.0",
           source: "builtin",
           sourcePath: "builtin://superpowers-debugging",
@@ -3906,7 +3841,7 @@ async function executeCommand<T>(
         {
           name: "superpowers:writing-plans",
           description: "Use when you have a spec or requirements for a multi-step task",
-          author: "AxAgent",
+          author: "AxInvest",
           version: "1.0.0",
           source: "builtin",
           sourcePath: "builtin://superpowers-writing-plans",
@@ -3921,7 +3856,7 @@ async function executeCommand<T>(
         {
           name: "superpowers:test-driven-development",
           description: "Use when implementing any feature or bugfix, before writing implementation code",
-          author: "AxAgent",
+          author: "AxInvest",
           version: "1.0.0",
           source: "builtin",
           sourcePath: "builtin://superpowers-tdd",
@@ -4666,14 +4601,9 @@ async function executeCommand<T>(
     }
     case "process_telegram_message":
     case "process_discord_message":
-    case "process_wechat_message":
-    case "process_feishu_message":
-    case "process_qq_message":
-    case "process_dingtalk_message":
-    case "process_slack_message":
-    case "process_whatsapp_message": {
-      return { success: true, reply_sent: false } as T;
-    }
+    case "process_platform_message":
+      // 后端 process_platform_message 返回 Ok(None)（平台白名单校验 + 日志）
+      return null as T;
     case "start_api_server": {
       setStore("api_server_running", true);
       return { port: (args as { port?: number }).port ?? 8080 } as T;
@@ -4777,10 +4707,6 @@ async function executeCommand<T>(
     case "pty_kill_session":
     case "pty_remove_session":
     case "pty_analyze_output":
-    case "pty_clear_output":
-      return null as T;
-
-    // ── NL-to-Workflow ────────────────────────────────────────────────
     case "generate_workflow_from_prompt": {
       return {
         nodes: [
@@ -5349,336 +5275,26 @@ async function executeCommand<T>(
         elapsedMs: 0,
       } as T;
 
-    // ── OPC Industries ──────────────────────────────────────────────
-    case "opc_get_industry_pack": {
-      const industryId = (args as { industry_id?: string; industryId?: string })?.industry_id
-        || (args as { industry_id?: string; industryId?: string })?.industryId
-        || "";
-      const industryManifests: Record<string, {
-        id: string;
-        name: string;
-        icon: string;
-        description: string;
-        version: number;
-        enabled: boolean;
-      }> = {
-        "ai-research": {
-          id: "ai_research",
-          name: "人工智能研究",
-          icon: "🤖",
-          description: "AI 技术与应用研究报告：需求分析 → 技术调研 → 原型验证 → 报告输出",
-          version: 1,
-          enabled: true,
-        },
-        "software-dev": {
-          id: "software_dev",
-          name: "软件开发",
-          icon: "💻",
-          description: "软件开发全流程：需求分析 → 架构设计 → 编码实现 → 测试部署",
-          version: 1,
-          enabled: true,
-        },
-        "finance-invest": {
-          id: "finance_invest",
-          name: "金融投资",
-          icon: "📈",
-          description: "投资分析与决策：市场分析 → 财务建模 → 风险评估 → 投资建议",
-          version: 1,
-          enabled: true,
-        },
-        "sales-growth": {
-          id: "sales_growth",
-          name: "销售增长",
-          icon: "🚀",
-          description: "销售增长策略：市场定位 → 客户画像 → 获客策略 → 转化优化",
-          version: 1,
-          enabled: true,
-        },
-        "content-media": {
-          id: "content_media",
-          name: "内容媒体",
-          icon: "📝",
-          description: "内容创作与传播：选题策划 → 内容生产 → 多平台分发 → 效果追踪",
-          version: 1,
-          enabled: true,
-        },
-        "industry-consulting": {
-          id: "industry_consulting",
-          name: "行业咨询",
-          icon: "💼",
-          description: "行业洞察与咨询：行业扫描 → 竞品分析 → 战略建议 → 落地规划",
-          version: 1,
-          enabled: true,
-        },
-        "accounting": {
-          id: "accounting",
-          name: "会计",
-          icon: "💰",
-          description: "财务会计与税务：账务处理 → 税务申报 → 财务报表 → 审计支持",
-          version: 1,
-          enabled: true,
-        },
-        "ecommerce": {
-          id: "ecommerce",
-          name: "电商",
-          icon: "🛒",
-          description: "电商运营全流程：选品策略 → 店铺运营 → 营销推广 → 客户管理",
-          version: 1,
-          enabled: true,
-        },
-        "education": {
-          id: "education",
-          name: "教育",
-          icon: "🎓",
-          description: "教育产品与服务：课程设计 → 内容开发 → 学员运营 → 效果评估",
-          version: 1,
-          enabled: true,
-        },
-      };
-
-      const manifest = industryManifests[industryId] || industryManifests["ai-research"];
-      const workflows = getStore<any[]>("workflow_templates", []).filter(
-        (w: any) => w.tags?.includes("opc") && w.tags?.some((t: string) => t.includes(industryId.replace("-", ""))),
-      );
-
-      return {
-        manifest,
-        workflows: workflows.length > 0 ? workflows : [
-          {
-            id: `workflow-${industryId}`,
-            name: `${manifest.name}分析流程`,
-            description: `${manifest.description}`,
-            version: "1",
-          },
-        ],
-      } as T;
-    }
-
-    case "opc_list_industries": {
-      const industries = [
-        {
-          id: "ai-research",
-          name: "人工智能研究",
-          icon: "🤖",
-          description: "AI 技术调研、模型评测、应用场景分析",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "software-dev",
-          name: "软件开发",
-          icon: "💻",
-          description: "代码审查、架构设计、API 文档、Bug 分析",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "finance-invest",
-          name: "金融投资",
-          icon: "📈",
-          description: "个股分析、财报解读、估值计算、风险评估",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "sales-growth",
-          name: "销售增长",
-          icon: "🚀",
-          description: "客户画像、转化漏斗、销售文案、竞品策略",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "content-media",
-          name: "内容媒体",
-          icon: "📝",
-          description: "文章写作、SEO 优化、视频脚本、内容日历",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "industry-consulting",
-          name: "行业咨询",
-          icon: "💼",
-          description: "行业报告、市场预测、进入策略、竞品分析",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "accounting",
-          name: "会计",
-          icon: "💰",
-          description: "税务筹划、报表解读、成本分析、预算规划",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "ecommerce",
-          name: "电商",
-          icon: "🛒",
-          description: "选品分析、定价策略、营销方案、店铺诊断",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-        {
-          id: "education",
-          name: "教育",
-          icon: "🎓",
-          description: "课程设计、知识图谱、学习路径、教材生成",
-          actionCount: 4,
-          workflowCount: 3,
-        },
-      ];
-      return industries as unknown as T;
-    }
-
-    case "opc_build_industry_prompt": {
-      const industryId = (args as { industry_id?: string; industryId?: string })?.industry_id
-        || (args as { industry_id?: string; industryId?: string })?.industryId
-        || "ai-research";
-      const actionKey = (args as { action_key?: string; actionKey?: string })?.action_key
-        || (args as { action_key?: string; actionKey?: string })?.actionKey
-        || "ai-paper";
-
-      const promptConfigs: Record<string, Record<string, { systemPrompt: string; userPrompt: string; label: string }>> =
-        {
-          "ai-research": {
-            "ai-paper": {
-              systemPrompt: "你是一位资深的 AI 研究员，擅长追踪前沿技术论文。",
-              userPrompt: "请帮我调研最近一个月 AI 领域的重要论文和技术突破。",
-              label: "AI 论文调研",
-            },
-            "ai-benchmark": {
-              systemPrompt: "你是一位 AI 模型评测专家。",
-              userPrompt: "请对比分析主流大模型在中文场景下的性能表现。",
-              label: "模型性能对比",
-            },
-            "ai-application": {
-              systemPrompt: "你是一位 AI 应用咨询顾问。",
-              userPrompt: "请分析 AI 技术在特定行业的应用机会。",
-              label: "AI 应用场景分析",
-            },
-            "ai-report": {
-              systemPrompt: "你是一位专业的 AI 行业分析师。",
-              userPrompt: "请生成一份 AI 技术研究报告。",
-              label: "生成 AI 研究报告",
-            },
-          },
-          "software-dev": {
-            "sd-code-review": {
-              systemPrompt: "你是一位资深代码审查专家。",
-              userPrompt: "请帮我审查代码，关注代码质量和最佳实践。",
-              label: "代码审查",
-            },
-            "sd-architecture": {
-              systemPrompt: "你是一位资深软件架构师。",
-              userPrompt: "请对系统架构进行评估并提供改进建议。",
-              label: "架构设计咨询",
-            },
-            "sd-api-doc": {
-              systemPrompt: "你是一位技术文档撰写专家。",
-              userPrompt: "请为代码生成完整的 API 文档。",
-              label: "API 文档生成",
-            },
-            "sd-bug": {
-              systemPrompt: "你是一位资深调试专家。",
-              userPrompt: "请帮我分析错误信息，定位根因并提供修复方案。",
-              label: "Bug 分析修复",
-            },
-          },
-        };
-
-      const industryPrompts = promptConfigs[industryId] || promptConfigs["ai-research"];
-      const action = industryPrompts[actionKey] || industryPrompts["ai-paper"];
-
-      return {
-        systemPrompt: action.systemPrompt,
-        userPrompt: action.userPrompt,
-        actionKey,
-        actionLabel: action.label,
-        industryId,
-      } as unknown as T;
-    }
-
-    case "opc_list_industry_actions":
-    case "opc_list_industry_workflows":
-    case "opc_get_action_config":
-    case "opc_get_workflow_config": {
-      return [] as unknown as T;
-    }
-
-    // ── OPC Core CRUD ────────────────────────────────────────────────
     case "opc_list_invoices":
-    case "opc_list_customers":
-    case "opc_list_projects":
-    case "opc_list_kpis":
-    case "opc_list_revenue":
-    case "opc_list_landing_pages":
-    case "opc_list_blog_posts":
-    case "opc_list_contacts":
-    case "opc_list_work_items":
-    case "opc_list_orgs":
-    case "opc_list_talents":
-    case "opc_list_experiences":
-    case "opc_list_revenue_records":
-    case "opc_list_kpi_records":
-    case "opc_list_industry_connections":
-    case "opc_list_site_domains":
-    case "opc_list_tags":
-    case "opc_list_tasks":
-    case "opc_list_sessions":
-    case "opc_list_documents":
-    case "opc_list_rules":
-    case "opc_list_templates":
-    case "opc_list_domains":
-    case "opc_list_metrics":
-    case "opc_list_configs":
-    case "opc_list_assets":
-    case "opc_list_campaigns":
-    case "opc_list_channels":
-    case "opc_list_workflows":
-    case "opc_list_apps":
-    case "opc_list_tenants":
-    case "opc_list_members":
-    case "opc_list_integrations":
-    case "opc_list_automations":
-    case "opc_list_webhooks":
-    case "opc_list_newsletters":
-    case "opc_list_subscribers":
-    case "opc_list_seo_assets":
-    case "opc_list_backlinks":
-    case "opc_list_keywords":
-    case "opc_list_competitors":
-    case "opc_list_opportunities":
-    case "opc_list_funnels":
-    case "opc_list_pages":
-    case "opc_list_elements":
-    case "opc_list_variants":
-    case "opc_list_analytics":
-    case "opc_list_acquisitions":
-    case "opc_list_retention":
-    case "opc_list_referrals":
-    case "opc_list_campaign_templates":
-    case "opc_list_price_points":
-    case "opc_list_value_metrics":
-    case "opc_list_experiments":
-    case "opc_list_hypotheses":
-    case "opc_list_features":
-    case "opc_list_suggestions":
-    case "opc_list_reviews":
-    case "opc_list_tickets":
-    case "opc_list_invoices_overdue":
-    case "opc_list_invoices_upcoming":
-    case "opc_list_projects_active":
-    case "opc_list_projects_completed":
-    case "opc_list_customers_active":
-    case "opc_list_customers_inactive":
-    case "opc_list_customers_new":
-      return [] as unknown as T;
+      return [...MOCK_INVOICES] as unknown as T;
 
-    // ── OPC 需求发现相关 ────────────────────────────────────────────
     case "opc_list_platforms":
       return [...PRESET_MOCK_PLATFORMS] as unknown as T;
+
+    case "opc_get_scan_policy":
+      // 与 ScanPolicy::default 对齐（crates/tools/src/tools/scan_policy.rs）
+      return {
+        concurrency: 4,
+        rateLimitPerMin: 60,
+        retryMax: 2,
+        retryBackoffMs: 500,
+        timeoutSecs: 15,
+        dedupWindowHours: 168,
+        maxLeadsPerScan: 200,
+      } as T;
+
+    case "opc_save_scan_policy":
+      return (args as { policy?: unknown }).policy as T;
 
     case "opc_save_platform": {
       const input = (args ?? {}) as {
@@ -5732,11 +5348,18 @@ async function executeCommand<T>(
     }
 
     case "opc_list_leads": {
-      const { minScore } = (args ?? {}) as { limit?: number; minScore?: number };
-      const filtered = typeof minScore === "number"
+      const { minScore, status } = (args ?? {}) as {
+        limit?: number;
+        minScore?: number;
+        status?: string;
+      };
+      let filtered = typeof minScore === "number"
         ? MOCK_DEMAND_LEADS.filter((l) => l.commercialValueScore >= minScore)
-        : MOCK_DEMAND_LEADS;
-      return [...filtered].sort((a, b) => b.commercialValueScore - a.commercialValueScore) as unknown as T;
+        : [...MOCK_DEMAND_LEADS];
+      if (status) {
+        filtered = filtered.filter((l) => l.status === status);
+      }
+      return filtered.sort((a, b) => b.commercialValueScore - a.commercialValueScore) as unknown as T;
     }
 
     case "opc_discover_and_evaluate_leads": {
@@ -5758,657 +5381,366 @@ async function executeCommand<T>(
       } as unknown as T;
     }
 
-    case "opc_get_dashboard_summary":
-      return {
-        total_revenue: 0,
-        total_invoices: 0,
-        active_projects: 0,
-        total_customers: 0,
-        recent_kpis: [],
-        revenue_trend: [],
-      } as unknown as T;
-
-    // ── OPC 行业学习与进化系统 ────────────────────────────────────
-    case "opc_get_learning_config": {
-      const industryId = (args as { industryId?: string })?.industryId || "ai-research";
-      const industryNames: Record<string, string> = {
-        "ai-research": "人工智能研究",
-        "software-dev": "软件开发",
-        "finance-invest": "金融投资",
-        "sales-growth": "销售增长",
-        "content-media": "内容媒体",
-        "industry-consulting": "行业咨询",
-        accounting: "会计",
-        ecommerce: "电商",
-        education: "教育",
+    case "opc_update_lead_status": {
+      const { leadId, status } = (args ?? {}) as { leadId?: string; status?: string };
+      const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
+      if (!lead) {
+        throw new Error(`需求线索不存在: ${leadId}`);
+      }
+      const legal: Record<string, string[]> = {
+        new: ["evaluated", "contacted", "lost"],
+        evaluated: ["contacted", "lost"],
+        contacted: ["won", "lost"],
       };
-      return {
+      if (lead.status !== status && !(legal[lead.status] ?? []).includes(status ?? "")) {
+        throw new Error(`非法状态迁移: ${lead.status} → ${status}`);
+      }
+      lead.status = status ?? lead.status;
+      lead.updatedAt = Math.floor(Date.now() / 1000);
+      return { ...lead } as unknown as T;
+    }
+
+    case "opc_convert_lead_to_workflow": {
+      const { leadId } = (args ?? {}) as { leadId?: string };
+      const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
+      if (!lead) {
+        throw new Error(`需求线索不存在: ${leadId}`);
+      }
+      if (lead.linkedWorkflowId) {
+        throw new Error(`线索已转化，工作流 ID: ${lead.linkedWorkflowId}`);
+      }
+      // 浏览器模式没有 workflow_templates 表：返回最小模板结构（与真实契约同形）
+      const template = {
+        id: `demand:lead:${lead.id}`,
+        name: `需求实现: ${lead.title.slice(0, 40)}`,
+        description: lead.description,
+        icon: "target",
+        tags: ["opc_demand", "demand_implement"],
         version: 1,
-        industry_id: industryId,
-        industry_name: industryNames[industryId] || industryId,
-        reflection_enabled: true,
-        evolution_enabled: true,
-        code_evolver_enabled: false,
-        self_improvement_enabled: true,
-        reinforcement_learning_enabled: false,
-        config_path: `/opc/industries/${industryId}/learning.yaml`,
+        isPreset: false,
+        isEditable: true,
+        isPublic: false,
+        triggerConfig: { triggerType: "manual", config: {} },
+        nodes: [],
+        edges: [],
+        variables: [],
+        toolDefs: [],
+        clusterId: "demand_implement",
+        routePath: `/automation/demand/${lead.id}`,
+      };
+      lead.linkedWorkflowId = template.id;
+      lead.updatedAt = Math.floor(Date.now() / 1000);
+      return template as unknown as T;
+    }
+
+    case "opc_run_lead_workflow": {
+      const { leadId } = (args ?? {}) as { leadId?: string };
+      const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
+      if (!lead) {
+        throw new Error(`需求线索不存在: ${leadId}`);
+      }
+      if (!lead.linkedWorkflowId) {
+        throw new Error("线索尚未转化为工作流，请先转化");
+      }
+      lead.implementedAt = Math.floor(Date.now() / 1000);
+      lead.updatedAt = lead.implementedAt;
+      return `mock-exec-${lead.id}-${Date.now()}` as unknown as T;
+    }
+
+    // ── OPC 需求订阅（v133 定时扫描）────────────────────────────────
+    case "opc_list_subscriptions":
+      return [...MOCK_DEMAND_SUBSCRIPTIONS] as unknown as T;
+
+    case "opc_save_subscription": {
+      const { input } = (args ?? {}) as { input?: Record<string, unknown> };
+      const now = Math.floor(Date.now() / 1000);
+      const id = (input?.id as string | undefined) ?? "";
+      const existing = MOCK_DEMAND_SUBSCRIPTIONS.find((s) => s.id === id);
+      if (existing) {
+        if (typeof input?.keyword === "string") {
+          existing.keyword = input.keyword;
+        }
+        if (typeof input?.enabled === "boolean") {
+          existing.enabled = input.enabled;
+        }
+        if (typeof input?.intervalHours === "number") {
+          existing.intervalHours = input.intervalHours;
+        }
+        if (typeof input?.minScore === "number") {
+          existing.minScore = input.minScore;
+        }
+        if (Array.isArray(input?.platforms)) {
+          existing.platforms = input.platforms as string[];
+        }
+        existing.updatedAt = now;
+        return { ...existing } as unknown as T;
+      }
+      const keyword = (input?.keyword as string | undefined)?.trim() ?? "";
+      if (!keyword) {
+        throw new Error("订阅关键词不能为空");
+      }
+      if (MOCK_DEMAND_SUBSCRIPTIONS.some((s) => s.keyword === keyword)) {
+        throw new Error(`订阅词已存在: ${keyword}`);
+      }
+      const row: DemandSubscription = {
+        id: `sub-${Date.now()}`,
+        keyword,
+        enabled: input?.enabled === false ? false : true,
+        intervalHours: typeof input?.intervalHours === "number" ? input.intervalHours : 6,
+        minScore: typeof input?.minScore === "number" ? input.minScore : 60,
+        platforms: Array.isArray(input?.platforms) ? (input.platforms as string[]) : [],
+        lastScannedAt: null,
+        lastHitCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      MOCK_DEMAND_SUBSCRIPTIONS.push(row);
+      return { ...row } as unknown as T;
+    }
+
+    case "opc_delete_subscription": {
+      const { id } = (args ?? {}) as { id?: string };
+      const before = MOCK_DEMAND_SUBSCRIPTIONS.length;
+      MOCK_DEMAND_SUBSCRIPTIONS = MOCK_DEMAND_SUBSCRIPTIONS.filter((s) => s.id !== id);
+      if (MOCK_DEMAND_SUBSCRIPTIONS.length === before) {
+        throw new Error(`订阅不存在: ${id}`);
+      }
+      return undefined as unknown as T;
+    }
+
+    case "opc_run_subscription_scan": {
+      const { onlyDue } = (args ?? {}) as { onlyDue?: boolean };
+      const now = Math.floor(Date.now() / 1000);
+      const due = onlyDue === false
+        ? MOCK_DEMAND_SUBSCRIPTIONS.filter((s) => s.enabled)
+        : MOCK_DEMAND_SUBSCRIPTIONS.filter((s) =>
+          s.enabled
+          && (s.lastScannedAt === null
+            || now - s.lastScannedAt >= s.intervalHours * 3600)
+        );
+      const outcomes = due.map((s) => {
+        const hits = MOCK_DEMAND_LEADS.filter((l) => l.commercialValueScore >= s.minScore).slice(0, 2);
+        s.lastScannedAt = now;
+        s.lastHitCount = hits.length;
+        s.updatedAt = now;
+        return {
+          subscriptionId: s.id,
+          keyword: s.keyword,
+          ok: true,
+          error: null,
+          hits,
+        };
+      });
+      return {
+        scannedSubscriptions: due.length,
+        totalSaved: outcomes.length,
+        totalRefreshed: 0,
+        highValueHits: outcomes.reduce((n, o) => n + o.hits.length, 0),
+        outcomes,
       } as unknown as T;
     }
 
-    case "opc_list_learning_configs": {
-      const ids = [
-        "ai-research",
-        "software-dev",
-        "finance-invest",
-        "sales-growth",
-        "content-media",
-        "industry-consulting",
-        "accounting",
-        "ecommerce",
-        "education",
-      ];
-      return ids.map((id) => ({
-        version: 1,
-        industry_id: id,
-        industry_name: id.replace(/-/g, "_"),
-        reflection_enabled: true,
-        evolution_enabled: true,
-        code_evolver_enabled: false,
-        self_improvement_enabled: true,
-        reinforcement_learning_enabled: false,
-        config_path: `/opc/industries/${id}/learning.yaml`,
-      })) as unknown as T;
-    }
-
-    case "opc_reflect_on_workflow": {
+    case "opc_ensure_demand_scan_job": {
+      const { cronExpression } = (args ?? {}) as { cronExpression?: string };
+      const cron = cronExpression ?? "0 */6 * * *";
+      // 5 字段校验（与后端 validate_cron_expression 同规则）
+      if (cron.trim().split(/\s+/).length !== 5) {
+        throw new Error(`非法的 cron 表达式: ${cron}`);
+      }
       return {
-        success: true,
-        industry_id: (args as { industryId?: string })?.industryId || "",
-        workflow_id: (args as { workflowId?: string })?.workflowId || "",
-        quality_score: 0.82,
-        suggestions: ["考虑增加数据验证步骤", "优化异常处理逻辑"],
-        summary: "工作流执行质量良好，建议在数据校验环节加强检查。",
+        id: "mock-opc-demand-scan",
+        name: "OPC 需求订阅扫描",
+        description: "按订阅词表扫描需求平台，命中推送门槛的线索走 delivery 推送",
+        schedule: cron,
+        enabled: true,
+        status: "active",
+        taskType: "opc_demand_scan",
+        recurring: true,
+        workflowId: null,
+        createdAt: Math.floor(Date.now() / 1000),
+        lastRunAt: null,
+        nextRunAt: null,
+        runCount: 0,
       } as unknown as T;
     }
 
-    case "opc_evolve_workflow": {
-      return {
-        success: true,
-        industry_id: (args as { industryId?: string })?.industryId || "",
-        workflow_id: (args as { workflowId?: string })?.workflowId || "",
-        status: "evolved",
-        suggested_optimizations: ["自动调整阈值", "增加决策分支"],
-        message: "工作流已根据最近执行结果完成进化优化。",
-      } as unknown as T;
-    }
+    case "opc_match_lead_capabilities": {
+      // 能力匹配 mock：与后端 opc_demand_capability 同口径（required 映射 + 门槛判定），
+      // 检索侧用固定假候选模拟（浏览器模式无 RAG）
+      const { leadId, topK } = (args ?? {}) as { leadId?: string; topK?: number };
+      const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
+      if (!lead) { throw new Error(`线索不存在: ${leadId}`); }
+      const limit = Math.min(Math.max(topK ?? 8, 1), 20);
 
-    case "opc_run_self_improvement": {
-      return {
-        success: true,
-        industry_id: (args as { industryId?: string })?.industryId || "",
-        target: (args as { target?: string })?.target || "all",
-        status: "completed",
-        improvements_applied: ["参数阈值微调", "新增一个决策分支"],
-        message: "自我改进完成，工作流已优化。",
-      } as unknown as T;
-    }
+      // 需求类型 → 必需能力域（与后端 required_domains_for 保持一致）
+      const REQUIRED: Record<string, string[]> = {
+        tool_software: ["general", "automation"],
+        content_creation: ["content_creation", "ai_media"],
+        design: ["content_creation", "ai_media"],
+        development: ["devops", "general"],
+        operations: ["automation", "devops"],
+        marketing: ["content_creation", "communication"],
+        education: ["content_creation"],
+        enterprise_service: ["automation", "data_analysis"],
+        outsourcing: ["general", "automation"],
+        consulting: ["data_analysis", "general"],
+      };
+      const required = REQUIRED[lead.demandType] ?? [];
 
-    case "opc_get_rl_stats": {
-      return {
-        total_experiences: 150,
-        industry_count: 9,
-        oldest_timestamp_ms: Date.now() - 7 * 24 * 3600 * 1000,
-        newest_timestamp_ms: Date.now(),
-        avg_reward: 0.75,
-        success_rate: 0.68,
-      } as unknown as T;
-    }
-
-    case "opc_record_rl_experience": {
-      return { success: true, recorded: true } as unknown as T;
-    }
-
-    case "opc_trigger_rl_optimization": {
-      return {
-        industry_id: (args as { industryId?: string })?.industryId || "",
-        experiences_used: 50,
-        avg_reward: 0.78,
-        reward_trend: "improving",
-        suggested_adjustments: ["提高高质量样本权重", "降低低质量样本影响"],
-        quality_weights_optimized: [
-          ["accuracy", 0.4],
-          ["efficiency", 0.35],
-          ["user_satisfaction", 0.25],
-        ],
-        reflection_threshold: 0.65,
-        evolution_trigger_adjusted: true,
-      } as unknown as T;
-    }
-
-    case "opc_trigger_auto_learning":
-    case "opc_trigger_industry_learning": {
-      return {
-        reflection: {
-          status: "success" as const,
-          quality_score: 0.82,
-          message: "反思完成，质量评分良好",
-        },
-        evolution: {
-          status: "success" as const,
-          reason: "基于最近 10 次执行结果",
-          message: "进化完成，工作流已优化",
-        },
-        self_improvement: {
-          status: "success" as const,
-          target: "all",
-          message: "自我改进完成",
-        },
-        triggered_at: Date.now(),
-      } as unknown as T;
-    }
-
-    case "opc_get_learning_metrics": {
-      const industryId = (args as { industryId?: string })?.industryId || "";
-      return {
-        industry_id: industryId,
-        total_samples: 42,
-        decision_accuracy: 0.78,
-        risk_prediction_accuracy: 0.72,
-        avg_feedback_score: 4.3,
-        improvement_trend: "improving" as const,
-        last_updated: Date.now(),
-      } as unknown as T;
-    }
-
-    case "opc_execute_analysis": {
-      const industryId = (args as { industryId?: string })?.industryId || "ai-research";
-      return {
-        industry_id: industryId,
-        decision_type: "weekly_review",
-        summary: `${industryId} 行业本周表现稳定，建议维持当前策略并关注新兴机会。`,
-        confidence: 0.82,
-        kpis: [
+      // 固定假候选：development 类给「部分覆盖」演示，其余给 ready 演示
+      const matches = lead.demandType === "development"
+        ? [
           {
-            id: "k1",
-            name: "综合指数",
-            value: 85,
-            unit: "分",
-            period: "本周",
-            trend: "up" as const,
-            change_percent: 3.2,
+            capabilityId: "mock-cap-devops-ci",
+            name: "CI/CD 流水线工作流",
+            kind: "workflow",
+            domain: "devops",
+            retrievalScore: 0.71,
+            summary: "多平台 API 对接与定时同步任务编排",
           },
-        ],
-        recommendations: [
-          { id: "r1", type: "opportunity" as const, description: "新兴市场机会值得关注", priority: "medium" as const },
-          { id: "r2", type: "warning" as const, description: "竞争加剧，需关注差异化", priority: "low" as const },
-        ],
-        risk_level: "medium" as const,
-      } as unknown as T;
-    }
-
-    case "opc_execute_workflow": {
-      const industryId = (args as { industryId?: string })?.industryId || "ai-research";
-      return {
-        industry_id: industryId,
-        workflow_id: `industry_${industryId}`,
-        status: "completed" as const,
-        node_results: [
-          { id: "n1", name: "数据收集", status: "completed" as const, duration_ms: 120 },
-          { id: "n2", name: "分析处理", status: "completed" as const, duration_ms: 250 },
-          { id: "n3", name: "报告生成", status: "completed" as const, duration_ms: 80 },
-        ],
-        duration_ms: 450,
-      } as unknown as T;
-    }
-
-    case "opc_get_industry_dashboard": {
-      const industryId = (args as { industryId?: string })?.industryId || "ai-research";
-      const days = (args as { days?: number })?.days || 30;
-      return {
-        industry_id: industryId,
-        kpis: [
+        ].slice(0, limit)
+        : [
           {
-            id: "k1",
-            name: "总收入",
-            value: 125000,
-            unit: "¥",
-            period: `${days}天`,
-            trend: "up" as const,
-            change_percent: 12.5,
-          },
-          {
-            id: "k2",
-            name: "客户数量",
-            value: 48,
-            unit: "人",
-            period: `${days}天`,
-            trend: "up" as const,
-            change_percent: 8.2,
+            capabilityId: "mock-cap-content-agent",
+            name: "内容聚类摘要 Agent",
+            kind: "agent",
+            domain: "content_creation",
+            retrievalScore: 0.78,
+            summary: "按兴趣关键词自动聚类并生成摘要周报",
           },
           {
-            id: "k3",
-            name: "项目完成率",
-            value: 85,
-            unit: "%",
-            period: `${days}天`,
-            trend: "flat" as const,
-            change_percent: 0.5,
+            capabilityId: "mock-cap-ai-media",
+            name: "AI 媒体生成工具链",
+            kind: "toolchain",
+            domain: "ai_media",
+            retrievalScore: 0.66,
+            summary: "多模态内容生成与配图",
           },
-          {
-            id: "k4",
-            name: "平均交付时间",
-            value: 12,
-            unit: "天",
-            period: `${days}天`,
-            trend: "down" as const,
-            change_percent: -5.3,
-          },
-        ],
-        cards: [
-          { id: "c1", title: "本月业绩", kpi_id: "k1", default_display: "¥125,000" },
-          { id: "c2", title: "客户增长", kpi_id: "k2", default_display: "48 人" },
-        ],
-        summary: `${industryId} 行业在过去 ${days} 天表现稳定，核心指标向好。`,
-      } as unknown as T;
-    }
+        ].slice(0, limit);
 
-    case "opc_get_industry_workflow_steps": {
-      const industryId = (args as { industryId?: string })?.industryId || "ai-research";
+      const bestScore = matches.length > 0 ? Math.max(...matches.map((m) => m.retrievalScore)) : 0;
+      const covered = matches.map((m) => m.domain);
+      const missingDomains = required.filter((d) => !covered.includes(d));
+      const verdict = bestScore >= 0.65 && missingDomains.length === 0
+        ? "ready"
+        : bestScore >= 0.4 || (missingDomains.length === 0 && bestScore > 0)
+        ? "partial"
+        : "missing";
+
       return {
-        industry_id: industryId,
-        steps: [
-          { id: "s1", name: "需求分析", description: "收集客户需求与痛点", order: 1, status: "completed" as const },
-          { id: "s2", name: "方案设计", description: "制定解决方案", order: 2, status: "completed" as const },
-          { id: "s3", name: "开发实施", description: "执行开发与交付", order: 3, status: "active" as const },
-          { id: "s4", name: "验收上线", description: "最终验收与部署", order: 4, status: "pending" as const },
-        ],
+        leadId: lead.id,
+        verdict,
+        bestScore,
+        matches,
+        requiredDomains: required,
+        missingDomains,
+        gapHint: missingDomains.length > 0
+          ? `需求类型 ${lead.demandType} 需要以下能力域，当前能力库未覆盖：${missingDomains.join("、")}`
+          : null,
       } as unknown as T;
     }
 
-    case "opc_get_industry_automation_rules": {
+    case "opc_list_invoices": {
+      const { status } = (args ?? {}) as { status?: string };
+      return (status ? MOCK_INVOICES.filter((i) => i.status === status) : [...MOCK_INVOICES]) as unknown as T;
+    }
+
+    case "opc_create_invoice_from_lead": {
+      const { leadId } = (args ?? {}) as { leadId?: string };
+      const lead = MOCK_DEMAND_LEADS.find((l) => l.id === leadId);
+      if (!lead) { throw new Error(`线索不存在: ${leadId}`); }
+      // 与后端同规则：仅 won 线索可开票；已有发票幂等返回
+      if (lead.status !== "won") {
+        throw new Error(`仅 won 线索可开票，当前状态: ${lead.status}（线索 ${leadId}）`);
+      }
+      const existing = MOCK_INVOICES.find((i) => i.leadId === leadId);
+      if (existing) { return existing as unknown as T; }
+      const now = Math.floor(Date.now() / 1000);
+      const inv: DeliveryInvoice = {
+        id: `inv-${leadId}-${now}`,
+        leadId: lead.id,
+        linkedWorkflowId: lead.linkedWorkflowId,
+        title: lead.title,
+        amount: lead.budgetMax ?? lead.budgetMin ?? 0,
+        currency: lead.budgetCurrency || "CNY",
+        status: "draft",
+        issuedAt: null,
+        paidAt: null,
+        notes: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      MOCK_INVOICES.push(inv);
+      return inv as unknown as T;
+    }
+
+    case "opc_update_invoice_status": {
+      const { invoiceId, status } = (args ?? {}) as {
+        invoiceId?: string;
+        status?: "draft" | "sent" | "paid";
+      };
+      const inv = MOCK_INVOICES.find((i) => i.id === invoiceId);
+      if (!inv) { throw new Error(`发票不存在: ${invoiceId}`); }
+      // 与后端同规则：draft → sent → paid 单向，同状态幂等
+      const legal = inv.status === status
+        || (inv.status === "draft" && status === "sent")
+        || (inv.status === "sent" && status === "paid");
+      if (!legal) {
+        throw new Error(`非法发票状态迁移: ${inv.status} → ${status}（合法路径 draft → sent → paid）`);
+      }
+      const now = Math.floor(Date.now() / 1000);
+      if (status === "sent") { inv.issuedAt = now; }
+      if (status === "paid") {
+        inv.issuedAt = inv.issuedAt ?? now;
+        inv.paidAt = now;
+      }
+      inv.status = status ?? inv.status;
+      inv.updatedAt = now;
+      return inv as unknown as T;
+    }
+
+    case "opc_delete_invoice": {
+      const { invoiceId } = (args ?? {}) as { invoiceId?: string };
+      const idx = MOCK_INVOICES.findIndex((i) => i.id === invoiceId);
+      if (idx >= 0) { MOCK_INVOICES.splice(idx, 1); }
+      return { ok: true } as unknown as T;
+    }
+
+    case "opc_get_delivery_summary": {
+      const won = MOCK_DEMAND_LEADS.filter((l) => l.status === "won").length;
+      const active = MOCK_DEMAND_LEADS.filter((l) => l.status !== "lost").length;
+      const byCurrency = new Map<string, { paidTotal: number; issuedTotal: number }>();
+      let paidCount = 0;
+      for (const inv of MOCK_INVOICES) {
+        const acc = byCurrency.get(inv.currency) ?? { paidTotal: 0, issuedTotal: 0 };
+        if (inv.status === "paid") {
+          acc.paidTotal += inv.amount;
+          acc.issuedTotal += inv.amount;
+          paidCount += 1;
+        } else if (inv.status === "sent") {
+          acc.issuedTotal += inv.amount;
+        }
+        byCurrency.set(inv.currency, acc);
+      }
       return {
-        rules: [
-          {
-            id: "r1",
-            name: "新客户跟进",
-            enabled: true,
-            conditions: [{ type: "event", config: { event: "customer_created" } }],
-            actions: [{ type: "notification", config: { channel: "email" } }],
-            last_triggered: new Date(Date.now() - 86400000).toISOString(),
-            trigger_count: 12,
-          },
-          {
-            id: "r2",
-            name: "发票逾期提醒",
-            enabled: true,
-            conditions: [{ type: "schedule", config: { cron: "0 9 * * *" } }],
-            actions: [{ type: "email", config: { template: "overdue_invoice" } }],
-            last_triggered: new Date(Date.now() - 3600000).toISOString(),
-            trigger_count: 5,
-          },
-          {
-            id: "r3",
-            name: "项目状态同步",
-            enabled: false,
-            conditions: [{ type: "event", config: { event: "project_status_changed" } }],
-            actions: [{ type: "webhook", config: { url: "/api/sync" } }],
-            trigger_count: 0,
-          },
-        ],
+        wonLeads: won,
+        activeLeads: active,
+        invoiceCount: MOCK_INVOICES.length,
+        paidCount,
+        revenues: [...byCurrency.entries()].map(([currency, v]) => ({ currency, ...v })),
+        conversionRate: active === 0 ? 0 : won / active,
       } as unknown as T;
     }
 
-    case "opc_run_automation_rules": {
-      return ["r1", "r2"] as unknown as T;
-    }
-
-    case "opc_get_customer":
-    case "opc_get_invoice":
-    case "opc_get_project":
-    case "opc_get_kpi":
-    case "opc_get_revenue":
-    case "opc_get_landing_page":
-    case "opc_get_blog_post":
-    case "opc_get_contact":
-    case "opc_get_work_item":
-    case "opc_get_org":
-    case "opc_get_talent":
-    case "opc_get_experience":
-    case "opc_get_industry_connection":
-    case "opc_get_site_domain":
-    case "opc_get_tag":
-    case "opc_get_task":
-    case "opc_get_session":
-    case "opc_get_document":
-    case "opc_get_rule":
-    case "opc_get_template":
-    case "opc_get_domain":
-    case "opc_get_metric":
-    case "opc_get_config":
-    case "opc_get_asset":
-    case "opc_get_campaign":
-    case "opc_get_channel":
-    case "opc_get_workflow":
-    case "opc_get_app":
-    case "opc_get_tenant":
-    case "opc_get_member":
-    case "opc_get_integration":
-    case "opc_get_automation":
-    case "opc_get_webhook":
-    case "opc_get_newsletter":
-    case "opc_get_subscriber":
-    case "opc_get_seo_asset":
-    case "opc_get_backlink":
-    case "opc_get_keyword":
-    case "opc_get_competitor":
-    case "opc_get_opportunity":
-    case "opc_get_funnel":
-    case "opc_get_page":
-    case "opc_get_element":
-    case "opc_get_variant":
-    case "opc_get_analytic":
-    case "opc_get_acquisition":
-    case "opc_get_retention":
-    case "opc_get_referral":
-    case "opc_get_campaign_template":
-    case "opc_get_price_point":
-    case "opc_get_value_metric":
-    case "opc_get_experiment":
-    case "opc_get_hypothesis":
-    case "opc_get_feature":
-    case "opc_get_suggestion":
-    case "opc_get_review":
-    case "opc_get_ticket":
-      return {} as unknown as T;
-
-    case "opc_create_customer":
-    case "opc_create_invoice":
-    case "opc_create_project":
-    case "opc_create_kpi":
-    case "opc_create_revenue":
-    case "opc_create_landing_page":
-    case "opc_create_blog_post":
-    case "opc_create_contact":
-    case "opc_create_work_item":
-    case "opc_create_org":
-    case "opc_create_talent":
-    case "opc_create_experience":
-    case "opc_create_industry_connection":
-    case "opc_create_site_domain":
-    case "opc_create_tag":
-    case "opc_create_task":
-    case "opc_create_session":
-    case "opc_create_document":
-    case "opc_create_rule":
-    case "opc_create_template":
-    case "opc_create_domain":
-    case "opc_create_metric":
-    case "opc_create_config":
-    case "opc_create_asset":
-    case "opc_create_campaign":
-    case "opc_create_channel":
-    case "opc_create_workflow":
-    case "opc_create_app":
-    case "opc_create_tenant":
-    case "opc_create_member":
-    case "opc_create_integration":
-    case "opc_create_automation":
-    case "opc_create_webhook":
-    case "opc_create_newsletter":
-    case "opc_create_subscriber":
-    case "opc_create_seo_asset":
-    case "opc_create_backlink":
-    case "opc_create_keyword":
-    case "opc_create_competitor":
-    case "opc_create_opportunity":
-    case "opc_create_funnel":
-    case "opc_create_page":
-    case "opc_create_element":
-    case "opc_create_variant":
-    case "opc_create_experiment":
-    case "opc_create_hypothesis":
-    case "opc_create_feature":
-    case "opc_create_suggestion":
-    case "opc_create_review":
-    case "opc_create_ticket":
-    case "opc_create_referral":
-    case "opc_create_price_point":
-    case "opc_create_value_metric":
-    case "opc_create_campaign_template":
-    case "opc_create_acquisition":
-    case "opc_create_retention":
-      return { success: true } as unknown as T;
-
-    case "opc_update_customer":
-    case "opc_update_invoice":
-    case "opc_update_project":
-    case "opc_update_kpi":
-    case "opc_update_revenue":
-    case "opc_update_landing_page":
-    case "opc_update_blog_post":
-    case "opc_update_contact":
-    case "opc_update_work_item":
-    case "opc_update_org":
-    case "opc_update_talent":
-    case "opc_update_experience":
-    case "opc_update_industry_connection":
-    case "opc_update_site_domain":
-    case "opc_update_tag":
-    case "opc_update_task":
-    case "opc_update_session":
-    case "opc_update_document":
-    case "opc_update_rule":
-    case "opc_update_template":
-    case "opc_update_domain":
-    case "opc_update_metric":
-    case "opc_update_config":
-    case "opc_update_asset":
-    case "opc_update_campaign":
-    case "opc_update_channel":
-    case "opc_update_workflow":
-    case "opc_update_app":
-    case "opc_update_tenant":
-    case "opc_update_member":
-    case "opc_update_integration":
-    case "opc_update_automation":
-    case "opc_update_webhook":
-    case "opc_update_newsletter":
-    case "opc_update_subscriber":
-    case "opc_update_seo_asset":
-    case "opc_update_backlink":
-    case "opc_update_keyword":
-    case "opc_update_competitor":
-    case "opc_update_opportunity":
-    case "opc_update_funnel":
-    case "opc_update_page":
-    case "opc_update_element":
-    case "opc_update_variant":
-    case "opc_update_experiment":
-    case "opc_update_hypothesis":
-    case "opc_update_feature":
-    case "opc_update_suggestion":
-    case "opc_update_review":
-    case "opc_update_ticket":
-      return { success: true } as unknown as T;
-
-    case "opc_delete_customer":
     case "opc_delete_invoice":
-    case "opc_delete_project":
-    case "opc_delete_kpi":
-    case "opc_delete_revenue":
-    case "opc_delete_landing_page":
-    case "opc_delete_blog_post":
-    case "opc_delete_contact":
-    case "opc_delete_work_item":
-    case "opc_delete_org":
-    case "opc_delete_talent":
-    case "opc_delete_experience":
-    case "opc_delete_industry_connection":
-    case "opc_delete_site_domain":
-    case "opc_delete_tag":
-    case "opc_delete_task":
-    case "opc_delete_session":
-    case "opc_delete_document":
-    case "opc_delete_rule":
-    case "opc_delete_template":
-    case "opc_delete_domain":
-    case "opc_delete_metric":
-    case "opc_delete_config":
-    case "opc_delete_asset":
-    case "opc_delete_campaign":
-    case "opc_delete_channel":
-    case "opc_delete_workflow":
-    case "opc_delete_app":
-    case "opc_delete_tenant":
-    case "opc_delete_member":
-    case "opc_delete_integration":
-    case "opc_delete_automation":
-    case "opc_delete_webhook":
-    case "opc_delete_newsletter":
-    case "opc_delete_subscriber":
-    case "opc_delete_seo_asset":
-    case "opc_delete_backlink":
-    case "opc_delete_keyword":
-    case "opc_delete_competitor":
-    case "opc_delete_opportunity":
-    case "opc_delete_funnel":
-    case "opc_delete_page":
-    case "opc_delete_element":
-    case "opc_delete_variant":
-    case "opc_delete_experiment":
-    case "opc_delete_hypothesis":
-    case "opc_delete_feature":
-    case "opc_delete_suggestion":
-    case "opc_delete_review":
-    case "opc_delete_ticket":
-    case "opc_delete_referral":
-      return { success: true } as unknown as T;
-
-    case "opc_transition_invoice":
-    case "opc_add_milestone":
-    case "opc_complete_milestone":
-    case "opc_find_customer_by_email":
-    case "opc_record_kpi":
-    case "opc_get_financial_report":
-    case "opc_kanban_board":
-    case "opc_work_item_start":
-    case "opc_work_item_unblock":
-    case "opc_work_item_review":
-    case "opc_escalate_work_item":
-    case "opc_mark_contact_read":
-    case "opc_get_investment_advice":
-    case "opc_sync_fleet":
-    case "opc_import_industry_pack":
-    case "opc_export_industry_pack":
-    case "opc_import_talent_library":
-    case "opc_market_list":
-    case "opc_publish_blog_post":
-    case "opc_publish_landing_page":
-    case "opc_run_self_improving_opc_work_item":
-      return { success: true } as unknown as T;
-
-    // ── Knowledge Base Advanced (知识库高级) ────────────────────────
     case "kb_connect_vault":
       return { success: true, vault_id: (args as { vault_id?: string })?.vault_id ?? "" } as T;
     case "kb_disconnect_vault":
       return { success: true } as T;
-    case "kb_list_vaults":
-      return [] as T;
-    case "kb_semantic_search":
-      return [] as T;
-    case "kb_hybrid_search":
-      return [] as T;
-    case "kb_rag_pipeline":
-      return { chunks: [], answer: "", sources: [] } as T;
-    case "kb_create_rag_pipeline":
-      return { pipeline_id: (args as { name?: string })?.name ?? "", created: true } as T;
-    case "kb_list_rag_pipelines":
-      return [] as T;
-    case "kb_delete_rag_pipeline":
-      return { success: true } as T;
-    case "kb_get_embedding_config":
-      return { model: "text-embedding-3-small", dimension: 1536 } as T;
-    case "kb_update_embedding_config":
-      return { success: true } as T;
-    case "kb_reindex":
-      return { job_id: "mock-reindex", status: "started" } as T;
-    case "kb_get_index_status":
-      return { status: "ready", progress: 100, indexed_chunks: 0 } as T;
-    case "kb_cancel_index":
-      return { success: true } as T;
-    case "kb_optimize_index":
-      return { success: true, optimized_chunks: 0 } as T;
-
-    // ── Workflow Engine (工作流引擎) ────────────────────────────────
     case "workflow_execute":
       return { execution_id: "mock-exec", status: "completed", outputs: {} } as T;
     case "workflow_cancel":
       return { success: true } as T;
-    case "workflow_get_execution_status":
-      return {
-        execution_id: (args as { execution_id?: string })?.execution_id ?? "",
-        status: "completed",
-        current_node: null,
-        progress: 100,
-        node_states: {},
-      } as T;
-    case "workflow_list_executions":
-      return [] as T;
-    case "workflow_get_execution_history":
-      return [] as T;
-    case "workflow_get_node_trace":
-      return { node_id: (args as { node_id?: string })?.node_id ?? "", inputs: {}, outputs: {}, duration_ms: 0 } as T;
-    case "workflow_resume_execution":
-      return { success: true } as T;
-    case "workflow_pause_execution":
-      return { success: true } as T;
-    case "workflow_set_breakpoint":
-      return { success: true } as T;
-    case "workflow_remove_breakpoint":
-      return { success: true } as T;
-    case "workflow_list_breakpoints":
-      return [] as T;
-
-    // ── RL Training (RL 训练) ───────────────────────────────────────
-    case "rl_train_start":
-      return { training_id: "mock-rl-train", status: "started" } as T;
-    case "rl_train_stop":
-      return { success: true } as T;
-    case "rl_train_status":
-      return {
-        training_id: (args as { training_id?: string })?.training_id ?? "",
-        status: "idle",
-        step: 0,
-        total_steps: 0,
-        reward: 0,
-        loss: 0,
-      } as T;
-    case "rl_list_training_jobs":
-      return [] as T;
-    case "rl_get_training_config":
-      return {} as T;
-    case "rl_update_training_config":
-      return { success: true } as T;
-    case "rl_save_checkpoint":
-      return { checkpoint_id: "mock-checkpoint", saved: true } as T;
-    case "rl_load_checkpoint":
-      return { checkpoint_id: (args as { checkpoint_id?: string })?.checkpoint_id ?? "", config: {} } as T;
-    case "rl_list_checkpoints":
-      return [] as T;
-    case "rl_delete_checkpoint":
-      return { success: true } as T;
-    case "rl_compute_advantages":
-      return { advantages: [], values: [] } as T;
-    case "rl_generate_trajectories":
-      return { trajectories: [], total_steps: 0 } as T;
-    case "rl_rollout_policy":
-      return { actions: [], log_probs: [], values: [] } as T;
-    case "rl_get_policy_weights":
-      return { weights: {} } as T;
-    case "rl_update_policy_weights":
-      return { success: true } as T;
-
-    // ── Capability System (能力发现系统) ────────────────────────────
     case "capability_register_passport": {
       const passport = (args as { request?: { passport?: CapabilityPassportDto } })
         ?.request?.passport;
@@ -6491,39 +5823,6 @@ async function executeCommand<T>(
         },
       ] as T;
 
-    // ── Trajectory System (轨迹系统) ───────────────────────────────
-    case "trajectory_record_start":
-      return { trajectory_id: "mock-traj", started: true } as T;
-    case "trajectory_record_step":
-      return { recorded: true } as T;
-    case "trajectory_record_end":
-      return { trajectory_id: (args as { trajectory_id?: string })?.trajectory_id ?? "", total_steps: 0 } as T;
-    case "trajectory_batch_record":
-      return { batch_id: "mock-batch", count: 0 } as T;
-    case "trajectory_replay":
-      return { steps: [], total_score: 0 } as T;
-    case "trajectory_sample_batch":
-      return { trajectories: [] } as T;
-    case "trajectory_export":
-      return { format: "json", url: "" } as T;
-    case "trajectory_delete":
-      return { success: true } as T;
-    case "trajectory_get_stats":
-      return { total: 0, avg_reward: 0, avg_length: 0 } as T;
-
-    // ── Tools System (工具系统) ─────────────────────────────────────
-    case "tool_list":
-      return [] as T;
-    case "tool_execute":
-      return { success: true, result: null, duration_ms: 0 } as T;
-    case "tool_validate":
-      return { valid: true, errors: [] } as T;
-    case "tool_get_dependencies":
-      return [] as T;
-    case "tool_warmup":
-      return { success: true, warmed_up: false } as T;
-
-    // ── App Config (应用配置) ───────────────────────────────────────
     case "get_app_config":
       return {} as T;
 

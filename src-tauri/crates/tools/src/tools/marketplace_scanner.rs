@@ -74,6 +74,30 @@ impl DemandType {
     }
 }
 
+impl std::str::FromStr for DemandType {
+    type Err = ();
+
+    /// 解析 `as_str()` 产出的 snake_case 标识；无法识别返回 `Err(())`
+    ///
+    /// 反向查表复用 `as_str()`，不重复写一遍字面量 —— 两处各写一遍必然漂移。
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        const ALL: [DemandType; 11] = [
+            DemandType::Unknown,
+            DemandType::ToolSoftware,
+            DemandType::ContentCreation,
+            DemandType::Design,
+            DemandType::Development,
+            DemandType::Operations,
+            DemandType::Marketing,
+            DemandType::Education,
+            DemandType::EnterpriseService,
+            DemandType::Outsourcing,
+            DemandType::Consulting,
+        ];
+        ALL.into_iter().find(|d| d.as_str() == s).ok_or(())
+    }
+}
+
 /// 价格区间
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

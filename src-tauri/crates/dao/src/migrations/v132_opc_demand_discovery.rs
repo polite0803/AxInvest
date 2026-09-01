@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! v131: 创建 OPC 需求发现两张表 —— 平台配置 + 需求线索持久化。
+//! v132: 创建 OPC 需求发现两张表 —— 平台配置 + 需求线索持久化。
 //!
 //! ## Background
 //!
@@ -80,7 +80,7 @@ pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     )
     .await?;
 
-    tracing::info!("[v131] Created opc_demand_platforms + opc_demand_leads tables");
+    tracing::info!("[v132] Created opc_demand_platforms + opc_demand_leads tables");
     Ok(())
 }
 
@@ -92,7 +92,7 @@ mod tests {
     use sea_orm::Statement;
 
     #[tokio::test]
-    async fn v131_creates_tables_sqlite() {
+    async fn v132_creates_tables_sqlite() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         up(db.clone()).await.unwrap();
 

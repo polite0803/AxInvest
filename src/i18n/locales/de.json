@@ -2748,6 +2748,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "Workflow-Plan nicht gefunden",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "Anwenden der Workflow-Reflexion fehlgeschlagen",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "Workflow-Reflexionsevolution fehlgeschlagen",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Workflow-Fähigkeitsschnittstelle nicht registriert (Reflexion/Evolution/Optimierer nicht verfügbar)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "Ungültiger Workflow-Reflexionseintrag",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "Workflow-Reflexion fehlgeschlagen",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "Workflow-Reflexionsvorschlag fehlgeschlagen",
@@ -2884,8 +2885,7 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Workflow-Fähigkeitsschnittstelle nicht registriert (Reflexion/Evolution/Optimierer nicht verfügbar)"
+    "message": "错误"
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -7766,6 +7766,8 @@
       "fileUploaded": "Datei hochgeladen",
       "ingestError": "Import fehlgeschlagen",
       "ingestSuccess": "Erfolgreich importiert",
+      "indexingProgress": "Indizierung {{indexed}}/{{total}}",
+      "stageIngest": "Inhalte werden aufgenommen und Notizen erstellt…",
       "uploadError": "Hochladen fehlgeschlagen",
       "importError": "Import fehlgeschlagen",
       "previewError": "Vorschau fehlgeschlagen",
@@ -13441,12 +13443,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",

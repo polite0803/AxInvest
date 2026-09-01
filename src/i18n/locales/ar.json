@@ -2748,6 +2748,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "خطة سير العمل غير موجودة",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "فشل تطبيق انعكاس سير العمل",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "فشل تطور انعكاس سير العمل",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "لم يتم تسجيل وصل قدرة سير العمل (الانعكاس/التطور/المحسّن غير متاحة)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "سجل انعكاس سير عمل غير صالح",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "فشل انعكاس سير العمل",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "فشل اقتراح انعكاس سير العمل",
@@ -2884,8 +2885,7 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "لم يتم تسجيل وصل قدرة سير العمل (الانعكاس/التطور/المحسّن غير متاحة)"
+    "message": "错误"
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -7764,6 +7764,8 @@
       "fileUploaded": "تم رفع الملف",
       "ingestError": "فشل الاستيراد",
       "ingestSuccess": "تم الاستيراد بنجاح",
+      "indexingProgress": "جارٍ الفهرسة {{indexed}}/{{total}}",
+      "stageIngest": "جارٍ استيعاب المحتوى وإنشاء الملاحظات…",
       "uploadError": "فشل الرفع",
       "importError": "فشل الاستيراد",
       "previewError": "فشل المعاينة",
@@ -13441,12 +13443,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",

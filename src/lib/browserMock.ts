@@ -5275,9 +5275,6 @@ async function executeCommand<T>(
         elapsedMs: 0,
       } as T;
 
-    case "opc_list_invoices":
-      return [...MOCK_INVOICES] as unknown as T;
-
     case "opc_list_platforms":
       return [...PRESET_MOCK_PLATFORMS] as unknown as T;
 
@@ -5732,7 +5729,6 @@ async function executeCommand<T>(
       } as unknown as T;
     }
 
-    case "opc_delete_invoice":
     case "kb_connect_vault":
       return { success: true, vault_id: (args as { vault_id?: string })?.vault_id ?? "" } as T;
     case "kb_disconnect_vault":

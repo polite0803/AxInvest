@@ -121,10 +121,7 @@ function getChatCodeThemes(
 ) {
   const darkTheme = normalizeCodeTheme(selectedDarkTheme) || DEFAULT_DARK_CODE_BLOCK_THEME;
   const lightTheme = normalizeCodeTheme(selectedLightTheme) || DEFAULT_LIGHT_CODE_BLOCK_THEME;
-  const themes = [lightTheme, darkTheme];
-  if (lightTheme !== darkTheme) {
-    themes.push(darkTheme);
-  }
+  const themes: string[] = [darkTheme, lightTheme];
   return {
     darkTheme,
     lightTheme,
@@ -137,11 +134,12 @@ let _codeBlockPreviewHandler:
   | null = null;
 let _mermaidOpenModalHandler: ((svgString: string | null) => void) | null = null;
 
-function getChatCodeBlockProps(darkTheme: string, lightTheme: string) {
+function getChatCodeBlockProps(darkTheme: string, lightTheme: string, fontFamily?: string) {
   return {
     darkTheme,
     lightTheme,
     maxHeight: "none",
+    fontFamily,
     renderHeaderActions: (ctx: CodeBlockActionContext) => <CodeBlockHeaderActions ctx={ctx} />,
     onPreviewCode: (payload: CodeBlockPreviewPayload) => {
       _codeBlockPreviewHandler?.(payload);
@@ -444,12 +442,8 @@ function ThinkNode(
     [selectedDarkCodeTheme, selectedLightCodeTheme],
   );
   const codeBlockProps = useMemo(
-    () => getChatCodeBlockProps(darkTheme, lightTheme),
-    [darkTheme, lightTheme],
-  );
-  const codeBlockMonacoOptions = useMemo(
-    () => (codeFontFamily ? { fontFamily: codeFontFamily } : undefined),
-    [codeFontFamily],
+    () => getChatCodeBlockProps(darkTheme, lightTheme, codeFontFamily),
+    [darkTheme, lightTheme, codeFontFamily],
   );
   const customHtmlTags = useMemo(
     () => CHAT_CUSTOM_HTML_TAGS.filter((t) => t !== "think"),
@@ -509,7 +503,6 @@ function ThinkNode(
                 codeBlockLightTheme={lightTheme}
                 codeBlockDarkTheme={darkTheme}
                 codeBlockProps={codeBlockProps}
-                codeBlockMonacoOptions={codeBlockMonacoOptions}
                 customHtmlTags={customHtmlTags}
                 mermaidProps={CHAT_MERMAID_PROPS}
                 infographicProps={CHAT_INFOGRAPHIC_PROPS}
@@ -1432,12 +1425,8 @@ const AssistantMarkdown = React.memo(
       return entries;
     }, [content]);
     const codeBlockProps = useMemo(
-      () => getChatCodeBlockProps(codeBlockDarkTheme, codeBlockLightTheme),
-      [codeBlockDarkTheme, codeBlockLightTheme],
-    );
-    const codeBlockMonacoOptions = useMemo(
-      () => (codeFontFamily ? { fontFamily: codeFontFamily } : undefined),
-      [codeFontFamily],
+      () => getChatCodeBlockProps(codeBlockDarkTheme, codeBlockLightTheme, codeFontFamily),
+      [codeBlockDarkTheme, codeBlockLightTheme, codeFontFamily],
     );
     // LaTeX 公式分割：仅当内容含 $ 时才走分割渲染路径，多数消息命中快速路径无开销
     const latexSegments = useMemo(
@@ -1604,7 +1593,6 @@ const AssistantMarkdown = React.memo(
                         codeBlockLightTheme={codeBlockLightTheme}
                         codeBlockDarkTheme={codeBlockDarkTheme}
                         codeBlockProps={codeBlockProps}
-                        codeBlockMonacoOptions={codeBlockMonacoOptions}
                         mermaidProps={CHAT_MERMAID_PROPS}
                         infographicProps={CHAT_INFOGRAPHIC_PROPS}
                         {...CHAT_RENDER_BATCH_PROPS}
@@ -1625,7 +1613,6 @@ const AssistantMarkdown = React.memo(
                       codeBlockLightTheme={codeBlockLightTheme}
                       codeBlockDarkTheme={codeBlockDarkTheme}
                       codeBlockProps={codeBlockProps}
-                      codeBlockMonacoOptions={codeBlockMonacoOptions}
                       mermaidProps={CHAT_MERMAID_PROPS}
                       infographicProps={CHAT_INFOGRAPHIC_PROPS}
                       {...CHAT_RENDER_BATCH_PROPS}
@@ -1644,7 +1631,6 @@ const AssistantMarkdown = React.memo(
                       codeBlockLightTheme={codeBlockLightTheme}
                       codeBlockDarkTheme={codeBlockDarkTheme}
                       codeBlockProps={codeBlockProps}
-                      codeBlockMonacoOptions={codeBlockMonacoOptions}
                       mermaidProps={CHAT_MERMAID_PROPS}
                       infographicProps={CHAT_INFOGRAPHIC_PROPS}
                       {...CHAT_RENDER_BATCH_PROPS}

@@ -53,9 +53,11 @@ pub mod v133_opc_demand_discovery;
 pub mod v134_lead_workflow_link;
 pub mod v135_demand_subscriptions;
 pub mod v136_opc_invoices;
+pub mod v137_governance_disable_platforms;
+pub mod v138_demand_lead_dedupe_fingerprint;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 136;
+pub const CURRENT_VERSION: i32 = 138;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -272,6 +274,16 @@ const MIGRATIONS: &[Migration] = &[
         version: 136,
         description: "v136_opc_invoices: 创建 OPC 交付发票表 opc_invoices（lead_id 溯源 / draft→sent→paid 状态机 / 多币种金额）",
         up: |db| Box::pin(v136_opc_invoices::up(db)),
+    },
+    Migration {
+        version: 137,
+        description: "v137_governance_disable_platforms: 数据源治理——默认禁用 10 个无公开检索 API/需官方凭证的平台（config_json 无非空 api_token 时 default_enabled=false）",
+        up: |db| Box::pin(v137_governance_disable_platforms::up(db)),
+    },
+    Migration {
+        version: 138,
+        description: "v138_demand_lead_dedupe_fingerprint: 需求线索去重键从 (platform, source_url) 迁移为内容指纹 content_fingerprint（标题+描述归一化哈希，16 位 hex）",
+        up: |db| Box::pin(v138_demand_lead_dedupe_fingerprint::up(db)),
     },
 ];
 

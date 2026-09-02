@@ -4,14 +4,14 @@
 //!
 //! 从 YAML 配置迁移而来：config/opc/industries/ai_research/
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use axagent_opc_types::*;
 
 /// AI 科技研究报告 行业适配器
 pub struct AiResearchAdapter {
-    data_service: Mutex<Option<Arc<dyn OpcDataService>>>,
+    data_service: OnceLock<Arc<dyn OpcDataService>>,
 }
 
 impl AiResearchAdapter {
@@ -19,7 +19,7 @@ impl AiResearchAdapter {
     pub const INDUSTRY_NAME: &'static str = "AI 科技研究报告";
 
     pub fn new() -> Self {
-        Self { data_service: Mutex::new(None) }
+        Self { data_service: OnceLock::new() }
     }
 }
 
@@ -44,11 +44,11 @@ impl OpcIndustryAdapter for AiResearchAdapter {
     }
 
     fn set_data_service(&self, data_service: Arc<dyn OpcDataService>) {
-        *self.data_service.lock().unwrap() = Some(data_service);
+        let _ = self.data_service.set(data_service);
     }
 
     fn data_service(&self) -> Option<Arc<dyn OpcDataService>> {
-        self.data_service.lock().unwrap().clone()
+        self.data_service.get().cloned()
     }
 
     async fn validate(

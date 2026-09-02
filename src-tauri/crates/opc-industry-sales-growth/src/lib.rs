@@ -4,7 +4,7 @@
 //!
 //! 从 YAML 配置迁移而来：config/opc/industries/sales_growth/
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use axagent_opc_types::OpcDataService;
@@ -12,7 +12,7 @@ use axagent_opc_types::*;
 
 /// 销售增长流程 行业适配器
 pub struct SalesGrowthAdapter {
-    data_service: Mutex<Option<Arc<dyn OpcDataService>>>,
+    data_service: OnceLock<Arc<dyn OpcDataService>>,
 }
 
 impl SalesGrowthAdapter {
@@ -20,7 +20,7 @@ impl SalesGrowthAdapter {
     pub const INDUSTRY_NAME: &'static str = "销售增长流程";
 
     pub fn new() -> Self {
-        Self { data_service: Mutex::new(None) }
+        Self { data_service: OnceLock::new() }
     }
 }
 
@@ -70,11 +70,11 @@ impl OpcIndustryAdapter for SalesGrowthAdapter {
     }
 
     fn set_data_service(&self, data_service: Arc<dyn OpcDataService>) {
-        *self.data_service.lock().unwrap() = Some(data_service);
+        let _ = self.data_service.set(data_service);
     }
 
     fn data_service(&self) -> Option<Arc<dyn OpcDataService>> {
-        self.data_service.lock().unwrap().clone()
+        self.data_service.get().cloned()
     }
 
     async fn validate(

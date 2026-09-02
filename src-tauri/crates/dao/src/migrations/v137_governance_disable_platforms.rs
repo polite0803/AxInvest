@@ -117,8 +117,8 @@ mod tests {
     use sea_orm::Statement;
 
     async fn setup(db: &sea_orm::DatabaseConnection) {
-        crate::migrations::v132_opc_demand_discovery::up(db.clone()).await.unwrap();
-        crate::migrations::v133_lead_workflow_link::up(db.clone()).await.unwrap();
+        crate::migrations::v133_opc_demand_discovery::up(db.clone()).await.unwrap();
+        crate::migrations::v134_lead_workflow_link::up(db.clone()).await.unwrap();
     }
 
     #[tokio::test]

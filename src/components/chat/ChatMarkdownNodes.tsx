@@ -121,7 +121,8 @@ function getChatCodeThemes(
 ) {
   const darkTheme = normalizeCodeTheme(selectedDarkTheme) || DEFAULT_DARK_CODE_BLOCK_THEME;
   const lightTheme = normalizeCodeTheme(selectedLightTheme) || DEFAULT_LIGHT_CODE_BLOCK_THEME;
-  const themes: string[] = [darkTheme, lightTheme];
+  // markstream-react v2 要求 themes 为 readonly [dark, light] 二元组
+  const themes = [darkTheme, lightTheme] as const;
   return {
     darkTheme,
     lightTheme,
@@ -134,12 +135,11 @@ let _codeBlockPreviewHandler:
   | null = null;
 let _mermaidOpenModalHandler: ((svgString: string | null) => void) | null = null;
 
-function getChatCodeBlockProps(darkTheme: string, lightTheme: string, fontFamily?: string) {
+function getChatCodeBlockProps(darkTheme: string, lightTheme: string) {
   return {
     darkTheme,
     lightTheme,
     maxHeight: "none",
-    fontFamily,
     renderHeaderActions: (ctx: CodeBlockActionContext) => <CodeBlockHeaderActions ctx={ctx} />,
     onPreviewCode: (payload: CodeBlockPreviewPayload) => {
       _codeBlockPreviewHandler?.(payload);
@@ -442,8 +442,12 @@ function ThinkNode(
     [selectedDarkCodeTheme, selectedLightCodeTheme],
   );
   const codeBlockProps = useMemo(
-    () => getChatCodeBlockProps(darkTheme, lightTheme, codeFontFamily),
-    [darkTheme, lightTheme, codeFontFamily],
+    () => getChatCodeBlockProps(darkTheme, lightTheme),
+    [darkTheme, lightTheme],
+  );
+  const codeBlockOptions = useMemo(
+    () => (codeFontFamily ? { fontFamily: codeFontFamily } : undefined),
+    [codeFontFamily],
   );
   const customHtmlTags = useMemo(
     () => CHAT_CUSTOM_HTML_TAGS.filter((t) => t !== "think"),
@@ -503,6 +507,7 @@ function ThinkNode(
                 codeBlockLightTheme={lightTheme}
                 codeBlockDarkTheme={darkTheme}
                 codeBlockProps={codeBlockProps}
+                codeBlockOptions={codeBlockOptions}
                 customHtmlTags={customHtmlTags}
                 mermaidProps={CHAT_MERMAID_PROPS}
                 infographicProps={CHAT_INFOGRAPHIC_PROPS}
@@ -1375,7 +1380,7 @@ const AssistantMarkdown = React.memo(
     isStreaming: boolean;
     codeBlockDarkTheme: string;
     codeBlockLightTheme: string;
-    codeBlockThemes: string[];
+    codeBlockThemes: readonly [string, string];
     codeFontFamily?: string;
     /** 当前消息 ID，传递给检索结果节点用于 RAG 反馈闭环 */
     messageId?: string | null;
@@ -1425,8 +1430,12 @@ const AssistantMarkdown = React.memo(
       return entries;
     }, [content]);
     const codeBlockProps = useMemo(
-      () => getChatCodeBlockProps(codeBlockDarkTheme, codeBlockLightTheme, codeFontFamily),
-      [codeBlockDarkTheme, codeBlockLightTheme, codeFontFamily],
+      () => getChatCodeBlockProps(codeBlockDarkTheme, codeBlockLightTheme),
+      [codeBlockDarkTheme, codeBlockLightTheme],
+    );
+    const codeBlockOptions = useMemo(
+      () => (codeFontFamily ? { fontFamily: codeFontFamily } : undefined),
+      [codeFontFamily],
     );
     // LaTeX 公式分割：仅当内容含 $ 时才走分割渲染路径，多数消息命中快速路径无开销
     const latexSegments = useMemo(
@@ -1593,6 +1602,7 @@ const AssistantMarkdown = React.memo(
                         codeBlockLightTheme={codeBlockLightTheme}
                         codeBlockDarkTheme={codeBlockDarkTheme}
                         codeBlockProps={codeBlockProps}
+                        codeBlockOptions={codeBlockOptions}
                         mermaidProps={CHAT_MERMAID_PROPS}
                         infographicProps={CHAT_INFOGRAPHIC_PROPS}
                         {...CHAT_RENDER_BATCH_PROPS}
@@ -1613,6 +1623,7 @@ const AssistantMarkdown = React.memo(
                       codeBlockLightTheme={codeBlockLightTheme}
                       codeBlockDarkTheme={codeBlockDarkTheme}
                       codeBlockProps={codeBlockProps}
+                      codeBlockOptions={codeBlockOptions}
                       mermaidProps={CHAT_MERMAID_PROPS}
                       infographicProps={CHAT_INFOGRAPHIC_PROPS}
                       {...CHAT_RENDER_BATCH_PROPS}
@@ -1631,6 +1642,7 @@ const AssistantMarkdown = React.memo(
                       codeBlockLightTheme={codeBlockLightTheme}
                       codeBlockDarkTheme={codeBlockDarkTheme}
                       codeBlockProps={codeBlockProps}
+                      codeBlockOptions={codeBlockOptions}
                       mermaidProps={CHAT_MERMAID_PROPS}
                       infographicProps={CHAT_INFOGRAPHIC_PROPS}
                       {...CHAT_RENDER_BATCH_PROPS}

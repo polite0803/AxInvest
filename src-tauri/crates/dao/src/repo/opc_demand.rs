@@ -767,14 +767,14 @@ mod tests {
     #[tokio::test]
     async fn create_manual_lead_returns_existing_row_on_duplicate() {
         use crate::migrations::{
-            v132_opc_demand_discovery, v133_lead_workflow_link, v136_demand_lead_dedupe_fingerprint,
+            v133_opc_demand_discovery, v134_lead_workflow_link, v138_demand_lead_dedupe_fingerprint,
         };
         use sea_orm::Database;
 
         let db = Database::connect("sqlite::memory:").await.unwrap();
-        v132_opc_demand_discovery::up(db.clone()).await.unwrap();
-        v133_lead_workflow_link::up(db.clone()).await.unwrap();
-        v136_demand_lead_dedupe_fingerprint::up(db.clone()).await.unwrap();
+        v133_opc_demand_discovery::up(db.clone()).await.unwrap();
+        v134_lead_workflow_link::up(db.clone()).await.unwrap();
+        v138_demand_lead_dedupe_fingerprint::up(db.clone()).await.unwrap();
 
         let row = super::NewLeadRow {
             id: "lead-manual-1".to_string(),

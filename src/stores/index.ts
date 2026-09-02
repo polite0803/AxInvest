@@ -97,3 +97,15 @@ export type { PausedExecutionInfo } from "./feature/workEngineStore";
 export { useWorkflowEditorStore } from "./feature/workflowEditorStore";
 export type { SaveSkillWorkflowResponse, SimilarWorkflow } from "./feature/workflowEditorStore";
 export { useWorkflowStore } from "./feature/workflowStore";
+
+// ── AxInvest 投资域 ──
+export { useCrossMarketStore } from "./feature/crossMarketStore";
+export { useExecutionBridgeStore } from "./feature/executionBridgeStore";
+export { useIndustryLearningStore } from "./feature/industryLearningStore";
+export { useMarketMainlineStore } from "./feature/marketMainlineStore";
+export { usePaperPortfolioStore } from "./feature/paperPortfolioStore";
+export { usePipelineStore } from "./feature/pipelineStore";
+export { useBacktestStore, useStrategyStore } from "./feature/quant";
+export { useStockAnalysisStore } from "./feature/stockAnalysisStore";
+export type { PortfolioStressResult } from "./feature/stockAnalysisStore";
+export { useWorkspaceStore, type WorkspaceView } from "./feature/workspaceStore";

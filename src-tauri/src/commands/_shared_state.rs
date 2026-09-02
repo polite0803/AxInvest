@@ -52,8 +52,16 @@ impl axagent_harness::ToolRanker for RlToolRanker {
         &self,
         tools: Vec<axagent_harness::types::ChatTool>,
     ) -> Vec<axagent_harness::types::ChatTool> {
-        let optimizer = self.0.blocking_read();
-        optimizer.rank_tools(tools)
+        // rank_tools 是同步 trait 方法，但调用链（get_chat_tools）可能运行在
+        // tokio runtime 上下文中，禁止 blocking_read。锁被占用时跳过重排，
+        // 原序返回（降级而非 panic）。
+        match self.0.try_read() {
+            Ok(optimizer) => optimizer.rank_tools(tools),
+            Err(_) => {
+                tracing::debug!("RlToolRanker skipped: lock busy, tools unranked");
+                tools
+            },
+        }
     }
 }
 
@@ -66,8 +74,22 @@ pub fn init_shared_state(app_data_dir: &std::path::Path) {
     if path.exists() {
         match RLOptimizer::load_from_file(&path) {
             Ok(loaded) => {
-                *SHARED_OPTIMIZER.blocking_write() = loaded;
-                tracing::info!("RLOptimizer loaded from {}", path.display());
+                // 注意：init_shared_state 在 create_app_state（async 上下文）内被调用，
+                // tokio RwLock 禁止 blocking_write（会 panic "Cannot block the current
+                // thread from within a runtime"）。启动期无竞争，try_write 必然成功；
+                // 极端情况下锁被占用则放弃加载，退回默认空实例。
+                match SHARED_OPTIMIZER.try_write() {
+                    Ok(mut guard) => {
+                        *guard = loaded;
+                        tracing::info!("RLOptimizer loaded from {}", path.display());
+                    },
+                    Err(_) => {
+                        tracing::warn!(
+                            "RLOptimizer load skipped (lock busy), using default: {}",
+                            path.display()
+                        );
+                    },
+                }
             },
             Err(e) => {
                 tracing::warn!(

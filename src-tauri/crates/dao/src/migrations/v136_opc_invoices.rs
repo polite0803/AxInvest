@@ -111,6 +111,6 @@ mod tests {
             .unwrap()
             .unwrap();
         let n: i64 = row.try_get_by("n").unwrap();
-        assert_eq!(n, 2, "应有两个索引（lead_id / status）");
+        assert_eq!(n, 3, "应有三个索引（lead_id / status / customer_id）");
     }
 }

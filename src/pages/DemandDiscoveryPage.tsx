@@ -437,7 +437,7 @@ export function DemandDiscoveryPage() {
       enabled: values.enabled,
       // 凭证合并进 config_json（保留既有扩展字段）；空串 = 清除已存 token
       config: {
-        ...(editing?.config ?? {}),
+        ...editing?.config,
         api_token: values.apiToken ?? "",
       },
     };

@@ -77,7 +77,7 @@ mod tests {
     async fn v134_adds_columns_sqlite() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         // 依赖 v132 建表（opc_demand_leads）
-        crate::migrations::v132_opc_demand_discovery::up(db.clone()).await.unwrap();
+        crate::migrations::v133_opc_demand_discovery::up(db.clone()).await.unwrap();
         up(db.clone()).await.unwrap();
 
         let row = db

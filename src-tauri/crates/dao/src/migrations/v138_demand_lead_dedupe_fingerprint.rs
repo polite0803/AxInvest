@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! v136: 需求线索去重键从 `(platform, source_url)` 迁移为内容指纹。
+//! v138: 需求线索去重键从 `(platform, source_url)` 迁移为内容指纹。
 //!
 //! ## Background
 //!
@@ -43,7 +43,7 @@ pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
             if !msg.contains("duplicate column name") {
                 return Err(e);
             }
-            tracing::debug!("[v136] opc_demand_leads.content_fingerprint 已存在，跳过");
+            tracing::debug!("[v138] opc_demand_leads.content_fingerprint 已存在，跳过");
         }
     }
 
@@ -58,7 +58,7 @@ pub async fn up(db: sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     .await?;
 
     tracing::info!(
-        "[v136] opc_demand_leads: dedupe key (platform, source_url) -> (platform, content_fingerprint)"
+        "[v138] opc_demand_leads: dedupe key (platform, source_url) -> (platform, content_fingerprint)"
     );
     Ok(())
 }
@@ -70,11 +70,11 @@ mod tests {
     use sea_orm::Statement;
 
     #[tokio::test]
-    async fn v136_migrates_dedupe_index_sqlite() {
+    async fn v138_migrates_dedupe_index_sqlite() {
         let db = Database::connect("sqlite::memory:").await.unwrap();
         // 依赖 v132 建表 + v133 加列
-        crate::migrations::v132_opc_demand_discovery::up(db.clone()).await.unwrap();
-        crate::migrations::v133_lead_workflow_link::up(db.clone()).await.unwrap();
+        crate::migrations::v133_opc_demand_discovery::up(db.clone()).await.unwrap();
+        crate::migrations::v134_lead_workflow_link::up(db.clone()).await.unwrap();
         up(db.clone()).await.unwrap();
 
         // 新指纹索引存在
